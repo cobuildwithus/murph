@@ -93,6 +93,8 @@ const validProtocolVariantPageWithOnboarding = {
   },
   protocol: {
     doseSignature: "2x/week",
+    logFields: ["completed intervals"],
+    sessionFieldIds: ["completed_intervals"],
   },
   safety: {
     cautionLevel: "high",
@@ -121,8 +123,6 @@ const validProtocolVariantPageWithOnboarding = {
       intentSummary: "Explore Norwegian 4x4 Intervals",
     },
     safetyScreen: {
-      cautionLevel: "high",
-      mode: "ask_compact_then_expand_if_positive",
       dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start",
       mustAsk: [
         {
@@ -135,10 +135,7 @@ const validProtocolVariantPageWithOnboarding = {
       {
         id: "modality",
         label: "Modality",
-        purpose: "logistics",
-        valueType: "enum",
-        askPolicy: "ask_if_unknown",
-        required: true,
+        question: "Which modality will you use?",
         target: {
           object: "experimentRun",
           field: "modality",
@@ -148,18 +145,7 @@ const validProtocolVariantPageWithOnboarding = {
     ],
     planDefaults: {
       testPlanId: "wearable-cardio-fitness-49d",
-      baselineDays: 7,
-      interventionDays: 42,
-      sessionsPerWeek: 2,
-      targetSessions: 12,
-      minimumUsefulSessions: 8,
-    },
-    logging: {
-      sessionFields: ["modality", "interval_peak_hrs"],
-    },
-    assistantPolicy: {
-      askBeforeCreatingAutomations: true,
-      missedLogFollowup: "opt_in_only",
+      firstSessionGuidance: "Start with a conservative first interval session.",
     },
   },
 } as const;
@@ -327,6 +313,39 @@ describe("@murphai/contracts health commons schemas", () => {
     ).toEqual({
       success: true,
       data: validProtocolVariantPageWithOnboarding,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validProtocolVariantPageWithOnboarding,
+        protocol: {
+          ...validProtocolVariantPageWithOnboarding.protocol,
+          sessionFieldIds: ["completed intervals"],
+        },
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validProtocolVariantPageWithOnboarding,
+        protocol: {
+          ...validProtocolVariantPageWithOnboarding.protocol,
+          sessionFieldIds: [],
+        },
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validProtocolVariantPageWithOnboarding,
+        protocol: {
+          ...validProtocolVariantPageWithOnboarding.protocol,
+          sessionFieldIds: ["completed_intervals", "completed_intervals"],
+        },
+      }),
+    ).toMatchObject({
+      success: false,
     });
     expect(
       safeParseContract(
@@ -607,7 +626,10 @@ describe("@murphai/contracts health commons schemas", () => {
           setupSlots: [
             {
               ...validProtocolVariantPageWithOnboarding.experimentOnboarding.setupSlots[0],
-              options: undefined,
+              purpose: "logistics",
+              valueType: "enum",
+              askPolicy: "ask_if_unknown",
+              required: true,
             },
           ],
         },

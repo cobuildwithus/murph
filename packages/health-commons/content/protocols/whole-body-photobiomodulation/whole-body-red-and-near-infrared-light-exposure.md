@@ -278,6 +278,30 @@ protocol:
     - daytime sleepiness
     - recovery or energy
     - missed sessions and reason
+  sessionFieldIds:
+  - device_model
+  - wavelengths
+  - irradiance_if_known
+  - fluence_if_known
+  - intensity_mode_or_pulsing_if_known
+  - session_start_time
+  - session_duration_minutes
+  - front_only_or_front_and_back
+  - exposure_geometry_distance_position
+  - body_coverage_or_clothing
+  - eye_protection_used
+  - accidental_direct_gaze
+  - nonthermal_comfort
+  - skin_warmth_burning_pain_or_irritation
+  - visual_symptoms_or_afterimage
+  - acute_symptoms
+  - mood_irritability_agitation_or_lowered_mood
+  - sleep_quality_next_morning
+  - daytime_sleepiness_next_day
+  - recovery_or_energy_next_day
+  - next_morning_resting_heart_rate
+  - next_morning_hrv_rmssd
+  - missed_session_reason
   stopConditions:
     - Stop the session immediately if you develop eye pain, blurred vision, new visual disturbance, unusual light sensitivity, new floaters, or an afterimage that does not resolve promptly.
     - Stop the session immediately after accidental direct gaze into emitters if any eye or visual symptom persists.
@@ -365,158 +389,73 @@ expectedSignalDescriptions:
     protocolProminence: context
     description: "Deep-sleep minutes remain a noisy context signal when sleep findings are null, mixed, or unmeasured."
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to cautiously plan a Red Light Therapy experiment.
-    intentSummary: Explore Red Light Therapy
-  contextReview:
-    vaultChecks:
-
-      -
-        id: active_experiments
-        label: Active experiments
-        reason: Avoid stacking another sleep, recovery, light, heat, cold, training, skin, or supplement experiment on top of this limited-evidence PBM run unless attribution is intentionally weak.
-        readHints:
-          - experiment list --status active --format json
-      -
-        id: sleep_recovery_baseline
-        label: Recent sleep and recovery baseline
-        reason: Confirm there is enough recent resting-heart-rate, sleep, HRV, and subjective recovery context to interpret a 14-day baseline against a 28-day intervention.
-        freshnessDays: 21
-        readHints:
-          - wearables day <YYYY-MM-DD> --format json
-          - sleep diary recent --format json
-          - journal show
-      -
-        id: device_and_dose_context
-        label: Device, dose, and setup context
-        reason: This protocol should not become active unless the device model, red/NIR wavelengths, irradiance or fluence if available, duration, timing, exposure geometry, body coverage, eye protection, and nonthermal setup are identifiable.
-        freshnessDays: 30
-        readHints:
-          - memory show
-          - search query "whole body red near infrared PBM device model wavelengths irradiance fluence eye protection"
-      -
-        id: safety_context
-        label: PBM safety boundaries
-        reason: Screen for pregnancy/lactation/minors, cancer or suspicious lesions, photosensitizing drugs or PDT, eye disease or visual symptoms, seizure/light-triggered symptoms, implanted devices, unstable disease, diabetes medication constraints, thyroid or skin-boundary concerns, wounds/rashes/sunburn/tattoos, and inability to sense or report heat.
-        freshnessDays: 180
-        readHints:
-          - memory show
-          - journal show
-          - search query "pregnancy cancer photosensitizing medication PDT eye disease seizure pacemaker diabetes thyroid wound rash sunburn tattoo heat sensation"
-    notes:
-      - Review vault context first, then still ask the compact safety screen because missing context is not clearance.
-      - Onboarding is planning-only until the user explicitly confirms the limited-evidence posture, safety-screen outcome, device parameters, eye protection, dose plan, logging path, and reminder policy.
+    displayPrompt: "Hey Murph, I want to cautiously plan a Red Light Therapy experiment."
+    intentSummary: "Explore Red Light Therapy"
   safetyScreen:
-    cautionLevel: high
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-      -
-        id: pregnancy_lactation_or_minor
-        prompt: Are you under 18, pregnant, trying to become pregnant, breastfeeding, or lactating?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: This adult wellness protocol does not establish whole-body PBM clearance for minors, pregnancy, or lactation.
-      -
-        id: cancer_skin_cancer_or_suspicious_lesion
-        prompt: Do you have active or recent cancer treatment, skin-cancer history, precancerous lesions, or any changing, bleeding, crusting, painful, unexplained, or suspicious skin lesion in an area that would be exposed?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Cancer and suspicious-lesion contexts should remain clinician-guided rather than treated as routine unsupervised wellness use.
-      -
-        id: photosensitizing_meds_or_pdt
-        prompt: Are you using photosensitizing medication, topical/systemic retinoids, steroids that affect skin healing, or have you recently had photodynamic therapy or a PDT photosensitizer?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Medication and photosensitizer risk is wavelength- and context-dependent and should not be reduced to a generic red-light safety assumption.
-      -
-        id: eye_disease_symptoms_or_no_protection
-        prompt: Do you have eye disease, ocular photosensitivity, current eye pain, flashes, floaters, afterimages, blurry or distorted vision, other visual symptoms, or no device-appropriate eye protection you can use for every session?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Eye-protection and no-direct-gaze guardrails are required; current symptoms or unavailable protection should block routine unsupervised setup.
-      -
-        id: seizure_or_light_triggered_symptoms
-        prompt: Do you have a seizure disorder, light-triggered symptoms, migraine or neurologic symptoms triggered by light, or a history of unusual reactions to flashing or bright light?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Light-triggered neurologic symptoms are a conservative boundary in supervised PBM-style protocols.
-      -
-        id: implanted_device_or_pacemaker
-        prompt: Do you have a pacemaker, implanted defibrillator, neurostimulator, insulin pump, implanted device, or other device that the PBM manufacturer says requires medical guidance?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Implanted-device and manufacturer contraindication questions should be resolved before whole-body exposure.
-      -
-        id: unstable_cardiometabolic_neurologic_pulmonary_psychiatric
-        prompt: Do you have unstable cardiovascular, metabolic, neurologic, pulmonary, or psychiatric disease, recent fainting, chest pain, dyspnea at rest, uncontrolled blood pressure, severe dizziness, mania/hypomania, or severe mood instability?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Whole-body exposure should not be used to self-manage unstable clinical symptoms or conditions.
-      -
-        id: diabetes_or_glucose_medication
-        prompt: Do you use insulin, sulfonylureas, or other glucose-lowering medication, or do you have diabetes with variable glucose control?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Glucose-medication constraints recur in supervised protocol boundaries and should not be bypassed by a wellness starter.
-      -
-        id: thyroid_skin_boundary_or_open_skin
-        prompt: Do you have thyroid-area restrictions, active rash, open wounds, sunburn, painful tattoos, skin irritation, recent procedure sites, infection, blistering, or areas with impaired sensation in regions that would be exposed?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Skin, thyroid-area, wound, tattoo, irritation, and impaired-sensation concerns change both safety and interpretation.
-      -
-        id: unable_to_sense_or_report_heat
-        prompt: Would you be unable to reliably feel, notice, or report heat, burning, pain, unusual warmth, visual symptoms, dizziness, mood changes, or other symptoms during and after sessions?
-        ifPositive: do_not_start_unsupervised
-        why: This protocol depends on immediate symptom reporting and nonthermal comfort; inability to sense or report symptoms makes unsupervised use unsafe.
+      - id: "pregnancy_lactation_or_minor"
+        prompt: "Are you under 18, pregnant, trying to become pregnant, breastfeeding, or lactating?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "cancer_skin_cancer_or_suspicious_lesion"
+        prompt: "Do you have active or recent cancer treatment, skin-cancer history, precancerous lesions, or any changing, bleeding, crusting, painful, unexplained, or suspicious skin lesion in an area that would be exposed?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "photosensitizing_meds_or_pdt"
+        prompt: "Are you using photosensitizing medication, topical/systemic retinoids, steroids that affect skin healing, or have you recently had photodynamic therapy or a PDT photosensitizer?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "eye_disease_symptoms_or_no_protection"
+        prompt: "Do you have eye disease, ocular photosensitivity, current eye pain, flashes, floaters, afterimages, blurry or distorted vision, other visual symptoms, or no device-appropriate eye protection you can use for every session?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "seizure_or_light_triggered_symptoms"
+        prompt: "Do you have a seizure disorder, light-triggered symptoms, migraine or neurologic symptoms triggered by light, or a history of unusual reactions to flashing or bright light?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "implanted_device_or_pacemaker"
+        prompt: "Do you have a pacemaker, implanted defibrillator, neurostimulator, insulin pump, implanted device, or other device that the PBM manufacturer says requires medical guidance?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "unstable_cardiometabolic_neurologic_pulmonary_psychiatric"
+        prompt: "Do you have unstable cardiovascular, metabolic, neurologic, pulmonary, or psychiatric disease, recent fainting, chest pain, dyspnea at rest, uncontrolled blood pressure, severe dizziness, mania/hypomania, or severe mood instability?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "diabetes_or_glucose_medication"
+        prompt: "Do you use insulin, sulfonylureas, or other glucose-lowering medication, or do you have diabetes with variable glucose control?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "thyroid_skin_boundary_or_open_skin"
+        prompt: "Do you have thyroid-area restrictions, active rash, open wounds, sunburn, painful tattoos, skin irritation, recent procedure sites, infection, blistering, or areas with impaired sensation in regions that would be exposed?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "unable_to_sense_or_report_heat"
+        prompt: "Would you be unable to reliably feel, notice, or report heat, burning, pain, unusual warmth, visual symptoms, dizziness, mood changes, or other symptoms during and after sessions?"
+        ifPositive: "do_not_start_unsupervised"
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
-        - eye pain, blurred vision, new visual disturbance, unusual light sensitivity, persistent afterimage, new floaters, or any visual symptom after direct or accidental emitter gaze
-        - unavailable, displaced, poorly fitting, uncomfortable, or skipped eye protection
-        - hot, burning, painful, or unusually warm skin; blistering; persistent erythema; rash; hives; swelling; hyperpigmentation; herpes reactivation; or skin irritation that lasts beyond the session
-        - chest pain or tightness, palpitations, fainting, near-fainting, confusion, seizure symptoms, severe headache, severe dizziness, nausea, wheezing, dyspnea at rest, or unusual shortness of breath
-        - clearly worse sleep, insomnia, agitation, irritability, hypomania or mania-like symptoms, lowered mood, or mood instability without a better explanation
-        - new medication, photosensitizing treatment, PDT, skin procedure, wound, rash, sunburn, tattoo irritation, or device malfunction that invalidates the original safety screen or dose setup
-    notes:
-      - A positive screen does not diagnose risk; it means Murph should keep the user in planning, postponement, or clinician-guidance mode rather than activating the experiment by default.
-      - This starter is not cleared for minors, pregnancy, lactation, active/recent cancer treatment, suspicious lesions, photosensitizing medications, recent PDT, active eye symptoms, unavailable eye protection, seizure/light-triggered symptoms, implanted-device concerns, unstable disease, glucose-medication constraints, open or irritated skin, or impaired heat/symptom sensing.
+        - "eye pain, blurred vision, new visual disturbance, unusual light sensitivity, persistent afterimage, new floaters, or any visual symptom after direct or accidental emitter gaze"
+        - "unavailable, displaced, poorly fitting, uncomfortable, or skipped eye protection"
+        - "hot, burning, painful, or unusually warm skin; blistering; persistent erythema; rash; hives; swelling; hyperpigmentation; herpes reactivation; or skin irritation that lasts beyond the session"
+        - "chest pain or tightness, palpitations, fainting, near-fainting, confusion, seizure symptoms, severe headache, severe dizziness, nausea, wheezing, dyspnea at rest, or unusual shortness of breath"
+        - "clearly worse sleep, insomnia, agitation, irritability, hypomania or mania-like symptoms, lowered mood, or mood instability without a better explanation"
+        - "new medication, photosensitizing treatment, PDT, skin procedure, wound, rash, sunburn, tattoo irritation, or device malfunction that invalidates the original safety screen or dose setup"
   setupSlots:
-
-    -
-      id: device_model
-      label: Device model
-      purpose: safety
-      valueType: free_text
-      askPolicy: always
-      required: true
-      question: What exact whole-body red/NIR PBM device model would you use?
+    - id: "device_model"
+      label: "Device model"
+      question: "What exact whole-body red/NIR PBM device model would you use?"
       target:
-        object: protocol
-        field: personalization.setup.deviceModel
-    -
-      id: wavelengths
-      label: Red/NIR wavelengths
-      purpose: measurement_fidelity
-      valueType: free_text
-      askPolicy: always
-      required: true
-      question: What red and near-infrared wavelengths does the device report for the mode you plan to use?
+        object: "protocol"
+        field: "personalization.setup.deviceModel"
+    - id: "wavelengths"
+      label: "Red/NIR wavelengths"
+      question: "What red and near-infrared wavelengths does the device report for the mode you plan to use?"
       target:
-        object: protocol
-        field: personalization.setup.wavelengths
-    -
-      id: irradiance_fluence
-      label: Irradiance or fluence
-      purpose: measurement_fidelity
-      valueType: free_text
-      askPolicy: always
-      required: true
-      question: What irradiance and/or fluence does the device report for your distance, mode, and session length? If unavailable, say unknown and keep the run parameter-logged rather than dose-claimed.
+        object: "protocol"
+        field: "personalization.setup.wavelengths"
+    - id: "irradiance_fluence"
+      label: "Irradiance or fluence"
+      question: "What irradiance and/or fluence does the device report for your distance, mode, and session length? If unavailable, say unknown and keep the run parameter-logged rather than dose-claimed."
       target:
-        object: protocol
-        field: personalization.setup.irradianceFluence
-    -
-      id: session_duration_minutes
-      label: Session duration
-      purpose: safety
-      valueType: integer
-      askPolicy: always
-      required: true
+        object: "protocol"
+        field: "personalization.setup.irradianceFluence"
+    - id: "session_duration_minutes"
+      label: "Session duration"
+      question: "How many minutes will each session last? This starter caps sessions at 20 minutes and should start at the lower of the device instructions and the candidate range."
       constraints:
         default: 12
         min: 1
@@ -525,153 +464,86 @@ experimentOnboarding:
           - 12
           - 15
           - 20
-      question: How many minutes will each session last? This starter caps sessions at 20 minutes and should start at the lower of the device instructions and the candidate range.
       target:
-        object: experimentRun
-        field: sessionDurationMinutes
-    -
-      id: session_timing
-      label: Session timing
-      purpose: measurement_fidelity
-      valueType: enum
-      askPolicy: always
-      required: true
-      question: Which stable session window is realistic for the 28-day intervention?
+        object: "experimentRun"
+        field: "sessionDurationMinutes"
+    - id: "session_timing"
+      label: "Session timing"
+      question: "Which stable session window is realistic for the 28-day intervention?"
       options:
-        - morning
-        - midday
-        - afternoon
-        - early_evening
-        - variable_but_logged
+        - "morning"
+        - "midday"
+        - "afternoon"
+        - "early_evening"
+        - "variable_but_logged"
       target:
-        object: experimentRun
-        field: sessionTiming
-    -
-      id: exposure_geometry_body_coverage
-      label: Exposure geometry and body coverage
-      purpose: measurement_fidelity
-      valueType: free_text
-      askPolicy: always
-      required: true
+        object: "experimentRun"
+        field: "sessionTiming"
+    - id: "exposure_geometry_body_coverage"
+      label: "Exposure geometry and body coverage"
       question: "What exposure geometry will you use: distance, front-only or front-and-back, position, clothing/body coverage, and any areas excluded?"
       target:
-        object: protocol
-        field: personalization.setup.exposureGeometryBodyCoverage
-    -
-      id: eye_protection
-      label: Eye protection
-      purpose: safety
-      valueType: free_text
-      askPolicy: always
-      required: true
-      question: What device-appropriate eye protection will you use for every session, and how will you avoid direct emitter gaze?
+        object: "protocol"
+        field: "personalization.setup.exposureGeometryBodyCoverage"
+    - id: "eye_protection"
+      label: "Eye protection"
+      question: "What device-appropriate eye protection will you use for every session, and how will you avoid direct emitter gaze?"
       target:
-        object: protocol
-        field: personalization.setup.eyeProtection
-    -
-      id: nonthermal_comfort
-      label: Nonthermal comfort
-      purpose: safety
-      valueType: enum
-      askPolicy: always
-      required: true
-      question: Can you keep sessions clearly nonthermal and stop immediately if skin feels hot, burning, painful, or unusually warm?
+        object: "protocol"
+        field: "personalization.setup.eyeProtection"
+    - id: "nonthermal_comfort"
+      label: "Nonthermal comfort"
+      question: "Can you keep sessions clearly nonthermal and stop immediately if skin feels hot, burning, painful, or unusually warm?"
       options:
-        - yes_nonthermal_and_stop_if_warm
-        - unsure_or_device_feels_hot
+        - "yes_nonthermal_and_stop_if_warm"
+        - "unsure_or_device_feels_hot"
       target:
-        object: protocol
-        field: personalization.setup.nonthermalComfort
-    -
-      id: logging_path
-      label: Logging path
-      purpose: measurement_fidelity
-      valueType: enum
-      askPolicy: always
-      required: true
-      question: Where should Murph record session parameters, symptoms, confounders, and next-morning sleep/recovery ratings?
+        object: "protocol"
+        field: "personalization.setup.nonthermalComfort"
+    - id: "logging_path"
+      label: "Logging path"
+      question: "Where should Murph record session parameters, symptoms, confounders, and next-morning sleep/recovery ratings?"
       options:
-        - murph_experiment_log
-        - daily_journal
-        - spreadsheet_import
-        - other_logged_path
+        - "murph_experiment_log"
+        - "daily_journal"
+        - "spreadsheet_import"
+        - "other_logged_path"
       target:
-        object: experimentRun
-        field: logging.path
-    -
-      id: reminder_policy
-      label: Reminder preference
-      purpose: assistant_support
-      valueType: reminder_policy
-      askPolicy: ask_at_confirmation
-      required: true
-      question: Do you want reminders for the three weekly sessions and any missing logs?
+        object: "experimentRun"
+        field: "logging.path"
+    - id: "reminder_policy"
+      label: "Reminder preference"
+      question: "Do you want reminders for the three weekly sessions and any missing logs?"
       options:
-        - none
-        - session_reminders_only
-        - session_reminders_plus_same_day_missing_log_check
-        - weekly_digest_only
+        - "none"
+        - "session_reminders_only"
+        - "session_reminders_plus_same_day_missing_log_check"
+        - "weekly_digest_only"
+      constraints:
+        askWhen: "at_confirmation"
       target:
-        object: assistantSupport
-        field: reminderPolicy
+        object: "assistantSupport"
+        field: "reminderPolicy"
   planDefaults:
-    testPlanId: whole-body-pbm-rhr-sleep-42d
-    baselineDays: 14
-    interventionDays: 28
-    sessionsPerWeek: 3
-    targetSessions: 12
-    minimumUsefulSessions: 10
-    firstSessionGuidance: Start at the lower of the device beginner instructions and the 12-20 minute candidate range, keep the session clearly nonthermal, use eye protection, avoid direct emitter gaze, and log all device parameters and symptoms.
-  logging:
-    sessionFields:
-      - device_model
-      - wavelengths
-      - irradiance_if_known
-      - fluence_if_known
-      - intensity_mode_or_pulsing_if_known
-      - session_start_time
-      - session_duration_minutes
-      - front_only_or_front_and_back
-      - exposure_geometry_distance_position
-      - body_coverage_or_clothing
-      - eye_protection_used
-      - accidental_direct_gaze
-      - nonthermal_comfort
-      - skin_warmth_burning_pain_or_irritation
-      - visual_symptoms_or_afterimage
-      - acute_symptoms
-      - mood_irritability_agitation_or_lowered_mood
-      - sleep_quality_next_morning
-      - daytime_sleepiness_next_day
-      - recovery_or_energy_next_day
-      - next_morning_resting_heart_rate
-      - next_morning_hrv_rmssd
-      - missed_session_reason
-    confounders:
-      - bedtime_or_wake_time_change
-      - caffeine_alcohol_or_late_meal_change
-      - exercise_training_load_change
-      - sauna_heat_cold_or_light_intervention
-      - new_sleep_recovery_supplement_or_skin_intervention
-      - medication_change_or_photosensitizing_exposure
-      - illness_pain_travel_or_timezone_shift
-      - major_stress
-      - wearable_model_or_algorithm_change
-      - wounds_rash_sunburn_tattoo_or_skin_irritation
+    testPlanId: "whole-body-pbm-rhr-sleep-42d"
+    firstSessionGuidance: "Start at the lower of the device beginner instructions and the 12-20 minute candidate range, keep the session clearly nonthermal, use eye protection, avoid direct emitter gaze, and log all device parameters and symptoms."
+  trackingHints:
+    confounderFields:
+      - "bedtime_or_wake_time_change"
+      - "caffeine_alcohol_or_late_meal_change"
+      - "exercise_training_load_change"
+      - "sauna_heat_cold_or_light_intervention"
+      - "new_sleep_recovery_supplement_or_skin_intervention"
+      - "medication_change_or_photosensitizing_exposure"
+      - "illness_pain_travel_or_timezone_shift"
+      - "major_stress"
+      - "wearable_model_or_algorithm_change"
+      - "wounds_rash_sunburn_tattoo_or_skin_irritation"
     notes:
-      - Missing sessions should be logged honestly; do not make up adherence by continuing through symptoms.
-      - Irradiance or fluence may be unknown for some consumer devices, but the unknown must be recorded and should limit dose claims.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-      - none
-      - session_reminders_only
-      - session_reminders_plus_same_day_missing_log_check
-      - weekly_digest_only
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: Did you complete or intentionally skip the whole-body red/NIR PBM session today? Either answer is useful — I just want the experiment record to be accurate.
+      - "Missing sessions should be logged honestly; do not make up adherence by continuing through symptoms."
+      - "Irradiance or fluence may be unknown for some consumer devices, but the unknown must be recorded and should limit dose claims."
+  supportHints:
+    missedLogFollowupCopy: "Did you complete or intentionally skip the whole-body red/NIR PBM session today? Either answer is useful — I just want the experiment record to be accurate."
 whyItWorks:
   - "## Light is dose, not color\n\nRed/NIR PBM depends on wavelength, irradiance, fluence, duration, distance, and coverage. Marketing color names do not define the biological exposure."
   - "## Cells shift signaling\n\nPhotons affect mitochondrial, nitric-oxide, inflammatory, and oxidative-stress pathways. The effect is nonthermal; heat turns it into a different protocol."

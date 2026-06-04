@@ -146,6 +146,28 @@ protocol:
     - "taste_texture_or_preparation_burden"
     - "dry_stool_or_worsening_constipation"
     - "dose_reduction_or_stop_reason"
+  sessionFieldIds:
+  - dose_taken
+  - active_husk_grams
+  - liquid_ounces
+  - with_meal
+  - medicine_spacing_ok
+  - gi_symptoms
+  - swallowing_or_allergy_symptoms
+  - label_minimum_liquid_met
+  - liquid_ounces_or_ml
+  - mixture_drunk_promptly
+  - mixture_thickened_before_swallowing
+  - dry_or_incompletely_hydrated_dose
+  - capsule_count
+  - capsules_swallowed_one_at_a_time
+  - product_is_granules
+  - dose_near_bedtime
+  - medication_spacing_minutes
+  - oral_rx_otc_or_supplement_taken_within_spacing_window
+  - medication_effect_change_or_timing_concern
+  - dry_stool_or_worsening_constipation
+  - dose_reduction_or_stop_reason
   stopConditions:
     - "Stop the dose and seek emergency or urgent medical help for choking, trouble swallowing, throat/chest obstruction sensation, breathing difficulty, wheezing, facial/tongue swelling, or anaphylaxis-type symptoms."
     - "Stop and get urgent clinician guidance for severe or persistent abdominal pain, vomiting, severe constipation, dry stool or constipation after inadequate liquid, no bowel movement with pain, or suspected bowel obstruction/bezoar."
@@ -277,107 +299,49 @@ expectedSignalDescriptions:
       basis: "The 2025 41-RCT lipid meta-analysis estimated HDL-C at +0.57 mg/dL with a confidence interval crossing zero; older direct syntheses found no significant change or a small lower value."
     protocolProminence: "context"
 experimentOnboarding:
-  schemaVersion: "murph.commons.experiment-onboarding.v1"
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
     displayPrompt: "Hey Murph, I want to explore doing the Psyllium Husk For Cholesterol protocol."
     intentSummary: "Explore Psyllium Husk For Cholesterol"
-  contextReview:
-    vaultChecks:
-
-      -
-        id: "recent_lipid_panel"
-        label: "Recent lipid panel"
-        reason: "This protocol needs baseline LDL-C and total cholesterol before the intervention and a feasible repeat lab window."
-        freshnessDays: 120
-        readHints:
-          - "search saved labs for LDL-C total cholesterol non-HDL-C ApoB HDL-C triglycerides"
-          - "journal show cholesterol labs"
-      -
-        id: "active_experiments_and_lipid_meds"
-        label: "Active experiments and lipid medications"
-        reason: "Lipid medication or concurrent diet experiments can dominate LDL-C changes and weaken attribution."
-        freshnessDays: 30
-        readHints:
-          - "experiment list --status active"
-          - "search query \"statin ezetimibe PCSK9 bile acid sequestrant lipid medication cholesterol supplement\""
-      -
-        id: "diet_weight_stability"
-        label: "Diet and weight stability"
-        reason: "Dietary saturated fat changes, major diet shifts, and weight loss can move lipid labs independently of psyllium."
-        freshnessDays: 30
-        readHints:
-          - "memory show diet weight"
-          - "journal show weight diet saturated fat alcohol exercise"
-    notes:
-      - "Do not turn this into a runnable experiment unless baseline labs and follow-up lab logistics are explicit or the user accepts a planning-only setup."
-      - "Do not re-ask stable context the vault already answers unless it changes safety, dose, measurement fidelity, or consent."
-      - "If a usable lipid panel is already in the vault, treat that panel as baseline lab evidence and save its event id/date in analysisPlan.measurementAnchors. Do not create a pre-intervention run-in window unless the user explicitly wants daily logging before the first dose."
   safetyScreen:
-    cautionLevel: "moderate"
-    mode: "ask_compact_then_expand_if_positive"
     dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-      -
-        id: "swallowing_or_obstruction_risk"
+      - id: "swallowing_or_obstruction_risk"
         prompt: "Any swallowing difficulty/dysphagia, prior choking with powders or capsules, esophageal narrowing, bowel obstruction or narrowing, fecal impaction, severe constipation, reduced gut motility, prior GI obstruction/bezoar, GI surgery or clinician-supervised bowel care?"
         ifPositive: "do_not_start_unsupervised"
-        why: "Psyllium can swell; choking, esophageal obstruction, bowel obstruction, bezoar, and reduced-motility contexts are boundary conditions for unsupervised use."
-      -
-        id: "psyllium_allergy_risk"
+      - id: "psyllium_allergy_risk"
         prompt: "Any known or suspected psyllium, ispaghula, or isabgol allergy, prior reaction to psyllium-containing foods/laxatives, or past rash, wheezing, occupational asthma, rhinitis, or anaphylaxis with fiber laxatives or psyllium dust?"
         ifPositive: "do_not_start_unsupervised"
-        why: "Psyllium hypersensitivity has been reported and should not be challenged in an unsupervised experiment."
-      -
-        id: "diagnosed_hypercholesterolemia_or_clinical_lipid_care"
+      - id: "diagnosed_hypercholesterolemia_or_clinical_lipid_care"
         prompt: "Are you using psyllium to manage diagnosed hypercholesterolemia, known cardiovascular disease, high cardiovascular risk, or a clinician-managed lipid plan, or are you considering changing lipid medication?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
-        why: "Cholesterol-directed psyllium use and medication-combination contexts should be clinician-guided rather than treated as an ordinary wellness experiment."
-      -
-        id: "high_risk_medication_timing"
+      - id: "high_risk_medication_timing"
         prompt: "Do you take oral prescriptions, OTC medicines, supplements, minerals, vitamin B12, thyroid hormone, levodopa, lithium, carbamazepine, coumarins/anticoagulants, cardiac glycosides/digoxin, diabetes medicines, bile-acid sequestrants, or any medicine where absorption or timing is high stakes?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
-        why: "Psyllium may require spacing for oral prescriptions, OTC medicines, supplements, minerals, and timing-sensitive medicines, with product-specific clinician/pharmacist advice for high-stakes drugs."
-      -
-        id: "pregnancy_pediatric_or_supervised_care"
+      - id: "pregnancy_pediatric_or_supervised_care"
         prompt: "Are you pregnant, lactating, under 18, or using this inside clinician-supervised cardiovascular, diabetes, bowel/GI, or lipid care?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
-        why: "These are population/context boundaries for this adult cholesterol self-experiment; lactation-specific safety context is separate from adult LDL-C efficacy evidence."
-      -
-        id: "cannot_take_with_full_liquid"
+      - id: "cannot_take_with_full_liquid"
         prompt: "Would it be hard to take every dose with at least 8 oz / 240 mL liquid, drink mixed powder/granules promptly before thickening, swallow capsules one at a time with adequate liquid, and avoid dry/incompletely hydrated or near-bedtime dosing?"
         ifPositive: "do_not_start_unsupervised"
-        why: "Adequate liquid, prompt swallowing, and form-specific directions are core safety requirements, not preferences."
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
         - "choking, breathing difficulty, or throat/chest obstruction sensation"
         - "facial/tongue swelling, wheezing, or anaphylaxis-type symptoms"
         - "severe abdominal pain, vomiting, severe constipation, dry stool with inadequate liquid, or suspected obstruction/bezoar"
         - "missed medication spacing or medication-effect concern"
         - "inability to take every dose with at least 8 oz / 240 mL liquid"
-    notes:
-      - "A positive or uncertain screen means Murph should keep this as planning or recommend clinician/pharmacist guidance before setting reminders or tracking an active run."
   setupSlots:
-
-    -
-      id: "baseline_lipid_panel_date"
+    - id: "baseline_lipid_panel_date"
       label: "Baseline lipid panel date"
-      purpose: "measurement_fidelity"
-      valueType: "free_text"
-      askPolicy: "ask_if_unknown"
-      required: false
       question: "If no usable lipid panel is already anchored in analysisPlan.measurementAnchors, what baseline lipid panel date should Murph use, or do you need to schedule one before starting?"
+      constraints:
+        optional: true
       target:
         object: "analysisPlan"
         field: "measurementAnchors"
-    -
-      id: "followup_lab_feasibility"
+    - id: "followup_lab_feasibility"
       label: "Follow-up lab feasibility"
-      purpose: "measurement_fidelity"
-      valueType: "enum"
-      askPolicy: "ask_if_unknown"
-      required: true
       question: "Can you repeat a lipid panel after about 8 to 12 weeks of stable dosing?"
       options:
         - "yes_8_to_12_weeks"
@@ -387,13 +351,8 @@ experimentOnboarding:
       target:
         object: "analysisPlan"
         field: "followupLabFeasibility"
-    -
-      id: "product_format"
+    - id: "product_format"
       label: "Product format"
-      purpose: "logistics"
-      valueType: "enum"
-      askPolicy: "ask_if_unknown"
-      required: true
       question: "What psyllium product format will you use? Food/cereal forms are not automatically equivalent to powder, granules, or capsules and still require adequate liquid; do not use food mixing as a workaround for swallowing difficulty."
       options:
         - "powder"
@@ -405,24 +364,14 @@ experimentOnboarding:
       target:
         object: "onboardingCapture"
         field: "productFormat"
-    -
-      id: "product_serving_details"
+    - id: "product_serving_details"
       label: "Serving details"
-      purpose: "measurement_fidelity"
-      valueType: "free_text"
-      askPolicy: "ask_if_unknown"
-      required: true
       question: "From the label, what are the product grams, active psyllium husk grams, and soluble-fiber grams per serving if listed?"
       target:
         object: "onboardingCapture"
         field: "productServingDetails"
-    -
-      id: "active_husk_grams_per_day"
+    - id: "active_husk_grams_per_day"
       label: "Active husk grams per day"
-      purpose: "adherence"
-      valueType: "number"
-      askPolicy: "ask_if_unknown"
-      required: true
       question: "What daily active psyllium husk target should Murph track, ideally in the 7 to 10.5 g/day range if tolerated? Higher-dose attempts should be clinician-guided rather than an ordinary self-experiment."
       constraints:
         min: 0
@@ -433,13 +382,8 @@ experimentOnboarding:
       target:
         object: "protocol"
         field: "dose.activeHuskGramsPerDay"
-    -
-      id: "dose_schedule"
+    - id: "dose_schedule"
       label: "Dose schedule"
-      purpose: "logistics"
-      valueType: "enum"
-      askPolicy: "ask_if_unknown"
-      required: true
       question: "How will you split the daily dose?"
       options:
         - "twice_daily"
@@ -449,24 +393,14 @@ experimentOnboarding:
       target:
         object: "protocol"
         field: "dose.scheduleLabel"
-    -
-      id: "medication_spacing_plan"
+    - id: "medication_spacing_plan"
       label: "Medication spacing plan"
-      purpose: "safety"
-      valueType: "free_text"
-      askPolicy: "ask_if_unknown"
-      required: true
       question: "What plan will keep psyllium at least 2 hours away from all oral prescriptions, OTC medicines, and supplements, or what clinician/pharmacist advice are you following?"
       target:
         object: "onboardingCapture"
         field: "medicationSpacingPlan"
-    -
-      id: "diet_med_stability"
+    - id: "diet_med_stability"
       label: "Diet and medication stability"
-      purpose: "confounder_control"
-      valueType: "enum"
-      askPolicy: "ask_if_unknown"
-      required: true
       question: "Will diet, saturated fat intake, weight-loss efforts, lipid medications, and other lipid supplements stay stable during the experiment, except for clinician-directed changes that should be followed and logged as confounders?"
       options:
         - "stable"
@@ -476,53 +410,24 @@ experimentOnboarding:
       target:
         object: "analysisPlan"
         field: "confounderRiskCategory"
-    -
-      id: "reminder_policy"
+    - id: "reminder_policy"
       label: "Reminder policy"
-      purpose: "assistant_support"
-      valueType: "reminder_policy"
-      askPolicy: "ask_at_confirmation"
-      required: true
       question: "Do you want dose reminders and a weekly adherence/safety digest, or tracking only?"
       options:
         - "none"
         - "dose_reminders"
         - "weekly_digest_only"
         - "dose_reminders_plus_weekly_digest"
+      constraints:
+        askWhen: "at_confirmation"
       target:
         object: "assistantSupport"
         field: "reminderPolicy"
   planDefaults:
     testPlanId: "lipid-panel-12-week"
-    interventionDays: 84
-    sessionsPerWeek: 14
-    targetSessions: 168
-    minimumUsefulSessions: 112
     firstSessionGuidance: "Keep the first week boring: use one product, one dosing plan, at least 8 oz / 240 mL liquid per dose, prompt swallowing before thickening, and no simultaneous diet or lipid-medication changes unless clinician-directed."
-  logging:
-    sessionFields:
-      - "dose_taken"
-      - "active_husk_grams"
-      - "liquid_ounces"
-      - "with_meal"
-      - "medicine_spacing_ok"
-      - "gi_symptoms"
-      - "swallowing_or_allergy_symptoms"
-      - "label_minimum_liquid_met"
-      - "liquid_ounces_or_ml"
-      - "mixture_drunk_promptly"
-      - "mixture_thickened_before_swallowing"
-      - "dry_or_incompletely_hydrated_dose"
-      - "capsule_count"
-      - "capsules_swallowed_one_at_a_time"
-      - "product_is_granules"
-      - "dose_near_bedtime"
-      - "medication_spacing_minutes"
-      - "oral_rx_otc_or_supplement_taken_within_spacing_window"
-      - "medication_effect_change_or_timing_concern"
-      - "dry_stool_or_worsening_constipation"
-      - "dose_reduction_or_stop_reason"
-    confounders:
+  trackingHints:
+    confounderFields:
       - "diet_change"
       - "weight_change"
       - "exercise_change"
@@ -537,16 +442,7 @@ experimentOnboarding:
       - "taste_texture_or_preparation_burden"
     notes:
       - "Weekly review should prioritize safety symptoms and adherence before interpreting any lipid result."
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: "opt_in_only"
-    reminderOptions:
-      - "none"
-      - "dose_reminders"
-      - "weekly_digest_only"
-      - "dose_reminders_plus_weekly_digest"
-    weeklyDigestDefault: true
+  supportHints:
     missedLogFollowupCopy: "No psyllium dose was logged for the planned window. Should Murph mark it missed, partial, or taken?"
 whyItWorks:
   - "## Viscous gel traps bile acids in the gut\n\nPsyllium forms a thick gel in the intestine that binds bile acids and cholesterol, blocking reabsorption. The liver compensates by pulling LDL particles from the bloodstream to rebuild bile-acid supply. LDL-C and total cholesterol are the most consistent lipid signals across psyllium-specific trials and meta-analyses."

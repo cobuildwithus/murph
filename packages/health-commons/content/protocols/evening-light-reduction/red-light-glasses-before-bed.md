@@ -112,6 +112,31 @@ protocol:
   - driving, cycling, cooking hazards, tools, stairs, unfamiliar low-light navigation, color-critical work, near-falls, falls, bumping into objects, or removing glasses for safety
   - headache, migraine-like symptoms, photophobia, eye pain, visual discomfort, blurred or double vision, dizziness, nausea, malaise, anxiety, depressive mood, elevated/agitated mood, or mood instability
   - extra sleep-score checking, rumination, or spending more time in bed to improve scores
+  sessionFieldIds:
+  - glasses_worn
+  - glasses_on_time
+  - glasses_off_time
+  - intended_bedtime
+  - actual_bedtime
+  - estimated_time_to_fall_asleep_minutes
+  - pre_bed_wiredness_rating
+  - subjective_sleep_quality
+  - felt_less_wired_before_bed
+  - headache_or_visual_discomfort
+  - unsafe_low_light_navigation
+  - mood_change
+  - lens_model_or_specs
+  - lens_color
+  - lens_filter_confidence
+  - fit_leakage_coverage
+  - removed_glasses_during_wear_window
+  - pre_bed_sleepiness_rating
+  - perceived_ease_of_sleep_onset
+  - visual_symptoms_blurred_or_double_vision
+  - near_fall_fall_or_bumped_object
+  - safety_critical_task_arose
+  - anxiety_or_depressive_mood
+  - elevated_or_agitated_mood
   stopConditions:
   - Remove the glasses immediately and stop that night’s session if any driving, cycling, cooking hazard, tool use, stair navigation, unfamiliar low-light navigation, or color-, contrast-, or motion-critical task arises while the glasses are on.
   - Stop immediately for new visual symptoms, blurred or double vision, migraine-like headache, photophobia, eye pain, or visual discomfort.
@@ -231,228 +256,127 @@ expectedSignalDescriptions:
     basis: The direct consumer eyewear evidence does not establish glucose lowering; use glucose only as context if sleep timing changes materially.
   protocolProminence: context
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to explore wearing red-light glasses before bed.
-    intentSummary: Explore Red Light Glasses Before Bed
-  contextReview:
-    vaultChecks:
-    - id: active_experiments
-      label: Active experiments
-      reason: Avoid stacking another meaningful experiment on top of an active one unless the user explicitly accepts weaker attribution.
-      readHints:
-      - experiment list --status active
-    - id: wearable_sleep_baseline
-      label: Wearable sleep baseline
-      reason: Check whether sleep-onset, sleep-efficiency, HRV, or resting-heart-rate trends are available for baseline/intervention comparison.
-      freshnessDays: 14
-      readHints:
-      - wearables sources list
-      - wearables day
-    - id: sleep_schedule_and_evening_context
-      label: Sleep schedule and evening light context
-      reason: Understand usual bedtime, screen use, room-light habits, and routine stability before asking setup questions.
-      freshnessDays: 30
-      readHints:
-      - memory show
-      - search query "bedtime evening light screens sleep schedule room light"
-      - journal show
-    - id: eye_mood_and_medication_context
-      label: Eye, mood, medication, and circadian context
-      reason: Screen for eye/light sensitivity, mood or circadian-risk context, pregnancy/postpartum context, melatonin, timed light therapy, or other reasons Murph should not frame this as a simple unsupervised experiment.
-      freshnessDays: 90
-      readHints:
-      - memory show
-      - search query "migraine photosensitivity eye surgery eye disease bipolar mania hypomania severe insomnia delayed sleep phase shift work pregnancy postpartum melatonin light therapy medication"
-    notes:
-    - Prefer recent wearable sleep data when present, but allow a subjective-only run when wearables are missing or noisy.
-    - Do not re-ask stable context the vault already answers unless it changes safety, logistics, measurement fidelity, or consent.
+    displayPrompt: "Hey Murph, I want to explore wearing red-light glasses before bed."
+    intentSummary: "Explore Red Light Glasses Before Bed"
   safetyScreen:
-    cautionLevel: moderate
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: do_not_start_unsupervised
+    dispositionIfAnyPositive: "do_not_start_unsupervised"
     mustAsk:
-    - id: eye_or_light_sensitivity
-      prompt: Do you have eye disease, recent eye surgery, new visual symptoms, migraine/photosensitivity, visually triggered seizures, or a history of tinted-lens discomfort?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Eye and light-sensitivity contexts are outside the simple adult self-experiment; the extracted corpus supports eye-health claim boundaries but does not validate this protocol for these groups.
-    - id: mood_or_sleep_phase_risk
-      prompt: Do you have bipolar disorder, recent mania or hypomania, major depression, severe or unstable mood symptoms, delayed sleep phase, severe insomnia, or current timed light or melatonin therapy?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Mood, insomnia-treatment, and circadian-timing variants need separate timing, supervision, outcomes, and safety framing.
-    - id: pregnancy_pediatric_shift_or_clinical_variant
-      prompt: Are you pregnant or postpartum, setting this up for a child or adolescent, working nights or rotating shifts, planning overnight wakefulness, or recovering in hospital/after major surgery or an acute neurologic or cardiac event?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: These are special-population, schedule-specific, or clinical variants rather than the default adult bedtime-glasses experiment.
-    - id: safety_critical_evening_tasks
-      prompt: Would you need to drive, cycle, cook with visual hazards, use tools, navigate stairs or unfamiliar low-light spaces, or do color-, contrast-, or motion-critical work while the glasses would be on?
-      ifPositive: do_not_start_unsupervised
-      why: The default run should only start after choosing a task-free wear window or agreeing to remove the glasses before that task; do not treat this as “continue with caution” while wearing the glasses.
-    stopIf:
-      inheritFromProtocolSafety: true
-    notes:
-    - A positive or uncertain clinical screen is not a diagnosis; it means Murph should avoid the default unsupervised plan and route to clinician guidance or a separate protocol.
-    - A safety-task positive may be resolved by scheduling the glasses after the task, removing them before the task, or skipping that night’s session; it should not be handled as wearing the glasses with extra caution.
+      - id: "eye_or_light_sensitivity"
+        prompt: "Do you have eye disease, recent eye surgery, new visual symptoms, migraine/photosensitivity, visually triggered seizures, or a history of tinted-lens discomfort?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "mood_or_sleep_phase_risk"
+        prompt: "Do you have bipolar disorder, recent mania or hypomania, major depression, severe or unstable mood symptoms, delayed sleep phase, severe insomnia, or current timed light or melatonin therapy?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "pregnancy_pediatric_shift_or_clinical_variant"
+        prompt: "Are you pregnant or postpartum, setting this up for a child or adolescent, working nights or rotating shifts, planning overnight wakefulness, or recovering in hospital/after major surgery or an acute neurologic or cardiac event?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "safety_critical_evening_tasks"
+        prompt: "Would you need to drive, cycle, cook with visual hazards, use tools, navigate stairs or unfamiliar low-light spaces, or do color-, contrast-, or motion-critical work while the glasses would be on?"
+        ifPositive: "do_not_start_unsupervised"
   setupSlots:
-  - id: glasses_available
-    label: Glasses available
-    purpose: logistics
-    valueType: boolean
-    askPolicy: ask_if_unknown
-    required: true
-    question: Do you already have amber, red, or orange blue-light-filtering glasses you can wear before bed?
-    target:
-      object: onboardingCapture
-      field: answers.glassesAvailable
-  - id: lens_filter_confidence
-    label: Lens filter confidence
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: 'How confident are you that the lenses strongly filter blue-green or melanopic light: published specs, visibly dark amber or red, or unsure?'
-    options:
-    - published_specs
-    - visibly_dark
-    - unsure
-    target:
-      object: experimentRun
-      field: lensFilterConfidence
-  - id: lens_model_or_specs
-    label: Lens model or spectral specs
-    purpose: measurement_fidelity
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: false
-    question: Do you know the lens model, brand, or any spectral/melanopic filtering specs?
-    target:
-      object: experimentRun
-      field: lensModelOrSpecs
-  - id: wear_window
-    label: Wear window before bed
-    purpose: logistics
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: Can you realistically wear them for the last 90 to 120 minutes before bed on experiment nights?
-    options:
-    - ninety_minutes
-    - one_hundred_twenty_minutes
-    - shorter_or_inconsistent
-    constraints:
-      targetMinutes: 90
-      preferredMinutes: 120
-    target:
-      object: experimentRun
-      field: wearWindow
-  - id: bedtime_anchor
-    label: Bedtime anchor
-    purpose: logistics
-    valueType: local_time
-    askPolicy: ask_if_unknown_or_stale
-    required: true
-    question: What bedtime should Murph anchor the glasses reminder to?
-    target:
-      object: experimentRun
-      field: bedtimeAnchor
-  - id: evening_light_stability
-    label: Evening light stability
-    purpose: confounder_control
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: false
-    question: Should we keep your current evening screen and room-light habits stable so the glasses are the main change?
-    options:
-    - keep_existing_habits_stable
-    - also_reduce_screens_or_room_light_weaker_attribution
-    target:
-      object: analysisPlan
-      field: eveningLightAttributionPolicy
-  - id: reminder_policy
-    label: Reminder policy
-    purpose: assistant_support
-    valueType: reminder_policy
-    askPolicy: ask_at_confirmation
-    required: true
-    question: Do you want a reminder before the wear window, and if nothing is logged by the next morning should Murph ask once or leave it alone?
-    options:
-    - none
-    - pre_window
-    - pre_window_plus_next_morning_missing_log_check
-    target:
-      object: assistantSupport
-      field: reminderPolicy
+    - id: "glasses_available"
+      label: "Glasses available"
+      question: "Do you already have amber, red, or orange blue-light-filtering glasses you can wear before bed?"
+      target:
+        object: "onboardingCapture"
+        field: "answers.glassesAvailable"
+    - id: "lens_filter_confidence"
+      label: "Lens filter confidence"
+      question: "How confident are you that the lenses strongly filter blue-green or melanopic light: published specs, visibly dark amber or red, or unsure?"
+      options:
+        - "published_specs"
+        - "visibly_dark"
+        - "unsure"
+      target:
+        object: "experimentRun"
+        field: "lensFilterConfidence"
+    - id: "lens_model_or_specs"
+      label: "Lens model or spectral specs"
+      question: "Do you know the lens model, brand, or any spectral/melanopic filtering specs?"
+      constraints:
+        optional: true
+      target:
+        object: "experimentRun"
+        field: "lensModelOrSpecs"
+    - id: "wear_window"
+      label: "Wear window before bed"
+      question: "Can you realistically wear them for the last 90 to 120 minutes before bed on experiment nights?"
+      options:
+        - "ninety_minutes"
+        - "one_hundred_twenty_minutes"
+        - "shorter_or_inconsistent"
+      constraints:
+        targetMinutes: 90
+        preferredMinutes: 120
+      target:
+        object: "experimentRun"
+        field: "wearWindow"
+    - id: "bedtime_anchor"
+      label: "Bedtime anchor"
+      question: "What bedtime should Murph anchor the glasses reminder to?"
+      constraints:
+        askWhen: "if_unknown_or_stale"
+      target:
+        object: "experimentRun"
+        field: "bedtimeAnchor"
+    - id: "evening_light_stability"
+      label: "Evening light stability"
+      question: "Should we keep your current evening screen and room-light habits stable so the glasses are the main change?"
+      options:
+        - "keep_existing_habits_stable"
+        - "also_reduce_screens_or_room_light_weaker_attribution"
+      constraints:
+        optional: true
+      target:
+        object: "analysisPlan"
+        field: "eveningLightAttributionPolicy"
+    - id: "reminder_policy"
+      label: "Reminder policy"
+      question: "Do you want a reminder before the wear window, and if nothing is logged by the next morning should Murph ask once or leave it alone?"
+      options:
+        - "none"
+        - "pre_window"
+        - "pre_window_plus_next_morning_missing_log_check"
+      constraints:
+        askWhen: "at_confirmation"
+      target:
+        object: "assistantSupport"
+        field: "reminderPolicy"
   planDefaults:
-    testPlanId: sol-wiredness-21d
-    baselineDays: 7
-    interventionDays: 14
-    sessionsPerWeek: 7
-    targetSessions: 12
-    minimumUsefulSessions: 10
-    firstSessionGuidance: Keep the first night simple. Wear the glasses during the usual pre-bed routine and do not add another new sleep intervention at the same time.
-  logging:
-    sessionFields:
-    - glasses_worn
-    - glasses_on_time
-    - glasses_off_time
-    - intended_bedtime
-    - actual_bedtime
-    - estimated_time_to_fall_asleep_minutes
-    - pre_bed_wiredness_rating
-    - subjective_sleep_quality
-    - felt_less_wired_before_bed
-    - headache_or_visual_discomfort
-    - unsafe_low_light_navigation
-    - mood_change
-    - lens_model_or_specs
-    - lens_color
-    - lens_filter_confidence
-    - fit_leakage_coverage
-    - removed_glasses_during_wear_window
-    - pre_bed_sleepiness_rating
-    - perceived_ease_of_sleep_onset
-    - visual_symptoms_blurred_or_double_vision
-    - near_fall_fall_or_bumped_object
-    - safety_critical_task_arose
-    - anxiety_or_depressive_mood
-    - elevated_or_agitated_mood
-    confounders:
-    - screen_use_last_2h
-    - room_light_brightness_last_2h
-    - caffeine_after_noon
-    - alcohol_last_24h
-    - hard_training_last_24h
-    - late_exercise
-    - travel_or_timezone_shift
-    - illness_or_fever
-    - unusual_stress
-    - new_supplement_or_medication_change
-    - melatonin_or_timed_light_change
-    - screen_device_type
-    - screen_brightness_last_2h
-    - night_mode_or_screen_filter_settings
-    - content_arousal_last_2h
-    - new_screen_curfew_added
-    - room_light_spectrum_or_warmth
-    - dimmers_bulbs_lamps_vs_overhead
-    - room_light_redesign_added
-    - wake_time
-    - naps
-    - late_work_or_unusual_schedule_change
-    - sleep_supplement_or_sedative_change
-    - stimulant_or_antidepressant_or_psychiatric_medication_change
-    - safety_task_or_navigation_event
-    - extra_sleep_score_checking_or_rumination
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-    - none
-    - pre_window
-    - pre_window_plus_next_morning_missing_log_check
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: Did you end up wearing the glasses before bed last night? Totally fine either way; I just want the experiment record to be accurate.
+    testPlanId: "sol-wiredness-21d"
+    firstSessionGuidance: "Keep the first night simple. Wear the glasses during the usual pre-bed routine and do not add another new sleep intervention at the same time."
+  trackingHints:
+    confounderFields:
+      - "screen_use_last_2h"
+      - "room_light_brightness_last_2h"
+      - "caffeine_after_noon"
+      - "alcohol_last_24h"
+      - "hard_training_last_24h"
+      - "late_exercise"
+      - "travel_or_timezone_shift"
+      - "illness_or_fever"
+      - "unusual_stress"
+      - "new_supplement_or_medication_change"
+      - "melatonin_or_timed_light_change"
+      - "screen_device_type"
+      - "screen_brightness_last_2h"
+      - "night_mode_or_screen_filter_settings"
+      - "content_arousal_last_2h"
+      - "new_screen_curfew_added"
+      - "room_light_spectrum_or_warmth"
+      - "dimmers_bulbs_lamps_vs_overhead"
+      - "room_light_redesign_added"
+      - "wake_time"
+      - "naps"
+      - "late_work_or_unusual_schedule_change"
+      - "sleep_supplement_or_sedative_change"
+      - "stimulant_or_antidepressant_or_psychiatric_medication_change"
+      - "safety_task_or_navigation_event"
+      - "extra_sleep_score_checking_or_rumination"
+  supportHints:
+    missedLogFollowupCopy: "Did you end up wearing the glasses before bed last night? Totally fine either way; I just want the experiment record to be accurate."
 whyItWorks:
   - "## Blue-green light signals daytime\n\nEvening short-wavelength light hits melanopsin pathways and tells the clock to stay alert. Melatonin suppression is the signal glasses are trying to reduce."
   - "## Lens blocks retinal input\n\nAmber or red lenses work only when they meaningfully reduce melanopic light reaching the eye. Color alone is not dose; spectrum and fit matter."

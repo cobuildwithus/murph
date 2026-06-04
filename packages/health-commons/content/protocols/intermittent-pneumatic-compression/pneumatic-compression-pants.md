@@ -250,6 +250,31 @@ protocol:
   - delayed symptoms later the same day
   - anticoagulant, antiplatelet, NSAID/analgesic, sensory-altering medicine, stimulant, diuretic, hormone therapy/estrogen context if relevant
   - whether symptoms resolved after removal
+  sessionFieldIds:
+  - target_use_case
+  - device_model
+  - garment_coverage
+  - pressure_intensity
+  - compression_mode
+  - duration_minutes
+  - timing_after_trigger
+  - posture
+  - soreness_score
+  - fatigue_score
+  - perceived_recovery_score
+  - leg_heaviness_score
+  - comfort_score
+  - skin_check
+  - symptoms_or_stop_reason
+  - time_since_workout_or_trigger
+  - workout_type_intensity_muscle_group
+  - time_of_day
+  - device_zones_or_program
+  - garment_contact_risk_points
+  - mobility_breaks_or_calf_exercises_if_travel_context
+  - skin_check_later_same_day
+  - delayed_symptoms
+  - symptom_resolution_after_removal
   stopConditions:
   - Severe pain, pain that feels wrong, pain out of proportion, rapidly increasing tightness/swelling, a hard/tight limb compartment, or pain with toe/ankle movement.
   - New numbness, tingling, weakness, gait instability, foot drop, trouble lifting the toes, foot slapping, dizziness, fainting, or any symptom that makes walking unsafe after removal.
@@ -309,270 +334,150 @@ expectedSignalDescriptions:
     basis: "source_artifact:doi-10.1007-s11332-024-01217-5 reported higher total-quality-recovery without better cycling power, and source_artifact:pmid-27011305 reported immediate fatigue relief after ultramarathon IPC. Null athlete trials keep confidence low."
   protocolProminence: focus
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Set up a cautious pneumatic compression pants experiment for post-exercise soreness, perceived recovery, or leg comfort—not for clot prevention or medical swelling treatment.
-    intentSummary: Consumer lower-limb IPC recovery or comfort self-experiment
-  contextReview:
-    vaultChecks:
-    - id: compression_device_history
-      label: Compression-device history
-      reason: Prior symptoms, device intolerance, or brand-specific use can change setup and safety questions.
-      freshnessDays: 365
-      readHints:
-      - search query "Normatec Therabody compression boots pneumatic compression pressotherapy symptoms" --format json
-    - id: vascular_clot_or_swelling_context
-      label: Vascular, clot, or swelling context
-      reason: Known clot risk, unexplained swelling, vascular disease, wounds, or lymphedema/lipedema changes this from a wellness experiment to clinician-guided care.
-      freshnessDays: 180
-      readHints:
-      - search query "DVT PE clot swelling edema lymphedema venous ulcer PAD wound cellulitis" --format json
-    - id: recent_injury_surgery_or_immobility
-      label: Recent injury, surgery, or immobility
-      reason: Recent surgery, fracture, dislocation, immobilization, or trauma can make compression unsafe without medical guidance.
-      freshnessDays: 90
-      readHints:
-      - search query "surgery injury fracture dislocation immobilization cast" --format json
-    - id: sensory_or_skin_risk
-      label: Sensory or skin risk
-      reason: Neuropathy, fragile skin, diabetes, wounds, or reduced sensation raises risk of missing pressure injury or skin breakdown.
-      freshnessDays: 180
-      readHints:
-      - search query "diabetes neuropathy numbness skin wound pressure sore" --format json
-    notes:
-    - Review context first, but still ask the compact safety screen because silence in the vault is not clearance.
+    displayPrompt: "Set up a cautious pneumatic compression pants experiment for post-exercise soreness, perceived recovery, or leg comfort—not for clot prevention or medical swelling treatment."
+    intentSummary: "Consumer lower-limb IPC recovery or comfort self-experiment"
   safetyScreen:
-    cautionLevel: high
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-    - id: clot_or_pe_red_flags
-      prompt: known or suspected DVT/PE, acute thrombophlebitis, unexplained calf pain, one-sided swelling/warmth/redness, chest pain, unexplained shortness of breath, coughing blood, fainting, or current clinician-directed clot-prevention plan
-      ifPositive: do_not_start_unsupervised
-      why: Consumer pneumatic compression pants should not be used to self-treat or prevent suspected clots.
-    - id: vte_history_or_high_risk_travel_context
-      prompt: previous DVT/PE, known thrombophilia/clotting disorder, active cancer, recent hospitalization/surgery/trauma, cast/splint or prolonged bed rest, pregnancy/postpartum, estrogen therapy/hormonal contraception/HRT, strong family history of VTE, or travel/prolonged sitting where the goal is clot prevention
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: These factors can change travel or clot-prevention decisions; consumer pneumatic compression pants should not replace a clinician-directed VTE plan.
-    - id: cardiopulmonary_or_vascular_risk
-      prompt: acute pulmonary edema, cardiopulmonary edema, acute or decompensated heart failure, edema from congestive heart failure, severe arterial disease or PAD/CLTI, acute limb ischemia, severe arteriosclerosis/ischemic vascular disease, severe/uncontrolled hypertension, acute/severe heart/liver/kidney disease, systemic edema, or a condition where increasing venous or lymphatic return may be unsafe
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: IPC can change venous/lymphatic return and is not self-cleared in these contexts.
-    - id: skin_infection_wound_or_sensation_risk
-      prompt: active infection, cellulitis, erysipelas, phlegmon, active phlebitis, open wound, leg ulcer, burn, blister, skin rash, fragile skin, tumor/cancerous lesion near the garment site, diabetes-related foot risk, neuropathy or reduced sensation, abnormal pressure sensitivity, severe bony prominences, or medicines that alter sensation or alertness
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Skin and nerve warning signs can be missed or worsened under compression.
-    - id: recent_injury_surgery_or_structural_risk
-      prompt: recent surgery, direct pressure over a surgical site or hardware, recent skin graft or vascular bypass/graft, immobilization, cast/splint, fracture, dislocation, suspected compartment syndrome, major recent injury, severe osteopenia/osteoporosis or bone fragility, severe bony prominences, poor garment fit, focal pressure over the fibular head/knee/ankle/groin/genitals, anticoagulant or bleeding-risk situation, pregnancy/postpartum, or relevant implanted medical device
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: These contexts need individualized guidance before pressure and garment coverage are chosen.
-    - id: can_stop_and_remove_device
-      prompt: can you reliably feel warning symptoms, understand the stop rules, reach the power/disconnect path, and remove the garment quickly without help?
-      ifNegative: do_not_start_unsupervised
-      why: The protocol depends on early symptom detection and immediate removal; incapacitated or unable-to-remove users need supervised use.
-    - id: medical_treatment_goal
-      prompt: is the intended goal DVT/PE prevention, travel VTE prevention, unexplained swelling treatment, lymphedema/lipedema, venous ulcer, wound care, PAD/ischemia, diabetes-related foot risk, post-thrombotic syndrome, post-surgical prophylaxis, or replacing a medical compression plan
-      ifPositive: do_not_start_unsupervised
-      why: Those goals belong in supervised clinical pathways, not this Murph wellness protocol.
+      - id: "clot_or_pe_red_flags"
+        prompt: "known or suspected DVT/PE, acute thrombophlebitis, unexplained calf pain, one-sided swelling/warmth/redness, chest pain, unexplained shortness of breath, coughing blood, fainting, or current clinician-directed clot-prevention plan"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "vte_history_or_high_risk_travel_context"
+        prompt: "previous DVT/PE, known thrombophilia/clotting disorder, active cancer, recent hospitalization/surgery/trauma, cast/splint or prolonged bed rest, pregnancy/postpartum, estrogen therapy/hormonal contraception/HRT, strong family history of VTE, or travel/prolonged sitting where the goal is clot prevention"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "cardiopulmonary_or_vascular_risk"
+        prompt: "acute pulmonary edema, cardiopulmonary edema, acute or decompensated heart failure, edema from congestive heart failure, severe arterial disease or PAD/CLTI, acute limb ischemia, severe arteriosclerosis/ischemic vascular disease, severe/uncontrolled hypertension, acute/severe heart/liver/kidney disease, systemic edema, or a condition where increasing venous or lymphatic return may be unsafe"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "skin_infection_wound_or_sensation_risk"
+        prompt: "active infection, cellulitis, erysipelas, phlegmon, active phlebitis, open wound, leg ulcer, burn, blister, skin rash, fragile skin, tumor/cancerous lesion near the garment site, diabetes-related foot risk, neuropathy or reduced sensation, abnormal pressure sensitivity, severe bony prominences, or medicines that alter sensation or alertness"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "recent_injury_surgery_or_structural_risk"
+        prompt: "recent surgery, direct pressure over a surgical site or hardware, recent skin graft or vascular bypass/graft, immobilization, cast/splint, fracture, dislocation, suspected compartment syndrome, major recent injury, severe osteopenia/osteoporosis or bone fragility, severe bony prominences, poor garment fit, focal pressure over the fibular head/knee/ankle/groin/genitals, anticoagulant or bleeding-risk situation, pregnancy/postpartum, or relevant implanted medical device"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "can_stop_and_remove_device"
+        prompt: "can you reliably feel warning symptoms, understand the stop rules, reach the power/disconnect path, and remove the garment quickly without help?"
+        ifNegative: "do_not_start_unsupervised"
+      - id: "medical_treatment_goal"
+        prompt: "is the intended goal DVT/PE prevention, travel VTE prevention, unexplained swelling treatment, lymphedema/lipedema, venous ulcer, wound care, PAD/ischemia, diabetes-related foot risk, post-thrombotic syndrome, post-surgical prophylaxis, or replacing a medical compression plan"
+        ifPositive: "do_not_start_unsupervised"
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
-      - device fails to deflate, pressure feels abnormal, or the garment cannot be removed quickly
-      - session requires walking with leg attachments or creates a tubing, cord, obstruction, or fall hazard
-      - garment presses focally on the fibular head, knee, ankle bone, groin/genitals, surgical site/hardware, skin graft/bypass area, or another bony prominence
-      - goal shifts from comfort/recovery to medical treatment or clot prevention
-    notes:
-    - A positive screen is not a diagnosis; it means Murph should not set up unsupervised consumer-pants use.
-    - When the screen is positive, offer to help organize questions for a clinician rather than creating an experiment run.
+        - "device fails to deflate, pressure feels abnormal, or the garment cannot be removed quickly"
+        - "session requires walking with leg attachments or creates a tubing, cord, obstruction, or fall hazard"
+        - "garment presses focally on the fibular head, knee, ankle bone, groin/genitals, surgical site/hardware, skin graft/bypass area, or another bony prominence"
+        - "goal shifts from comfort/recovery to medical treatment or clot prevention"
   setupSlots:
-  - id: target_use_case
-    label: Target use case
-    purpose: context
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: 'What are you testing: post-exercise soreness, perceived recovery/readiness, leg heaviness/comfort after standing or sitting, or something else? If you choose ''other'', it cannot mean new swelling, one-sided swelling, painful swelling, injury, numbness, wound care, circulation disease, or medical treatment.'
-    options:
-    - post_exercise_soreness
-    - perceived_recovery
-    - leg_heaviness_comfort
-    - other_nonmedical_comfort
-    writePath: runPlan.targetUseCase
-  - id: device_model
-    label: Device model
-    purpose: logistics
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: true
-    question: What brand/model or device type will you use?
-    writePath: runPlan.deviceModel
-  - id: garment_coverage
-    label: Garment coverage
-    purpose: logistics
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: Which areas will the garment cover? Do not use direct groin/genital compression or a fit that creates focal pressure over bony prominences, surgical sites/hardware, skin graft/bypass areas, or lesions.
-    options:
-    - feet_calves
-    - calves_thighs
-    - full_legs
-    - pants_hips
-    - other
-    writePath: runPlan.garmentCoverage
-  - id: pressure_intensity
-    label: Pressure or intensity
-    purpose: measurement_fidelity
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: true
-    question: What pressure, level, or intensity setting will you start with? Use the lowest comfortable setting within the device manual. Do not copy high-pressure study settings, do not use the device maximum as a target, and do not increase pressure to force a stronger effect.
-    writePath: runPlan.pressureIntensity
-  - id: compression_mode
-    label: Compression mode
-    purpose: measurement_fidelity
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: false
-    question: What mode, sequence, zone pattern, or program will you use?
-    writePath: runPlan.compressionMode
-  - id: duration_minutes
-    label: Session duration
-    purpose: adherence
-    valueType: integer
-    askPolicy: ask_if_unknown
-    required: true
-    question: How many minutes per session will you use? The ordinary starter plan is 20–30 minutes; do not use continuous, overnight, or >30-minute sessions in this wellness protocol.
-    constraints:
-      minimum: 10
-      maximum: 30
-      recommendedMinimum: 20
-      recommendedMaximum: 30
-      aboveMaximumDisposition: separate_device_specific_or_clinician_guided_variant
-    writePath: runPlan.durationMinutes
-  - id: sessions_per_week
-    label: Sessions per week
-    purpose: adherence
-    valueType: integer
-    askPolicy: ask_if_unknown
-    required: true
-    question: How many sessions per week are realistic? The default is 3, with a target of 12 over 21 days.
-    constraints:
-      minimum: 1
-      maximum: 7
-      default: 3
-    writePath: runPlan.sessionsPerWeek
-  - id: timing_after_trigger
-    label: Timing after trigger
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: When will you usually do the session relative to the trigger?
-    options:
-    - within_2h_after_exercise
-    - same_day_after_exercise
-    - after_standing_or_sitting_day
-    - travel_comfort_only
-    - other_consistent_timing
-    writePath: runPlan.timingAfterTrigger
-  - id: posture
-    label: Posture
-    purpose: safety
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: What stable position will you use during sessions?
-    options:
-    - seated
-    - reclined
-    - lying_down
-    writePath: runPlan.posture
-  - id: measurement_focus
-    label: Measurement focus
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: Which primary outcome should Murph use?
-    options:
-    - muscle_soreness
-    - perceived_recovery
-    - leg_heaviness
-    writePath: analysisPlan.primaryOutcomePreference
-  - id: reminder_policy
-    label: Reminder policy
-    purpose: assistant_support
-    valueType: reminder_policy
-    askPolicy: ask_at_confirmation
-    required: true
-    question: Would you like session reminders and one same-day missing-log check?
-    options:
-    - none
-    - pre_session
-    - pre_session_plus_same_day_missing_log_check
-    writePath: assistantSupport.reminderPolicy
+    - id: "target_use_case"
+      label: "Target use case"
+      question: "What are you testing: post-exercise soreness, perceived recovery/readiness, leg heaviness/comfort after standing or sitting, or something else? If you choose ''other'', it cannot mean new swelling, one-sided swelling, painful swelling, injury, numbness, wound care, circulation disease, or medical treatment."
+      options:
+        - "post_exercise_soreness"
+        - "perceived_recovery"
+        - "leg_heaviness_comfort"
+        - "other_nonmedical_comfort"
+      writePath: "runPlan.targetUseCase"
+    - id: "device_model"
+      label: "Device model"
+      question: "What brand/model or device type will you use?"
+      writePath: "runPlan.deviceModel"
+    - id: "garment_coverage"
+      label: "Garment coverage"
+      question: "Which areas will the garment cover? Do not use direct groin/genital compression or a fit that creates focal pressure over bony prominences, surgical sites/hardware, skin graft/bypass areas, or lesions."
+      options:
+        - "feet_calves"
+        - "calves_thighs"
+        - "full_legs"
+        - "pants_hips"
+        - "other"
+      writePath: "runPlan.garmentCoverage"
+    - id: "pressure_intensity"
+      label: "Pressure or intensity"
+      question: "What pressure, level, or intensity setting will you start with? Use the lowest comfortable setting within the device manual. Do not copy high-pressure study settings, do not use the device maximum as a target, and do not increase pressure to force a stronger effect."
+      writePath: "runPlan.pressureIntensity"
+    - id: "compression_mode"
+      label: "Compression mode"
+      question: "What mode, sequence, zone pattern, or program will you use?"
+      constraints:
+        optional: true
+      writePath: "runPlan.compressionMode"
+    - id: "duration_minutes"
+      label: "Session duration"
+      question: "How many minutes per session will you use? The ordinary starter plan is 20–30 minutes; do not use continuous, overnight, or >30-minute sessions in this wellness protocol."
+      constraints:
+        minimum: 10
+        maximum: 30
+        recommendedMinimum: 20
+        recommendedMaximum: 30
+        aboveMaximumDisposition: "separate_device_specific_or_clinician_guided_variant"
+      writePath: "runPlan.durationMinutes"
+    - id: "sessions_per_week"
+      label: "Sessions per week"
+      question: "How many sessions per week are realistic? The default is 3, with a target of 12 over 21 days."
+      constraints:
+        minimum: 1
+        maximum: 7
+        default: 3
+      writePath: "runPlan.sessionsPerWeek"
+    - id: "timing_after_trigger"
+      label: "Timing after trigger"
+      question: "When will you usually do the session relative to the trigger?"
+      options:
+        - "within_2h_after_exercise"
+        - "same_day_after_exercise"
+        - "after_standing_or_sitting_day"
+        - "travel_comfort_only"
+        - "other_consistent_timing"
+      writePath: "runPlan.timingAfterTrigger"
+    - id: "posture"
+      label: "Posture"
+      question: "What stable position will you use during sessions?"
+      options:
+        - "seated"
+        - "reclined"
+        - "lying_down"
+      writePath: "runPlan.posture"
+    - id: "measurement_focus"
+      label: "Measurement focus"
+      question: "Which primary outcome should Murph use?"
+      options:
+        - "muscle_soreness"
+        - "perceived_recovery"
+        - "leg_heaviness"
+      writePath: "analysisPlan.primaryOutcomePreference"
+    - id: "reminder_policy"
+      label: "Reminder policy"
+      question: "Would you like session reminders and one same-day missing-log check?"
+      options:
+        - "none"
+        - "pre_session"
+        - "pre_session_plus_same_day_missing_log_check"
+      constraints:
+        askWhen: "at_confirmation"
+      writePath: "assistantSupport.reminderPolicy"
   planDefaults:
-    testPlanId: soreness-comfort-28d
-    baselineDays: 7
-    interventionDays: 21
-    sessionsPerWeek: 3
-    targetSessions: 12
-    minimumUsefulSessions: 8
-    firstSessionGuidance: 'Make the first session a tolerance check: lowest comfortable pressure, reachable disconnect, no walking, no focal pressure over fibular head/knee/ankle/groin/genitals or surgical/graft areas, and stop at the first wrong-feeling symptom.'
-  logging:
-    sessionFields:
-    - target_use_case
-    - device_model
-    - garment_coverage
-    - pressure_intensity
-    - compression_mode
-    - duration_minutes
-    - timing_after_trigger
-    - posture
-    - soreness_score
-    - fatigue_score
-    - perceived_recovery_score
-    - leg_heaviness_score
-    - comfort_score
-    - skin_check
-    - symptoms_or_stop_reason
-    - time_since_workout_or_trigger
-    - workout_type_intensity_muscle_group
-    - time_of_day
-    - device_zones_or_program
-    - garment_contact_risk_points
-    - mobility_breaks_or_calf_exercises_if_travel_context
-    - skin_check_later_same_day
-    - delayed_symptoms
-    - symptom_resolution_after_removal
+    testPlanId: "soreness-comfort-28d"
+    firstSessionGuidance: "Make the first session a tolerance check: lowest comfortable pressure, reachable disconnect, no walking, no focal pressure over fibular head/knee/ankle/groin/genitals or surgical/graft areas, and stop at the first wrong-feeling symptom."
+  trackingHints:
     confounders:
-    - exact time since workout, workout type, intensity, muscle group, and DOMS/injury distinction
-    - time of day, posture before measurement, and session posture
-    - exact device model, garment coverage, zones, mode, pressure/intensity, duration, and any pressure/duration change
-    - whether the garment contacted fibular head, knee/ankle bony prominences, groin/genitals, surgical hardware/site, graft/bypass area, or skin lesion
-    - travel duration, prolonged sitting/standing duration, cast/splint/immobility, and whether mobility breaks/calf exercises occurred
-    - skin check before, immediately after, and later the same day
-    - new injury, calf pain, swelling, warmth, redness, numbness, weakness, foot drop, skin mark, blister, bruise, wound, infection sign, or delayed symptom
-    - 'medications: anticoagulants, antiplatelets, NSAIDs/analgesics, sensory-altering meds, stimulants, diuretics, hormone therapy/estrogen if travel or swelling is relevant'
-    - pregnancy/postpartum status if relevant, menstrual cycle/hormonal context if the user already tracks it
-    - illness, fever, cellulitis, wound, burn, dermatitis, or infection
-    - sleep debt, alcohol, hydration, heat/cold/sauna exposure, massage, stretching, cold plunge, BFR, compression garments, or other recovery modalities
-    - whether the session was stopped early, why, and whether symptoms resolved after removal
+      - "exact time since workout, workout type, intensity, muscle group, and DOMS/injury distinction"
+      - "time of day, posture before measurement, and session posture"
+      - "exact device model, garment coverage, zones, mode, pressure/intensity, duration, and any pressure/duration change"
+      - "whether the garment contacted fibular head, knee/ankle bony prominences, groin/genitals, surgical hardware/site, graft/bypass area, or skin lesion"
+      - "travel duration, prolonged sitting/standing duration, cast/splint/immobility, and whether mobility breaks/calf exercises occurred"
+      - "skin check before, immediately after, and later the same day"
+      - "new injury, calf pain, swelling, warmth, redness, numbness, weakness, foot drop, skin mark, blister, bruise, wound, infection sign, or delayed symptom"
+      - "medications: anticoagulants, antiplatelets, NSAIDs/analgesics, sensory-altering meds, stimulants, diuretics, hormone therapy/estrogen if travel or swelling is relevant"
+      - "pregnancy/postpartum status if relevant, menstrual cycle/hormonal context if the user already tracks it"
+      - "illness, fever, cellulitis, wound, burn, dermatitis, or infection"
+      - "sleep debt, alcohol, hydration, heat/cold/sauna exposure, massage, stretching, cold plunge, BFR, compression garments, or other recovery modalities"
+      - "whether the session was stopped early, why, and whether symptoms resolved after removal"
     notes:
-    - Log early stops as useful safety data, not failed adherence.
-    - Keep pressure and duration stable unless safety or comfort requires a lower dose.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-    - none
-    - pre_session
-    - pre_session_plus_same_day_missing_log_check
-    - weekly_digest
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: Did you use the compression pants session today? Totally fine either way — I just want the experiment record and symptoms to be accurate.
+      - "Log early stops as useful safety data, not failed adherence."
+      - "Keep pressure and duration stable unless safety or comfort requires a lower dose."
+  supportHints:
+    missedLogFollowupCopy: "Did you use the compression pants session today? Totally fine either way — I just want the experiment record and symptoms to be accurate."
 whyItWorks:
   - "## Mechanical squeeze moves fluid\n\nSequential compression empties veins and interstitial fluid from the legs during inflation. Deflation allows refill; each cycle moves blood and fluid through tissue."
   - "## Comfort is the practical endpoint\n\nThe best signal is how the legs feel after a matched trigger: soreness, heaviness, and fatigue. It is not proof that muscle damage reversed."

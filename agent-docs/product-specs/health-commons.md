@@ -32,7 +32,7 @@ The storage primitive is a typed wiki page plus generated projections. Product/d
 | Aggregate community outcome summary | future generated projection attached to biomarker and/or protocol entities after an explicit contribution pipeline exists |
 
 Protocol pages must include lineage, attribution, a performable protocol block, safety, and at least one test plan. Claims must cite source pages unless they are explicitly labeled as community outcomes.
-Protocol pages may also include an optional `experimentOnboarding` block that describes how assistants should safely review context, screen for red flags, gather setup slots, and summarize the plan before creating a private run.
+Protocol pages may also include an optional compact `experimentOnboarding` block that stores only protocol-specific onboarding deltas, such as start intent, safety-screen questions, setup slots, selected test plan, first-session guidance, adaptation policy, and tracking/support hints. Generic vault-read behavior, plan timing, adherence targets, readable logging labels, and stable session log ids come from assistant instructions plus canonical `testPlans`, `protocol.logFields`, `protocol.sessionFieldIds`, `protocol`, and `safety` fields; only stable extra confounder log ids belong in `trackingHints.confounderFields`, while prose confounder guidance stays in `trackingHints.confounders` or `notes`.
 Protocol and source pages may also include an optional `media` array for small public presentation assets such as header imagery. Keep those assets lightweight and repo-local, and do not use `media` as a substitute for research artifact manifests, PDFs, or other large external files.
 
 ## Protocol Summary Copy

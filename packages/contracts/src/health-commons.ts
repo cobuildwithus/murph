@@ -10,7 +10,7 @@ export const HEALTH_COMMONS_SOURCE_INDEX_SCHEMA_VERSION = "murph.commons.source-
 export const HEALTH_COMMONS_SOURCE_ARTIFACT_INDEX_SCHEMA_VERSION =
   "murph.commons.source-artifact-index.v1" as const;
 export const HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SCHEMA_VERSION =
-  "murph.commons.experiment-onboarding.v1" as const;
+  "murph.commons.experiment-onboarding.v2" as const;
 export const HEALTH_COMMONS_MEASUREMENT_PLAN_SCHEMA_VERSION =
   "murph.commons.measurement-plan.v1" as const;
 export const HEALTH_COMMONS_REDIRECTS_SCHEMA_VERSION = "murph.commons.redirects.v1" as const;
@@ -276,6 +276,23 @@ export const healthCommonsKeySchema = z.string().regex(new RegExp(KEY_PATTERN, "
 export const healthCommonsStableIdSchema = z.string().regex(new RegExp(STABLE_ID_PATTERN, "u"));
 export const healthCommonsRelativePathSchema = z.string().regex(new RegExp(PATH_SEGMENT_PATTERN, "u"));
 export const healthCommonsSha256HexSchema = z.string().regex(new RegExp(SHA256_HEX_PATTERN, "u"));
+
+function healthCommonsStableIdArraySchema(options: { minItems?: number } = {}) {
+  let schema = z.array(healthCommonsStableIdSchema);
+
+  if (options.minItems !== undefined) {
+    schema = schema.min(options.minItems);
+  }
+
+  return schema.meta({ uniqueItems: true }).superRefine((values, context) => {
+    if (new Set(values).size !== values.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Expected unique stable ids.",
+      });
+    }
+  });
+}
 
 const nonEmptyStringSchema = z.string().trim().min(1);
 const shortStringSchema = nonEmptyStringSchema.max(240);
@@ -777,6 +794,7 @@ export const healthCommonsProtocolSpecSchema = z
     tips: z.array(longStringSchema).optional(),
     keepInMind: z.array(longStringSchema).optional(),
     logFields: z.array(shortStringSchema).optional(),
+    sessionFieldIds: healthCommonsStableIdArraySchema({ minItems: 1 }).optional(),
     stopConditions: z.array(longStringSchema).optional(),
   })
   .strict();
@@ -792,44 +810,6 @@ export const HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS = [
 
 export type HealthCommonsExperimentOnboardingCautionLevel =
   (typeof HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS)[number];
-
-export const HEALTH_COMMONS_EXPERIMENT_ONBOARDING_ASK_POLICIES = [
-  "always",
-  "ask_if_unknown",
-  "ask_if_unknown_or_stale",
-  "ask_at_confirmation",
-] as const;
-
-export type HealthCommonsExperimentOnboardingAskPolicy =
-  (typeof HEALTH_COMMONS_EXPERIMENT_ONBOARDING_ASK_POLICIES)[number];
-
-export const HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SLOT_PURPOSES = [
-  "safety",
-  "logistics",
-  "measurement_fidelity",
-  "assistant_support",
-  "confounder_control",
-  "personalization",
-  "adherence",
-  "context",
-] as const;
-
-export type HealthCommonsExperimentOnboardingSlotPurpose =
-  (typeof HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SLOT_PURPOSES)[number];
-
-export const HEALTH_COMMONS_EXPERIMENT_ONBOARDING_VALUE_TYPES = [
-  "boolean",
-  "enum",
-  "free_text",
-  "integer",
-  "local_time",
-  "number",
-  "weekly_time_windows",
-  "reminder_policy",
-] as const;
-
-export type HealthCommonsExperimentOnboardingValueType =
-  (typeof HEALTH_COMMONS_EXPERIMENT_ONBOARDING_VALUE_TYPES)[number];
 
 export const HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SETUP_TARGET_OBJECTS = [
   "protocol",
@@ -888,38 +868,12 @@ export type HealthCommonsExperimentStartIntent = z.infer<
   typeof healthCommonsExperimentStartIntentSchema
 >;
 
-export const healthCommonsExperimentOnboardingVaultCheckSchema = z
-  .object({
-    id: experimentOnboardingIdSchema,
-    label: shortStringSchema.optional(),
-    reason: longStringSchema.optional(),
-    freshnessDays: z.number().int().nonnegative().optional(),
-    readHints: z.array(shortStringSchema).optional(),
-  })
-  .strict();
-
-export type HealthCommonsExperimentOnboardingVaultCheck = z.infer<
-  typeof healthCommonsExperimentOnboardingVaultCheckSchema
->;
-
-export const healthCommonsExperimentOnboardingContextReviewSchema = z
-  .object({
-    vaultChecks: z.array(healthCommonsExperimentOnboardingVaultCheckSchema).optional(),
-    notes: z.array(longStringSchema).optional(),
-  })
-  .strict();
-
-export type HealthCommonsExperimentOnboardingContextReview = z.infer<
-  typeof healthCommonsExperimentOnboardingContextReviewSchema
->;
-
 export const healthCommonsExperimentOnboardingSafetyQuestionSchema = z
   .object({
     id: experimentOnboardingIdSchema,
     prompt: longStringSchema,
     ifPositive: z.enum(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS).optional(),
     ifNegative: z.enum(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS).optional(),
-    why: longStringSchema.optional(),
   })
   .strict();
 
@@ -929,7 +883,6 @@ export type HealthCommonsExperimentOnboardingSafetyQuestion = z.infer<
 
 export const healthCommonsExperimentOnboardingStopPolicySchema = z
   .object({
-    inheritFromProtocolSafety: z.boolean().optional(),
     additionalConditions: z.array(shortStringSchema).optional(),
   })
   .strict();
@@ -940,14 +893,11 @@ export type HealthCommonsExperimentOnboardingStopPolicy = z.infer<
 
 export const healthCommonsExperimentOnboardingSafetyScreenSchema = z
   .object({
-    cautionLevel: z.enum(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS),
-    mode: z.enum(["ask_compact_then_expand_if_positive", "ask_each_item"]),
     dispositionIfAnyPositive: z.enum(
       HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS,
     ),
     mustAsk: z.array(healthCommonsExperimentOnboardingSafetyQuestionSchema).min(1),
     stopIf: healthCommonsExperimentOnboardingStopPolicySchema.optional(),
-    notes: z.array(longStringSchema).optional(),
   })
   .strict();
 
@@ -987,11 +937,7 @@ export const healthCommonsExperimentOnboardingSetupSlotSchema = z
   .object({
     id: experimentOnboardingIdSchema,
     label: shortStringSchema,
-    purpose: z.enum(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SLOT_PURPOSES),
-    valueType: z.enum(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_VALUE_TYPES),
-    askPolicy: z.enum(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_ASK_POLICIES),
-    required: z.boolean(),
-    question: longStringSchema.optional(),
+    question: longStringSchema,
     options: z.array(experimentOnboardingIdSchema).optional(),
     constraints: experimentOnboardingUnknownRecordSchema.optional(),
     notes: z.array(longStringSchema).optional(),
@@ -1000,13 +946,6 @@ export const healthCommonsExperimentOnboardingSetupSlotSchema = z
   })
   .strict()
   .superRefine((slot, context) => {
-    if (slot.valueType === "enum" && (!slot.options || slot.options.length === 0)) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Enum setup slots must declare options.",
-        path: ["options"],
-      });
-    }
     if (!slot.target && !slot.writePath) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -1023,11 +962,6 @@ export type HealthCommonsExperimentOnboardingSetupSlot = z.infer<
 export const healthCommonsExperimentOnboardingPlanDefaultsSchema = z
   .object({
     testPlanId: healthCommonsStableIdSchema.optional(),
-    baselineDays: z.number().int().nonnegative().optional(),
-    interventionDays: z.number().int().positive().optional(),
-    sessionsPerWeek: z.number().positive().optional(),
-    targetSessions: z.number().int().nonnegative().optional(),
-    minimumUsefulSessions: z.number().int().nonnegative().optional(),
     firstSessionGuidance: longStringSchema.optional(),
     missedSessionGuidance: longStringSchema.optional(),
   })
@@ -1037,32 +971,26 @@ export type HealthCommonsExperimentOnboardingPlanDefaults = z.infer<
   typeof healthCommonsExperimentOnboardingPlanDefaultsSchema
 >;
 
-export const healthCommonsExperimentOnboardingLoggingSchema = z
+export const healthCommonsExperimentOnboardingTrackingHintsSchema = z
   .object({
-    sessionFields: z.array(experimentOnboardingIdSchema).min(1),
+    confounderFields: healthCommonsStableIdArraySchema({ minItems: 1 }).optional(),
     confounders: z.array(longStringSchema).optional(),
     notes: z.array(longStringSchema).optional(),
   })
   .strict();
 
-export type HealthCommonsExperimentOnboardingLogging = z.infer<
-  typeof healthCommonsExperimentOnboardingLoggingSchema
+export type HealthCommonsExperimentOnboardingTrackingHints = z.infer<
+  typeof healthCommonsExperimentOnboardingTrackingHintsSchema
 >;
 
-export const healthCommonsExperimentOnboardingAssistantPolicySchema = z
+export const healthCommonsExperimentOnboardingSupportHintsSchema = z
   .object({
-    maxSetupQuestionsPerTurn: z.number().int().positive().max(5).optional(),
-    askBeforeCreatingAutomations: z.boolean(),
-    missedLogFollowup: z.enum(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES),
-    reminderOptions: z.array(experimentOnboardingIdSchema).optional(),
-    weeklyDigestDefault: z.boolean().optional(),
     missedLogFollowupCopy: longStringSchema.optional(),
-    confirmationPrompt: longStringSchema.optional(),
   })
   .strict();
 
-export type HealthCommonsExperimentOnboardingAssistantPolicy = z.infer<
-  typeof healthCommonsExperimentOnboardingAssistantPolicySchema
+export type HealthCommonsExperimentOnboardingSupportHints = z.infer<
+  typeof healthCommonsExperimentOnboardingSupportHintsSchema
 >;
 
 export const healthCommonsExperimentOnboardingAdaptationFieldSchema = z
@@ -1124,20 +1052,15 @@ export const healthCommonsExperimentOnboardingSchema = z
   .object({
     schemaVersion: z.literal(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SCHEMA_VERSION),
     startIntent: healthCommonsExperimentStartIntentSchema,
-    contextReview: healthCommonsExperimentOnboardingContextReviewSchema.optional(),
     safetyScreen: healthCommonsExperimentOnboardingSafetyScreenSchema.optional(),
     adaptationPolicy: healthCommonsExperimentOnboardingAdaptationPolicySchema.optional(),
     setupSlots: z.array(healthCommonsExperimentOnboardingSetupSlotSchema).optional(),
     planDefaults: healthCommonsExperimentOnboardingPlanDefaultsSchema.optional(),
-    logging: healthCommonsExperimentOnboardingLoggingSchema.optional(),
-    assistantPolicy: healthCommonsExperimentOnboardingAssistantPolicySchema.optional(),
+    trackingHints: healthCommonsExperimentOnboardingTrackingHintsSchema.optional(),
+    supportHints: healthCommonsExperimentOnboardingSupportHintsSchema.optional(),
   })
   .strict()
   .superRefine((onboarding, context) => {
-    addDuplicateIdIssues(context, onboarding.contextReview?.vaultChecks ?? [], [
-      "contextReview",
-      "vaultChecks",
-    ]);
     addDuplicateIdIssues(context, onboarding.safetyScreen?.mustAsk ?? [], [
       "safetyScreen",
       "mustAsk",

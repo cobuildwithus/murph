@@ -91,6 +91,10 @@ protocol:
     - diet_or_fortified_food_change
     - symptoms_or_adverse_events
     - 25ohd_lab_value_and_unit
+  sessionFieldIds:
+  - dose_taken
+  - vitamin_d3_dose_iu
+  - product_name
   stopConditions:
     - Symptoms suggesting hypercalcemia or kidney stone occur; seek urgent care for severe confusion, severe dehydration, persistent vomiting, inability to keep fluids down, severe flank pain, blood in urine, fever with stone symptoms, or rapidly worsening weakness.
     - Stop and seek clinician guidance if serum calcium is high, urine calcium is high, 25(OH)D is above the lab reference range or clinician concern threshold, kidney function worsens, kidney-stone symptoms occur, or a clinician tells you to stop.
@@ -128,205 +132,117 @@ expectedSignalDescriptions:
       basis: Direct 800–1000 IU/day D3 trials show roughly +20–35 nmol/L by 8–12 weeks, equivalent to about +8–14 ng/mL; response shifts with baseline level, body size, season, sun exposure, diet, adherence, and assay.
     protocolProminence: focus
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Set up a daily vitamin D3 experiment with lab-feedback tracking and safety screening.
-    intentSummary: Run a daily D3 protocol with 25(OH)D as the primary endpoint.
-  contextReview:
-    vaultChecks:
-
-      -
-        id: recent_25ohd_result
-        label: Recent 25(OH)D lab
-        reason: Baseline and unit determine how interpretable follow-up will be.
-        freshnessDays: 180
-        readHints:
-          - 25(OH)D
-          - 25-hydroxyvitamin D
-          - vitamin D lab
-      -
-        id: kidney_or_calcium_context
-        label: Kidney, calcium, stone, parathyroid context
-        reason: These conditions change the safety posture.
-        freshnessDays: 365
-        readHints:
-          - kidney stones
-          - calcium
-          - hyperparathyroidism
-          - CKD
-    notes:
-      - The assistant should prioritize safety/risk review before dose personalization.
+    displayPrompt: "Set up a daily vitamin D3 experiment with lab-feedback tracking and safety screening."
+    intentSummary: "Run a daily D3 protocol with 25(OH)D as the primary endpoint."
   safetyScreen:
-    cautionLevel: moderate
-    mode: ask_each_item
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-      -
-        id: kidney_disease_or_stones
-        prompt: Do you have chronic kidney disease, reduced kidney function, abnormal creatinine/eGFR, or a history of kidney stones?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Vitamin D safety concerns concentrate around calcium handling, kidney function, and stone risk.
-      -
-        id: high_calcium_or_parathyroid
-        prompt: Have you had high serum calcium, high urine calcium/hypercalciuria, hypercalcemia, hyperparathyroidism, abnormal PTH/phosphorus in a kidney context, or unexplained calcium abnormalities?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Vitamin D can worsen calcium-related risks in susceptible people.
-      -
-        id: granulomatous_or_clinician_warning
-        prompt: Do you have sarcoidosis, another granulomatous disease, or clinician warnings about vitamin D or calcium handling?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: The extracted safety synthesis supports conservative screening for these contexts without turning them into an ordinary self-directed protocol.
-      -
-        id: clinician_repletion_or_abnormal_25ohd
-        prompt: Are you treating diagnosed vitamin D deficiency, following a clinician-prescribed repletion/loading plan, or responding to a very low or above-range 25(OH)D result?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Clinical deficiency treatment and abnormal lab management are not ordinary wellness self-experiments.
-      -
-        id: calcium_stack_or_urine_calcium
-        prompt: Are you taking calcium supplements, high-dose calcium antacids, calcium prescriptions, or have you had high urine calcium/hypercalciuria?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Calcium co-use and urine calcium change the kidney-stone and hypercalciuria safety posture.
-      -
-        id: malabsorption_bariatric_or_cf
-        prompt: Do you have cystic fibrosis, fat malabsorption, short bowel, intestinal rehabilitation, Roux-en-Y or other bariatric surgery, or another absorption problem?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Absorption and formulation/route questions require a separate clinical variant.
-      -
-        id: non_daily_or_non_d3_variant
-        prompt: Are you using D2, calcifediol, calcitriol, alfacalcidol, paricalcitol, UVB/sunlight treatment, fortified-food intervention, or a weekly/monthly/bolus/loading vitamin D schedule?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: These are not the Daily Vitamin D3 Supplementation protocol.
-      -
-        id: pregnancy_or_pediatric
-        prompt: Are you pregnant, trying to conceive, breastfeeding, or setting this up for a child or adolescent?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: This canonical protocol is not a pregnancy, lactation, pediatric, or adolescent dosing protocol.
+      - id: "kidney_disease_or_stones"
+        prompt: "Do you have chronic kidney disease, reduced kidney function, abnormal creatinine/eGFR, or a history of kidney stones?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "high_calcium_or_parathyroid"
+        prompt: "Have you had high serum calcium, high urine calcium/hypercalciuria, hypercalcemia, hyperparathyroidism, abnormal PTH/phosphorus in a kidney context, or unexplained calcium abnormalities?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "granulomatous_or_clinician_warning"
+        prompt: "Do you have sarcoidosis, another granulomatous disease, or clinician warnings about vitamin D or calcium handling?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "clinician_repletion_or_abnormal_25ohd"
+        prompt: "Are you treating diagnosed vitamin D deficiency, following a clinician-prescribed repletion/loading plan, or responding to a very low or above-range 25(OH)D result?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "calcium_stack_or_urine_calcium"
+        prompt: "Are you taking calcium supplements, high-dose calcium antacids, calcium prescriptions, or have you had high urine calcium/hypercalciuria?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "malabsorption_bariatric_or_cf"
+        prompt: "Do you have cystic fibrosis, fat malabsorption, short bowel, intestinal rehabilitation, Roux-en-Y or other bariatric surgery, or another absorption problem?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "non_daily_or_non_d3_variant"
+        prompt: "Are you using D2, calcifediol, calcitriol, alfacalcidol, paricalcitol, UVB/sunlight treatment, fortified-food intervention, or a weekly/monthly/bolus/loading vitamin D schedule?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "pregnancy_or_pediatric"
+        prompt: "Are you pregnant, trying to conceive, breastfeeding, or setting this up for a child or adolescent?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
-        - possible_hypercalcemia_or_kidney_stone_symptoms
-        - high_serum_calcium_or_high_urine_calcium
-        - above_range_25ohd_or_clinician_concern_threshold
-        - kidney_function_worsens
-        - exceeds_upper_intake_ceiling_or_total_intake_unknown
-        - switches_to_non_daily_or_non_d3_variant
-        - product_error_recall_or_dose_uncertainty
-    notes:
-      - Any positive safety question should block casual experiment creation until clinician guidance is documented.
+        - "possible_hypercalcemia_or_kidney_stone_symptoms"
+        - "high_serum_calcium_or_high_urine_calcium"
+        - "above_range_25ohd_or_clinician_concern_threshold"
+        - "kidney_function_worsens"
+        - "exceeds_upper_intake_ceiling_or_total_intake_unknown"
+        - "switches_to_non_daily_or_non_d3_variant"
+        - "product_error_recall_or_dose_uncertainty"
   setupSlots:
-
-    -
-      id: daily_dose_iu
-      label: Daily D3 dose in IU
-      purpose: personalization
-      valueType: integer
-      askPolicy: always
-      required: true
-      question: What daily vitamin D3 dose in IU will you use?
+    - id: "daily_dose_iu"
+      label: "Daily D3 dose in IU"
+      question: "What daily vitamin D3 dose in IU will you use?"
       constraints:
-        recommendedStartingRange: 800-1000 IU/day only for low-risk adults after negative safety screen
+        recommendedStartingRange: "800-1000 IU/day only for low-risk adults after negative safety screen"
         upperIntakeCeiling: 4000
         invalidIf:
-          - dose_iu <= 0
-          - dose_iu > 4000
-          - total_vitamin_d_from_all_sources_unknown
-          - active_safety_screen_positive_without_clinician_guidance
-        onInvalid: do_not_create_ordinary_protocol; route_to_clinician_guidance_or_separate_variant
+          - "dose_iu <= 0"
+          - "dose_iu > 4000"
+          - "total_vitamin_d_from_all_sources_unknown"
+          - "active_safety_screen_positive_without_clinician_guidance"
+        onInvalid: "do_not_create_ordinary_protocol; route_to_clinician_guidance_or_separate_variant"
       target:
-        object: onboardingCapture
-        field: setupAnswers.dailyDoseIu
-    -
-      id: product_name
-      label: Product name
-      purpose: measurement_fidelity
-      valueType: free_text
-      askPolicy: ask_if_unknown
-      required: false
-      question: Which D3 product will you use?
+        object: "onboardingCapture"
+        field: "setupAnswers.dailyDoseIu"
+    - id: "product_name"
+      label: "Product name"
+      question: "Which D3 product will you use?"
+      constraints:
+        optional: true
       target:
-        object: onboardingCapture
-        field: setupAnswers.productName
-    -
-      id: dose_time
-      label: Dose time
-      purpose: adherence
-      valueType: local_time
-      askPolicy: ask_if_unknown
-      required: false
-      question: What time of day will you usually take it?
+        object: "onboardingCapture"
+        field: "setupAnswers.productName"
+    - id: "dose_time"
+      label: "Dose time"
+      question: "What time of day will you usually take it?"
+      constraints:
+        optional: true
       target:
-        object: onboardingCapture
-        field: setupAnswers.doseTime
-    -
-      id: baseline_25ohd_known
-      label: Baseline 25(OH)D known
-      purpose: measurement_fidelity
-      valueType: boolean
-      askPolicy: always
-      required: true
-      question: Do you have a baseline 25(OH)D result or plan to get one?
+        object: "onboardingCapture"
+        field: "setupAnswers.doseTime"
+    - id: "baseline_25ohd_known"
+      label: "Baseline 25(OH)D known"
+      question: "Do you have a baseline 25(OH)D result or plan to get one?"
       target:
-        object: onboardingCapture
-        field: setupAnswers.baseline25ohdKnown
-    -
-      id: retest_plan
-      label: Follow-up lab plan
-      purpose: measurement_fidelity
-      valueType: enum
-      askPolicy: ask_if_unknown
-      required: false
-      question: When will you recheck 25(OH)D?
+        object: "onboardingCapture"
+        field: "setupAnswers.baseline25ohdKnown"
+    - id: "retest_plan"
+      label: "Follow-up lab plan"
+      question: "When will you recheck 25(OH)D?"
       options:
-        - eight_weeks
-        - twelve_weeks
-        - no_lab_planned_yet
+        - "eight_weeks"
+        - "twelve_weeks"
+        - "no_lab_planned_yet"
+      constraints:
+        optional: true
       target:
-        object: onboardingCapture
-        field: setupAnswers.retestPlan
-    -
-      id: current_supplement_stack
-      label: Current D/calcium supplements
-      purpose: safety
-      valueType: free_text
-      askPolicy: always
-      required: true
-      question: List other vitamin D, calcium, multivitamin, or prescription products you take.
+        object: "onboardingCapture"
+        field: "setupAnswers.retestPlan"
+    - id: "current_supplement_stack"
+      label: "Current D/calcium supplements"
+      question: "List other vitamin D, calcium, multivitamin, or prescription products you take."
       target:
-        object: onboardingCapture
-        field: setupAnswers.currentSupplementStack
+        object: "onboardingCapture"
+        field: "setupAnswers.currentSupplementStack"
   planDefaults:
-    testPlanId: 25ohd-lab-feedback-91d
-    baselineDays: 7
-    interventionDays: 84
-    sessionsPerWeek: 7
-    targetSessions: 84
-    minimumUsefulSessions: 56
-    firstSessionGuidance: After the safety screen is negative, total vitamin D intake is known, and the selected dose is within the adult ceiling, take the planned daily D3 dose once with your chosen routine cue, then log dose, product, supplement stack, calcium context, and any confounder changes.
-  logging:
-    sessionFields:
-      - dose_taken
-      - vitamin_d3_dose_iu
-      - product_name
-    confounders:
-      - missed_or_extra_dose
-      - other_vitamin_d_or_calcium_supplements
-      - sun_or_uv_exposure_change
-      - travel_or_latitude_change
-      - diet_or_fortified_food_change
-      - symptoms_or_adverse_events
+    testPlanId: "25ohd-lab-feedback-91d"
+    firstSessionGuidance: "After the safety screen is negative, total vitamin D intake is known, and the selected dose is within the adult ceiling, take the planned daily D3 dose once with your chosen routine cue, then log dose, product, supplement stack, calcium context, and any confounder changes."
+  trackingHints:
+    confounderFields:
+      - "missed_or_extra_dose"
+      - "other_vitamin_d_or_calcium_supplements"
+      - "sun_or_uv_exposure_change"
+      - "travel_or_latitude_change"
+      - "diet_or_fortified_food_change"
+      - "symptoms_or_adverse_events"
     notes:
-      - Ask for lab value, unit, and date when a baseline or follow-up 25(OH)D result is entered.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 4
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-      - daily_dose_reminder
-      - weekly_context_check
-      - lab_retest_reminder
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: Log missed D3 doses as context; do not double up just because a log was missed.
+      - "Ask for lab value, unit, and date when a baseline or follow-up 25(OH)D result is entered."
+  supportHints:
+    missedLogFollowupCopy: "Log missed D3 doses as context; do not double up just because a log was missed."
 whyItWorks:
   - "## Daily D3 feeds the liver conversion that raises 25(OH)D\n\nOral cholecalciferol enters circulation and the liver hydroxylates it into 25-hydroxyvitamin D — the form measured by a standard vitamin D lab. Consistent daily dosing at 800–1000 IU raises serum 25(OH)D by roughly 8–14 ng/mL over 8–12 weeks in trials of healthy adults."
   - "## Response depends on where you start and how you live\n\nBaseline 25(OH)D, body size, season, latitude, sun exposure, skin pigmentation, diet, and adherence all shift the dose-response curve. A person starting low in winter gains more per IU than someone replete in summer. Murph treats this as a logged N-of-1 lab-feedback experiment, not a fixed-dose guarantee."

@@ -955,6 +955,7 @@ protocol:
   doseSignature: 3–5 g/day creatine monohydrate ongoing; optional <=20 g/day split loading as four <=5 g servings for 5–7 days; 7-day baseline + 6-week intervention
   target: Plain creatine monohydrate, taken consistently; avoid blending evidence from other creatine forms or multi-ingredient products.
   frequency:
+    sessionsPerWeek: 7
     sessionsPerDay: 1
   interventionSessionsMinimum: 28
   interventionSessionsTarget: 42
@@ -997,6 +998,17 @@ protocol:
     - perceived recovery
     - sleep, illness, alcohol, heat exposure, or major diet changes
     - kidney-lab context if relevant
+  sessionFieldIds:
+  - daily_dose_g
+  - servings_count
+  - product_type
+  - missed_dose
+  - body_weight
+  - gi_symptoms
+  - training_completed
+  - training_performance
+  - training_volume
+  - perceived_recovery
   stopConditions:
     - Stop and seek appropriate care for severe allergic-type symptoms, severe or persistent vomiting or diarrhea, fainting, chest pain, severe weakness, dark urine with muscle pain,.
     - Pause the experiment and get clinician guidance for unexpected abnormal kidney labs, known kidney disease, transplant, dialysis, single-kidney status, unresolved proteinuria/albuminuria, or nephrotoxic medication/supplement stacks.
@@ -1090,211 +1102,103 @@ expectedSignalDescriptions:
       confidence: moderate
       basis: "A dose-dependence trial flags higher diarrhea risk with 10 g in one serving, while split 5 g doses are better tolerated; pooled symptom-score changes were not extractable."
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to explore creatine monohydrate.
-    intentSummary: Explore Creatine Monohydrate
-  contextReview:
-    vaultChecks:
-
-      -
-        id: active_experiments
-        label: Active experiments
-        reason: Avoid changing multiple supplement, diet, or training variables at once unless the user intentionally accepts messy attribution.
-        readHints:
-          - experiment list --status active --format json
-      -
-        id: supplement_stack
-        label: Current supplements
-        reason: Identify other creatine forms, stimulant blends, protein/carbohydrate formulas, nephrotoxic stacks, or multi-ingredient products that would blur attribution.
-        freshnessDays: 30
-        readHints:
-          - search query "supplement creatine preworkout protein" --format json
-      -
-        id: kidney_labs_and_history
-        label: Kidney labs and kidney history
-        reason: Creatinine interpretation and kidney-risk boundaries matter before unsupervised creatine use.
-        freshnessDays: 180
-        readHints:
-          - search query "kidney creatinine eGFR albumin proteinuria CKD dialysis transplant" --format json
-      -
-        id: training_context
-        label: Training context
-        reason: The most interpretable experiment needs stable resistance training or repeated high-intensity work.
-        freshnessDays: 45
-        readHints:
-          - search query "strength training workout sprint interval" --format json
-      -
-        id: weight_and_diet_context
-        label: Weight and diet context
-        reason: Body-weight change, protein/energy intake, and vegetarian/vegan diet pattern can affect interpretation.
-        freshnessDays: 30
-        readHints:
-          - search query "body weight diet protein vegetarian vegan calories" --format json
-    notes:
-      - If the user lacks a repeatable training endpoint, use the no-load tolerance plan rather than overclaiming efficacy.
+    displayPrompt: "Hey Murph, I want to explore creatine monohydrate."
+    intentSummary: "Explore Creatine Monohydrate"
   safetyScreen:
-    cautionLevel: moderate
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-      -
-        id: kidney_risk_or_abnormal_labs
-        prompt: Do you have kidney disease, kidney transplant, dialysis, a single kidney, protein or albumin in urine, unresolved abnormal creatinine/eGFR, or clinician concern about kidney function?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Kidney-risk contexts and creatinine-based lab interpretation need clinical context before unsupervised supplementation.
-      -
-        id: pregnancy_lactation_minor
-        prompt: Are you pregnant, trying to become pregnant, postpartum, lactating, or under 18?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: These populations are outside the default healthy-adult self-experiment boundary.
-      -
-        id: bipolar_mania_or_psychiatric_instability
-        prompt: Do you have bipolar disorder, a history of mania or hypomania, or current psychiatric instability?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: The extraction preserved psychiatric boundary evidence including a hypomania/mania signal in adjacent disease-context literature.
-      -
-        id: muscle_disorder_or_metabolic_myopathy
-        prompt: Do you have a significant muscle disorder, metabolic myopathy, McArdle disease?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Disease-treatment and muscle-disorder evidence is off-scope for the default healthy-adult protocol.
-      -
-        id: nephrotoxic_stack_or_high_risk_medications
-        prompt: Are you using medications or supplement stacks that a clinician has warned may affect kidney function?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Nephrotoxic co-exposures make kidney-lab interpretation and risk management more complex.
-      -
-        id: non_monohydrate_or_blend
-        prompt: Is the product creatine HCl, ethyl ester, buffered creatine, nitrate, chelate, liquid serum, or a mixed pre-workout/protein formula rather than plain monohydrate?
-        ifPositive: do_not_start_unsupervised
-        why: Alternative forms and blends are adjacent variants and should not be silently treated as the monohydrate protocol.
-      -
-        id: clinical_treatment_or_major_condition
-        prompt: Are you trying to use creatine to treat a diagnosed medical condition, major injury, psychiatric condition, pregnancy/perinatal concern, or neuromuscular disease?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Clinical-treatment and major-condition contexts have different risk-benefit thresholds and should not be folded into the default healthy-adult protocol.
-      -
-        id: product_quality_problem
-        prompt: Is the product poorly labeled, unusually high dose, missing a clear creatine monohydrate amount per serving, or not from a source you trust?
-        ifPositive: do_not_start_unsupervised
-        why: Product identity and label clarity are part of the monohydrate protocol boundary and attribution quality.
+      - id: "kidney_risk_or_abnormal_labs"
+        prompt: "Do you have kidney disease, kidney transplant, dialysis, a single kidney, protein or albumin in urine, unresolved abnormal creatinine/eGFR, or clinician concern about kidney function?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "pregnancy_lactation_minor"
+        prompt: "Are you pregnant, trying to become pregnant, postpartum, lactating, or under 18?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "bipolar_mania_or_psychiatric_instability"
+        prompt: "Do you have bipolar disorder, a history of mania or hypomania, or current psychiatric instability?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "muscle_disorder_or_metabolic_myopathy"
+        prompt: "Do you have a significant muscle disorder, metabolic myopathy, McArdle disease?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "nephrotoxic_stack_or_high_risk_medications"
+        prompt: "Are you using medications or supplement stacks that a clinician has warned may affect kidney function?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "non_monohydrate_or_blend"
+        prompt: "Is the product creatine HCl, ethyl ester, buffered creatine, nitrate, chelate, liquid serum, or a mixed pre-workout/protein formula rather than plain monohydrate?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "clinical_treatment_or_major_condition"
+        prompt: "Are you trying to use creatine to treat a diagnosed medical condition, major injury, psychiatric condition, pregnancy/perinatal concern, or neuromuscular disease?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "product_quality_problem"
+        prompt: "Is the product poorly labeled, unusually high dose, missing a clear creatine monohydrate amount per serving, or not from a source you trust?"
+        ifPositive: "do_not_start_unsupervised"
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
-        - dark urine with muscle pain
-        - severe persistent GI symptoms
-        - unexpected abnormal kidney labs
-        - mania or hypomania symptoms
-    notes:
-      - The default user is a screened adult. Positive screens do not prove harm; they change the protocol from self-experiment to clinician-guided decision.
+        - "dark urine with muscle pain"
+        - "severe persistent GI symptoms"
+        - "unexpected abnormal kidney labs"
+        - "mania or hypomania symptoms"
   setupSlots:
-
-    -
-      id: dose_path
-      label: Dose path
-      purpose: personalization
-      valueType: enum
-      askPolicy: always
-      required: true
-      question: Which dosing path do you want to test?
+    - id: "dose_path"
+      label: "Dose path"
+      question: "Which dosing path do you want to test?"
       options:
-        - no_load_3_5g_daily
-        - optional_loading_then_maintenance
+        - "no_load_3_5g_daily"
+        - "optional_loading_then_maintenance"
       target:
-        object: protocol
-        field: creatine.dosePath
-    -
-      id: maintenance_dose_g
-      label: Maintenance dose in grams
-      purpose: personalization
-      valueType: number
-      askPolicy: always
-      required: true
-      question: What daily maintenance dose will you use, in grams?
+        object: "protocol"
+        field: "creatine.dosePath"
+    - id: "maintenance_dose_g"
+      label: "Maintenance dose in grams"
+      question: "What daily maintenance dose will you use, in grams?"
       constraints:
         min: 3
         max: 5
-        unit: g/day
+        unit: "g/day"
       target:
-        object: protocol
-        field: creatine.maintenanceDoseG
-    -
-      id: daily_time
-      label: Daily dosing time
-      purpose: adherence
-      valueType: local_time
-      askPolicy: ask_if_unknown
-      required: false
-      question: What repeatable time of day should this attach to?
+        object: "protocol"
+        field: "creatine.maintenanceDoseG"
+    - id: "daily_time"
+      label: "Daily dosing time"
+      question: "What repeatable time of day should this attach to?"
+      constraints:
+        optional: true
       target:
-        object: protocol
-        field: creatine.dailyTime
-    -
-      id: product_type
-      label: Product type
-      purpose: measurement_fidelity
-      valueType: enum
-      askPolicy: always
-      required: true
-      question: What type of creatine product are you using?
+        object: "protocol"
+        field: "creatine.dailyTime"
+    - id: "product_type"
+      label: "Product type"
+      question: "What type of creatine product are you using?"
       options:
-        - plain_creatine_monohydrate
-        - monohydrate_in_blend
-        - other_creatine_form
-        - not_yet_chosen
+        - "plain_creatine_monohydrate"
+        - "monohydrate_in_blend"
+        - "other_creatine_form"
+        - "not_yet_chosen"
       target:
-        object: protocol
-        field: creatine.productType
-    -
-      id: training_endpoint
-      label: Training endpoint
-      purpose: measurement_fidelity
-      valueType: free_text
-      askPolicy: always
-      required: true
-      question: 'Which repeatable training outcome should Murph track: a lift, reps at a load, total tonnage, sprint/repeated power, or tolerance only?'
+        object: "protocol"
+        field: "creatine.productType"
+    - id: "training_endpoint"
+      label: "Training endpoint"
+      question: "Which repeatable training outcome should Murph track: a lift, reps at a load, total tonnage, sprint/repeated power, or tolerance only?"
       target:
-        object: protocol
-        field: creatine.trainingEndpoint
+        object: "protocol"
+        field: "creatine.trainingEndpoint"
   planDefaults:
-    testPlanId: strength-and-tolerance-49d
-    baselineDays: 7
-    interventionDays: 42
-    sessionsPerWeek: 7
-    targetSessions: 42
-    minimumUsefulSessions: 28
-    firstSessionGuidance: Start with the no-loading 3–5 g/day path unless faster saturation is worth the extra servings and GI-monitoring burden.
-  logging:
-    sessionFields:
-      - daily_dose_g
-      - servings_count
-      - product_type
-      - missed_dose
-      - body_weight
-      - gi_symptoms
-      - training_completed
-      - training_performance
-      - training_volume
-      - perceived_recovery
-    confounders:
-      - diet_or_protein_change
-      - new_supplement_or_medication
-      - training_program_change
-      - illness
-      - alcohol_or_sleep_disruption
-      - heat_exposure_or_dehydration_context
+    testPlanId: "strength-and-tolerance-49d"
+    firstSessionGuidance: "Start with the no-loading 3–5 g/day path unless faster saturation is worth the extra servings and GI-monitoring burden."
+  trackingHints:
+    confounderFields:
+      - "diet_or_protein_change"
+      - "new_supplement_or_medication"
+      - "training_program_change"
+      - "illness"
+      - "alcohol_or_sleep_disruption"
+      - "heat_exposure_or_dehydration_context"
     notes:
-      - Ask for symptoms and context, not just dose completion.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 4
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-      - daily_log_reminder
-      - weekly_digest
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: Want to fill in yesterday's creatine dose, symptoms, and training context?
+      - "Ask for symptoms and context, not just dose completion."
+  supportHints:
+    missedLogFollowupCopy: "Want to fill in yesterday's creatine dose, symptoms, and training context?"
 whyItWorks:
   - "## Daily creatine raises muscle phosphocreatine stores\n\n3–5 g/day creatine monohydrate saturates the creatine transporter over weeks, raising intramuscular phosphocreatine. Loading at 20 g/day split into 4 servings reaches saturation faster — roughly 5–7 days versus several weeks — but both paths converge on the same elevated store."
   - "## More phosphocreatine fuels harder repeated efforts\n\nPhosphocreatine donates its phosphate group to regenerate ATP during short, intense contractions. Higher stores let each set, sprint, or rep start with a fuller energy buffer. The effect is strongest in repeated high-intensity work: more reps at a given load, faster recovery between sets, and greater total training volume per session."

@@ -130,6 +130,16 @@ protocol:
     - "pain flare, shortness of breath, illness symptoms, nocturia, or other physical symptom that affected sleep"
     - "adverse-effect type, intensity 0-10, duration, whether it carried into the next day, and whether it impaired functioning"
     - reason for stopping early or skipping the session
+  sessionFieldIds:
+  - meditation-start-time
+  - meditation-minutes
+  - practice-location
+  - estimated-sleep-onset-minutes
+  - pre-bed-wiredness-0-10
+  - rumination-0-10
+  - sleep-quality-0-10
+  - adverse-effects
+  - morning-wearable-sleep-onset
   stopConditions:
     - "Sleep-onset latency, total sleep time, pre-bed wiredness, or functional next-day impairment is clearly worse for 3 consecutive intervention nights."
     - "The practice increases anxiety, panic, rumination, intrusive thoughts, frustration, sleep effort, or compulsive tracking."
@@ -234,307 +244,190 @@ expectedSignalDescriptions:
       basis: "No extracted source establishes a resting-heart-rate effect for unguided bedtime silent meditation. The estimate follows the arousal-to-recovery pathway and the mixed objective wearable evidence, so expect a small same-device shift at most."
     protocolProminence: context
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
     displayPrompt: "Hey Murph, I want to explore doing silent meditation before bed."
-    intentSummary: Explore Silent Meditation Before Bed.
-  contextReview:
-    vaultChecks:
-
-      -
-        id: active-experiments
-        label: Active sleep or recovery experiments
-        reason: Avoid overlapping new sleep interventions that would make the result hard to interpret.
-        freshnessDays: 7
-        readHints:
-          - experiment list --status active
-      -
-        id: wearable-sleep-baseline
-        label: Recent wearable sleep baseline
-        reason: "Use recent sleep-onset, sleep-efficiency, HRV, resting-heart-rate, and deep-sleep trends as exploratory context."
-        freshnessDays: 21
-        readHints:
-          - wearables sleep summary
-          - wearables recovery summary
-      -
-        id: sleep-routine-context
-        label: Bedtime routine and confounders
-        reason: "Bedtime, caffeine, alcohol, screens, exercise, stress, illness, and travel can dominate sleep-onset signals."
-        freshnessDays: 30
-        readHints:
-          - memory search sleep routine
-          - journal search bedtime caffeine alcohol screens exercise stress
-      -
-        id: mental-health-and-meditation-safety
-        label: Meditation and psychiatric safety context
-        reason: "Some users need clinician guidance before unsupervised silent practice, especially near bedtime."
-        freshnessDays: 90
-        readHints:
-          - memory search meditation adverse reaction bipolar mania psychosis dissociation trauma panic suicidality
-    notes:
-      - "Use existing context first, then ask only for missing or stale setup details."
-      - Do not create reminders or automations unless the user opts in.
+    intentSummary: "Explore Silent Meditation Before Bed."
   safetyScreen:
-    cautionLevel: moderate
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-      -
-        id: mania-psychosis-risk
+      - id: "mania-psychosis-risk"
         prompt: "Any history of bipolar disorder, mania or hypomania, psychosis, hallucinations, unusual beliefs, markedly reduced need for sleep, or current agitation?"
-        ifPositive: do_not_start_unsupervised
-        why: Mania- or psychosis-like symptoms are red-line stop conditions for an unsupervised bedtime meditation experiment.
-      -
-        id: dissociation-trauma-panic-risk
+        ifPositive: "do_not_start_unsupervised"
+      - id: "dissociation-trauma-panic-risk"
         prompt: "Any PTSD, trauma re-experiencing, panic attacks, fear of losing control, or breath/body-focus anxiety even if you have not tried meditation before?"
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: The protocol should stay brief or be avoided when attention practice activates distressing or dissociative experiences.
-      -
-        id: suicidality-severe-depression
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "suicidality-severe-depression"
         prompt: "Any current suicidal thoughts, self-harm thoughts, severe depression, or major functional impairment?"
-        ifPositive: do_not_start_unsupervised
-        why: Meditation is not a substitute for urgent mental-health support.
-      -
-        id: persistent-insomnia-or-osa-concern
+        ifPositive: "do_not_start_unsupervised"
+      - id: "persistent-insomnia-or-osa-concern"
         prompt: "Do you have persistent insomnia, suspected untreated sleep apnea, loud snoring with pauses, or sleepiness that is impairing daily life?"
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: A self-experiment should not delay evidence-based insomnia care or medical evaluation.
-      -
-        id: past-meditation-adverse-reaction
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "past-meditation-adverse-reaction"
         prompt: "Have you previously had a bad reaction to meditation, mindfulness, breath attention, retreats, or silent practice?"
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Past adverse reactions are a practical boundary for unsupervised bedtime practice.
-      -
-        id: epilepsy-neurologic-cognitive-risk
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "epilepsy-neurologic-cognitive-risk"
         prompt: "Any epilepsy or seizure disorder, cognitive impairment, dementia, major neurologic condition, or need for caregiver-supported practice?"
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Neurologic and cognitive contexts may need adapted or supported practice rather than ordinary self-guided bedtime meditation.
-      -
-        id: perinatal-complexity
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "perinatal-complexity"
         prompt: "Are you pregnant, postpartum, or dealing with perinatal sleep or mental-health complexity?"
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Pregnancy and postpartum sleep contexts need population-specific guidance rather than general adult protocol assumptions.
-      -
-        id: substance-use-or-withdrawal
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "substance-use-or-withdrawal"
         prompt: "Any active substance-use disorder, withdrawal, intoxication, or addiction-related instability that could affect sleep or mental state?"
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: "Substance use, withdrawal, and addiction instability can confound sleep and increase safety uncertainty."
-      -
-        id: major-medical-sleep-driver
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "major-medical-sleep-driver"
         prompt: "Is pain, shortness of breath, cancer-related symptoms, MS, stroke/heart disease, or another major medical issue currently driving your sleep problem?"
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Medical comorbidity sleep problems need condition-specific care and should not be treated as an ordinary wellness self-experiment.
-      -
-        id: youth-or-caregiver-context
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "youth-or-caregiver-context"
         prompt: "Is this for a child or adolescent, or someone who needs caregiver support to do the practice safely?"
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Youth and caregiver-supported contexts require separate variants and should not be generalized from the adult protocol.
+        ifPositive: "clinician_guidance_before_unsupervised_start"
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
         - "The practice becomes a source of sleep pressure, rumination, or compulsive tracking."
-        - The user reports any red-line mental-health symptom during the experiment.
-    notes:
-      - "Positive screens do not diagnose anything; they decide whether the protocol should be skipped, shortened, or clinician-guided."
+        - "The user reports any red-line mental-health symptom during the experiment."
   setupSlots:
-
-    -
-      id: bedtime-anchor
-      label: Target bedtime
-      purpose: logistics
-      valueType: local_time
-      askPolicy: ask_if_unknown_or_stale
-      required: true
-      question: What time are you usually trying to be in bed or lights-out during this experiment?
-      target:
-        object: experimentRun
-        field: bedtimeAnchor
-    -
-      id: session-window
-      label: Meditation timing window
-      purpose: logistics
-      valueType: enum
-      askPolicy: ask_if_unknown
-      required: true
-      question: When should the 10-minute silent meditation usually happen relative to bedtime?
-      options:
-        - last15min
-        - last30min
-        - last60min
+    - id: "bedtime-anchor"
+      label: "Target bedtime"
+      question: "What time are you usually trying to be in bed or lights-out during this experiment?"
       constraints:
-        preferredDefault: last30min
+        askWhen: "if_unknown_or_stale"
       target:
-        object: experimentRun
-        field: sessionWindow
-    -
-      id: session-duration
-      label: Session duration
-      purpose: adherence
-      valueType: enum
-      askPolicy: ask_if_unknown
-      required: true
-      question: How long should each silent session be?
+        object: "experimentRun"
+        field: "bedtimeAnchor"
+    - id: "session-window"
+      label: "Meditation timing window"
+      question: "When should the 10-minute silent meditation usually happen relative to bedtime?"
       options:
-        - five-minutes
-        - ten-minutes
+        - "last15min"
+        - "last30min"
+        - "last60min"
       constraints:
-        preferredDefault: ten-minutes
+        preferredDefault: "last30min"
+      target:
+        object: "experimentRun"
+        field: "sessionWindow"
+    - id: "session-duration"
+      label: "Session duration"
+      question: "How long should each silent session be?"
+      options:
+        - "five-minutes"
+        - "ten-minutes"
+      constraints:
+        preferredDefault: "ten-minutes"
         defaultMinutes: 10
         doNotEscalateForSleep: true
       target:
-        object: experimentRun
-        field: sessionDuration
-    -
-      id: practice-location
-      label: Practice location
-      purpose: measurement_fidelity
-      valueType: enum
-      askPolicy: ask_if_unknown
-      required: true
-      question: Where will you usually do the silent meditation?
+        object: "experimentRun"
+        field: "sessionDuration"
+    - id: "practice-location"
+      label: "Practice location"
+      question: "Where will you usually do the silent meditation?"
       options:
-        - chair
-        - edge-of-bed
-        - in-bed
+        - "chair"
+        - "edge-of-bed"
+        - "in-bed"
       constraints:
-        preferredDefault: chair
+        preferredDefault: "chair"
       target:
-        object: experimentRun
-        field: practiceLocation
-    -
-      id: measurement-path
-      label: Measurement path
-      purpose: measurement_fidelity
-      valueType: enum
-      askPolicy: ask_if_unknown
-      required: true
-      question: Do you want diary-only tracking or diary plus wearable context?
+        object: "experimentRun"
+        field: "practiceLocation"
+    - id: "measurement-path"
+      label: "Measurement path"
+      question: "Do you want diary-only tracking or diary plus wearable context?"
       options:
-        - diary-only
-        - diary-plus-wearable
+        - "diary-only"
+        - "diary-plus-wearable"
       constraints:
-        preferredDefault: diary-plus-wearable
+        preferredDefault: "diary-plus-wearable"
       target:
-        object: analysisPlan
-        field: measurementPath
-    -
-      id: reminder-policy
-      label: Reminder preference
-      purpose: assistant_support
-      valueType: reminder_policy
-      askPolicy: ask_at_confirmation
-      required: true
+        object: "analysisPlan"
+        field: "measurementPath"
+    - id: "reminder-policy"
+      label: "Reminder preference"
       question: "Would you like no reminders, a pre-bed reminder, or a pre-bed reminder plus a morning missing-log nudge?"
       options:
-        - none
-        - pre-bed-reminder
-        - pre-bed-plus-morning-missing-log
+        - "none"
+        - "pre-bed-reminder"
+        - "pre-bed-plus-morning-missing-log"
       constraints:
-        preferredDefault: none
+        askWhen: "at_confirmation"
+        preferredDefault: "none"
       target:
-        object: assistantSupport
-        field: reminderPolicy
+        object: "assistantSupport"
+        field: "reminderPolicy"
+  planDefaults:
+    testPlanId: "sol-arousal-21d"
+    firstSessionGuidance: "Start with 10 minutes of silent, unguided breath or body awareness. Stop and log it if the session increases arousal, rumination, panic, dissociation, or sleep effort."
   adaptationPolicy:
     fields:
-
-      -
-        id: adapt-session-duration
-        label: Session duration
+      - id: "adapt-session-duration"
+        label: "Session duration"
         target:
-          object: experimentRun
-          field: sessionDuration
+          object: "experimentRun"
+          field: "sessionDuration"
         sourceSlotIds:
-          - session-duration
+          - "session-duration"
         requiredForRunSpec: true
         protocolReusable: true
-        guidance: Default to 10 minutes; 5 minutes is allowed after arousal or burden. Do not offer 30 minutes inside the ordinary protocol; longer sessions require a separate higher-burden variant and should never be used to chase sleep.
-      -
-        id: adapt-practice-location
-        label: Practice location
+        guidance: "Default to 10 minutes; 5 minutes is allowed after arousal or burden. Do not offer 30 minutes inside the ordinary protocol; longer sessions require a separate higher-burden variant and should never be used to chase sleep."
+      - id: "adapt-practice-location"
+        label: "Practice location"
         target:
-          object: experimentRun
-          field: practiceLocation
+          object: "experimentRun"
+          field: "practiceLocation"
         sourceSlotIds:
-          - practice-location
+          - "practice-location"
         requiredForRunSpec: true
         protocolReusable: true
-        guidance: Use a consistent location; prefer chair or edge-of-bed if in-bed quiet wakefulness confounds wearable sleep onset.
-      -
-        id: adapt-session-window
-        label: Session timing window
+        guidance: "Use a consistent location; prefer chair or edge-of-bed if in-bed quiet wakefulness confounds wearable sleep onset."
+      - id: "adapt-session-window"
+        label: "Session timing window"
         target:
-          object: experimentRun
-          field: sessionWindow
+          object: "experimentRun"
+          field: "sessionWindow"
         sourceSlotIds:
-          - session-window
+          - "session-window"
         requiredForRunSpec: true
         protocolReusable: true
-        guidance: Use the last 30 minutes before intended bedtime by default; do not move later if it increases sleep pressure.
+        guidance: "Use the last 30 minutes before intended bedtime by default; do not move later if it increases sleep pressure."
     measurementPlan:
-      testPlanId: sol-arousal-21d
+      testPlanId: "sol-arousal-21d"
       requiredSignals:
-        - biomarker:sleep-onset-latency
+        - "biomarker:sleep-onset-latency"
       optionalSignals:
-        - biomarker:sleep-efficiency
-        - biomarker:deep-sleep-minutes
-        - biomarker:hrv-rmssd
-        - biomarker:resting-heart-rate
+        - "biomarker:sleep-efficiency"
+        - "biomarker:deep-sleep-minutes"
+        - "biomarker:hrv-rmssd"
+        - "biomarker:resting-heart-rate"
       notes:
-        - Pre-bed wiredness and rumination are protocol-local log fields until separate biomarker pages exist.
+        - "Pre-bed wiredness and rumination are protocol-local log fields until separate biomarker pages exist."
         - "Wearable outputs are context and trend signals, not diagnostic confirmation."
     reusableSetup:
       enabled: true
       sourceSlotIds:
-        - bedtime-anchor
-        - session-window
-        - session-duration
-        - practice-location
-        - measurement-path
+        - "bedtime-anchor"
+        - "session-window"
+        - "session-duration"
+        - "practice-location"
+        - "measurement-path"
       notes:
-        - Reuse setup only for adjacent pre-sleep downshift variants when the intervention remains low stimulation and pre-bed.
-  planDefaults:
-    testPlanId: sol-arousal-21d
-    baselineDays: 7
-    interventionDays: 14
-    sessionsPerWeek: 7
-    targetSessions: 12
-    minimumUsefulSessions: 10
-    firstSessionGuidance: "Start with 10 minutes of silent, unguided breath or body awareness. Stop and log it if the session increases arousal, rumination, panic, dissociation, or sleep effort."
-  logging:
-    sessionFields:
-      - meditation-start-time
-      - meditation-minutes
-      - practice-location
-      - estimated-sleep-onset-minutes
-      - pre-bed-wiredness-0-10
-      - rumination-0-10
-      - sleep-quality-0-10
-      - adverse-effects
-      - morning-wearable-sleep-onset
-    confounders:
-      - caffeine-after-noon
-      - alcohol-last-24h
-      - late-exercise
-      - screens-last-hour
-      - unusual-stress
-      - illness
-      - travel-timezone-shift
-      - new-sleep-intervention
-      - medication-or-supplement-change
+        - "Reuse setup only for adjacent pre-sleep downshift variants when the intervention remains low stimulation and pre-bed."
+  trackingHints:
+    confounderFields:
+      - "caffeine-after-noon"
+      - "alcohol-last-24h"
+      - "late-exercise"
+      - "screens-last-hour"
+      - "unusual-stress"
+      - "illness"
+      - "travel-timezone-shift"
+      - "new-sleep-intervention"
+      - "medication-or-supplement-change"
     notes:
       - "Morning missing logs should ask for a quick estimate, not a detailed forensic reconstruction."
-      - Adverse or activating effects should be shown in review even if sleep score improved.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-      - none
-      - pre-bed-reminder
-      - pre-bed-plus-morning-missing-log
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: You missed last night’s silent-meditation log. Add a quick estimate only if it is easy.
+      - "Adverse or activating effects should be shown in review even if sleep score improved."
+  supportHints:
+    missedLogFollowupCopy: "You missed last night’s silent-meditation log. Add a quick estimate only if it is easy."
 whyItWorks:
   - "## Attention stops chasing thoughts\n\nSilent sitting trains repeated return to breath, body contact, or room sounds. Planning and worry lose momentum because they stop getting followed."
   - "## Grounding lowers threat checks\n\nOpen, simple attention reduces internal negotiation before sleep. The useful mechanism is lower arousal, not a perfect blank mind."

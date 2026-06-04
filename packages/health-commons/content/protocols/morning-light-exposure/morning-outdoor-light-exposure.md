@@ -250,6 +250,7 @@ protocol:
   doseSignature: daily · outdoor ambient natural light soon after waking · 10-30 min target · 7-day baseline + 21-day intervention
   target: Ambient outdoor daylight within about 30-60 minutes after waking when feasible, preferably before 10 AM, without staring at the sun.
   frequency:
+    sessionsPerWeek: 7
     sessionsPerDay: 1
   durationMinutes:
     min: 5
@@ -306,6 +307,20 @@ protocol:
     - headache, nausea, eye discomfort, skin reaction, heat symptoms, or mood activation
     - evening light or screen changes
     - caffeine, alcohol, illness, travel, major stress, or new sleep changes
+  sessionFieldIds:
+  - wake_time
+  - exposure_start_time
+  - minutes_outdoors
+  - before_10am
+  - outdoor_or_window_backup
+  - weather_brightness_context
+  - uv_heat_protection_used
+  - activity_during_exposure
+  - subjective_sleep_quality_next_morning
+  - bedtime
+  - final_wake_time
+  - morning_alertness
+  - headache_eye_skin_heat_or_mood_symptoms
   stopConditions:
     - Stop or shorten exposure if it triggers headache, nausea, migraine, photophobia, eye pain, visual symptoms, or unusual light sensitivity.
     - Stop and seek appropriate help if you notice unusual mood elevation, agitation, racing thoughts, reduced need for sleep, severe insomnia worsening, or suicidal thoughts.
@@ -373,123 +388,51 @@ expectedSignalDescriptions:
       basis: Sleep-efficiency evidence is indirect and mixed. A direct morning-sunlight survey found no significant association, while outdoor/daytime bright-light studies support tracking sleep-wake consolidation as a secondary signal.
     protocolProminence: context
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to try morning outdoor light exposure.
-    intentSummary: Explore Morning Outdoor Light Exposure
-  contextReview:
-    vaultChecks:
-
-      -
-        id: active_experiments
-        label: Active experiments
-        reason: Avoid changing morning light at the same time as another sleep, exercise, caffeine, evening-light, or medication experiment unless the user chooses that tradeoff.
-        readHints:
-          - experiment list --status active --format json
-      -
-        id: sleep_and_wake_baseline
-        label: Recent sleep and wake baseline
-        reason: Confirm there is enough recent sleep timing or subjective sleep context to interpret a baseline-versus-intervention comparison.
-        freshnessDays: 21
-        readHints:
-          - wearables day <YYYY-MM-DD> --format json
-          - sleep diary recent --format json
-      -
-        id: recent_evening_light_or_sleep_changes
-        label: Recent evening light or sleep changes
-        reason: New evening-light, screen, bedtime, caffeine, alcohol, or sleep-hygiene changes can overwhelm the morning-light attribution.
-        freshnessDays: 21
-        readHints:
-          - search query "evening light screens bedtime caffeine alcohol sleep hygiene" --format json
-      -
-        id: light_mood_eye_skin_medication_risk
-        label: Light, mood, eye, skin, and medication risk
-        reason: Bipolar/mania history, eye disease, photophobia, migraine, photosensitizing medications, sun allergy, or prior phototoxic reactions change the safety posture.
-        freshnessDays: 180
-        readHints:
-          - search query "bipolar mania hypomania migraine photophobia eye disease photosensitivity sun allergy doxycycline isotretinoin medication" --format json
-      -
-        id: outdoor_feasibility_weather_uv_heat
-        label: Outdoor feasibility, weather, UV, and heat
-        reason: The protocol should never require unsafe heat, UV overexposure, sunburn, glare, or an unsafe route.
-        freshnessDays: 7
-        readHints:
-          - weather forecast --location <user_location> --format json
-          - search query "UV index heat warning" --format json
-    notes:
-      - Review vault context first, then still ask the compact safety screen because missing context is not clearance.
+    displayPrompt: "Hey Murph, I want to try morning outdoor light exposure."
+    intentSummary: "Explore Morning Outdoor Light Exposure"
   safetyScreen:
-    cautionLevel: moderate
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-      -
-        id: mood_activation_or_bipolar
-        prompt: bipolar disorder, past mania or hypomania, rapid cycling, mixed symptoms, recent severe mood instability, suicidal thoughts, or unusual activation with bright light
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Bright-light therapy literature supports a conservative boundary for mania/hypomania risk even though this protocol uses outdoor ambient light.
-      -
-        id: eye_migraine_or_light_sensitivity
-        prompt: known eye disease, new visual symptoms, migraine or photophobia triggered by light, unusual eye pain, or strong light sensitivity
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Eye, migraine, and photophobia sources make symptom-triggered reduction or clinician guidance more important than dose completion.
-      -
-        id: photosensitivity_or_sun_allergy
-        prompt: photosensitizing medication, known photosensitivity, sun allergy, prior phototoxic or photoallergic reaction, or a skin condition where sunlight is unsafe
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Drug-induced photosensitivity and UV guidance support conservative use.
-      -
-        id: unsafe_uv_heat_or_route
-        prompt: no safe outdoor place, unsafe heat, high UV without protection, air-quality/weather hazards, or a route where traffic or footing risk would make the session unsafe
-        ifPositive: do_not_start_unsupervised
-        why: Outdoor feasibility and environmental safety override adherence.
-      -
-        id: current_clinical_light_or_circadian_treatment
-        prompt: current clinician-guided light therapy, treatment for seasonal affective disorder, severe insomnia, depression, bipolar disorder, or a diagnosed circadian rhythm sleep-wake disorder
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Clinical light therapy and circadian-treatment protocols are separate from this wellness self-experiment.
-    stopIf:
-      inheritFromProtocolSafety: true
-    notes:
-      - A positive or uncertain screen does not diagnose anything; it means Murph should not set up this as an unsupervised default protocol without appropriate guidance or a safer route.
+      - id: "mood_activation_or_bipolar"
+        prompt: "bipolar disorder, past mania or hypomania, rapid cycling, mixed symptoms, recent severe mood instability, suicidal thoughts, or unusual activation with bright light"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "eye_migraine_or_light_sensitivity"
+        prompt: "known eye disease, new visual symptoms, migraine or photophobia triggered by light, unusual eye pain, or strong light sensitivity"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "photosensitivity_or_sun_allergy"
+        prompt: "photosensitizing medication, known photosensitivity, sun allergy, prior phototoxic or photoallergic reaction, or a skin condition where sunlight is unsafe"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "unsafe_uv_heat_or_route"
+        prompt: "no safe outdoor place, unsafe heat, high UV without protection, air-quality/weather hazards, or a route where traffic or footing risk would make the session unsafe"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "current_clinical_light_or_circadian_treatment"
+        prompt: "current clinician-guided light therapy, treatment for seasonal affective disorder, severe insomnia, depression, bipolar disorder, or a diagnosed circadian rhythm sleep-wake disorder"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
   setupSlots:
-
-    -
-      id: usual_wake_time
-      label: Usual wake time
-      purpose: personalization
-      valueType: local_time
-      askPolicy: ask_if_unknown_or_stale
-      required: true
-      question: What time do you usually wake up on days you would do the morning-light session?
+    - id: "usual_wake_time"
+      label: "Usual wake time"
+      question: "What time do you usually wake up on days you would do the morning-light session?"
+      constraints:
+        askWhen: "if_unknown_or_stale"
       target:
-        object: experimentRun
-        field: usualWakeTime
-    -
-      id: target_morning_window
-      label: Target morning window
-      purpose: logistics
-      valueType: enum
-      askPolicy: ask_if_unknown
-      required: true
-      question: Which outdoor window is realistic most days?
+        object: "experimentRun"
+        field: "usualWakeTime"
+    - id: "target_morning_window"
+      label: "Target morning window"
+      question: "Which outdoor window is realistic most days?"
       options:
-        - first_30_minutes
-        - first_60_minutes
-        - before_10am
-        - later_morning_backup
+        - "first_30_minutes"
+        - "first_60_minutes"
+        - "before_10am"
+        - "later_morning_backup"
       target:
-        object: experimentRun
-        field: targetMorningWindow
-    -
-      id: target_minutes
-      label: Target minutes
-      purpose: adherence
-      valueType: integer
-      askPolicy: ask_if_unknown
-      required: true
-      question: How many minutes outdoors should Murph set as your daily target: 10, 15, 20, or 30?
+        object: "experimentRun"
+        field: "targetMorningWindow"
+    - id: "target_minutes"
+      label: "Target minutes"
+      question: "How many minutes outdoors should Murph set as your daily target: 10, 15, 20, or 30?"
       constraints:
         min: 5
         max: 40
@@ -499,97 +442,58 @@ experimentOnboarding:
           - 20
           - 30
       target:
-        object: experimentRun
-        field: targetMinutes
-    -
-      id: outdoor_location
-      label: Outdoor location
-      purpose: logistics
-      valueType: free_text
-      askPolicy: ask_if_unknown
-      required: true
-      question: Where would you usually do it safely: porch, balcony, courtyard, park path, commute stop, or somewhere else?
+        object: "experimentRun"
+        field: "targetMinutes"
+    - id: "outdoor_location"
+      label: "Outdoor location"
+      question: "Where would you usually do it safely: porch, balcony, courtyard, park path, commute stop, or somewhere else?"
       target:
-        object: experimentRun
-        field: outdoorLocation
-    -
-      id: backup_policy
-      label: Backup policy
-      purpose: safety
-      valueType: enum
-      askPolicy: ask_at_confirmation
-      required: true
-      question: When outdoor exposure is unsafe or impractical, what should count as the default backup?
+        object: "experimentRun"
+        field: "outdoorLocation"
+    - id: "backup_policy"
+      label: "Backup policy"
+      question: "When outdoor exposure is unsafe or impractical, what should count as the default backup?"
       options:
-        - skip_and_log
-        - open_shade_short_session
-        - window_light_logged_as_backup
-        - reschedule_later_morning
+        - "skip_and_log"
+        - "open_shade_short_session"
+        - "window_light_logged_as_backup"
+        - "reschedule_later_morning"
+      constraints:
+        askWhen: "at_confirmation"
       target:
-        object: experimentRun
-        field: backupPolicy
-    -
-      id: reminder_policy
-      label: Reminder policy
-      purpose: assistant_support
-      valueType: reminder_policy
-      askPolicy: ask_at_confirmation
-      required: true
-      question: Do you want a morning reminder and, if you miss the log, one same-day check-in?
+        object: "experimentRun"
+        field: "backupPolicy"
+    - id: "reminder_policy"
+      label: "Reminder policy"
+      question: "Do you want a morning reminder and, if you miss the log, one same-day check-in?"
       options:
-        - none
-        - morning_reminder
-        - morning_reminder_plus_same_day_missing_log_check
+        - "none"
+        - "morning_reminder"
+        - "morning_reminder_plus_same_day_missing_log_check"
+      constraints:
+        askWhen: "at_confirmation"
       target:
-        object: assistantSupport
-        field: reminderPolicy
+        object: "assistantSupport"
+        field: "reminderPolicy"
   planDefaults:
-    testPlanId: sleep-quality-timing-28d
-    baselineDays: 7
-    interventionDays: 21
-    sessionsPerWeek: 7
-    targetSessions: 21
-    minimumUsefulSessions: 14
-    firstSessionGuidance: Start with a conservative 5-10 minutes in comfortable ambient outdoor light, avoid direct sun-gazing, and log any light, eye, skin, heat, or mood symptoms.
-  logging:
-    sessionFields:
-      - wake_time
-      - exposure_start_time
-      - minutes_outdoors
-      - before_10am
-      - outdoor_or_window_backup
-      - weather_brightness_context
-      - uv_heat_protection_used
-      - activity_during_exposure
-      - subjective_sleep_quality_next_morning
-      - bedtime
-      - final_wake_time
-      - morning_alertness
-      - headache_eye_skin_heat_or_mood_symptoms
-    confounders:
-      - evening_light_or_screen_change
-      - bedtime_or_wake_time_change
-      - caffeine_after_noon
-      - alcohol_last_24h
-      - illness_or_pain
-      - travel_or_timezone_shift
-      - major_stress
-      - new_exercise_sleep_or_mood_intervention
-      - new_medication_or_supplement
-      - unusual_weather_uv_or_heat
+    testPlanId: "sleep-quality-timing-28d"
+    firstSessionGuidance: "Start with a conservative 5-10 minutes in comfortable ambient outdoor light, avoid direct sun-gazing, and log any light, eye, skin, heat, or mood symptoms."
+  trackingHints:
+    confounderFields:
+      - "evening_light_or_screen_change"
+      - "bedtime_or_wake_time_change"
+      - "caffeine_after_noon"
+      - "alcohol_last_24h"
+      - "illness_or_pain"
+      - "travel_or_timezone_shift"
+      - "major_stress"
+      - "new_exercise_sleep_or_mood_intervention"
+      - "new_medication_or_supplement"
+      - "unusual_weather_uv_or_heat"
     notes:
-      - A missed or skipped day should be logged honestly; it is better evidence than forcing unsafe exposure.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-      - none
-      - morning_reminder
-      - morning_reminder_plus_same_day_missing_log_check
-      - weekly_digest
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: Did you get outside for your morning-light session today? Totally fine if not — I just want the experiment record to be accurate.
+      - "A missed or skipped day should be logged honestly; it is better evidence than forcing unsafe exposure."
+  supportHints:
+    missedLogFollowupCopy: "Did you get outside for your morning-light session today? Totally fine if not — I just want the experiment record to be accurate."
 whyItWorks:
   - "## Morning light resets clock timing\n\nBright outdoor light hits retinal clock pathways soon after waking. That signal anchors the circadian day more strongly than dim indoor light."
   - "## Early cue shapes evening biology\n\nMorning phase signals help melatonin and alertness shift earlier. Sleep pressure still builds through the day; light tells the clock when the day started."

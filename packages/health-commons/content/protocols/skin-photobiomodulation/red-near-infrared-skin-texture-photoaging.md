@@ -288,6 +288,20 @@ protocol:
   - cosmetic procedures
   - sun exposure
   - standardized photo checkpoint
+  sessionFieldIds:
+  - session_date
+  - device_model
+  - red_nir_mode
+  - treatment_area
+  - session_minutes
+  - eye_protection_used
+  - skin_heat_or_pain
+  - redness_or_irritation
+  - pigment_change
+  - headache
+  - ocular_symptoms
+  - skincare_changes
+  - photo_checkpoint
   stopConditions:
   - Stop for tearing, distorted vision, temporary vision loss, persistent or recurrent afterimage, flashes, spots, floaters, blurry vision, eye pain, eye irritation, or any new ocular or visual symptom during or after use.
   - Stop if eye inserts, shields, or goggles shift, fit poorly, feel hot, cause contact irritation/allergy, or cannot be used without removing them near the eyelids.
@@ -350,233 +364,122 @@ expectedSignalDescriptions:
     basis: Direct home/facial studies generally report good short-term tolerability, but ocular, pigment, heat, photosensitivity, and procedure-adjacent safety sources drive stop rules rather than a pooled symptom-rate estimate.
   protocolProminence: context
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to explore a red and near-infrared LED mask experiment for skin texture or photoaging.
-    intentSummary: Explore Red/NIR Skin Texture And Photoaging
-  contextReview:
-    vaultChecks:
-    - id: active_experiments
-      label: Active experiments
-      reason: Avoid stacking another visible-skin, sleep, supplement, skincare, or recovery experiment on top of this one unless attribution is intentionally weak.
-      readHints:
-      - experiment list --status active
-    - id: skin_photo_baseline
-      label: Existing skin photos or notes
-      reason: Check whether the user already has comparable baseline photos, skincare notes, or recent cosmetic changes before asking for a new baseline workflow.
-      freshnessDays: 30
-      readHints:
-      - journal show
-      - memory show
-      - search query "skin photos skincare red light LED mask photoaging"
-    - id: device_context
-      label: Device model and mode
-      reason: The protocol should not become active unless the selected device, red/NIR mode, session duration, treatment area, and eye-protection setup are identifiable.
-      freshnessDays: 30
-      readHints:
-      - memory show
-      - search query "LED mask red NIR device model mode eye protection"
-    - id: safety_context
-      label: Skin, medication, procedure, and eye-safety context
-      reason: Screen for adult-only eligibility, pregnancy/lactation boundary, pigment risk, photosensitivity, active irritation, suspicious lesions, recent procedures, ocular risk, and inability to use eye protection.
-      freshnessDays: 30
-      readHints:
-      - memory show
-      - journal show
-      - search query "photosensitivity medication eye skin procedure melasma pregnancy lactation"
-    notes:
-    - Onboarding is planning-only until the user explicitly confirms the device, eye protection, baseline-photo workflow, schedule, and logging path.
+    displayPrompt: "Hey Murph, I want to explore a red and near-infrared LED mask experiment for skin texture or photoaging."
+    intentSummary: "Explore Red/NIR Skin Texture And Photoaging"
   safetyScreen:
-    cautionLevel: moderate
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-    - id: adult_only
-      prompt: Are you under 18? This starter is for adults only.
-      ifPositive: do_not_start_unsupervised
-      why: The extracted cosmetic mask evidence and this onboarding flow are adult-oriented; minors require a separate clinician/guardian-guided variant.
-    - id: pregnant_lactating_or_trying
-      prompt: Are you pregnant, trying to become pregnant, or lactating?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: No extracted pregnancy or lactation safety source supports clearing this as an unsupervised cosmetic light experiment.
-    - id: eye_risk_or_symptoms
-      prompt: Do you have retinal disease, macular disease, ocular albinism, retinitis pigmentosa, congenital retinal disease, another known ocular abnormality, ocular photosensitivity, recent eye procedure, photosensitizing medication exposure, or current eye pain, tearing, flashes, floaters, afterimages, blurry or distorted vision, temporary vision loss, or other visual symptoms?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Face-adjacent light-device sources support conservative eye screening, required protection, and stop rules for any ocular or visual symptom.
-    - id: eye_protection_unavailable
-      prompt: Are manufacturer-specified eye inserts, shields, or goggles unavailable for any session, or would you need to look directly at active LEDs?
-      ifPositive: do_not_start_unsupervised
-      why: The starter should not run without eye protection.
-    - id: active_skin_or_wound
-      prompt: Is the treatment area sunburned, recently tanned from intense UV, inflamed, infected, blistered, wounded, healing from a procedure, or affected by an active rash or painful irritation?
-      ifPositive: do_not_start_unsupervised
-      why: Active or healing skin problems should not be folded into a cosmetic LED self-test.
-    - id: suspicious_lesion_or_cancer_history
-      prompt: Is there any unexplained, changing, bleeding, crusting, suspicious, pre-cancerous, cancerous, or undiagnosed lesion in the treatment area, or do you have active or recent cancer history?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Oncologic safety evidence is limited and supports suspicious-lesion and active/recent cancer-history screening, not reassurance.
-    - id: pigment_or_photosensitivity_risk
-      prompt: Do you have melasma, post-inflammatory hyperpigmentation history, active pigment flare, Fitzpatrick IV-VI skin with pigment concern, a photosensitivity condition, prior light-triggered reaction, or any systemic/topical medication or skincare active that may increase photosensitivity or barrier irritation?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Pigment and photosensitivity evidence is mixed and adjacent, so uncertain cases should use clinician or pharmacist review rather than automatic unsupervised setup.
-    - id: recent_energy_or_pdt
-      prompt: Have you recently had laser, IPL, RF, microneedling, peel, filler, PRP, PDT/photosensitizer treatment, photoconverter treatment, or another cosmetic procedure in the target area?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Post-procedure and photosensitizer protocols are separate variants with different supervision and outcomes.
-    - id: unknown_or_hot_device
-      prompt: Is the device model, red/NIR-only wrinkle or texture mode, timer, or nonthermal comfort unclear, or does it feel hot or painful?
-      ifPositive: do_not_start_unsupervised
-      why: Unknown device parameters and heat/pain undermine both safety and attribution.
+      - id: "adult_only"
+        prompt: "Are you under 18? This starter is for adults only."
+        ifPositive: "do_not_start_unsupervised"
+      - id: "pregnant_lactating_or_trying"
+        prompt: "Are you pregnant, trying to become pregnant, or lactating?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "eye_risk_or_symptoms"
+        prompt: "Do you have retinal disease, macular disease, ocular albinism, retinitis pigmentosa, congenital retinal disease, another known ocular abnormality, ocular photosensitivity, recent eye procedure, photosensitizing medication exposure, or current eye pain, tearing, flashes, floaters, afterimages, blurry or distorted vision, temporary vision loss, or other visual symptoms?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "eye_protection_unavailable"
+        prompt: "Are manufacturer-specified eye inserts, shields, or goggles unavailable for any session, or would you need to look directly at active LEDs?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "active_skin_or_wound"
+        prompt: "Is the treatment area sunburned, recently tanned from intense UV, inflamed, infected, blistered, wounded, healing from a procedure, or affected by an active rash or painful irritation?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "suspicious_lesion_or_cancer_history"
+        prompt: "Is there any unexplained, changing, bleeding, crusting, suspicious, pre-cancerous, cancerous, or undiagnosed lesion in the treatment area, or do you have active or recent cancer history?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "pigment_or_photosensitivity_risk"
+        prompt: "Do you have melasma, post-inflammatory hyperpigmentation history, active pigment flare, Fitzpatrick IV-VI skin with pigment concern, a photosensitivity condition, prior light-triggered reaction, or any systemic/topical medication or skincare active that may increase photosensitivity or barrier irritation?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "recent_energy_or_pdt"
+        prompt: "Have you recently had laser, IPL, RF, microneedling, peel, filler, PRP, PDT/photosensitizer treatment, photoconverter treatment, or another cosmetic procedure in the target area?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "unknown_or_hot_device"
+        prompt: "Is the device model, red/NIR-only wrinkle or texture mode, timer, or nonthermal comfort unclear, or does it feel hot or painful?"
+        ifPositive: "do_not_start_unsupervised"
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
-      - tearing, distorted vision, temporary vision loss, persistent or recurrent afterimage, flashes, spots, floaters, blurry vision, eye pain, eye irritation, or any new ocular or visual symptom during or after use.
-      - eye inserts, shields, or goggles shift, fit poorly, feel hot, cause contact irritation/allergy, or cannot be used without removing them near the eyelids.
-      - burning or stinging, itching, swelling or edema, vesicles, bullae, blistering, prolonged redness, pain, or new/worsening hyperpigmentation or melasma-like change.
-      - new, changing, bleeding, crusting, painful, suspicious, or undiagnosed lesion requiring clinical review in any new, changing, bleeding, crusting, painful, suspicious, or undiagnosed lesion in the treatment area.
-      - a photosensitizing medication/topical is started or changed, a major skincare active is added, a cosmetic procedure occurs or is planned, or sunburn/recent intense tanning occurs.
-      - damaged device parts, device malfunction, unexpected heat or hot spots, timer or auto-shutoff failure, unclear mode behavior, or any pressure to increase dose, frequency, closeness, or remove protection.
-    notes:
-    - Positive screens do not diagnose risk; they move the user to planning, clinician guidance, postponement, or a non-run education path.
-    - This adult starter should not be presented as cleared for minors, pregnancy, lactation, active/recent cancer history, suspicious lesions, eye disease, active pigment disorders, photosensitizing medications, open/healing skin, or immediate post-procedure use.
+        - "tearing, distorted vision, temporary vision loss, persistent or recurrent afterimage, flashes, spots, floaters, blurry vision, eye pain, eye irritation, or any new ocular or visual symptom during or after use."
+        - "eye inserts, shields, or goggles shift, fit poorly, feel hot, cause contact irritation/allergy, or cannot be used without removing them near the eyelids."
+        - "burning or stinging, itching, swelling or edema, vesicles, bullae, blistering, prolonged redness, pain, or new/worsening hyperpigmentation or melasma-like change."
+        - "new, changing, bleeding, crusting, painful, suspicious, or undiagnosed lesion requiring clinical review in any new, changing, bleeding, crusting, painful, suspicious, or undiagnosed lesion in the treatment area."
+        - "a photosensitizing medication/topical is started or changed, a major skincare active is added, a cosmetic procedure occurs or is planned, or sunburn/recent intense tanning occurs."
+        - "damaged device parts, device malfunction, unexpected heat or hot spots, timer or auto-shutoff failure, unclear mode behavior, or any pressure to increase dose, frequency, closeness, or remove protection."
   setupSlots:
-  - id: device_model
-    label: Device model
-    purpose: safety
-    valueType: free_text
-    askPolicy: always
-    required: true
-    question: What exact LED mask/device model would you use?
-    writePath: experiment.setup.deviceModel
-  - id: red_nir_mode
-    label: Red/NIR mode
-    purpose: safety
-    valueType: free_text
-    askPolicy: always
-    required: true
-    question: Which red/NIR wrinkle or texture mode will you use, and what wavelengths does the device report?
-    writePath: experiment.setup.mode
-  - id: treatment_area
-    label: Treatment area
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: always
-    required: true
-    options:
-    - full_face
-    - periocular_crows_feet
-    - split_face
-    question: Which face region will you treat and score?
-    writePath: experiment.setup.treatmentArea
-    notes:
-    - Neck, decollete, scalp, wound, acne, full-body, ophthalmology, transcranial, intranasal, or other non-face targets require separate variants and should not activate this starter.
-  - id: session_duration_minutes
-    label: Session duration
-    purpose: safety
-    valueType: integer
-    askPolicy: always
-    required: true
-    constraints:
-      default: 10
-      min: 1
-      max: 10
-    question: What session length does the selected red/NIR mode use? This starter caps sessions at 10 minutes; if the device label requires longer use, do not activate this starter without a device-specific fork.
-    writePath: experiment.plan.sessionDurationMinutes
-  - id: sessions_per_week
-    label: Sessions per week
-    purpose: adherence
-    valueType: integer
-    askPolicy: always
-    required: true
-    constraints:
-      default: 5
-      min: 1
-      max: 5
-    question: How many sessions per week will you do? This starter caps frequency at 5 sessions/week; more frequent use requires a separate device-specific fork.
-    writePath: experiment.plan.sessionsPerWeek
-  - id: eye_protection_plan
-    label: Eye protection plan
-    purpose: safety
-    valueType: free_text
-    askPolicy: always
-    required: true
-    question: What eye inserts, shields, or goggles will you use every session?
-    writePath: experiment.setup.eyeProtection
-  - id: baseline_photo_plan
-    label: Baseline photo workflow
-    purpose: measurement_fidelity
-    valueType: free_text
-    askPolicy: always
-    required: true
-    question: How will you keep camera, lighting, distance, expression, and makeup/sunscreen rules identical for baseline and follow-up photos?
-    writePath: experiment.measurement.photoWorkflow
-  - id: skincare_stability
-    label: Skincare stability
-    purpose: confounder_control
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: true
-    question: Which skincare products, actives, procedures, and sun-exposure habits will you keep stable during the run?
-    writePath: experiment.confounders.skincare
-  - id: session_log_path
-    label: Session log path
-    purpose: measurement_fidelity
-    valueType: free_text
-    askPolicy: always
-    required: true
-    question: Where will sessions, symptoms, eye protection, and photo checkpoints be logged?
-    writePath: experiment.logging.path
-  - id: reminder_policy
-    label: Reminder preference
-    purpose: assistant_support
-    valueType: reminder_policy
-    askPolicy: ask_at_confirmation
-    required: false
-    question: Would you like opt-in session reminders or only a weekly summary?
-    writePath: experiment.support.reminders
+    - id: "device_model"
+      label: "Device model"
+      question: "What exact LED mask/device model would you use?"
+      writePath: "experiment.setup.deviceModel"
+    - id: "red_nir_mode"
+      label: "Red/NIR mode"
+      question: "Which red/NIR wrinkle or texture mode will you use, and what wavelengths does the device report?"
+      writePath: "experiment.setup.mode"
+    - id: "treatment_area"
+      label: "Treatment area"
+      question: "Which face region will you treat and score?"
+      options:
+        - "full_face"
+        - "periocular_crows_feet"
+        - "split_face"
+      notes:
+        - "Neck, decollete, scalp, wound, acne, full-body, ophthalmology, transcranial, intranasal, or other non-face targets require separate variants and should not activate this starter."
+      writePath: "experiment.setup.treatmentArea"
+    - id: "session_duration_minutes"
+      label: "Session duration"
+      question: "What session length does the selected red/NIR mode use? This starter caps sessions at 10 minutes; if the device label requires longer use, do not activate this starter without a device-specific fork."
+      constraints:
+        default: 10
+        min: 1
+        max: 10
+      writePath: "experiment.plan.sessionDurationMinutes"
+    - id: "sessions_per_week"
+      label: "Sessions per week"
+      question: "How many sessions per week will you do? This starter caps frequency at 5 sessions/week; more frequent use requires a separate device-specific fork."
+      constraints:
+        default: 5
+        min: 1
+        max: 5
+      writePath: "experiment.plan.sessionsPerWeek"
+    - id: "eye_protection_plan"
+      label: "Eye protection plan"
+      question: "What eye inserts, shields, or goggles will you use every session?"
+      writePath: "experiment.setup.eyeProtection"
+    - id: "baseline_photo_plan"
+      label: "Baseline photo workflow"
+      question: "How will you keep camera, lighting, distance, expression, and makeup/sunscreen rules identical for baseline and follow-up photos?"
+      writePath: "experiment.measurement.photoWorkflow"
+    - id: "skincare_stability"
+      label: "Skincare stability"
+      question: "Which skincare products, actives, procedures, and sun-exposure habits will you keep stable during the run?"
+      writePath: "experiment.confounders.skincare"
+    - id: "session_log_path"
+      label: "Session log path"
+      question: "Where will sessions, symptoms, eye protection, and photo checkpoints be logged?"
+      writePath: "experiment.logging.path"
+    - id: "reminder_policy"
+      label: "Reminder preference"
+      question: "Would you like opt-in session reminders or only a weekly summary?"
+      constraints:
+        optional: true
+        askWhen: "at_confirmation"
+      writePath: "experiment.support.reminders"
   planDefaults:
-    testPlanId: skin-photo-56d
-    baselineDays: 14
-    interventionDays: 42
-    sessionsPerWeek: 5
-    targetSessions: 30
-    minimumUsefulSessions: 24
-    firstSessionGuidance: Do the first session only after adult-only, pregnancy/lactation, eye/skin/lesion/photosensitivity screens, device/model, red/NIR mode, eye protection, nonthermal comfort, baseline photos, and log path are confirmed.
-  logging:
-    sessionFields:
-    - session_date
-    - device_model
-    - red_nir_mode
-    - treatment_area
-    - session_minutes
-    - eye_protection_used
-    - skin_heat_or_pain
-    - redness_or_irritation
-    - pigment_change
-    - headache
-    - ocular_symptoms
-    - skincare_changes
-    - photo_checkpoint
-    confounders:
-    - sun_exposure
-    - retinoids_or_acids
-    - exfoliation
-    - cosmetic_procedure
-    - photosensitizing_medication
-    - illness_or_stress
-    - makeup_or_lighting_change
+    testPlanId: "skin-photo-56d"
+    firstSessionGuidance: "Do the first session only after adult-only, pregnancy/lactation, eye/skin/lesion/photosensitivity screens, device/model, red/NIR mode, eye protection, nonthermal comfort, baseline photos, and log path are confirmed."
+  trackingHints:
+    confounderFields:
+      - "sun_exposure"
+      - "retinoids_or_acids"
+      - "exfoliation"
+      - "cosmetic_procedure"
+      - "photosensitizing_medication"
+      - "illness_or_stress"
+      - "makeup_or_lighting_change"
     notes:
-    - Device/app logging is optional; manual Murph logging is acceptable, but do not describe a run as device-logged unless the selected device exposes usable session records.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-    - no_reminders
-    - session_reminders
-    - weekly_digest
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: Want to log whether you used the LED mask session and any symptoms?
+      - "Device/app logging is optional; manual Murph logging is acceptable, but do not describe a run as device-logged unless the selected device exposes usable session records."
+  supportHints:
+    missedLogFollowupCopy: "Want to log whether you used the LED mask session and any symptoms?"
 whyItWorks:
   - "## Photons hit treated skin\n\nRed and near-infrared light reach facial tissue at the selected geometry. The target is local skin signaling, not whole-body recovery."
   - "## Cell-energy signals shift\n\nPBM affects mitochondrial and nitric-oxide pathways, changing downstream repair and inflammatory signaling. Skin response depends on wavelength, dose, coverage, and consistency."

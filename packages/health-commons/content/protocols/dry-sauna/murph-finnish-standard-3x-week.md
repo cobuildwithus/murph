@@ -133,6 +133,32 @@ protocol:
     - "menstrual_pregnancy_or_fertility_context_if_relevant"
     - "public_shared_sauna_hygiene_or_facility_issue"
     - "symptoms_during_or_after"
+  sessionFieldIds:
+  - session_date
+  - session_start_time
+  - session_duration_minutes
+  - first_session_tolerance_check_minutes
+  - approximate_temperature_c
+  - bench_level_or_position
+  - standalone_or_postexercise
+  - exercise_type_and_load_if_applicable
+  - humidity_or_heavy_steam_if_notable
+  - cool_down_method
+  - time_until_fully_steady_and_alert
+  - hydration_notes
+  - pre_post_body_mass_if_already_tracking_hydration
+  - alcohol_last_24h
+  - caffeine_stimulant_sedative_or_recreational_substance_context
+  - medication_dose_or_timing_change
+  - illness_or_fever
+  - travel_or_timezone_shift
+  - ambient_heat_or_other_heat_exposure
+  - hard_training_last_24h
+  - cold_shower_cold_plunge_cold_swim_or_contrast_exposure
+  - skin_irritation_rash_hives_burning_or_infection_context
+  - menstrual_pregnancy_or_fertility_context_if_relevant
+  - public_shared_sauna_hygiene_or_facility_issue
+  - symptoms_during_or_after
   stopConditions:
     - "Stop the session immediately for chest pain or pressure, faintness, severe dizziness, loss of balance, confusion, neurologic symptoms, palpitations, unusual shortness of breath, severe headache, vomiting, weakness, feeling unwell, panic-level distress, skin burning, heat-triggered itching, hives, rash flare, or feeling unsafe."
     - "Leave and cool down gently if heat feels stronger than expected, humidity or steam becomes overwhelming, or you cannot stay comfortable without forcing it."
@@ -269,118 +295,117 @@ expectedSignalDescriptions:
       basis: "Repeated heat exposure can create cardiovascular strain, but this protocol is not a direct aerobic-capacity intervention and should stay below aerobic training for VO2max interpretation."
     description: "Repeated heat exposure can create cardiovascular strain and recovery adaptations, but it is not a direct aerobic-capacity protocol."
 experimentOnboarding:
-  schemaVersion: "murph.commons.experiment-onboarding.v1"
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
     displayPrompt: "Hey Murph, I want to explore doing the Finnish dry sauna protocol."
     intentSummary: "Explore Finnish Dry Sauna"
-  contextReview:
-    vaultChecks:
-
-      -
-        id: "active_experiments"
-        label: "Active experiments"
-        reason: "Avoid starting another meaningful experiment on top of an active one unless the user explicitly accepts weaker attribution."
-        readHints:
-          - "experiment list --status active --format json"
-      -
-        id: "wearable_sources"
-        label: "Wearable sources"
-        reason: "Confirm whether resting-heart-rate, recovery, sleep, or activity signals are available during the baseline and intervention windows."
-        freshnessDays: 14
-        readHints:
-          - "wearables sources list --format json"
-          - "wearables day <YYYY-MM-DD> --format json"
-      -
-        id: "recent_sleep_and_recovery_signals"
-        label: "Recent sleep and recovery context"
-        reason: "Review recent sleep or recovery instability before interpreting sauna sessions as the main cause of any short-horizon signal."
-        freshnessDays: 21
-        readHints:
-          - "wearables day <YYYY-MM-DD> --format json"
-          - "search query \"sleep recovery fatigue insomnia travel alcohol illness\" --format json"
-      -
-        id: "recent_activity_sessions"
-        label: "Recent activity sessions"
-        reason: "Determine whether sauna sessions are likely to be stand-alone or post-exercise and whether recent training load could dominate the signal."
-        freshnessDays: 21
-        readHints:
-          - "timeline --entry-type event --kind activity_session --from <YYYY-MM-DD> --format json"
-          - "search query \"sauna workout exercise training recovery\" --format json"
-      -
-        id: "morning_blood_pressure_records"
-        label: "Morning blood pressure context"
-        reason: "Recent home blood-pressure measurements can improve interpretation when the user already has a consistent cuff routine."
-        freshnessDays: 30
-        readHints:
-          - "search query \"blood pressure hypertension home cuff\" --format json"
-      -
-        id: "conditions"
-        label: "Relevant conditions"
-        reason: "Cardiovascular, kidney, seizure, heat-intolerance, pregnancy, respiratory, fainting, or dehydration context can change whether unsupervised sauna is a good fit."
-        freshnessDays: 90
-        readHints:
-          - "search query \"heart disease chest pain fainting syncope dehydration kidney disease seizure asthma COPD heat intolerance pregnancy\" --format json"
-      -
-        id: "medications"
-        label: "Relevant medications"
-        reason: "Diuretics, blood-pressure medications, stimulants, sedatives, opioid patches, and other medications that change hydration, blood pressure, alertness, or sweating affect safety and interpretation."
-        freshnessDays: 30
-        readHints:
-          - "search query \"diuretic beta blocker antihypertensive stimulant sedative sweating dehydration opioid patch medication\" --format json"
-      -
-        id: "recent_illness_or_fever"
-        label: "Recent illness or fever"
-        reason: "Fever, infection, or recent illness can make sauna tolerance worse and distort recovery signals."
-        freshnessDays: 14
-        readHints:
-          - "search query \"fever illness infection\" --format json"
-    notes:
-      - "Review available context first, but still ask the compact heat-safety screen because silence in the vault is not clearance."
   safetyScreen:
-    cautionLevel: "high"
-    mode: "ask_compact_then_expand_if_positive"
     dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-      -
-        id: "cardiovascular_or_fainting_risk"
+      - id: "cardiovascular_or_fainting_risk"
         prompt: "Any chest pain, fainting, significant dizziness, unstable blood pressure, known serious heart rhythm issue, heart failure, ischemic heart disease, recent cardiac event, peripheral arterial disease, or clinician advice to avoid heat?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
-        why: "Heat raises cardiovascular strain and can worsen unsafe symptoms."
-      -
-        id: "pregnancy_or_fertility_context"
+      - id: "pregnancy_or_fertility_context"
         prompt: "Are you pregnant, possibly pregnant, trying to become pregnant, early postpartum, or actively protecting fertility or sperm markers?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
-        why: "Heat exposure has pregnancy and fertility-specific caution boundaries."
-      -
-        id: "opioid_patch_or_transdermal_heat_risk"
+      - id: "opioid_patch_or_transdermal_heat_risk"
         prompt: "Are you using a fentanyl, buprenorphine, or other transdermal opioid patch, or any medication patch with heat warnings?"
         ifPositive: "do_not_start_unsupervised_explicit_clinician_clearance_required"
-        why: "External heat can increase transdermal drug delivery; opioid patches have sauna-specific fatal-poisoning reports."
-      -
-        id: "medication_or_substance_risk"
+      - id: "medication_or_substance_risk"
         prompt: "Any diuretics, blood-pressure medicines, beta blockers, anticholinergics, psychotropics, sedatives, stimulants, antiseizure medicines, lithium, insulin or other heat-sensitive medications, recreational drugs, or alcohol use planned before or after sauna?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
-        why: "Medications and substances can change hydration, electrolytes, blood pressure, alertness, sweating, thermoregulation, skin blood flow, and heat tolerance."
-      -
-        id: "clinical_heat_risk_conditions"
+      - id: "clinical_heat_risk_conditions"
         prompt: "Any diabetes, kidney disease, seizure disorder, asthma, COPD, chronic respiratory disease, heat intolerance, prior heat illness, skin condition that flares with heat or sweat, open wound, or active skin infection?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
-        why: "These groups were excluded from or mismatched with direct wellness-protocol evidence and may change heat tolerance."
-      -
-        id: "acute_illness_or_dehydration"
+      - id: "acute_illness_or_dehydration"
         prompt: "Any fever, acute illness, recent heat exhaustion, dehydration, vomiting, diarrhea, or unusually hard training recovery right now?"
         ifPositive: "do_not_start_unsupervised"
-        why: "These contexts raise heat-stress risk and make the experiment difficult to interpret."
-    stopIf:
-      inheritFromProtocolSafety: true
-    notes:
-      - "A positive or uncertain safety answer is not a diagnosis; it means Murph should not set this up as an unsupervised run without clinician guidance, postponement, or a lower-risk alternative."
+  setupSlots:
+    - id: "sauna_access"
+      label: "Sauna access"
+      question: "Do you have regular access to a traditional Finnish-style dry sauna for the next 2 weeks?"
+      options:
+        - "home_dry_sauna"
+        - "gym_or_spa_dry_sauna"
+        - "public_dry_sauna"
+        - "infrared_or_steam_only"
+        - "no_regular_access"
+      target:
+        object: "experimentRun"
+        field: "saunaAccess"
+    - id: "sauna_modality_match"
+      label: "Modality match"
+      question: "Can you keep this to a dry sauna around 80-100 C rather than infrared, steam, cold plunge, or mixed hot-cold sessions?"
+      target:
+        object: "experimentRun"
+        field: "modalityMatch"
+    - id: "usual_sauna_tolerance"
+      label: "Usual sauna tolerance"
+      question: "Have you used a sauna recently, and did it feel tolerable without dizziness, chest symptoms, or feeling unwell afterward?"
+      options:
+        - "recent_and_tolerated"
+        - "recent_but_not_well_tolerated"
+        - "not_recent"
+        - "unsure"
+      target:
+        object: "onboardingCapture"
+        field: "answers.usualSaunaTolerance"
+    - id: "session_timing"
+      label: "Session timing"
+      question: "What 3 days or time windows could realistically work for sauna sessions?"
+      constraints:
+        sessionsPerWeek: 3
+        avoidBackToBackWhenPossible: true
+        defaultRunPlanSchedule:
+          kind: "cron"
+          expression: "0 18 * * 2,4,6"
+          timeZone: "UTC"
+        runPlanScheduleTimeZonePolicy: "replace_with_user_vault_timezone"
+      target:
+        object: "onboardingCapture"
+        field: "answers.sessionTiming"
+    - id: "standalone_context"
+      label: "Session context"
+      question: "Should we treat these as stand-alone sauna sessions, post-exercise sessions, or a mix we need to label carefully?"
+      options:
+        - "mostly_standalone"
+        - "mostly_post_exercise"
+        - "mixed_contexts"
+      target:
+        object: "experimentRun"
+        field: "sessionContext"
+    - id: "blood_pressure_tracking"
+      label: "Morning blood pressure"
+      question: "Do you already measure morning blood pressure with a home cuff, or should we keep blood pressure as optional context?"
+      options:
+        - "validated_home_cuff_available"
+        - "cuff_available_but_inconsistent"
+        - "no_home_cuff"
+      constraints:
+        optional: true
+        askWhen: "if_unknown_or_stale"
+      target:
+        object: "analysisPlan"
+        field: "morningBloodPressureMode"
+    - id: "reminder_policy"
+      label: "Reminder policy"
+      question: "Would you like a reminder before planned sauna sessions, and should I ask once later that day if nothing is logged?"
+      options:
+        - "none"
+        - "pre_session"
+        - "pre_session_plus_same_day_missing_log_check"
+      constraints:
+        askWhen: "at_confirmation"
+      target:
+        object: "assistantSupport"
+        field: "reminderPolicy"
+  planDefaults:
+    testPlanId: "rhr-21d"
+    firstSessionGuidance: "Treat the first session as a tolerance check: 5–10 minutes or less is acceptable, use lower heat or a lower bench where possible, exit at the first concerning symptom, and do not add cold plunge, alcohol, recreational drugs, or hard exercise around the session."
+    missedSessionGuidance: "Never make up a missed sauna by doubling duration, stacking sessions, or choosing hotter settings."
   adaptationPolicy:
     fields:
-
-      -
-        id: "modality"
+      - id: "modality"
         label: "Sauna modality"
         target:
           object: "protocol"
@@ -391,8 +416,7 @@ experimentOnboarding:
         requiredForRunSpec: true
         protocolReusable: true
         guidance: "Reuse a private protocol only when the available sauna is a traditional dry sauna rather than infrared, steam, or mixed hot-cold exposure."
-      -
-        id: "duration_minutes"
+      - id: "duration_minutes"
         label: "Session duration"
         target:
           object: "protocol"
@@ -400,8 +424,7 @@ experimentOnboarding:
         requiredForRunSpec: true
         protocolReusable: true
         guidance: "Keep the target session duration explicit, with early exits logged instead of treated as failure."
-      -
-        id: "temperature_c"
+      - id: "temperature_c"
         label: "Temperature"
         target:
           object: "protocol"
@@ -411,8 +434,7 @@ experimentOnboarding:
         requiredForRunSpec: true
         protocolReusable: true
         guidance: "Keep the dry-sauna temperature range explicit because lower heat, infrared, or steam changes the recipe."
-      -
-        id: "timing_context"
+      - id: "timing_context"
         label: "Timing context"
         target:
           object: "experimentRun"
@@ -423,8 +445,7 @@ experimentOnboarding:
         requiredForRunSpec: true
         protocolReusable: true
         guidance: "Store planned time windows and whether sessions are stand-alone, post-exercise, or mixed."
-      -
-        id: "measurement_plan"
+      - id: "measurement_plan"
         label: "Measurement plan"
         target:
           object: "analysisPlan"
@@ -459,153 +480,8 @@ experimentOnboarding:
         - "blood_pressure_tracking"
       notes:
         - "Reuse the setup only when the dry-sauna modality, planned frequency, session context, and measurement plan still match the user’s current situation."
-  setupSlots:
-
-    -
-      id: "sauna_access"
-      label: "Sauna access"
-      purpose: "logistics"
-      valueType: "enum"
-      askPolicy: "ask_if_unknown"
-      required: true
-      question: "Do you have regular access to a traditional Finnish-style dry sauna for the next 2 weeks?"
-      options:
-        - "home_dry_sauna"
-        - "gym_or_spa_dry_sauna"
-        - "public_dry_sauna"
-        - "infrared_or_steam_only"
-        - "no_regular_access"
-      target:
-        object: "experimentRun"
-        field: "saunaAccess"
-    -
-      id: "sauna_modality_match"
-      label: "Modality match"
-      purpose: "measurement_fidelity"
-      valueType: "boolean"
-      askPolicy: "ask_if_unknown"
-      required: true
-      question: "Can you keep this to a dry sauna around 80-100 C rather than infrared, steam, cold plunge, or mixed hot-cold sessions?"
-      target:
-        object: "experimentRun"
-        field: "modalityMatch"
-    -
-      id: "usual_sauna_tolerance"
-      label: "Usual sauna tolerance"
-      purpose: "safety"
-      valueType: "enum"
-      askPolicy: "ask_if_unknown"
-      required: true
-      question: "Have you used a sauna recently, and did it feel tolerable without dizziness, chest symptoms, or feeling unwell afterward?"
-      options:
-        - "recent_and_tolerated"
-        - "recent_but_not_well_tolerated"
-        - "not_recent"
-        - "unsure"
-      target:
-        object: "onboardingCapture"
-        field: "answers.usualSaunaTolerance"
-    -
-      id: "session_timing"
-      label: "Session timing"
-      purpose: "logistics"
-      valueType: "weekly_time_windows"
-      askPolicy: "ask_if_unknown"
-      required: true
-      question: "What 3 days or time windows could realistically work for sauna sessions?"
-      constraints:
-        sessionsPerWeek: 3
-        avoidBackToBackWhenPossible: true
-        defaultRunPlanSchedule:
-          kind: "cron"
-          expression: "0 18 * * 2,4,6"
-          timeZone: "UTC"
-        runPlanScheduleTimeZonePolicy: "replace_with_user_vault_timezone"
-      target:
-        object: "onboardingCapture"
-        field: "answers.sessionTiming"
-    -
-      id: "standalone_context"
-      label: "Session context"
-      purpose: "context"
-      valueType: "enum"
-      askPolicy: "ask_if_unknown"
-      required: true
-      question: "Should we treat these as stand-alone sauna sessions, post-exercise sessions, or a mix we need to label carefully?"
-      options:
-        - "mostly_standalone"
-        - "mostly_post_exercise"
-        - "mixed_contexts"
-      target:
-        object: "experimentRun"
-        field: "sessionContext"
-    -
-      id: "blood_pressure_tracking"
-      label: "Morning blood pressure"
-      purpose: "measurement_fidelity"
-      valueType: "enum"
-      askPolicy: "ask_if_unknown_or_stale"
-      required: false
-      question: "Do you already measure morning blood pressure with a home cuff, or should we keep blood pressure as optional context?"
-      options:
-        - "validated_home_cuff_available"
-        - "cuff_available_but_inconsistent"
-        - "no_home_cuff"
-      target:
-        object: "analysisPlan"
-        field: "morningBloodPressureMode"
-    -
-      id: "reminder_policy"
-      label: "Reminder policy"
-      purpose: "assistant_support"
-      valueType: "reminder_policy"
-      askPolicy: "ask_at_confirmation"
-      required: true
-      question: "Would you like a reminder before planned sauna sessions, and should I ask once later that day if nothing is logged?"
-      options:
-        - "none"
-        - "pre_session"
-        - "pre_session_plus_same_day_missing_log_check"
-      target:
-        object: "assistantSupport"
-        field: "reminderPolicy"
-  planDefaults:
-    testPlanId: "rhr-21d"
-    baselineDays: 7
-    interventionDays: 14
-    sessionsPerWeek: 3
-    targetSessions: 6
-    minimumUsefulSessions: 4
-    firstSessionGuidance: "Treat the first session as a tolerance check: 5–10 minutes or less is acceptable, use lower heat or a lower bench where possible, exit at the first concerning symptom, and do not add cold plunge, alcohol, recreational drugs, or hard exercise around the session."
-    missedSessionGuidance: "Never make up a missed sauna by doubling duration, stacking sessions, or choosing hotter settings."
-  logging:
-    sessionFields:
-      - "session_date"
-      - "session_start_time"
-      - "session_duration_minutes"
-      - "first_session_tolerance_check_minutes"
-      - "approximate_temperature_c"
-      - "bench_level_or_position"
-      - "standalone_or_postexercise"
-      - "exercise_type_and_load_if_applicable"
-      - "humidity_or_heavy_steam_if_notable"
-      - "cool_down_method"
-      - "time_until_fully_steady_and_alert"
-      - "hydration_notes"
-      - "pre_post_body_mass_if_already_tracking_hydration"
-      - "alcohol_last_24h"
-      - "caffeine_stimulant_sedative_or_recreational_substance_context"
-      - "medication_dose_or_timing_change"
-      - "illness_or_fever"
-      - "travel_or_timezone_shift"
-      - "ambient_heat_or_other_heat_exposure"
-      - "hard_training_last_24h"
-      - "cold_shower_cold_plunge_cold_swim_or_contrast_exposure"
-      - "skin_irritation_rash_hives_burning_or_infection_context"
-      - "menstrual_pregnancy_or_fertility_context_if_relevant"
-      - "public_shared_sauna_hygiene_or_facility_issue"
-      - "symptoms_during_or_after"
-    confounders:
+  trackingHints:
+    confounderFields:
       - "illness_or_fever"
       - "alcohol_last_24h"
       - "caffeine_stimulant_sedative_or_recreational_substance_context"
@@ -621,15 +497,7 @@ experimentOnboarding:
     notes:
       - "Keep stand-alone and post-exercise sauna interpretation separate whenever workout context could explain the recovery story."
       - "Do not require pre/post body-mass logging unless the user already tracks hydration that way."
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: "opt_in_only"
-    reminderOptions:
-      - "none"
-      - "pre_session"
-      - "pre_session_plus_same_day_missing_log_check"
-    weeklyDigestDefault: true
+  supportHints:
     missedLogFollowupCopy: "Did you end up doing today’s sauna session? Totally fine either way, I just want the experiment record to be accurate."
 whyItWorks:
   - "## Heat forces redistribution\n\nDry sauna loads the body without muscle work. Skin vessels open; sweat carries heat out; heart rate rises; blood shifts outward. The stress is circulation and thermoregulation, not fitness effort."

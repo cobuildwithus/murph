@@ -585,6 +585,21 @@ protocol:
     - "session paused shortened or stopped"
     - "same-device VO2 max or cardio-fitness estimate if performance tracking is relevant"
     - "resting heart rate and HRV recovery context"
+  sessionFieldIds:
+  - clinical_indication
+  - chamber_type
+  - pressure_value_and_unit
+  - oxygen_fraction
+  - planned_minutes
+  - completed_minutes
+  - air_breaks
+  - session_number
+  - ear_sinus_symptoms
+  - vision_changes
+  - anxiety_claustrophobia
+  - glucose_bp_checks_if_relevant
+  - adverse_events
+  - paused_shortened_or_stopped
   stopConditions:
     - "Do not start an unsupervised course without a current clinician prescription and medically supervised facility safety controls."
     - "Stop or defer immediately if the facility or clinician identifies untreated pneumothorax, unsafe device/implant compatibility, intraocular gas, prohibited materials, or another absolute safety issue."
@@ -659,174 +674,74 @@ expectedSignalDescriptions:
       basis: "No extracted HBOT trial gives a reliable RMSSD effect size for this broad protocol; HRV is useful for recovery interpretation, not efficacy scoring."
     protocolProminence: "context"
 experimentOnboarding:
-  schemaVersion: "murph.commons.experiment-onboarding.v1"
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
     displayPrompt: "Hey Murph, I want to track a clinician-prescribed hyperbaric oxygen therapy course."
     intentSummary: "Track clinician-supervised HBOT"
-  contextReview:
-    vaultChecks:
-
-      -
-        id: "active_experiments"
-        label: "Active experiments"
-        reason: "Avoid overlapping major interventions that could obscure adverse events or recovery changes."
-        readHints:
-          - "experiment list --status active --format json"
-      -
-        id: "clinician_prescribed_plan"
-        label: "Clinician-prescribed HBOT plan"
-        reason: "This protocol is a tracking wrapper for prescribed care, not an unsupervised start path."
-        freshnessDays: 30
-        readHints:
-          - 'search query "hyperbaric oxygen HBOT prescription treatment plan indication chamber pressure sessions" --format json'
-      -
-        id: "pulmonary_ent_and_neurologic_risk"
-        label: "Pulmonary, ENT, and seizure-threshold context"
-        reason: "Pneumothorax, lung disease, ear/sinus equalization issues, respiratory infection, and seizure risk materially change HBOT safety."
-        freshnessDays: 180
-        readHints:
-          - 'search query "pneumothorax COPD asthma ear sinus seizure epilepsy respiratory infection" --format json'
-      -
-        id: "device_medication_and_chemotherapy_context"
-        label: "Implants, devices, ocular gas, and medication exposures"
-        reason: "Device compatibility, intraocular gas, and selected medication or chemotherapy exposures are safety-screen items."
-        freshnessDays: 180
-        readHints:
-          - 'search query "implanted device pacemaker defibrillator intraocular gas bleomycin doxorubicin cisplatin disulfiram mafenide" --format json'
-      -
-        id: "diabetes_blood_pressure_and_pregnancy_context"
-        label: "Metabolic, cardiovascular, and pregnancy context"
-        reason: "Hypoglycemia risk, acute blood-pressure changes, heart-failure context, and pregnancy context can alter monitoring and risk."
-        freshnessDays: 90
-        readHints:
-          - 'search query "diabetes hypoglycemia blood pressure heart failure pregnancy" --format json'
-    notes:
-      - "Review vault context first, but still ask the compact high-caution screen because absence of stored evidence is not clearance."
   safetyScreen:
-    cautionLevel: "high"
-    mode: "ask_each_item"
     dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-      -
-        id: "unsupervised_start"
+      - id: "unsupervised_start"
         prompt: "Are you considering HBOT without a current clinician prescription or without a medically supervised chamber facility?"
         ifPositive: "do_not_start_unsupervised"
-        why: "Murph must not start, schedule, or track HBOT without both a current clinician prescription and a medically supervised chamber facility."
-      -
-        id: "urgent_or_disease_treatment_request"
+      - id: "urgent_or_disease_treatment_request"
         prompt: "Is this for current carbon-monoxide exposure/poisoning, decompression illness, gas embolism, crush or traumatic ischemia, a non-healing wound, radiation injury, sudden hearing loss, or a neurologic symptom/diagnosis?"
         ifPositive: "do_not_start_unsupervised"
-        why: "Murph must not recommend self-treatment for acute, wound, radiation, ENT, or neurologic HBOT indications. Only create a tracking run after an active clinician/facility plan exists, and keep disease-specific outcomes in a separate clinical variant."
-      -
-        id: "absolute_or_major_chamber_safety_issue"
+      - id: "absolute_or_major_chamber_safety_issue"
         prompt: "Any untreated pneumothorax, unresolved chamber/device compatibility concern, intraocular gas, prohibited-material concern, or facility instruction that says HBOT should not proceed?"
         ifPositive: "do_not_start_unsupervised"
-        why: "These can create immediate chamber-safety risk and must be cleared by the treating clinician/facility before Murph continues."
-      -
-        id: "relative_contraindication_or_monitoring_issue"
+      - id: "relative_contraindication_or_monitoring_issue"
         prompt: "Any lung disease, blebs/bullae, COPD/asthma, thoracic surgery history, ear/sinus equalization problem, recent respiratory infection, fever, seizure history or seizure-threshold modifier, CNS disease, hypercapnia/CO2-retention risk, opioid or sedative use, alcohol withdrawal/dependence, diabetes/hypoglycemia risk, pregnancy context, intraocular gas or recent eye surgery, selected chemotherapy/medication exposure, implanted or external device, uncontrolled blood pressure, heart-failure concern, severe claustrophobia/anxiety, or recent nicotine/high-caffeine/other vasoconstrictor exposure?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
-        why: "These require individualized clinician and facility review before creating or continuing an HBOT tracking run."
-      -
-        id: "active_or_recent_adverse_event"
+      - id: "active_or_recent_adverse_event"
         prompt: "Any severe ear/sinus pain, neurologic symptom, chest symptom, shortness of breath, vision change, severe anxiety, glucose symptom, unsafe blood-pressure reading if relevant, device alarm, or prior HBOT session stopped for safety?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
-        why: "Active or recurring adverse events should be handled by the treating team before Murph continues the tracking plan."
-    stopIf:
-      inheritFromProtocolSafety: true
-    notes:
-      - "A positive or uncertain screen is not a diagnosis; it means Murph must not create or continue HBOT tracking until the treating clinician/facility has reviewed the issue and cleared the plan."
   setupSlots:
-
-    -
-      id: "clinical_indication"
+    - id: "clinical_indication"
       label: "Clinical indication"
-      purpose: "context"
-      valueType: "free_text"
-      askPolicy: "ask_if_unknown"
-      required: true
       question: "What indication or care-plan reason did the treating clinician give for HBOT?"
       target:
-        object: experimentRun
-        field: clinicalIndication
-    -
-      id: "prescribed_schedule"
+        object: "experimentRun"
+        field: "clinicalIndication"
+    - id: "prescribed_schedule"
       label: "Prescribed schedule"
-      purpose: "logistics"
-      valueType: "free_text"
-      askPolicy: "ask_if_unknown"
-      required: true
       question: "What pressure, session length, frequency, air-break plan, and total number of sessions were prescribed?"
       target:
-        object: experimentRun
-        field: prescribedSchedule
-    -
-      id: "facility_supervision"
+        object: "experimentRun"
+        field: "prescribedSchedule"
+    - id: "facility_supervision"
       label: "Facility supervision"
-      purpose: "safety"
-      valueType: "boolean"
-      askPolicy: "ask_if_unknown"
-      required: true
       question: "Will every session be delivered in a medically supervised chamber facility with staff monitoring?"
       target:
-        object: onboardingCapture
-        field: answers.facilitySupervision
-    -
-      id: "chamber_type"
+        object: "onboardingCapture"
+        field: "answers.facilitySupervision"
+    - id: "chamber_type"
       label: "Chamber type"
-      purpose: "measurement_fidelity"
-      valueType: "enum"
-      askPolicy: "ask_if_unknown"
-      required: true
       question: "What chamber type will be used?"
       options:
         - "monoplace"
         - "multiplace"
         - "unknown"
       target:
-        object: experimentRun
-        field: chamberType
-    -
-      id: "session_log_reminder_policy"
+        object: "experimentRun"
+        field: "chamberType"
+    - id: "session_log_reminder_policy"
       label: "Session log reminder policy"
-      purpose: "assistant_support"
-      valueType: "reminder_policy"
-      askPolicy: "ask_at_confirmation"
-      required: true
       question: "Should Murph remind you to log each prescribed session and adverse-event check?"
       options:
         - "none"
         - "post_session_log"
         - "post_session_plus_same_day_missing_log_check"
+      constraints:
+        askWhen: "at_confirmation"
       target:
-        object: assistantSupport
-        field: reminderPolicy
+        object: "assistantSupport"
+        field: "reminderPolicy"
   planDefaults:
     testPlanId: "clinician-supervised-hbot-recovery-49d"
-    baselineDays: 7
-    interventionDays: 42
-    sessionsPerWeek: 5
-    targetSessions: 20
-    minimumUsefulSessions: 1
     firstSessionGuidance: "Do not begin unless the clinician/facility plan is active; replace the default HBOT schedule with the actual prescribed pressure, oxygen method, chamber type, session duration, air-break plan, frequency, and total planned sessions before logging the first session."
-  logging:
-    sessionFields:
-      - "clinical_indication"
-      - "chamber_type"
-      - "pressure_value_and_unit"
-      - "oxygen_fraction"
-      - "planned_minutes"
-      - "completed_minutes"
-      - "air_breaks"
-      - "session_number"
-      - "ear_sinus_symptoms"
-      - "vision_changes"
-      - "anxiety_claustrophobia"
-      - "glucose_bp_checks_if_relevant"
-      - "adverse_events"
-      - "paused_shortened_or_stopped"
-    confounders:
+  trackingHints:
+    confounderFields:
       - "acute_respiratory_infection"
       - "fever_or_illness"
       - "medication_change"
@@ -838,16 +753,7 @@ experimentOnboarding:
       - "other_major_intervention"
     notes:
       - "Log absence of adverse events as explicitly as presence of adverse events."
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: "opt_in_only"
-    reminderOptions:
-      - "none"
-      - "post_session_log"
-      - "post_session_plus_same_day_missing_log_check"
-      - "weekly_digest"
-    weeklyDigestDefault: true
+  supportHints:
     missedLogFollowupCopy: "Did you complete today's prescribed HBOT session, and were there any ear, sinus, vision, anxiety, glucose, blood-pressure, or other safety notes to log?"
 whyItWorks:
   - "## Pressure dissolves oxygen\n\nHBOT raises pressure while oxygen fraction stays high. Hemoglobin is already near full; the extra dose comes from oxygen dissolving directly into plasma."

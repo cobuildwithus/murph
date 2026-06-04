@@ -226,6 +226,21 @@ protocol:
   - sleep, fatigue, illness, and competing training load
   - stop-condition event
   - stretching, foam rolling, manual therapy, shockwave, dry needling, medication, injection, or other treatment change
+  sessionFieldIds:
+  - pain_location_and_onset_pattern
+  - onset_mile_or_minute
+  - lateral_knee_pain_before
+  - peak_lateral_knee_pain
+  - pain_after_session
+  - next_day_pain
+  - walking_and_stair_tolerance
+  - red_flag_or_mimic_symptoms
+  - run_walk_minutes
+  - interval_pattern
+  - strength_control_completed
+  - exercise_sets_reps_load_rpe_pain_response
+  - gait_cue_used
+  - stop_condition_event
   stopConditions:
   - Do not start, or stop and seek appropriate care, after acute trauma, sudden swelling, deformity, a pop at injury, inability to bear weight, severe pain, a locked knee, major swelling, fever, hot/red/warm joint, major loss of motion, neurologic symptoms, focal bony pain, rest/night pain, or rapidly worsening pain.
   - Do not use this page as a self-diagnosis protocol for locking, catching, true giving-way, recurrent swelling, adolescent knee pain with hip pain, suspected stress fracture, suspected meniscal/ligament/cartilage injury, patellofemoral mimic, or unclear knee/hip/spine pain.
@@ -277,210 +292,106 @@ expectedSignalDescriptions:
     basis: Direct runner rehab sources use pain-free running, function, and graded return-to-run tolerance as endpoints; case evidence reaches pain-free running within 4–6 weeks, while starting branch and deload size determine the minute gain.
   protocolProminence: focus
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to explore an IT band syndrome rehab and return-to-run plan.
-    intentSummary: Explore ITBS Rehab And Return To Run
-  contextReview:
-    vaultChecks:
-    - id: active_experiments
-      label: Active experiments
-      reason: Avoid stacking a rehab experiment on top of another meaningful intervention unless the user accepts weaker attribution.
-      readHints:
-      - experiment list --status active --format json
-    - id: recent_knee_symptoms
-      label: Recent knee symptoms
-      reason: Confirm that the symptom pattern is lateral-knee pain consistent with ITBS rather than urgent or unclear knee pain.
-      freshnessDays: 30
-      readHints:
-      - search query "knee pain lateral knee IT band ITBS swelling locking trauma" --format json
-    - id: recent_running_load
-      label: Recent running load
-      reason: Understand current mileage, hills, speed work, terrain, and the dose that provokes symptoms before selecting a starting branch.
-      freshnessDays: 45
-      readHints:
-      - timeline --entry-type event --kind activity_session --from <YYYY-MM-DD> --format json
-      - search query "run running workout route hills intervals" --format json
-    - id: injury_or_clinician_context
-      label: Injury or clinician context
-      reason: A clinician diagnosis, imaging result, recent injection, medication, or surgical advice changes the safety and interpretation posture.
-      freshnessDays: 180
-      readHints:
-      - search query "ITBS iliotibial knee diagnosis imaging injection surgery physical therapy" --format json
-    - id: wearable_activity_sources
-      label: Wearable and activity sources
-      reason: Activity data can help quantify running exposure, but symptom response remains the primary outcome.
-      freshnessDays: 14
-      readHints:
-      - wearables sources list --format json
-      - wearables day <YYYY-MM-DD> --format json
-    - id: medication_and_procedure_changes
-      label: Medication or procedure changes
-      reason: New NSAID use, corticosteroid injection, shockwave, or manual therapy can confound symptom changes and may need clinician guidance.
-      freshnessDays: 30
-      readHints:
-      - search query "NSAID ibuprofen steroid injection shockwave physical therapy knee" --format json
-    notes:
-    - Do not infer diagnosis from logs alone.
-    - If red flags are present, the assistant should route away from experiment creation before asking setup details.
+    displayPrompt: "Hey Murph, I want to explore an IT band syndrome rehab and return-to-run plan."
+    intentSummary: "Explore ITBS Rehab And Return To Run"
   safetyScreen:
-    cautionLevel: moderate
-    mode: ask_each_item
-    dispositionIfAnyPositive: do_not_start_unsupervised
+    dispositionIfAnyPositive: "do_not_start_unsupervised"
     mustAsk:
-    - id: acute_trauma_or_pop
-      prompt: Did this knee pain begin after a fall, collision, twist, sudden pop, or other acute traumatic event?
-      ifPositive: do_not_start_unsupervised
-      why: Acute traumatic knee pain may require evaluation before any return-to-run plan.
-    - id: bear_weight_locked_swollen
-      prompt: Do you have inability to bear weight, a locked knee, major swelling, marked instability, or major loss of knee motion?
-      ifPositive: do_not_start_unsupervised
-      why: These features are outside a self-guided ITBS rehab experiment.
-    - id: infection_or_systemic_signs
-      prompt: Do you have fever, a hot or red joint, spreading redness, systemic illness, or severe unexplained night/rest pain?
-      ifPositive: do_not_start_unsupervised
-      why: These signs can indicate urgent or non-ITBS conditions.
-    - id: neurologic_or_spreading_symptoms
-      prompt: Do you have new numbness, weakness, progressive neurologic symptoms, or pain spreading in a pattern that is not lateral knee pain during running?
-      ifPositive: do_not_start_unsupervised
-      why: A changing or non-lateral symptom pattern should not be treated as simple ITBS.
-    - id: worsening_despite_deload
-      prompt: Has pain kept worsening even after reducing running or avoiding the activities that trigger it?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Failure to improve with load reduction can mean the starting assumption or progression is wrong.
-    - id: mechanical_focal_or_mimic_features
-      prompt: Do you have true locking, catching, buckling/giving way, recurrent swelling, rest or night pain, focal bony tenderness, hip/back pain, anterior-knee symptoms, or anything that makes this feel unlike typical lateral running-related ITBS pain?
-      ifPositive: do_not_start_unsupervised
-      why: Mechanical, focal bony, referred, or unclear patterns need assessment before a self-guided ITBS return-to-run experiment.
-    - id: separate_clinical_variant_needed
-      prompt: Are you pregnant or postpartum, an adolescent, post-surgical, managing inflammatory arthritis/gout/significant osteoarthritis, a cyclist with bike-fit-driven symptoms, or currently planning medication, injection, shockwave, dry needling, manual therapy, imaging-driven care, or surgery for this knee?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: These cases require a separate pathway or clinician-guided plan rather than the ordinary self-guided running variant.
+      - id: "acute_trauma_or_pop"
+        prompt: "Did this knee pain begin after a fall, collision, twist, sudden pop, or other acute traumatic event?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "bear_weight_locked_swollen"
+        prompt: "Do you have inability to bear weight, a locked knee, major swelling, marked instability, or major loss of knee motion?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "infection_or_systemic_signs"
+        prompt: "Do you have fever, a hot or red joint, spreading redness, systemic illness, or severe unexplained night/rest pain?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "neurologic_or_spreading_symptoms"
+        prompt: "Do you have new numbness, weakness, progressive neurologic symptoms, or pain spreading in a pattern that is not lateral knee pain during running?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "worsening_despite_deload"
+        prompt: "Has pain kept worsening even after reducing running or avoiding the activities that trigger it?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "mechanical_focal_or_mimic_features"
+        prompt: "Do you have true locking, catching, buckling/giving way, recurrent swelling, rest or night pain, focal bony tenderness, hip/back pain, anterior-knee symptoms, or anything that makes this feel unlike typical lateral running-related ITBS pain?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "separate_clinical_variant_needed"
+        prompt: "Are you pregnant or postpartum, an adolescent, post-surgical, managing inflammatory arthritis/gout/significant osteoarthritis, a cyclist with bike-fit-driven symptoms, or currently planning medication, injection, shockwave, dry needling, manual therapy, imaging-driven care, or surgery for this knee?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
-      - Pain changes gait or causes limping
-      - Pain appears at rest, persists after the session, or rebounds later that day or the next morning
-      - Symptoms spread beyond expected lateral-knee pattern
-      - Swelling, warmth, redness, fever, buckling, true locking, catching, inability to bear weight, numbness, weakness, or major motion loss appears
-      - User adds medication, injection, shockwave, dry needling, manual therapy, surgery planning, or another major treatment
-    notes:
-    - Keep safety stronger than efficacy. A positive screen should route away from unsupervised experiment creation.
+        - "Pain changes gait or causes limping"
+        - "Pain appears at rest, persists after the session, or rebounds later that day or the next morning"
+        - "Symptoms spread beyond expected lateral-knee pattern"
+        - "Swelling, warmth, redness, fever, buckling, true locking, catching, inability to bear weight, numbness, weakness, or major motion loss appears"
+        - "User adds medication, injection, shockwave, dry needling, manual therapy, surgery planning, or another major treatment"
   setupSlots:
-  - id: symptom_pattern
-    label: Symptom pattern
-    purpose: safety
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: true
-    question: Briefly describe where the knee pain is, when it appears during running, and what makes it settle.
-    writePath: onboarding.answers.symptomPattern
-  - id: pain_ceiling
-    label: Pain ceiling
-    purpose: safety
-    valueType: integer
-    askPolicy: ask_if_unknown
-    required: true
-    question: What pain ceiling should stop a run session? Use a 0 to 10 scale, with 0 as no pain and 10 as worst pain.
-    constraints:
-      min: 0
-      max: 10
-      recommendedMax: 3
-    writePath: runPlan.painCeiling
-  - id: starting_branch
-    label: Starting branch
-    purpose: personalization
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: 'Where should the plan start: no running yet, short run/walk re-entry, or already tolerating easy runs?'
-    options:
-    - no_running_yet
-    - run_walk_reentry
-    - easy_runs_tolerated
-    writePath: runPlan.startingBranch
-  - id: rehab_days
-    label: Rehab days
-    purpose: logistics
-    valueType: weekly_time_windows
-    askPolicy: ask_if_unknown
-    required: true
-    question: Which three weekly windows are realistic for strength and control sessions?
-    writePath: runPlan.rehabDays
-  - id: run_walk_windows
-    label: Run/walk windows
-    purpose: logistics
-    valueType: weekly_time_windows
-    askPolicy: ask_if_unknown
-    required: false
-    question: Which two or three weekly windows could hold easy run/walk sessions once symptoms allow?
-    writePath: runPlan.runWalkWindows
-  - id: route_controls
-    label: Route controls
-    purpose: confounder_control
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: false
-    question: What flat, predictable route or surface can you use early, and are there hills, camber, or speed-work triggers to avoid?
-    writePath: runPlan.routeControls
-  - id: reminder_policy
-    label: Reminder policy
-    purpose: assistant_support
-    valueType: reminder_policy
-    askPolicy: ask_at_confirmation
-    required: true
-    question: Do you want rehab/run reminders and a next-day symptom check if no log appears?
-    options:
-    - none
-    - session_reminders
-    - session_reminders_plus_next_day_check
-    writePath: assistantSupport.reminderPolicy
+    - id: "symptom_pattern"
+      label: "Symptom pattern"
+      question: "Briefly describe where the knee pain is, when it appears during running, and what makes it settle."
+      writePath: "onboarding.answers.symptomPattern"
+    - id: "pain_ceiling"
+      label: "Pain ceiling"
+      question: "What pain ceiling should stop a run session? Use a 0 to 10 scale, with 0 as no pain and 10 as worst pain."
+      constraints:
+        min: 0
+        max: 10
+        recommendedMax: 3
+      writePath: "runPlan.painCeiling"
+    - id: "starting_branch"
+      label: "Starting branch"
+      question: "Where should the plan start: no running yet, short run/walk re-entry, or already tolerating easy runs?"
+      options:
+        - "no_running_yet"
+        - "run_walk_reentry"
+        - "easy_runs_tolerated"
+      writePath: "runPlan.startingBranch"
+    - id: "rehab_days"
+      label: "Rehab days"
+      question: "Which three weekly windows are realistic for strength and control sessions?"
+      writePath: "runPlan.rehabDays"
+    - id: "run_walk_windows"
+      label: "Run/walk windows"
+      question: "Which two or three weekly windows could hold easy run/walk sessions once symptoms allow?"
+      constraints:
+        optional: true
+      writePath: "runPlan.runWalkWindows"
+    - id: "route_controls"
+      label: "Route controls"
+      question: "What flat, predictable route or surface can you use early, and are there hills, camber, or speed-work triggers to avoid?"
+      constraints:
+        optional: true
+      writePath: "runPlan.routeControls"
+    - id: "reminder_policy"
+      label: "Reminder policy"
+      question: "Do you want rehab/run reminders and a next-day symptom check if no log appears?"
+      options:
+        - "none"
+        - "session_reminders"
+        - "session_reminders_plus_next_day_check"
+      constraints:
+        askWhen: "at_confirmation"
+      writePath: "assistantSupport.reminderPolicy"
   planDefaults:
-    testPlanId: symptom-guided-return-to-run-49d
-    baselineDays: 7
-    interventionDays: 42
-    sessionsPerWeek: 3
-    targetSessions: 18
-    minimumUsefulSessions: 12
-    firstSessionGuidance: Start with screening, baseline logging, and a low-irritation strength/control session. Do not force a run on day one if walking or stairs are still provocative.
-  logging:
-    sessionFields:
-    - pain_location_and_onset_pattern
-    - onset_mile_or_minute
-    - lateral_knee_pain_before
-    - peak_lateral_knee_pain
-    - pain_after_session
-    - next_day_pain
-    - walking_and_stair_tolerance
-    - red_flag_or_mimic_symptoms
-    - run_walk_minutes
-    - interval_pattern
-    - strength_control_completed
-    - exercise_sets_reps_load_rpe_pain_response
-    - gait_cue_used
-    - stop_condition_event
-    confounders:
-    - route_surface_hills_downhill_camber
-    - pace_speedwork_or_intensity
-    - weekly_mileage_long_run_and_recent_mileage_jump
-    - shoe_age_model_orthotics_or_equipment_change
-    - cross_training_or_cycling_exposure
-    - sleep_fatigue_illness_or_competing_training_load
-    - new_nsaid_acetaminophen_or_other_pain_medication
-    - injection_shockwave_dry_needling_manual_therapy_or_other_treatment
+    testPlanId: "symptom-guided-return-to-run-49d"
+    firstSessionGuidance: "Start with screening, baseline logging, and a low-irritation strength/control session. Do not force a run on day one if walking or stairs are still provocative."
+  trackingHints:
+    confounderFields:
+      - "route_surface_hills_downhill_camber"
+      - "pace_speedwork_or_intensity"
+      - "weekly_mileage_long_run_and_recent_mileage_jump"
+      - "shoe_age_model_orthotics_or_equipment_change"
+      - "cross_training_or_cycling_exposure"
+      - "sleep_fatigue_illness_or_competing_training_load"
+      - "new_nsaid_acetaminophen_or_other_pain_medication"
+      - "injection_shockwave_dry_needling_manual_therapy_or_other_treatment"
     notes:
-    - Symptoms and function are primary; wearable activity data is context.
-    - Next-day pain is part of session interpretation, not an optional extra.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-    - none
-    - session_reminders
-    - session_reminders_plus_next_day_check
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: Did knee pain stay mild after the last rehab or run/walk session, and how did it feel the next morning?
+      - "Symptoms and function are primary; wearable activity data is context."
+      - "Next-day pain is part of session interpretation, not an optional extra."
+  supportHints:
+    missedLogFollowupCopy: "Did knee pain stay mild after the last rehab or run/walk session, and how did it feel the next morning?"
 whyItWorks:
   - "## Irritation drops before capacity returns\n\nITBS rehab starts by reducing the running dose that keeps the lateral knee irritated. Pain falls when the tissue stops getting the same provocative stride load."
   - "## Hip control changes the stride\n\nGlute and hip-abductor work improves pelvis and femur control. Better lateral-hip control reduces how much load each stride dumps into the outer knee."

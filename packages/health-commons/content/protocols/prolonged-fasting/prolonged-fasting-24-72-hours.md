@@ -135,6 +135,31 @@ protocol:
   - orthostatic symptoms or fall risk
   - planned driving, operating machinery, heat, or sauna during fast
   - prior fast adverse symptoms or refeed symptoms
+  sessionFieldIds:
+  - fast_start_time
+  - planned_duration_hours
+  - actual_end_time
+  - fasting_type
+  - fluids_available_and_used
+  - caffeine_change_or_withdrawal
+  - strenuous_exercise_or_heat_exposure
+  - hunger_level
+  - headache
+  - dizziness_or_lightheadedness
+  - faintness_or_near_syncope
+  - palpitations
+  - chest_pain_or_pressure
+  - unusual_shortness_of_breath
+  - confusion_or_neurologic_symptoms
+  - mood_or_stress
+  - sleep_disruption
+  - blood_pressure_if_available
+  - pulse_if_available
+  - glucose_or_cgm_if_available_or_clinician_directed
+  - body_weight_if_measured
+  - first_refeed_time
+  - first_refeed_notes
+  - symptoms_after_refeed
   stopConditions:
   - Stop the fast and seek care for fainting, confusion, seizure, neurologic symptoms, chest pain, breathing difficulty, palpitations, irregular heartbeat, severe weakness, or severe dizziness.
   - Stop if fever, vomiting, diarrhea, or inability to keep fluids occurs.
@@ -239,362 +264,230 @@ expectedSignalDescriptions:
     confidence: low
     basis: "Anchored by source_artifact:pmid-35380473, which found about 3 mmHg lower ambulatory mean arterial pressure after 24 h, and source_artifact:pmid-38126086, which emphasized reduced central-hypovolemia tolerance."
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to explore doing a 24–72 hour fast.
-    intentSummary: Explore Prolonged Fasting (24–72 Hours)
-  contextReview:
-    vaultChecks:
-    - id: active_experiments
-      label: Active experiments
-      reason: Avoid stacking a fasting experiment on top of another meaningful intervention unless the user accepts weaker attribution.
-      readHints:
-      - experiment list --status active --format json
-    - id: recent_fasting_or_restriction_history
-      label: Recent fasting, dieting, or restriction history
-      reason: Prior tolerance, binge/restrict cycling, rapid weight loss, or compensatory fasting motives change safety.
-      freshnessDays: 180
-      readHints:
-      - search query "fast fasting water-only intermittent fasting eating disorder binge purge restriction laxative diet pill rapid weight loss" --format json
-    - id: diabetes_glucose_and_medications
-      label: Diabetes, glucose monitoring, and medication context
-      reason: Diabetes, hypoglycemia history, insulin, sulfonylureas, SGLT2 inhibitors, and related medication changes are clinician-guided boundaries.
-      freshnessDays: 90
-      readHints:
-      - search query "diabetes insulin sulfonylurea SGLT2 hypoglycemia ketoacidosis CGM glucometer metformin dapagliflozin empagliflozin canagliflozin" --format json
-    - id: hydration_blood_pressure_kidney_gout_context
-      label: Hydration, blood pressure, kidney, and gout context
-      reason: Hypovolemia, orthostatic symptoms, kidney risk, and hyperuricemia or gout history affect fasting safety and interpretation.
-      freshnessDays: 90
-      readHints:
-      - search query "dehydration fainting syncope orthostatic low blood pressure kidney disease renal gout uric acid nephrolithiasis diuretic antihypertensive" --format json
-    - id: pregnancy_postpartum_lactation
-      label: Pregnancy, postpartum, or lactation context
-      reason: Pregnancy, postpartum, and lactation are not routine self-experiment fasting contexts.
-      freshnessDays: 90
-      readHints:
-      - memory show --format json
-      - search query "pregnancy postpartum breastfeeding lactation" --format json
-    - id: recent_illness_or_poor_intake
-      label: Recent illness, dehydration, or poor intake
-      reason: Fever, vomiting, diarrhea, infection, dehydration, and prolonged poor intake can change fasting and refeeding risk.
-      freshnessDays: 30
-      readHints:
-      - search query "fever infection illness vomiting diarrhea dehydration poor intake appetite loss" --format json
-    - id: monitoring_sources
-      label: Monitoring sources
-      reason: Confirm whether blood pressure, pulse, CGM/glucose, wearable sleep, or symptom logs exist before asking for redundant setup data.
-      freshnessDays: 30
-      readHints:
-      - wearables sources list --format json
-      - search query "blood pressure cuff CGM glucose glucometer pulse weight sleep symptoms" --format json
+    displayPrompt: "Hey Murph, I want to explore doing a 24–72 hour fast."
+    intentSummary: "Explore Prolonged Fasting (24–72 Hours)"
   safetyScreen:
-    cautionLevel: high
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-    - id: adult_age_and_capacity
-      prompt: Are you under 18, or not able to reliably understand the plan, hydrate normally, notice symptoms, stop early, or get help if needed?
-      ifPositive: do_not_start_unsupervised
-      why: This wellness variant is adult-only and depends on capacity to stop and seek help.
-    - id: diabetes_glucose_medication
-      prompt: Do you have diabetes, hypoglycemia history, ketoacidosis history, or use insulin, sulfonylureas, other glucose-lowering medication, or an SGLT2 inhibitor?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Glucose-lowering medication and ketoacidosis risk can make fasting unsafe without clinical guidance.
-    - id: broader_medication_review
-      prompt: Do you use antihypertensives, diuretics, anticoagulants, lithium or other psychotropics, anticonvulsants, diabetes medications, SGLT2 inhibitors, or any medication that must be taken with food, hydration, or meal timing?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Medication adjustment or monitoring during fasting is clinician-guided; Murph should not provide medication-change instructions.
-    - id: pregnancy_lactation_postpartum
-      prompt: Are you pregnant, trying to become pregnant, recently postpartum, or breastfeeding?
-      ifPositive: do_not_start_unsupervised
-      why: Pregnancy, postpartum, and lactation are not routine self-experiment fasting contexts.
-    - id: eating_disorder_restriction_risk
-      prompt: Do you have an active or past eating disorder, binge/purge or binge/restrict cycling, low body weight, recent rapid weight loss, or fasting motives tied to compensating for eating?
-      ifPositive: do_not_start_unsupervised
-      why: Restriction-risk contexts should stop unsupervised run creation.
-    - id: kidney_heart_gout_syncope
-      prompt: Do you have kidney disease, gout or uric-acid kidney stones, heart disease, arrhythmia, fainting, low blood pressure, orthostatic intolerance, or significant dehydration susceptibility?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Hydration, kidney, cardiovascular, and orthostatic risk affect fasting safety.
-    - id: endocrine_neuro_liver_frailty_cachexia
-      prompt: Do you have uncontrolled thyroid disease, advanced liver disease, advanced kidney disease, stroke/cerebrovascular disease, dementia or cognitive impairment, frailty or fall risk, cachexia, involuntary weight loss, or low functional reserves?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: These are fasting-therapy contraindication or low-reserve contexts that do not belong in an unsupervised wellness fast.
-    - id: acute_illness_dehydration
-      prompt: Are you currently ill, feverish, vomiting, having diarrhea, dehydrated, unable to keep fluids down, or recovering from prolonged poor intake?
-      ifPositive: do_not_start_unsupervised
-      why: Acute illness, dehydration, and poor intake raise fasting and refeeding risk.
-    - id: prior_severe_fast_symptoms
-      prompt: Has a previous fast caused fainting, confusion, chest symptoms, palpitations, severe dizziness, severe weakness, inability to hydrate, or severe symptoms after refeeding?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Prior severe symptoms change the risk profile.
-    - id: electrolyte_lab_or_refeeding_risk
-      prompt: Have you had known low sodium, potassium, phosphate, or magnesium; abnormal kidney or liver labs; very low BMI; substantial recent weight loss; several days of negligible intake; malnutrition; prior refeeding problems; or a clinician concern about labs?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: High-risk refeeding or electrolyte contexts require clinical management, not Murph-generated supplement or calorie instructions.
-    - id: cancer_clot_and_immobility_risk
-      prompt: Are you in active cancer care, chemotherapy, radiation, or immunotherapy, or do you have prior DVT/PE, a clotting disorder, or planned long travel/prolonged immobility during the fast?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Oncology fasting and thrombosis-risk contexts require separate clinical handling.
+      - id: "adult_age_and_capacity"
+        prompt: "Are you under 18, or not able to reliably understand the plan, hydrate normally, notice symptoms, stop early, or get help if needed?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "diabetes_glucose_medication"
+        prompt: "Do you have diabetes, hypoglycemia history, ketoacidosis history, or use insulin, sulfonylureas, other glucose-lowering medication, or an SGLT2 inhibitor?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "broader_medication_review"
+        prompt: "Do you use antihypertensives, diuretics, anticoagulants, lithium or other psychotropics, anticonvulsants, diabetes medications, SGLT2 inhibitors, or any medication that must be taken with food, hydration, or meal timing?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "pregnancy_lactation_postpartum"
+        prompt: "Are you pregnant, trying to become pregnant, recently postpartum, or breastfeeding?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "eating_disorder_restriction_risk"
+        prompt: "Do you have an active or past eating disorder, binge/purge or binge/restrict cycling, low body weight, recent rapid weight loss, or fasting motives tied to compensating for eating?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "kidney_heart_gout_syncope"
+        prompt: "Do you have kidney disease, gout or uric-acid kidney stones, heart disease, arrhythmia, fainting, low blood pressure, orthostatic intolerance, or significant dehydration susceptibility?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "endocrine_neuro_liver_frailty_cachexia"
+        prompt: "Do you have uncontrolled thyroid disease, advanced liver disease, advanced kidney disease, stroke/cerebrovascular disease, dementia or cognitive impairment, frailty or fall risk, cachexia, involuntary weight loss, or low functional reserves?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "acute_illness_dehydration"
+        prompt: "Are you currently ill, feverish, vomiting, having diarrhea, dehydrated, unable to keep fluids down, or recovering from prolonged poor intake?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "prior_severe_fast_symptoms"
+        prompt: "Has a previous fast caused fainting, confusion, chest symptoms, palpitations, severe dizziness, severe weakness, inability to hydrate, or severe symptoms after refeeding?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "electrolyte_lab_or_refeeding_risk"
+        prompt: "Have you had known low sodium, potassium, phosphate, or magnesium; abnormal kidney or liver labs; very low BMI; substantial recent weight loss; several days of negligible intake; malnutrition; prior refeeding problems; or a clinician concern about labs?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "cancer_clot_and_immobility_risk"
+        prompt: "Are you in active cancer care, chemotherapy, radiation, or immunotherapy, or do you have prior DVT/PE, a clotting disorder, or planned long travel/prolonged immobility during the fast?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
-      - positive_or_uncertain_red_flag
-      - dry_fasting_intent
-      - medication_change_request
-      - high_risk_refeeding_features
-      - minor_or_lacks_capacity_to_stop_seek_help_or_hydrate
-      - broader_medication_review_needed
-      - active_cancer_treatment_or_oncology_context
-      - known_electrolyte_or_lab_concern
-      - prior_dvt_pe_clotting_or_immobility_risk
-    notes:
-    - Any yes, maybe, or unclear safety answer should prevent unsupervised private-run creation.
-    - Murph should not provide medication-change, electrolyte, thiamine, or high-risk refeeding instructions.
-    - Wearables, CGM, blood pressure, or labs are context only and never override symptoms, red flags, or clinician guidance.
-    - High-risk refeeding features route to clinician-guided care; Murph should not provide electrolyte, salt, thiamine, supplement, or calorie prescriptions.
+        - "positive_or_uncertain_red_flag"
+        - "dry_fasting_intent"
+        - "medication_change_request"
+        - "high_risk_refeeding_features"
+        - "minor_or_lacks_capacity_to_stop_seek_help_or_hydrate"
+        - "broader_medication_review_needed"
+        - "active_cancer_treatment_or_oncology_context"
+        - "known_electrolyte_or_lab_concern"
+        - "prior_dvt_pe_clotting_or_immobility_risk"
   setupSlots:
-  - id: goal
-    label: Goal
-    purpose: personalization
-    valueType: free_text
-    askPolicy: always
-    required: true
-    question: 'What are you trying to learn from this fast: tolerance, symptoms, refeed response, sleep disruption as context, appetite context, or optional glucose context if already monitored? If the goal is weight loss, compensating for eating, detox, proving willpower, pushing ketones, or pushing duration, do not create an unsupervised run.'
-    target:
-      object: onboardingCapture
-      field: goal
-  - id: selected_duration_hours
-    label: Selected duration
-    purpose: logistics
-    valueType: enum
-    askPolicy: always
-    required: true
-    question: What duration are you actually considering for this run?
-    options:
-    - twenty_four_hours
-    - thirty_six_hours
-    - forty_eight_hours
-    - sixty_hours
-    - seventy_two_hours
-    constraints:
-      durationGatingNotes:
-      - For a first unsupervised run, default to the shortest duration that answers the question.
-      - Selecting 60 or 72 hours requires prior tolerance of at least a 24-hour fast, no safety-screen red flags, a safe stop plan, and a planned refeed. Do not select a longer duration to intensify weight loss, ketones, willpower, or mental-clarity effects.
-    target:
-      object: experimentRun
-      field: selectedDurationHours
-  - id: fasting_type
-    label: Fasting type
-    purpose: safety
-    valueType: enum
-    askPolicy: always
-    required: true
-    question: What exactly would count as fasting for this run? Selecting dry fasting records a route-out condition and must not create this protocol run.
-    options:
-    - water_only_hydrated
-    - zero_calorie_hydrated
-    - modified_or_calorie_containing_fast
-    - dry_fast
-    constraints:
-      routing:
-        dry_fast: do_not_create_this_protocol_run
-        modified_or_calorie_containing_fast: route_to_separate_variant
-        zero_calorie_hydrated: allow_only_as_logged_implementation_variant_with_separate_interpretation
-      notes:
-      - Dry fasting or deliberate fluid restriction is not a selectable implementation of this protocol.
-    target:
-      object: experimentRun
-      field: fastingType
-  - id: start_end_refeed_window
-    label: Start, end, and refeed window
-    purpose: logistics
-    valueType: free_text
-    askPolicy: always
-    required: true
-    question: When would the fast start, when would it end, and when would the first planned refeed happen?
-    target:
-      object: experimentRun
-      field: startEndRefeedWindow
-  - id: prior_tolerance
-    label: Prior fasting tolerance
-    purpose: safety
-    valueType: free_text
-    askPolicy: always
-    required: true
-    question: Have you completed a 24-hour or longer fast before, and did it cause severe symptoms?
-    target:
-      object: onboardingCapture
-      field: priorTolerance
-  - id: hydration_activity_plan
-    label: Hydration and activity plan
-    purpose: safety
-    valueType: free_text
-    askPolicy: always
-    required: true
-    question: During the fast, will you have easy access to fluids, rest, and a way to stop the fast, and will you avoid strenuous training or heat stress?
-    target:
-      object: experimentRun
-      field: hydrationActivityPlan
-  - id: monitoring_available
-    label: Monitoring available
-    purpose: measurement_fidelity
-    valueType: free_text
-    askPolicy: always
-    required: true
-    question: 'What can you realistically log: symptoms only, wearable pulse or sleep-disruption context, home blood pressure, body weight, CGM/glucose, or clinician-directed labs?'
-    target:
-      object: experimentRun
-      field: monitoringPlan
-  - id: reminder_policy
-    label: Reminder policy
-    purpose: assistant_support
-    valueType: reminder_policy
-    askPolicy: ask_at_confirmation
-    required: true
-    question: What reminder support should Murph use, if any?
-    options:
-    - none
-    - start_and_refeed_reminders
-    - start_refeed_plus_one_symptom_check
-    - weekly_digest_only
-    target:
-      object: assistantSupport
-      field: reminderPolicy
+    - id: "goal"
+      label: "Goal"
+      question: "What are you trying to learn from this fast: tolerance, symptoms, refeed response, sleep disruption as context, appetite context, or optional glucose context if already monitored? If the goal is weight loss, compensating for eating, detox, proving willpower, pushing ketones, or pushing duration, do not create an unsupervised run."
+      target:
+        object: "onboardingCapture"
+        field: "goal"
+    - id: "selected_duration_hours"
+      label: "Selected duration"
+      question: "What duration are you actually considering for this run?"
+      options:
+        - "twenty_four_hours"
+        - "thirty_six_hours"
+        - "forty_eight_hours"
+        - "sixty_hours"
+        - "seventy_two_hours"
+      constraints:
+        durationGatingNotes:
+          - "For a first unsupervised run, default to the shortest duration that answers the question."
+          - "Selecting 60 or 72 hours requires prior tolerance of at least a 24-hour fast, no safety-screen red flags, a safe stop plan, and a planned refeed. Do not select a longer duration to intensify weight loss, ketones, willpower, or mental-clarity effects."
+      target:
+        object: "experimentRun"
+        field: "selectedDurationHours"
+    - id: "fasting_type"
+      label: "Fasting type"
+      question: "What exactly would count as fasting for this run? Selecting dry fasting records a route-out condition and must not create this protocol run."
+      options:
+        - "water_only_hydrated"
+        - "zero_calorie_hydrated"
+        - "modified_or_calorie_containing_fast"
+        - "dry_fast"
+      constraints:
+        routing:
+          dry_fast: "do_not_create_this_protocol_run"
+          modified_or_calorie_containing_fast: "route_to_separate_variant"
+          zero_calorie_hydrated: "allow_only_as_logged_implementation_variant_with_separate_interpretation"
+        notes:
+          - "Dry fasting or deliberate fluid restriction is not a selectable implementation of this protocol."
+      target:
+        object: "experimentRun"
+        field: "fastingType"
+    - id: "start_end_refeed_window"
+      label: "Start, end, and refeed window"
+      question: "When would the fast start, when would it end, and when would the first planned refeed happen?"
+      target:
+        object: "experimentRun"
+        field: "startEndRefeedWindow"
+    - id: "prior_tolerance"
+      label: "Prior fasting tolerance"
+      question: "Have you completed a 24-hour or longer fast before, and did it cause severe symptoms?"
+      target:
+        object: "onboardingCapture"
+        field: "priorTolerance"
+    - id: "hydration_activity_plan"
+      label: "Hydration and activity plan"
+      question: "During the fast, will you have easy access to fluids, rest, and a way to stop the fast, and will you avoid strenuous training or heat stress?"
+      target:
+        object: "experimentRun"
+        field: "hydrationActivityPlan"
+    - id: "monitoring_available"
+      label: "Monitoring available"
+      question: "What can you realistically log: symptoms only, wearable pulse or sleep-disruption context, home blood pressure, body weight, CGM/glucose, or clinician-directed labs?"
+      target:
+        object: "experimentRun"
+        field: "monitoringPlan"
+    - id: "reminder_policy"
+      label: "Reminder policy"
+      question: "What reminder support should Murph use, if any?"
+      options:
+        - "none"
+        - "start_and_refeed_reminders"
+        - "start_refeed_plus_one_symptom_check"
+        - "weekly_digest_only"
+      constraints:
+        askWhen: "at_confirmation"
+      target:
+        object: "assistantSupport"
+        field: "reminderPolicy"
+  planDefaults:
+    testPlanId: "acute-fast-tolerance-14d"
+    firstSessionGuidance: "Choose the shortest duration that answers the question, keep hydration and stop rules visible, and treat early stopping as a valid safety outcome."
   adaptationPolicy:
     fields:
-    - id: selected_duration_hours
-      label: Selected duration
-      target:
-        object: experimentRun
-        field: selectedDurationHours
-      sourceSlotIds:
-      - selected_duration_hours
-      requiredForRunSpec: true
-      protocolReusable: false
-      guidance: Store the exact selected duration. Do not auto-escalate from 24 hours to 48 or 72 hours inside the same run.
-    - id: fasting_type
-      label: Fasting type
-      target:
-        object: experimentRun
-        field: fastingType
-      sourceSlotIds:
-      - fasting_type
-      requiredForRunSpec: true
-      protocolReusable: true
-      guidance: Hydrated water-only fasting is the default target variant. Zero-calorie beverages or electrolyte variants must be logged and interpreted separately from water-only evidence. Dry fasting is unsupported for unsupervised setup and must route out. Modified, VLCD, or FMD-style fasting needs a separate adaptation or protocol.
-    - id: safety_screen_outcome
-      label: Safety screen outcome
-      target:
-        object: experimentRun
-        field: safetyScreenOutcome
-      requiredForRunSpec: true
-      protocolReusable: false
-      guidance: Positive or uncertain screen means no unsupervised private run.
-    - id: refeed_plan
-      label: Refeed plan
-      target:
-        object: experimentRun
-        field: refeedPlan
-      sourceSlotIds:
-      - start_end_refeed_window
-      requiredForRunSpec: true
-      protocolReusable: false
-      guidance: The run must include a planned end time, first refeed window, and post-refeed symptom watch. High-risk refeeding features route to clinician guidance.
-    - id: monitoring_plan
-      label: Monitoring plan
-      target:
-        object: experimentRun
-        field: monitoringPlan
-      sourceSlotIds:
-      - monitoring_available
-      requiredForRunSpec: true
-      protocolReusable: true
-      guidance: Symptom logging is required; BP, pulse, glucose/CGM, ketones, labs, and body weight are optional or risk-driven context and are never a substitute for clinical care or stop rules.
-    - id: assistant_support
-      label: Assistant support
-      target:
-        object: assistantSupport
-        field: reminderPolicy
-      sourceSlotIds:
-      - reminder_policy
-      requiredForRunSpec: true
-      protocolReusable: false
-      guidance: Reminders or follow-ups are only created after explicit confirmation, and missed-log follow-up should be neutral and easy to opt out of.
+      - id: "selected_duration_hours"
+        label: "Selected duration"
+        target:
+          object: "experimentRun"
+          field: "selectedDurationHours"
+        sourceSlotIds:
+          - "selected_duration_hours"
+        requiredForRunSpec: true
+        protocolReusable: false
+        guidance: "Store the exact selected duration. Do not auto-escalate from 24 hours to 48 or 72 hours inside the same run."
+      - id: "fasting_type"
+        label: "Fasting type"
+        target:
+          object: "experimentRun"
+          field: "fastingType"
+        sourceSlotIds:
+          - "fasting_type"
+        requiredForRunSpec: true
+        protocolReusable: true
+        guidance: "Hydrated water-only fasting is the default target variant. Zero-calorie beverages or electrolyte variants must be logged and interpreted separately from water-only evidence. Dry fasting is unsupported for unsupervised setup and must route out. Modified, VLCD, or FMD-style fasting needs a separate adaptation or protocol."
+      - id: "safety_screen_outcome"
+        label: "Safety screen outcome"
+        target:
+          object: "experimentRun"
+          field: "safetyScreenOutcome"
+        requiredForRunSpec: true
+        protocolReusable: false
+        guidance: "Positive or uncertain screen means no unsupervised private run."
+      - id: "refeed_plan"
+        label: "Refeed plan"
+        target:
+          object: "experimentRun"
+          field: "refeedPlan"
+        sourceSlotIds:
+          - "start_end_refeed_window"
+        requiredForRunSpec: true
+        protocolReusable: false
+        guidance: "The run must include a planned end time, first refeed window, and post-refeed symptom watch. High-risk refeeding features route to clinician guidance."
+      - id: "monitoring_plan"
+        label: "Monitoring plan"
+        target:
+          object: "experimentRun"
+          field: "monitoringPlan"
+        sourceSlotIds:
+          - "monitoring_available"
+        requiredForRunSpec: true
+        protocolReusable: true
+        guidance: "Symptom logging is required; BP, pulse, glucose/CGM, ketones, labs, and body weight are optional or risk-driven context and are never a substitute for clinical care or stop rules."
+      - id: "assistant_support"
+        label: "Assistant support"
+        target:
+          object: "assistantSupport"
+          field: "reminderPolicy"
+        sourceSlotIds:
+          - "reminder_policy"
+        requiredForRunSpec: true
+        protocolReusable: false
+        guidance: "Reminders or follow-ups are only created after explicit confirmation, and missed-log follow-up should be neutral and easy to opt out of."
     measurementPlan:
-      testPlanId: acute-fast-tolerance-14d
+      testPlanId: "acute-fast-tolerance-14d"
       requiredSignals:
-      - biomarker:blood-ketones-beta-hydroxybutyrate
+        - "biomarker:blood-ketones-beta-hydroxybutyrate"
       optionalSignals:
-      - biomarker:continuous-glucose
-      - biomarker:body-weight
-      - biomarker:resting-heart-rate
-      - biomarker:hrv-rmssd
-      - biomarker:morning-blood-pressure
+        - "biomarker:continuous-glucose"
+        - "biomarker:body-weight"
+        - "biomarker:resting-heart-rate"
+        - "biomarker:hrv-rmssd"
+        - "biomarker:morning-blood-pressure"
       notes:
-      - Primary measurement is safety and tolerability through refeed.
-      - Optional metabolic signals should not override symptoms or clinician guidance.
-      - Sleep disruption is logged as a confounder or symptom-context variable, not as a direct evidence-backed outcome for this protocol.
+        - "Primary measurement is safety and tolerability through refeed."
+        - "Optional metabolic signals should not override symptoms or clinician guidance."
+        - "Sleep disruption is logged as a confounder or symptom-context variable, not as a direct evidence-backed outcome for this protocol."
     reusableSetup:
       enabled: false
       notes:
-      - Do not silently reuse a prior fasting plan without rechecking duration, safety screen, hydration, monitoring, and refeed details.
-  planDefaults:
-    testPlanId: acute-fast-tolerance-14d
-    baselineDays: 7
-    interventionDays: 7
-    targetSessions: 1
-    minimumUsefulSessions: 1
-    firstSessionGuidance: Choose the shortest duration that answers the question, keep hydration and stop rules visible, and treat early stopping as a valid safety outcome.
-  logging:
-    sessionFields:
-    - fast_start_time
-    - planned_duration_hours
-    - actual_end_time
-    - fasting_type
-    - fluids_available_and_used
-    - caffeine_change_or_withdrawal
-    - strenuous_exercise_or_heat_exposure
-    - hunger_level
-    - headache
-    - dizziness_or_lightheadedness
-    - faintness_or_near_syncope
-    - palpitations
-    - chest_pain_or_pressure
-    - unusual_shortness_of_breath
-    - confusion_or_neurologic_symptoms
-    - mood_or_stress
-    - sleep_disruption
-    - blood_pressure_if_available
-    - pulse_if_available
-    - glucose_or_cgm_if_available_or_clinician_directed
-    - body_weight_if_measured
-    - first_refeed_time
-    - first_refeed_notes
-    - symptoms_after_refeed
-    confounders:
-    - acute_illness_or_fever
-    - vomiting_or_diarrhea
-    - dehydration
-    - alcohol_last_24h
-    - unusual_training_load
-    - travel_or_heat_exposure
-    - medication_change
-    - unusually_high_stress
+        - "Do not silently reuse a prior fasting plan without rechecking duration, safety screen, hydration, monitoring, and refeed details."
+  trackingHints:
+    confounderFields:
+      - "acute_illness_or_fever"
+      - "vomiting_or_diarrhea"
+      - "dehydration"
+      - "alcohol_last_24h"
+      - "unusual_training_load"
+      - "travel_or_heat_exposure"
+      - "medication_change"
+      - "unusually_high_stress"
     notes:
-    - Missed logs should be treated neutrally; do not shame or pressure duration completion.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-    - none
-    - start_and_refeed_reminders
-    - start_refeed_plus_one_symptom_check
-    - weekly_digest_only
-    weeklyDigestDefault: false
-    missedLogFollowupCopy: Did you end up continuing or ending the fast? Totally fine either way — I just want the experiment record and safety notes to be accurate.
+      - "Missed logs should be treated neutrally; do not shame or pressure duration completion."
+  supportHints:
+    missedLogFollowupCopy: "Did you end up continuing or ending the fast? Totally fine either way — I just want the experiment record and safety notes to be accurate."
 whyItWorks:
   - "## Food stops; liver covers glucose\n\nAfter the meal supply ends, liver glycogen and gluconeogenesis hold blood glucose up. Insulin falls because incoming carbohydrate is gone."
   - "## Fuel shifts toward fat and ketones\n\nAs glycogen drops, fat oxidation rises; the liver makes beta-hydroxybutyrate. Ketones mark the fuel switch, not a target to chase."

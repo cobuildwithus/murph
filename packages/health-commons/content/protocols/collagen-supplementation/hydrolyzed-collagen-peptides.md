@@ -498,6 +498,30 @@ protocol:
   - skincare_sun_weather_change
   - new_medication_or_supplement
   - notes
+  sessionFieldIds:
+  - daily_grams_taken
+  - missed_dose
+  - product_identity
+  - product_name_brand_manufacturer
+  - serving_size_grams_per_serving
+  - lot_batch_and_expiration
+  - source_species_or_category
+  - allergen_information
+  - full_ingredient_list
+  - coingredients
+  - biotin_presence
+  - third_party_testing_or_batch_coa
+  - upcoming_lab_tests
+  - target_outcome_score
+  - gi_symptoms
+  - allergic_symptoms
+  - rash_or_skin_reaction
+  - urinary_or_stone_warning_symptoms
+  - training_or_rehab_change
+  - diet_or_protein_change
+  - skincare_sun_weather_change
+  - new_medication_or_supplement
+  - notes
   stopConditions:
   - hives with systemic symptoms, swelling of lips/tongue/face/throat, throat tightness, wheezing, shortness of breath, dizziness/fainting, or repeated vomiting
   - painful or widespread red-purple rash, blistering, peeling skin, fever with rash, mouth sores, eye pain/redness, genital sores, or facial swelling
@@ -623,364 +647,192 @@ expectedSignalDescriptions:
     confidence: low
     basis: "Short HCP trials often report acceptable tolerability, but adverse-event extraction is incomplete and source_artifact:racgp-oa-nutraceuticals-2026-04-25 notes GI events as a practical monitoring signal."
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to explore doing hydrolyzed collagen peptides.
-    intentSummary: Create a private, target-specific HCP supplement run only after product, safety, measurement, and confounder setup are confirmed.
-  contextReview:
-    vaultChecks:
-
-    -
-      id: active_experiments
-      label: Active experiments
-      reason: Avoid stacking a new supplement run on top of overlapping experiments that change the same outcome.
-    -
-      id: current_supplements
-      label: Current supplements
-      reason: Collagen blends and new supplements can confound outcome and safety interpretation.
-    -
-      id: allergies_and_food_reactions
-      label: Allergies and food reactions
-      reason: Source species, collagen/gelatin/gummy/capsule reactions, fish/marine allergy, Crustacean-shellfish cross-contact concern, and alpha-gal/mammalian-source reactions are key safety gates.
-    -
-      id: medical_nutrition_boundaries
-      label: Medical nutrition boundaries
-      reason: CKD, transplant, dialysis, recurrent stones, protein restrictions, malnutrition, frailty, wound care, fracture, surgery, pregnancy, lactation, child/adolescent use, and clinician-directed nutrition plans need clinician-guided decisions.
-    -
-      id: target_outcome_history
-      label: Target outcome history
-      reason: The run should measure one target with a baseline and follow-up plan.
-    -
-      id: training_or_rehab_context
-      label: Training or rehab context
-      reason: Joint, tendon, and recovery outcomes depend heavily on loading and training context.
-    -
-      id: skincare_and_sun_context
-      label: Skincare, sun, and season context
-      reason: Skin endpoints can be confounded by skincare changes, sun exposure, humidity, and season.
-    -
-      id: diet_and_protein_context
-      label: Diet and protein context
-      reason: Protein intake, energy intake, calcium, vitamin D, and other diet changes can affect interpretation.
-    -
-      id: upcoming_labs
-      label: Upcoming lab tests
-      reason: Biotin-containing beauty or collagen blends can interfere with some lab tests, so planned thyroid, cardiac/troponin, endocrine, or hormone labs should be visible before starting.
+    displayPrompt: "Hey Murph, I want to explore doing hydrolyzed collagen peptides."
+    intentSummary: "Create a private, target-specific HCP supplement run only after product, safety, measurement, and confounder setup are confirmed."
   safetyScreen:
-    cautionLevel: moderate
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-    -
-      id: collagen_gelatin_or_product_reaction
-      prompt: Have you reacted to collagen, gelatin, gummies, marshmallows, capsules, bovine/porcine/fish/marine products, or this exact product before?
-      ifPositive: do_not_start_unsupervised
-      why: Prior reaction to the ingredient family or product is a hard stop for an unsupervised supplement trial.
-    -
-      id: fish_marine_or_shellfish_allergy_source_unclear
-      prompt: Do you have fish allergy, Crustacean shellfish allergy, or uncertainty about whether the product is fish/marine-derived or cross-contact controlled?
-      ifPositive: do_not_start_unsupervised
-      why: Fish and Crustacean shellfish are major allergen categories and marine-source/cross-contact details affect the safety boundary.
-    -
-      id: alpha_gal_or_mammalian_source_reaction
-      prompt: Have you been diagnosed with alpha-gal syndrome or had reactions to mammalian meat, bovine/porcine gelatin, mammal-derived capsules, or mammalian-source products?
-      ifPositive: do_not_start_unsupervised
-      why: Bovine/porcine collagen, gelatin, capsules, and some excipients can be mammalian-source exposures.
-    -
-      id: severe_allergy_history
-      prompt: Have you ever had anaphylaxis, breathing symptoms, facial/tongue/throat swelling, throat tightness, wheezing, fainting, repeated vomiting, or severe rash from a food, supplement, cosmetic, or medication?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Severe allergy history raises the threshold for an unsupervised supplement trial.
-    -
-      id: kidney_or_stone_or_protein_restriction
-      prompt: Do you have CKD, transplant history, dialysis, clinician-prescribed protein restriction, recurrent kidney stones, calcium-oxalate stones, hyperoxaluria, reduced/uncertain kidney function, or kidney-related diet advice?
-      ifPositive: do_not_start_unsupervised
-      why: Collagen is a protein-containing supplement and hydroxyproline/oxalate pathways create a conservative stone/kidney safety boundary.
-    -
-      id: pregnancy_lactation_child_or_adolescent
-      prompt: Are you pregnant, trying to conceive, breastfeeding, or planning this for a child or adolescent?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: The extracted HCP evidence does not establish safety or efficacy for these higher-threshold contexts.
-    -
-      id: active_care_or_medically_supervised_diet
-      prompt: Are you on prescription medications, in active medical care, managing immune/liver/GI malabsorption/cancer/eating-disorder concerns, or following a medically supervised diet?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Medical-care and drug/nutrition contexts can change risk, interactions, and interpretation.
-    -
-      id: blend_coingredients_or_biotin
-      prompt: Does the product include biotin, herbs, high-dose vitamins/minerals, glucosamine, chondroitin, MSM, probiotics, stimulants, or other active ingredients beyond HCP?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Active coingredients can introduce interaction, lab-interference, teratogenicity, and confounding concerns.
-    -
-      id: upcoming_labs
-      prompt: Do you have upcoming thyroid, cardiac/troponin, endocrine, hormone, or other clinical lab tests, especially if the product contains biotin?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Biotin in supplement blends can interfere with some assays and cause incorrect results.
-    -
-      id: product_identity_quality_incomplete
-      prompt: Is the product missing grams per serving, source species/category, full ingredients, allergen information, serving instructions, manufacturer, or lot/batch; is the seal damaged; is there a recall; or is source/species unclear?
-      ifPositive: do_not_start_unsupervised
-      why: Product identity, source, allergens, and lot-level quality are required before starting.
+      - id: "collagen_gelatin_or_product_reaction"
+        prompt: "Have you reacted to collagen, gelatin, gummies, marshmallows, capsules, bovine/porcine/fish/marine products, or this exact product before?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "fish_marine_or_shellfish_allergy_source_unclear"
+        prompt: "Do you have fish allergy, Crustacean shellfish allergy, or uncertainty about whether the product is fish/marine-derived or cross-contact controlled?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "alpha_gal_or_mammalian_source_reaction"
+        prompt: "Have you been diagnosed with alpha-gal syndrome or had reactions to mammalian meat, bovine/porcine gelatin, mammal-derived capsules, or mammalian-source products?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "severe_allergy_history"
+        prompt: "Have you ever had anaphylaxis, breathing symptoms, facial/tongue/throat swelling, throat tightness, wheezing, fainting, repeated vomiting, or severe rash from a food, supplement, cosmetic, or medication?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "kidney_or_stone_or_protein_restriction"
+        prompt: "Do you have CKD, transplant history, dialysis, clinician-prescribed protein restriction, recurrent kidney stones, calcium-oxalate stones, hyperoxaluria, reduced/uncertain kidney function, or kidney-related diet advice?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "pregnancy_lactation_child_or_adolescent"
+        prompt: "Are you pregnant, trying to conceive, breastfeeding, or planning this for a child or adolescent?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "active_care_or_medically_supervised_diet"
+        prompt: "Are you on prescription medications, in active medical care, managing immune/liver/GI malabsorption/cancer/eating-disorder concerns, or following a medically supervised diet?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "blend_coingredients_or_biotin"
+        prompt: "Does the product include biotin, herbs, high-dose vitamins/minerals, glucosamine, chondroitin, MSM, probiotics, stimulants, or other active ingredients beyond HCP?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "upcoming_labs"
+        prompt: "Do you have upcoming thyroid, cardiac/troponin, endocrine, hormone, or other clinical lab tests, especially if the product contains biotin?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "product_identity_quality_incomplete"
+        prompt: "Is the product missing grams per serving, source species/category, full ingredients, allergen information, serving instructions, manufacturer, or lot/batch; is the seal damaged; is there a recall; or is source/species unclear?"
+        ifPositive: "do_not_start_unsupervised"
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
-      - systemic_or_severe_allergy_symptoms
-      - severe_skin_reaction
-      - kidney_stone_or_urinary_warning_symptoms
-      - persistent_vomiting_diarrhea_or_dehydration
-      - biotin_relevant_lab_testing
-      - product_recall_contamination_damaged_seal_or_label_inconsistency
-      - new_medical_nutrition_boundary
-    notes:
-    - Safety gates are handled before dose planning. A positive hard-stop screen should not be overridden by efficacy interest.
-    - The default population is generally healthy adults using a clearly labeled HCP product with known dose, source, ingredients, allergens, manufacturer, and lot/batch.
-    - Plain HCP and multi-ingredient beauty blends are separate experiments; active coingredients should trigger clinician/pharmacist guidance or a separate blend protocol.
+        - "systemic_or_severe_allergy_symptoms"
+        - "severe_skin_reaction"
+        - "kidney_stone_or_urinary_warning_symptoms"
+        - "persistent_vomiting_diarrhea_or_dehydration"
+        - "biotin_relevant_lab_testing"
+        - "product_recall_contamination_damaged_seal_or_label_inconsistency"
+        - "new_medical_nutrition_boundary"
   setupSlots:
-
-  -
-    id: target_outcome
-    label: Primary target outcome
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: always
-    required: true
-    question: What one outcome are you trying to test first?
-    options:
-    - skin_appearance_or_hydration
-    - joint_pain_function
-    - tendon_or_loading_symptoms
-    - workout_recovery
-    - body_composition_with_training
-    - bone_lab_context
-    - tolerability_adherence
-    target:
-      object: onboardingCapture
-      field: setupAnswers.targetOutcome
-  -
-    id: product_identity
-    label: Exact product
-    purpose: safety
-    valueType: free_text
-    askPolicy: always
-    required: true
-    question: What exact product, brand, manufacturer, serving size, grams per serving, lot/batch, expiration date, ingredient list, allergen information, and serving instructions are on the label?
-    target:
-      object: onboardingCapture
-      field: setupAnswers.productIdentity
-  -
-    id: planned_daily_grams
-    label: Planned daily grams
-    purpose: logistics
-    valueType: number
-    askPolicy: always
-    required: true
-    question: How many grams of hydrolyzed collagen peptides per day will you hold constant?
-    target:
-      object: onboardingCapture
-      field: setupAnswers.plannedDailyGrams
-  -
-    id: source_species
-    label: Source species
-    purpose: safety
-    valueType: enum
-    askPolicy: always
-    required: true
-    question: What source species/category is listed, and is fish/marine or mammalian source/cross-contact information clear?
-    options:
-    - fish_marine
-    - bovine
-    - porcine
-    - chicken
-    - mixed
-    - unknown
-    target:
-      object: onboardingCapture
-      field: setupAnswers.sourceSpecies
-  -
-    id: coingredients
-    label: Cointerventions and coingredients
-    purpose: confounder_control
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: true
-    question: Does the product include biotin, herbs, high-dose vitamins/minerals, glucosamine, chondroitin, MSM, probiotics, stimulants, vitamin C, hyaluronic acid, calcium, vitamin D, sweeteners, or other active ingredients?
-    target:
-      object: onboardingCapture
-      field: setupAnswers.coingredients
-  -
-    id: schedule_timing
-    label: Dose timing
-    purpose: adherence
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: true
-    question: When will you take it each day, and will timing around training or loading be part of the plan?
-    target:
-      object: onboardingCapture
-      field: setupAnswers.scheduleTiming
-  -
-    id: duration_target
-    label: Target duration
-    purpose: logistics
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: Which time horizon matches the target?
-    options:
-    - four_weeks_setup
-    - six_weeks_skin
-    - eight_to_twelve_weeks_skin_or_joint
-    - twelve_weeks_training_or_recovery
-    - three_to_six_months_tendon_loading
-    - twelve_months_bone_clinical
-    target:
-      object: onboardingCapture
-      field: setupAnswers.durationTarget
-  -
-    id: primary_metric
-    label: Primary metric
-    purpose: measurement_fidelity
-    valueType: free_text
-    askPolicy: always
-    required: true
-    question: What exact score, questionnaire, photo method, pain/function scale, or recovery check will be used as the primary metric?
-    target:
-      object: onboardingCapture
-      field: setupAnswers.primaryMetric
-  -
-    id: baseline_plan
-    label: Baseline plan
-    purpose: measurement_fidelity
-    valueType: free_text
-    askPolicy: always
-    required: true
-    question: How will you collect a 7-day baseline before starting the supplement?
-    target:
-      object: onboardingCapture
-      field: setupAnswers.baselinePlan
-  -
-    id: cointerventions_to_keep_stable
-    label: Confounders to hold stable
-    purpose: confounder_control
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: true
-    question: Which training, rehab, skincare, sun exposure, diet/protein, analgesic, medication, and supplement variables will you keep stable or log as changes?
-    target:
-      object: onboardingCapture
-      field: setupAnswers.cointerventionsToKeepStable
-  -
-    id: reminder_policy
-    label: Reminder policy
-    purpose: assistant_support
-    valueType: reminder_policy
-    askPolicy: ask_at_confirmation
-    required: false
-    question: Do you want a daily dose/log reminder and weekly check-in?
-    target:
-      object: onboardingCapture
-      field: setupAnswers.reminderPolicy
-  -
-    id: allergy_and_alpha_gal_context
-    label: Allergy and alpha-gal context
-    purpose: safety
-    valueType: free_text
-    askPolicy: always
-    required: true
-    question: Any fish, Crustacean shellfish, collagen, gelatin, bovine/porcine, mammalian-meat, capsule/gummy/marshmallow, alpha-gal, or same-product reactions?
-    target:
-      object: onboardingCapture
-      field: setupAnswers.allergyAndAlphaGalContext
-  -
-    id: kidney_and_stone_context
-    label: Kidney and stone context
-    purpose: safety
-    valueType: free_text
-    askPolicy: always
-    required: true
-    question: Any CKD, transplant, dialysis, protein restriction, recurrent stones, calcium-oxalate stones, hyperoxaluria, or uncertain kidney function?
-    target:
-      object: onboardingCapture
-      field: setupAnswers.kidneyAndStoneContext
-  -
-    id: biotin_and_lab_context
-    label: Biotin and upcoming labs
-    purpose: safety
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: false
-    question: Does the product contain biotin, and are thyroid, cardiac/troponin, endocrine, hormone, or other clinical labs coming up?
-    target:
-      object: onboardingCapture
-      field: setupAnswers.biotinAndLabContext
-  -
-    id: marine_contaminant_testing
-    label: Marine-source testing
-    purpose: safety
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: false
-    question: For fish/marine collagen, is a batch COA or third-party contaminant test available, including metals/metalloids?
-    target:
-      object: onboardingCapture
-      field: setupAnswers.marineContaminantTesting
+    - id: "target_outcome"
+      label: "Primary target outcome"
+      question: "What one outcome are you trying to test first?"
+      options:
+        - "skin_appearance_or_hydration"
+        - "joint_pain_function"
+        - "tendon_or_loading_symptoms"
+        - "workout_recovery"
+        - "body_composition_with_training"
+        - "bone_lab_context"
+        - "tolerability_adherence"
+      target:
+        object: "onboardingCapture"
+        field: "setupAnswers.targetOutcome"
+    - id: "product_identity"
+      label: "Exact product"
+      question: "What exact product, brand, manufacturer, serving size, grams per serving, lot/batch, expiration date, ingredient list, allergen information, and serving instructions are on the label?"
+      target:
+        object: "onboardingCapture"
+        field: "setupAnswers.productIdentity"
+    - id: "planned_daily_grams"
+      label: "Planned daily grams"
+      question: "How many grams of hydrolyzed collagen peptides per day will you hold constant?"
+      target:
+        object: "onboardingCapture"
+        field: "setupAnswers.plannedDailyGrams"
+    - id: "source_species"
+      label: "Source species"
+      question: "What source species/category is listed, and is fish/marine or mammalian source/cross-contact information clear?"
+      options:
+        - "fish_marine"
+        - "bovine"
+        - "porcine"
+        - "chicken"
+        - "mixed"
+        - "unknown"
+      target:
+        object: "onboardingCapture"
+        field: "setupAnswers.sourceSpecies"
+    - id: "coingredients"
+      label: "Cointerventions and coingredients"
+      question: "Does the product include biotin, herbs, high-dose vitamins/minerals, glucosamine, chondroitin, MSM, probiotics, stimulants, vitamin C, hyaluronic acid, calcium, vitamin D, sweeteners, or other active ingredients?"
+      target:
+        object: "onboardingCapture"
+        field: "setupAnswers.coingredients"
+    - id: "schedule_timing"
+      label: "Dose timing"
+      question: "When will you take it each day, and will timing around training or loading be part of the plan?"
+      target:
+        object: "onboardingCapture"
+        field: "setupAnswers.scheduleTiming"
+    - id: "duration_target"
+      label: "Target duration"
+      question: "Which time horizon matches the target?"
+      options:
+        - "four_weeks_setup"
+        - "six_weeks_skin"
+        - "eight_to_twelve_weeks_skin_or_joint"
+        - "twelve_weeks_training_or_recovery"
+        - "three_to_six_months_tendon_loading"
+        - "twelve_months_bone_clinical"
+      target:
+        object: "onboardingCapture"
+        field: "setupAnswers.durationTarget"
+    - id: "primary_metric"
+      label: "Primary metric"
+      question: "What exact score, questionnaire, photo method, pain/function scale, or recovery check will be used as the primary metric?"
+      target:
+        object: "onboardingCapture"
+        field: "setupAnswers.primaryMetric"
+    - id: "baseline_plan"
+      label: "Baseline plan"
+      question: "How will you collect a 7-day baseline before starting the supplement?"
+      target:
+        object: "onboardingCapture"
+        field: "setupAnswers.baselinePlan"
+    - id: "cointerventions_to_keep_stable"
+      label: "Confounders to hold stable"
+      question: "Which training, rehab, skincare, sun exposure, diet/protein, analgesic, medication, and supplement variables will you keep stable or log as changes?"
+      target:
+        object: "onboardingCapture"
+        field: "setupAnswers.cointerventionsToKeepStable"
+    - id: "reminder_policy"
+      label: "Reminder policy"
+      question: "Do you want a daily dose/log reminder and weekly check-in?"
+      constraints:
+        optional: true
+        askWhen: "at_confirmation"
+      target:
+        object: "onboardingCapture"
+        field: "setupAnswers.reminderPolicy"
+    - id: "allergy_and_alpha_gal_context"
+      label: "Allergy and alpha-gal context"
+      question: "Any fish, Crustacean shellfish, collagen, gelatin, bovine/porcine, mammalian-meat, capsule/gummy/marshmallow, alpha-gal, or same-product reactions?"
+      target:
+        object: "onboardingCapture"
+        field: "setupAnswers.allergyAndAlphaGalContext"
+    - id: "kidney_and_stone_context"
+      label: "Kidney and stone context"
+      question: "Any CKD, transplant, dialysis, protein restriction, recurrent stones, calcium-oxalate stones, hyperoxaluria, or uncertain kidney function?"
+      target:
+        object: "onboardingCapture"
+        field: "setupAnswers.kidneyAndStoneContext"
+    - id: "biotin_and_lab_context"
+      label: "Biotin and upcoming labs"
+      question: "Does the product contain biotin, and are thyroid, cardiac/troponin, endocrine, hormone, or other clinical labs coming up?"
+      constraints:
+        optional: true
+      target:
+        object: "onboardingCapture"
+        field: "setupAnswers.biotinAndLabContext"
+    - id: "marine_contaminant_testing"
+      label: "Marine-source testing"
+      question: "For fish/marine collagen, is a batch COA or third-party contaminant test available, including metals/metalloids?"
+      constraints:
+        optional: true
+      target:
+        object: "onboardingCapture"
+        field: "setupAnswers.marineContaminantTesting"
   planDefaults:
-    testPlanId: chosen-primary-outcome-91d
-    baselineDays: 7
-    interventionDays: 84
-    sessionsPerWeek: 7
-    targetSessions: 84
-    minimumUsefulSessions: 56
-    firstSessionGuidance: Confirm product identity, label-required details, dose, source species/category, target metric, baseline plan, hard-stop safety screen, lab/biotin context, and confounders before logging the first daily dose.
-  logging:
-    sessionFields:
-    - daily_grams_taken
-    - missed_dose
-    - product_identity
-    - product_name_brand_manufacturer
-    - serving_size_grams_per_serving
-    - lot_batch_and_expiration
-    - source_species_or_category
-    - allergen_information
-    - full_ingredient_list
-    - coingredients
-    - biotin_presence
-    - third_party_testing_or_batch_coa
-    - upcoming_lab_tests
-    - target_outcome_score
-    - gi_symptoms
-    - allergic_symptoms
-    - rash_or_skin_reaction
-    - urinary_or_stone_warning_symptoms
-    - training_or_rehab_change
-    - diet_or_protein_change
-    - skincare_sun_weather_change
-    - new_medication_or_supplement
-    - notes
-    confounders:
-    - product_switch
-    - dose_change
-    - collagen_product_stacking
-    - multi_ingredient_blend
-    - training_or_rehab_load
-    - analgesic_or_rescue_med_use
-    - diet_or_protein_change
-    - skincare_sun_weather_change
-    - sleep_illness_travel
-    - new_medication_or_supplement
-    - upcoming_lab_tests_or_biotin_pause
+    testPlanId: "chosen-primary-outcome-91d"
+    firstSessionGuidance: "Confirm product identity, label-required details, dose, source species/category, target metric, baseline plan, hard-stop safety screen, lab/biotin context, and confounders before logging the first daily dose."
+  trackingHints:
+    confounderFields:
+      - "product_switch"
+      - "dose_change"
+      - "collagen_product_stacking"
+      - "multi_ingredient_blend"
+      - "training_or_rehab_load"
+      - "analgesic_or_rescue_med_use"
+      - "diet_or_protein_change"
+      - "skincare_sun_weather_change"
+      - "sleep_illness_travel"
+      - "new_medication_or_supplement"
+      - "upcoming_lab_tests_or_biotin_pause"
     notes:
-    - Daily logging should capture dose/adherence, product identity/lot, safety symptoms, allergy/GI/rash/urinary warning symptoms, and major confounders. Weekly checks should revisit the primary metric rather than collecting every possible collagen endpoint.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 4
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-    - daily_log
-    - weekly_checkin
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: Want to mark whether you took collagen yesterday and note any symptoms or confounders?
+      - "Daily logging should capture dose/adherence, product identity/lot, safety symptoms, allergy/GI/rash/urinary warning symptoms, and major confounders. Weekly checks should revisit the primary metric rather than collecting every possible collagen endpoint."
+  supportHints:
+    missedLogFollowupCopy: "Want to mark whether you took collagen yesterday and note any symptoms or confounders?"
 whyItWorks:
 - “## Collagen peptides survive digestion and reach target tissues\n\nHydrolysis breaks collagen into low-molecular-weight peptides (Pro-Hyp, Hyp-Gly, and others) that survive gastric acid and appear in blood within hours. These peptide fragments accumulate in skin, cartilage, and connective tissue, where they act as both building blocks and signaling molecules for local matrix turnover.”
 - “## Skin outcomes have the strongest direct signal\n\nAcross RCTs and meta-analyses, daily HCP intake improves dermal hydration, elasticity, and wrinkle depth over 6–12 weeks. The peptides stimulate fibroblast collagen synthesis and glycosaminoglycan production in the dermis. Results remain product-, dose-, and population-specific rather than universal.”

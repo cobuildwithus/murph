@@ -589,12 +589,10 @@ function buildExperimentPlanPayloadFromTypedOptions(input: {
       })
     : undefined
   const onboarding = protocol?.experimentOnboarding
-  const defaults = onboarding?.planDefaults
   const baselineDays =
-    input.options.baselineDays ?? defaults?.baselineDays ?? testPlan?.baselineDays
+    input.options.baselineDays ?? testPlan?.baselineDays
   const interventionDays =
     input.options.interventionDays ??
-    defaults?.interventionDays ??
     testPlan?.interventionDays
   const windows = resolveStartWindows({
     baselineStart: input.options.baselineStart,
@@ -657,10 +655,9 @@ function buildExperimentPlanPayloadFromTypedOptions(input: {
   const schedule = buildRunScheduleFromOptions(input.options)
   const sessionFields =
     input.options.sessionField ??
-    onboarding?.logging?.sessionFields ??
-    protocolSpec?.logFields
+    protocolSpec?.sessionFieldIds
   const confounderFields =
-    input.options.confounderField ?? onboarding?.logging?.confounders
+    input.options.confounderField ?? onboarding?.trackingHints?.confounderFields
 
   const runPlan = experimentRunPlanSchema.parse(
     compactRecord({
@@ -673,15 +670,14 @@ function buildExperimentPlanPayloadFromTypedOptions(input: {
       dose: truncateBoundedText(input.options.dose ?? protocolSpec?.doseSignature, 160),
       sessionsPerWeek:
         input.options.sessionsPerWeek ??
-        defaults?.sessionsPerWeek ??
         protocolSpec?.frequency?.sessionsPerWeek,
       targetSessions:
         input.options.targetSessions ??
-        defaults?.targetSessions ??
+        testPlan?.targetAdherenceSessions ??
         protocolSpec?.interventionSessionsTarget,
       minimumUsefulSessions:
         input.options.minimumUsefulSessions ??
-        defaults?.minimumUsefulSessions ??
+        testPlan?.minimumAdherenceSessions ??
         protocolSpec?.interventionSessionsMinimum,
       logging:
         sessionFields === undefined
@@ -754,10 +750,8 @@ function buildExperimentPlanPayloadFromTypedOptions(input: {
       analysisPlan,
       assistantSupport: compactRecord({
         remindersEnabled: input.options.remindersEnabled,
-        missedLogFollowup:
-          input.options.missedLogFollowup ?? onboarding?.assistantPolicy?.missedLogFollowup,
-        weeklyDigestEnabled:
-          input.options.weeklyDigestEnabled ?? onboarding?.assistantPolicy?.weeklyDigestDefault,
+        missedLogFollowup: input.options.missedLogFollowup,
+        weeklyDigestEnabled: input.options.weeklyDigestEnabled,
       }),
     }),
   )

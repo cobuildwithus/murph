@@ -574,6 +574,23 @@ protocol:
   - fall risk, dizziness, balance limits, or floor limitations
   - partner/manual assistance, external force, or aggressive leverage used
   - time of day, warm-up state, footwear/setup change, illness, sleep, and stress
+  sessionFieldIds:
+  - target_area
+  - stretch_position
+  - target_side
+  - support_used
+  - holds_completed
+  - total_hold_seconds
+  - intensity_0_10
+  - mild_discomfort_or_pain
+  - primary_measure_value
+  - measurement_side_limb_and_units
+  - perceived_stiffness_0_10
+  - session_burden_0_10
+  - symptoms_during_session
+  - symptoms_after_session
+  - symptoms_settled_after_stopping
+  - missed_session_reason
   stopConditions:
   - Stop the stretch immediately if you feel sharp pain, a sudden pull, a pop, or symptoms that feel like an acute strain.
   - Stop immediately if you notice radiating pain, numbness, tingling, paresthesia, new weakness, reflex changes, progressive neurologic symptoms, gait/hand-clumsiness symptoms, or symptoms that feel neurologic rather than muscular.
@@ -703,241 +720,133 @@ expectedSignalDescriptions:
     confidence: low
     basis: "Source-backed anchor: source_artifact:pmid-37231582 supports objective stiffness reduction after long-term static stretching, but user-rated stiffness is not the main pooled endpoint and does not map cleanly to a simple check-in."
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to explore at-home static stretching.
-    intentSummary: Explore At Home Static Stretching
-  contextReview:
-    vaultChecks:
-
-    -
-      id: active_experiments
-      label: Active experiments
-      reason: Avoid stacking a new flexibility run on top of another meaningful experiment unless the user accepts weaker attribution.
-      readHints:
-      - experiment list --status active
-    -
-      id: recent_pain_or_injury_context
-      label: Recent pain, injury, surgery, or rehab context
-      reason: Static stretching for general flexibility should not silently become treatment for pain, acute injury, repaired tissue, neurologic symptoms, or post-surgical rehab.
-      freshnessDays: 60
-      readHints:
-      - memory show
-      - search query "pain injury surgery rehab stretching mobility"
-      - journal show
-    -
-      id: mobility_measurement_history
-      label: Existing flexibility measurements
-      reason: Reuse any recent toe-touch, sit-and-reach, knee-to-wall, shoulder reach, stiffness, or symptom logs before asking for repeated setup details.
-      freshnessDays: 30
-      readHints:
-      - metrics list flexibility mobility
-      - journal show
-    notes:
-    - Review context first, but still ask the compact safety screen because several red flags are not reliably inferable from saved notes.
+    displayPrompt: "Hey Murph, I want to explore at-home static stretching."
+    intentSummary: "Explore At Home Static Stretching"
   safetyScreen:
-    cautionLevel: moderate
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-    -
-      id: pain_neurologic_symptoms
-      prompt: Do you have sharp pain, radiating pain, numbness, tingling, new weakness, reflex changes, gait or hand clumsiness, or symptoms that feel neurologic rather than ordinary tightness?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Neurologic symptoms are not normal stretch discomfort.
-    -
-      id: recent_injury_surgery_repair
-      prompt: Have you had a recent injury, surgery, tendon/soft-tissue repair, clinician-imposed range-of-motion limit, or current clinician-directed rehab plan for the area you want to stretch?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Repaired, injured, restricted, or rehabilitating tissue belongs in a clinician-guided pathway rather than a generic flexibility experiment.
-    -
-      id: hypermobility_instability
-      prompt: Have you been diagnosed with hEDS/EDS, joint hypermobility syndrome, recurrent subluxations/dislocations, or joints that feel unstable at end range?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Symptomatic hypermobility changes the default from deeper stretching toward individualized stability and control.
-    -
-      id: pregnancy_postpartum_status
-      prompt: Are you currently pregnant or postpartum?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Pregnancy and postpartum activity needs a pregnancy-specific contraindication and modification branch, not the ordinary wellness starter.
-    -
-      id: pregnancy_postpartum_warning_signs
-      prompt: If pregnant or postpartum, do you have warning signs such as bleeding, fluid leakage, painful contractions, chest pain, unexplained shortness of breath or dyspnea before exertion, dizziness, headache, calf pain/swelling, or weakness affecting balance?
-      ifPositive: do_not_start_unsupervised
-      why: Pregnancy/postpartum warning signs should stop activity and prompt care.
-    -
-      id: clinical_pain_or_rehab_target
-      prompt: Are you trying to treat pain, sciatica, plantar heel/foot pain, progressive shoulder stiffness, suspected muscle/tendon strain, post-surgical stiffness, or a clinician-directed rehab problem with this run?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Clinical pain and rehab contexts belong in separate guided variants, not the ordinary flexibility experiment.
-    -
-      id: severe_post_exertion_symptoms
-      prompt: Have you recently done unusually strenuous exercise, or do you have severe muscle pain, swelling, weakness, dark urine, or systemic symptoms?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Severe post-exertion symptoms are not ordinary stiffness and should not be stretched through.
-    -
-      id: forceful_assisted_or_pain_seeking_stretching
-      prompt: Would this routine involve someone pushing you into the stretch, manual force, external loading, aggressive end-range leverage, or intentionally stretching into pain?
-      ifPositive: do_not_start_unsupervised
-      why: This starter variant is self-applied gentle static stretching, not assisted, forced, extreme-range, or pain-seeking stretching.
-    -
-      id: fall_balance_or_floor_limitation
-      prompt: Do you have a fall history, frailty, dizziness, balance limits, or floor limitations that make unsupported standing or floor stretching risky?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Fall or floor-limitation positives need seated or fully supported positions and no balance-challenging stretches before an unsupervised run is created.
-    -
-      id: known_disease_or_high_intensity_plan
-      prompt: Do you have known cardiovascular, metabolic, or renal disease with concerning symptoms, or are you planning to combine this with higher-intensity exercise?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: This starter is a gentle static-only run; disease with concerning symptoms or higher-intensity combinations need a separate clearance path.
+      - id: "pain_neurologic_symptoms"
+        prompt: "Do you have sharp pain, radiating pain, numbness, tingling, new weakness, reflex changes, gait or hand clumsiness, or symptoms that feel neurologic rather than ordinary tightness?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "recent_injury_surgery_repair"
+        prompt: "Have you had a recent injury, surgery, tendon/soft-tissue repair, clinician-imposed range-of-motion limit, or current clinician-directed rehab plan for the area you want to stretch?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "hypermobility_instability"
+        prompt: "Have you been diagnosed with hEDS/EDS, joint hypermobility syndrome, recurrent subluxations/dislocations, or joints that feel unstable at end range?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "pregnancy_postpartum_status"
+        prompt: "Are you currently pregnant or postpartum?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "pregnancy_postpartum_warning_signs"
+        prompt: "If pregnant or postpartum, do you have warning signs such as bleeding, fluid leakage, painful contractions, chest pain, unexplained shortness of breath or dyspnea before exertion, dizziness, headache, calf pain/swelling, or weakness affecting balance?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "clinical_pain_or_rehab_target"
+        prompt: "Are you trying to treat pain, sciatica, plantar heel/foot pain, progressive shoulder stiffness, suspected muscle/tendon strain, post-surgical stiffness, or a clinician-directed rehab problem with this run?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "severe_post_exertion_symptoms"
+        prompt: "Have you recently done unusually strenuous exercise, or do you have severe muscle pain, swelling, weakness, dark urine, or systemic symptoms?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "forceful_assisted_or_pain_seeking_stretching"
+        prompt: "Would this routine involve someone pushing you into the stretch, manual force, external loading, aggressive end-range leverage, or intentionally stretching into pain?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "fall_balance_or_floor_limitation"
+        prompt: "Do you have a fall history, frailty, dizziness, balance limits, or floor limitations that make unsupported standing or floor stretching risky?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "known_disease_or_high_intensity_plan"
+        prompt: "Do you have known cardiovascular, metabolic, or renal disease with concerning symptoms, or are you planning to combine this with higher-intensity exercise?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
-      - new or progressive neurologic symptoms
-      - joint instability, slipping, subluxation, or dislocation feeling
-      - pain or symptoms that increase during a hold, do not settle after backing off, or recur/worsen on the next attempted session
-      - severe post-exertion muscle pain, swelling, weakness, dark urine, or systemic symptoms
-      - pregnancy/postpartum warning signs
-      - partner force, manual pushing, external loading, or pain-seeking stretching
-    notes:
-    - A positive screen is not a diagnosis. Do not create an unsupervised run until the positive item is triaged.
-    - Fall or floor-limitation positives may continue only after switching to seated or fully supported positions and avoiding balance-challenging stretches.
-    - Item-level do_not_start_unsupervised dispositions override the general compact-screen routing.
+        - "new or progressive neurologic symptoms"
+        - "joint instability, slipping, subluxation, or dislocation feeling"
+        - "pain or symptoms that increase during a hold, do not settle after backing off, or recur/worsen on the next attempted session"
+        - "severe post-exertion muscle pain, swelling, weakness, dark urine, or systemic symptoms"
+        - "pregnancy/postpartum warning signs"
+        - "partner force, manual pushing, external loading, or pain-seeking stretching"
   setupSlots:
-
-  -
-    id: target_area
-    label: Primary target area
-    purpose: personalization
-    valueType: enum
-    askPolicy: always
-    required: true
-    question: Which one area do you want to test first?
-    options:
-    - posterior_chain_hamstrings
-    - calf_ankle
-    - hip_flexor
-    - shoulder_upper_body
-    target:
-      object: protocol
-      field: targetArea
-  -
-    id: primary_measure
-    label: Primary measurement
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: always
-    required: true
-    question: Which repeatable measurement will you use for that target?
-    options:
-    - toe_touch_distance
-    - sit_and_reach_distance
-    - ankle_knee_to_wall_distance
-    - shoulder_reach_distance
-    target:
-      object: analysisPlan
-      field: primaryMeasure
-  -
-    id: sessions_per_week
-    label: Planned sessions per week
-    purpose: adherence
-    valueType: integer
-    askPolicy: ask_if_unknown
-    required: true
-    question: How many days per week can you realistically do the routine? The default is 5.
-    constraints:
-      min: 4
-      max: 6
-      default: 5
-    target:
-      object: protocol
-      field: sessionsPerWeek
-  -
-    id: weekly_schedule
-    label: Weekly schedule
-    purpose: logistics
-    valueType: weekly_time_windows
-    askPolicy: ask_if_unknown
-    required: false
-    question: Which days or time windows are easiest for stretching?
-    constraints:
-      defaultRunPlanSchedule:
-        kind: cron
-        expression: "0 20 * * 1,2,3,4,5"
-        timeZone: UTC
-      runPlanScheduleTimeZonePolicy: replace_with_user_vault_timezone
-    target:
-      object: onboardingCapture
-      field: answers.weeklySchedule
-  -
-    id: reminder_policy
-    label: Reminder preference
-    purpose: assistant_support
-    valueType: reminder_policy
-    askPolicy: ask_at_confirmation
-    required: false
-    question: Would reminders help, or would you prefer no reminders?
-    target:
-      object: assistantSupport
-      field: reminderPolicy
+    - id: "target_area"
+      label: "Primary target area"
+      question: "Which one area do you want to test first?"
+      options:
+        - "posterior_chain_hamstrings"
+        - "calf_ankle"
+        - "hip_flexor"
+        - "shoulder_upper_body"
+      target:
+        object: "protocol"
+        field: "targetArea"
+    - id: "primary_measure"
+      label: "Primary measurement"
+      question: "Which repeatable measurement will you use for that target?"
+      options:
+        - "toe_touch_distance"
+        - "sit_and_reach_distance"
+        - "ankle_knee_to_wall_distance"
+        - "shoulder_reach_distance"
+      target:
+        object: "analysisPlan"
+        field: "primaryMeasure"
+    - id: "sessions_per_week"
+      label: "Planned sessions per week"
+      question: "How many days per week can you realistically do the routine? The default is 5."
+      constraints:
+        min: 4
+        max: 6
+        default: 5
+      target:
+        object: "protocol"
+        field: "sessionsPerWeek"
+    - id: "weekly_schedule"
+      label: "Weekly schedule"
+      question: "Which days or time windows are easiest for stretching?"
+      constraints:
+        optional: true
+        defaultRunPlanSchedule:
+          kind: "cron"
+          expression: "0 20 * * 1,2,3,4,5"
+          timeZone: "UTC"
+        runPlanScheduleTimeZonePolicy: "replace_with_user_vault_timezone"
+      target:
+        object: "onboardingCapture"
+        field: "answers.weeklySchedule"
+    - id: "reminder_policy"
+      label: "Reminder preference"
+      question: "Would reminders help, or would you prefer no reminders?"
+      constraints:
+        optional: true
+        askWhen: "at_confirmation"
+      target:
+        object: "assistantSupport"
+        field: "reminderPolicy"
   planDefaults:
-    testPlanId: target-rom-49d
-    baselineDays: 7
-    interventionDays: 42
-    sessionsPerWeek: 5
-    targetSessions: 30
-    minimumUsefulSessions: 20
-    firstSessionGuidance: Start with the default 2 × 30-second self-applied holds for the chosen area, keep intensity at mild tension or slight discomfort rather than pain, and stop immediately for pain, neurologic symptoms, instability, severe post-exertion symptoms, pregnancy/postpartum warning signs, or forceful assisted/pain-seeking stretching.
-  logging:
-    sessionFields:
-    - target_area
-    - stretch_position
-    - target_side
-    - support_used
-    - holds_completed
-    - total_hold_seconds
-    - intensity_0_10
-    - mild_discomfort_or_pain
-    - primary_measure_value
-    - measurement_side_limb_and_units
-    - perceived_stiffness_0_10
-    - session_burden_0_10
-    - symptoms_during_session
-    - symptoms_after_session
-    - symptoms_settled_after_stopping
-    - missed_session_reason
-    confounders:
-    - recent_exercise
-    - unusually_strenuous_or_unaccustomed_exercise
-    - soreness_location_and_severity
-    - severe_muscle_pain_swelling_weakness_dark_urine_or_systemic_symptoms
-    - current_pain_injury_surgery_repair_or_rehab_status
-    - clinician_restrictions_or_clearance_changes
-    - pregnancy_or_postpartum_status_if_applicable
-    - pregnancy_postpartum_warning_signs_if_applicable
-    - fall_risk_dizziness_balance_or_floor_limitations
-    - support_used_floor_wall_chair_countertop_or_seated
-    - partner_manual_assistance_or_external_force_used
-    - time_of_day
-    - warm_up_state
-    - footwear_or_setup_change
-    - illness
-    - sleep
-    - stress
+    testPlanId: "target-rom-49d"
+    firstSessionGuidance: "Start with the default 2 × 30-second self-applied holds for the chosen area, keep intensity at mild tension or slight discomfort rather than pain, and stop immediately for pain, neurologic symptoms, instability, severe post-exertion symptoms, pregnancy/postpartum warning signs, or forceful assisted/pain-seeking stretching."
+  trackingHints:
+    confounderFields:
+      - "recent_exercise"
+      - "unusually_strenuous_or_unaccustomed_exercise"
+      - "soreness_location_and_severity"
+      - "severe_muscle_pain_swelling_weakness_dark_urine_or_systemic_symptoms"
+      - "current_pain_injury_surgery_repair_or_rehab_status"
+      - "clinician_restrictions_or_clearance_changes"
+      - "pregnancy_or_postpartum_status_if_applicable"
+      - "pregnancy_postpartum_warning_signs_if_applicable"
+      - "fall_risk_dizziness_balance_or_floor_limitations"
+      - "support_used_floor_wall_chair_countertop_or_seated"
+      - "partner_manual_assistance_or_external_force_used"
+      - "time_of_day"
+      - "warm_up_state"
+      - "footwear_or_setup_change"
+      - "illness"
+      - "sleep"
+      - "stress"
     notes:
-    - Log actual exposure, not just the planned schedule. Keep symptoms separate from success outcomes.
-    - Do not classify stop-rule symptoms as non-adherence; route them as safety events or reasons to pause the run.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-    - none
-    - planned_session_reminder
-    - weekly_digest
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: Want to log whether yesterday’s stretching happened, or skip that entry?
+      - "Log actual exposure, not just the planned schedule. Keep symptoms separate from success outcomes."
+      - "Do not classify stop-rule symptoms as non-adherence; route them as safety events or reasons to pause the run."
+  supportHints:
+    missedLogFollowupCopy: "Want to log whether yesterday’s stretching happened, or skip that entry?"
 whyItWorks:
   - "## Held tension changes tolerance\n\nStatic stretching works by repeatedly exposing 1 end range to mild, non-painful tension. The nervous system allows more range before guarding; the joint moves farther without forcing tissue."
   - "## Tissue adapts slowly\n\nRepeated low force changes passive resistance in muscle, tendon, and surrounding connective tissue. The dose is boring by design: same position, same target, enough weeks for range to move."

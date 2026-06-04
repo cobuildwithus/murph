@@ -109,6 +109,24 @@ protocol:
   - unusual_work_travel_or_caregiving
   - occupational_walking
   - concurrent_training_or_rehab
+  sessionFieldIds:
+  - daily_step_count
+  - selected_step_floor
+  - floor_hit
+  - step_source
+  - device_wear_or_carry_gap
+  - device_change
+  - baseline_activity_level
+  - intentional_walking_minutes
+  - intentional_exercise_or_training
+  - pain_or_soreness_rating
+  - fatigue_or_recovery_rating
+  - safety_symptoms
+  - sleep_disruption
+  - life_friction
+  - route_weather_or_heat
+  - injury_or_recovery_status
+  - occupational_walking
   stopConditions:
   - Stop immediately for chest pain or pressure, syncope or near-syncope, fainting or near-fainting, severe dizziness, confusion, severe or unusual shortness of breath, or neurologic symptoms.
   - Pause and seek appropriate guidance for a fall, near-fall pattern, new or worsening foot wound, skin breakdown, severe blistering, or concerning foot symptoms.
@@ -248,238 +266,123 @@ expectedSignalDescriptions:
   protocolProminence: context
   description: Cadence belongs in interpretation because turning the goal into a cadence prescription changes the intervention into a different MVPA variant.
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to explore a Daily Step Floor experiment.
-    intentSummary: Explore Daily Step Floor
-  contextReview:
-    vaultChecks:
-    - id: active_experiments
-      label: Active experiments
-      reason: Avoid stacking meaningful experiments unless the user explicitly accepts the interpretation tradeoff.
-      readHints:
-      - experiment list --status active --format json
-    - id: recent_step_baseline
-      label: Recent step baseline
-      reason: Estimate the user’s current daily step distribution before choosing a floor.
-      freshnessDays: 21
-      readHints:
-      - wearables day-range <YYYY-MM-DD> <YYYY-MM-DD> --metrics steps --format json
-      - activity summary --last 21d --format json
-    - id: wearable_or_phone_sources
-      label: Step-count sources
-      reason: Confirm one consistent source of truth and detect device switching.
-      freshnessDays: 14
-      readHints:
-      - wearables sources list --format json
-      - wearables day <YYYY-MM-DD> --format json
-    - id: mobility_pain_and_falls
-      label: Mobility, pain, and falls
-      reason: Screen for pain, gait, balance, or fall-risk contexts that may need a lower floor or clinician guidance.
-      freshnessDays: 90
-      readHints:
-      - notes search mobility pain falls walking --format json
-      - symptom logs --last 90d --format json
-    - id: cardiopulmonary_symptoms
-      label: Cardiopulmonary symptoms
-      reason: Identify red flags before unsupervised step escalation.
-      freshnessDays: 180
-      readHints:
-      - notes search chest pain shortness breath dizziness fainting palpitations --format json
-    - id: diabetes_foot_or_neuropathy_context
-      label: Diabetes foot or neuropathy context
-      reason: Generic step floors may be inappropriate with active foot wounds, neuropathy, offloading, or ulcer-risk restrictions.
-      freshnessDays: 180
-      readHints:
-      - notes search diabetes neuropathy foot ulcer wound offloading --format json
-    - id: pregnancy_postpartum_or_clinician_restrictions
-      label: Pregnancy, postpartum, or clinician restrictions
-      reason: Special-population or clinician restrictions should shape whether a generic floor is appropriate.
-      freshnessDays: 180
-      readHints:
-      - notes search pregnancy postpartum activity restriction clinician guidance --format json
-    - id: route_weather_heat_context
-      label: Route, weather, and heat context
-      reason: Unsafe route, heat, traffic, and terrain risks can turn a step target into a safety problem.
-      freshnessDays: 14
-      readHints:
-      - location weather risk --last 14d --format json
-      - notes search route heat traffic terrain --format json
-    notes:
-    - Generated source-index.json was absent from the supplied snapshot; onboarding should preserve source-key boundaries rather than inventing clinical clearance.
+    displayPrompt: "Hey Murph, I want to explore a Daily Step Floor experiment."
+    intentSummary: "Explore Daily Step Floor"
   safetyScreen:
-    cautionLevel: moderate
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-    - id: cardiopulmonary_red_flags
-      prompt: Any chest pain or pressure, syncope or near-syncope, severe dizziness, severe unusual shortness of breath, palpitations with symptoms, or known unstable heart/lung condition that could make more walking unsafe?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Cardiopulmonary red flags override an unsupervised step-floor increase.
-    - id: movement_pain_falls_risk
-      prompt: Any current injury or injury recovery, foot/ankle/knee/hip/back pain worsened by walking, recent falls or near-falls, balance limitation, frailty, gait aid change, or unsafe route constraint?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: A step floor should not require pushing through pain, unsafe gait, or fall risk.
-    - id: special_contexts
-      prompt: Any active foot wound or diabetic neuropathy/ulcer risk, pregnancy or early postpartum context, frailty or very low baseline activity, acute illness or fever, heat-illness risk, or clinician-imposed activity restriction?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: These contexts can require population-specific or clinician-specific guidance rather than a generic step floor.
+      - id: "cardiopulmonary_red_flags"
+        prompt: "Any chest pain or pressure, syncope or near-syncope, severe dizziness, severe unusual shortness of breath, palpitations with symptoms, or known unstable heart/lung condition that could make more walking unsafe?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "movement_pain_falls_risk"
+        prompt: "Any current injury or injury recovery, foot/ankle/knee/hip/back pain worsened by walking, recent falls or near-falls, balance limitation, frailty, gait aid change, or unsafe route constraint?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "special_contexts"
+        prompt: "Any active foot wound or diabetic neuropathy/ulcer risk, pregnancy or early postpartum context, frailty or very low baseline activity, acute illness or fever, heat-illness risk, or clinician-imposed activity restriction?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
-      - new or worsening pain that changes gait
-      - fall or repeated near-fall
-      - foot wound or skin breakdown
-      - chest pain, syncope or near-syncope, severe dizziness, severe unusual shortness of breath
-      - heat illness, fever, or acute illness
-    notes:
-    - Safety screening is conservative because extracted evidence supports step-count behavior change more strongly than universal safety or disease-treatment claims.
+        - "new or worsening pain that changes gait"
+        - "fall or repeated near-fall"
+        - "foot wound or skin breakdown"
+        - "chest pain, syncope or near-syncope, severe dizziness, severe unusual shortness of breath"
+        - "heat illness, fever, or acute illness"
   setupSlots:
-  - id: step_source
-    label: Step source of truth
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: always
-    required: true
-    question: Which source should be treated as the source of truth for daily steps?
-    options:
-    - phone
-    - watch_or_wearable
-    - pedometer
-    target:
-      object: protocol
-      field: stepSource
-  - id: baseline_window
-    label: Baseline window
-    purpose: personalization
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: Use a 7-day or 14-day baseline before setting the floor?
-    options:
-    - seven_days
-    - fourteen_days
-    target:
-      object: analysisPlan
-      field: baselineWindow
-  - id: floor_tier
-    label: Step-floor tier
-    purpose: personalization
-    valueType: enum
-    askPolicy: always
-    required: true
-    question: Which floor tier should the experiment use?
-    options:
-    - baseline_observation
-    - baseline_plus_1000
-    - baseline_plus_2000
-    - fixed_6000
-    - fixed_8000
-    - fixed_10000
-    - fixed_12000
-    - custom_ramp
-    target:
-      object: protocol
-      field: floorTier
-  - id: custom_ramp_rule
-    label: Custom ramp rule
-    purpose: personalization
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: false
-    question: If using a custom ramp, what exact daily floor or weekly ramp rule should Murph record?
-    target:
-      object: protocol
-      field: customRampRule
-  - id: fallback_rule
-    label: Fallback rule
-    purpose: safety
-    valueType: enum
-    askPolicy: always
-    required: true
-    question: What should happen on pain, illness, poor sleep, travel, heat, or hazardous-route days?
-    options:
-    - reduce_to_baseline
-    - reduce_by_2000
-    - rest_and_log_safety
-    - custom_recovery_floor
-    target:
-      object: protocol
-      field: fallbackRule
-  - id: route_weather_constraints
-    label: Route and weather constraints
-    purpose: safety
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: false
-    question: Any route, traffic, terrain, heat, or weather constraints that should shape walking plans?
-    target:
-      object: onboardingCapture
-      field: routeWeatherConstraints
-  - id: reminder_preference
-    label: Reminder preference
-    purpose: assistant_support
-    valueType: reminder_policy
-    askPolicy: ask_at_confirmation
-    required: false
-    question: Would reminders help, and when should Murph avoid nudging?
-    target:
-      object: assistantSupport
-      field: reminderPreference
+    - id: "step_source"
+      label: "Step source of truth"
+      question: "Which source should be treated as the source of truth for daily steps?"
+      options:
+        - "phone"
+        - "watch_or_wearable"
+        - "pedometer"
+      target:
+        object: "protocol"
+        field: "stepSource"
+    - id: "baseline_window"
+      label: "Baseline window"
+      question: "Use a 7-day or 14-day baseline before setting the floor?"
+      options:
+        - "seven_days"
+        - "fourteen_days"
+      target:
+        object: "analysisPlan"
+        field: "baselineWindow"
+    - id: "floor_tier"
+      label: "Step-floor tier"
+      question: "Which floor tier should the experiment use?"
+      options:
+        - "baseline_observation"
+        - "baseline_plus_1000"
+        - "baseline_plus_2000"
+        - "fixed_6000"
+        - "fixed_8000"
+        - "fixed_10000"
+        - "fixed_12000"
+        - "custom_ramp"
+      target:
+        object: "protocol"
+        field: "floorTier"
+    - id: "custom_ramp_rule"
+      label: "Custom ramp rule"
+      question: "If using a custom ramp, what exact daily floor or weekly ramp rule should Murph record?"
+      constraints:
+        optional: true
+      target:
+        object: "protocol"
+        field: "customRampRule"
+    - id: "fallback_rule"
+      label: "Fallback rule"
+      question: "What should happen on pain, illness, poor sleep, travel, heat, or hazardous-route days?"
+      options:
+        - "reduce_to_baseline"
+        - "reduce_by_2000"
+        - "rest_and_log_safety"
+        - "custom_recovery_floor"
+      target:
+        object: "protocol"
+        field: "fallbackRule"
+    - id: "route_weather_constraints"
+      label: "Route and weather constraints"
+      question: "Any route, traffic, terrain, heat, or weather constraints that should shape walking plans?"
+      constraints:
+        optional: true
+      target:
+        object: "onboardingCapture"
+        field: "routeWeatherConstraints"
+    - id: "reminder_preference"
+      label: "Reminder preference"
+      question: "Would reminders help, and when should Murph avoid nudging?"
+      constraints:
+        optional: true
+        askWhen: "at_confirmation"
+      target:
+        object: "assistantSupport"
+        field: "reminderPreference"
   planDefaults:
-    testPlanId: wearable-step-floor-42d
-    baselineDays: 14
-    interventionDays: 28
-    sessionsPerWeek: 7
-    targetSessions: 28
-    minimumUsefulSessions: 21
-    firstSessionGuidance: Start with a conservative floor chosen from baseline. The first week is for repeatability and safety, not maximal steps; low baseline activity, frailty, injury recovery, pregnancy/postpartum status, pain, acute illness, or cardiopulmonary symptoms should push the plan toward baseline-only, a lower floor, a slower ramp, or clinician-guided adaptation.
-  logging:
-    sessionFields:
-    - daily_step_count
-    - selected_step_floor
-    - floor_hit
-    - step_source
-    - device_wear_or_carry_gap
-    - device_change
-    - baseline_activity_level
-    - intentional_walking_minutes
-    - intentional_exercise_or_training
-    - pain_or_soreness_rating
-    - fatigue_or_recovery_rating
-    - safety_symptoms
-    - sleep_disruption
-    - life_friction
-    - route_weather_or_heat
-    - injury_or_recovery_status
-    - occupational_walking
-    confounders:
-    - device_change
-    - phone_not_carried
-    - watch_off_time
-    - unusual_work_or_occupational_walking
-    - travel
-    - illness_or_fever
-    - sleep_disruption
-    - injury_or_recovery_status
-    - injury_or_pain
-    - weather_or_heat
-    - footwear_change
-    - terrain_change
-    - intentional_exercise_program
-    - concurrent_training
-    - diet_or_weight_loss_change
-    - medication_change
-  assistantPolicy:
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-    - none
-    - morning_plan
-    - afternoon_gap_check
-    - evening_log_prompt
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: Would you like to log yesterday’s steps and whether anything affected walking or device data?
+    testPlanId: "wearable-step-floor-42d"
+    firstSessionGuidance: "Start with a conservative floor chosen from baseline. The first week is for repeatability and safety, not maximal steps; low baseline activity, frailty, injury recovery, pregnancy/postpartum status, pain, acute illness, or cardiopulmonary symptoms should push the plan toward baseline-only, a lower floor, a slower ramp, or clinician-guided adaptation."
+  trackingHints:
+    confounderFields:
+      - "device_change"
+      - "phone_not_carried"
+      - "watch_off_time"
+      - "unusual_work_or_occupational_walking"
+      - "travel"
+      - "illness_or_fever"
+      - "sleep_disruption"
+      - "injury_or_recovery_status"
+      - "injury_or_pain"
+      - "weather_or_heat"
+      - "footwear_change"
+      - "terrain_change"
+      - "intentional_exercise_program"
+      - "concurrent_training"
+      - "diet_or_weight_loss_change"
+      - "medication_change"
+  supportHints:
+    missedLogFollowupCopy: "Would you like to log yesterday’s steps and whether anything affected walking or device data?"
 whyItWorks:
   - "## Visible floor raises exposure\n\nA step floor turns activity into a daily threshold. The number changes behavior first; downstream fitness, blood pressure, sleep, and pain depend on the added load being real and recoverable."
   - "## Low-grade load accumulates\n\nWalking adds circulation, weight bearing, and muscle contractions without a formal workout. Repeated daily volume replaces sitting with enough movement for small cardiovascular and tissue signals."

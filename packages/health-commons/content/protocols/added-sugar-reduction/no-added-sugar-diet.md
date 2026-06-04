@@ -452,6 +452,16 @@ protocol:
   - sugar_alcohol_or_low_no_calorie_sweetener_amount
   - weight_tracking_distress_or_food_rule_rigidity
   - training_fuel_recovery_or_performance_change
+  sessionFieldIds:
+  - daily_added_sugar_grams
+  - boundary_rule
+  - largest_added_sugar_source_avoided
+  - added_sugar_exceptions
+  - replacement_used
+  - craving_intensity
+  - headache_irritability_or_low_energy
+  - social_or_label_reading_friction
+  - hypoglycemia_treatment_or_glucose_lows
   stopConditions:
   - Stop to treat hypoglycemia; do not resume the strict version without clinician guidance after repeated lows, severe lows, or medication uncertainty.
   - Stop or loosen if dizziness, confusion, illness, dehydration, or inability to maintain regular meals interferes with daily function.
@@ -532,243 +542,128 @@ expectedSignalDescriptions:
     basis: RCT synthesis comparing higher versus lower dietary sugar found the largest BP separation after at least 8 weeks; shorter home runs should use repeated morning averages.
   description: Lower sugar and sugary-drink exposure reduces energy load, high-fructose intake, vascular tone, and sodium-handling strain.
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to explore doing a No Added Sugar experiment.
-    intentSummary: Explore No Added Sugar
-  contextReview:
-    vaultChecks:
-
-    -
-      id: active_experiments
-      label: Active experiments
-      reason: Avoid starting another diet, supplement, fasting, or training experiment that would confound intake or biomarker changes.
-      readHints:
-      - experiment list --status active --format json
-    -
-      id: dietary_restrictions_and_weight_context
-      label: Dietary restrictions and weight context
-      reason: Underweight, recent unintended weight loss, food insecurity, eating-disorder history, or rigid food rules materially change fit and safety.
-      freshnessDays: 90
-      readHints:
-      - search query "diet restriction weight loss eating disorder underweight food insecurity" --format json
-    -
-      id: diabetes_and_hypoglycemia_context
-      label: Diabetes medications or hypoglycemia risk
-      reason: Glucose-lowering medications and prior lows require clinician-aligned safety planning and must not be overridden by no-sugar rules.
-      freshnessDays: 30
-      readHints:
-      - search query "diabetes insulin sulfonylurea SGLT2 hypoglycemia glucose" --format json
-    -
-      id: pregnancy_pediatric_or_high_energy_context
-      label: Pregnancy, pediatric, or high-energy needs
-      reason: Pregnancy, breastfeeding, children/adolescents, frailty, or high training load require adapted nutrition rather than a generic self-experiment.
-      freshnessDays: 90
-      readHints:
-      - search query "pregnancy breastfeeding child adolescent athlete training frailty" --format json
-    -
-      id: available_tracking_signals
-      label: Available tracking signals
-      reason: Confirm whether the user can log food labels, body weight, waist, blood pressure, CGM, labs, or sleep context before selecting a test plan.
-      freshnessDays: 14
-      readHints:
-      - wearables sources list --format json
-      - search query "food log scale blood pressure CGM labs" --format json
-    notes:
-    - Review context first, but still ask the compact safety screen because silence in the vault is not clearance.
+    displayPrompt: "Hey Murph, I want to explore doing a No Added Sugar experiment."
+    intentSummary: "Explore No Added Sugar"
   safetyScreen:
-    cautionLevel: moderate
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-    -
-      id: glucose_medication_or_lows
-      prompt: Do you have diabetes or prediabetes, type 1 diabetes, gestational diabetes, use insulin, sulfonylureas, SGLT2 inhibitors, other glucose-lowering medication, have CGM/glucose lows, or have a history of significant low blood sugar or an uncertain hypoglycemia treatment plan?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: No-added-sugar rules must not interfere with hypoglycemia prevention or rapid carbohydrate treatment.
-    -
-      id: pregnancy_child_or_medical_diet
-      prompt: Are you pregnant, breastfeeding, setting this up for a child or adolescent, or following a medical diet where carbohydrates, calories, sodium, kidney disease, or another condition requires individualized guidance?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Special-population nutrition needs can make a generic strict rule inappropriate.
-    -
-      id: underfueling_or_eating_disorder_risk
-      prompt: Do you have current or past eating-disorder concerns, food-rule compulsions, underweight, recent unintentional weight loss, frailty, food insecurity, or heavy training where underfueling is a risk?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Adequate energy, carbohydrate availability, and psychological safety outrank a rigid sugar rule.
-    -
-      id: medical_diet_access_or_frailty_context
-      prompt: Are you following a clinician-prescribed diet, dealing with kidney disease, cystic fibrosis, NAFLD treatment, dental or periodontal treatment, hospitalization or long-term-care nutrition, fluid/sodium/protein limits, food insecurity, or limited control over available foods?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Medical nutrition needs, restricted food access, and frailty can make a strict no-added-sugar rule unsafe or misleading; use clinician guidance or a lighter sugar-source-awareness variant.
-    stopIf:
-      inheritFromProtocolSafety: true
-    notes:
-    - A positive or uncertain screen is not a diagnosis; it means Murph should not set up a strict unsupervised version without adapted guidance.
-    - Offer a lighter sugar-source-awareness experiment or clinician-aligned nutrition plan when the strict path is a poor fit.
-    - When strict avoidance is unsafe or unrealistic, route to sugar-source awareness or clinician-guided adaptation rather than treating the run as failed.
+      - id: "glucose_medication_or_lows"
+        prompt: "Do you have diabetes or prediabetes, type 1 diabetes, gestational diabetes, use insulin, sulfonylureas, SGLT2 inhibitors, other glucose-lowering medication, have CGM/glucose lows, or have a history of significant low blood sugar or an uncertain hypoglycemia treatment plan?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "pregnancy_child_or_medical_diet"
+        prompt: "Are you pregnant, breastfeeding, setting this up for a child or adolescent, or following a medical diet where carbohydrates, calories, sodium, kidney disease, or another condition requires individualized guidance?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "underfueling_or_eating_disorder_risk"
+        prompt: "Do you have current or past eating-disorder concerns, food-rule compulsions, underweight, recent unintentional weight loss, frailty, food insecurity, or heavy training where underfueling is a risk?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "medical_diet_access_or_frailty_context"
+        prompt: "Are you following a clinician-prescribed diet, dealing with kidney disease, cystic fibrosis, NAFLD treatment, dental or periodontal treatment, hospitalization or long-term-care nutrition, fluid/sodium/protein limits, food insecurity, or limited control over available foods?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+  setupSlots:
+    - id: "boundary_rule"
+      label: "Boundary rule"
+      question: "Which boundary do you want to test: label-defined Added Sugars only, or a stricter free-sugar boundary that also treats juice, honey, syrups, and concentrates as out?"
+      options:
+        - "label_defined_added_sugars"
+        - "stricter_free_sugar_boundary"
+      target:
+        object: "experimentRun"
+        field: "boundaryRule"
+    - id: "baseline_logging_method"
+      label: "Baseline logging method"
+      question: "How will you estimate added sugar during baseline and intervention: label grams, food log with estimates, photo log plus notes, or a nutrition app?"
+      options:
+        - "label_grams"
+        - "food_log_estimates"
+        - "photo_log_plus_notes"
+        - "nutrition_app"
+      target:
+        object: "experimentRun"
+        field: "loggingMethod"
+    - id: "top_added_sugar_sources"
+      label: "Top added-sugar sources"
+      question: "What are your top recurring added-sugar sources right now: drinks, desserts, breakfast foods, sauces, snacks, restaurant foods, or something else?"
+      target:
+        object: "onboardingCapture"
+        field: "answers.topAddedSugarSources"
+    - id: "replacement_plan"
+      label: "Replacement plan"
+      question: "What will you use instead for the main sources you listed, and do you want to allow low/no-calorie sweeteners as a logged transition tool?"
+      target:
+        object: "experimentRun"
+        field: "replacementPlan"
+    - id: "weight_tracking_fit"
+      label: "Weight tracking fit"
+      question: "Is weekly body-weight tracking available and unlikely to increase distress, restriction, food-rule rigidity, or unsafe behavior?"
+      options:
+        - "weekly_weight_safe_available"
+        - "avoid_weight_tracking"
+      notes:
+        - "Choose the body-weight-primary plan only for weekly_weight_safe_available."
+        - "If the answer is avoid_weight_tracking, do not ask for scale measurements and do not promote added-sugar intake into a biomarker outcome."
+      target:
+        object: "analysisPlan"
+        field: "weightTrackingFit"
+    - id: "daily_log_time"
+      label: "Daily log time"
+      question: "What time of day should Murph expect your quick food-and-symptom log?"
+      target:
+        object: "assistantSupport"
+        field: "dailyLogTime"
+    - id: "reminder_policy"
+      label: "Reminder policy"
+      question: "Want reminders for the daily log, a weekly digest, both, or no reminders?"
+      options:
+        - "none"
+        - "daily_log"
+        - "weekly_digest"
+        - "daily_log_plus_weekly_digest"
+      constraints:
+        askWhen: "at_confirmation"
+      target:
+        object: "assistantSupport"
+        field: "reminderPolicy"
+  planDefaults:
+    testPlanId: "added-sugar-intake-28d"
+    firstSessionGuidance: "Start with logging and replacing the biggest obvious sources; do not make the diet smaller, stricter, or lower-carb. Use the body-weight-primary plan only when weekly weight tracking is safe and available; otherwise keep the run as exposure logging plus safety and livability review instead of a biomarker-outcome test. The 7/21-day plan and 14-session minimum are Murph run-quality defaults, not clinical thresholds."
   adaptationPolicy:
     fields:
-    -
-      id: measurement_plan
-      label: Measurement plan
-      target:
-        object: analysisPlan
-        field: measurementPlan
-      sourceSlotIds:
-      - weight_tracking_fit
-      requiredForRunSpec: true
-      protocolReusable: false
-      guidance: Use the body-weight-primary default plan only when weekly weight tracking is safe and available. If weight tracking is unavailable or would increase distress, restriction, or unsafe behavior, record a no-biomarker-outcome measurement plan, keep scale weight out of required signals, and treat the run as exposure logging plus safety/livability review rather than a biomarker-outcome test.
-  setupSlots:
-
-  -
-    id: boundary_rule
-    label: Boundary rule
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: always
-    required: true
-    question: 'Which boundary do you want to test: label-defined Added Sugars only, or a stricter free-sugar boundary that also treats juice, honey, syrups, and concentrates as out?'
-    options:
-    - label_defined_added_sugars
-    - stricter_free_sugar_boundary
-    target:
-      object: experimentRun
-      field: boundaryRule
-  -
-    id: baseline_logging_method
-    label: Baseline logging method
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: 'How will you estimate added sugar during baseline and intervention: label grams, food log with estimates, photo log plus notes, or a nutrition app?'
-    options:
-    - label_grams
-    - food_log_estimates
-    - photo_log_plus_notes
-    - nutrition_app
-    target:
-      object: experimentRun
-      field: loggingMethod
-  -
-    id: top_added_sugar_sources
-    label: Top added-sugar sources
-    purpose: personalization
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: true
-    question: 'What are your top recurring added-sugar sources right now: drinks, desserts, breakfast foods, sauces, snacks, restaurant foods, or something else?'
-    target:
-      object: onboardingCapture
-      field: answers.topAddedSugarSources
-  -
-    id: replacement_plan
-    label: Replacement plan
-    purpose: adherence
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: true
-    question: What will you use instead for the main sources you listed, and do you want to allow low/no-calorie sweeteners as a logged transition tool?
-    target:
-      object: experimentRun
-      field: replacementPlan
-  -
-    id: weight_tracking_fit
-    label: Weight tracking fit
-    purpose: safety
-    valueType: enum
-    askPolicy: always
-    required: true
-    question: Is weekly body-weight tracking available and unlikely to increase distress, restriction, food-rule rigidity, or unsafe behavior?
-    options:
-    - weekly_weight_safe_available
-    - avoid_weight_tracking
-    target:
-      object: analysisPlan
-      field: weightTrackingFit
+      - id: "measurement_plan"
+        label: "Measurement plan"
+        target:
+          object: "analysisPlan"
+          field: "measurementPlan"
+        sourceSlotIds:
+          - "weight_tracking_fit"
+        requiredForRunSpec: true
+        protocolReusable: false
+        guidance: "Use the body-weight-primary default plan only when weekly weight tracking is safe and available. If weight tracking is unavailable or would increase distress, restriction, or unsafe behavior, record a no-biomarker-outcome measurement plan, keep scale weight out of required signals, and treat the run as exposure logging plus safety/livability review rather than a biomarker-outcome test."
+  trackingHints:
+    confounderFields:
+      - "restaurant_or_travel_day"
+      - "illness_or_poor_sleep"
+      - "training_load_change"
+      - "alcohol"
+      - "menstrual_cycle_context_if_relevant"
+      - "new_diet_or_medication_change"
+      - "total_energy_or_meal_adequacy_context"
+      - "meals_skipped_or_fasting"
+      - "keto_low_carb_or_carbohydrate_restriction_drift"
+      - "fruit_dairy_legumes_starchy_foods_reduced"
+      - "food_access_budget_or_household_control_constraints"
+      - "diabetes_medication_bp_medication_or_diuretic_changes"
+      - "hypoglycemia_treatment_or_glucose_lows"
+      - "hydration_or_gi_illness_context"
+      - "refined_starch_larger_portion_or_lower_sugar_packaged_replacement"
+      - "sugar_alcohol_or_low_no_calorie_sweetener_amount"
+      - "weight_tracking_distress_or_food_rule_rigidity"
+      - "training_fuel_recovery_or_performance_change"
     notes:
-    - Choose the body-weight-primary plan only for weekly_weight_safe_available.
-    - If the answer is avoid_weight_tracking, do not ask for scale measurements and do not promote added-sugar intake into a biomarker outcome.
-  -
-    id: daily_log_time
-    label: Daily log time
-    purpose: assistant_support
-    valueType: local_time
-    askPolicy: ask_if_unknown
-    required: true
-    question: What time of day should Murph expect your quick food-and-symptom log?
-    target:
-      object: assistantSupport
-      field: dailyLogTime
-  -
-    id: reminder_policy
-    label: Reminder policy
-    purpose: assistant_support
-    valueType: reminder_policy
-    askPolicy: ask_at_confirmation
-    required: true
-    question: Want reminders for the daily log, a weekly digest, both, or no reminders?
-    options:
-    - none
-    - daily_log
-    - weekly_digest
-    - daily_log_plus_weekly_digest
-    target:
-      object: assistantSupport
-      field: reminderPolicy
-  planDefaults:
-    testPlanId: added-sugar-intake-28d
-    baselineDays: 7
-    interventionDays: 21
-    targetSessions: 21
-    minimumUsefulSessions: 14
-    firstSessionGuidance: Start with logging and replacing the biggest obvious sources; do not make the diet smaller, stricter, or lower-carb. Use the body-weight-primary plan only when weekly weight tracking is safe and available; otherwise keep the run as exposure logging plus safety and livability review instead of a biomarker-outcome test. The 7/21-day plan and 14-session minimum are Murph run-quality defaults, not clinical thresholds.
-  logging:
-    sessionFields:
-    - daily_added_sugar_grams
-    - boundary_rule
-    - largest_added_sugar_source_avoided
-    - added_sugar_exceptions
-    - replacement_used
-    - craving_intensity
-    - headache_irritability_or_low_energy
-    - social_or_label_reading_friction
-    - hypoglycemia_treatment_or_glucose_lows
-    confounders:
-    - restaurant_or_travel_day
-    - illness_or_poor_sleep
-    - training_load_change
-    - alcohol
-    - menstrual_cycle_context_if_relevant
-    - new_diet_or_medication_change
-    - total_energy_or_meal_adequacy_context
-    - meals_skipped_or_fasting
-    - keto_low_carb_or_carbohydrate_restriction_drift
-    - fruit_dairy_legumes_starchy_foods_reduced
-    - food_access_budget_or_household_control_constraints
-    - diabetes_medication_bp_medication_or_diuretic_changes
-    - hypoglycemia_treatment_or_glucose_lows
-    - hydration_or_gi_illness_context
-    - refined_starch_larger_portion_or_lower_sugar_packaged_replacement
-    - sugar_alcohol_or_low_no_calorie_sweetener_amount
-    - weight_tracking_distress_or_food_rule_rigidity
-    - training_fuel_recovery_or_performance_change
-    notes:
-    - Log exceptions neutrally. The goal is an interpretable experiment record, not perfect moral compliance.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-    - none
-    - daily_log
-    - weekly_digest
-    - daily_log_plus_weekly_digest
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: Did you get a chance to log yesterday's added-sugar sources? Totally fine either way — I just want the experiment record to stay accurate.
+      - "Log exceptions neutrally. The goal is an interpretable experiment record, not perfect moral compliance."
+  supportHints:
+    missedLogFollowupCopy: "Did you get a chance to log yesterday's added-sugar sources? Totally fine either way — I just want the experiment record to stay accurate."
 whyItWorks:
   - "## Added sugar delivers fast energy with low fullness\n\nSugary drinks, desserts, sauces, and snacks add calories that disappear quickly. Removing them lowers the easiest energy surplus before changing the rest of the diet."
   - "## Label rule cuts repeat sources\n\n0 g added sugar on labels turns a vague goal into a boundary. The mechanism is fewer fast carbohydrate hits and less insulin demand from recurring sources."

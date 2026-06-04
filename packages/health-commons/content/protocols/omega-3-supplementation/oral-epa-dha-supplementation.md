@@ -458,6 +458,7 @@ protocol:
   doseSignature: daily oral preformed EPA/DHA · exact EPA+DHA logged · 14-day baseline + 12-week intervention
   target: Stable product and actual labeled EPA mg/day + DHA mg/day, chosen before the run and kept fixed
   frequency:
+    sessionsPerWeek: 7
     sessionsPerDay: 1
   interventionSessionsMinimum: 56
   interventionSessionsTarget: 84
@@ -513,6 +514,22 @@ protocol:
   - gout_flare_edema_or_joint_swelling
   - planned_procedure_or_pregnancy_lactation_change
   - lab_method_date_and_relevant_results
+  sessionFieldIds:
+  - product_brand_and_name
+  - source_type
+  - formulation_if_known
+  - epa_mg
+  - dha_mg
+  - total_epa_dha_mg
+  - servings_taken
+  - dose_time
+  - taken_with_food_or_fat
+  - missed_doubled_or_changed_dose
+  - gi_or_taste_symptoms
+  - palpitations_irregular_heartbeat_dizziness_or_syncope
+  - bleeding_bruising_nosebleeds_gums_or_menses
+  - allergic_symptoms
+  - gout_flare_edema_or_joint_swelling
   stopConditions:
   - Stop immediately and seek urgent medical help for hives or rash with swelling, swelling of lips/tongue/throat, wheezing, trouble breathing, chest pain, fainting, severe shortness of breath, stroke-like symptoms, or a rapid/irregular heartbeat with weakness, dizziness, or near-syncope.
   - Stop immediately and seek urgent medical help for vomiting blood, coughing blood, black/tarry stools, red blood in stool or urine, uncontrolled bleeding, severe headache or neurologic symptoms after head injury, or any severe bleeding symptom.
@@ -614,351 +631,203 @@ expectedSignalDescriptions:
     basis: Pooled participant modeling rose about 4.9% to 8.1%, and an 8-week 1 g/day RCT rose about 5.7% to 7.6%; baseline status, dose, formulation, and diet explain much of the spread.
   protocolProminence: context
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to test oral EPA/DHA supplementation.
-    intentSummary: Explore Oral EPA/DHA Supplementation
-  contextReview:
-    vaultChecks:
-
-    -
-      id: active_experiments
-      label: Active experiments
-      reason: Avoid stacking a supplement experiment with another intervention that changes labs or symptoms at the same time.
-    -
-      id: current_supplements_and_medications
-      label: Current supplements and medications
-      reason: Check existing omega-3 use, product stacking, anticoagulants, antiplatelets, warfarin/DOACs, regular NSAIDs, lipid therapy, diabetes/thyroid/blood-pressure medicines, SSRIs/SNRIs, and bleeding-relevant supplements.
-      freshnessDays: 14
-    -
-      id: recent_labs
-      label: Recent labs
-      reason: Find baseline omega-3 index/RBC EPA+DHA, lipid panel, ALT/AST when relevant, and clinician-managed abnormal values before setting the test plan.
-      freshnessDays: 180
-    -
-      id: cardiovascular_rhythm_history
-      label: Rhythm history
-      reason: Prior atrial fibrillation/flutter, clinically significant arrhythmia, unexplained palpitations, syncope, rhythm evaluation, or high AF risk changes the safety disposition.
-    -
-      id: planned_procedures
-      label: Planned procedures
-      reason: Planned surgery, dental extraction, endoscopy, biopsy, or other invasive procedures can change bleeding-risk handling.
-    -
-      id: allergy_context
-      label: Fish or shellfish allergy context
-      reason: Fish/shellfish allergy concerns require product-specific clinician or allergy guidance before use.
-    -
-      id: pregnancy_lactation_context
-      label: Pregnancy or lactation context
-      reason: Pregnancy, trying to conceive, lactation, and child/adolescent use are separate care pathways.
-    -
-      id: diet_background
-      label: Seafood and diet background
-      reason: Seafood servings/type, high-mercury fish exposure, ALA-rich foods, saturated-fat/omega-6 pattern, alcohol, weight change, and exercise load can confound omega-3 status and lipid changes.
-    -
-      id: liver_lipid_gout_immune_context
-      label: Liver, lipid-treatment, gout, and immune context
-      reason: Liver disease/elevated ALT/AST, LDL-C monitoring, severe hypertriglyceridemia, pancreatitis history, gout, immunocompromise, or immunosuppressive therapy can require clinician-guided variants.
-    notes:
-    - Use compact screening first, then expand only for positives or missing safety-critical context.
+    displayPrompt: "Hey Murph, I want to test oral EPA/DHA supplementation."
+    intentSummary: "Explore Oral EPA/DHA Supplementation"
   safetyScreen:
-    cautionLevel: moderate
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-    -
-      id: antithrombotic_bleeding_or_procedure_context
-      prompt: Are you taking an anticoagulant, antiplatelet, regular NSAID, high-dose aspirin, SSRI/SNRI, or bleeding-relevant supplement; do you have a bleeding disorder, thrombocytopenia, history of serious bleeding, recurrent nosebleeds/gum bleeding, abnormal bruising/bleeding, or a planned surgery, dental extraction, endoscopy, biopsy, or other invasive procedure?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Bleeding evidence is not a blanket prohibition, but medication, supplement, disorder, and procedure contexts need individualized guidance.
-    -
-      id: rhythm_lipid_liver_gout_or_high_dose_context
-      prompt: Have you had atrial fibrillation/flutter, another clinically significant arrhythmia, unexplained palpitations, syncope, high AF risk, severe hypertriglyceridemia, pancreatitis history, clinician-managed lipids/CVD/diabetes risk, liver disease/elevated ALT/AST, LDL-C requiring monitoring, gout, immunocompromise or immunosuppressive therapy, prescription omega-3 use, or planned multi-gram/high-dose omega-3 intake?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Arrhythmia, high-dose/prescription, severe lipid, liver/LDL, gout, and immune contexts belong outside the unsupervised default protocol.
-    -
-      id: allergy_age_or_life_stage_context
-      prompt: Do you have fish/shellfish allergy concerns, prior omega-3 or capsule-ingredient reactions, are you under 18, pregnant, trying to conceive, lactating, planning child/adolescent use, or using cod liver oil or another retinol-containing omega product?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Allergy/hypersensitivity, pediatric use, pregnancy/lactation, and cod-liver retinol exposure are separate safety pathways.
+      - id: "antithrombotic_bleeding_or_procedure_context"
+        prompt: "Are you taking an anticoagulant, antiplatelet, regular NSAID, high-dose aspirin, SSRI/SNRI, or bleeding-relevant supplement; do you have a bleeding disorder, thrombocytopenia, history of serious bleeding, recurrent nosebleeds/gum bleeding, abnormal bruising/bleeding, or a planned surgery, dental extraction, endoscopy, biopsy, or other invasive procedure?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "rhythm_lipid_liver_gout_or_high_dose_context"
+        prompt: "Have you had atrial fibrillation/flutter, another clinically significant arrhythmia, unexplained palpitations, syncope, high AF risk, severe hypertriglyceridemia, pancreatitis history, clinician-managed lipids/CVD/diabetes risk, liver disease/elevated ALT/AST, LDL-C requiring monitoring, gout, immunocompromise or immunosuppressive therapy, prescription omega-3 use, or planned multi-gram/high-dose omega-3 intake?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "allergy_age_or_life_stage_context"
+        prompt: "Do you have fish/shellfish allergy concerns, prior omega-3 or capsule-ingredient reactions, are you under 18, pregnant, trying to conceive, lactating, planning child/adolescent use, or using cod liver oil or another retinol-containing omega product?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
-      - serious_allergic_symptoms_or_anaphylaxis
-      - new_irregular_heartbeat_palpitations_dizziness_or_syncope
-      - chest_pain_severe_shortness_of_breath_or_stroke_like_symptoms
-      - vomiting_blood_black_stool_blood_in_urine_or_uncontrolled_bleeding
-      - unusual_bruising_nosebleeds_gum_bleeding_or_heavier_menses
-      - severe_or_persistent_gi_symptoms
-      - gout_flare_marked_joint_swelling_or_new_edema
-      - rising_alt_ast_ldl_c_dark_urine_or_jaundice
-      - new_anticoagulant_antiplatelet_regular_nsaid_or_bleeding_supplement
-      - planned_procedure_pregnancy_or_breastfeeding_begins
-    notes:
-    - If the user is unsure about medication names, bleeding-relevant supplements, a clinician-managed diagnosis, or a procedure date, treat that as positive until clarified.
-    - Do not reassure fish/shellfish allergy, pregnancy/lactation, pediatric use, AF/flutter, severe hypertriglyceridemia, or antithrombotic use into the starter variant; route to clinician-guided variants.
+        - "serious_allergic_symptoms_or_anaphylaxis"
+        - "new_irregular_heartbeat_palpitations_dizziness_or_syncope"
+        - "chest_pain_severe_shortness_of_breath_or_stroke_like_symptoms"
+        - "vomiting_blood_black_stool_blood_in_urine_or_uncontrolled_bleeding"
+        - "unusual_bruising_nosebleeds_gum_bleeding_or_heavier_menses"
+        - "severe_or_persistent_gi_symptoms"
+        - "gout_flare_marked_joint_swelling_or_new_edema"
+        - "rising_alt_ast_ldl_c_dark_urine_or_jaundice"
+        - "new_anticoagulant_antiplatelet_regular_nsaid_or_bleeding_supplement"
+        - "planned_procedure_pregnancy_or_breastfeeding_begins"
   setupSlots:
-
-  -
-    id: product_identity
-    label: Product identity
-    purpose: personalization
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: true
-    question: What exact product do you plan to use? Include brand, product name, serving size, and a label/photo if available.
-    target:
-      object: protocol
-      field: productIdentity
-  -
-    id: source_type
-    label: Source type
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: What type of omega-3 source is it? Some options below are captured for routing only and are not eligible for the starter EPA/DHA variant.
-    options:
-    - fish_oil
-    - algal_epa_dha
-    - algal_dha_only_route_out
-    - krill_oil_route_out
-    - cod_liver_oil_route_out
-    - prescription_omega3_route_out
-    - other_or_unknown
-    target:
-      object: protocol
-      field: sourceType
-  -
-    id: epa_mg_per_day
-    label: EPA mg per planned day
-    purpose: measurement_fidelity
-    valueType: number
-    askPolicy: ask_if_unknown
-    required: true
-    question: How many milligrams of EPA will you take on a planned day?
-    constraints:
-      min: 0
-    target:
-      object: protocol
-      field: epaMgPerDay
-  -
-    id: dha_mg_per_day
-    label: DHA mg per planned day
-    purpose: measurement_fidelity
-    valueType: number
-    askPolicy: ask_if_unknown
-    required: true
-    question: How many milligrams of DHA will you take on a planned day?
-    constraints:
-      min: 0
-    target:
-      object: protocol
-      field: dhaMgPerDay
-  -
-    id: servings_per_day
-    label: Servings per day
-    purpose: adherence
-    valueType: number
-    askPolicy: ask_if_unknown
-    required: true
-    question: How many capsules, softgels, teaspoons, or servings will you take per day?
-    constraints:
-      min: 0
-    target:
-      object: protocol
-      field: servingsPerDay
-  -
-    id: formulation
-    label: Formulation if known
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: false
-    question: What formulation does the label report, if any?
-    options:
-    - triglyceride
-    - re_esterified_triglyceride
-    - ethyl_ester
-    - monoglyceride
-    - phospholipid
-    - free_fatty_acid
-    - unknown
-    target:
-      object: protocol
-      field: formulation
-  -
-    id: lab_plan
-    label: Lab plan
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: What measurement plan will you use?
-    options:
-    - omega3_index
-    - erythrocyte_epa_dha
-    - lipid_panel
-    - no_lab_manual_log
-    target:
-      object: analysisPlan
-      field: testPlan.labPlan
-  -
-    id: dosing_time
-    label: Dosing time
-    purpose: adherence
-    valueType: local_time
-    askPolicy: ask_if_unknown
-    required: false
-    question: What time do you plan to take it most days?
-    constraints:
-      defaultRunPlanSchedule:
-        kind: dailyLocal
-        localTime: "08:00"
-        timeZone: UTC
-      runPlanScheduleTimeZonePolicy: replace_with_user_vault_timezone
-    target:
-      object: onboardingCapture
-      field: answers.dosingTime
-  -
-    id: background_seafood
-    label: Background seafood intake
-    purpose: confounder_control
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: false
-    question: About how often do you eat fish or seafood now, what types, any high-mercury fish exposure, and will you keep that stable?
-    target:
-      object: onboardingCapture
-      field: context.backgroundSeafood
-  -
-    id: reminder_policy
-    label: Reminder preference
-    purpose: assistant_support
-    valueType: reminder_policy
-    askPolicy: ask_at_confirmation
-    required: false
-    question: Would you like reminders or only weekly check-ins?
-    options:
-    - none
-    - daily_checkin
-    - missed_dose_check
-    - weekly_digest
-    target:
-      object: assistantSupport
-      field: reminderPolicy
-  -
-    id: product_quality_details
-    label: Product quality details
-    purpose: measurement_fidelity
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: false
-    question: Can you record batch/lot, expiration date, storage conditions, and any third-party testing or certificate-of-analysis information?
-    target:
-      object: protocol
-      field: productQualityDetails
-  -
-    id: dose_with_food_context
-    label: Dose and meal context
-    purpose: measurement_fidelity
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: false
-    question: Will you take it with food or fat, and will you keep that meal pattern stable?
-    target:
-      object: protocol
-      field: doseWithFoodContext
-  -
-    id: medication_supplement_context
-    label: Medication and supplement context
-    purpose: safety
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: true
-    question: List anticoagulants, antiplatelets, regular NSAIDs, SSRIs/SNRIs, statins, fibrates, niacin, diabetes/thyroid/blood-pressure medicines, vitamin E, garlic, ginkgo, ginger, turmeric/curcumin, nattokinase, or other bleeding-relevant supplements.
-    target:
-      object: onboardingCapture
-      field: context.medicationSupplementContext
-  -
-    id: diet_lifestyle_confounders
-    label: Diet and lifestyle confounders
-    purpose: confounder_control
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: false
-    question: Note ALA foods such as flax/chia/walnut/canola, saturated-fat or omega-6 changes, alcohol changes, weight-change efforts, and exercise-load changes you expect during the run.
-    target:
-      object: onboardingCapture
-      field: context.dietLifestyleConfounders
-  -
-    id: baseline_safety_context
-    label: Baseline safety context
-    purpose: safety
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: true
-    question: Any AF/flutter, palpitations, syncope, CVD, diabetes, liver disease, kidney disease, gout, pancreatitis, lipid disorder, bleeding disorder, fish/shellfish allergy, pregnancy/lactation, planned procedures, baseline bruising/nosebleeds/gum bleeding, or unusual menstrual bleeding pattern?
-    target:
-      object: onboardingCapture
-      field: context.baselineSafetyContext
+    - id: "product_identity"
+      label: "Product identity"
+      question: "What exact product do you plan to use? Include brand, product name, serving size, and a label/photo if available."
+      target:
+        object: "protocol"
+        field: "productIdentity"
+    - id: "source_type"
+      label: "Source type"
+      question: "What type of omega-3 source is it? Some options below are captured for routing only and are not eligible for the starter EPA/DHA variant."
+      options:
+        - "fish_oil"
+        - "algal_epa_dha"
+        - "algal_dha_only_route_out"
+        - "krill_oil_route_out"
+        - "cod_liver_oil_route_out"
+        - "prescription_omega3_route_out"
+        - "other_or_unknown"
+      target:
+        object: "protocol"
+        field: "sourceType"
+    - id: "epa_mg_per_day"
+      label: "EPA mg per planned day"
+      question: "How many milligrams of EPA will you take on a planned day?"
+      constraints:
+        min: 0
+      target:
+        object: "protocol"
+        field: "epaMgPerDay"
+    - id: "dha_mg_per_day"
+      label: "DHA mg per planned day"
+      question: "How many milligrams of DHA will you take on a planned day?"
+      constraints:
+        min: 0
+      target:
+        object: "protocol"
+        field: "dhaMgPerDay"
+    - id: "servings_per_day"
+      label: "Servings per day"
+      question: "How many capsules, softgels, teaspoons, or servings will you take per day?"
+      constraints:
+        min: 0
+      target:
+        object: "protocol"
+        field: "servingsPerDay"
+    - id: "formulation"
+      label: "Formulation if known"
+      question: "What formulation does the label report, if any?"
+      options:
+        - "triglyceride"
+        - "re_esterified_triglyceride"
+        - "ethyl_ester"
+        - "monoglyceride"
+        - "phospholipid"
+        - "free_fatty_acid"
+        - "unknown"
+      constraints:
+        optional: true
+      target:
+        object: "protocol"
+        field: "formulation"
+    - id: "lab_plan"
+      label: "Lab plan"
+      question: "What measurement plan will you use?"
+      options:
+        - "omega3_index"
+        - "erythrocyte_epa_dha"
+        - "lipid_panel"
+        - "no_lab_manual_log"
+      target:
+        object: "analysisPlan"
+        field: "testPlan.labPlan"
+    - id: "dosing_time"
+      label: "Dosing time"
+      question: "What time do you plan to take it most days?"
+      constraints:
+        optional: true
+        defaultRunPlanSchedule:
+          kind: "dailyLocal"
+          localTime: "08:00"
+          timeZone: "UTC"
+        runPlanScheduleTimeZonePolicy: "replace_with_user_vault_timezone"
+      target:
+        object: "onboardingCapture"
+        field: "answers.dosingTime"
+    - id: "background_seafood"
+      label: "Background seafood intake"
+      question: "About how often do you eat fish or seafood now, what types, any high-mercury fish exposure, and will you keep that stable?"
+      constraints:
+        optional: true
+      target:
+        object: "onboardingCapture"
+        field: "context.backgroundSeafood"
+    - id: "reminder_policy"
+      label: "Reminder preference"
+      question: "Would you like reminders or only weekly check-ins?"
+      options:
+        - "none"
+        - "daily_checkin"
+        - "missed_dose_check"
+        - "weekly_digest"
+      constraints:
+        optional: true
+        askWhen: "at_confirmation"
+      target:
+        object: "assistantSupport"
+        field: "reminderPolicy"
+    - id: "product_quality_details"
+      label: "Product quality details"
+      question: "Can you record batch/lot, expiration date, storage conditions, and any third-party testing or certificate-of-analysis information?"
+      constraints:
+        optional: true
+      target:
+        object: "protocol"
+        field: "productQualityDetails"
+    - id: "dose_with_food_context"
+      label: "Dose and meal context"
+      question: "Will you take it with food or fat, and will you keep that meal pattern stable?"
+      constraints:
+        optional: true
+      target:
+        object: "protocol"
+        field: "doseWithFoodContext"
+    - id: "medication_supplement_context"
+      label: "Medication and supplement context"
+      question: "List anticoagulants, antiplatelets, regular NSAIDs, SSRIs/SNRIs, statins, fibrates, niacin, diabetes/thyroid/blood-pressure medicines, vitamin E, garlic, ginkgo, ginger, turmeric/curcumin, nattokinase, or other bleeding-relevant supplements."
+      target:
+        object: "onboardingCapture"
+        field: "context.medicationSupplementContext"
+    - id: "diet_lifestyle_confounders"
+      label: "Diet and lifestyle confounders"
+      question: "Note ALA foods such as flax/chia/walnut/canola, saturated-fat or omega-6 changes, alcohol changes, weight-change efforts, and exercise-load changes you expect during the run."
+      constraints:
+        optional: true
+      target:
+        object: "onboardingCapture"
+        field: "context.dietLifestyleConfounders"
+    - id: "baseline_safety_context"
+      label: "Baseline safety context"
+      question: "Any AF/flutter, palpitations, syncope, CVD, diabetes, liver disease, kidney disease, gout, pancreatitis, lipid disorder, bleeding disorder, fish/shellfish allergy, pregnancy/lactation, planned procedures, baseline bruising/nosebleeds/gum bleeding, or unusual menstrual bleeding pattern?"
+      target:
+        object: "onboardingCapture"
+        field: "context.baselineSafetyContext"
   planDefaults:
-    testPlanId: omega3-index-status-98d
-    baselineDays: 14
-    interventionDays: 84
-    sessionsPerWeek: 7
-    targetSessions: 84
-    minimumUsefulSessions: 56
-    firstSessionGuidance: Confirm actual EPA and DHA from the label, product quality details, and the safety screen before first dose. Keep product, dose, meal context, and background seafood intake stable unless the experiment is intentionally changed and restarted.
-  logging:
-    sessionFields:
-    - product_brand_and_name
-    - source_type
-    - formulation_if_known
-    - epa_mg
-    - dha_mg
-    - total_epa_dha_mg
-    - servings_taken
-    - dose_time
-    - taken_with_food_or_fat
-    - missed_doubled_or_changed_dose
-    - gi_or_taste_symptoms
-    - palpitations_irregular_heartbeat_dizziness_or_syncope
-    - bleeding_bruising_nosebleeds_gums_or_menses
-    - allergic_symptoms
-    - gout_flare_edema_or_joint_swelling
-    confounders:
-    - seafood_servings_type_or_high_mercury_change
-    - ala_food_intake_change
-    - other_omega3_sources
-    - new_supplement_or_medication
-    - anticoagulant_antiplatelet_nsaid_or_bleeding_supplement_change
-    - statin_fibrate_niacin_diabetes_thyroid_or_bp_med_change
-    - ssri_snri_or_bleeding_relevant_drug_change
-    - planned_procedure
-    - pregnancy_lactation_status_change
-    - illness_or_infection
-    - major_diet_saturated_fat_omega6_or_alcohol_change
-    - weight_change
-    - exercise_load_change
-    - travel_or_schedule_disruption
-    - lab_method_or_clinician_directed_lab_change
+    testPlanId: "omega3-index-status-98d"
+    firstSessionGuidance: "Confirm actual EPA and DHA from the label, product quality details, and the safety screen before first dose. Keep product, dose, meal context, and background seafood intake stable unless the experiment is intentionally changed and restarted."
+  trackingHints:
+    confounderFields:
+      - "seafood_servings_type_or_high_mercury_change"
+      - "ala_food_intake_change"
+      - "other_omega3_sources"
+      - "new_supplement_or_medication"
+      - "anticoagulant_antiplatelet_nsaid_or_bleeding_supplement_change"
+      - "statin_fibrate_niacin_diabetes_thyroid_or_bp_med_change"
+      - "ssri_snri_or_bleeding_relevant_drug_change"
+      - "planned_procedure"
+      - "pregnancy_lactation_status_change"
+      - "illness_or_infection"
+      - "major_diet_saturated_fat_omega6_or_alcohol_change"
+      - "weight_change"
+      - "exercise_load_change"
+      - "travel_or_schedule_disruption"
+      - "lab_method_or_clinician_directed_lab_change"
     notes:
-    - If a daily dose is missed, log it rather than doubling up unless a clinician or product instructions say otherwise.
-    - Log exact EPA and DHA separately; total capsule count alone is not enough.
-    - When lipid outcomes are measured, log major diet, alcohol, weight, exercise, medication, illness, and supplement changes so the lipid panel is interpretable.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 3
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-    - none
-    - daily_checkin
-    - missed_dose_check
-    - weekly_digest
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: You missed an EPA/DHA log. Did you take the planned serving, skip it, or change the dose/product?
+      - "If a daily dose is missed, log it rather than doubling up unless a clinician or product instructions say otherwise."
+      - "Log exact EPA and DHA separately; total capsule count alone is not enough."
+      - "When lipid outcomes are measured, log major diet, alcohol, weight, exercise, medication, illness, and supplement changes so the lipid panel is interpretable."
+  supportHints:
+    missedLogFollowupCopy: "You missed an EPA/DHA log. Did you take the planned serving, skip it, or change the dose/product?"
 whyItWorks:
   - "## EPA and DHA replace other fatty acids in cell membranes\n\nPreformed EPA and DHA enter red-blood-cell membranes over weeks of consistent intake, raising omega-3 index proportionally to dose, duration, and baseline status. A 12-week window with same-matrix retesting separates real tissue change from acute plasma noise."
   - "## Triglycerides fall when liver export slows\n\nEPA and DHA reduce hepatic VLDL assembly and triglyceride secretion. Fasting triglycerides are the most consistent lipid signal, especially from an elevated baseline. LDL-C and non-HDL-C move in different directions depending on dose, EPA/DHA ratio, and starting phenotype."

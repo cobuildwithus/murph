@@ -23,22 +23,24 @@ interface TestOnboarding {
     displayPrompt: string;
     intentSummary: string;
   };
-  contextReview: {
-    vaultChecks: Array<{
+  safetyScreen: {
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start";
+    mustAsk: Array<{
       id: string;
-      reason: string;
-      readHints: string[];
+      prompt: string;
+      ifPositive?: "clinician_guidance_before_unsupervised_start" | "do_not_start_unsupervised";
     }>;
+    stopIf?: {
+      additionalConditions: string[];
+    };
   };
   setupSlots: Array<{
     id: string;
     label: string;
-    purpose: "logistics";
-    valueType: "enum";
-    askPolicy: "ask_if_unknown";
-    required: boolean;
+    question: string;
     options?: string[];
-    target: SetupTarget;
+    target?: SetupTarget;
+    writePath?: string;
   }>;
   adaptationPolicy?: {
     fields: Array<{
@@ -63,12 +65,18 @@ interface TestOnboarding {
       notes?: string[];
     };
   };
-  logging: {
-    sessionFields: string[];
+  planDefaults: {
+    testPlanId: string;
+    firstSessionGuidance: string;
+    missedSessionGuidance?: string;
   };
-  assistantPolicy: {
-    askBeforeCreatingAutomations: boolean;
-    missedLogFollowup: "opt_in_only";
+  trackingHints: {
+    confounderFields?: string[];
+    confounders: string[];
+    notes: string[];
+  };
+  supportHints: {
+    missedLogFollowupCopy: string;
   };
 }
 
@@ -79,28 +87,36 @@ function createBaseOnboarding(): TestOnboarding {
       displayPrompt: "Hey Murph, I want to explore doing Norwegian 4x4 intervals.",
       intentSummary: "Explore Norwegian 4x4 Intervals",
     },
-    contextReview: {
-      vaultChecks: [
+    safetyScreen: {
+      dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start",
+      mustAsk: [
         {
-          id: "active_experiments",
-          reason: "Preserve the one-meaningful-experiment default.",
-          readHints: ["experiment list --status active --format json"],
+          id: "cardio_red_flags",
+          prompt: "Any chest pain, fainting, or known unstable heart condition?",
+          ifPositive: "clinician_guidance_before_unsupervised_start",
         },
       ],
+      stopIf: {
+        additionalConditions: ["new chest pain during exertion"],
+      },
     },
     setupSlots: [
       {
         id: "modality",
         label: "Modality",
-        purpose: "logistics",
-        valueType: "enum",
-        askPolicy: "ask_if_unknown",
-        required: true,
+        question: "Which modality will you use?",
         options: ["bike", "rower"],
         target: {
           object: "experimentRun",
           field: "modality",
         },
+      },
+      {
+        id: "reminder_policy",
+        label: "Reminder preference",
+        question: "Do you want a reminder?",
+        options: ["none", "session_reminder"],
+        writePath: "assistantSupport.reminderPolicy",
       },
     ],
     adaptationPolicy: {
@@ -142,43 +158,136 @@ function createBaseOnboarding(): TestOnboarding {
         notes: ["Reuse the protocol only when the modality still matches."],
       },
     },
-    logging: {
-      sessionFields: ["modality"],
+    planDefaults: {
+      testPlanId: "wearable-cardio-fitness-49d",
+      firstSessionGuidance: "Start with a conservative first interval session.",
+      missedSessionGuidance: "If a session is missed, resume at the next planned slot.",
     },
-    assistantPolicy: {
-      askBeforeCreatingAutomations: true,
-      missedLogFollowup: "opt_in_only",
+    trackingHints: {
+      confounderFields: ["recent_illness", "training_load_change"],
+      confounders: ["recent_illness", "training_load_change"],
+      notes: ["Treat wearable estimates as context."],
+    },
+    supportHints: {
+      missedLogFollowupCopy: "Did the interval session happen today?",
     },
   };
 }
 
 describe("healthCommonsExperimentOnboardingSchema", () => {
-  it("accepts reusable onboarding blocks with command read hints", () => {
+  it("accepts compact onboarding deltas without duplicated plan or logging structure", () => {
     const parsed = healthCommonsExperimentOnboardingSchema.parse(createBaseOnboarding());
 
-    expect(parsed.contextReview?.vaultChecks?.[0]?.readHints).toEqual([
-      "experiment list --status active --format json",
-    ]);
-    expect(parsed.setupSlots?.[0]?.target).toEqual({
-      object: "experimentRun",
-      field: "modality",
-    });
-    expect(parsed.adaptationPolicy?.fields.map((field) => field.id)).toEqual([
+    expect(parsed.schemaVersion).toBe("murph.commons.experiment-onboarding.v2");
+    expect(parsed.safetyScreen?.mustAsk[0]?.id).toBe("cardio_red_flags");
+    expect(parsed.setupSlots?.map((slot) => slot.id)).toEqual([
       "modality",
-      "measurement_plan",
+      "reminder_policy",
     ]);
-    expect(parsed.adaptationPolicy?.measurementPlan?.requiredSignals).toEqual([
-      "biomarker:estimated-vo2max",
-    ]);
-    expect(parsed.adaptationPolicy?.reusableSetup?.target).toEqual({
-      object: "protocol",
-      field: "setupSnapshot",
+    expect(parsed.setupSlots?.[1]?.writePath).toBe("assistantSupport.reminderPolicy");
+    expect(parsed.planDefaults).toEqual({
+      testPlanId: "wearable-cardio-fitness-49d",
+      firstSessionGuidance: "Start with a conservative first interval session.",
+      missedSessionGuidance: "If a session is missed, resume at the next planned slot.",
     });
+    expect(parsed.trackingHints?.confounderFields).toEqual([
+      "recent_illness",
+      "training_load_change",
+    ]);
+    expect(parsed.trackingHints?.confounders).toEqual([
+      "recent_illness",
+      "training_load_change",
+    ]);
+    expect(parsed.supportHints?.missedLogFollowupCopy).toBe(
+      "Did the interval session happen today?",
+    );
   });
 
-  it("rejects setup slots without typed targets", () => {
+  it("rejects legacy duplicated onboarding sections", () => {
+    const onboarding = {
+      ...createBaseOnboarding(),
+      contextReview: {
+        vaultChecks: [],
+      },
+      logging: {
+        sessionFields: ["modality"],
+      },
+      assistantPolicy: {
+        askBeforeCreatingAutomations: true,
+        missedLogFollowup: "opt_in_only",
+      },
+    };
+
+    expect(() => healthCommonsExperimentOnboardingSchema.parse(onboarding)).toThrow(
+      /Unrecognized key/u,
+    );
+  });
+
+  it("rejects duplicated plan defaults that canonical test plans own", () => {
+    const onboarding = {
+      ...createBaseOnboarding(),
+      planDefaults: {
+        ...createBaseOnboarding().planDefaults,
+        baselineDays: 7,
+        interventionDays: 42,
+        sessionsPerWeek: 2,
+        targetSessions: 12,
+        minimumUsefulSessions: 8,
+      },
+    };
+
+    expect(() => healthCommonsExperimentOnboardingSchema.parse(onboarding)).toThrow(
+      /Unrecognized key/u,
+    );
+  });
+
+  it("keeps runnable confounder field hints as stable ids", () => {
+    const onboarding = createBaseOnboarding();
+    onboarding.trackingHints.confounderFields = ["exact time since workout"];
+
+    expect(() => healthCommonsExperimentOnboardingSchema.parse(onboarding)).toThrow();
+  });
+
+  it("rejects empty or duplicated runnable confounder field hints", () => {
+    const emptyConfounderFields = createBaseOnboarding();
+    emptyConfounderFields.trackingHints.confounderFields = [];
+
+    expect(() => healthCommonsExperimentOnboardingSchema.parse(emptyConfounderFields)).toThrow();
+
+    const duplicatedConfounderFields = createBaseOnboarding();
+    duplicatedConfounderFields.trackingHints.confounderFields = [
+      "recent_illness",
+      "recent_illness",
+    ];
+
+    expect(() => healthCommonsExperimentOnboardingSchema.parse(duplicatedConfounderFields)).toThrow(
+      /unique/u,
+    );
+  });
+
+  it("rejects legacy setup slot metadata", () => {
     const base = createBaseOnboarding();
-    const { target: _target, ...slotWithoutTarget } = base.setupSlots[0];
+    const onboarding = {
+      ...base,
+      setupSlots: [
+        {
+          ...base.setupSlots[0],
+          purpose: "logistics",
+          valueType: "enum",
+          askPolicy: "ask_if_unknown",
+          required: true,
+        },
+      ],
+    };
+
+    expect(() => healthCommonsExperimentOnboardingSchema.parse(onboarding)).toThrow(
+      /Unrecognized key/u,
+    );
+  });
+
+  it("rejects setup slots without typed targets or write paths", () => {
+    const base = createBaseOnboarding();
+    const { target: _target, writePath: _writePath, ...slotWithoutTarget } = base.setupSlots[0];
     const onboarding = {
       ...base,
       setupSlots: [slotWithoutTarget],
@@ -200,19 +309,6 @@ describe("healthCommonsExperimentOnboardingSchema", () => {
 
     expect(() => healthCommonsExperimentOnboardingSchema.parse(onboarding)).toThrow(
       /Duplicate onboarding id modality/,
-    );
-  });
-
-  it("requires enum setup slots to declare options", () => {
-    const onboarding = createBaseOnboarding();
-    const slotWithoutOptions = { ...onboarding.setupSlots[0] };
-    delete slotWithoutOptions.options;
-    onboarding.setupSlots = [
-      slotWithoutOptions,
-    ];
-
-    expect(() => healthCommonsExperimentOnboardingSchema.parse(onboarding)).toThrow(
-      /Enum setup slots must declare options/,
     );
   });
 

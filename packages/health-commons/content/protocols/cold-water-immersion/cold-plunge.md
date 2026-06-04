@@ -141,6 +141,31 @@ protocol:
   - sauna_heat_or_hot_cold_contrast_same_day
   - alcohol_sedatives_recreational_drugs_or_major_sleep_deprivation_today
   - time_of_day
+  sessionFieldIds:
+  - water_temperature_c
+  - time_in_water_seconds
+  - mood_before
+  - mood_after
+  - cold_shock_intensity
+  - breathing_controlled
+  - symptoms_or_stop
+  - rewarming_time_minutes
+  - temperature_measurement_method
+  - adult_nearby_or_rescue_plan_confirmed
+  - first_session_or_changed_setup_yes_no
+  - prior_cold_exposure_tolerance
+  - pre_session_anxiety_or_panic_0_10
+  - breathing_control_recovered_within_30s_yes_no
+  - post_exit_balance_or_clumsiness
+  - post_exit_shivering_or_unable_to_rewarm
+  - medication_context_today
+  - clinical_intent_wellness_vs_treatment
+  - recent_illness_fever_dehydration_or_heat_illness
+  - thermometer_available_yes_no
+  - hard_training_or_resistance_training_within_24h
+  - sauna_heat_or_hot_cold_contrast_same_day
+  - alcohol_sedatives_recreational_drugs_or_major_sleep_deprivation_today
+  - time_of_day
   stopConditions:
   - Do not start if water temperature is unmeasured, the thermometer is unavailable, water is below 10 °C for the first default Murph run, setup changed, no safe exit, no adult nearby for first exposure, or any safety screen is positive or uncertain.
   - Controlled breathing is not restored within 15–30 seconds, inability to speak in short sentences, uncontrolled gasping, hyperventilation, panic, or loss of breathing control.
@@ -230,345 +255,227 @@ expectedSignalDescriptions:
     basis: Sleep evidence is mostly adjacent to athletes, cryotherapy, or post-exercise recovery and includes null findings; stable sleep efficiency is the best supported expectation.
   protocolProminence: context
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to explore a short cold plunge experiment.
-    intentSummary: Explore Cold Plunge
-  contextReview:
-    vaultChecks:
-    - id: active_experiments
-      label: Active experiments
-      reason: Avoid stacking another meaningful experiment on top of an active one unless the user explicitly accepts weaker attribution.
-      readHints:
-      - experiment list --status active --format json
-    - id: wearable_recovery_sleep_sources
-      label: Wearable recovery and sleep sources
-      reason: Confirm whether HRV, resting heart rate, sleep, or activity signals are available for baseline and intervention context.
-      freshnessDays: 14
-      readHints:
-      - wearables sources list --format json
-      - wearables day <YYYY-MM-DD> --format json
-    - id: cardiovascular_blood_pressure_context
-      label: Cardiovascular and blood-pressure context
-      reason: Cold water can acutely increase cardiovascular load; recent symptoms, diagnoses, or blood-pressure context can change the safety posture.
-      freshnessDays: 90
-      readHints:
-      - search query "heart disease arrhythmia chest pain syncope hypertension blood pressure stroke heart failure" --format json
-    - id: cold_reaction_respiratory_neurologic_context
-      label: Cold reaction, respiratory, and neurologic context
-      reason: Cold urticaria, Raynaud-type reactions, asthma/COPD, seizures, dizziness, and prior cold-water intolerance can change whether unsupervised cold exposure is appropriate.
-      freshnessDays: 180
-      readHints:
-      - search query "cold urticaria Raynaud asthma COPD seizure fainting dizziness cold water" --format json
-    - id: medications_alcohol_sedatives
-      label: Medication, alcohol, and sedative context
-      reason: Blood-pressure, heart-rate, glucose, alertness, thermoregulation, and coordination effects can change cold-water risk and interpretation.
-      freshnessDays: 30
-      readHints:
-      - search query "beta blocker antihypertensive insulin hypoglycemia sedative alcohol medication" --format json
-    - id: recent_illness_training_heat_context
-      label: Recent illness, training, and heat exposure
-      reason: Illness, hard training, sauna, travel, or major sleep disruption can dominate recovery signals and raise risk.
-      freshnessDays: 21
-      readHints:
-      - search query "illness fever infection hard workout sauna travel sleep disruption" --format json
-    notes:
-    - Review context first, but still ask the high-caution safety screen because absence of vault evidence is not clearance.
+    displayPrompt: "Hey Murph, I want to explore a short cold plunge experiment."
+    intentSummary: "Explore Cold Plunge"
   safetyScreen:
-    cautionLevel: high
-    mode: ask_each_item
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-    - id: age_frailty_and_fall_risk
-      prompt: under 18, older adult with frailty, limited mobility, fall risk, difficulty stepping out of a tub, or needing help to dress or rewarm
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Minor, frailty, mobility, and post-immersion instability contexts require a different supervision and rescue model.
-    - id: cardiovascular_channelopathy_or_syncope
-      prompt: known cardiovascular disease, coronary artery disease, angina, arrhythmia, Long QT/channelopathy, family history of sudden cardiac death or serious water-triggered cardiac events, heart failure, recent heart attack or stroke, unexplained fainting/near-fainting, exertional chest symptoms, significant palpitations, uncontrolled blood pressure, medication-treated high blood pressure if uncertain, or a clinician telling you to avoid sudden cold or water stress
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Cold water can acutely change breathing, blood pressure, heart rate, sympathetic tone, and arrhythmia-relevant conditions.
-    - id: circulation_neuropathy_cold_injury
-      prompt: peripheral artery disease, poor circulation, peripheral neuropathy, venous stasis, prior frostbite or non-freezing cold injury, cold agglutinin disease, severe Raynaud-type reaction, severe numbness, or prior unsafe reaction to cold water
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Circulation, sensation, and cold-injury history can change cold-exposure risk and safe-exit judgment.
-    - id: cold_allergy_or_systemic_reaction
-      prompt: cold urticaria, cold-triggered hives, swelling, wheeze, throat tightness, angioedema, anaphylaxis history, or any cold-triggered systemic reaction
-      ifPositive: do_not_start_unsupervised
-      why: Cold-triggered allergic or vascular reactions can become systemic or impair safe exit.
-    - id: respiratory_neurologic_kidney_or_diabetes_context
-      prompt: severe asthma/COPD symptoms, cold-triggered respiratory symptoms, seizure disorder/epilepsy, kidney failure or serious kidney disease, diabetes with hypoglycemia risk or impaired sensation, or medication affecting heart rate, blood pressure, rhythm, alertness, thermoregulation, glucose, balance, or safe exit
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Respiratory, neurologic, kidney, diabetes, and medication contexts can alter cold-stress and safe-exit risk.
-    - id: pregnancy_postpartum_or_clinical_variant_context
-      prompt: pregnancy, early postpartum, or another clinical situation where a clinician-guided or professionally supervised variant would be safer than an ordinary wellness run
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: The ordinary Cold Plunge page is not a pregnancy/postpartum or clinical-treatment clearance pathway.
-    - id: clinical_mental_health_context
-      prompt: recent self-harm or suicide risk, severe or unstable mental-health symptoms, or planning to use cold plunges as treatment for depression or anxiety
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: The default protocol tracks acute subjective mood in a wellness experiment; it is not a clinical mental-health treatment.
-    - id: current_illness_or_depleted_state
-      prompt: fever, acute infection, dehydration, recent heat illness, severe fatigue, major sleep deprivation, or feeling too unwell to safely exit and rewarm today
-      ifPositive: do_not_start_unsupervised
-      why: Acute illness or depletion can raise cold-stress risk and confound interpretation.
-    - id: unsafe_setup_or_exit
-      prompt: unmeasured water temperature, no thermometer, water below 10 °C for the first default Murph run, no reliable way to get out immediately, slippery footing, locked or covered tub risk, open-water setting, no adult nearby for the first session or changed/colder/uncertain setup, or no dry warm rewarming plan
-      ifPositive: do_not_start_unsupervised
-      why: Measured temperature, immediate exit, rescue planning, and rewarming are first-run safety gates.
-    - id: alcohol_sedatives_or_impairment
-      prompt: alcohol, sedatives, recreational drugs, major sleep deprivation, or anything that could impair judgment, balance, breathing control, or safe exit today
-      ifPositive: do_not_start_unsupervised
-    - id: breathwork_submersion_or_breath_hold_plan
-      prompt: planning to do breathwork, deliberate hyperventilation, breath-holding, face submersion, underwater challenges, open-water swimming, sauna-to-plunge contrast, or hot-cold stacking as part of the session
-      ifPositive: do_not_start_unsupervised
-      why: Those are excluded variants with different drowning, arrhythmia-relevant, heat-stress, and rescue risks.
+      - id: "age_frailty_and_fall_risk"
+        prompt: "under 18, older adult with frailty, limited mobility, fall risk, difficulty stepping out of a tub, or needing help to dress or rewarm"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "cardiovascular_channelopathy_or_syncope"
+        prompt: "known cardiovascular disease, coronary artery disease, angina, arrhythmia, Long QT/channelopathy, family history of sudden cardiac death or serious water-triggered cardiac events, heart failure, recent heart attack or stroke, unexplained fainting/near-fainting, exertional chest symptoms, significant palpitations, uncontrolled blood pressure, medication-treated high blood pressure if uncertain, or a clinician telling you to avoid sudden cold or water stress"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "circulation_neuropathy_cold_injury"
+        prompt: "peripheral artery disease, poor circulation, peripheral neuropathy, venous stasis, prior frostbite or non-freezing cold injury, cold agglutinin disease, severe Raynaud-type reaction, severe numbness, or prior unsafe reaction to cold water"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "cold_allergy_or_systemic_reaction"
+        prompt: "cold urticaria, cold-triggered hives, swelling, wheeze, throat tightness, angioedema, anaphylaxis history, or any cold-triggered systemic reaction"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "respiratory_neurologic_kidney_or_diabetes_context"
+        prompt: "severe asthma/COPD symptoms, cold-triggered respiratory symptoms, seizure disorder/epilepsy, kidney failure or serious kidney disease, diabetes with hypoglycemia risk or impaired sensation, or medication affecting heart rate, blood pressure, rhythm, alertness, thermoregulation, glucose, balance, or safe exit"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "pregnancy_postpartum_or_clinical_variant_context"
+        prompt: "pregnancy, early postpartum, or another clinical situation where a clinician-guided or professionally supervised variant would be safer than an ordinary wellness run"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "clinical_mental_health_context"
+        prompt: "recent self-harm or suicide risk, severe or unstable mental-health symptoms, or planning to use cold plunges as treatment for depression or anxiety"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "current_illness_or_depleted_state"
+        prompt: "fever, acute infection, dehydration, recent heat illness, severe fatigue, major sleep deprivation, or feeling too unwell to safely exit and rewarm today"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "unsafe_setup_or_exit"
+        prompt: "unmeasured water temperature, no thermometer, water below 10 °C for the first default Murph run, no reliable way to get out immediately, slippery footing, locked or covered tub risk, open-water setting, no adult nearby for the first session or changed/colder/uncertain setup, or no dry warm rewarming plan"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "alcohol_sedatives_or_impairment"
+        prompt: "alcohol, sedatives, recreational drugs, major sleep deprivation, or anything that could impair judgment, balance, breathing control, or safe exit today"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "breathwork_submersion_or_breath_hold_plan"
+        prompt: "planning to do breathwork, deliberate hyperventilation, breath-holding, face submersion, underwater challenges, open-water swimming, sauna-to-plunge contrast, or hot-cold stacking as part of the session"
+        ifPositive: "do_not_start_unsupervised"
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
-      - water temperature is unmeasured, the thermometer is unavailable, the setup changed, no safe exit, or no adult nearby for first exposure
-      - controlled breathing is not restored within 15–30 seconds or the user cannot speak in short sentences
-      - chest symptoms, severe breathlessness, wheeze, palpitations, faintness, fainting, confusion, visual changes, severe headache, or loss of coordination
-      - cold-triggered hives, swelling, throat tightness, angioedema, or systemic reaction symptoms
-      - post-exit unsteadiness, severe numbness, weak legs, poor grip, clumsiness, or inability to dress/rewarm without help
-      - unsafe exit or rewarming setup
-    notes:
-    - A positive or uncertain screen is not a diagnosis; it means Murph should not configure an unsupervised Cold Plunge run and should offer a safer alternative or clinician-guidance path.
+        - "water temperature is unmeasured, the thermometer is unavailable, the setup changed, no safe exit, or no adult nearby for first exposure"
+        - "controlled breathing is not restored within 15–30 seconds or the user cannot speak in short sentences"
+        - "chest symptoms, severe breathlessness, wheeze, palpitations, faintness, fainting, confusion, visual changes, severe headache, or loss of coordination"
+        - "cold-triggered hives, swelling, throat tightness, angioedema, or systemic reaction symptoms"
+        - "post-exit unsteadiness, severe numbness, weak legs, poor grip, clumsiness, or inability to dress/rewarm without help"
+        - "unsafe exit or rewarming setup"
   setupSlots:
-  - id: water_temperature_c
-    label: Water temperature
-    purpose: logistics
-    valueType: number
-    askPolicy: always
-    required: true
-    question: What measured water temperature in °C will you use for the first sessions?
-    constraints:
-      unit: C
-      min: 10
-      max: 15
-      recommendedMin: 10
-      recommendedMax: 15
-      firstDefaultRunHardGate: measured_10_to_15_c; do_not_start_if_unmeasured_or_below_10_c
-    target:
-      object: protocol
-      field: temperatureC
-  - id: session_duration_minutes
-    label: Session duration
-    purpose: logistics
-    valueType: number
-    askPolicy: always
-    required: true
-    question: How many minutes will you stay in the water for the first sessions?
-    constraints:
-      unit: minutes
-      recommendedMin: 1
-      recommendedMax: 3
-    target:
-      object: protocol
-      field: durationMinutes
-  - id: sessions_per_week
-    label: Sessions per week
-    purpose: adherence
-    valueType: integer
-    askPolicy: ask_if_unknown
-    required: true
-    question: How many cold-plunge sessions per week can you realistically complete during the two-week intervention?
-    constraints:
-      recommendedMin: 2
-      recommendedMax: 3
-    target:
-      object: protocol
-      field: frequency.sessionsPerWeek
-  - id: exit_and_rewarming_plan
-    label: Exit and rewarming plan
-    purpose: safety
-    valueType: free_text
-    askPolicy: always
-    required: true
-    question: What is your exact exit and gentle rewarming plan?
-    target:
-      object: onboardingCapture
-      field: exitAndRewarmingPlan
-  - id: supervision_or_checkin
-    label: Supervision or check-in
-    purpose: safety
-    valueType: enum
-    askPolicy: always
-    required: true
-    question: What supervision or check-in will you use?
-    options:
-    - adult_nearby_and_able_to_help
-    - adult_nearby_first_session_then_reassess
-    - scheduled_checkin_after_prior_uneventful_sessions_only
-    - not_sure
-    target:
-      object: onboardingCapture
-      field: supervisionOrCheckin
-  - id: mood_scale
-    label: Mood scale
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: Which same-scale mood rating will you use before and after sessions?
-    options:
-    - zero_to_ten
-    - one_to_five
-    target:
-      object: analysisPlan
-      field: moodScale
-  - id: session_timing
-    label: Session timing
-    purpose: confounder_control
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: false
-    question: When will sessions usually happen, and will they be kept away from hard training or sauna?
-    target:
-      object: experimentRun
-      field: sessionTiming
-  - id: reminder_policy
-    label: Logging reminder preference
-    purpose: assistant_support
-    valueType: reminder_policy
-    askPolicy: ask_at_confirmation
-    required: false
-    question: Should Murph remind you to log before and after a planned session?
-    target:
-      object: assistantSupport
-      field: reminderPolicy
+    - id: "water_temperature_c"
+      label: "Water temperature"
+      question: "What measured water temperature in °C will you use for the first sessions?"
+      constraints:
+        unit: "C"
+        min: 10
+        max: 15
+        recommendedMin: 10
+        recommendedMax: 15
+        firstDefaultRunHardGate: "measured_10_to_15_c; do_not_start_if_unmeasured_or_below_10_c"
+      target:
+        object: "protocol"
+        field: "temperatureC"
+    - id: "session_duration_minutes"
+      label: "Session duration"
+      question: "How many minutes will you stay in the water for the first sessions?"
+      constraints:
+        unit: "minutes"
+        recommendedMin: 1
+        recommendedMax: 3
+      target:
+        object: "protocol"
+        field: "durationMinutes"
+    - id: "sessions_per_week"
+      label: "Sessions per week"
+      question: "How many cold-plunge sessions per week can you realistically complete during the two-week intervention?"
+      constraints:
+        recommendedMin: 2
+        recommendedMax: 3
+      target:
+        object: "protocol"
+        field: "frequency.sessionsPerWeek"
+    - id: "exit_and_rewarming_plan"
+      label: "Exit and rewarming plan"
+      question: "What is your exact exit and gentle rewarming plan?"
+      target:
+        object: "onboardingCapture"
+        field: "exitAndRewarmingPlan"
+    - id: "supervision_or_checkin"
+      label: "Supervision or check-in"
+      question: "What supervision or check-in will you use?"
+      options:
+        - "adult_nearby_and_able_to_help"
+        - "adult_nearby_first_session_then_reassess"
+        - "scheduled_checkin_after_prior_uneventful_sessions_only"
+        - "not_sure"
+      target:
+        object: "onboardingCapture"
+        field: "supervisionOrCheckin"
+    - id: "mood_scale"
+      label: "Mood scale"
+      question: "Which same-scale mood rating will you use before and after sessions?"
+      options:
+        - "zero_to_ten"
+        - "one_to_five"
+      target:
+        object: "analysisPlan"
+        field: "moodScale"
+    - id: "session_timing"
+      label: "Session timing"
+      question: "When will sessions usually happen, and will they be kept away from hard training or sauna?"
+      constraints:
+        optional: true
+      target:
+        object: "experimentRun"
+        field: "sessionTiming"
+    - id: "reminder_policy"
+      label: "Logging reminder preference"
+      question: "Should Murph remind you to log before and after a planned session?"
+      constraints:
+        optional: true
+        askWhen: "at_confirmation"
+      target:
+        object: "assistantSupport"
+        field: "reminderPolicy"
+  planDefaults:
+    testPlanId: "mood-safety-21d"
+    firstSessionGuidance: "Use the warmer end of the measured 10–15 °C range and the shortest duration; another adult should be nearby and able to help; end immediately if breathing control or exit confidence changes."
   adaptationPolicy:
     fields:
-    - id: temperature_field
-      label: Water temperature range
-      target:
-        object: protocol
-        field: temperatureC
-      sourceSlotIds:
-      - water_temperature_c
-      requiredForRunSpec: true
-      protocolReusable: true
-      guidance: Default first-run sessions require measured 10–15 °C water; do not start if unmeasured, below 10 °C, or changed setup unless this is a separate clinician-guided/professionally supervised variant.
-    - id: duration_field
-      label: Session duration
-      target:
-        object: protocol
-        field: durationMinutes
-      sourceSlotIds:
-      - session_duration_minutes
-      requiredForRunSpec: true
-      protocolReusable: true
-      guidance: Start with 1–3 minutes; do not increase duration during the first run to chase discomfort.
-    - id: frequency_field
-      label: Weekly frequency
-      target:
-        object: protocol
-        field: frequency.sessionsPerWeek
-      sourceSlotIds:
-      - sessions_per_week
-      requiredForRunSpec: true
-      protocolReusable: true
-    - id: safety_plan_field
-      label: Safety setup
-      target:
-        object: onboardingCapture
-        field: safetyPlan
-      sourceSlotIds:
-      - exit_and_rewarming_plan
-      - supervision_or_checkin
-      requiredForRunSpec: true
-      protocolReusable: false
-      guidance: Another adult nearby and able to help is required for the first session or any changed/colder/uncertain setup; a scheduled check-in is only for later uneventful sessions with unchanged measured setup and negative screen.
-    - id: mood_scale_field
-      label: Primary mood scale
-      target:
-        object: analysisPlan
-        field: moodScale
-      sourceSlotIds:
-      - mood_scale
-      requiredForRunSpec: true
-      protocolReusable: true
+      - id: "temperature_field"
+        label: "Water temperature range"
+        target:
+          object: "protocol"
+          field: "temperatureC"
+        sourceSlotIds:
+          - "water_temperature_c"
+        requiredForRunSpec: true
+        protocolReusable: true
+        guidance: "Default first-run sessions require measured 10–15 °C water; do not start if unmeasured, below 10 °C, or changed setup unless this is a separate clinician-guided/professionally supervised variant."
+      - id: "duration_field"
+        label: "Session duration"
+        target:
+          object: "protocol"
+          field: "durationMinutes"
+        sourceSlotIds:
+          - "session_duration_minutes"
+        requiredForRunSpec: true
+        protocolReusable: true
+        guidance: "Start with 1–3 minutes; do not increase duration during the first run to chase discomfort."
+      - id: "frequency_field"
+        label: "Weekly frequency"
+        target:
+          object: "protocol"
+          field: "frequency.sessionsPerWeek"
+        sourceSlotIds:
+          - "sessions_per_week"
+        requiredForRunSpec: true
+        protocolReusable: true
+      - id: "safety_plan_field"
+        label: "Safety setup"
+        target:
+          object: "onboardingCapture"
+          field: "safetyPlan"
+        sourceSlotIds:
+          - "exit_and_rewarming_plan"
+          - "supervision_or_checkin"
+        requiredForRunSpec: true
+        protocolReusable: false
+        guidance: "Another adult nearby and able to help is required for the first session or any changed/colder/uncertain setup; a scheduled check-in is only for later uneventful sessions with unchanged measured setup and negative screen."
+      - id: "mood_scale_field"
+        label: "Primary mood scale"
+        target:
+          object: "analysisPlan"
+          field: "moodScale"
+        sourceSlotIds:
+          - "mood_scale"
+        requiredForRunSpec: true
+        protocolReusable: true
     measurementPlan:
-      testPlanId: mood-safety-21d
+      testPlanId: "mood-safety-21d"
       requiredSignals:
-      - biomarker:self-reported-mood
+        - "biomarker:self-reported-mood"
       optionalSignals:
-      - biomarker:resting-heart-rate
-      - biomarker:hrv-rmssd
-      - biomarker:morning-blood-pressure
-      - biomarker:sleep-efficiency
+        - "biomarker:resting-heart-rate"
+        - "biomarker:hrv-rmssd"
+        - "biomarker:morning-blood-pressure"
+        - "biomarker:sleep-efficiency"
       notes:
-      - Configure mood and safety logs before creating the active experiment. Wearable and home-device signals can be linked later as context.
+        - "Configure mood and safety logs before creating the active experiment. Wearable and home-device signals can be linked later as context."
     reusableSetup:
       enabled: true
       target:
-        object: onboardingCapture
-        field: coldPlungeSetup
+        object: "onboardingCapture"
+        field: "coldPlungeSetup"
       sourceSlotIds:
-      - water_temperature_c
-      - exit_and_rewarming_plan
-      - supervision_or_checkin
+        - "water_temperature_c"
+        - "exit_and_rewarming_plan"
+        - "supervision_or_checkin"
       notes:
-      - Reuse only for the same physical setup; re-ask if the tub, water source, location, exit plan, or supervision changes.
+        - "Reuse only for the same physical setup; re-ask if the tub, water source, location, exit plan, or supervision changes."
     notes:
-    - Cold Plunge onboarding adapts the dose downward when any safety, breathing-control, exit, or rewarming uncertainty appears.
-  planDefaults:
-    testPlanId: mood-safety-21d
-    baselineDays: 7
-    interventionDays: 14
-    sessionsPerWeek: 3
-    targetSessions: 6
-    minimumUsefulSessions: 4
-    firstSessionGuidance: Use the warmer end of the measured 10–15 °C range and the shortest duration; another adult should be nearby and able to help; end immediately if breathing control or exit confidence changes.
-  logging:
-    sessionFields:
-    - water_temperature_c
-    - time_in_water_seconds
-    - mood_before
-    - mood_after
-    - cold_shock_intensity
-    - breathing_controlled
-    - symptoms_or_stop
-    - rewarming_time_minutes
-    - temperature_measurement_method
-    - adult_nearby_or_rescue_plan_confirmed
-    - first_session_or_changed_setup_yes_no
-    - prior_cold_exposure_tolerance
-    - pre_session_anxiety_or_panic_0_10
-    - breathing_control_recovered_within_30s_yes_no
-    - post_exit_balance_or_clumsiness
-    - post_exit_shivering_or_unable_to_rewarm
-    - medication_context_today
-    - clinical_intent_wellness_vs_treatment
-    - recent_illness_fever_dehydration_or_heat_illness
-    - thermometer_available_yes_no
-    - hard_training_or_resistance_training_within_24h
-    - sauna_heat_or_hot_cold_contrast_same_day
-    - alcohol_sedatives_recreational_drugs_or_major_sleep_deprivation_today
-    - time_of_day
-    confounders:
-    - sleep_last_night
-    - hard_training_same_day
-    - sauna_or_heat_same_day
-    - alcohol_or_sedatives
-    - illness_or_fever
-    - unusual_stress
-    - medication_context_today
-    - clinical_intent_wellness_vs_treatment
-    - recent_illness_fever_dehydration_or_heat_illness
-    - hard_training_or_resistance_training_within_24h
-    - sauna_heat_or_hot_cold_contrast_same_day
-    - alcohol_sedatives_recreational_drugs_or_major_sleep_deprivation_today
-    - time_of_day
+      - "Cold Plunge onboarding adapts the dose downward when any safety, breathing-control, exit, or rewarming uncertainty appears."
+  trackingHints:
+    confounderFields:
+      - "sleep_last_night"
+      - "hard_training_same_day"
+      - "sauna_or_heat_same_day"
+      - "alcohol_or_sedatives"
+      - "illness_or_fever"
+      - "unusual_stress"
+      - "medication_context_today"
+      - "clinical_intent_wellness_vs_treatment"
+      - "recent_illness_fever_dehydration_or_heat_illness"
+      - "hard_training_or_resistance_training_within_24h"
+      - "sauna_heat_or_hot_cold_contrast_same_day"
+      - "alcohol_sedatives_recreational_drugs_or_major_sleep_deprivation_today"
+      - "time_of_day"
     notes:
-    - Log before and after the session; never continue a session just to complete a log.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 3
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-    - reminder_policy
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: I can remind you to log temperature, duration, mood, symptoms, and rewarming after planned cold-plunge sessions.
+      - "Log before and after the session; never continue a session just to complete a log."
+  supportHints:
+    missedLogFollowupCopy: "I can remind you to log temperature, duration, mood, symptoms, and rewarming after planned cold-plunge sessions."
 whyItWorks:
   - "## Cold shock defends core\n\nCold water hits skin thermoreceptors fast. Breathing spikes, vessels clamp down, heart rate and pressure shift; blood moves inward to defend core temperature."
   - "## Rewarming is part of the dose\n\nThe session is not over at exit. Shivering, vasoconstriction release, and rewarming decide whether the stress resolves cleanly or carries into recovery."

@@ -484,6 +484,18 @@ protocol:
     - missed or modified sessions
     - other hard training
     - heat illness alcohol caffeine or recent-illness context
+  sessionFieldIds:
+  - modality
+  - movement_choice
+  - completed_rounds
+  - rpe
+  - peak_hr
+  - symptoms
+  - soreness
+  - recovery_24_48h
+  - sleep_disruption
+  - other_hard_training
+  - heat_illness_context
   stopConditions:
     - Stop immediately and do not restart that day for chest pain or pressure; faintness, near-fainting, severe dizziness, confusion, poor-perfusion feelings, palpitations or unusual rhythm symptoms; new neurologic symptoms; unusual shortness of breath; wheeze, cough, or chest tightness outside a known clinician-directed plan; or if you want or need to stop.
     - Stop immediately for possible heat illness, feeling unable to cool down, altered mental status or confusion, collapse, heat cramps, severe dehydration context, or hot/humid/poorly ventilated conditions that make continuing unsafe. Begin cooling and seek medical help when symptoms are severe, persistent, or concerning.
@@ -582,247 +594,111 @@ expectedSignalDescriptions:
       basis: "HIIT blood-pressure effects are usually small, larger in elevated BP and minimal in normotension; adolescent Tabata/HIIT data showed about a 2 mmHg SBP signal."
     protocolProminence: context
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to explore doing Tabata 20/10 intervals.
-    intentSummary: Explore Tabata 20/10 Interval Training
-  contextReview:
-    vaultChecks:
-
-      -
-        id: active_experiments
-        label: Active experiments
-        reason: Avoid starting more than one meaningful experiment at once unless the user explicitly chooses that tradeoff.
-        readHints:
-          - experiment list --status active --format json
-      -
-        id: wearable_sources
-        label: Wearable sources
-        reason: Confirm whether cardio-fitness, heart-rate, recovery, sleep, activity, or blood-pressure signals can be observed during the baseline and intervention windows.
-        freshnessDays: 14
-        readHints:
-          - wearables sources list --format json
-          - wearables day <YYYY-MM-DD> --format json
-      -
-        id: recent_activity_sessions
-        label: Recent activity sessions
-        reason: Understand current training load, interval familiarity, and likely modality fit before scheduling hard intervals.
-        freshnessDays: 45
-        readHints:
-          - search query "interval workouts cycling rowing running tabata hiit" --format json
-          - timeline --entry-type event --kind activity_session --from <YYYY-MM-DD> --format json
-      -
-        id: cardiovascular_metabolic_renal_or_exertional_symptoms
-        label: Cardiovascular, metabolic, renal, or exertional symptoms
-        reason: Tabata 20/10 is vigorous exercise; warning symptoms or known disease can change the safety disposition.
-        freshnessDays: 90
-        readHints:
-          - profile medical_conditions --format json
-          - timeline search "chest pain dizziness faint palpitations shortness of breath blood pressure diabetes kidney" --format json
-      -
-        id: respiratory_conditions
-        label: Respiratory conditions
-        reason: Asthma, exercise-induced bronchoconstriction, or unusual wheeze requires a plan before hard unsupervised intervals.
-        freshnessDays: 90
-        readHints:
-          - profile medical_conditions --format json
-          - timeline search "asthma wheeze inhaler bronchoconstriction" --format json
-      -
-        id: injuries_pain_and_recovery
-        label: Injuries, pain, and recovery
-        reason: Movement choice is a major determinant of musculoskeletal risk and recovery burden.
-        freshnessDays: 45
-        readHints:
-          - timeline search "injury pain soreness recovery DOMS" --format json
-      -
-        id: recent_illness_heat_or_rhabdo_context
-        label: Recent illness, heat, or rhabdomyolysis context
-        reason: Recent fever/illness, heat exposure, dehydration, or prior exertional rhabdomyolysis can make all-out intervals inappropriate.
-        freshnessDays: 30
-        readHints:
-          - timeline search "fever illness covid flu heat dehydration dark urine rhabdo" --format json
-      -
-        id: pregnancy_or_postpartum_context
-        label: Pregnancy or postpartum context
-        reason: Pregnancy and early postpartum status can change vigorous-exercise screening and supervision needs.
-        freshnessDays: 90
-        readHints:
-          - profile contexts --format json
-          - timeline search "pregnant postpartum" --format json
-      -
-        id: medications_affecting_hr_or_hypoglycemia
-        label: Medications affecting heart rate or hypoglycemia risk
-        reason: Some medications can change heart-rate interpretation, blood-pressure response, or fueling/hypoglycemia risk during vigorous exercise.
-        freshnessDays: 90
-        readHints:
-          - profile medications --format json
-    notes:
-      - When safety context is missing or stale, ask before creating the experiment instead of assuming Tabata is appropriate.
+    displayPrompt: "Hey Murph, I want to explore doing Tabata 20/10 intervals."
+    intentSummary: "Explore Tabata 20/10 Interval Training"
   safetyScreen:
-    cautionLevel: high
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-      -
-        id: vigorous_exercise_red_flags
-        prompt: Do you have known cardiovascular, metabolic, or kidney disease, uncontrolled blood pressure, or any recent chest pain, fainting, severe dizziness, palpitations, neurologic symptoms, or unusual shortness of breath with exertion?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: These change the risk profile for vigorous unsupervised intervals.
-      -
-        id: respiratory_or_asthma_flag
-        prompt: Do you have asthma, exercise-induced bronchoconstriction, unexplained wheeze, chest tightness, or no current plan for respiratory symptoms during hard exercise?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Hard 20/10 intervals can provoke respiratory symptoms and require a plan.
-      -
-        id: recent_illness_heat_rhabdo_or_pem
-        prompt: Have you recently had fever or significant illness, suspected myocarditis/pericarditis, heat illness, severe dehydration, exertional rhabdomyolysis, dark urine after exercise, or post-exertional symptom flares?
-        ifPositive: do_not_start_unsupervised
-        why: These contexts can make maximal or near-maximal intervals unsafe without individualized guidance.
-      -
-        id: pregnancy_postpartum_medication_or_hypoglycemia_flag
-        prompt: Are you pregnant, early postpartum, or taking medication that affects heart rate, blood pressure, or hypoglycemia risk during exercise?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: These contexts can change intensity targets, monitoring, and stop rules.
-      -
-        id: injury_or_movement_safety_flag
-        prompt: Do you have current injury, joint pain, severe soreness, balance risk, or movement limitations that could make jumping, sprinting, or loaded movements unsafe when tired?
-        ifPositive: continue_with_caution
-        why: Modality choice and movement scaling are major safety levers for Tabata-style workouts.
+      - id: "vigorous_exercise_red_flags"
+        prompt: "Do you have known cardiovascular, metabolic, or kidney disease, uncontrolled blood pressure, or any recent chest pain, fainting, severe dizziness, palpitations, neurologic symptoms, or unusual shortness of breath with exertion?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "respiratory_or_asthma_flag"
+        prompt: "Do you have asthma, exercise-induced bronchoconstriction, unexplained wheeze, chest tightness, or no current plan for respiratory symptoms during hard exercise?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "recent_illness_heat_rhabdo_or_pem"
+        prompt: "Have you recently had fever or significant illness, suspected myocarditis/pericarditis, heat illness, severe dehydration, exertional rhabdomyolysis, dark urine after exercise, or post-exertional symptom flares?"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "pregnancy_postpartum_medication_or_hypoglycemia_flag"
+        prompt: "Are you pregnant, early postpartum, or taking medication that affects heart rate, blood pressure, or hypoglycemia risk during exercise?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "injury_or_movement_safety_flag"
+        prompt: "Do you have current injury, joint pain, severe soreness, balance risk, or movement limitations that could make jumping, sprinting, or loaded movements unsafe when tired?"
+        ifPositive: "continue_with_caution"
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
-        - unsafe movement form
-        - cannot recover enough during the 10-second rest
-        - severe soreness or impaired recovery after a prior session
-    notes:
-      - A positive screen does not diagnose a condition; it changes the disposition toward clinician guidance, lower-intensity alternatives, or not starting unsupervised.
+        - "unsafe movement form"
+        - "cannot recover enough during the 10-second rest"
+        - "severe soreness or impaired recovery after a prior session"
   setupSlots:
-
-    -
-      id: modality
-      label: Interval modality
-      purpose: safety
-      valueType: enum
-      askPolicy: always
-      required: true
-      question: What modality will you use for the 20/10 block?
+    - id: "modality"
+      label: "Interval modality"
+      question: "What modality will you use for the 20/10 block?"
       options:
-        - stationary_bike
-        - rower
-        - elliptical
-        - treadmill
-        - simple_bodyweight
-        - other
+        - "stationary_bike"
+        - "rower"
+        - "elliptical"
+        - "treadmill"
+        - "simple_bodyweight"
+        - "other"
       target:
-        object: protocol
-        field: modality
-    -
-      id: movement_choice
-      label: Movement choice
-      purpose: measurement_fidelity
-      valueType: free_text
-      askPolicy: ask_if_unknown
-      required: false
-      question: If you are not using a machine, what exact movement or movement sequence will you do?
+        object: "protocol"
+        field: "modality"
+    - id: "movement_choice"
+      label: "Movement choice"
+      question: "If you are not using a machine, what exact movement or movement sequence will you do?"
+      constraints:
+        optional: true
       target:
-        object: protocol
-        field: movementChoice
-    -
-      id: safe_environment
-      label: Safe environment
-      purpose: safety
-      valueType: boolean
-      askPolicy: always
-      required: true
-      question: Will you do the intervals somewhere you can stop immediately without traffic, obstacles, or unsafe fall risk?
+        object: "protocol"
+        field: "movementChoice"
+    - id: "safe_environment"
+      label: "Safe environment"
+      question: "Will you do the intervals somewhere you can stop immediately without traffic, obstacles, or unsafe fall risk?"
       target:
-        object: onboardingCapture
-        field: safety.safeEnvironment
-    -
-      id: hr_monitor
-      label: Heart-rate monitor
-      purpose: measurement_fidelity
-      valueType: enum
-      askPolicy: ask_if_unknown
-      required: false
-      question: What heart-rate setup will you use, if any?
+        object: "onboardingCapture"
+        field: "safety.safeEnvironment"
+    - id: "hr_monitor"
+      label: "Heart-rate monitor"
+      question: "What heart-rate setup will you use, if any?"
       options:
-        - chest_strap
-        - wrist_wearable
-        - none
+        - "chest_strap"
+        - "wrist_wearable"
+        - "none"
+      constraints:
+        optional: true
       target:
-        object: analysisPlan
-        field: measurement.hrMonitor
-    -
-      id: weekly_schedule
-      label: Weekly schedule
-      purpose: adherence
-      valueType: weekly_time_windows
-      askPolicy: always
-      required: true
-      question: Which two weekly time windows should Murph suggest, with at least 48 hours between sessions?
+        object: "analysisPlan"
+        field: "measurement.hrMonitor"
+    - id: "weekly_schedule"
+      label: "Weekly schedule"
+      question: "Which two weekly time windows should Murph suggest, with at least 48 hours between sessions?"
       constraints:
         defaultRunPlanSchedule:
-          kind: cron
+          kind: "cron"
           expression: "0 8 * * 2,5"
-          timeZone: UTC
-        runPlanScheduleTimeZonePolicy: replace_with_user_vault_timezone
+          timeZone: "UTC"
+        runPlanScheduleTimeZonePolicy: "replace_with_user_vault_timezone"
       target:
-        object: onboardingCapture
-        field: answers.weeklySchedule
-    -
-      id: reminder_policy
-      label: Reminders
-      purpose: assistant_support
-      valueType: reminder_policy
-      askPolicy: ask_if_unknown
-      required: false
-      question: Would you like reminders for the baseline, sessions, and next-day recovery logs?
+        object: "onboardingCapture"
+        field: "answers.weeklySchedule"
+    - id: "reminder_policy"
+      label: "Reminders"
+      question: "Would you like reminders for the baseline, sessions, and next-day recovery logs?"
+      constraints:
+        optional: true
       target:
-        object: assistantSupport
-        field: reminders.policy
+        object: "assistantSupport"
+        field: "reminders.policy"
   planDefaults:
-    testPlanId: wearable-cardio-fitness-and-recovery-49d
-    baselineDays: 7
-    interventionDays: 42
-    sessionsPerWeek: 2
-    targetSessions: 12
-    minimumUsefulSessions: 8
-    firstSessionGuidance: Make the first session conservative: one 8-round block, low-risk modality, controlled effort, true 10-second rests, and no extra finisher.
-  logging:
-    sessionFields:
-      - modality
-      - movement_choice
-      - completed_rounds
-      - rpe
-      - peak_hr
-      - symptoms
-      - soreness
-      - recovery_24_48h
-      - sleep_disruption
-      - other_hard_training
-      - heat_illness_context
-    confounders:
-      - illness
-      - sleep
-      - alcohol
-      - caffeine
-      - medication_change
-      - travel
-      - stress
-      - heat_exposure
-      - extra_training
+    testPlanId: "wearable-cardio-fitness-and-recovery-49d"
+    firstSessionGuidance: "Make the first session conservative: one 8-round block, low-risk modality, controlled effort, true 10-second rests, and no extra finisher."
+  trackingHints:
+    confounderFields:
+      - "illness"
+      - "sleep"
+      - "alcohol"
+      - "caffeine"
+      - "medication_change"
+      - "travel"
+      - "stress"
+      - "heat_exposure"
+      - "extra_training"
     notes:
-      - Ask for a next-day recovery check after each session because short high-intensity workouts can still create disproportionate soreness, sleep disruption, or autonomic load.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 4
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: default_on
-    reminderOptions:
-      - reminder_policy
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: You missed a Tabata log. Record whether the session happened, completed rounds, symptoms, and recovery rather than guessing later.
+      - "Ask for a next-day recovery check after each session because short high-intensity workouts can still create disproportionate soreness, sleep disruption, or autonomic load."
+  supportHints:
+    missedLogFollowupCopy: "You missed a Tabata log. Record whether the session happened, completed rounds, symptoms, and recovery rather than guessing later."
 whyItWorks:
   - "## 20/10 compresses oxygen debt\n\n20 sec hard work spikes demand; 10 sec rest is too short to reset. Heart, lungs, and muscle chase a load that keeps stacking."
   - "## Rest fidelity is the protocol\n\nTrue rest preserves the contrast. Adding movements during rest turns the session into a different workout with different fatigue and safety profile."

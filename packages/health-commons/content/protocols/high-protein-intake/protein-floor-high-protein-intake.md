@@ -74,6 +74,7 @@ protocol:
   doseSignature: daily · 1.5–2.0 g/kg/day protein floor · food-first, supplement-assisted only as needed · 7–14 day baseline + 8-week intervention
   target: Reach a declared 1.5–2.0 g/kg/day target using a declared denominator. Default to 1.5–1.6; use 1.8–2.0 only with a negative screen, suitable denominator, fiber/diet plan, and documented or clinician-guided rationale. Do not exceed 2.0.
   frequency:
+    sessionsPerWeek: 7
     sessionsPerDay: 1
   interventionSessionsMinimum: 42
   interventionSessionsTarget: 56
@@ -118,6 +119,32 @@ protocol:
   - training_context
   - sleep_or_activity_context
   - symptoms_or_adverse_events
+  sessionFieldIds:
+  - daily_protein_grams
+  - daily_protein_g_per_kg
+  - target_met
+  - energy_intake_kcal
+  - fiber_g_day
+  - saturated_fat_g_day
+  - protein_source_mix
+  - supplement_use
+  - satiety_rating
+  - digestive_comfort
+  - body_weight
+  - training_context
+  - symptoms_or_adverse_events
+  - fluid_or_hydration_context
+  - sodium_or_salty_processed_food_context
+  - calcium_or_dairy_context
+  - purine_heavy_foods
+  - nondairy_animal_protein_servings
+  - red_or_processed_meat_servings
+  - seafood_or_shellfish_servings
+  - plant_soy_legume_dairy_meat_seafood_supplement_split
+  - supplement_product_and_dose
+  - constipation_diarrhea_reflux_bloating_nausea
+  - blood_pressure_if_tracked
+  - relevant_lab_changes_or_new_clinician_advice
   stopConditions:
   - Stop or pause the experiment and seek clinician guidance if new or worsening flank pain, blood in urine, painful urination, marked urinary changes, fever with urinary symptoms, sudden hot/swollen painful joint, gout flare symptoms, severe or persistent constipation, diarrhea, nausea/vomiting, reflux, bloating, abdominal pain, dehydration, unusual weakness, or concerning lab changes occur.
   - Pause and redesign the plan if hitting the target requires crowding out fiber-rich plants, legumes, whole grains, vegetables, or fruit; creates persistent constipation or GI distress; or shifts the diet into a low-fiber/very-low-carbohydrate pattern.
@@ -294,320 +321,167 @@ expectedSignalDescriptions:
     basis: Healthy-adult evidence generally does not show adverse short-term GFR change, but trials use surrogate renal markers and exclude kidney-risk groups.
   protocolProminence: context
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to explore doing High Protein Intake.
-    intentSummary: Explore High Protein Intake
-  contextReview:
-    vaultChecks:
-
-    -
-      id: active_experiments
-      label: Active experiments
-      reason: Avoid stacking a meaningful diet experiment with another active intervention unless the user explicitly accepts the attribution tradeoff.
-      readHints:
-      - experiment list --status active --format json
-    -
-      id: recent_body_weight
-      label: Recent body weight
-      reason: The g/kg/day target requires a declared denominator and current or chosen weight.
-      freshnessDays: 30
-      readHints:
-      - search query "body weight scale weight" --format json
-      - timeline --entry-type biomarker --key biomarker:body-weight --from <YYYY-MM-DD> --format json
-    -
-      id: nutrition_logs
-      label: Recent nutrition logs
-      reason: Baseline protein intake and tracking method determine whether the run is interpretable.
-      freshnessDays: 21
-      readHints:
-      - search query "protein grams calories fiber saturated fat nutrition log" --format json
-    -
-      id: training_context
-      label: Training context
-      reason: Resistance training, endurance load, or a new training plan changes how body composition and recovery outcomes should be interpreted.
-      freshnessDays: 45
-      readHints:
-      - search query "workout resistance training running cycling soreness" --format json
-    -
-      id: kidney_gout_stone_liver_pregnancy_context
-      label: Kidney, gout, stone, liver, and pregnancy context
-      reason: These contexts can route the user away from unsupervised protein-floor setup.
-      freshnessDays: 180
-      readHints:
-      - search query "kidney eGFR creatinine albuminuria proteinuria kidney stone gout uric acid liver cirrhosis pregnancy" --format json
-    -
-      id: recent_labs_if_available
-      label: Recent labs if available
-      reason: Creatinine, eGFR, urine albumin, BUN, uric acid, LDL-C, and triglycerides may be useful safety or interpretation context for some users.
-      freshnessDays: 180
-      readHints:
-      - search query "creatinine eGFR BUN uric acid LDL triglycerides albumin creatinine ratio" --format json
-    notes:
-    - Review context first, but ask the compact safety screen because missing vault data is not clearance.
+    displayPrompt: "Hey Murph, I want to explore doing High Protein Intake."
+    intentSummary: "Explore High Protein Intake"
   safetyScreen:
-    cautionLevel: moderate
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-    -
-      id: kidney_or_protein_restriction
-      prompt: known kidney disease, reduced eGFR, renal hyperfiltration, mild renal insufficiency, abnormal creatinine or kidney labs, albuminuria or proteinuria, diabetes with kidney risk or uncertain kidney status, dialysis, kidney transplant history, or a clinician-directed protein restriction
-    -
-      id: stones_gout_or_urate
-      prompt: recurrent kidney stones, uric-acid or cystine stones, high urine uric acid, low urine citrate, gout, marked hyperuricemia, urate-lowering medication context, or a plan that relies heavily on nondairy animal protein, red/processed meat, poultry, fish/shellfish, or other purine-heavy sources
-    -
-      id: pregnancy_liver_or_digestive
-      prompt: pregnancy or possible pregnancy, trying to conceive, lactation or postpartum nutrition, significant liver disease or cirrhosis, abnormal liver tests, or severe digestive intolerance that could worsen with a higher-protein or lower-fiber diet
-    -
-      id: eating_disorder_or_restriction_risk
-      prompt: active eating disorder, past disordered eating that could be reactivated by macro tracking, or distress around strict food rules
-    -
-      id: clinical_nutrition_context
-      prompt: recent bariatric surgery, post-hospital recovery, frailty, malnutrition, sarcopenia treatment, nursing-home or institutional nutrition, under-18 status, or another clinician-supervised nutrition plan
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: These contexts are clinical nutrition or population-specific variants rather than the base adult wellness protein-floor protocol.
-    -
-      id: cardiometabolic_or_prescribed_diet_context
-      prompt: established cardiovascular disease, major dyslipidemia, diabetes/prediabetes, metabolic syndrome, or a clinician-prescribed diabetes, lipid, cardiovascular, kidney, bariatric, or weight-loss diet
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Cardiometabolic, diabetes, lipid, and prescribed-diet contexts require source-mix and lab interpretation beyond the base unsupervised protocol.
-    stopIf:
-      inheritFromProtocolSafety: true
-    notes:
-    - A positive or uncertain screen is not a diagnosis; it means Murph should not set up this as an unsupervised protein-floor run without appropriate guidance.
-    - A no answer to the fiber guardrail should route to redesign, lowering the target, or pausing rather than proceeding with a low-fiber plan.
-    - Choosing 1.8–2.0 g/kg/day requires a negative screen and documented rationale; choosing 2.0 g/kg/day is not the default.
+      - id: "kidney_or_protein_restriction"
+        prompt: "known kidney disease, reduced eGFR, renal hyperfiltration, mild renal insufficiency, abnormal creatinine or kidney labs, albuminuria or proteinuria, diabetes with kidney risk or uncertain kidney status, dialysis, kidney transplant history, or a clinician-directed protein restriction"
+      - id: "stones_gout_or_urate"
+        prompt: "recurrent kidney stones, uric-acid or cystine stones, high urine uric acid, low urine citrate, gout, marked hyperuricemia, urate-lowering medication context, or a plan that relies heavily on nondairy animal protein, red/processed meat, poultry, fish/shellfish, or other purine-heavy sources"
+      - id: "pregnancy_liver_or_digestive"
+        prompt: "pregnancy or possible pregnancy, trying to conceive, lactation or postpartum nutrition, significant liver disease or cirrhosis, abnormal liver tests, or severe digestive intolerance that could worsen with a higher-protein or lower-fiber diet"
+      - id: "eating_disorder_or_restriction_risk"
+        prompt: "active eating disorder, past disordered eating that could be reactivated by macro tracking, or distress around strict food rules"
+      - id: "clinical_nutrition_context"
+        prompt: "recent bariatric surgery, post-hospital recovery, frailty, malnutrition, sarcopenia treatment, nursing-home or institutional nutrition, under-18 status, or another clinician-supervised nutrition plan"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "cardiometabolic_or_prescribed_diet_context"
+        prompt: "established cardiovascular disease, major dyslipidemia, diabetes/prediabetes, metabolic syndrome, or a clinician-prescribed diabetes, lipid, cardiovascular, kidney, bariatric, or weight-loss diet"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
   setupSlots:
-
-  -
-    id: body_weight_kg
-    label: Body-weight denominator value
-    purpose: measurement_fidelity
-    valueType: number
-    askPolicy: ask_if_unknown
-    required: true
-    question: What body-weight value should the protein target use, in kilograms?
-    target:
-      object: experimentRun
-      field: bodyWeightKg
-  -
-    id: dose_denominator
-    label: Dose denominator
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: Should the g/kg target use actual body weight, adjusted body weight, goal body weight, or a clinician-specified denominator?
-    options:
-    - actual_body_weight
-    - adjusted_body_weight
-    - goal_body_weight
-    - clinician_specified_weight
-    target:
-      object: experimentRun
-      field: doseDenominator
-  -
-    id: target_g_per_kg
-    label: Target g/kg/day
-    purpose: personalization
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: 'Which target should this run use: 1.5, 1.6, 1.8, or 2.0 g/kg/day? Default to 1.5–1.6; 1.8–2.0 requires a negative safety screen, preserved fiber/diet quality, and documented rationale.'
-    options:
-    - target_1_5
-    - target_1_6
-    - target_1_8
-    - target_2_0
-    constraints:
-      allowedRangeGPerKg:
-      - 1.5
-      - 2.0
-      higherTargetRequires:
-      - negative_safety_screen
-      - appropriate_denominator
-      - fiber_and_diet_quality_preserved
-      - documented_or_clinician_guided_rationale
-      doNotExceedGPerKg: 2.0
-    target:
-      object: experimentRun
-      field: targetGPerKg
-  -
-    id: baseline_protein_known
-    label: Baseline protein known
-    purpose: measurement_fidelity
-    valueType: boolean
-    askPolicy: ask_if_unknown
-    required: true
-    question: Do you already know your usual daily protein intake from recent logs?
-    target:
-      object: onboardingCapture
-      field: baselineProteinKnown
-  -
-    id: tracking_method
-    label: Tracking method
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: 'How will you track protein: nutrition app, photo plus estimate, meal template, dietitian plan, or another method?'
-    options:
-    - nutrition_app
-    - photo_plus_estimate
-    - meal_template
-    - dietitian_plan
-    - other_method
-    target:
-      object: experimentRun
-      field: trackingMethod
-  -
-    id: energy_balance_goal
-    label: Energy-balance goal
-    purpose: confounder_control
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: Is this run meant to be weight loss, weight maintenance, muscle gain, or only a protein-target adherence test?
-    options:
-    - weight_loss
-    - weight_maintenance
-    - muscle_gain
-    - adherence_only
-    - unsure
-    target:
-      object: experimentRun
-      field: energyBalanceGoal
-  -
-    id: primary_outcome
-    label: Primary outcome
-    purpose: personalization
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: 'What should be the main read: adherence, satiety, weight trend, body composition, digestive comfort, training support, or lab context?'
-    options:
-    - adherence
-    - satiety
-    - weight_trend
-    - body_composition
-    - digestive_comfort
-    - training_support
-    - lab_context
-    target:
-      object: analysisPlan
-      field: primaryOutcome
-  -
-    id: protein_source_plan
-    label: Protein source plan
-    purpose: confounder_control
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: true
-    question: What foods or supplements will you mainly use to hit the target, and how will you avoid supplement stacking, high saturated-fat drift, red/processed-meat drift, seafood/shellfish overreliance, or purine-heavy source shifts?
-    target:
-      object: experimentRun
-      field: proteinSourcePlan
-  -
-    id: fiber_guardrail
-    label: Fiber guardrail
-    purpose: safety
-    valueType: boolean
-    askPolicy: ask_if_unknown
-    required: true
-    question: Can you keep fiber-rich plants, legumes, whole grains, vegetables, and fruit in the plan rather than replacing them with protein-only foods?
-    target:
-      object: onboardingCapture
-      field: fiberGuardrail
-    constraints:
-      ifFalse: redesign_lower_target_or_pause
-  -
-    id: reminder_policy
-    label: Reminder policy
-    purpose: assistant_support
-    valueType: reminder_policy
-    askPolicy: ask_at_confirmation
-    required: true
-    question: Want daily logging reminders, a weekly check-in, both, or none?
-    options:
-    - none
-    - daily_log
-    - weekly_digest
-    - daily_log_plus_weekly_digest
-    target:
-      object: assistantSupport
-      field: reminderPolicy
+    - id: "body_weight_kg"
+      label: "Body-weight denominator value"
+      question: "What body-weight value should the protein target use, in kilograms?"
+      target:
+        object: "experimentRun"
+        field: "bodyWeightKg"
+    - id: "dose_denominator"
+      label: "Dose denominator"
+      question: "Should the g/kg target use actual body weight, adjusted body weight, goal body weight, or a clinician-specified denominator?"
+      options:
+        - "actual_body_weight"
+        - "adjusted_body_weight"
+        - "goal_body_weight"
+        - "clinician_specified_weight"
+      target:
+        object: "experimentRun"
+        field: "doseDenominator"
+    - id: "target_g_per_kg"
+      label: "Target g/kg/day"
+      question: "Which target should this run use: 1.5, 1.6, 1.8, or 2.0 g/kg/day? Default to 1.5–1.6; 1.8–2.0 requires a negative safety screen, preserved fiber/diet quality, and documented rationale."
+      options:
+        - "target_1_5"
+        - "target_1_6"
+        - "target_1_8"
+        - "target_2_0"
+      constraints:
+        allowedRangeGPerKg:
+          - 1.5
+          - 2
+        higherTargetRequires:
+          - "negative_safety_screen"
+          - "appropriate_denominator"
+          - "fiber_and_diet_quality_preserved"
+          - "documented_or_clinician_guided_rationale"
+        doNotExceedGPerKg: 2
+      target:
+        object: "experimentRun"
+        field: "targetGPerKg"
+    - id: "baseline_protein_known"
+      label: "Baseline protein known"
+      question: "Do you already know your usual daily protein intake from recent logs?"
+      target:
+        object: "onboardingCapture"
+        field: "baselineProteinKnown"
+    - id: "tracking_method"
+      label: "Tracking method"
+      question: "How will you track protein: nutrition app, photo plus estimate, meal template, dietitian plan, or another method?"
+      options:
+        - "nutrition_app"
+        - "photo_plus_estimate"
+        - "meal_template"
+        - "dietitian_plan"
+        - "other_method"
+      target:
+        object: "experimentRun"
+        field: "trackingMethod"
+    - id: "energy_balance_goal"
+      label: "Energy-balance goal"
+      question: "Is this run meant to be weight loss, weight maintenance, muscle gain, or only a protein-target adherence test?"
+      options:
+        - "weight_loss"
+        - "weight_maintenance"
+        - "muscle_gain"
+        - "adherence_only"
+        - "unsure"
+      target:
+        object: "experimentRun"
+        field: "energyBalanceGoal"
+    - id: "primary_outcome"
+      label: "Primary outcome"
+      question: "What should be the main read: adherence, satiety, weight trend, body composition, digestive comfort, training support, or lab context?"
+      options:
+        - "adherence"
+        - "satiety"
+        - "weight_trend"
+        - "body_composition"
+        - "digestive_comfort"
+        - "training_support"
+        - "lab_context"
+      target:
+        object: "analysisPlan"
+        field: "primaryOutcome"
+    - id: "protein_source_plan"
+      label: "Protein source plan"
+      question: "What foods or supplements will you mainly use to hit the target, and how will you avoid supplement stacking, high saturated-fat drift, red/processed-meat drift, seafood/shellfish overreliance, or purine-heavy source shifts?"
+      target:
+        object: "experimentRun"
+        field: "proteinSourcePlan"
+    - id: "fiber_guardrail"
+      label: "Fiber guardrail"
+      question: "Can you keep fiber-rich plants, legumes, whole grains, vegetables, and fruit in the plan rather than replacing them with protein-only foods?"
+      constraints:
+        ifFalse: "redesign_lower_target_or_pause"
+      target:
+        object: "onboardingCapture"
+        field: "fiberGuardrail"
+    - id: "reminder_policy"
+      label: "Reminder policy"
+      question: "Want daily logging reminders, a weekly check-in, both, or none?"
+      options:
+        - "none"
+        - "daily_log"
+        - "weekly_digest"
+        - "daily_log_plus_weekly_digest"
+      constraints:
+        askWhen: "at_confirmation"
+      target:
+        object: "assistantSupport"
+        field: "reminderPolicy"
   planDefaults:
-    testPlanId: protein-floor-70d-basic
-    baselineDays: 14
-    interventionDays: 56
-    sessionsPerWeek: 7
-    targetSessions: 56
-    minimumUsefulSessions: 42
-    firstSessionGuidance: Start at the lower end of the selected band and verify GI comfort, fiber, hydration, and practicality before pushing higher.
-  logging:
-    sessionFields:
-    - daily_protein_grams
-    - daily_protein_g_per_kg
-    - target_met
-    - energy_intake_kcal
-    - fiber_g_day
-    - saturated_fat_g_day
-    - protein_source_mix
-    - supplement_use
-    - satiety_rating
-    - digestive_comfort
-    - body_weight
-    - training_context
-    - symptoms_or_adverse_events
-    - fluid_or_hydration_context
-    - sodium_or_salty_processed_food_context
-    - calcium_or_dairy_context
-    - purine_heavy_foods
-    - nondairy_animal_protein_servings
-    - red_or_processed_meat_servings
-    - seafood_or_shellfish_servings
-    - plant_soy_legume_dairy_meat_seafood_supplement_split
-    - supplement_product_and_dose
-    - constipation_diarrhea_reflux_bloating_nausea
-    - blood_pressure_if_tracked
-    - relevant_lab_changes_or_new_clinician_advice
-    confounders:
-    - calorie_deficit_or_surplus
-    - carbohydrate_displacement
-    - new_training_program
-    - travel_or_eating_out
-    - illness
-    - alcohol
-    - menstrual_cycle_context
-    - new_medication_or_supplement
-    - sleep_disruption
-    - baseline_protein_intake
-    - baseline_fiber_intake
-    - diabetes_prediabetes_or_metabolic_syndrome_context
-    - kidney_liver_gout_stone_lipid_or_cardiovascular_history
-    - clinician_prescribed_diet_or_medication_change
-    - hydration_or_heat_exposure
-    - sodium_intake_shift
-    - calcium_or_dairy_shift
-    - purine_or_nondairy_animal_protein_shift
-    - red_or_processed_meat_shift
-    - supplement_stacking_or_product_change
-    - bariatric_frailty_malnutrition_or_post_hospital_context
+    testPlanId: "protein-floor-70d-basic"
+    firstSessionGuidance: "Start at the lower end of the selected band and verify GI comfort, fiber, hydration, and practicality before pushing higher."
+  trackingHints:
+    confounderFields:
+      - "calorie_deficit_or_surplus"
+      - "carbohydrate_displacement"
+      - "new_training_program"
+      - "travel_or_eating_out"
+      - "illness"
+      - "alcohol"
+      - "menstrual_cycle_context"
+      - "new_medication_or_supplement"
+      - "sleep_disruption"
+      - "baseline_protein_intake"
+      - "baseline_fiber_intake"
+      - "diabetes_prediabetes_or_metabolic_syndrome_context"
+      - "kidney_liver_gout_stone_lipid_or_cardiovascular_history"
+      - "clinician_prescribed_diet_or_medication_change"
+      - "hydration_or_heat_exposure"
+      - "sodium_intake_shift"
+      - "calcium_or_dairy_shift"
+      - "purine_or_nondairy_animal_protein_shift"
+      - "red_or_processed_meat_shift"
+      - "supplement_stacking_or_product_change"
+      - "bariatric_frailty_malnutrition_or_post_hospital_context"
     notes:
-    - Daily check-ins should be neutral records of what happened, not compliance judgments.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-    - none
-    - daily_log
-    - weekly_digest
-    - daily_log_plus_weekly_digest
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: Did you get a protein log for today? Totally fine either way — I just want the experiment record to reflect what happened.
+      - "Daily check-ins should be neutral records of what happened, not compliance judgments."
+  supportHints:
+    missedLogFollowupCopy: "Did you get a protein log for today? Totally fine either way — I just want the experiment record to reflect what happened."
 whyItWorks:
   - "## Amino acids set repair floor\n\nProtein supplies essential amino acids, especially leucine, for muscle protein synthesis. A daily floor prevents low-intake days from starving repair."
   - "## Protein slows the meal\n\nHigher-protein meals empty more slowly and trigger stronger satiety signals. Hunger drops when protein replaces lower-satiety calories instead of just adding more food."

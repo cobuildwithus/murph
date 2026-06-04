@@ -72,7 +72,7 @@ function createMeasurementMethodPage(): HealthCommonsSourcePage {
 function createProtocolPage(input: {
   adaptationPolicy?: HealthCommonsExperimentOnboarding["adaptationPolicy"];
   body?: string;
-  confirmationPrompt?: string;
+  firstSessionGuidance?: string;
   measurementPlan?: NonNullable<HealthCommonsPageFrontmatter["measurementPlan"]>;
   testPlanId?: string;
 } = {}): HealthCommonsSourcePage {
@@ -120,10 +120,7 @@ function createProtocolPage(input: {
         {
           id: "modality",
           label: "Modality",
-          purpose: "logistics",
-          valueType: "enum",
-          askPolicy: "ask_if_unknown",
-          required: true,
+          question: "Which modality will you use?",
           options: ["bike", "rower"],
           target: {
             object: "experimentRun",
@@ -136,17 +133,8 @@ function createProtocolPage(input: {
         : { adaptationPolicy: input.adaptationPolicy }),
       planDefaults: {
         testPlanId: input.testPlanId ?? "wearable-cardio-fitness-49d",
-        baselineDays: 7,
-        interventionDays: 42,
-      },
-      logging: {
-        sessionFields: ["modality"],
-      },
-      assistantPolicy: {
-        askBeforeCreatingAutomations: true,
-        missedLogFollowup: "opt_in_only",
-        confirmationPrompt:
-          input.confirmationPrompt ?? "Show the exact protocol revisions before starting.",
+        firstSessionGuidance:
+          input.firstSessionGuidance ?? "Start with a conservative first interval session.",
       },
     },
   };
@@ -162,7 +150,7 @@ function createProtocolPage(input: {
 function createContentSet(input: {
   adaptationPolicy?: HealthCommonsExperimentOnboarding["adaptationPolicy"];
   body?: string;
-  confirmationPrompt?: string;
+  firstSessionGuidance?: string;
   measurementPlan?: NonNullable<HealthCommonsPageFrontmatter["measurementPlan"]>;
   testPlanId?: string;
 } = {}): HealthCommonsContentSet {
@@ -203,11 +191,11 @@ describe("buildHealthCommonsCatalogFromContent", () => {
         }),
       ]),
     );
-    expect(protocol?.experimentOnboarding?.planDefaults).toMatchObject({
+    expect(protocol?.experimentOnboarding?.planDefaults).toEqual(expect.objectContaining({
       testPlanId: "lipid-panel-12-week",
-      interventionDays: 84,
-    });
+    }));
     expect(protocol?.experimentOnboarding?.planDefaults).not.toHaveProperty("baselineDays");
+    expect(protocol?.experimentOnboarding?.planDefaults).not.toHaveProperty("interventionDays");
   });
 
   it("changes pageRevisionId without changing runSpecRevisionId for narrative-only edits", () => {
@@ -239,12 +227,12 @@ describe("buildHealthCommonsCatalogFromContent", () => {
   it("changes runSpecRevisionId when onboarding semantics change", () => {
     const firstCatalog = buildHealthCommonsCatalogFromContent(
       createContentSet({
-        confirmationPrompt: "Show the exact protocol revisions before starting.",
+        firstSessionGuidance: "Start with a conservative first interval session.",
       }),
     );
     const secondCatalog = buildHealthCommonsCatalogFromContent(
       createContentSet({
-        confirmationPrompt: "Show the protocol revisions, test plan, and reminder policy before starting.",
+        firstSessionGuidance: "Start with a conservative bike or rower interval session.",
       }),
     );
 

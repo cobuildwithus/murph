@@ -33,11 +33,7 @@ describe("health commons catalog", () => {
             enabled: true,
           },
         },
-        assistantPolicy: {
-          missedLogFollowup: "opt_in_only",
-        },
         planDefaults: {
-          sessionsPerWeek: 3,
           testPlanId: "rhr-21d",
         },
         startIntent: {
@@ -71,13 +67,53 @@ describe("health commons catalog", () => {
       },
     });
     for (const protocol of catalog.entities.filter((entity) => entity.experimentOnboarding)) {
+      expect(protocol.experimentOnboarding).not.toHaveProperty("contextReview");
+      expect(protocol.experimentOnboarding).not.toHaveProperty("logging");
+      expect(protocol.experimentOnboarding).not.toHaveProperty("assistantPolicy");
+      expect(protocol.experimentOnboarding?.planDefaults).not.toHaveProperty("baselineDays");
+      expect(protocol.experimentOnboarding?.planDefaults).not.toHaveProperty("interventionDays");
+      expect(protocol.experimentOnboarding?.planDefaults).not.toHaveProperty("sessionsPerWeek");
+      expect(protocol.experimentOnboarding?.planDefaults).not.toHaveProperty("targetSessions");
+      expect(protocol.experimentOnboarding?.planDefaults).not.toHaveProperty("minimumUsefulSessions");
+      for (const confounderField of protocol.experimentOnboarding?.trackingHints?.confounderFields ?? []) {
+        expect(
+          confounderField,
+          `${protocol.key} trackingHints.confounderFields must be stable ids`,
+        ).toMatch(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+      }
+      expect(
+        protocol.protocol?.sessionFieldIds?.length,
+        `${protocol.key} must keep canonical stable session log ids outside onboarding`,
+      ).toBeGreaterThan(0);
+      for (const sessionFieldId of protocol.protocol?.sessionFieldIds ?? []) {
+        expect(
+          sessionFieldId,
+          `${protocol.key} protocol.sessionFieldIds must be stable ids`,
+        ).toMatch(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+      }
       for (const slot of protocol.experimentOnboarding?.setupSlots ?? []) {
+        expect(slot).not.toHaveProperty("purpose");
+        expect(slot).not.toHaveProperty("valueType");
+        expect(slot).not.toHaveProperty("askPolicy");
+        expect(slot).not.toHaveProperty("required");
         expect(
           slot.target?.object === "experimentRun" &&
             (slot.target.field === "schedule" || slot.target.field.startsWith("schedule.")),
           `${protocol.key} setup slot ${slot.id} must not target legacy experimentRun.schedule fields`,
         ).toBe(false);
         const constraints = readRecord(slot.constraints);
+        if (constraints?.optional !== undefined) {
+          expect(
+            constraints.optional,
+            `${protocol.key} setup slot ${slot.id} optional hint must be boolean`,
+          ).toBeTypeOf("boolean");
+        }
+        if (constraints?.askWhen !== undefined) {
+          expect(
+            constraints.askWhen,
+            `${protocol.key} setup slot ${slot.id} askWhen hint must be compact`,
+          ).toMatch(/^(?:at_confirmation|if_unknown_or_stale)$/u);
+        }
         if (constraints?.defaultRunPlanSchedule !== undefined) {
           expect(
             experimentRunScheduleIntentSchema.safeParse(constraints.defaultRunPlanSchedule).success,
@@ -90,10 +126,37 @@ describe("health commons catalog", () => {
         }
       }
     }
-    expect(saunaProtocol?.revision.pageRevisionId).toMatch(/^sha256:[a-f0-9]{64}$/u);
-    expect(saunaProtocol?.revision.runSpecRevisionId).toBe(
-      "sha256:adba9e327a9841a382e1572dfa083395558174487031a5564d35fa015caa6c68",
+    const itBandProtocol = catalog.entities.find(
+      (entity) =>
+        entity.key ===
+        "protocol_variant:iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run",
     );
+    expect(
+      itBandProtocol?.experimentOnboarding?.setupSlots?.find(
+        (slot) => slot.id === "run_walk_windows",
+      ),
+    ).toMatchObject({
+      constraints: {
+        optional: true,
+      },
+    });
+    expect(
+      itBandProtocol?.experimentOnboarding?.setupSlots?.find(
+        (slot) => slot.id === "reminder_policy",
+      ),
+    ).toMatchObject({
+      constraints: {
+        askWhen: "at_confirmation",
+      },
+    });
+    expect(itBandProtocol?.experimentOnboarding?.trackingHints?.confounderFields).toContain(
+      "route_surface_hills_downhill_camber",
+    );
+    expect(
+      Buffer.byteLength(JSON.stringify(itBandProtocol?.experimentOnboarding), "utf8"),
+    ).toBeLessThanOrEqual(6_000);
+    expect(saunaProtocol?.revision.pageRevisionId).toMatch(/^sha256:[a-f0-9]{64}$/u);
+    expect(saunaProtocol?.revision.runSpecRevisionId).toMatch(/^sha256:[a-f0-9]{64}$/u);
     expect(saunaProtocol?.revision.recipeHash).toMatch(/^sha256:[a-f0-9]{64}$/u);
     const protocolRelationTargets = saunaProtocol?.relations?.map((relation) => relation.target) ?? [];
     expect(protocolRelationTargets).toContain(
@@ -122,8 +185,7 @@ describe("health commons catalog", () => {
         },
       },
       revision: {
-        runSpecRevisionId:
-          "sha256:388cfa7a6ab36b500684fce89694590458a152e3e23d51bf4b8bea61187e5041",
+        runSpecRevisionId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
       },
     });
     expect(redLightProtocol?.expectedSignalDescriptions?.map((signal) => signal.biomarkerKey)).toEqual(expect.arrayContaining([

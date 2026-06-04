@@ -227,6 +227,18 @@ protocol:
     - recovery after 24 to 48 hours
     - sleep disruption
     - other hard training
+  sessionFieldIds:
+  - modality
+  - completed_intervals
+  - interval_peak_hrs
+  - time_in_85_to_95_percent_hrmax
+  - rpe_each_interval
+  - one_minute_hr_recovery
+  - two_minute_hr_recovery
+  - symptoms_during_or_after
+  - recovery_after_24_to_48h
+  - sleep_disruption
+  - other_hard_training
   stopConditions:
     - Stop the session immediately if chest pain or pressure, faintness, severe dizziness, confusion, palpitations, unusual shortness of breath, neurologic symptoms, or unsafe pain occurs.
     - End the experiment and seek appropriate care if severe symptoms occur, symptoms repeat across sessions, or recovery feels unusually impaired for more than 24–48 hours.
@@ -361,220 +373,89 @@ expectedSignalDescriptions:
       basis: "Repeated aerobic training can improve insulin sensitivity, but glucose is a secondary endpoint for this protocol and medication-associated hypoglycemia risk must stay visible."
     description: "Repeated aerobic training can improve insulin sensitivity and muscle glucose disposal, but glucose remains a secondary endpoint for this protocol."
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
     displayPrompt: "Hey Murph, I want to explore doing Norwegian 4x4 intervals."
     intentSummary: "Explore Norwegian 4x4 Intervals"
-  contextReview:
-    vaultChecks:
-
-      -
-        id: active_experiments
-        label: Active experiments
-        reason: Avoid starting more than one meaningful experiment at once unless the user explicitly chooses that tradeoff.
-        readHints:
-          - experiment list --status active --format json
-      -
-        id: wearable_sources
-        label: Wearable sources
-        reason: Confirm that cardio-fitness, heart-rate, recovery, sleep, or activity signals can be observed during the baseline and intervention windows.
-        freshnessDays: 14
-        readHints:
-          - wearables sources list --format json
-          - wearables day <YYYY-MM-DD> --format json
-      -
-        id: recent_activity_sessions
-        label: Recent activity sessions
-        reason: Understand current training load, interval familiarity, and likely modality fit before scheduling two hard weekly sessions.
-        freshnessDays: 45
-        readHints:
-          - search query "interval workouts running cycling rowing" --format json
-          - timeline --entry-type event --kind activity_session --from <YYYY-MM-DD> --format json
-      -
-        id: cardiovascular_or_respiratory_conditions
-        label: Cardiovascular or respiratory conditions
-        reason: Known cardiovascular or respiratory disease can change whether unsupervised vigorous intervals are a good fit even before the compact safety screen.
-        freshnessDays: 180
-        readHints:
-          - search query "heart disease arrhythmia chest pain syncope hypertension asthma COPD" --format json
-      -
-        id: heart_rate_affecting_or_glucose_lowering_medications
-        label: Medications that change heart-rate interpretation or hypoglycemia risk
-        reason: Beta blockers, other heart-rate-limiting medications, and diabetes medications that can cause lows materially change safety and interpretation.
-        freshnessDays: 30
-        readHints:
-          - search query "beta blocker medication insulin sulfonylurea hypoglycemia" --format json
-      -
-        id: blood_pressure_records
-        label: Blood pressure context
-        reason: Recent elevated blood pressure or a known uncontrolled-hypertension context matters before unsupervised vigorous intervals.
-        freshnessDays: 30
-        readHints:
-          - search query "blood pressure hypertension" --format json
-      -
-        id: pregnancy_or_postpartum_context
-        label: Pregnancy or postpartum context
-        reason: Pregnancy and early postpartum status can change whether unsupervised vigorous intervals are a good fit right now.
-        freshnessDays: 30
-        readHints:
-          - memory show --format json
-          - search query "pregnancy postpartum" --format json
-      -
-        id: recent_illness_or_infection
-        label: Recent illness or infection
-        reason: Recent fever, infection, or possible myocarditis or pericarditis changes the safety posture for vigorous intervals.
-        freshnessDays: 21
-        readHints:
-          - search query "fever infection illness myocarditis pericarditis" --format json
-      -
-        id: injuries_pain_and_post_exertional_malaise
-        label: Injuries, pain, and post-exertional malaise
-        reason: Injury, pain, or a long-COVID or post-exertional-malaise pattern can make this protocol a poor fit even if the fitness goal is reasonable.
-        freshnessDays: 45
-        readHints:
-          - search query "injury pain long COVID post-exertional malaise" --format json
-    notes:
-      - Review vault context first, but still ask the compact high-intensity safety screen because silence in the vault is not clearance.
   safetyScreen:
-    cautionLevel: high
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-      -
-        id: cardiovascular_red_flags
-        prompt: known cardiovascular disease, exertional chest pain or pressure, unexplained shortness of breath, fainting or near-fainting, significant palpitations or arrhythmia, heart failure, recent heart attack or stroke, uncontrolled blood pressure, or possible myocarditis/pericarditis
-      -
-        id: acute_or_special_context
-        prompt: recent significant infection or fever, pregnancy or early postpartum if relevant, diabetes medication that can cause lows, beta blockers or other heart-rate-limiting medication, or severe asthma/COPD symptoms
-      -
-        id: movement_or_recovery_risk
-        prompt: injury or pain that vigorous exercise worsens, or a long-COVID/post-exertional-malaise pattern
-    stopIf:
-      inheritFromProtocolSafety: true
-    notes:
-      - A positive or uncertain screen is not a diagnosis; it means Murph should not set up this as an unsupervised high-intensity self-experiment.
-      - Offer a lower-intensity or clinician-guided alternative when the self-directed 4x4 path is not a safe fit.
+      - id: "cardiovascular_red_flags"
+        prompt: "known cardiovascular disease, exertional chest pain or pressure, unexplained shortness of breath, fainting or near-fainting, significant palpitations or arrhythmia, heart failure, recent heart attack or stroke, uncontrolled blood pressure, or possible myocarditis/pericarditis"
+      - id: "acute_or_special_context"
+        prompt: "recent significant infection or fever, pregnancy or early postpartum if relevant, diabetes medication that can cause lows, beta blockers or other heart-rate-limiting medication, or severe asthma/COPD symptoms"
+      - id: "movement_or_recovery_risk"
+        prompt: "injury or pain that vigorous exercise worsens, or a long-COVID/post-exertional-malaise pattern"
   setupSlots:
-
-    -
-      id: modality
-      label: Modality
-      purpose: logistics
-      valueType: enum
-      askPolicy: ask_if_unknown
-      required: true
+    - id: "modality"
+      label: "Modality"
       question: "What would you use for the hard intervals: bike, rower, elliptical, treadmill, hill, or a safe running route?"
       options:
-        - bike
-        - rower
-        - elliptical
-        - treadmill
-        - hill
-        - safe_running_route
+        - "bike"
+        - "rower"
+        - "elliptical"
+        - "treadmill"
+        - "hill"
+        - "safe_running_route"
       target:
-        object: experimentRun
-        field: modality
-    -
-      id: safe_environment
-      label: Safe environment
-      purpose: safety
-      valueType: boolean
-      askPolicy: ask_if_unknown
-      required: true
-      question: Do you have a place to do this without traffic, obstacles, or footing hazards?
+        object: "experimentRun"
+        field: "modality"
+    - id: "safe_environment"
+      label: "Safe environment"
+      question: "Do you have a place to do this without traffic, obstacles, or footing hazards?"
       target:
-        object: onboardingCapture
-        field: answers.safeEnvironment
-    -
-      id: hr_monitor
-      label: Heart-rate monitor
-      purpose: measurement_fidelity
-      valueType: enum
-      askPolicy: ask_if_unknown
-      required: true
+        object: "onboardingCapture"
+        field: "answers.safeEnvironment"
+    - id: "hr_monitor"
+      label: "Heart-rate monitor"
       question: "What heart-rate monitor would you use for the intervals: chest strap, wrist wearable, or none?"
       options:
-        - chest_strap
-        - wrist_wearable
-        - none
+        - "chest_strap"
+        - "wrist_wearable"
+        - "none"
       target:
-        object: experimentRun
-        field: hrMonitor
-    -
-      id: weekly_schedule
-      label: Weekly schedule
-      purpose: logistics
-      valueType: weekly_time_windows
-      askPolicy: ask_if_unknown
-      required: true
-      question: What two days and rough times would realistically work, with at least 48 hours between sessions?
+        object: "experimentRun"
+        field: "hrMonitor"
+    - id: "weekly_schedule"
+      label: "Weekly schedule"
+      question: "What two days and rough times would realistically work, with at least 48 hours between sessions?"
       constraints:
         sessionsPerWeek: 2
         minimumHoursBetweenSessions: 48
         defaultRunPlanSchedule:
-          kind: cron
+          kind: "cron"
           expression: "0 8 * * 2,5"
-          timeZone: UTC
-        runPlanScheduleTimeZonePolicy: replace_with_user_vault_timezone
+          timeZone: "UTC"
+        runPlanScheduleTimeZonePolicy: "replace_with_user_vault_timezone"
       target:
-        object: onboardingCapture
-        field: answers.weeklySchedule
-    -
-      id: reminder_policy
-      label: Reminder policy
-      purpose: assistant_support
-      valueType: reminder_policy
-      askPolicy: ask_at_confirmation
-      required: true
-      question: Want a reminder before each planned session, and if you do not log it by later that day should Murph ask once or leave it alone?
+        object: "onboardingCapture"
+        field: "answers.weeklySchedule"
+    - id: "reminder_policy"
+      label: "Reminder policy"
+      question: "Want a reminder before each planned session, and if you do not log it by later that day should Murph ask once or leave it alone?"
       options:
-        - none
-        - pre_session
-        - pre_session_plus_same_day_missing_log_check
+        - "none"
+        - "pre_session"
+        - "pre_session_plus_same_day_missing_log_check"
+      constraints:
+        askWhen: "at_confirmation"
       target:
-        object: assistantSupport
-        field: reminderPolicy
+        object: "assistantSupport"
+        field: "reminderPolicy"
   planDefaults:
-    testPlanId: wearable-cardio-fitness-49d
-    baselineDays: 7
-    interventionDays: 42
-    sessionsPerWeek: 2
-    targetSessions: 12
-    minimumUsefulSessions: 8
-    firstSessionGuidance: Keep the first session conservative; the goal is repeatable hard aerobic work, not maximal suffering.
-  logging:
-    sessionFields:
-      - modality
-      - completed_intervals
-      - interval_peak_hrs
-      - time_in_85_to_95_percent_hrmax
-      - rpe_each_interval
-      - one_minute_hr_recovery
-      - two_minute_hr_recovery
-      - symptoms_during_or_after
-      - recovery_after_24_to_48h
-      - sleep_disruption
-      - other_hard_training
-    confounders:
-      - illness_or_fever
-      - acute_infection_recovery
-      - alcohol_last_24h
-      - caffeine_last_6h
-      - hard_training_last_24h
-      - travel_or_timezone_shift
-      - unusually_high_work_or_life_stress
-      - new_medication_or_supplement
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-      - none
-      - pre_session
-      - pre_session_plus_same_day_missing_log_check
-      - weekly_digest
-    weeklyDigestDefault: true
+    testPlanId: "wearable-cardio-fitness-49d"
+    firstSessionGuidance: "Keep the first session conservative; the goal is repeatable hard aerobic work, not maximal suffering."
+  trackingHints:
+    confounderFields:
+      - "illness_or_fever"
+      - "acute_infection_recovery"
+      - "alcohol_last_24h"
+      - "caffeine_last_6h"
+      - "hard_training_last_24h"
+      - "travel_or_timezone_shift"
+      - "unusually_high_work_or_life_stress"
+      - "new_medication_or_supplement"
+  supportHints:
     missedLogFollowupCopy: "Did you end up doing today's 4x4 session? Totally fine either way — I just want the experiment record to be accurate."
 whyItWorks:
   - "## 4-minute rep is dose\n\nShort sprints end before the aerobic system is fully loaded. 4 min is long enough for heart rate, ventilation, cardiac output, and muscle oxygen extraction to climb and stay high. The work is not a burst; it is sustained pressure on the oxygen-delivery system."

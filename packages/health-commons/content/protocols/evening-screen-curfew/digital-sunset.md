@@ -470,6 +470,34 @@ protocol:
   - resting heart rate
   - HRV RMSSD
   - sleep-score checking frequency or wearable-related anxiety
+  sessionFieldIds:
+  - planned_bedtime
+  - curfew_start_time
+  - actual_last_personal_screen_time
+  - screen_after_cutoff
+  - screen_content_after_cutoff
+  - in_bed_phone_use
+  - overnight_phone_use
+  - planned_exception_used
+  - missed_or_delayed_urgent_contact
+  - phone_location
+  - dnd_silent_app_lock_or_phone_placement_settings
+  - exception_path_tested
+  - replacement_activity
+  - replacement_activity_duration_minutes
+  - replacement_activity_delayed_bedtime
+  - rebound_or_compensatory_screen_use
+  - actual_lights_out
+  - planned_wake_time
+  - actual_wake_or_rise_time
+  - total_sleep_opportunity_minutes
+  - time_in_bed_minutes
+  - estimated_sleep_onset_latency_minutes
+  - pre_sleep_wiredness
+  - subjective_sleep_quality
+  - next_day_sleepiness
+  - next_day_safety_critical_tasks
+  - drowsiness_before_hazardous_task
   stopConditions:
   - Stop or shrink the curfew if bedtime moves later, sleep opportunity shrinks, or sleep worsens for three consecutive nights.
   - Stop if it causes dangerous next-day sleepiness; do not drive, operate machinery, or do safety-critical tasks while sleepy.
@@ -524,314 +552,173 @@ expectedSignalDescriptions:
   protocolProminence: "focus"
   description: "Fewer in-bed pickups, delayed lights-out minutes, and restless starts leave more of the sleep window actually asleep."
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to explore doing Digital Sunset with no personal screens before bed.
-    intentSummary: Explore Digital Sunset
-  contextReview:
-    vaultChecks:
-
-    -
-      id: active_experiments
-      label: Active experiments
-      reason: Avoid stacking another meaningful experiment on top of an active one unless the user explicitly accepts weaker attribution.
-      readHints:
-      - experiment list --status active
-    -
-      id: wearable_sleep_baseline
-      label: Wearable sleep baseline
-      reason: Check whether sleep-onset, sleep-efficiency, total-sleep-time, HRV, or resting-heart-rate trends are available for baseline and intervention windows.
-      freshnessDays: 14
-      readHints:
-      - wearables sources list
-      - wearables day
-      - sleep summary
-    -
-      id: evening_screen_and_bedtime_context
-      label: Evening screen and bedtime context
-      reason: "Understand usual bedtime, phone-in-bed habits, work/social screen use, notifications, and whether a 30-minute or 60-minute window is realistic."
-      freshnessDays: 30
-      readHints:
-      - memory show
-      - search query "bedtime screens phone sleep routine notifications work on-call"
-      - journal show
-    -
-      id: sleep_safety_and_life_fit_context
-      label: Sleep safety and life-fit context
-      reason: Check for persistent sleep problems, dangerous daytime sleepiness, drowsy driving, current clinical sleep treatment, mood or circadian concerns, high phone-separation distress, and necessary availability.
-      freshnessDays: 90
-      readHints:
-      - memory show
-      - search query "insomnia sleep apnea drowsy driving bipolar mania shift work on-call caregiving phone anxiety wearable fixation"
-    notes:
-    - Do not re-ask context the vault already answers unless it changes safety, logistics, measurement fidelity, or consent.
-    - When wearable data are missing or noisy, the protocol can still run with subjective sleep-onset, sleep-quality, and wiredness logs.
+    displayPrompt: "Hey Murph, I want to explore doing Digital Sunset with no personal screens before bed."
+    intentSummary: "Explore Digital Sunset"
   safetyScreen:
-    cautionLevel: moderate
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-    -
-      id: acute_mental_health_or_self_harm
-      prompt: current suicidal thoughts, self-harm urges, psychosis, crisis-level distress, or rapidly worsening severe depression or anxiety
-      ifPositive: do_not_start_unsupervised
-      why: A bedtime screen curfew is not crisis care or mental-health treatment; support and clinical or crisis resources take priority over the experiment.
-    -
-      id: persistent_or_unsafe_sleep_problem
-      prompt: persistent or severe insomnia, suspected sleep apnea or another sleep disorder, unsafe daytime sleepiness, drowsy driving, or current clinical sleep treatment
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Digital Sunset is not insomnia treatment and should not delay clinical care for persistent or unsafe sleep problems.
-    -
-      id: mood_or_circadian_risk
-      prompt: bipolar disorder, recent mania or hypomania, severe mood instability, diagnosed circadian rhythm sleep-wake disorder, rotating shift-work sleep disruption, or major circadian disruption
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: "Rigid sleep/circadian rules can be a poor fit without clinician guidance in these contexts."
-    -
-      id: phone_separation_distress
-      prompt: high anxiety, panic attacks, craving, withdrawal-like discomfort, problematic smartphone use or nomophobia, obsessive checking, or sleep-score fixation when the phone or screen is unavailable
-      ifPositive: continue_with_caution
-      why: Use a smaller window, gradual step-down, optional replacement plan, and a documented contact path; do not use abrupt all-or-nothing phone removal, app locks, or repeated reminders if they increase distress.
-    -
-      id: severe_phone_separation_or_compulsive_use
-      prompt: severe panic, compulsive or addiction-like phone use, inability to tolerate phone separation, or repeated failed attempts that worsen distress
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Severe phone-separation distress belongs in a supported gradual variant, not an ordinary unsupervised wellness run.
-    -
-      id: pediatric_sleep_or_mental_health_red_flags
-      prompt: "for a child or adolescent: loud snoring or mouth breathing, restless legs or possible low iron, daytime sleepiness despite enough sleep, ongoing sleep problems, medical or psychiatric conditions affecting sleep, self-harm concerns, or use without guardian support"
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Child and adolescent sleep problems need guardian-aware and sometimes pediatric, sleep, or mental-health evaluation rather than an adult self-experiment.
-    -
-      id: medical_accessibility_or_alarm_dependency
-      prompt: phone or screen is needed for medical alarms, medication reminders, glucose/heart/respiratory alerts, accessibility communication, fall or safety alerts, emergency translation, alarms, or another health/safety function
-      ifPositive: continue_with_caution
-      why: Keep those functions active through a tested exception; do not use silent mode, Do Not Disturb, app locks, or phone placement that could block safety functions.
-    -
-      id: necessary_availability
-      prompt: on-call work, caregiving, medical, emergency, safety-critical, or accessibility reasons you need a reachable device at night
-      ifPositive: continue_with_caution
-      why: Necessary availability should become a planned exception, not a failure label.
-    -
-      id: pregnancy_postpartum_new_infant_or_major_caregiving
-      prompt: pregnancy, postpartum recovery, a newborn or infant at home, or major caregiving disruption that is already reducing sleep opportunity or worsening mood
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Major caregiving or perinatal sleep disruption may need a separate support plan rather than an ordinary screen-curfew experiment.
-    -
-      id: safety_critical_work_or_driving
-      prompt: upcoming driving, cycling or commuting in traffic, operating machinery, hazardous work, childcare while severely sleepy, or on-call clinical/public-safety duties without a sleep-opportunity plan
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Safety-critical next-day tasks require sleep opportunity and a tested exception path before protocol adherence.
+      - id: "acute_mental_health_or_self_harm"
+        prompt: "current suicidal thoughts, self-harm urges, psychosis, crisis-level distress, or rapidly worsening severe depression or anxiety"
+        ifPositive: "do_not_start_unsupervised"
+      - id: "persistent_or_unsafe_sleep_problem"
+        prompt: "persistent or severe insomnia, suspected sleep apnea or another sleep disorder, unsafe daytime sleepiness, drowsy driving, or current clinical sleep treatment"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "mood_or_circadian_risk"
+        prompt: "bipolar disorder, recent mania or hypomania, severe mood instability, diagnosed circadian rhythm sleep-wake disorder, rotating shift-work sleep disruption, or major circadian disruption"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "phone_separation_distress"
+        prompt: "high anxiety, panic attacks, craving, withdrawal-like discomfort, problematic smartphone use or nomophobia, obsessive checking, or sleep-score fixation when the phone or screen is unavailable"
+        ifPositive: "continue_with_caution"
+      - id: "severe_phone_separation_or_compulsive_use"
+        prompt: "severe panic, compulsive or addiction-like phone use, inability to tolerate phone separation, or repeated failed attempts that worsen distress"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "pediatric_sleep_or_mental_health_red_flags"
+        prompt: "for a child or adolescent: loud snoring or mouth breathing, restless legs or possible low iron, daytime sleepiness despite enough sleep, ongoing sleep problems, medical or psychiatric conditions affecting sleep, self-harm concerns, or use without guardian support"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "medical_accessibility_or_alarm_dependency"
+        prompt: "phone or screen is needed for medical alarms, medication reminders, glucose/heart/respiratory alerts, accessibility communication, fall or safety alerts, emergency translation, alarms, or another health/safety function"
+        ifPositive: "continue_with_caution"
+      - id: "necessary_availability"
+        prompt: "on-call work, caregiving, medical, emergency, safety-critical, or accessibility reasons you need a reachable device at night"
+        ifPositive: "continue_with_caution"
+      - id: "pregnancy_postpartum_new_infant_or_major_caregiving"
+        prompt: "pregnancy, postpartum recovery, a newborn or infant at home, or major caregiving disruption that is already reducing sleep opportunity or worsening mood"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "safety_critical_work_or_driving"
+        prompt: "upcoming driving, cycling or commuting in traffic, operating machinery, hazardous work, childcare while severely sleepy, or on-call clinical/public-safety duties without a sleep-opportunity plan"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
-      - curfew_delays_bedtime
-      - dangerous_next_day_sleepiness
-      - phone_separation_distress
-      - severe_phone_separation_or_compulsive_use
-      - necessary_contact_blocked
-      - exception_path_or_safety_alerts_fail
-      - app_locks_or_dnd_block_medical_accessibility_alarm_or_emergency_functions
-      - replacement_activity_or_rebound_use_delays_bedtime
-      - sleep_opportunity_worsens_on_nights_before_driving_caregiving_or_safety_critical_work
-      - suicidal_thoughts_self_harm_psychosis_or_crisis_level_distress
-      - tracking_fixation
-    notes:
-    - A positive screen does not always block the experiment, but high-risk sleep, mood, circadian, self-harm, or clinical-treatment positives require clinician guidance before an unsupervised start. Low-risk positives such as necessary availability or mild phone-separation discomfort may continue only after a documented exception or step-down plan.
-    - A positive or uncertain screen is not a diagnosis. It tells Murph whether to soften, postpone, or route the unsupervised experiment.
+        - "curfew_delays_bedtime"
+        - "dangerous_next_day_sleepiness"
+        - "phone_separation_distress"
+        - "severe_phone_separation_or_compulsive_use"
+        - "necessary_contact_blocked"
+        - "exception_path_or_safety_alerts_fail"
+        - "app_locks_or_dnd_block_medical_accessibility_alarm_or_emergency_functions"
+        - "replacement_activity_or_rebound_use_delays_bedtime"
+        - "sleep_opportunity_worsens_on_nights_before_driving_caregiving_or_safety_critical_work"
+        - "suicidal_thoughts_self_harm_psychosis_or_crisis_level_distress"
+        - "tracking_fixation"
   setupSlots:
-
-  -
-    id: bedtime_anchor
-    label: Bedtime anchor
-    purpose: logistics
-    valueType: local_time
-    askPolicy: ask_if_unknown_or_stale
-    required: true
-    question: What bedtime should the screen cutoff be anchored to?
-    target:
-      object: experimentRun
-      field: bedtimeAnchor
-  -
-    id: curfew_window
-    label: Curfew window
-    purpose: logistics
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: "Which window is realistic to start with: 30 minutes, 60 minutes, or a gradual ramp?"
-    options:
-    - thirty_minutes
-    - sixty_minutes
-    - gradual_ramp
-    constraints:
-      minimumMinutes: 30
-      largerWindowMinutes: 60
-    target:
-      object: experimentRun
-      field: curfewWindow
-  -
-    id: target_screen_pattern
-    label: Target screen pattern
-    purpose: personalization
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: "What is the main pattern you want to change: scrolling before bed, phone in bed, work/messages, streaming/gaming, or mixed use?"
-    options:
-    - scrolling_before_bed
-    - phone_in_bed
-    - work_or_messages
-    - streaming_or_gaming
-    - mixed_use
-    target:
-      object: experimentRun
-      field: targetScreenPattern
-  -
-    id: phone_location
-    label: Phone location
-    purpose: logistics
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: "Where will the phone go during the window: out of bed, outside the bedroom, or reachable in call-only/VIP mode?"
-    options:
-    - out_of_bed
-    - outside_bedroom
-    - call_only_or_vip_mode
-    target:
-      object: experimentRun
-      field: phoneLocation
-  -
-    id: necessary_exceptions
-    label: Necessary exceptions
-    purpose: safety
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: false
-    question: Any work, caregiving, medical, emergency, accessibility, or safety contacts that must remain reachable?
-    target:
-      object: experimentRun
-      field: necessaryExceptions
-  -
-    id: replacement_activity
-    label: Replacement activity
-    purpose: adherence
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: What will replace screens during the curfew window?
-    options:
-    - paper_reading
-    - journaling
-    - stretching
-    - prep_for_tomorrow
-    - quiet_conversation
-    - audio_started_before_cutoff
-    - other_non_screen_activity
-    target:
-      object: experimentRun
-      field: replacementActivity
-  -
-    id: measurement_mode
-    label: Measurement mode
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: "How should Murph measure this: subjective log only, wearable plus subjective log, or wearable plus optional phone-log/screenshots?"
-    options:
-    - subjective_log_only
-    - wearable_plus_subjective
-    - wearable_subjective_phone_log_optional
-    target:
-      object: experimentRun
-      field: measurementMode
-  -
-    id: reminder_policy
-    label: Reminder policy
-    purpose: assistant_support
-    valueType: reminder_policy
-    askPolicy: ask_at_confirmation
-    required: true
-    question: Do you want no reminders, one pre-curfew reminder, or one pre-curfew reminder plus a next-morning missing-log check?
-    options:
-    - none
-    - pre_curfew
-    - pre_curfew_plus_next_morning_missing_log_check
-    target:
-      object: assistantSupport
-      field: reminderPolicy
+    - id: "bedtime_anchor"
+      label: "Bedtime anchor"
+      question: "What bedtime should the screen cutoff be anchored to?"
+      constraints:
+        askWhen: "if_unknown_or_stale"
+      target:
+        object: "experimentRun"
+        field: "bedtimeAnchor"
+    - id: "curfew_window"
+      label: "Curfew window"
+      question: "Which window is realistic to start with: 30 minutes, 60 minutes, or a gradual ramp?"
+      options:
+        - "thirty_minutes"
+        - "sixty_minutes"
+        - "gradual_ramp"
+      constraints:
+        minimumMinutes: 30
+        largerWindowMinutes: 60
+      target:
+        object: "experimentRun"
+        field: "curfewWindow"
+    - id: "target_screen_pattern"
+      label: "Target screen pattern"
+      question: "What is the main pattern you want to change: scrolling before bed, phone in bed, work/messages, streaming/gaming, or mixed use?"
+      options:
+        - "scrolling_before_bed"
+        - "phone_in_bed"
+        - "work_or_messages"
+        - "streaming_or_gaming"
+        - "mixed_use"
+      target:
+        object: "experimentRun"
+        field: "targetScreenPattern"
+    - id: "phone_location"
+      label: "Phone location"
+      question: "Where will the phone go during the window: out of bed, outside the bedroom, or reachable in call-only/VIP mode?"
+      options:
+        - "out_of_bed"
+        - "outside_bedroom"
+        - "call_only_or_vip_mode"
+      target:
+        object: "experimentRun"
+        field: "phoneLocation"
+    - id: "necessary_exceptions"
+      label: "Necessary exceptions"
+      question: "Any work, caregiving, medical, emergency, accessibility, or safety contacts that must remain reachable?"
+      constraints:
+        optional: true
+      target:
+        object: "experimentRun"
+        field: "necessaryExceptions"
+    - id: "replacement_activity"
+      label: "Replacement activity"
+      question: "What will replace screens during the curfew window?"
+      options:
+        - "paper_reading"
+        - "journaling"
+        - "stretching"
+        - "prep_for_tomorrow"
+        - "quiet_conversation"
+        - "audio_started_before_cutoff"
+        - "other_non_screen_activity"
+      target:
+        object: "experimentRun"
+        field: "replacementActivity"
+    - id: "measurement_mode"
+      label: "Measurement mode"
+      question: "How should Murph measure this: subjective log only, wearable plus subjective log, or wearable plus optional phone-log/screenshots?"
+      options:
+        - "subjective_log_only"
+        - "wearable_plus_subjective"
+        - "wearable_subjective_phone_log_optional"
+      target:
+        object: "experimentRun"
+        field: "measurementMode"
+    - id: "reminder_policy"
+      label: "Reminder policy"
+      question: "Do you want no reminders, one pre-curfew reminder, or one pre-curfew reminder plus a next-morning missing-log check?"
+      options:
+        - "none"
+        - "pre_curfew"
+        - "pre_curfew_plus_next_morning_missing_log_check"
+      constraints:
+        askWhen: "at_confirmation"
+      target:
+        object: "assistantSupport"
+        field: "reminderPolicy"
   planDefaults:
-    testPlanId: digital-sunset-sol-21d
-    baselineDays: 7
-    interventionDays: 14
-    sessionsPerWeek: 7
-    targetSessions: 12
-    minimumUsefulSessions: 10
-    firstSessionGuidance: Keep the first night simple. Use a 30-minute window unless the user is confident that 60 minutes will not delay bedtime or create anxiety.
-  logging:
-    sessionFields:
-    - planned_bedtime
-    - curfew_start_time
-    - actual_last_personal_screen_time
-    - screen_after_cutoff
-    - screen_content_after_cutoff
-    - in_bed_phone_use
-    - overnight_phone_use
-    - planned_exception_used
-    - missed_or_delayed_urgent_contact
-    - phone_location
-    - dnd_silent_app_lock_or_phone_placement_settings
-    - exception_path_tested
-    - replacement_activity
-    - replacement_activity_duration_minutes
-    - replacement_activity_delayed_bedtime
-    - rebound_or_compensatory_screen_use
-    - actual_lights_out
-    - planned_wake_time
-    - actual_wake_or_rise_time
-    - total_sleep_opportunity_minutes
-    - time_in_bed_minutes
-    - estimated_sleep_onset_latency_minutes
-    - pre_sleep_wiredness
-    - subjective_sleep_quality
-    - next_day_sleepiness
-    - next_day_safety_critical_tasks
-    - drowsiness_before_hazardous_task
-    confounders:
-    - caffeine_dose_and_timing
-    - alcohol_quantity_and_timing
-    - nicotine_vaping_or_other_stimulant_use
-    - cannabis_sedatives_otc_sleep_aids_melatonin_supplements_or_new_medication
-    - late_exercise_or_hard_training
-    - nap_timing_and_duration
-    - unusual_stress_pain_or_deadline
-    - work_deadline_or_on_call
-    - social_obligation
-    - travel_or_timezone_shift
-    - shift_schedule_or_on_call_status
-    - illness_or_fever
-    - household_partner_child_pet_disruption
-    - room_light_or_screen_brightness_change
-    - morning_or_daytime_bright_light_or_light_therapy_change
-    - new_sleep_intervention
-    - notification_or_call_awakenings
-    - reason_bedtime_was_delayed
-    - wearable_tracking_anxiety
-    - sleep_score_checking_frequency
+    testPlanId: "digital-sunset-sol-21d"
+    firstSessionGuidance: "Keep the first night simple. Use a 30-minute window unless the user is confident that 60 minutes will not delay bedtime or create anxiety."
+  trackingHints:
+    confounderFields:
+      - "caffeine_dose_and_timing"
+      - "alcohol_quantity_and_timing"
+      - "nicotine_vaping_or_other_stimulant_use"
+      - "cannabis_sedatives_otc_sleep_aids_melatonin_supplements_or_new_medication"
+      - "late_exercise_or_hard_training"
+      - "nap_timing_and_duration"
+      - "unusual_stress_pain_or_deadline"
+      - "work_deadline_or_on_call"
+      - "social_obligation"
+      - "travel_or_timezone_shift"
+      - "shift_schedule_or_on_call_status"
+      - "illness_or_fever"
+      - "household_partner_child_pet_disruption"
+      - "room_light_or_screen_brightness_change"
+      - "morning_or_daytime_bright_light_or_light_therapy_change"
+      - "new_sleep_intervention"
+      - "notification_or_call_awakenings"
+      - "reason_bedtime_was_delayed"
+      - "wearable_tracking_anxiety"
+      - "sleep_score_checking_frequency"
     notes:
-    - Keep nightly logging short enough that it does not become another bedtime screen task.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-    - none
-    - pre_curfew
-    - pre_curfew_plus_next_morning_missing_log_check
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: Did you end up doing the screen cutoff last night? Totally fine either way — I just want the experiment record to be accurate.
+      - "Keep nightly logging short enough that it does not become another bedtime screen task."
+  supportHints:
+    missedLogFollowupCopy: "Did you end up doing the screen cutoff last night? Totally fine either way — I just want the experiment record to be accurate."
 whyItWorks:
   - "## Screens keep the brain engaged\n\nPhones and laptops deliver light, novelty, decisions, messages, and social threat checks. Those inputs keep arousal up when sleep needs boring conditions."
   - "## Curfew removes 3 inputs\n\nNo screens cuts melanopic light, interactive content, and notification loops together. The mechanism is not blue light alone; it is lower sensory and cognitive activation."

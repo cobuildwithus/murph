@@ -156,6 +156,14 @@ protocol:
     - "pregnancy possibility where relevant"
     - "safety-lab changes"
     - "cardiovascular-risk diagnosis or clinician-directed lipid-care plan changes"
+  sessionFieldIds:
+  - serving-taken
+  - product-identity
+  - ryr-mg-day
+  - monacolin-info
+  - muscle-symptoms
+  - medication-changes
+  - diet-weight-changes
   stopConditions:
     - "Stop the run and seek medical guidance for severe, unusual, or unexplained muscle pain, tenderness, cramps, weakness, fever with muscle symptoms, unusual tiredness with muscle symptoms, dark/cola urine, or suspected rhabdomyolysis."
     - "Stop and seek guidance for jaundice, right-upper-abdominal pain, severe nausea or vomiting, marked fatigue, pale stools, or other liver concern."
@@ -280,92 +288,35 @@ expectedSignalDescriptions:
       basis: "Several direct syntheses found no significant HDL-C increase, while some older or product-specific trials reported HDL-C gains."
     protocolProminence: "context"
 experimentOnboarding:
-  schemaVersion: "murph.commons.experiment-onboarding.v1"
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
     displayPrompt: "I want to plan a red yeast rice cholesterol experiment."
     intentSummary: "Plan a high-caution, product-specific RYR lipid-panel experiment with safety screening before any run is created."
-  contextReview:
-    vaultChecks:
-
-      -
-        id: "recent-lipid-panel"
-        label: "Recent lipid panel"
-        reason: "LDL-C response requires a baseline and follow-up lab, not symptom tracking alone."
-        freshnessDays: 180
-        readHints:
-          - "LDL-C"
-          - "total cholesterol"
-          - "HDL-C"
-          - "triglycerides"
-          - "non-HDL-C"
-          - "ApoB"
-      -
-        id: "lipid-medications"
-        label: "Lipid medications and supplements"
-        reason: "Medication and supplement overlap changes both safety and attribution."
-        readHints:
-          - "statin"
-          - "fibrate"
-          - "ezetimibe"
-          - "PCSK9"
-          - "niacin"
-          - "berberine"
-          - "fish oil"
-      -
-        id: "liver-kidney-muscle-history"
-        label: "Liver, kidney, and muscle history"
-        reason: "RYR has statin-like and contamination-related safety boundaries."
-        readHints:
-          - "liver enzymes"
-          - "kidney function"
-          - "creatine kinase"
-          - "myalgia"
-          - "rhabdomyolysis"
-    notes:
-      - "Do not create reminders or a private run until the user explicitly confirms the product, safety screen, baseline lab plan, and clinician-guidance status."
   safetyScreen:
-    cautionLevel: "high"
-    mode: "ask_compact_then_expand_if_positive"
     dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-      -
-        id: "pregnancy-lactation-pediatric"
+      - id: "pregnancy-lactation-pediatric"
         prompt: "Are you pregnant, trying to become pregnant, breastfeeding, or planning this for a child or teenager?"
         ifPositive: "do_not_start_unsupervised"
-        why: "Pregnancy, lactation, and pediatric use are outside this self-experiment protocol."
-      -
-        id: "liver-kidney-muscle-risk"
+      - id: "liver-kidney-muscle-risk"
         prompt: "Do you have liver disease or unexplained liver symptoms; kidney disease, kidney failure, kidney transplant, significant kidney-function abnormality, or prior acute kidney injury; untreated hypothyroidism; muscle disease, unexplained muscle pain/tenderness/weakness, prior CK elevation, prior rhabdomyolysis, any prior statin-associated muscle symptoms or statin intolerance, or known allergy to lovastatin/statins/red yeast rice?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
-        why: "RYR can involve statin-like muscle/liver risk, product-specific kidney-safety concerns, and risk factors that require clinical review rather than routine self-experiment use."
-      -
-        id: "high-risk-clinical-care"
+      - id: "high-risk-clinical-care"
         prompt: "Do you have known ASCVD, prior heart attack or stroke, familial hypercholesterolemia, very high LDL-C, very high triglycerides, diabetes, chronic kidney disease, or another condition requiring clinician-directed lipid care?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
-        why: "These are clinical lipid-management contexts, not ordinary wellness experiments, and supplement evidence does not establish cardiovascular-event-prevention replacement."
-      -
-        id: "interacting-medications"
+      - id: "interacting-medications"
         prompt: "Are you taking or likely to start a statin, fibrate/gemfibrozil, niacin, ezetimibe, PCSK9 therapy, bile-acid sequestrant, other lipid-lowering medicine/supplement, cyclosporine or transplant/immunosuppressive therapy, macrolide antibiotic, azole antifungal, HIV/HCV antiviral, fusidic acid, colchicine, danazol, nefazodone, amiodarone, verapamil/diltiazem, warfarin/coumarin anticoagulant, strong CYP3A4/P-gp medicine, or regular grapefruit product?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
-        why: "Overlapping lipid therapy and CYP3A4/P-gp or narrow-therapeutic-index interactions can change adverse-event risk and make the experiment hard to interpret."
-      -
-        id: "alcohol-grapefruit-or-acute-illness"
+      - id: "alcohol-grapefruit-or-acute-illness"
         prompt: "Do you use heavy alcohol, grapefruit products, or have an acute illness that could affect liver, kidney, or muscle safety?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
-        why: "These can increase risk or confound safety signals."
-      -
-        id: "replacing-prescribed-care"
+      - id: "replacing-prescribed-care"
         prompt: "Are you planning to replace, pause, or avoid prescribed lipid-lowering therapy with red yeast rice?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
-        why: "This protocol is not a substitute for clinician-directed lipid treatment or cardiovascular-risk management."
-      -
-        id: "product-quality-law-check"
+      - id: "product-quality-law-check"
         prompt: "Is any product identity, lot/batch, expiration date, retailer/country, monacolin K or total monacolins if stated, citrinin/contaminant testing or COA status, warning-label status, current recall/safety-notice check, hidden-drug/adulteration warning check, or local-law check missing or uncertain for this product?"
         ifPositive: "do_not_start_unsupervised"
-        why: "Red yeast rice products vary in active monacolin content and may have contaminant, adulteration, recall, or legal-status issues that change safety and attribution."
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
         - "product recall, contamination notice, hidden-drug warning, suspected adulteration, or failed local-law check"
         - "new severe, unusual, or unexplained muscle symptoms, fever/tiredness with muscle symptoms, or dark/cola urine"
@@ -374,95 +325,53 @@ experimentOnboarding:
         - "abnormal or worsening ALT, AST, CK, creatinine, or eGFR"
         - "new interacting medicine, acute illness requiring interacting antimicrobial/colchicine/fusidic acid therapy, grapefruit, or heavy-alcohol exposure"
         - "do not restart after a stop signal unless a clinician explicitly clears restarting"
-    notes:
-      - "Any positive or uncertain answer should route to clinician guidance rather than a frictionless self-experiment start."
-      - "A negative screen is not a guarantee of safety; it only supports using the routine protocol rather than a clinician-guided variant."
   setupSlots:
-
-    -
-      id: "product-identity"
+    - id: "product-identity"
       label: "Product identity"
-      purpose: "personalization"
-      valueType: "free_text"
-      askPolicy: "always"
-      required: true
       question: "What exact red yeast rice product, brand, serving size, lot/batch, expiration date, retailer, and country will you use?"
       target:
         object: "experimentRun"
         field: "productIdentity"
-    -
-      id: "active-dose-info"
+    - id: "active-dose-info"
       label: "Active-dose information"
-      purpose: "personalization"
-      valueType: "free_text"
-      askPolicy: "always"
-      required: true
       question: "What RYR mg/day and monacolin K or total monacolins/day are stated or documented, if any?"
       target:
         object: "experimentRun"
         field: "activeDoseInfo"
-    -
-      id: "product-quality-docs"
+    - id: "product-quality-docs"
       label: "Product-quality documentation"
-      purpose: "personalization"
-      valueType: "free_text"
-      askPolicy: "always"
-      required: true
       question: "What evidence do you have for citrinin/contaminant testing, third-party/lab testing, warning-label status, certificate-of-analysis review, recall/safety-notice check, hidden-drug/adulteration warning check, and local-law check?"
       target:
         object: "experimentRun"
         field: "productQualityDocs"
-    -
-      id: "baseline-lab-date"
+    - id: "baseline-lab-date"
       label: "Baseline lipid panel date"
-      purpose: "measurement_fidelity"
-      valueType: "free_text"
-      askPolicy: "ask_if_unknown_or_stale"
-      required: true
       question: "What date was or will be the baseline lipid panel?"
+      constraints:
+        askWhen: "if_unknown_or_stale"
       target:
         object: "experimentRun"
         field: "baselineLabDate"
-    -
-      id: "followup-lab-window"
+    - id: "followup-lab-window"
       label: "Follow-up lipid panel window"
-      purpose: "measurement_fidelity"
-      valueType: "free_text"
-      askPolicy: "ask_if_unknown"
-      required: true
       question: "When will you repeat the lipid panel, ideally 8–12 weeks after starting?"
       target:
         object: "experimentRun"
         field: "followupLabWindow"
-    -
-      id: "reminder-policy"
+    - id: "reminder-policy"
       label: "Reminder preference"
-      purpose: "assistant_support"
-      valueType: "reminder_policy"
-      askPolicy: "ask_at_confirmation"
-      required: false
       question: "Would you like a daily log reminder after the run is confirmed?"
+      constraints:
+        optional: true
+        askWhen: "at_confirmation"
       target:
         object: "experimentRun"
         field: "reminderPolicy"
   planDefaults:
     testPlanId: "lipid-panel-98d"
-    baselineDays: 14
-    interventionDays: 84
-    sessionsPerWeek: 7
-    targetSessions: 84
-    minimumUsefulSessions: 56
     firstSessionGuidance: "Confirm baseline lab, product identity, product-quality/local-law checks, safety screen, and any clinician guidance before recording the first RYR serving."
-  logging:
-    sessionFields:
-      - "serving-taken"
-      - "product-identity"
-      - "ryr-mg-day"
-      - "monacolin-info"
-      - "muscle-symptoms"
-      - "medication-changes"
-      - "diet-weight-changes"
-    confounders:
+  trackingHints:
+    confounderFields:
       - "lipid-medication-change"
       - "diet-change"
       - "weight-change"
@@ -485,14 +394,7 @@ experimentOnboarding:
     notes:
       - "Log missed servings and any product change immediately; product switching invalidates a clean run."
       - "Log temporary interacting medicines, grapefruit exposure, heavy alcohol exposure, vigorous exercise or muscle injury near symptom/CK events, dehydration or acute illness, thyroid/endocrine changes, pregnancy possibility where relevant, safety-lab changes, product COA/citrinin/contaminant status, recall-check date, local-law check date, and any change in cardiovascular-risk diagnosis or clinician-directed lipid-care plan."
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 4
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: "opt_in_only"
-    reminderOptions:
-      - "daily-log"
-      - "weekly-review"
-    weeklyDigestDefault: true
+  supportHints:
     missedLogFollowupCopy: "A missed RYR log matters for dose attribution. Please mark taken, missed, or stopped."
 whyItWorks:
   - "## Monacolin K blocks liver cholesterol synthesis\n\nMonacolin K is chemically identical to lovastatin and inhibits HMG-CoA reductase, the rate-limiting enzyme in cholesterol production. The liver compensates by upregulating LDL receptors, pulling LDL particles out of the bloodstream. This statin-like pharmacology is why the protocol requires high-caution screening rather than treating RYR as a generic food supplement."

@@ -112,6 +112,18 @@ protocol:
   - alcohol
   - late exercise
   - illness, travel, or unusual stress
+  sessionFieldIds:
+  - caffeine_source
+  - caffeine_mg
+  - last_caffeine_time
+  - curfew_met
+  - intended_bedtime
+  - actual_bedtime
+  - sleep_onset_latency_minutes
+  - sleep_quality_rating
+  - withdrawal_symptoms
+  - headache_or_migraine
+  - anxiety_or_palpitations
   stopConditions:
   - Stop or taper if withdrawal symptoms impair driving, work, caregiving, or safety-critical tasks; do not drive or operate machinery while impaired.
   - Stop and seek urgent care for chest pain, fainting, seizure, severe palpitations, confusion, neurologic symptoms, thunderclap headache, or suspected caffeine overdose.
@@ -209,257 +221,160 @@ expectedSignalDescriptions:
     basis: Caffeine-HRV evidence is heterogeneous, and overnight RMSSD depends on sleep stage, illness, alcohol, stress, and device window.
   protocolProminence: context
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to test a caffeine curfew and dose reset.
-    intentSummary: Explore Caffeine Curfew + Dose Reset
-  contextReview:
-    vaultChecks:
-    - id: active_experiments
-      label: Active experiments
-      reason: Avoid stacking another behavior-change experiment that would weaken attribution.
-      readHints:
-      - experiment list --status active
-    - id: sleep_baseline
-      label: Sleep baseline
-      reason: Check whether sleep-onset, sleep-efficiency, total sleep, deep-sleep, resting-heart-rate, HRV, or blood-pressure trends are available before intervention.
-      freshnessDays: 14
-      readHints:
-      - wearables sources list
-      - wearables day
-      - sleep summary
-    - id: caffeine_pattern
-      label: Current caffeine pattern
-      reason: Identify usual source, dose, last-caffeine timing, hidden caffeine, high-dose products, and whether tapering is safer than abrupt change.
-      freshnessDays: 30
-      readHints:
-      - memory show
-      - search query "coffee caffeine energy drink preworkout tea decaf caffeine medication"
-      - journal show
-    - id: safety_context
-      label: Safety and medication context
-      reason: Screen for pregnancy/lactation, cardiovascular or blood-pressure concerns, panic/anxiety vulnerability, diagnosed sleep disorders, migraine/severe headaches, and interacting medications.
-      freshnessDays: 90
-      readHints:
-      - memory show
-      - search query "pregnancy lactation hypertension arrhythmia panic anxiety migraine headache insomnia sleep apnea medication ciprofloxacin fluvoxamine caffeine"
-    notes:
-    - Prefer recent logged caffeine and wearable sleep data, but allow a baseline week if the vault is sparse.
-    - Do not re-ask stable context the vault already answers unless it affects safety, tapering, or measurement fidelity.
+    displayPrompt: "Hey Murph, I want to test a caffeine curfew and dose reset."
+    intentSummary: "Explore Caffeine Curfew + Dose Reset"
   safetyScreen:
-    cautionLevel: moderate
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-    - id: pregnancy_lactation_trying_to_conceive_or_youth
-      prompt: pregnancy, trying to conceive, lactation, or the protocol is for a child or adolescent
-      why: Dose limits, fetal/infant considerations, and pediatric boundaries differ from general adult wellness experiments.
-    - id: cardiovascular_bp_or_syncope
-      prompt: uncontrolled high blood pressure, arrhythmia, chest pain history, fainting/syncope, severe palpitations, concerning blood-pressure readings, or clinician advice to limit caffeine
-      why: Caffeine exposure and high-dose products can affect symptoms and blood pressure in vulnerable users, while arrhythmia evidence needs clinician-specific interpretation.
-    - id: panic_anxiety_bipolar_lithium_or_mood_instability
-      prompt: panic disorder, severe anxiety, caffeine-triggered anxiety, bipolar disorder, recent mania or hypomania, severe mood instability, lithium treatment, or a recent lithium dose change
-      why: Caffeine exposure and caffeine reduction can affect anxiety, sleep, mood, and lithium-related clinical management.
-    - id: headache_withdrawal_dependence_or_heavy_use
-      prompt: migraine vulnerability, severe headaches, prior thunderclap headache, prior difficult caffeine withdrawal, heavy caffeine use, caffeine dependence concerns, or inability to cut down despite distress or impairment
-      why: A taper or clinician-guided plan may be safer than an abrupt timing reset.
-    - id: sleep_disorder_or_operational_alertness
-      prompt: diagnosed or persistent insomnia, suspected sleep apnea, shift-work sleep disorder, rotating shifts, professional driving, heavy machinery, clinical/on-call work, overnight caregiving, or other safety-critical alertness requirements
-      why: This protocol is not diagnostic or treatment for sleep disorders, and withdrawal-related sleepiness can create safety risk.
-    - id: medication_interactions_or_hidden_caffeine
-      prompt: fluvoxamine, ciprofloxacin or other quinolone antibiotics, caffeine-containing pain relievers or medicines, psychiatric medicines, supplements/pre-workouts, or any clinician/pharmacist warning about caffeine interactions
-      why: Some medicines contain caffeine or can change caffeine clearance and residual exposure.
-    - id: concentrated_or_high_dose_caffeine_products
-      prompt: pure caffeine powder, liquid caffeine concentrate, caffeine tablets, energy shots, pre-workout products, guarana/yerba mate products, or frequent energy-drink use
-      why: These products can make dose estimation and adverse-event risk very different from ordinary coffee or tea.
-    stopIf:
-      inheritFromProtocolSafety: true
-    notes:
-    - A positive screen does not diagnose a problem; it means Murph should avoid launching this as a simple unsupervised experiment without a lower-risk plan or clinician input.
+      - id: "pregnancy_lactation_trying_to_conceive_or_youth"
+        prompt: "pregnancy, trying to conceive, lactation, or the protocol is for a child or adolescent"
+      - id: "cardiovascular_bp_or_syncope"
+        prompt: "uncontrolled high blood pressure, arrhythmia, chest pain history, fainting/syncope, severe palpitations, concerning blood-pressure readings, or clinician advice to limit caffeine"
+      - id: "panic_anxiety_bipolar_lithium_or_mood_instability"
+        prompt: "panic disorder, severe anxiety, caffeine-triggered anxiety, bipolar disorder, recent mania or hypomania, severe mood instability, lithium treatment, or a recent lithium dose change"
+      - id: "headache_withdrawal_dependence_or_heavy_use"
+        prompt: "migraine vulnerability, severe headaches, prior thunderclap headache, prior difficult caffeine withdrawal, heavy caffeine use, caffeine dependence concerns, or inability to cut down despite distress or impairment"
+      - id: "sleep_disorder_or_operational_alertness"
+        prompt: "diagnosed or persistent insomnia, suspected sleep apnea, shift-work sleep disorder, rotating shifts, professional driving, heavy machinery, clinical/on-call work, overnight caregiving, or other safety-critical alertness requirements"
+      - id: "medication_interactions_or_hidden_caffeine"
+        prompt: "fluvoxamine, ciprofloxacin or other quinolone antibiotics, caffeine-containing pain relievers or medicines, psychiatric medicines, supplements/pre-workouts, or any clinician/pharmacist warning about caffeine interactions"
+      - id: "concentrated_or_high_dose_caffeine_products"
+        prompt: "pure caffeine powder, liquid caffeine concentrate, caffeine tablets, energy shots, pre-workout products, guarana/yerba mate products, or frequent energy-drink use"
   setupSlots:
-  - id: bedtime_anchor
-    label: Bedtime anchor
-    purpose: logistics
-    valueType: local_time
-    askPolicy: ask_if_unknown_or_stale
-    required: true
-    question: What intended bedtime should Murph use to calculate the 8-hour caffeine buffer?
-    target:
-      object: experimentRun
-      field: bedtimeAnchor
-  - id: curfew_choice
-    label: Late-morning curfew
-    purpose: logistics
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: Should the late-morning curfew be 10am or 11am for this first run?
-    options:
-    - ten_am
-    - eleven_am
-    constraints:
-      default: eleven_am
-      sensitiveOrSleepReactiveDefault: ten_am
-    target:
-      object: experimentRun
-      field: curfewChoice
-  - id: baseline_caffeine_dose
-    label: Baseline caffeine dose
-    purpose: measurement_fidelity
-    valueType: integer
-    askPolicy: ask_if_unknown
-    required: false
-    question: About how many milligrams of caffeine do you usually have per day?
-    constraints:
-      unit: mg_per_day
-      useApproximateIfUnknown: true
-    target:
-      object: onboardingCapture
-      field: baselineCaffeineMg
-  - id: last_caffeine_time
-    label: Usual last caffeine time
-    purpose: measurement_fidelity
-    valueType: local_time
-    askPolicy: ask_if_unknown
-    required: false
-    question: What time do you usually have your last caffeine?
-    target:
-      object: onboardingCapture
-      field: usualLastCaffeineTime
-  - id: source_audit
-    label: All-source caffeine audit
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: Which caffeine sources should Murph watch for in your logs?
-    options:
-    - coffee_only
-    - coffee_tea
-    - energy_preworkout
-    - medications_or_supplements
-    - all_sources_or_unsure
-    target:
-      object: onboardingCapture
-      field: caffeineSourcePattern
-  - id: largest_single_caffeine_serving
-    label: Largest single caffeine serving
-    purpose: safety
-    valueType: integer
-    askPolicy: ask_if_unknown
-    required: false
-    question: About how many milligrams are in your largest usual single caffeine serving?
-    constraints:
-      unit: mg
-      useApproximateIfUnknown: true
-    target:
-      object: onboardingCapture
-      field: largestSingleCaffeineServingMg
-  - id: metabolism_modifiers
-    label: Caffeine metabolism modifiers
-    purpose: safety
-    valueType: enum
-    askPolicy: ask_if_unknown_or_stale
-    required: false
-    question: Any oral contraceptive or hormone therapy use, pregnancy/trying/lactation status, smoking/nicotine status change, or medication that might alter caffeine metabolism?
-    options:
-    - none_known
-    - oral_contraceptive_or_hormone_therapy
-    - pregnancy_trying_or_lactation
-    - smoking_or_nicotine_status_change
-    - interacting_medication_possible
-    - unsure
-    target:
-      object: onboardingCapture
-      field: caffeineMetabolismModifiers
-  - id: taper_need
-    label: Taper need
-    purpose: safety
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: Do you expect headaches, fatigue, or functional impairment if you suddenly reduce or move caffeine earlier?
-    options:
-    - unlikely
-    - possible
-    - likely_or_prior_withdrawal
-    - unsure
-    target:
-      object: experimentRun
-      field: taperNeed
-  - id: reminder_policy
-    label: Reminder policy
-    purpose: assistant_support
-    valueType: reminder_policy
-    askPolicy: ask_at_confirmation
-    required: true
-    question: Do you want a pre-curfew reminder, a next-morning missing-log check, both, or neither?
-    options:
-    - none
-    - pre_curfew
-    - next_morning_missing_log_check
-    - pre_curfew_plus_next_morning_check
-    target:
-      object: assistantSupport
-      field: reminderPolicy
+    - id: "bedtime_anchor"
+      label: "Bedtime anchor"
+      question: "What intended bedtime should Murph use to calculate the 8-hour caffeine buffer?"
+      constraints:
+        askWhen: "if_unknown_or_stale"
+      target:
+        object: "experimentRun"
+        field: "bedtimeAnchor"
+    - id: "curfew_choice"
+      label: "Late-morning curfew"
+      question: "Should the late-morning curfew be 10am or 11am for this first run?"
+      options:
+        - "ten_am"
+        - "eleven_am"
+      constraints:
+        default: "eleven_am"
+        sensitiveOrSleepReactiveDefault: "ten_am"
+      target:
+        object: "experimentRun"
+        field: "curfewChoice"
+    - id: "baseline_caffeine_dose"
+      label: "Baseline caffeine dose"
+      question: "About how many milligrams of caffeine do you usually have per day?"
+      constraints:
+        optional: true
+        unit: "mg_per_day"
+        useApproximateIfUnknown: true
+      target:
+        object: "onboardingCapture"
+        field: "baselineCaffeineMg"
+    - id: "last_caffeine_time"
+      label: "Usual last caffeine time"
+      question: "What time do you usually have your last caffeine?"
+      constraints:
+        optional: true
+      target:
+        object: "onboardingCapture"
+        field: "usualLastCaffeineTime"
+    - id: "source_audit"
+      label: "All-source caffeine audit"
+      question: "Which caffeine sources should Murph watch for in your logs?"
+      options:
+        - "coffee_only"
+        - "coffee_tea"
+        - "energy_preworkout"
+        - "medications_or_supplements"
+        - "all_sources_or_unsure"
+      target:
+        object: "onboardingCapture"
+        field: "caffeineSourcePattern"
+    - id: "largest_single_caffeine_serving"
+      label: "Largest single caffeine serving"
+      question: "About how many milligrams are in your largest usual single caffeine serving?"
+      constraints:
+        optional: true
+        unit: "mg"
+        useApproximateIfUnknown: true
+      target:
+        object: "onboardingCapture"
+        field: "largestSingleCaffeineServingMg"
+    - id: "metabolism_modifiers"
+      label: "Caffeine metabolism modifiers"
+      question: "Any oral contraceptive or hormone therapy use, pregnancy/trying/lactation status, smoking/nicotine status change, or medication that might alter caffeine metabolism?"
+      options:
+        - "none_known"
+        - "oral_contraceptive_or_hormone_therapy"
+        - "pregnancy_trying_or_lactation"
+        - "smoking_or_nicotine_status_change"
+        - "interacting_medication_possible"
+        - "unsure"
+      constraints:
+        optional: true
+        askWhen: "if_unknown_or_stale"
+      target:
+        object: "onboardingCapture"
+        field: "caffeineMetabolismModifiers"
+    - id: "taper_need"
+      label: "Taper need"
+      question: "Do you expect headaches, fatigue, or functional impairment if you suddenly reduce or move caffeine earlier?"
+      options:
+        - "unlikely"
+        - "possible"
+        - "likely_or_prior_withdrawal"
+        - "unsure"
+      target:
+        object: "experimentRun"
+        field: "taperNeed"
+    - id: "reminder_policy"
+      label: "Reminder policy"
+      question: "Do you want a pre-curfew reminder, a next-morning missing-log check, both, or neither?"
+      options:
+        - "none"
+        - "pre_curfew"
+        - "next_morning_missing_log_check"
+        - "pre_curfew_plus_next_morning_check"
+      constraints:
+        askWhen: "at_confirmation"
+      target:
+        object: "assistantSupport"
+        field: "reminderPolicy"
   planDefaults:
-    testPlanId: caffeine-curfew-21d
-    baselineDays: 7
-    interventionDays: 14
-    sessionsPerWeek: 7
-    targetSessions: 12
-    minimumUsefulSessions: 10
-    firstSessionGuidance: Start by moving the last planned caffeine before the cutoff; do not add a new sleep supplement, new bedtime, or screen curfew during the same test.
-  logging:
-    sessionFields:
-    - caffeine_source
-    - caffeine_mg
-    - last_caffeine_time
-    - curfew_met
-    - intended_bedtime
-    - actual_bedtime
-    - sleep_onset_latency_minutes
-    - sleep_quality_rating
-    - withdrawal_symptoms
-    - headache_or_migraine
-    - anxiety_or_palpitations
-    confounders:
-    - alcohol_last_24h
-    - late_exercise
-    - illness_or_fever
-    - travel_or_timezone_shift
-    - unusual_stress
-    - new_medication_or_supplement
-    - major_bedtime_shift
-    - screen_or_light_change
-    - largest_single_caffeine_serving_mg
-    - first_caffeine_time
-    - caffeine_tablet_powder_or_concentrate_exposure
-    - energy_drink_shot_or_preworkout_exposure
-    - guarana_yerba_mate_or_stimulant_blend
-    - caffeine_containing_medication
-    - interacting_medication_or_antibiotic
-    - lithium_or_psychiatric_medication_change
-    - oral_contraceptive_or_hormone_context
-    - pregnancy_trying_to_conceive_or_lactation_context
-    - safety_critical_alertness_demand
-    - withdrawal_symptom_severity
-    - rescue_headache_or_migraine_medication
-    - blood_pressure_reading_context_if_relevant
-    - smoking_or_nicotine_status_change
+    testPlanId: "caffeine-curfew-21d"
+    firstSessionGuidance: "Start by moving the last planned caffeine before the cutoff; do not add a new sleep supplement, new bedtime, or screen curfew during the same test."
+  trackingHints:
+    confounderFields:
+      - "alcohol_last_24h"
+      - "late_exercise"
+      - "illness_or_fever"
+      - "travel_or_timezone_shift"
+      - "unusual_stress"
+      - "new_medication_or_supplement"
+      - "major_bedtime_shift"
+      - "screen_or_light_change"
+      - "largest_single_caffeine_serving_mg"
+      - "first_caffeine_time"
+      - "caffeine_tablet_powder_or_concentrate_exposure"
+      - "energy_drink_shot_or_preworkout_exposure"
+      - "guarana_yerba_mate_or_stimulant_blend"
+      - "caffeine_containing_medication"
+      - "interacting_medication_or_antibiotic"
+      - "lithium_or_psychiatric_medication_change"
+      - "oral_contraceptive_or_hormone_context"
+      - "pregnancy_trying_to_conceive_or_lactation_context"
+      - "safety_critical_alertness_demand"
+      - "withdrawal_symptom_severity"
+      - "rescue_headache_or_migraine_medication"
+      - "blood_pressure_reading_context_if_relevant"
+      - "smoking_or_nicotine_status_change"
     notes:
-    - Ask for all caffeine sources, including decaf residual caffeine and OTC medication caffeine, not just coffee.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-    - none
-    - pre_curfew
-    - next_morning_missing_log_check
-    - pre_curfew_plus_next_morning_check
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: Did you end up having any caffeine after your cutoff yesterday? Totally fine either way—I just want the experiment record to be accurate.
+      - "Ask for all caffeine sources, including decaf residual caffeine and OTC medication caffeine, not just coffee."
+  supportHints:
+    missedLogFollowupCopy: "Did you end up having any caffeine after your cutoff yesterday? Totally fine either way—I just want the experiment record to be accurate."
 whyItWorks:
   - "## Caffeine blocks sleep pressure\n\nAdenosine builds across the day; caffeine blocks that signal. Late caffeine keeps the brain chemically less ready for sleep even when the clock says bedtime."
   - "## Earlier cutoff clears the blockade\n\nMoving caffeine earlier gives clearance time. Less residual stimulant load means sleep pressure, melatonin timing, and quiet wakefulness stop fighting as hard."

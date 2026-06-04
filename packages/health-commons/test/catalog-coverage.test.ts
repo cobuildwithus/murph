@@ -516,7 +516,7 @@ describe("@murphai/health-commons catalog coverage", () => {
           frontmatter: {
             ...protocolPage("protocol_variant:norwegian-4x4/example", "norwegian").frontmatter,
             experimentOnboarding: {
-              schemaVersion: "murph.commons.experiment-onboarding.v1",
+              schemaVersion: "murph.commons.experiment-onboarding.v2",
               startIntent: {
                 displayPrompt: "Explore Norwegian 4x4",
                 intentSummary: "Explore Norwegian 4x4",

@@ -941,6 +941,17 @@ protocol:
   - medication class, dose timing, and changes
   - shift work or sleep schedule change
   - self-harm, mood instability, or panic context
+  sessionFieldIds:
+  - alcohol_free_day
+  - drinks_count_and_type
+  - withdrawal_like_symptoms
+  - craving_urge_0_10
+  - mood_anxiety_note
+  - sleep_quality_note
+  - replacement_behaviors
+  - social_friction
+  - lapse_context
+  - next_step_decision
   stopConditions:
   - Stop self-guided abstinence and seek urgent medical help for seizure, hallucinations, severe confusion or delirium, fainting, chest pain, severe shortness of breath, repeated vomiting or dehydration, severe or irregular racing heartbeat, severe agitation, new trouble walking/poor coordination, new vision changes, suicidal/self-harm thoughts, or feeling unable to stay safe.
   - Stop and route to clinician-guided care for any new or escalating withdrawal-like symptoms, strong craving with loss of control, drinking to prevent or relieve symptoms, inability to sleep with escalating symptoms, or any medication change made to manage withdrawal, sleep, or cravings.
@@ -1130,200 +1141,110 @@ expectedSignalDescriptions:
     basis: Direct one-month subjective evidence supports tracking refusal self-efficacy while keeping craving relief cautious because craving did not consistently improve.
   description: "Repeatedly passing drinking cues without alcohol weakens cue-response loops and builds alternative reward routines."
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to try short-term alcohol abstinence.
-    intentSummary: Explore Short-Term Alcohol Abstinence
-  contextReview:
-    vaultChecks:
-
-    -
-      id: active_experiments
-      label: Active experiments
-      reason: Avoid stacking another major behavior or sleep experiment on top of the alcohol-free window unless the user accepts weaker attribution.
-      readHints:
-      - experiment list --status active
-    -
-      id: baseline_drinking_pattern
-      label: Baseline drinking pattern
-      reason: Estimate usual intake, binge pattern, alcohol-free days, and social cues before choosing a duration.
-      freshnessDays: 30
-      readHints:
-      - journal show
-      - search query "alcohol drinks units beer wine spirits"
-    -
-      id: withdrawal_and_medical_safety
-      label: Withdrawal and medical safety screen
-      reason: Possible dependence, prior severe withdrawal, pregnancy, liver disease, high-risk medications, and unstable mental health should route out of self-guided abstinence.
-      freshnessDays: 30
-      readHints:
-      - memory show
-      - health conditions list
-      - medications list
-    -
-      id: wearable_sleep_recovery_baseline
-      label: Wearable sleep and recovery baseline
-      reason: Check whether RHR, HRV, sleep duration, sleep efficiency, or sleep-onset trends are available for baseline versus intervention review.
-      freshnessDays: 14
-      readHints:
-      - wearables sources list
-      - wearables day
-  planDefaults:
-    testPlanId: alcohol-free-30d-full-challenge
-    baselineDays: 7
-    interventionDays: 30
-    sessionsPerWeek: 7
-    targetSessions: 30
-    minimumUsefulSessions: 26
-    firstSessionGuidance: Start with safety and logistics, not willpower. Make day 1 easy, keep logs simple, and avoid adding another major health experiment at the same time.
-  logging:
-    sessionFields:
-    - alcohol_free_day
-    - drinks_count_and_type
-    - withdrawal_like_symptoms
-    - craving_urge_0_10
-    - mood_anxiety_note
-    - sleep_quality_note
-    - replacement_behaviors
-    - social_friction
-    - lapse_context
-    - next_step_decision
-    confounders:
-    - caffeine_timing
-    - exercise_load
-    - illness
-    - travel
-    - unusual_stress
-    - medication_or_supplement_change
-    - sleep_aid_or_cannabis_or_nicotine_change
-    - major_diet_change
-    - social_event
-    - menstrual_cycle_if_relevant
-    - standard_drinks_units_and_last_drink_time
-    - weekday_weekend_holiday_or_social_event
-    - heavy_episodic_or_binge_pattern
-    - drinking_to_sleep_stress_relief_or_symptom_relief
-    - prior_withdrawal_history_and_baseline_craving
-    - no_low_alcohol_product_use_and_trigger_status
-    - replacement_sugar_calories_or_late_snacking
-    - medication_class_dose_timing_and_changes
-    - shift_work_or_sleep_schedule_change
-    - self_harm_mood_instability_or_panic_context
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-    - none
-    - daily_check_in
-    - daily_check_in_plus_next_day_missing_log_followup
-    missedLogFollowupCopy: Did yesterday count as alcohol-free, alcohol-used, or paused? Any answer is useful data for the experiment record.
+    displayPrompt: "Hey Murph, I want to try short-term alcohol abstinence."
+    intentSummary: "Explore Short-Term Alcohol Abstinence"
   safetyScreen:
-    cautionLevel: high
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-    -
-      id: alcohol_abstinence_safety_route
-      prompt: 'Before choosing a duration, do any of these apply: under 18; current or past withdrawal symptoms when cutting down, such as shakes/tremor, sweats, nausea/vomiting, severe anxiety, palpitations/racing or irregular heartbeat, or insomnia; needing alcohol to prevent symptoms; prior withdrawal seizure, delirium tremens, hallucinations, or confusion; high or uncertain daily intake; possible dependence or loss of control; pregnancy, trying to conceive, or breastfeeding questions; known/suspected liver disease or abnormal liver tests; seizure disorder or major cardiovascular/medical instability; active AUD treatment, recent detox, or AUD medication questions; benzodiazepine, opioid, CNS depressant, sedative, or sleep-medicine use/taper; complex medication list; unstable depression, mania, psychosis, suicidal/self-harm thoughts, or co-occurring substance use?'
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Self-guided alcohol abstinence is only for adults with a clear safety screen and no known or uncertain withdrawal, medication, pregnancy, liver, severe mental-health, or medical-instability red flags.
-    stopIf:
-      inheritFromProtocolSafety: true
-    notes:
-    - Safety routing comes before duration choice. Positive or uncertain answers should route to clinician-guided care, not a self-guided alcohol-free challenge.
-    - AUDIT/AUDIT-C-style drinking-risk questions can support context but are not consumer withdrawal-risk clearance.
+      - id: "alcohol_abstinence_safety_route"
+        prompt: "Before choosing a duration, do any of these apply: under 18; current or past withdrawal symptoms when cutting down, such as shakes/tremor, sweats, nausea/vomiting, severe anxiety, palpitations/racing or irregular heartbeat, or insomnia; needing alcohol to prevent symptoms; prior withdrawal seizure, delirium tremens, hallucinations, or confusion; high or uncertain daily intake; possible dependence or loss of control; pregnancy, trying to conceive, or breastfeeding questions; known/suspected liver disease or abnormal liver tests; seizure disorder or major cardiovascular/medical instability; active AUD treatment, recent detox, or AUD medication questions; benzodiazepine, opioid, CNS depressant, sedative, or sleep-medicine use/taper; complex medication list; unstable depression, mania, psychosis, suicidal/self-harm thoughts, or co-occurring substance use?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
   setupSlots:
-
-  -
-    id: safety_route_disposition
-    label: Safety route
-    purpose: safety
-    valueType: enum
-    askPolicy: always
-    required: true
-    question: Record the safety-screen disposition before choosing a duration.
-    options:
-    - no_red_flags_reported
-    - red_flag_present_route_to_clinician
-    - unsure_route_to_clinician
-    - already_clinician_guided
-    target:
-      object: onboardingCapture
-      field: safetyRoute
-  -
-    id: duration_choice
-    label: Challenge duration
-    purpose: logistics
-    valueType: enum
-    askPolicy: always
-    required: true
-    question: 'Which alcohol-free duration do you want: 7 days, 14 days, or 30 days?'
-    options:
-    - seven_days
-    - fourteen_days
-    - thirty_days
-    target:
-      object: experimentRun
-      field: durationChoice
-  -
-    id: baseline_window
-    label: Baseline window
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: always
-    required: true
-    question: Can you observe a 7-day usual-intake baseline first, or are you starting the alcohol-free window now with retrospective baseline context?
-    options:
-    - seven_day_baseline_first
-    - start_now_with_retrospective_context
-    target:
-      object: analysisPlan
-      field: baselineChoice
-  -
-    id: social_friction_plan
-    label: Social friction plan
-    purpose: adherence
-    valueType: free_text
-    askPolicy: ask_at_confirmation
-    required: false
-    question: What situation is most likely to make the challenge hard, and what is your low-friction plan for it?
-    target:
-      object: assistantSupport
-      field: socialFrictionPlan
-  -
-    id: off_ramp_goal
-    label: End review goal
-    purpose: personalization
-    valueType: enum
-    askPolicy: ask_at_confirmation
-    required: false
-    question: At the end, do you want to review continued abstinence, lower-risk drinking, usual drinking with awareness, or clinician-guided support?
-    options:
-    - continue_abstinence
-    - lower_risk_drinking
-    - usual_drinking_with_awareness
-    - clinician_guided_support
-    - decide_at_review
-    target:
-      object: analysisPlan
-      field: offRampGoal
-  -
-    id: reminder_policy
-    label: Reminder policy
-    purpose: assistant_support
-    valueType: reminder_policy
-    askPolicy: ask_at_confirmation
-    required: true
-    question: Do you want a daily check-in reminder, and should missed logs get a gentle next-day follow-up?
-    options:
-    - none
-    - daily_check_in
-    - daily_check_in_plus_next_day_missing_log_followup
-    target:
-      object: assistantSupport
-      field: reminderPolicy
+    - id: "safety_route_disposition"
+      label: "Safety route"
+      question: "Record the safety-screen disposition before choosing a duration."
+      options:
+        - "no_red_flags_reported"
+        - "red_flag_present_route_to_clinician"
+        - "unsure_route_to_clinician"
+        - "already_clinician_guided"
+      target:
+        object: "onboardingCapture"
+        field: "safetyRoute"
+    - id: "duration_choice"
+      label: "Challenge duration"
+      question: "Which alcohol-free duration do you want: 7 days, 14 days, or 30 days?"
+      options:
+        - "seven_days"
+        - "fourteen_days"
+        - "thirty_days"
+      target:
+        object: "experimentRun"
+        field: "durationChoice"
+    - id: "baseline_window"
+      label: "Baseline window"
+      question: "Can you observe a 7-day usual-intake baseline first, or are you starting the alcohol-free window now with retrospective baseline context?"
+      options:
+        - "seven_day_baseline_first"
+        - "start_now_with_retrospective_context"
+      target:
+        object: "analysisPlan"
+        field: "baselineChoice"
+    - id: "social_friction_plan"
+      label: "Social friction plan"
+      question: "What situation is most likely to make the challenge hard, and what is your low-friction plan for it?"
+      constraints:
+        optional: true
+        askWhen: "at_confirmation"
+      target:
+        object: "assistantSupport"
+        field: "socialFrictionPlan"
+    - id: "off_ramp_goal"
+      label: "End review goal"
+      question: "At the end, do you want to review continued abstinence, lower-risk drinking, usual drinking with awareness, or clinician-guided support?"
+      options:
+        - "continue_abstinence"
+        - "lower_risk_drinking"
+        - "usual_drinking_with_awareness"
+        - "clinician_guided_support"
+        - "decide_at_review"
+      constraints:
+        optional: true
+        askWhen: "at_confirmation"
+      target:
+        object: "analysisPlan"
+        field: "offRampGoal"
+    - id: "reminder_policy"
+      label: "Reminder policy"
+      question: "Do you want a daily check-in reminder, and should missed logs get a gentle next-day follow-up?"
+      options:
+        - "none"
+        - "daily_check_in"
+        - "daily_check_in_plus_next_day_missing_log_followup"
+      constraints:
+        askWhen: "at_confirmation"
+      target:
+        object: "assistantSupport"
+        field: "reminderPolicy"
+  planDefaults:
+    testPlanId: "alcohol-free-30d-full-challenge"
+    firstSessionGuidance: "Start with safety and logistics, not willpower. Make day 1 easy, keep logs simple, and avoid adding another major health experiment at the same time."
+  trackingHints:
+    confounderFields:
+      - "caffeine_timing"
+      - "exercise_load"
+      - "illness"
+      - "travel"
+      - "unusual_stress"
+      - "medication_or_supplement_change"
+      - "sleep_aid_or_cannabis_or_nicotine_change"
+      - "major_diet_change"
+      - "social_event"
+      - "menstrual_cycle_if_relevant"
+      - "standard_drinks_units_and_last_drink_time"
+      - "weekday_weekend_holiday_or_social_event"
+      - "heavy_episodic_or_binge_pattern"
+      - "drinking_to_sleep_stress_relief_or_symptom_relief"
+      - "prior_withdrawal_history_and_baseline_craving"
+      - "no_low_alcohol_product_use_and_trigger_status"
+      - "replacement_sugar_calories_or_late_snacking"
+      - "medication_class_dose_timing_and_changes"
+      - "shift_work_or_sleep_schedule_change"
+      - "self_harm_mood_instability_or_panic_context"
+  supportHints:
+    missedLogFollowupCopy: "Did yesterday count as alcohol-free, alcohol-used, or paused? Any answer is useful data for the experiment record."
 whyItWorks:
   - "## Alcohol sedates, then disrupts\n\nAlcohol can make sleep start feel easier, then fragments the back half of the night. REM pressure, temperature, hydration, and autonomic arousal rebound."
   - "## Removal lowers overnight strain\n\nNo alcohol means less vasodilation, dehydration, pulse elevation, and late-night arousal. Resting HR and HRV often show the recovery load first."

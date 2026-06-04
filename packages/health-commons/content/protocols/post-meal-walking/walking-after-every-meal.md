@@ -488,6 +488,17 @@ protocol:
   - low glucose symptoms, measured low, rescue carbs, or medication-context notes
   - missed or partial walk reason
   - illness, stress, sleep, alcohol, unusual activity, or sensor issues
+  sessionFieldIds:
+  - meal_label
+  - meal_start_time
+  - walked_after_meal
+  - walk_start_delay_min
+  - walk_duration_min
+  - walk_pace_or_rpe
+  - route_or_modality
+  - glucose_window_signal
+  - symptoms_or_lows
+  - missed_reason
   stopConditions:
   - Stop the walk immediately for hypoglycemia symptoms or a measured low, and follow the user’s existing glucose safety plan or urgent-care plan as appropriate.
   - Stop immediately for chest pain or pressure, faintness, severe dizziness, near-fall, confusion, palpitations, severe shortness of breath, neurologic symptoms, or unsafe pain.
@@ -555,234 +566,105 @@ expectedSignalDescriptions:
     confidence: low
     basis: The target post-meal walking evidence centers on meal-window glucose, while resting-heart-rate movement is indirect walking/recovery context; meaningful drift should be interpreted as strain or confounding before benefit.
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
-    displayPrompt: Hey Murph, I want to try walking after every meal.
-    intentSummary: Explore Walking After Every Meal
-  contextReview:
-    vaultChecks:
-
-    -
-      id: active_experiments
-      label: Active experiments
-      reason: Avoid starting more than one meaningful experiment at once unless the user explicitly chooses that tradeoff.
-      readHints:
-      - experiment list --status active --format json
-    -
-      id: wearable_or_cgm_sources
-      label: CGM, fingerstick, and wearable sources
-      reason: Confirm whether meal-window glucose and walking adherence can be observed during baseline and intervention.
-      freshnessDays: 14
-      readHints:
-      - wearables sources list --format json
-      - glucose sources list --format json
-      - wearables day <YYYY-MM-DD> --format json
-    -
-      id: meal_schedule_context
-      label: Usual meal schedule
-      reason: The protocol is tied to breakfast, lunch, and dinner timing; feasibility depends on when and where the user eats.
-      freshnessDays: 30
-      readHints:
-      - search query "breakfast lunch dinner meal timing work schedule" --format json
-    -
-      id: diabetes_medications_and_lows
-      label: Diabetes, glucose medication, and low-glucose history
-      reason: Insulin, secretagogues, type 1 diabetes, recurrent lows, or low-glucose symptoms materially change safety and interpretation.
-      freshnessDays: 30
-      readHints:
-      - search query "diabetes insulin sulfonylurea meglitinide hypoglycemia low glucose CGM" --format json
-    -
-      id: pregnancy_gdm_context
-      label: Pregnancy or gestational diabetes context
-      reason: Pregnancy, GDM, and pre-existing diabetes in pregnancy should be treated as supervised clinical contexts, not routine self-experiment setup.
-      freshnessDays: 30
-      readHints:
-      - memory show --format json
-      - search query "pregnancy gestational diabetes" --format json
-    -
-      id: falls_bp_and_dizziness
-      label: Falls, blood pressure, and meal-related dizziness
-      reason: Older age, frailty, post-meal dizziness, syncope, and suspected postprandial hypotension change the safety posture.
-      freshnessDays: 90
-      readHints:
-      - search query "dizziness falls syncope postprandial hypotension blood pressure" --format json
-    -
-      id: foot_neuropathy_mobility
-      label: Foot, neuropathy, and mobility context
-      reason: Neuropathy, ulcers, unsafe footwear, pain, or mobility impairment can require modification or clinician guidance before extra walking.
-      freshnessDays: 90
-      readHints:
-      - search query "neuropathy foot ulcer foot pain mobility balance falls" --format json
-    -
-      id: reflux_gi_context
-      label: Reflux and post-meal GI comfort
-      reason: Users with reflux or bloating may need gentler intensity and symptom logging rather than vigorous post-meal activity.
-      freshnessDays: 90
-      readHints:
-      - search query "reflux GERD bloating nausea post meal exercise" --format json
-    notes:
-    - Treat missing context as unknown rather than safe; the compact safety screen should ask before creating a run.
+    displayPrompt: "Hey Murph, I want to try walking after every meal."
+    intentSummary: "Explore Walking After Every Meal"
   safetyScreen:
-    cautionLevel: moderate
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-    -
-      id: glucose_medication_or_lows
-      prompt: Do you use insulin, sulfonylureas, meglitinides, or any glucose-lowering medication, or have you had recent low-glucose episodes?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Meal-timed walking can lower glucose during the post-meal window and may require an individualized low-glucose plan.
-    -
-      id: type1_or_pregnancy_gdm
-      prompt: Do you have type 1 diabetes, gestational diabetes, pre-existing diabetes in pregnancy, or are you currently pregnant?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: These contexts need clinician-guided interpretation and safety boundaries.
-    -
-      id: falls_dizziness_bp
-      prompt: Do you have meal-related dizziness, fainting, recurrent falls, very low blood pressure, or suspected postprandial hypotension?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Walking immediately after meals can interact with post-meal blood pressure and fall risk.
-    -
-      id: foot_neuropathy_or_ulcer
-      prompt: Do you have active foot wounds, ulcers, severe foot pain, neuropathy with loss of protective sensation, or unsafe footwear/mobility issues?
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Extra walking can worsen foot problems or create fall risk without modification.
-    -
-      id: cardiorespiratory_red_flags
-      prompt: Do you have chest pain, unexplained shortness of breath, recent fainting, unstable heart or lung symptoms, or clinician advice to avoid unsupervised walking?
-      ifPositive: do_not_start_unsupervised
-      why: Even gentle walking should not override urgent or clinician-directed restrictions.
+      - id: "glucose_medication_or_lows"
+        prompt: "Do you use insulin, sulfonylureas, meglitinides, or any glucose-lowering medication, or have you had recent low-glucose episodes?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "type1_or_pregnancy_gdm"
+        prompt: "Do you have type 1 diabetes, gestational diabetes, pre-existing diabetes in pregnancy, or are you currently pregnant?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "falls_dizziness_bp"
+        prompt: "Do you have meal-related dizziness, fainting, recurrent falls, very low blood pressure, or suspected postprandial hypotension?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "foot_neuropathy_or_ulcer"
+        prompt: "Do you have active foot wounds, ulcers, severe foot pain, neuropathy with loss of protective sensation, or unsafe footwear/mobility issues?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+      - id: "cardiorespiratory_red_flags"
+        prompt: "Do you have chest pain, unexplained shortness of breath, recent fainting, unstable heart or lung symptoms, or clinician advice to avoid unsupervised walking?"
+        ifPositive: "do_not_start_unsupervised"
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
-      - measured or symptomatic low glucose
-      - unsafe route or footing
-      - new foot wound or severe foot pain
-      - chest pain, faintness, palpitations, or severe shortness of breath
-    notes:
-    - A positive screen does not mean walking is impossible; it means the Murph self-experiment should not be launched without individualized safety guidance.
+        - "measured or symptomatic low glucose"
+        - "unsafe route or footing"
+        - "new foot wound or severe foot pain"
+        - "chest pain, faintness, palpitations, or severe shortness of breath"
   setupSlots:
-
-  -
-    id: tracking_method
-    label: Tracking method
-    purpose: measurement_fidelity
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: How will you track the outcome?
-    options:
-    - cgm
-    - fingerstick
-    - manual_adherence_only
-    target:
-      object: experimentRun
-      field: measurement.trackingMethod
-  -
-    id: meal_coverage
-    label: Meal coverage target
-    purpose: adherence
-    valueType: enum
-    askPolicy: ask_if_unknown
-    required: true
-    question: Which meals will you target?
-    options:
-    - breakfast_lunch_dinner
-    - all_main_meals
-    - dinner_priority
-    target:
-      object: experimentRun
-      field: mealCoverage
-  -
-    id: usual_meal_windows
-    label: Usual meal windows
-    purpose: logistics
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: false
-    question: What are your usual breakfast, lunch, and dinner times?
-    target:
-      object: experimentRun
-      field: usualMealWindows
-  -
-    id: walking_route
-    label: Safe walking route
-    purpose: logistics
-    valueType: free_text
-    askPolicy: ask_if_unknown
-    required: true
-    question: Where will you walk after meals when weather, darkness, or work constraints get in the way?
-    target:
-      object: experimentRun
-      field: walkingRoute
-  -
-    id: glucose_safety_plan
-    label: Glucose safety plan
-    purpose: safety
-    valueType: boolean
-    askPolicy: ask_if_unknown
-    required: false
-    question: If low glucose is possible for you, do you already have a clinician-guided low-glucose plan and fast carbs available?
-    target:
-      object: onboardingCapture
-      field: glucoseSafetyPlanConfirmed
-  -
-    id: reminder_policy
-    label: Reminder policy
-    purpose: assistant_support
-    valueType: reminder_policy
-    askPolicy: ask_if_unknown
-    required: false
-    question: Should Murph remind you after meals, only summarize weekly, or avoid reminders?
-    options:
-    - none
-    - mealtime_reminders
-    - weekly_digest
-    - missed_log_check
-    target:
-      object: assistantSupport
-      field: reminderPolicy
+    - id: "tracking_method"
+      label: "Tracking method"
+      question: "How will you track the outcome?"
+      options:
+        - "cgm"
+        - "fingerstick"
+        - "manual_adherence_only"
+      target:
+        object: "experimentRun"
+        field: "measurement.trackingMethod"
+    - id: "meal_coverage"
+      label: "Meal coverage target"
+      question: "Which meals will you target?"
+      options:
+        - "breakfast_lunch_dinner"
+        - "all_main_meals"
+        - "dinner_priority"
+      target:
+        object: "experimentRun"
+        field: "mealCoverage"
+    - id: "usual_meal_windows"
+      label: "Usual meal windows"
+      question: "What are your usual breakfast, lunch, and dinner times?"
+      constraints:
+        optional: true
+      target:
+        object: "experimentRun"
+        field: "usualMealWindows"
+    - id: "walking_route"
+      label: "Safe walking route"
+      question: "Where will you walk after meals when weather, darkness, or work constraints get in the way?"
+      target:
+        object: "experimentRun"
+        field: "walkingRoute"
+    - id: "glucose_safety_plan"
+      label: "Glucose safety plan"
+      question: "If low glucose is possible for you, do you already have a clinician-guided low-glucose plan and fast carbs available?"
+      constraints:
+        optional: true
+      target:
+        object: "onboardingCapture"
+        field: "glucoseSafetyPlanConfirmed"
+    - id: "reminder_policy"
+      label: "Reminder policy"
+      question: "Should Murph remind you after meals, only summarize weekly, or avoid reminders?"
+      options:
+        - "none"
+        - "mealtime_reminders"
+        - "weekly_digest"
+        - "missed_log_check"
+      constraints:
+        optional: true
+      target:
+        object: "assistantSupport"
+        field: "reminderPolicy"
   planDefaults:
-    testPlanId: cgm-postprandial-21d
-    baselineDays: 7
-    interventionDays: 14
-    sessionsPerWeek: 21
-    targetSessions: 36
-    minimumUsefulSessions: 28
-    firstSessionGuidance: 'Make the first day conservative: choose safe routes, walk gently for 10 minutes after each main meal, and log symptoms before trying 15 minutes or a brisker pace.'
-  logging:
-    sessionFields:
-    - meal_label
-    - meal_start_time
-    - walked_after_meal
-    - walk_start_delay_min
-    - walk_duration_min
-    - walk_pace_or_rpe
-    - route_or_modality
-    - glucose_window_signal
-    - symptoms_or_lows
-    - missed_reason
-    confounders:
-    - meal_carbohydrate_estimate
-    - medication_or_snack_change
-    - illness_stress_sleep
-    - unusual_activity
-    - alcohol
-    - sensor_issue
+    testPlanId: "cgm-postprandial-21d"
+    firstSessionGuidance: "Make the first day conservative: choose safe routes, walk gently for 10 minutes after each main meal, and log symptoms before trying 15 minutes or a brisker pace."
+  trackingHints:
+    confounderFields:
+      - "meal_carbohydrate_estimate"
+      - "medication_or_snack_change"
+      - "illness_stress_sleep"
+      - "unusual_activity"
+      - "alcohol"
+      - "sensor_issue"
     notes:
-    - Log missed meals and partial walks; adherence is part of the experiment, not a failure to hide.
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
-    reminderOptions:
-    - none
-    - mealtime_reminders
-    - weekly_digest
-    - missed_log_check
-    weeklyDigestDefault: true
-    missedLogFollowupCopy: No judgment—just record whether the meal walk happened, why it was missed, and whether the plan needs to be easier.
+      - "Log missed meals and partial walks; adherence is part of the experiment, not a failure to hide."
+  supportHints:
+    missedLogFollowupCopy: "No judgment—just record whether the meal walk happened, why it was missed, and whether the plan needs to be easier."
 whyItWorks:
   - "## Muscle contraction opens a glucose sink\n\nWalking makes leg muscle take up glucose without waiting for insulin. The contraction itself moves glucose transporters to the cell surface."
   - "## Timing hits the meal curve\n\nThe walk starts while digestion sends glucose into blood. Disposal rises during the same window as the peak, so the curve blunts."

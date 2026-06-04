@@ -16,12 +16,15 @@ describe("Bryan Johnson sauna onboarding", () => {
     );
 
     expect(protocol?.experimentOnboarding?.schemaVersion).toBe(
-      "murph.commons.experiment-onboarding.v1",
+      "murph.commons.experiment-onboarding.v2",
     );
     expect(protocol?.experimentOnboarding?.planDefaults?.testPlanId).toBe(
       "source-attributed-rhr-hrv-21d",
     );
-    expect(protocol?.experimentOnboarding?.safetyScreen?.cautionLevel).toBe("high");
+    expect(protocol?.safety?.cautionLevel).toBe("high");
+    expect(protocol?.experimentOnboarding).not.toHaveProperty("contextReview");
+    expect(protocol?.experimentOnboarding).not.toHaveProperty("logging");
+    expect(protocol?.experimentOnboarding).not.toHaveProperty("assistantPolicy");
     expect(protocol?.experimentOnboarding?.setupSlots?.map((slot) => slot.id)).toEqual(
       expect.arrayContaining([
         "run_variant",

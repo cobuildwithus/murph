@@ -827,9 +827,9 @@ function toProtocolShowDetail(
   return {
     ...toEntitySummary(entity),
     experimentOnboarding: toProtocolShowOnboarding(entity.experimentOnboarding),
-    protocol: hasOnboarding ? null : entity.protocol ?? null,
-    safety: hasOnboarding ? null : entity.safety ?? null,
-    testPlans: hasOnboarding ? [] : entity.testPlans ?? [],
+    protocol: entity.protocol ?? null,
+    safety: entity.safety ?? null,
+    testPlans: entity.testPlans ?? [],
     whyItWorks: hasOnboarding ? [] : entity.whyItWorks ?? [],
   };
 }
@@ -843,12 +843,7 @@ function toProtocolShowOnboarding(value: unknown): unknown | null {
     return value;
   }
 
-  return {
-    setupSlots: value.setupSlots ?? null,
-    safetyScreen: value.safetyScreen ?? null,
-    planDefaults: value.planDefaults ?? null,
-    logging: value.logging ?? null,
-  };
+  return value;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

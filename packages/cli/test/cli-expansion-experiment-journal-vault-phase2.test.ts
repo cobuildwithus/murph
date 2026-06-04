@@ -1282,6 +1282,17 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
     assert.equal(runPlan.sessionsPerWeek, 3)
     assert.equal(runPlan.targetSessions, 6)
     assert.equal(runPlan.minimumUsefulSessions, 4)
+    const saunaLogging = requireRecord(runPlan.logging, 'runPlan.logging')
+    assert.ok(Array.isArray(saunaLogging.sessionFields))
+    assert.equal(saunaLogging.sessionFields.length, 25)
+    assert.deepEqual(saunaLogging.sessionFields.slice(0, 3), [
+      'session_date',
+      'session_start_time',
+      'session_duration_minutes',
+    ])
+    assert.equal(saunaLogging.sessionFields.includes('symptoms_during_or_after'), true)
+    assert.ok(Array.isArray(saunaLogging.confounderFields))
+    assert.equal(saunaLogging.confounderFields.includes('hard_training_last_24h'), true)
     assert.ok(Array.isArray(runPlan.adherenceTargets))
     assert.equal(runPlan.adherenceTargets.length, 1)
     const adherenceTarget = requireRecord(
@@ -1317,6 +1328,97 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       'biomarker:sleep-efficiency',
       'biomarker:deep-sleep-minutes',
     ])
+
+    const compressionStarted = await runSliceCli([
+      'experiment',
+      'start',
+      'compression-pants-prose-log-fields',
+      '--from-protocol',
+      'protocol_variant:intermittent-pneumatic-compression/pneumatic-compression-pants',
+      '--intervention-start',
+      '2026-05-01',
+      '--vault',
+      vaultRoot,
+    ])
+    const compressionShown = await runSliceCli<{
+      entity: {
+        data: Record<string, unknown>
+      }
+    }>([
+      'experiment',
+      'show',
+      'compression-pants-prose-log-fields',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(compressionStarted.ok, true)
+    assert.equal(compressionShown.ok, true)
+    const compressionRunPlan = requireRecord(
+      requireData(compressionShown).entity.data.runPlan,
+      'compression runPlan',
+    )
+    const compressionLogging = requireRecord(
+      compressionRunPlan.logging,
+      'compression runPlan.logging',
+    )
+    assert.deepEqual(compressionLogging.sessionFields, [
+      'target_use_case',
+      'device_model',
+      'garment_coverage',
+      'pressure_intensity',
+      'compression_mode',
+      'duration_minutes',
+      'timing_after_trigger',
+      'posture',
+      'soreness_score',
+      'fatigue_score',
+      'perceived_recovery_score',
+      'leg_heaviness_score',
+      'comfort_score',
+      'skin_check',
+      'symptoms_or_stop_reason',
+      'time_since_workout_or_trigger',
+      'workout_type_intensity_muscle_group',
+      'time_of_day',
+      'device_zones_or_program',
+      'garment_contact_risk_points',
+      'mobility_breaks_or_calf_exercises_if_travel_context',
+      'skin_check_later_same_day',
+      'delayed_symptoms',
+      'symptom_resolution_after_removal',
+    ])
+    assert.equal('confounderFields' in compressionLogging, false)
+
+    const alcoholStarted = await runSliceCli([
+      'experiment',
+      'start',
+      'alcohol-free-selected-plan',
+      '--from-protocol',
+      'protocol_variant:alcohol-abstinence/short-term-alcohol-abstinence',
+      '--intervention-start',
+      '2026-05-01',
+      '--vault',
+      vaultRoot,
+    ])
+    const alcoholShown = await runSliceCli<{
+      entity: {
+        data: Record<string, unknown>
+      }
+    }>([
+      'experiment',
+      'show',
+      'alcohol-free-selected-plan',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(alcoholStarted.ok, true)
+    assert.equal(alcoholShown.ok, true)
+    const alcoholRunPlan = requireRecord(
+      requireData(alcoholShown).entity.data.runPlan,
+      'alcohol runPlan',
+    )
+    assert.equal(alcoholRunPlan.targetSessions, 30)
+    assert.equal(alcoholRunPlan.minimumUsefulSessions, 26)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

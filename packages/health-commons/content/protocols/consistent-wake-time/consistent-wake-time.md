@@ -317,6 +317,16 @@ protocol:
     - "stress, illness, travel, shift work, or schedule disruption"
     - "mood irritability or activation"
     - "wearable missingness or manual correction"
+  sessionFieldIds:
+  - target_wake_window
+  - final_wake_time
+  - time_out_of_bed
+  - lights_out_time
+  - estimated_total_sleep_time
+  - daytime_sleepiness
+  - naps
+  - inside_wake_window
+  - safety_override
   stopConditions:
     - "Pause or end the run if the wake target repeatedly reduces sleep opportunity or produces new or worsening daytime sleepiness."
     - "Do not drive, commute, operate machinery, or do safety-sensitive work while sleepy or acutely short on sleep just to preserve the wake target."
@@ -429,189 +439,86 @@ expectedSignalDescriptions:
       basis: "A 4-week regular-schedule study reported lower subjective sleepiness and better alertness when participants were not sleep deprived; scales vary across diaries."
     protocolProminence: "focus"
 experimentOnboarding:
-  schemaVersion: "murph.commons.experiment-onboarding.v1"
+  schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:
     displayPrompt: "Hey Murph, I want to explore a Consistent Wake Time experiment."
     intentSummary: "Explore Consistent Wake Time"
-  contextReview:
-    vaultChecks:
-
-      -
-        id: "active_experiments"
-        label: "Active experiments"
-        reason: "Avoid starting more than one meaningful sleep or recovery experiment at once unless the user explicitly accepts the attribution tradeoff."
-        readHints:
-          - "experiment list --status active --format json"
-      -
-        id: "recent_sleep_timing_duration"
-        label: "Recent sleep timing and duration"
-        reason: "Confirm baseline wake-time variability, sleep opportunity, and whether the proposed wake target would create short sleep."
-        freshnessDays: 21
-        readHints:
-          - "wearables day <YYYY-MM-DD> --format json"
-          - "timeline --entry-type sleep --from <YYYY-MM-DD> --format json"
-          - "search query \"sleep diary wake time bedtime sleepiness\" --format json"
-      -
-        id: "wearable_or_diary_sources"
-        label: "Wearable or diary availability"
-        reason: "Choose a measurement plan before asking the user to run a timing experiment."
-        freshnessDays: 14
-        readHints:
-          - "wearables sources list --format json"
-          - "search query \"wearable sleep diary\" --format json"
-      -
-        id: "sleepiness_insomnia_or_sleep_disorder_context"
-        label: "Sleepiness, insomnia, and sleep-disorder context"
-        reason: "Persistent sleepiness, severe insomnia, suspected OSA, hypersomnolence, or circadian symptoms are supervision boundaries rather than wake-target troubleshooting tasks."
-        freshnessDays: 180
-        readHints:
-          - "search query \"sleepiness insomnia snoring apnea hypersomnolence narcolepsy circadian delayed sleep phase\" --format json"
-      -
-        id: "work_school_shift_travel_constraints"
-        label: "Schedule constraints"
-        reason: "Work, school, caregiving, travel, and shift schedules can make a single wake window unsafe or uninterpretable."
-        freshnessDays: 30
-        readHints:
-          - "search query \"shift work night shift travel jet lag school start caregiving commute\" --format json"
-      -
-        id: "mood_destabilization_context"
-        label: "Mood destabilization context"
-        reason: "Sleep loss and rhythm changes can be risky in bipolar-spectrum or recent mania/hypomania contexts."
-        freshnessDays: 180
-        readHints:
-          - "search query \"bipolar mania hypomania mood sleep loss social rhythm\" --format json"
-    notes:
-      - "Review available context before repeating setup questions, but still ask the compact safety screen when the vault is silent or stale."
   safetyScreen:
-    cautionLevel: "moderate"
-    mode: "ask_compact_then_expand_if_positive"
     dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
-
-      -
-        id: "insufficient_sleep_opportunity"
+      - id: "insufficient_sleep_opportunity"
         prompt: "Would the proposed wake window routinely leave you short on sleep because bedtime cannot realistically move earlier?"
         ifPositive: "do_not_start_unsupervised"
-        why: "The protocol should not become sleep restriction."
-      -
-        id: "dangerous_sleepiness_or_driving"
+      - id: "dangerous_sleepiness_or_driving"
         prompt: "Are you currently having excessive daytime sleepiness, drowsy driving, unsafe morning impairment, or safety-sensitive work while short on sleep?"
         ifPositive: "do_not_start_unsupervised"
-        why: "Safety and adequate sleep override wake-time regularity."
-      -
-        id: "sleep_disorder_or_severe_insomnia_flags"
+      - id: "sleep_disorder_or_severe_insomnia_flags"
         prompt: "Do you have severe or chronic insomnia, loud snoring with witnessed apneas, suspected sleep apnea, narcolepsy or hypersomnolence symptoms, or another unresolved sleep-disorder concern?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
-        why: "These are clinical evaluation or treatment boundaries, not wake-time-only troubleshooting targets."
-      -
-        id: "circadian_shift_work_or_school_constraint"
+      - id: "circadian_shift_work_or_school_constraint"
         prompt: "Are you dealing with rotating shifts, long work hours, jet lag, delayed sleep phase, school-start constraints, caregiving nights, or another schedule constraint that makes one daily wake window unrealistic?"
         ifPositive: "continue_with_caution"
-        why: "The plan may need adaptation, postponement, or a different fatigue-management approach."
-      -
-        id: "mood_destabilization_risk"
+      - id: "mood_destabilization_risk"
         prompt: "Have you had bipolar disorder, recent mania or hypomania, or mood destabilization when sleep gets shorter or timing changes?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
-        why: "Sleep loss and rhythm shifts can destabilize vulnerable mood states."
     stopIf:
-      inheritFromProtocolSafety: true
       additionalConditions:
         - "Do not create a run when the selected wake window is expected to cause repeated short sleep."
         - "Do not create a run when the user expects to drive or do safety-sensitive work while sleepy to hit the wake target."
-    notes:
-      - "A positive or uncertain screen is not a diagnosis; it means the self-directed default run is not the right next step without adjustment, postponement, or clinician/occupational guidance."
   setupSlots:
-
-    -
-      id: "target_wake_window"
+    - id: "target_wake_window"
       label: "Target wake/rise window"
-      purpose: "logistics"
-      valueType: "weekly_time_windows"
-      askPolicy: "always"
-      required: true
       question: "What 60-minute wake/rise window can you realistically keep on most days while still getting enough sleep?"
       constraints:
         maxWindowMinutes: 60
         defaultRunPlanSchedule:
-          kind: dailyLocal
+          kind: "dailyLocal"
           localTime: "07:00"
-          timeZone: UTC
-        runPlanScheduleTimeZonePolicy: replace_with_user_vault_timezone
+          timeZone: "UTC"
+        runPlanScheduleTimeZonePolicy: "replace_with_user_vault_timezone"
       target:
-        object: onboardingCapture
-        field: answers.targetWakeWindow
-    -
-      id: "sleep_opportunity_plan"
+        object: "onboardingCapture"
+        field: "answers.targetWakeWindow"
+    - id: "sleep_opportunity_plan"
       label: "Sleep-opportunity plan"
-      purpose: "safety"
-      valueType: "free_text"
-      askPolicy: "always"
-      required: true
       question: "What bedtime or lights-out guardrail will protect enough sleep before that wake window?"
       target:
-        object: experimentRun
-        field: safety.sleepOpportunityPlan
-    -
-      id: "measurement_method"
+        object: "experimentRun"
+        field: "safety.sleepOpportunityPlan"
+    - id: "measurement_method"
       label: "Measurement method"
-      purpose: "measurement_fidelity"
-      valueType: "enum"
-      askPolicy: "ask_if_unknown"
-      required: true
       question: "How should Murph measure wake time during the run?"
       options:
         - "sleep_diary"
         - "wearable_plus_diary"
         - "wearable_only"
       target:
-        object: experimentRun
-        field: measurement.method
-    -
-      id: "weekend_recovery_policy"
+        object: "experimentRun"
+        field: "measurement.method"
+    - id: "weekend_recovery_policy"
       label: "Weekend and recovery policy"
-      purpose: "safety"
-      valueType: "enum"
-      askPolicy: "always"
-      required: true
       question: "How should the plan handle weekends or recovery after short sleep?"
       options:
         - "same_window_when_slept_enough"
         - "protect_sleep_after_short_sleep"
         - "needs_variable_schedule"
       target:
-        object: experimentRun
-        field: safety.weekendRecoveryPolicy
-    -
-      id: "reminder_policy"
+        object: "experimentRun"
+        field: "safety.weekendRecoveryPolicy"
+    - id: "reminder_policy"
       label: "Reminder policy"
-      purpose: "assistant_support"
-      valueType: "reminder_policy"
-      askPolicy: "ask_at_confirmation"
-      required: false
       question: "Would you like opt-in morning or weekly reminder support, or no reminders?"
+      constraints:
+        optional: true
+        askWhen: "at_confirmation"
       target:
-        object: experimentRun
-        field: assistant.reminderPolicy
+        object: "experimentRun"
+        field: "assistant.reminderPolicy"
   planDefaults:
     testPlanId: "wake-regularity-35d"
-    baselineDays: 7
-    interventionDays: 28
-    sessionsPerWeek: 7
-    targetSessions: 28
-    minimumUsefulSessions: 20
     firstSessionGuidance: "Start with baseline logging before changing the wake target. If the chosen wake window would make tonight too short, adjust later or postpone instead of forcing it."
-  logging:
-    sessionFields:
-      - "target_wake_window"
-      - "final_wake_time"
-      - "time_out_of_bed"
-      - "lights_out_time"
-      - "estimated_total_sleep_time"
-      - "daytime_sleepiness"
-      - "naps"
-      - "inside_wake_window"
-      - "safety_override"
-    confounders:
+  trackingHints:
+    confounderFields:
       - "caffeine_alcohol_timing"
       - "evening_light_or_screens"
       - "stress_or_illness"
@@ -620,16 +527,7 @@ experimentOnboarding:
       - "device_missingness"
     notes:
       - "Log safety overrides as appropriate adherence decisions, not failures."
-  assistantPolicy:
-    maxSetupQuestionsPerTurn: 2
-    askBeforeCreatingAutomations: true
-    missedLogFollowup: "opt_in_only"
-    reminderOptions:
-      - "none"
-      - "morning_checkin"
-      - "evening_bedtime_guardrail"
-      - "weekly_digest"
-    weeklyDigestDefault: true
+  supportHints:
     missedLogFollowupCopy: "No problem if the log was missed. Do you want to record the wake time and whether sleep felt safe enough today?"
 whyItWorks:
   - "## Wake time anchors the clock\n\nFinal wake time sets the next circadian day. Light, movement, meals, and alertness start from that anchor; irregular wake times keep the clock sliding."
