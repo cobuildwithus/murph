@@ -20,6 +20,7 @@ import {
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -196,6 +197,8 @@ it("backs off stale retry_later responses instead of spinning requests", async (
 });
 
 it("stops retrying retry_later responses when the wake timeout expires", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
   const retryAt = new Date(Date.now() + 60_000).toISOString();
   const fetchMock = vi.fn(async () => Response.json({
     kind: "retry_later",
@@ -203,7 +206,7 @@ it("stops retrying retry_later responses when the wake timeout expires", async (
   }));
   vi.stubGlobal("fetch", fetchMock);
 
-  await expect(wakeHostedWorkerForLatestPendingWake({
+  const wakePromise = wakeHostedWorkerForLatestPendingWake({
     harness: {
       runtimeEnv: {
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK:
@@ -215,9 +218,14 @@ it("stops retrying retry_later responses when the wake timeout expires", async (
     } as HostedLocalDevHarness,
     timeoutMs: 50,
     userId: "member_local_timeout_123",
-  })).rejects.toThrow(
+  });
+  const expectedRejection = expect(wakePromise).rejects.toThrow(
     `Timed out waiting for hosted runtime processing to be accepted after retry_later at ${retryAt}.`,
   );
+
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  await vi.advanceTimersByTimeAsync(50);
+  await expectedRejection;
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
