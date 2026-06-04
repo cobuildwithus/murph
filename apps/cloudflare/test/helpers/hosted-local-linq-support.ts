@@ -38,8 +38,9 @@ export type ObservedLinqRequestMatcher = (request: ObservedLinqRequest) => boole
 
 const linqCreateChatPath = "/chats";
 const linqAttachmentDownloadBasePath = "/attachment-downloads";
+const hostedLocalLinqWaitExpireAfterInFlightMs = 30_000;
 const hostedLocalLinqWaitNudgeAfterMailboxLagMs = 15_000;
-const hostedLocalLinqWaitNudgeAfterPendingDeliveryMs = 2_000;
+const hostedLocalLinqWaitManualRunAfterPendingDeliveryMs = 2_000;
 
 type HostedLinqInboundPartInput =
   | {
@@ -361,16 +362,25 @@ export async function startHostedLocalLinqStub(input: {
             now,
             status,
           });
-        if (
-          status
-          && shouldNudgeHostedLocalLinqWaitForStatus({
-            mailboxLagFirstObservedAt,
+        if (status) {
+          if (shouldExpireHostedLocalLinqWaitInFlightForStatus({ now, status })) {
+            await input.scenario.harness.expireRunnerActivityForTest(input.userId)
+              .catch(() => {});
+            await input.scenario.harness.nudgeUserBestEffort(input.userId);
+          } else if (shouldRunHostedLocalLinqWaitManualInvocationForStatus({
             now,
             pendingDeliveryFirstObservedAt,
             status,
-          })
-        ) {
-          await input.scenario.harness.nudgeUserBestEffort(input.userId);
+          })) {
+            await input.scenario.harness.runHostedManualInvocationForTest(input.userId)
+              .catch(() => input.scenario.harness.nudgeUserBestEffort(input.userId));
+          } else if (shouldNudgeHostedLocalLinqWaitForStatus({
+            mailboxLagFirstObservedAt,
+            now,
+            status,
+          })) {
+            await input.scenario.harness.nudgeUserBestEffort(input.userId);
+          }
         }
       }
 
@@ -488,29 +498,57 @@ export async function startHostedLocalLinqStub(input: {
   };
 }
 
+export function shouldExpireHostedLocalLinqWaitInFlightForStatus(input: {
+  now: number;
+  status: HostedRunnerStatusResponse;
+}): boolean {
+  if (!input.status.inFlight || input.status.lastErrorCode) {
+    return false;
+  }
+
+  const activityAt = readHostedLocalLinqStatusActivityAtMs(input.status);
+  return activityAt !== null
+    && input.now - activityAt >= hostedLocalLinqWaitExpireAfterInFlightMs;
+}
+
 export function shouldNudgeHostedLocalLinqWaitForStatus(input: {
   mailboxLagFirstObservedAt: number | null;
   now: number;
-  pendingDeliveryFirstObservedAt?: number | null;
   status: HostedRunnerStatusResponse;
 }): boolean {
   if (input.status.inFlight || input.status.lastErrorCode) {
     return false;
   }
 
-  const mailboxLagNudgeDue =
-    hostedLocalLinqStatusHasMailboxLag(input.status)
+  return hostedLocalLinqStatusHasMailboxLag(input.status)
     && input.mailboxLagFirstObservedAt !== null
     && input.now - input.mailboxLagFirstObservedAt
       >= hostedLocalLinqWaitNudgeAfterMailboxLagMs;
-  const pendingDeliveryNudgeDue =
-    hostedLocalLinqStatusHasPendingDelivery(input.status)
-    && input.pendingDeliveryFirstObservedAt !== null
-    && input.pendingDeliveryFirstObservedAt !== undefined
-    && input.now - input.pendingDeliveryFirstObservedAt
-      >= hostedLocalLinqWaitNudgeAfterPendingDeliveryMs;
+}
 
-  return mailboxLagNudgeDue || pendingDeliveryNudgeDue;
+export function shouldRunHostedLocalLinqWaitManualInvocationForStatus(input: {
+  now: number;
+  pendingDeliveryFirstObservedAt: number | null;
+  status: HostedRunnerStatusResponse;
+}): boolean {
+  if (input.status.inFlight || input.status.lastErrorCode) {
+    return false;
+  }
+
+  return hostedLocalLinqStatusHasPendingDelivery(input.status)
+    && input.pendingDeliveryFirstObservedAt !== null
+    && input.now - input.pendingDeliveryFirstObservedAt
+      >= hostedLocalLinqWaitManualRunAfterPendingDeliveryMs;
+}
+
+function readHostedLocalLinqStatusActivityAtMs(status: HostedRunnerStatusResponse): number | null {
+  const rawActivityAt = status.heartbeatAt ?? status.lastInvocationAt ?? null;
+  if (rawActivityAt === null) {
+    return null;
+  }
+
+  const activityAt = Date.parse(rawActivityAt);
+  return Number.isFinite(activityAt) ? activityAt : null;
 }
 
 function updateHostedLocalLinqMailboxLagFirstObservedAt(input: {

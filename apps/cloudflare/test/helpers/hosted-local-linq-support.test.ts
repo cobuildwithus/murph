@@ -5,11 +5,13 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
+  shouldExpireHostedLocalLinqWaitInFlightForStatus,
   shouldNudgeHostedLocalLinqWaitForStatus,
+  shouldRunHostedLocalLinqWaitManualInvocationForStatus,
 } from "./hosted-local-linq-support.js";
 
-describe("hosted local Linq wait nudge policy", () => {
-  it("does not nudge active, errored, or caught-up runner status", () => {
+describe("hosted local Linq wait recovery policy", () => {
+  it("does not recover active, errored, or caught-up runner status", () => {
     const now = Date.now();
 
     expect(shouldNudgeHostedLocalLinqWaitForStatus({
@@ -30,8 +32,20 @@ describe("hosted local Linq wait nudge policy", () => {
     expect(shouldNudgeHostedLocalLinqWaitForStatus({
       mailboxLagFirstObservedAt: now - 20_000,
       now,
+      status: createStatus({ inFlight: true, lag: "0", pendingDeliveryEffects: 1 }),
+    })).toBe(false);
+    expect(shouldRunHostedLocalLinqWaitManualInvocationForStatus({
+      now,
       pendingDeliveryFirstObservedAt: now - 20_000,
       status: createStatus({ inFlight: true, lag: "0", pendingDeliveryEffects: 1 }),
+    })).toBe(false);
+    expect(shouldExpireHostedLocalLinqWaitInFlightForStatus({
+      now,
+      status: createStatus({
+        inFlight: false,
+        lag: "0",
+        lastInvocationAt: new Date(now - 30_000).toISOString(),
+      }),
     })).toBe(false);
   });
 
@@ -50,43 +64,84 @@ describe("hosted local Linq wait nudge policy", () => {
     })).toBe(true);
   });
 
-  it("nudges after pending delivery effects have remained recoverable", () => {
+  it("runs a manual invocation after pending delivery effects have remained recoverable", () => {
     const now = Date.now();
 
-    expect(shouldNudgeHostedLocalLinqWaitForStatus({
-      mailboxLagFirstObservedAt: null,
+    expect(shouldRunHostedLocalLinqWaitManualInvocationForStatus({
       now,
       pendingDeliveryFirstObservedAt: now - 1_999,
       status: createStatus({ lag: "0", pendingDeliveryEffects: 1 }),
     })).toBe(false);
-    expect(shouldNudgeHostedLocalLinqWaitForStatus({
-      mailboxLagFirstObservedAt: null,
+    expect(shouldRunHostedLocalLinqWaitManualInvocationForStatus({
       now,
       pendingDeliveryFirstObservedAt: now - 2_000,
       status: createStatus({ lag: "0", pendingDeliveryEffects: 1 }),
     })).toBe(true);
+    expect(shouldNudgeHostedLocalLinqWaitForStatus({
+      mailboxLagFirstObservedAt: null,
+      now,
+      status: createStatus({ lag: "0", pendingDeliveryEffects: 1 }),
+    })).toBe(false);
   });
 
-  it("preserves stale mailbox lag nudges while pending delivery is fresh", () => {
+  it("preserves stale mailbox lag nudges while pending delivery recovery is fresh", () => {
     const now = Date.now();
 
     expect(shouldNudgeHostedLocalLinqWaitForStatus({
       mailboxLagFirstObservedAt: now - 15_000,
       now,
-      pendingDeliveryFirstObservedAt: now - 1,
       status: createStatus({ lag: "1", pendingDeliveryEffects: 1 }),
     })).toBe(true);
+    expect(shouldRunHostedLocalLinqWaitManualInvocationForStatus({
+      now,
+      pendingDeliveryFirstObservedAt: now - 1,
+      status: createStatus({ lag: "1", pendingDeliveryEffects: 1 }),
+    })).toBe(false);
+  });
+
+  it("expires stale in-flight status only when activity is old enough", () => {
+    const now = Date.parse("2026-05-08T00:00:30.000Z");
+
+    expect(shouldExpireHostedLocalLinqWaitInFlightForStatus({
+      now,
+      status: createStatus({
+        inFlight: true,
+        lag: "0",
+        lastInvocationAt: "2026-05-08T00:00:00.001Z",
+      }),
+    })).toBe(false);
+    expect(shouldExpireHostedLocalLinqWaitInFlightForStatus({
+      now,
+      status: createStatus({
+        inFlight: true,
+        lag: "0",
+        lastInvocationAt: "2026-05-08T00:00:00.000Z",
+      }),
+    })).toBe(true);
+    expect(shouldExpireHostedLocalLinqWaitInFlightForStatus({
+      now,
+      status: createStatus({
+        heartbeatAt: "2026-05-08T00:00:29.000Z",
+        inFlight: true,
+        lag: "0",
+        lastInvocationAt: "2026-05-08T00:00:00.000Z",
+      }),
+    })).toBe(false);
   });
 });
 
 function createStatus(input: {
+  heartbeatAt?: string | null;
   inFlight?: boolean;
   lag: string;
+  lastInvocationAt?: string | null;
   lastErrorCode?: string | null;
   pendingDeliveryEffects?: number | string;
 }): HostedRunnerStatusResponse {
   return {
+    ...(input.heartbeatAt === undefined ? {} : { heartbeatAt: input.heartbeatAt }),
     inFlight: input.inFlight ?? false,
+    ...(input.lastInvocationAt === undefined ? {} : { lastInvocationAt: input.lastInvocationAt }),
     lastErrorCode: input.lastErrorCode ?? null,
     mailboxLag: [
       {
