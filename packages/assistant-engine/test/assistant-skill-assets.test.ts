@@ -176,6 +176,9 @@ describe('assistant skill assets', () => {
       'invite product or brand names plus roughly how long they have taken each one or since when',
     )
     expect(raw).toContain(
+      'and add a quick note that they can also send a picture of the supplement bottles or labels if that is easier',
+    )
+    expect(raw).toContain(
       'When their supplement answer will require web searches or other product-ingredient lookups',
     )
     expect(raw).toContain(
