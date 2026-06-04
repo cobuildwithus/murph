@@ -18,10 +18,14 @@ import {
 export type CodexProgressEvent = AssistantProviderProgressEvent
 
 export const CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS = [
-  'One sec, cleaning up context.',
-  'Cleaning up context, give me a moment.',
-  'Tidying up context, be back in a sec.',
-  'Trimming old context, give me a moment.',
+  'Hang on, refreshing my memory real quick.',
+  'One moment while I catch up on our conversation.',
+  'Bear with me, pulling my thoughts together.',
+  'Hang on, piecing everything together real quick.',
+  'One sec, getting everything sorted in my head.',
+  'Give me a moment — lots to keep track of here.',
+  'Hold on, gathering my thoughts on all of this.',
+  'One sec — just making sure I\'m not missing anything.',
 ] as const
 
 export type CodexEventState = 'completed' | 'running'

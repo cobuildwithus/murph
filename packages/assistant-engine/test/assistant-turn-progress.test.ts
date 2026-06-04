@@ -97,7 +97,9 @@ describe('assistant turn progress', () => {
     })
 
     await expect(
-      progress.send('Compacting prior context.', { source: 'system' }),
+      progress.send('Hang on, refreshing my memory real quick.', {
+        source: 'system',
+      }),
     ).resolves.toEqual({
       kind: 'sent',
       source: 'system',
@@ -117,7 +119,7 @@ describe('assistant turn progress', () => {
     })
 
     expect(delivered.map((input) => [input.ordinal, input.text])).toEqual([
-      [0, 'Compacting prior context.'],
+      [0, 'Hang on, refreshing my memory real quick.'],
       [1, 'Checking the saved context now.'],
     ])
   })

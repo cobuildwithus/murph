@@ -4497,7 +4497,20 @@ describe('assistant codex runtime', () => {
     const workingDirectory = await createTempDir('assistant-codex-context-compact-')
     const onProgress = vi.fn()
     const onTraceEvent = vi.fn()
-    const selectedProgressText = CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS[2]
+    const selectedProgressText = CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS[4]
+    expect(CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS).toEqual([
+      'Hang on, refreshing my memory real quick.',
+      'One moment while I catch up on our conversation.',
+      'Bear with me, pulling my thoughts together.',
+      'Hang on, piecing everything together real quick.',
+      'One sec, getting everything sorted in my head.',
+      'Give me a moment — lots to keep track of here.',
+      'Hold on, gathering my thoughts on all of this.',
+      'One sec — just making sure I\'m not missing anything.',
+    ])
+    expect(CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/\bcontext\b/iu)]),
+    )
     vi.spyOn(Math, 'random').mockReturnValue(0.5)
     const progressDelivery = createProgressDeliveryMock()
 
