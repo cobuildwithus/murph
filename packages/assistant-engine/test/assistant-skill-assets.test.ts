@@ -124,11 +124,28 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Use this skill only when the current prompt includes the `Conversation onboarding:` activation',
     )
-    expect(raw).toContain('roughly 5-6 short assistant messages')
+    expect(raw).toContain('roughly 7-8 short assistant messages')
     expect(raw).toContain(
-      'current supplements, with brand or product names when they know them',
+      'age plus gender first, then current supplements with brand or product names',
     )
+    expect(raw).toContain('roughly how long they have taken them or since when')
     expect(raw).toContain('age plus gender')
+    expect(raw).toContain(
+      'One high-level setup detail first: what age and gender should I use for context?',
+    )
+    expect(raw).toContain(
+      'Are you taking any supplements right now? Product or brand names help, plus roughly how long you\'ve taken each one or since when.',
+    )
+    expect(raw).toContain(
+      'Are you already trying any health protocols or experiments, or mostly starting fresh?',
+    )
+    expect(raw).toContain('Save useful onboarding answers as they arrive')
+    expect(raw).toContain(
+      'before asking the next onboarding question',
+    )
+    expect(raw).toContain(
+      'Do not wait until all setup prompts are done',
+    )
     expect(raw).toContain(
       'whether they have recent blood tests or lab panels',
     )
@@ -139,8 +156,14 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Do not press for skipped demographic details, birth date, birth month/year, or sex assigned at birth',
     )
+    expect(raw).not.toContain(
+      'A few setup details are helpful if you\'re comfortable sharing',
+    )
     expect(raw).toContain(
-      'Ask follow-up questions about dosage or protocol adherence only when the user asks to set up a specific experiment',
+      'Ask follow-up questions about dosage only when the user asks to set up a specific experiment',
+    )
+    expect(raw).toContain(
+      'Ask follow-up questions about protocol adherence only when the user asks to set up a specific experiment',
     )
     expect(raw).not.toContain('birth month plus year and gender')
     expect(raw).not.toContain('birth month plus year, gender')
@@ -151,12 +174,18 @@ describe('assistant skill assets', () => {
       'broad health context, supplements, protocols, experiments, dated age context, gender, or interests go to memory',
     )
     expect(raw).toContain(
+      'supplement names and timing, current protocols or experiments',
+    )
+    expect(raw).toContain(
       'Age: save as dated Context memory using the current prompt\'s local date',
     )
     expect(raw).toContain('User was 20 years old on 2026-02-01.')
     expect(raw).toContain('Do not infer or store a birthday from age alone')
     expect(raw).toContain(
-      'additional setup context prompt, blood-test prompt, and wearable/app checkpoint have been asked',
+      'high-level age/gender prompt, supplement prompt, current protocol/experiment prompt, blood-test prompt, and wearable/app checkpoint have been asked',
+    )
+    expect(raw).toContain(
+      'verify that every useful setup answer they supplied has already been persisted',
     )
     expect(raw).toContain(
       'complete a wearable/app checkpoint before first experiment or logging setup',
