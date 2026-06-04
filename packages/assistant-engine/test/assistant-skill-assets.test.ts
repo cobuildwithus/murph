@@ -126,12 +126,20 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('roughly 7-8 short assistant messages')
     expect(raw).toContain(
-      'age plus gender first, then current supplements with brand or product names',
+      'age plus gender first, then the wearable/app checkpoint',
     )
+    expect(raw).toContain('then current health protocols or experiments')
+    expect(raw).toContain('then current supplements with brand or product names')
     expect(raw).toContain('roughly how long they have taken them or since when')
     expect(raw).toContain('age plus gender')
     expect(raw).toContain(
       'One high-level setup detail first: what age and gender should I use for context?',
+    )
+    expect(raw).toContain(
+      'before the wearable/app checkpoint or more detailed protocol/supplement questions',
+    )
+    expect(raw).toContain(
+      'before moving to current protocol or supplement questions',
     )
     expect(raw).toContain(
       'Are you taking any supplements right now? Product or brand names help, plus roughly how long you\'ve taken each one or since when.',
@@ -146,6 +154,26 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Do not wait until all setup prompts are done',
     )
+    const highLevelIndex = raw.indexOf(
+      'One high-level setup detail first: what age and gender should I use for context?',
+    )
+    const wearableIndex = raw.indexOf(
+      '4. Data sources and wearables. This is a required onboarding checkpoint',
+    )
+    const protocolsIndex = raw.indexOf(
+      'Are you already trying any health protocols or experiments, or mostly starting fresh?',
+    )
+    const supplementsIndex = raw.indexOf(
+      'Are you taking any supplements right now? Product or brand names help, plus roughly how long you\'ve taken each one or since when.',
+    )
+    const bloodTestsIndex = raw.indexOf(
+      'Do you have any recent blood tests or lab panels',
+    )
+    expect(highLevelIndex).toBeGreaterThanOrEqual(0)
+    expect(wearableIndex).toBeGreaterThan(highLevelIndex)
+    expect(protocolsIndex).toBeGreaterThan(wearableIndex)
+    expect(supplementsIndex).toBeGreaterThan(protocolsIndex)
+    expect(bloodTestsIndex).toBeGreaterThan(supplementsIndex)
     expect(raw).toContain(
       'whether they have recent blood tests or lab panels',
     )
@@ -182,7 +210,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('User was 20 years old on 2026-02-01.')
     expect(raw).toContain('Do not infer or store a birthday from age alone')
     expect(raw).toContain(
-      'high-level age/gender prompt, supplement prompt, current protocol/experiment prompt, blood-test prompt, and wearable/app checkpoint have been asked',
+      'high-level age/gender prompt, wearable/app checkpoint, current protocol/experiment prompt, supplement prompt, and blood-test prompt have been asked',
     )
     expect(raw).toContain(
       'verify that every useful setup answer they supplied has already been persisted',
