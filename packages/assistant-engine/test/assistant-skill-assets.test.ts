@@ -149,7 +149,7 @@ describe('assistant skill assets', () => {
       'before moving to current protocol or supplement questions',
     )
     expect(raw).toContain(
-      'asks what Murph should call the user and invites one current health curiosity, focus area, or concern',
+      'What should I call you? And is there anything health-wise you\'ve been curious about, working on, or dealing with lately?',
     )
     expect(raw).toContain(
       'whether they are already trying any health protocols or experiments',
@@ -205,14 +205,13 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Do not press for skipped demographic details, birth date, birth month/year, or sex assigned at birth',
     )
-    expect(raw.slice(nameContextIndex, highLevelIndex)).not.toContain('```text')
+    expect(raw.slice(nameContextIndex, highLevelIndex)).toContain('```text')
     expect(raw.slice(highLevelIndex, wearableIndex)).not.toContain('```text')
     expect(raw.slice(protocolsIndex, supplementsIndex)).not.toContain('```text')
     expect(raw.slice(supplementsIndex, bloodTestsIndex)).not.toContain('```text')
     expect(raw.slice(bloodTestsIndex, orientationIndex)).not.toContain('```text')
-    expect(raw.match(/Do not use a fixed script for this turn/g)?.length).toBe(5)
+    expect(raw.match(/Do not use a fixed script for this turn/g)?.length).toBe(4)
     const removedFixedScripts = [
-      'What should I call you? And is there anything health-wise you\'ve been curious about, working on, or dealing with lately?',
       'One high-level setup detail first: what age and gender should I use for context? You can skip either.',
       'Are you already trying any health protocols or experiments, or mostly starting fresh?',
       'Are you taking any supplements right now? Product or brand names help, plus roughly how long you\'ve taken each one or since when.',
