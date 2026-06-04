@@ -10,6 +10,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
 import {
   buildHostedExecutionMemberActivatedWake,
+  type HostedExecutionMemberChannels,
 } from "@murphai/hosted-execution";
 import {
   readHostedRuntimeTemporalEnvironment,
@@ -32,6 +33,13 @@ import {
 import {
   readHostedMemberStripeBillingRef,
 } from "../src/lib/hosted-onboarding/hosted-member-billing-store";
+import {
+  readHostedMemberSnapshot,
+} from "../src/lib/hosted-onboarding/hosted-member-store";
+import {
+  resolveHostedMemberChannelsForSnapshot,
+  resolveHostedMemberEmailLinked,
+} from "../src/lib/hosted-onboarding/member-channel-sync";
 import {
   appendHostedMailboxEnvelopeTx,
 } from "../src/lib/hosted-mailbox/store";
@@ -70,8 +78,8 @@ export interface CountSnapshot {
   hostedAiUsage: number;
   hostedAiUsageNonSkipped: number;
   hostedAiUsagePeriod: number;
-  hostedConsentEventResetScopes: number;
-  hostedConsentGrantResetScopes: number;
+  hostedConsentEventNonLaunch: number;
+  hostedConsentGrantNonLaunch: number;
   hostedIngressLatencyTrace: number;
   hostedInvite: number;
   hostedLinqDailyState: number;
@@ -104,14 +112,9 @@ interface DeleteCounts {
   deviceWebhookTraceOwners: number;
   hostedAiUsage: number;
   hostedAiUsagePeriod: number;
-  hostedConsentEventResetScopes: number;
-  hostedConsentGrantResetScopes: number;
   hostedIngressLatencyTrace: number;
   hostedInvite: number;
   hostedLinqDailyState: number;
-  hostedMemberEmailAuthorization: number;
-  hostedMemberIdentityPhoneFields: number;
-  hostedMemberRouting: number;
   hostedMailboxItem: number;
   hostedMailboxLaneCounter: number;
   hostedMailboxPayload: number;
@@ -159,22 +162,7 @@ interface ResetExecutionTargetSummary {
 const RESET_DOMAINS = ["device", "ingress", "runtime"] as const;
 const RESET_SCRIPT_SCHEMA = "murph.hosted-member-runtime-reset-script.v1";
 const DEFAULT_RESET_ENVIRONMENT = "production";
-const RESET_BOOTSTRAP_MEMBER_CHANNELS = {
-  email: false,
-  linq: false,
-  telegram: false,
-} as const;
-const PRESERVED_RESET_CONSENT_SCOPES = ["launch.legal", "launch.health-data"] as const;
-const HOSTED_MEMBER_IDENTITY_PHONE_RESET_DATA = {
-  maskedPhoneNumberHint: null,
-  phoneLookupKey: null,
-  phoneNumberEncrypted: null,
-  phoneNumberVerifiedAt: null,
-  signupPhoneCodeSentAt: null,
-  signupPhoneCodeSendAttemptId: null,
-  signupPhoneCodeSendAttemptStartedAt: null,
-  signupPhoneNumberEncrypted: null,
-} satisfies Prisma.HostedMemberIdentityUpdateManyMutationInput;
+const LAUNCH_CONSENT_SCOPES = ["launch.legal", "launch.health-data"] as const;
 export const RESET_TRANSACTION_OPTIONS = {
   maxWait: 30_000,
   timeout: 120_000,
@@ -637,8 +625,8 @@ async function countResetRows(input: {
     hostedAiUsage,
     hostedAiUsageNonSkipped,
     hostedAiUsagePeriod,
-    hostedConsentEventResetScopes,
-    hostedConsentGrantResetScopes,
+    hostedConsentEventNonLaunch,
+    hostedConsentGrantNonLaunch,
     hostedLinqDailyState,
     hostedInvite,
     hostedMemberRouting,
@@ -678,17 +666,17 @@ async function countResetRows(input: {
     }),
     input.prisma.hostedAiUsagePeriod.count({ where: { memberId: input.memberId } }),
     input.prisma.hostedConsentEvent.count({
-      where: hostedConsentEventResetWhere(input.memberId),
+      where: hostedConsentEventNonLaunchWhere(input.memberId),
     }),
     input.prisma.hostedConsentGrant.count({
-      where: hostedConsentGrantResetWhere(input.memberId),
+      where: hostedConsentGrantNonLaunchWhere(input.memberId),
     }),
     input.prisma.hostedLinqDailyState.count({ where: { memberId: input.memberId } }),
     input.prisma.hostedInvite.count({ where: { memberId: input.memberId } }),
     input.prisma.hostedMemberRouting.count({ where: { memberId: input.memberId } }),
     input.prisma.hostedMemberEmailAuthorization.count({ where: { memberId: input.memberId } }),
     input.prisma.hostedMemberIdentity.count({
-      where: hostedMemberIdentityPhoneResetWhere(input.memberId),
+      where: hostedMemberIdentityPhoneFieldsWhere(input.memberId),
     }),
     input.prisma.hostedWorkspace.count({ where: { userId: input.memberId } }),
     input.prisma.hostedWebInternalRequestNonce.count({ where: { userId: input.memberId } }),
@@ -719,8 +707,8 @@ async function countResetRows(input: {
     hostedAiUsage,
     hostedAiUsageNonSkipped,
     hostedAiUsagePeriod,
-    hostedConsentEventResetScopes,
-    hostedConsentGrantResetScopes,
+    hostedConsentEventNonLaunch,
+    hostedConsentGrantNonLaunch,
     hostedIngressLatencyTrace,
     hostedInvite,
     hostedLinqDailyState,
@@ -791,6 +779,7 @@ async function resetHostedMemberDatabaseState(input: {
     kind: string;
     lane: string;
     laneSeq: string;
+    memberChannels: HostedExecutionMemberChannels;
   };
   freshWorkspaceVersion: string;
   postCounts: CountSnapshot;
@@ -839,7 +828,12 @@ async function resetHostedMemberDatabaseState(input: {
       });
     }
 
+    const memberChannels = await readResetBootstrapMemberChannelsTx({
+      memberId: input.memberId,
+      tx,
+    });
     const freshBootstrap = await appendResetMemberActivatedMailboxItemTx({
+      memberChannels,
       memberId: input.memberId,
       timeZone: lockedMember.pendingActivationTimeZone,
       tx,
@@ -862,6 +856,7 @@ async function resetHostedMemberDatabaseState(input: {
 }
 
 async function appendResetMemberActivatedMailboxItemTx(input: {
+  memberChannels: HostedExecutionMemberChannels;
   memberId: string;
   timeZone: string | null;
   tx: Prisma.TransactionClient;
@@ -870,9 +865,11 @@ async function appendResetMemberActivatedMailboxItemTx(input: {
   kind: string;
   lane: string;
   laneSeq: string;
+  memberChannels: HostedExecutionMemberChannels;
 }> {
   const append = await appendHostedMailboxEnvelopeTx({
     envelope: buildResetMemberActivatedWake({
+      memberChannels: input.memberChannels,
       memberId: input.memberId,
       occurredAt: new Date().toISOString(),
       timeZone: input.timeZone,
@@ -892,10 +889,12 @@ async function appendResetMemberActivatedMailboxItemTx(input: {
     kind: append.item.kind,
     lane: append.item.lane,
     laneSeq: String(append.item.laneSeq),
+    memberChannels: input.memberChannels,
   };
 }
 
 export function buildResetMemberActivatedWake(input: {
+  memberChannels: HostedExecutionMemberChannels;
   memberId: string;
   occurredAt: string;
   timeZone?: string | null;
@@ -908,10 +907,34 @@ export function buildResetMemberActivatedWake(input: {
 
   return buildHostedExecutionMemberActivatedWake({
     eventId: `member.activated:runtime-reset:${eventFingerprint}`,
-    memberChannels: RESET_BOOTSTRAP_MEMBER_CHANNELS,
+    memberChannels: input.memberChannels,
     memberId: input.memberId,
     occurredAt: input.occurredAt,
     ...(timeZone ? { timeZone } : {}),
+  });
+}
+
+async function readResetBootstrapMemberChannelsTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedExecutionMemberChannels> {
+  const member = await readHostedMemberSnapshot({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+
+  if (!member) {
+    throw new Error("Hosted member reset could not read preserved contact channel state.");
+  }
+
+  const emailLinked = await resolveHostedMemberEmailLinked({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+
+  return resolveHostedMemberChannelsForSnapshot({
+    emailLinked,
+    member,
   });
 }
 
@@ -936,14 +959,9 @@ export function assertPostResetCounts(counts: CountSnapshot): void {
   expectZero("hostedAiUsage");
   expectZero("hostedAiUsageNonSkipped");
   expectZero("hostedAiUsagePeriod");
-  expectZero("hostedConsentEventResetScopes");
-  expectZero("hostedConsentGrantResetScopes");
   expectZero("hostedIngressLatencyTrace");
   expectZero("hostedInvite");
   expectZero("hostedLinqDailyState");
-  expectZero("hostedMemberEmailAuthorization");
-  expectZero("hostedMemberIdentityPhoneFields");
-  expectZero("hostedMemberRouting");
   expectZero("hostedMailboxPayload");
   expectZero("hostedWebInternalRequestNonce");
   expectZero("hostedWebSession");
@@ -992,14 +1010,9 @@ async function deleteResetRowsTx(input: {
     deviceWebhookTraceOwners: 0,
     hostedAiUsage: 0,
     hostedAiUsagePeriod: 0,
-    hostedConsentEventResetScopes: 0,
-    hostedConsentGrantResetScopes: 0,
     hostedIngressLatencyTrace: 0,
     hostedInvite: 0,
     hostedLinqDailyState: 0,
-    hostedMemberEmailAuthorization: 0,
-    hostedMemberIdentityPhoneFields: 0,
-    hostedMemberRouting: 0,
     hostedMailboxItem: 0,
     hostedMailboxLaneCounter: 0,
     hostedMailboxPayload: 0,
@@ -1024,22 +1037,8 @@ async function deleteResetRowsTx(input: {
   counts.hostedUserCryptoEnvelopeResetDomains = await deleteHostedCryptoEnvelopeRows(input.tx, input.memberId, RESET_DOMAINS);
   counts.hostedAiUsage = (await input.tx.hostedAiUsage.deleteMany({ where: { memberId: input.memberId } })).count;
   counts.hostedAiUsagePeriod = (await input.tx.hostedAiUsagePeriod.deleteMany({ where: { memberId: input.memberId } })).count;
-  counts.hostedConsentEventResetScopes = (await input.tx.hostedConsentEvent.deleteMany({
-    where: hostedConsentEventResetWhere(input.memberId),
-  })).count;
-  counts.hostedConsentGrantResetScopes = (await input.tx.hostedConsentGrant.deleteMany({
-    where: hostedConsentGrantResetWhere(input.memberId),
-  })).count;
   counts.hostedLinqDailyState = (await input.tx.hostedLinqDailyState.deleteMany({ where: { memberId: input.memberId } })).count;
   counts.hostedInvite = (await input.tx.hostedInvite.deleteMany({ where: { memberId: input.memberId } })).count;
-  counts.hostedMemberRouting = (await input.tx.hostedMemberRouting.deleteMany({ where: { memberId: input.memberId } })).count;
-  counts.hostedMemberEmailAuthorization = (await input.tx.hostedMemberEmailAuthorization.deleteMany({
-    where: { memberId: input.memberId },
-  })).count;
-  counts.hostedMemberIdentityPhoneFields = (await input.tx.hostedMemberIdentity.updateMany({
-    data: HOSTED_MEMBER_IDENTITY_PHONE_RESET_DATA,
-    where: hostedMemberIdentityPhoneResetWhere(input.memberId),
-  })).count;
   counts.hostedWorkspace = (await input.tx.hostedWorkspace.deleteMany({ where: { userId: input.memberId } })).count;
   counts.hostedWebInternalRequestNonce = (await input.tx.hostedWebInternalRequestNonce.deleteMany({
     where: { userId: input.memberId },
@@ -1215,7 +1214,7 @@ async function countDeviceWebhookTraceOwners(
   return Number(rows[0]?.count ?? 0n);
 }
 
-function hostedMemberIdentityPhoneResetWhere(memberId: string): Prisma.HostedMemberIdentityWhereInput {
+function hostedMemberIdentityPhoneFieldsWhere(memberId: string): Prisma.HostedMemberIdentityWhereInput {
   return {
     memberId,
     OR: [
@@ -1231,20 +1230,20 @@ function hostedMemberIdentityPhoneResetWhere(memberId: string): Prisma.HostedMem
   };
 }
 
-function hostedConsentEventResetWhere(memberId: string): Prisma.HostedConsentEventWhereInput {
+function hostedConsentEventNonLaunchWhere(memberId: string): Prisma.HostedConsentEventWhereInput {
   return {
     memberId,
     scope: {
-      notIn: Array.from(PRESERVED_RESET_CONSENT_SCOPES),
+      notIn: Array.from(LAUNCH_CONSENT_SCOPES),
     },
   };
 }
 
-function hostedConsentGrantResetWhere(memberId: string): Prisma.HostedConsentGrantWhereInput {
+function hostedConsentGrantNonLaunchWhere(memberId: string): Prisma.HostedConsentGrantWhereInput {
   return {
     memberId,
     scope: {
-      notIn: Array.from(PRESERVED_RESET_CONSENT_SCOPES),
+      notIn: Array.from(LAUNCH_CONSENT_SCOPES),
     },
   };
 }

@@ -142,16 +142,26 @@ describe("reset hosted member runtime script guards", () => {
     expect(() =>
       assertPostResetCounts({
         ...cleanCounts(),
-        hostedMemberRouting: 1,
+        hostedWebSession: 1,
       }),
-    ).toThrow("hostedMemberRouting=1");
-
+    ).toThrow("hostedWebSession=1");
     expect(() =>
       assertPostResetCounts({
         ...cleanCounts(),
-        hostedConsentGrantResetScopes: 1,
+        deviceConnection: 1,
       }),
-    ).toThrow("hostedConsentGrantResetScopes=1");
+    ).toThrow("deviceConnection=1");
+  });
+
+  it("allows preserved contact routing and channel consent facts after reset", () => {
+    expect(() => assertPostResetCounts({
+      ...cleanCounts(),
+      hostedConsentEventNonLaunch: 2,
+      hostedConsentGrantNonLaunch: 1,
+      hostedMemberEmailAuthorization: 1,
+      hostedMemberIdentityPhoneFields: 1,
+      hostedMemberRouting: 1,
+    })).not.toThrow();
   });
 
   it("requires exactly one fresh bootstrap mailbox item after reset", () => {
@@ -170,8 +180,13 @@ describe("reset hosted member runtime script guards", () => {
     ).toThrow("hostedRuntimeLog=0");
   });
 
-  it("builds a reset activation wake without routing channels or raw member id in the event id", () => {
+  it("builds a reset activation wake with preserved member channels and no raw member id in the event id", () => {
     const wake = buildResetMemberActivatedWake({
+      memberChannels: {
+        email: true,
+        linq: true,
+        telegram: false,
+      },
       memberId: "member_fixture",
       occurredAt: "2026-06-04T12:00:00.000Z",
       timeZone: "America/Los_Angeles",
@@ -180,8 +195,8 @@ describe("reset hosted member runtime script guards", () => {
     expect(wake).toMatchObject({
       kind: "member.activated",
       memberChannels: {
-        email: false,
-        linq: false,
+        email: true,
+        linq: true,
         telegram: false,
       },
       occurredAt: "2026-06-04T12:00:00.000Z",
@@ -244,8 +259,8 @@ function cleanCounts(): CountSnapshot {
     hostedAiUsage: 0,
     hostedAiUsageNonSkipped: 0,
     hostedAiUsagePeriod: 0,
-    hostedConsentEventResetScopes: 0,
-    hostedConsentGrantResetScopes: 0,
+    hostedConsentEventNonLaunch: 0,
+    hostedConsentGrantNonLaunch: 0,
     hostedIngressLatencyTrace: 0,
     hostedInvite: 0,
     hostedLinqDailyState: 0,
