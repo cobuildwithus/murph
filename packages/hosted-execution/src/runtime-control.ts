@@ -769,6 +769,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "checkpoint.snapshot_plan",
   "checkpoint.snapshot_size_progress",
   "checkpoint.snapshot_started",
+  // Legacy input only: older runners may post this during deploy skew.
   "workspace.codex_continuity_repaired",
   "workspace.codex_home_snapshot_failed",
   "assistant.device_connect",

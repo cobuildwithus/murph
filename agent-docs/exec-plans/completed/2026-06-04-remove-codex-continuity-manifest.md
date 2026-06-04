@@ -10,6 +10,7 @@ Success criteria:
 - Missing, invalid, archived, or unflushed Codex rollout files do not fail idle checkpoint or full snapshot creation.
 - Restore never clears all Codex resume state because of extra `.codex-hosted/**` files.
 - Restore clears only the assistant session whose referenced rollout is missing or unsafe.
+- Restore prunes `.codex-hosted/**` back to session-referenced rollout files so unrelated Codex auth/cache/log/session residue does not survive malformed or legacy restore.
 - Normal `session-thread` turns get bounded committed transcript fallback when native Codex resume is unavailable or stale-resume fallback starts a fresh thread.
 - Isolated fresh threads do not replay committed transcript history.
 - Focused tests prove the new snapshot, restore, stale-resume, and transcript-fallback behavior.
@@ -49,7 +50,7 @@ Restore:
   restore durable state
   check each session's referenced rollout path directly
   clear only unusable resume records
-  ignore unrelated .codex-hosted files
+  prune unrelated .codex-hosted files without using them to invalidate sessions
 
 Fallback:
   if native resume cannot be used, send bounded recent user/assistant transcript history
@@ -86,9 +87,10 @@ In `packages/assistant-runtime/src/hosted-runtime/workspace-restore.ts`:
   - no Codex resume: leave unchanged
   - no rollout path: clear native resume, because no local provider cache can be proven
   - invalid rollout path: clear only that session resume
+  - rollout filename does not match the saved Codex thread id: clear only that session resume
   - referenced rollout missing or not a regular non-symlink file: clear only that session resume
   - referenced rollout present and safe: leave resume intact
-- Ignore extra `.codex-hosted/**` files.
+- Prune extra `.codex-hosted/**` files after session sanitization, while leaving valid session resume state intact.
 - Keep legacy pre-restore clearing of `.codex-hosted` before applying old base/hot/delta bundles so stale cache from a previous restore cannot mix into the next restore.
 
 ### 3. Add Transcript Fallback For Native Resume Loss
@@ -96,7 +98,7 @@ In `packages/assistant-runtime/src/hosted-runtime/workspace-restore.ts`:
 In `packages/assistant-engine`:
 
 - Add a small provider-history field or reuse `activeTurnMessages` only if the diff stays clear. Prefer a separate field if it avoids labeling committed history as "Active turn so far."
-- Build bounded recent transcript history for normal `session-thread` plans when native resume is unavailable.
+- Build count- and byte-bounded recent transcript history for normal `session-thread` plans when native resume is unavailable.
 - Carry the same bounded history into stale-resume fresh-thread fallback.
 - Filter transcript entries to `kind: "user"` and `kind: "assistant"` only.
 - Do not replay committed history for isolated fresh threads.
@@ -107,7 +109,7 @@ In `packages/assistant-engine`:
 
 ### 4. Update Runtime Logs And Contracts
 
-- Remove `workspace.codex_continuity_repaired` if no producer remains.
+- Remove the `workspace.codex_continuity_repaired` producer; keep the event accepted as legacy input during deploy skew.
 - Keep `workspace.codex_home_snapshot` diagnostics if they still report useful best-effort counts.
 - Reword any `workspace.codex_home_snapshot_failed` semantics so provider-cache flush failure is not treated as checkpoint failure.
 - Update `agent-docs/references/hosted-runtime-protocol.md` and `packages/runtime-state/README.md` to remove "tiny continuity manifest" language.
@@ -118,7 +120,7 @@ Expected test rewrites:
 
 - Snapshot tests should assert exact referenced rollout files are included and manifest files are absent.
 - Missing/invalid/archived/symlink rollout snapshot tests should assert snapshot success plus diagnostics, not snapshot failure.
-- Restore tests should assert extra `.codex-hosted/**` files do not clear valid resume state.
+- Restore tests should assert extra `.codex-hosted/**` files do not clear valid resume state and are pruned after restore.
 - Restore tests should assert missing referenced rollout clears only the affected session.
 - Legacy restore tests should keep stale-cache replacement behavior without manifest verification.
 - Planner/provider tests should invert the current "does not replay committed transcript messages when provider-native resume is unavailable" case for normal `session-thread`.
@@ -140,7 +142,7 @@ Use `pnpm test:diff <changed paths>` if it truthfully covers the final changed s
 
 - Multiple sessions referencing the same rollout dedupe the explicit snapshot file.
 - A safe rollout for one session is preserved even if another session has a missing rollout.
-- Extra `.codex-hosted` files are ignored on warm and cold restore.
+- Extra `.codex-hosted` files are ignored for session invalidation and pruned on warm and cold restore.
 - Symlinks and parent-directory symlinks are never included as rollout files.
 - Prepared flush output that conflicts with session state does not fail the snapshot and does not override the session state.
 - No operator-home root inside the durable snapshot root means provider cache is simply absent; checkpoint still succeeds.
@@ -148,6 +150,7 @@ Use `pnpm test:diff <changed paths>` if it truthfully covers the final changed s
 - Transcript fallback does not include status/error/audit entries as model conversation.
 - Transcript fallback does not duplicate the current user message.
 - Transcript fallback respects existing bounded retention and content serialization.
+- Transcript fallback caps both individual message bytes and aggregate history bytes.
 
 ## Non-Goals
 
@@ -180,16 +183,21 @@ Done:
 - Audited manifest, snapshot, restore, and transcript-fallback call sites.
 - Confirmed manifest/repair removal is simpler and removes the observed unmanifested-file failure mode.
 - Confirmed transcript fallback must land with manifest deletion to preserve user-visible continuity when provider-native resume is unavailable.
+- Removed the hosted Codex continuity manifest, global manifest verifier, and restore repair producer.
+- Kept Codex provider cache as optional session-referenced rollout residue, with restore-time session sanitization and `.codex-hosted` pruning.
+- Added bounded committed transcript fallback only for private `session-thread` fresh starts and stale-resume fallbacks.
+- Preserved legacy `workspace.codex_continuity_repaired` log acceptance for deploy skew without producing that event.
+- Fixed review-found edge cases: wrong-thread rollout filenames clear only that session, legacy/generic bundles cannot retain arbitrary `.codex-hosted` residue, transcript fallback has count plus byte caps, oversized current prompts are de-duped before truncation, and doc metadata is aligned.
+- Ran focused package tests/typechecks, root typecheck, smoke, docs drift, the scoped diff verifier, completion audits, whitespace checks, stale-symbol scan, and scoped privacy scan.
 
 Now:
 
-- Ready for implementation.
+- Plan complete; archiving through the repo finish path.
 
 Next:
 
-- Update the existing coordination-ledger row to in-progress before code changes.
-- Delete manifest/repair first, then add narrow sanitizer and transcript fallback.
-- Run focused tests and required verification.
+- Create the scoped commit and hand off.
 
-Status: planned
+Status: completed
 Updated: 2026-06-04
+Completed: 2026-06-04

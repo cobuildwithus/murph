@@ -1130,6 +1130,50 @@ describe('Codex assistant registry helpers', () => {
     )
   })
 
+  it('serializes committed conversation history before active turn content', () => {
+    expect(
+      resolveAssistantProviderPrompt({
+        activeTurnMessages: [
+          {
+            role: 'assistant',
+            content: 'Draft answer',
+          },
+        ],
+        conversationHistoryMessages: [
+          {
+            role: 'user',
+            content: 'Earlier question',
+          },
+          {
+            role: 'assistant',
+            content: 'Earlier answer',
+          },
+        ],
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+        }),
+        userPrompt: 'Latest question.',
+        workingDirectory: '/tmp/provider-tests',
+      }),
+    ).toBe(
+      [
+        'Recent conversation history:',
+        'User:',
+        'Earlier question',
+        '',
+        'Assistant:',
+        'Earlier answer',
+        '',
+        'Active turn so far:',
+        'Assistant:',
+        'Draft answer',
+        '',
+        'User message:',
+        'Latest question.',
+      ].join('\n'),
+    )
+  })
+
   it('keeps raw Linq delivery targets out of Codex prompt context', () => {
     const prompt = resolveAssistantProviderPrompt({
       providerConfig: normalizeAssistantProviderConfig({
@@ -1418,7 +1462,7 @@ describe('Codex assistant registry helpers', () => {
     )
   })
 
-  it('replays active-turn history only on stale native-resume fallback', async () => {
+  it('replays committed and active-turn history only on stale native-resume fallback', async () => {
     const traceEvents: AssistantProviderTraceEvent[] = []
 
     codexAppServerMocks.executeCodexAppServerTurn
@@ -1450,6 +1494,16 @@ describe('Codex assistant registry helpers', () => {
           role: 'assistant',
         },
       ],
+      conversationHistoryMessages: [
+        {
+          content: 'earlier committed user context',
+          role: 'user',
+        },
+        {
+          content: 'earlier committed assistant context',
+          role: 'assistant',
+        },
+      ],
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
@@ -1464,12 +1518,13 @@ describe('Codex assistant registry helpers', () => {
 
     expect(attempt.ok).toBe(true)
     expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(2)
-    expect(
-      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0],
-    ).toMatchObject({
-      prompt: expect.not.stringContaining('Active turn so far:'),
+    const primaryAppServerInput =
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
+    expect(primaryAppServerInput).toMatchObject({
       resumeSessionId: 'stale-thread',
     })
+    expect(primaryAppServerInput?.prompt).not.toContain('Active turn so far:')
+    expect(primaryAppServerInput?.prompt).not.toContain('Recent conversation history:')
     expect(
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0],
     ).toMatchObject({
@@ -1479,6 +1534,9 @@ describe('Codex assistant registry helpers', () => {
     expect(
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]?.prompt,
     ).toContain('draft before interruption')
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]?.prompt,
+    ).toContain('earlier committed assistant context')
     if (!attempt.ok) {
       throw new Error('expected successful provider attempt')
     }
@@ -1491,6 +1549,8 @@ describe('Codex assistant registry helpers', () => {
     )).toMatchObject({
       activeTurnHistoryCount: 0,
       activeTurnHistoryPresent: false,
+      conversationHistoryCount: 0,
+      conversationHistoryPresent: false,
       providerPromptDiagnosticKind: 'primary',
       refreshThreadInstructions: false,
       resumeCodexThreadIdPresent: true,
@@ -1501,6 +1561,8 @@ describe('Codex assistant registry helpers', () => {
     )).toMatchObject({
       activeTurnHistoryCount: 2,
       activeTurnHistoryPresent: true,
+      conversationHistoryCount: 2,
+      conversationHistoryPresent: true,
       providerPromptDiagnosticKind: 'fresh-thread-fallback',
       refreshThreadInstructions: true,
       resumeCodexThreadIdPresent: false,

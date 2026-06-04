@@ -1304,6 +1304,13 @@ describe("hosted runtime control contracts", () => {
       level: "info",
       phase: "outbox",
     }).eventCode).toBe("outbox.delivery_finished");
+    expect(parseHostedRuntimeLogEntry({
+      at: "2026-04-26T00:00:07.000Z",
+      component: "workspace",
+      eventCode: "workspace.codex_continuity_repaired",
+      level: "warn",
+      phase: "restore",
+    }).eventCode).toBe("workspace.codex_continuity_repaired");
   });
 
   it("parses runner nudge and status without run identifiers or committed sequence targets", () => {

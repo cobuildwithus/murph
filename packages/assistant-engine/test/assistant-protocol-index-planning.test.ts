@@ -409,7 +409,7 @@ describe('assistant protocol index planning', () => {
     expect(resumedPlan.prepareFreshThreadFallback).toEqual(expect.any(Function))
   })
 
-  it('does not replay committed transcript messages when provider-native resume is unavailable', async () => {
+  it('replays bounded committed transcript messages when provider-native resume is unavailable', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -458,11 +458,187 @@ describe('assistant protocol index planning', () => {
         },
         route: createRoute(),
         session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resumeCodexThreadId).toBeNull()
+      expect(plan.conversationHistoryMessages).toEqual([
+        {
+          content: 'Earlier welcome.',
+          role: 'assistant',
+        },
+        ...Array.from({ length: 20 }, (_, index) => ({
+          content: `Historical message ${index}`,
+          role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
+        })),
+      ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('bounds committed transcript replay by message and aggregate bytes', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-transcript-bytes-'))
+    const session = createSession({
+      turnCount: 1,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(
+        vault,
+        session.sessionId,
+        Array.from({ length: 5 }, (_, index) => ({
+          kind: 'user',
+          text: `message-${index}: ${'x'.repeat(6_000)}`,
+        })),
+      )
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-05-04',
+          currentTimeZone: 'Asia/Kuala_Lumpur',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      const history = plan.conversationHistoryMessages ?? []
+      expect(history).toHaveLength(3)
+      expect(history[0]?.content).toEqual(expect.stringMatching(/^message-2:/u))
+      expect(history[2]?.content).toEqual(expect.stringMatching(/^message-4:/u))
+      let totalBytes = 0
+      for (const message of history) {
+        const content = message.content
+        if (typeof content !== 'string') {
+          throw new Error('Expected text-only transcript fallback history.')
+        }
+        const byteLength = Buffer.byteLength(content, 'utf8')
+        expect(byteLength).toBeLessThanOrEqual(4_000)
+        totalBytes += byteLength
+      }
+      expect(totalBytes).toBeLessThanOrEqual(12_000)
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('does not replay an oversized committed current user prompt', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-current-prompt-'))
+    const session = createSession({
+      turnCount: 1,
+    })
+    const currentPrompt = `Current prompt: ${'x'.repeat(6_000)}`
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          kind: 'assistant',
+          text: 'Earlier answer.',
+        },
+        {
+          kind: 'user',
+          text: currentPrompt,
+        },
+      ])
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          prompt: currentPrompt,
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-05-04',
+          currentTimeZone: 'Asia/Kuala_Lumpur',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.conversationHistoryMessages).toEqual([
+        {
+          content: 'Earlier answer.',
+          role: 'assistant',
+        },
+      ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('does not replay committed transcript messages when sensitive context is disallowed', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-public-transcript-'))
+    const session = createSession({
+      turnCount: 1,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          kind: 'user',
+          text: 'Prior sensitive context.',
+        },
+        {
+          kind: 'assistant',
+          text: 'Prior assistant context.',
+        },
+      ])
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-05-04',
+          currentTimeZone: 'Asia/Kuala_Lumpur',
+        },
+        route: createRoute(),
+        session,
         sharedPlan: createSharedPlan(),
       })
 
       expect(plan.resumeCodexThreadId).toBeNull()
-      expect('conversationMessages' in plan).toBe(false)
+      expect(plan.conversationHistoryMessages).toBeUndefined()
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -513,7 +689,136 @@ describe('assistant protocol index planning', () => {
       })
 
       expect(plan.resumeCodexThreadId).toBeNull()
-      expect('conversationMessages' in plan).toBe(false)
+      expect(plan.conversationHistoryMessages).toBeUndefined()
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('prepares committed transcript messages for stale native-resume fallback', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-resume-fallback-'))
+    const route = createRoute()
+    const session = createSession({
+      resumeState: {
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        threadId: 'thread-resume',
+      },
+      turnCount: 1,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          kind: 'user',
+          text: 'Earlier protocol context.',
+        },
+        {
+          kind: 'assistant',
+          text: 'Got it.',
+        },
+        {
+          kind: 'user',
+          text: 'What supported experiment protocols do we have?',
+        },
+      ])
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-05-04',
+          currentTimeZone: 'Asia/Kuala_Lumpur',
+        },
+        route,
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resumeCodexThreadId).toBe('thread-resume')
+      expect(plan.conversationHistoryMessages).toBeUndefined()
+      await expect(plan.prepareFreshThreadFallback?.()).resolves.toMatchObject({
+        conversationHistoryMessages: [
+          {
+            content: 'Earlier protocol context.',
+            role: 'user',
+          },
+          {
+            content: 'Got it.',
+            role: 'assistant',
+          },
+        ],
+      })
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('does not prepare committed transcript messages for public notification fallback', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-notification-public-'))
+    const route = createRoute()
+    const session = createSession({
+      resumeState: {
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        threadId: 'thread-resume',
+      },
+      turnCount: 1,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          kind: 'user',
+          text: 'Prior sensitive context.',
+        },
+        {
+          kind: 'assistant',
+          text: 'Prior assistant context.',
+        },
+      ])
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          vault,
+        },
+        profile: {
+          promptProfile: 'notification-decision',
+          threadScope: 'session-thread',
+          toolProfile: 'notification-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-05-04',
+          currentTimeZone: 'Asia/Kuala_Lumpur',
+        },
+        route,
+        session,
+        sharedPlan: createSharedPlan(),
+      })
+
+      expect(plan.resumeCodexThreadId).toBe('thread-resume')
+      expect(plan.conversationHistoryMessages).toBeUndefined()
+      await expect(plan.prepareFreshThreadFallback?.()).resolves.toMatchObject({
+        conversationHistoryMessages: undefined,
+      })
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -674,5 +979,21 @@ function createSharedPlan(
     persistUserPromptOnFailure: false,
     requestedWorkingDirectory: '/work',
     ...overrides,
+  }
+}
+
+function createPrivateSharedPlan(
+  overrides: Partial<AssistantTurnSharedPlan> = {},
+): AssistantTurnSharedPlan {
+  const plan = createSharedPlan({
+    ...overrides,
+    allowSensitiveHealthContext: true,
+  })
+  return {
+    ...plan,
+    conversationPolicy: {
+      ...plan.conversationPolicy,
+      allowSensitiveHealthContext: true,
+    },
   }
 }

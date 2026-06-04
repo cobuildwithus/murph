@@ -125,7 +125,34 @@ function sanitizeAssistantModelContentParts(
 export function resolveAssistantProviderFlatPromptActiveTurnSection(
   input: AssistantProviderTurnExecutionInput,
 ): string | null {
-  const activeTurnLines = (input.activeTurnMessages ?? []).flatMap((message) => {
+  const activeTurnLines = serializeAssistantConversationMessages(
+    input.activeTurnMessages ?? [],
+  )
+
+  return activeTurnLines.length > 0
+    ? `Active turn so far:\n${activeTurnLines.join('\n\n')}`
+    : null
+}
+
+export function resolveAssistantProviderFlatPromptConversationHistorySection(
+  input: AssistantProviderTurnExecutionInput,
+): string | null {
+  const conversationHistoryLines = serializeAssistantConversationMessages(
+    input.conversationHistoryMessages ?? [],
+  )
+
+  return conversationHistoryLines.length > 0
+    ? `Recent conversation history:\n${conversationHistoryLines.join('\n\n')}`
+    : null
+}
+
+function serializeAssistantConversationMessages(
+  messages: ReadonlyArray<{
+    content: string | AssistantUserMessageContentPart[]
+    role: 'assistant' | 'user'
+  }>,
+): string[] {
+  return messages.flatMap((message) => {
     const content = Array.isArray(message.content)
       ? serializeAssistantConversationContent(message.content)
       : message.content.trim()
@@ -136,10 +163,6 @@ export function resolveAssistantProviderFlatPromptActiveTurnSection(
     const label = message.role === 'assistant' ? 'Assistant' : 'User'
     return [`${label}:\n${content}`]
   })
-
-  return activeTurnLines.length > 0
-    ? `Active turn so far:\n${activeTurnLines.join('\n\n')}`
-    : null
 }
 
 function serializeAssistantConversationContent(
@@ -170,6 +193,7 @@ export function resolveAssistantProviderPrompt(
   }
 
   return [
+    resolveAssistantProviderFlatPromptConversationHistorySection(input),
     resolveAssistantProviderFlatPromptActiveTurnSection(input),
     resolveAssistantProviderComposedUserContent(input, {
       labelUserPrompt: true,

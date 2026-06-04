@@ -53,18 +53,21 @@ export interface AssistantProviderCapabilities {
   supportsRichUserMessageContent: boolean
 }
 
+export interface AssistantProviderConversationMessage {
+  content: string | AssistantUserMessageContentPart[]
+  role: 'assistant' | 'user'
+}
+
 export interface AssistantProviderTurnInput {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   activeTurnId?: string | null
-  activeTurnMessages?: ReadonlyArray<{
-    content: string | AssistantUserMessageContentPart[]
-    role: 'assistant' | 'user'
-  }>
+  activeTurnMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   activeTurnSessionId?: string | null
   abortSignal?: AbortSignal
   approvalPolicy?: AssistantApprovalPolicy | null
   codexCommand?: string | null
   codexHome?: string | null
+  conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   developerInstructions?: string | null
   env?: NodeJS.ProcessEnv
   model?: string | null
@@ -97,6 +100,7 @@ export interface AssistantProviderTurnInput {
 }
 
 export interface AssistantProviderFreshThreadFallbackInput {
+  conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   developerInstructions?: string | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null
@@ -110,12 +114,10 @@ export type AssistantProviderFreshThreadFallbackResolver =
 export interface AssistantProviderTurnExecutionInput {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   activeTurnId?: string | null
-  activeTurnMessages?: ReadonlyArray<{
-    content: string | AssistantUserMessageContentPart[]
-    role: 'assistant' | 'user'
-  }>
+  activeTurnMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   activeTurnSessionId?: string | null
   abortSignal?: AbortSignal
+  conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   env?: NodeJS.ProcessEnv
   developerInstructions?: string | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null

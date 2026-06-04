@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   encodeHostedBundleBase64,
-  snapshotHostedExecutionContextUnsafeForFixture,
+  snapshotHostedExecutionContext,
 } from "@murphai/runtime-state/node";
 
 import {
@@ -32,7 +32,7 @@ const EXPECTED_TRANSCRIPT_SNIPPET = "hello";
 
 async function main(): Promise<void> {
   try {
-    const snapshot = await snapshotHostedExecutionContextUnsafeForFixture({
+    const snapshot = await snapshotHostedExecutionContext({
       vaultRoot: FIXTURE_VAULT_ROOT,
     });
     const bundle = encodeHostedBundleBase64(snapshot.bundle);

@@ -441,6 +441,8 @@ async function executeAssistantCodexAttempt(input: {
       sandbox: attemptPlan.route.providerOptions.sandbox,
       approvalPolicy: attemptPlan.route.providerOptions.approvalPolicy,
       activeTurnMessages: attemptPlan.routePlan.activeTurnMessages,
+      conversationHistoryMessages:
+        attemptPlan.routePlan.conversationHistoryMessages,
       onEvent: executionPlan.input.onProviderEvent ?? undefined,
       profile: attemptPlan.route.providerOptions.profile,
       oss: attemptPlan.route.providerOptions.oss,

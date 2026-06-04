@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-06-03
+Last verified: 2026-06-04
 
 ## Decision
 
@@ -472,6 +472,9 @@ or workspace pointer. Provider-native continuity remains a workspace snapshot
 concern: if a container dies before the next idle-shutdown direct-R2 v2 snapshot,
 restore must still be correct from durable mailbox, transcript, and assistant
 runtime state even if provider-native resume optimization is unavailable.
+Fresh-thread starts and stale native-resume fallback may include bounded recent
+committed transcript history; primary native-resume attempts do not replay that
+history into the provider prompt.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
 state. `apps/web` assesses freshness from the latest replica ref, checkpoint
@@ -524,9 +527,14 @@ appropriate for wrong-user authority, invalid auth, undecryptable mailbox
 payloads, mismatched supplied sidecar refs, and lease/CAS conflicts.
 
 Hosted snapshots preserve only active `.codex-hosted/sessions/YYYY/MM/DD/rollout-*.jsonl`
-files referenced by live assistant resume state plus a tiny continuity manifest.
-They do not preserve Codex logs, SQLite metadata, prompt history, cache/temp,
-auth/credential/key/cert material, unreferenced sessions, or archived sessions.
+files referenced by live assistant resume state. They do not write a Codex
+continuity manifest, and they do not preserve Codex logs, SQLite metadata,
+prompt history, cache/temp, auth/credential/key/cert material, unreferenced
+sessions, or archived sessions. Restore sanitizes assistant session native
+resume state by clearing Codex resume metadata when the referenced rollout file
+is absent, does not match the saved Codex thread id, or is not a regular file
+under `.codex-hosted`; it then prunes restored `.codex-hosted` contents back to
+the surviving session-referenced rollout files.
 Checkpoint diagnostics for Codex continuity may expose only thread counts, byte
 totals, missing/invalid counters, and keyed hashed rollout-relative names when
 the hosted log fingerprint secret is configured; raw Codex home paths,

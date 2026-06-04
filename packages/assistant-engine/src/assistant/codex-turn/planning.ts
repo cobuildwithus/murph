@@ -43,6 +43,9 @@ import {
 import {
   readAssistantCodexResume,
 } from '../conversation-persistence.js'
+import {
+  listAssistantTranscriptEntries,
+} from '../store.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -76,6 +79,7 @@ export interface AssistantRouteTurnPlan {
   cliEnv: NodeJS.ProcessEnv
   developerInstructions: string | null
   activeTurnMessages?: readonly AssistantActiveTurnProviderHistoryMessage[]
+  conversationHistoryMessages?: readonly AssistantActiveTurnProviderHistoryMessage[]
   diagnosticsPolicy: AssistantDiagnosticsPolicy
   freshThreadFallback?: AssistantRouteFreshThreadFallbackPlan
   prepareFreshThreadFallback?: () => Promise<AssistantRouteFreshThreadFallbackPlan | null>
@@ -159,8 +163,13 @@ const ASSISTANT_ROUTE_PLANNING_SPAN_STAGES: readonly {
     stage: 'supported_experiment_protocols',
   },
 ]
+const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT = 24
+const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_MESSAGE_BYTES = 4_000
+const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_TOTAL_BYTES = 12_000
+const assistantConversationHistoryTextEncoder = new TextEncoder()
 
 export interface AssistantRouteFreshThreadFallbackPlan {
+  conversationHistoryMessages?: readonly AssistantActiveTurnProviderHistoryMessage[]
   developerInstructions: string | null
   sessionContext?: {
     binding: AssistantSession['binding']
@@ -405,6 +414,18 @@ export async function resolveAssistantRouteTurnPlan(input: {
     }),
   )
   const activeTurnHistory = input.activeTurnHistory ?? null
+  const shouldUseCommittedTranscriptHistory =
+    input.sharedPlan.allowSensitiveHealthContext &&
+    input.profile.threadScope === 'session-thread'
+  const resolveCommittedTranscriptHistoryMessages = async () =>
+    shouldUseCommittedTranscriptHistory
+      ? await resolveAssistantCommittedTranscriptHistoryMessages({
+          activeTurnHistory,
+          currentUserPrompt: input.input.prompt,
+          sessionId: input.session.sessionId,
+          vault: input.input.vault,
+        })
+      : []
   const nativeResumeEnabled =
     input.profile.threadScope === 'session-thread'
   const candidateResumeCodexThreadId =
@@ -423,6 +444,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     promptProfile: input.profile.promptProfile,
   })
   const resumeCodexThreadId = threadPlan.resumeCodexThreadId
+  const conversationHistoryMessages = resumeCodexThreadId === null
+    ? await resolveCommittedTranscriptHistoryMessages()
+    : []
   const shouldInjectBootstrapContext = threadPlan.shouldInjectBootstrapContext
   const shouldPrepareBootstrapContext = shouldInjectBootstrapContext
   const shouldPrepareAnyBootstrapContext = shouldPrepareBootstrapContext
@@ -546,6 +570,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     ? bootstrapAssistantCliContract
     : null
   const buildFreshThreadFallbackPlan = async () => {
+    const fallbackConversationHistoryMessages =
+      await resolveCommittedTranscriptHistoryMessages()
     const fallbackAssistantCliContract =
       input.profile.promptProfile === 'conversation'
         ? await readAssistantCliSurfaceBootstrapContext({
@@ -561,6 +587,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
     })
 
     return {
+      conversationHistoryMessages:
+        fallbackConversationHistoryMessages.length > 0
+          ? fallbackConversationHistoryMessages
+          : undefined,
       developerInstructions: normalizeNullableString(
         buildDeveloperInstructions(fallbackPromptResult),
       ),
@@ -610,6 +640,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
     cliEnv: input.sharedPlan.cliAccess.env,
     developerInstructions: normalizeNullableString(developerInstructions),
     activeTurnMessages: activeTurnHistory?.messages ?? undefined,
+    conversationHistoryMessages:
+      conversationHistoryMessages.length > 0
+        ? conversationHistoryMessages
+        : undefined,
     diagnosticsPolicy,
     ...(prepareFreshThreadFallback ? { prepareFreshThreadFallback } : {}),
     onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
@@ -649,6 +683,149 @@ export async function resolveAssistantRouteTurnPlan(input: {
     systemPrompt,
     turnContextPrompt,
   }
+}
+
+async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
+  activeTurnHistory: AssistantActiveTurnProviderHistory | null
+  currentUserPrompt: string
+  sessionId: string
+  vault: string
+}): Promise<readonly AssistantActiveTurnProviderHistoryMessage[]> {
+  let entries: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>
+  try {
+    entries = await listAssistantTranscriptEntries(input.vault, input.sessionId)
+  } catch {
+    return []
+  }
+
+  type TranscriptHistoryCandidate = {
+    message: AssistantActiveTurnProviderHistoryMessage
+    userPromptKey: string | null
+  }
+
+  const messages = entries.flatMap((entry): TranscriptHistoryCandidate[] => {
+    if (entry.kind !== 'assistant' && entry.kind !== 'user') {
+      return []
+    }
+    const rawContent = normalizeNullableString(entry.text)
+    const content = limitAssistantConversationHistoryTextBytes(
+      rawContent,
+      ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_MESSAGE_BYTES,
+    )
+    return content
+      ? [{
+          message: {
+            content,
+            role: entry.kind,
+          },
+          userPromptKey: entry.kind === 'user' && rawContent
+            ? normalizeAssistantConversationHistoryText(rawContent)
+            : null,
+        }]
+      : []
+  })
+
+  const currentPromptKey = normalizeAssistantConversationHistoryText(input.currentUserPrompt)
+  const activeTurnUserPromptKeys = new Set(
+    (input.activeTurnHistory?.messages ?? []).flatMap((message) => {
+      if (message.role !== 'user' || typeof message.content !== 'string') {
+        return []
+      }
+      const normalized = normalizeAssistantConversationHistoryText(message.content)
+      return normalized ? [normalized] : []
+    }),
+  )
+
+  while (messages.length > 0) {
+    const lastMessage = messages[messages.length - 1]
+    if (
+      !lastMessage ||
+      lastMessage.message.role !== 'user' ||
+      typeof lastMessage.message.content !== 'string'
+    ) {
+      break
+    }
+    const lastUserPromptKey =
+      lastMessage.userPromptKey ??
+      normalizeAssistantConversationHistoryText(lastMessage.message.content)
+    if (
+      !lastUserPromptKey ||
+      (currentPromptKey && lastUserPromptKey === currentPromptKey) ||
+      activeTurnUserPromptKeys.has(lastUserPromptKey)
+    ) {
+      messages.pop()
+      continue
+    }
+    break
+  }
+
+  return limitAssistantConversationHistoryMessages(
+    messages.map(({ message }) => message),
+  )
+}
+
+function normalizeAssistantConversationHistoryText(value: string): string | null {
+  const normalized = normalizeNullableString(value)
+  return normalized?.replace(/\s+/gu, ' ') ?? null
+}
+
+function limitAssistantConversationHistoryMessages(
+  messages: readonly AssistantActiveTurnProviderHistoryMessage[],
+): AssistantActiveTurnProviderHistoryMessage[] {
+  const countLimited = messages.slice(-ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT)
+  const retained: AssistantActiveTurnProviderHistoryMessage[] = []
+  let retainedBytes = 0
+
+  for (const message of [...countLimited].reverse()) {
+    if (typeof message.content !== 'string') {
+      continue
+    }
+    const messageBytes = assistantConversationHistoryUtf8Bytes(message.content)
+    if (messageBytes === 0) {
+      continue
+    }
+    if (
+      retainedBytes + messageBytes >
+      ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_TOTAL_BYTES
+    ) {
+      break
+    }
+    retained.push(message)
+    retainedBytes += messageBytes
+  }
+
+  return retained.reverse()
+}
+
+function limitAssistantConversationHistoryTextBytes(
+  value: string | null,
+  maxBytes: number,
+): string | null {
+  if (!value) {
+    return null
+  }
+  if (assistantConversationHistoryUtf8Bytes(value) <= maxBytes) {
+    return value
+  }
+
+  const codePoints = Array.from(value)
+  let low = 0
+  let high = codePoints.length
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2)
+    const candidate = codePoints.slice(0, mid).join('').trimEnd()
+    if (assistantConversationHistoryUtf8Bytes(candidate) <= maxBytes) {
+      low = mid
+    } else {
+      high = mid - 1
+    }
+  }
+
+  return normalizeNullableString(codePoints.slice(0, low).join('').trimEnd())
+}
+
+function assistantConversationHistoryUtf8Bytes(value: string): number {
+  return assistantConversationHistoryTextEncoder.encode(value).byteLength
 }
 
 async function measureRoutePlanningAsync<TResult>(

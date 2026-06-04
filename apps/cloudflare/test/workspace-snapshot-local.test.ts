@@ -17,8 +17,6 @@ import {
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
   collectHostedWorkspaceSnapshotArchivePlan,
-  resolveAssistantStatePaths,
-  verifyRestoredHostedCodexContinuityManifest,
 } from "@murphai/runtime-state/node";
 import {
   createEncryptedWorkspaceSnapshotFile,
@@ -132,9 +130,6 @@ describe("workspace snapshot local restore", () => {
 
       const restoredVaultRoot = path.join(restoredDurableRoot, "vault");
       const restoredOperatorHomeRoot = path.join(restoredDurableRoot, "home");
-      await verifyRestoredHostedCodexContinuityManifest(restoredOperatorHomeRoot, {
-        assistantStateRoot: resolveAssistantStatePaths(restoredVaultRoot).assistantStateRoot,
-      });
       await expect(readFile(path.join(restoredVaultRoot, "note.md"), "utf8"))
         .resolves.toBe("selected workspace\n");
       await expect(readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", rolloutRelativePath), "utf8"))

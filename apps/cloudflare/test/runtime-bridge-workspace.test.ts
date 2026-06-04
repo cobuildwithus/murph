@@ -494,7 +494,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const entries = listEncryptedWorkspaceSnapshotTarEntries(uploaded!.bytes, snapshotRef);
     expect(entries).toContain("vault/note.md");
     expect(entries).toContain("vault/.runtime/operations/assistant/sessions/session.json");
-    expect(entries).toContain("home/.murph/hosted-codex-continuity.json");
     expect(entries).toContain(`home/.codex-hosted/${rolloutRelativePath}`);
     expect(entries).not.toContain("vault/.runtime/projections/query.sqlite");
     expect(entries).not.toContain("vault/.runtime/cache/cache.txt");
@@ -1237,7 +1236,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(writeLog).toHaveBeenCalled();
   });
 
-  it("fails idle shutdown full snapshots that have dangling Codex resume state", async () => {
+  it("snapshots idle shutdown state with dangling Codex resume diagnostics", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));
     cleanupPaths.push(vaultRoot, baseVaultRoot);
@@ -1303,17 +1302,14 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
-      .rejects.toThrow("Hosted Codex continuity snapshot is missing required rollout state.");
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
 
     expect(putArtifact).not.toHaveBeenCalled();
-    expect(writeLog.mock.calls.flatMap(([request]) => request.entries)).toContainEqual(
+    expect(snapshotRef.objectKey).toContain("/workspace-snapshots/");
+    expect(writeLog.mock.calls.flatMap(([request]) => request.entries)).not.toContainEqual(
       expect.objectContaining({
         eventCode: "checkpoint.snapshot_failed",
-        redactedJson: expect.objectContaining({
-          safeErrorDetail: "Hosted Codex continuity snapshot is missing required rollout state.",
-          snapshotMode: "workspace_snapshot_v2",
-        }),
       }),
     );
   });
