@@ -15,7 +15,7 @@ Help the user set up a bounded experiment that fits their life, then create the 
 - Safety addressed before the run is created.
 - Run record captures protocol, schedule, measurement, stop conditions, and reminder preference.
 - After creating a protocol-linked run, the user gets the matching experiment page link so they can open the protocol and later results view.
-- Reminder setup is handled as an explicit part of experiment onboarding, and a one-shot first-session prep reminder is scheduled when the first intervention session time and a deliverable route are resolved.
+- Reminder setup is handled as an explicit part of experiment onboarding, and first-session instruction is resolved either in the current reply or through a one-shot first-session prep reminder when the first intervention session time and a deliverable route are resolved.
 
 ## Collaboration style
 
@@ -46,6 +46,11 @@ Match the user's energy. Brief answers deserve brief follow-ups. Never restate i
 
 ## First-session prep reminders
 
+- First-session support is not just a time reminder. Before onboarding is complete, resolve how the user will know what to do the first time:
+  - If the user is starting now or today and seems ready, give a brief first-session walkthrough in the current reply after creating the run.
+  - If the first session is later, the one-shot prep automation must instruct the scheduled assistant to give that brief walkthrough at reminder time.
+- The first-session walkthrough should use the saved experiment, the Health Commons protocol page, and the user's setup answers. Summarize only what the user needs for session one: first-session guidance, the starting branch, the pain ceiling or stop rule, the key steps for today, and what to log during or after plus next morning.
+- Do not make the reminder merely say "you have a session" or "I can walk you through it." Include the compact walkthrough by default, then offer to go deeper if needed.
 - During experiment onboarding, actively resolve the user's first planned intervention session date and time. Ask a direct, lightweight reminder setup question unless the user already gave a usable time, explicitly declined reminders, or reminder delivery is not possible in the current route.
 - Do not bury reminder setup in a summary or leave it as an optional afterthought. Once safety, protocol fit, and basic schedule are clear, ask for the first session time in plain language so Murph can remind them before the first session.
 - Use the user's canonical timezone and current local date from the prompt context to resolve phrases like "tomorrow around 5."
@@ -91,6 +96,7 @@ Match the user's energy. Brief answers deserve brief follow-ups. Never restate i
 - Include the current route fields, not just `--channel`: pass `--delivery-target`, `--identity-id`, `--participant-id`, and/or `--thread-id` when they are available from the current conversation route. For iMessage, use the internal channel `linq` and preserve the bound participant/thread route fields.
 - Do not create a scheduled first-session prep reminder with only a bare channel when no deliverable target or binding route is available. Set up the experiment without the prep reminder, and tell the user they can give a channel and time later.
 - First-session prep automation instructions must tell the scheduled assistant to read `vault-cli experiment show <id> --format json`, `vault-cli commons protocol show <key-or-route> --format json`, and `vault-cli experiment progress <id> --as-of <firstSessionDate> --format json` before sending. The instructions should skip if the experiment is inactive, completed intervention sessions are already present, the reminder was cancelled or moved, or the saved plan no longer matches the scheduled first session.
+- First-session prep automation instructions must also include this outcome: "This is the user's first time doing this experiment. If sending, give a brief first-session walkthrough, not just a reminder." Tell the scheduled assistant to derive the walkthrough from `experimentOnboarding.planDefaults.firstSessionGuidance`, protocol steps or tips, stop conditions, logging fields, and saved setup answers. Keep it short and do not dump the full protocol.
 - Protocol `assistantPolicy.askBeforeCreatingAutomations` applies to recurring or post-session support, not to this automatic first-session prep reminder when the first session time is resolved.
 
 ## Stop rules

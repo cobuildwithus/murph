@@ -785,6 +785,10 @@ describe('assistant notification decision guidance', () => {
     )
     expect(prompt).toContain('Send the prep reminder when those direct checks pass.')
     expect(prompt).toContain(
+      'The sent message must include a compact first-time walkthrough: what to do first, what to keep easy, the pain or stop rule, and what to log during or after plus next morning.',
+    )
+    expect(prompt).toContain('Do not only offer to walk the user through it.')
+    expect(prompt).toContain(
       'Default to skip for experiment notifications other than first-session prep unless the due check says `notify`',
     )
   })
