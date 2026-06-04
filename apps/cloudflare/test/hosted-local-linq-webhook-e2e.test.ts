@@ -828,7 +828,7 @@ async function startLinqScenario(
     additionalEnv: {
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqWebhookLocalInboundAllowlist(),
-      LINQ_API_BASE_URL: requireLinqStub().containerBaseUrl,
+      LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",

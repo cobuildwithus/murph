@@ -3,6 +3,9 @@ import { createHmac } from "node:crypto";
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
+import {
+  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+} from "@murphai/contracts";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -14,6 +17,7 @@ import {
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
   buildHostedLinqInboundEvent,
+  buildHostedLinqSignupWelcomeWake,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
   type ObservedLinqRequest,
@@ -26,7 +30,6 @@ const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const setupReplyText = "Done - I will remind you here in about five minutes.";
 const setupRequestText = "Remind me here in about five minutes to go to sleep.";
-const scheduledChatId = `chat_local_scheduled_reminder_${Date.now()}`;
 const scheduledReminderLeadMs = 300_000;
 const scheduledReminderMinimumRunwayMs = 45_000;
 const scheduledReminderSendWaitMs = 120_000;
@@ -64,17 +67,37 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     await requireScenario().runWake(buildActivationWake(userId), userId);
     const activatedStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(activatedStatus.lastErrorCode ?? null).toBeNull();
-    await requireScenario().bindActiveHostedLinqHomeChat({
-      chatId: scheduledChatId,
-      memberId: userId,
-      recipientPhone: memberPhone,
-    });
 
     const unscheduledStatus = await requireScenario().harness.readUserStatus(userId);
     expect(unscheduledStatus.workspace?.nextWakeAt ?? null).toBeNull();
     expect(unscheduledStatus.nextAlarmAt ?? null).toBeNull();
 
+    requireScenario().queueAssistantResponses([
+      buildHostedAssistantNotificationDecisionResponse({
+        privateSummary: "deliver signup welcome",
+        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      }),
+    ]);
+    await requireScenario().runWake(
+      buildHostedLinqSignupWelcomeWake({
+        eventId: `assistant.notification.requested:local:${userId}:evt_linq_scheduled_chat`,
+        userId,
+      }),
+      userId,
+    );
+    const welcomeSendPromise = requireLinqStub().waitForSend({
+      expectedPath: requireLinqStub().createChatPath,
+      matchRequest: requireLinqStub().createCreateChatRequestMatcher(userId),
+      scenario: requireScenario(),
+      userId,
+    });
+    const welcomeStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(welcomeStatus.lastErrorCode ?? null).toBeNull();
+    await welcomeSendPromise;
+
+    const scheduledChatId = requireLinqStub().requireObservedChatId(userId);
     const reminderPath = `/chats/${encodeURIComponent(scheduledChatId)}/messages`;
+    const setupReplyBaselineCount = requireLinqStub().countObservedSends(reminderPath);
     requireScenario().queueAssistantResponses([
       buildHostedAssistantAutomationSaveDirectiveResponse({
         dueAtIso: scheduledReminderTimes.dueAtIso,
@@ -97,6 +120,15 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       reason: "wake-appended-active-member",
     });
     await requireScenario().waitForLatestPendingWake(userId);
+    const setupReplySend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: setupReplyBaselineCount,
+      expectedPath: reminderPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(setupReplySend)).toBe(setupReplyText);
+    const setupStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(setupStatus.lastErrorCode ?? null).toBeNull();
     await waitForHostedWorkspaceNextWakeAt({
       expectedNextWakeAt: scheduledReminderTimes.dueAtIso,
       userId,
@@ -131,7 +163,7 @@ async function startScenario(): Promise<void> {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
-      LINQ_API_BASE_URL: requireLinqStub().containerBaseUrl,
+      LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",

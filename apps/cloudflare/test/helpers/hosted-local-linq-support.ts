@@ -43,6 +43,7 @@ const hostedLocalLinqObservedRequestWaitTimeoutMs = 180_000;
 const hostedLocalLinqWaitExpireAfterInFlightMs = 30_000;
 const hostedLocalLinqWaitNudgeAfterMailboxLagMs = 15_000;
 const hostedLocalLinqWaitAlarmAfterPendingDeliveryMs = 2_000;
+const hostedLocalRunnerProviderHost = "host.docker.internal";
 
 type HostedLinqInboundPartInput =
   | {
@@ -76,6 +77,7 @@ export interface HostedLocalLinqStub {
   readObservedMessageText(request: ObservedLinqRequest): string | null;
   requireObservedChatId(userId: string): string;
   requireLatestObservedMessageId(chatId: string): string;
+  runnerBaseUrl: string;
   stop(): Promise<void>;
   waitForAdditionalRequest(input: {
     baselineCount: number;
@@ -308,6 +310,7 @@ export async function startHostedLocalLinqStub(input: {
   const baseUrl = `http://127.0.0.1:${tcpPort}`;
   const containerBaseUrl =
     `http://${formatHostedLocalLinqUrlHost(resolveHostedLocalLinqContainerHost())}:${tcpPort}`;
+  const runnerBaseUrl = `http://${hostedLocalRunnerProviderHost}:${tcpPort}`;
   attachmentDownloadBaseUrl = `${baseUrl}${linqAttachmentDownloadBasePath}`;
   attachmentDownloadContainerBaseUrl =
     `${containerBaseUrl}${linqAttachmentDownloadBasePath}`;
@@ -447,6 +450,7 @@ export async function startHostedLocalLinqStub(input: {
 
       return latestMessageId;
     },
+    runnerBaseUrl,
     stop: async () => {
       await stopHttpStubServer(activeServer);
       server = null;

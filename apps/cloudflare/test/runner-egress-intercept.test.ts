@@ -2763,6 +2763,46 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
   });
 
+  it("forwards hosted-local Linq provider requests to the explicit Linux bridge alias", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://host.docker.internal:4011/chats", {
+        body: JSON.stringify({
+          from: "+15550000000",
+          message: { parts: [{ type: "text", value: "hello" }] },
+          to: ["+15550000001"],
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "172.17.0.1",
+        LINQ_API_BASE_URL: "http://host.docker.internal:4011",
+        LINQ_API_TOKEN: "linq-worker-secret",
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe("http://172.17.0.1:4011/chats");
+    expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
+  });
+
   it("routes default Linq provider host egress to the configured custom upstream", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
@@ -3943,6 +3983,8 @@ function createInterceptEnv(input: {
   LINQ_API_BASE_URL?: string;
   LINQ_API_TOKEN?: string;
   MAPBOX_ACCESS_TOKEN?: string;
+  MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED?: string;
+  MURPH_HOSTED_LOCAL_PROFILE?: string;
   OPENAI_API_KEY?: string;
   readActiveRuntimeUserFence?: () => Promise<WorkerActiveRuntimeUserFenceResult>;
   TELEGRAM_API_BASE_URL?: string;
@@ -3972,6 +4014,9 @@ function createInterceptEnv(input: {
     LINQ_API_BASE_URL: input.LINQ_API_BASE_URL,
     LINQ_API_TOKEN: input.LINQ_API_TOKEN,
     MAPBOX_ACCESS_TOKEN: input.MAPBOX_ACCESS_TOKEN,
+    MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED:
+      input.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED,
+    MURPH_HOSTED_LOCAL_PROFILE: input.MURPH_HOSTED_LOCAL_PROFILE,
     OPENAI_API_KEY: input.OPENAI_API_KEY,
     RUNNER_CONTAINER: {
       get: () => ({

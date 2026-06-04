@@ -50,7 +50,7 @@ describe("hosted local Linq typing prewarm e2e", () => {
       additionalEnv: {
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           buildLinqRecipientPhoneNumber(prewarmUserId),
-        LINQ_API_BASE_URL: requireLinqStub().containerBaseUrl,
+        LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
         LINQ_API_TOKEN: "linq-local-test-token",
         LINQ_WEBHOOK_SECRET: linqWebhookSecret,
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",

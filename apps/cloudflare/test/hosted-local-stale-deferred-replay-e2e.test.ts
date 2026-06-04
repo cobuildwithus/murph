@@ -160,7 +160,7 @@ async function startScenario(): Promise<void> {
       HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "45000",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
-      LINQ_API_BASE_URL: requireLinqStub().containerBaseUrl,
+      LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",

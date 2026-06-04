@@ -2651,11 +2651,16 @@ function readProviderBaseConfig(
 
   try {
     const url = new URL(rawValue);
-    if (isAllowedProviderBaseUrl(url)) {
+    if (isAllowedProviderBaseUrl(url, env)) {
+      const configuredUpstreamBaseUrl =
+        createHostedLocalProviderAliasUpstreamUrl(url, env) ?? url;
       const routes = uniqueProviderBaseRoutes(
-        ...createIdentityProviderBaseRoutes(withContainerHostAlias(url, env)),
+        ...createConfiguredProviderBaseRoutes(url, env),
         ...(options.acceptFallbackBaseUrl
-          ? createProviderBaseRoutes(url, fallbackRoutes.map((route) => route.acceptedBaseUrl))
+          ? createProviderBaseRoutes(
+              configuredUpstreamBaseUrl,
+              fallbackRoutes.map((route) => route.acceptedBaseUrl),
+            )
           : []),
       );
       return {
@@ -2689,6 +2694,21 @@ function createIdentityProviderBaseRoutes(acceptedBaseUrls: readonly URL[]): Pro
   return acceptedBaseUrls.map((acceptedBaseUrl) => ({
     acceptedBaseUrl,
     upstreamBaseUrl: acceptedBaseUrl,
+  }));
+}
+
+function createConfiguredProviderBaseRoutes(
+  configuredBaseUrl: URL,
+  env: RunnerOutboundEnvironmentSource,
+): ProviderBaseRoute[] {
+  const configuredUpstreamBaseUrl =
+    createHostedLocalProviderAliasUpstreamUrl(configuredBaseUrl, env);
+  return withContainerHostAlias(configuredBaseUrl, env).map((acceptedBaseUrl) => ({
+    acceptedBaseUrl,
+    upstreamBaseUrl:
+      configuredUpstreamBaseUrl && isSameProviderBaseUrl(acceptedBaseUrl, configuredBaseUrl)
+        ? configuredUpstreamBaseUrl
+        : acceptedBaseUrl,
   }));
 }
 
@@ -2738,13 +2758,24 @@ function normalizedProviderBasePath(base: URL): string {
   return base.pathname.replace(/\/+$/u, "");
 }
 
+function isSameProviderBaseUrl(left: URL, right: URL): boolean {
+  return left.origin === right.origin
+    && normalizedProviderBasePath(left) === normalizedProviderBasePath(right);
+}
+
 function isKnownProviderHost(url: URL, providerBase: ProviderBaseConfig): boolean {
   return providerBase.knownHosts.includes(normalizeProviderHostname(url.hostname));
 }
 
-function isAllowedProviderBaseUrl(url: URL): boolean {
+function isAllowedProviderBaseUrl(url: URL, env: RunnerOutboundEnvironmentSource): boolean {
   return url.protocol === "https:"
-    || (url.protocol === "http:" && isLocalOrTestProviderHost(url.hostname));
+    || (
+      url.protocol === "http:"
+      && (
+        isLocalOrTestProviderHost(url.hostname)
+        || isExplicitHostedLocalRunnerHostAlias(url.hostname, env)
+      )
+    );
 }
 
 function isLocalOrTestProviderHost(hostname: string): boolean {
@@ -2773,14 +2804,73 @@ function withContainerHostAlias(baseUrl: URL, env: RunnerOutboundEnvironmentSour
   return urls;
 }
 
+function createHostedLocalProviderAliasUpstreamUrl(
+  baseUrl: URL,
+  env: RunnerOutboundEnvironmentSource,
+): URL | null {
+  const alias = readLocalProviderHostAlias(env);
+  if (
+    !alias
+    || isLocalOrTestProviderHost(alias)
+    || !isContainerAliasableProviderHost(baseUrl.hostname)
+  ) {
+    return null;
+  }
+
+  const aliasUrl = new URL(baseUrl.toString());
+  aliasUrl.hostname = alias;
+  return aliasUrl.origin === baseUrl.origin ? null : aliasUrl;
+}
+
 function readLocalProviderHostAlias(env: RunnerOutboundEnvironmentSource): string | null {
   const alias = typeof env.HOSTED_EXECUTION_RUNNER_HOST_ALIAS === "string"
     ? env.HOSTED_EXECUTION_RUNNER_HOST_ALIAS.trim()
     : "";
-  if (!alias || !isLocalOrTestProviderHost(alias)) {
+  if (
+    !alias
+    || (
+      !isLocalOrTestProviderHost(alias)
+      && !isExplicitHostedLocalRunnerHostAlias(alias, env)
+    )
+  ) {
     return null;
   }
   return alias;
+}
+
+function isContainerAliasableProviderHost(hostname: string): boolean {
+  const normalized = normalizeProviderHostname(hostname);
+  return normalized === "localhost"
+    || normalized === "127.0.0.1"
+    || normalized === "::1"
+    || normalized === "[::1]"
+    || normalized === "host.docker.internal"
+    || normalized.endsWith(".localhost");
+}
+
+function isExplicitHostedLocalRunnerHostAlias(
+  hostname: string,
+  env: RunnerOutboundEnvironmentSource,
+): boolean {
+  const alias = typeof env.HOSTED_EXECUTION_RUNNER_HOST_ALIAS === "string"
+    ? env.HOSTED_EXECUTION_RUNNER_HOST_ALIAS.trim()
+    : "";
+  return alias.length > 0
+    && isHostedLocalRunnerHostAliasSource(env)
+    && normalizeProviderHostname(hostname) === normalizeProviderHostname(alias);
+}
+
+function isHostedLocalRunnerHostAliasSource(env: RunnerOutboundEnvironmentSource): boolean {
+  const profile = normalizeHostedLocalRunnerHostAliasMarker(env.MURPH_HOSTED_LOCAL_PROFILE);
+  return env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
+    || profile === "dev"
+    || profile === "worker-only"
+    || profile === "e2e:stub"
+    || profile === "e2e:live";
+}
+
+function normalizeHostedLocalRunnerHostAliasMarker(value: string | undefined): string | null {
+  return value?.trim().toLowerCase() || null;
 }
 
 function uniqueProviderHosts(...hosts: string[]): string[] {
