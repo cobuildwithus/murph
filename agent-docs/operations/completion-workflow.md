@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-06-03
+Last verified: 2026-06-04
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether ledger or plan mechanics apply.
@@ -33,11 +33,29 @@ Required workflow audit subagents default to high reasoning. Use xhigh reasoning
 10. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests and record the exact evidence.
 11. Run or re-run the required checks after the implementation is stable, after any simplify updates, after any security review-driven fixes, after any required coverage pass lands, after any frontend-review-driven fixes, and after any later review-driven fixes.
 12. Run the final completion review. Use the tiny repo-internal fast path below only when it applies; otherwise spawn a dedicated audit subagent and hand it `agent-docs/prompts/task-finish-review.md` plus the audit handoff packet below.
-13. Treat that final review as the last audit of remaining coverage and proof gaps too. If it finds meaningful missing tests or boundary-level verification, add the smallest high-impact proof before handoff instead of creating another default coverage pass.
-14. Resolve high-severity findings before final handoff and re-run affected required checks after any post-review fixes.
-15. Do not automatically spawn another workflow audit subagent after the first final review. One extra final-review rerun is allowed only when the first review forced a large or high-risk follow-up diff; otherwise finish locally after the post-fix checks.
+13. Enter the review-resolution loop below for every required audit output. Completion means there are no unresolved accepted/actionable findings, not merely that the audit pass ran.
+14. Treat the final review as the last audit of remaining coverage and proof gaps too. If it finds meaningful missing tests or boundary-level verification, add the smallest high-impact proof before handoff instead of creating another default coverage pass.
+15. Do not automatically spawn another workflow audit subagent after the first final review solely to improve wording, seek a second opinion, or re-litigate rejected findings. Rerun only the affected audit pass when review-driven fixes materially change that pass's risk surface, as described below.
 16. Close any active execution plan and use the commit path chosen by the routing doc and `AGENTS.md` before handoff. For plan-bearing work, the final scoped commit must go through `scripts/finish-task <active-plan-path> "summary" <path>...` so the matching ledger row is removed and the plan moves to `agent-docs/exec-plans/completed/`. Do not use `scripts/committer` or `git commit` as the final task commit for active-plan work; that commits code while leaving stale active-plan state behind. If overlapping dirty work blocks a safe `finish-task` commit, clear the exact ledger row, archive the plan with `scripts/close-exec-plan.sh`, and report the scoped-commit blocker before handoff.
-17. Final handoff must report required-check results plus any direct scenario evidence. Green required checks remain the default completion bar; if a required check failed for a credibly unrelated pre-existing reason, handoff must name the failing command, failing target, and why the current diff did not cause it.
+17. Final handoff must report required-check results, direct scenario evidence, and audit findings accepted, fixed, or rejected with reasons. Green required checks remain the default completion bar; if a required check failed for a credibly unrelated pre-existing reason, handoff must name the failing command, failing target, and why the current diff did not cause it.
+
+## Review-Resolution Loop
+
+Audit outputs are advisory until the parent implementation agent verifies them.
+For every finding from a required audit pass:
+
+1. Read the real code path, adjacent files, and relevant tests before accepting the finding. When a finding depends on external behavior, check the dependency's docs, source, or types instead of guessing.
+2. Classify the finding as accepted/actionable, rejected, or out of scope. Reject speculative risks, unrealistic edge cases, broad rewrites, and fixes that add more complexity than the bug justifies.
+3. For accepted/actionable findings, fix the smallest correct surface at the right ownership boundary. If the finding reveals a bug class or repeated pattern, inspect the current task scope for sibling instances and fix the scoped bug class together when practical.
+4. After any review-driven code, test, config, or docs change, rerun the focused verification that proves the changed surface.
+5. Rerun the affected audit pass when the fix materially changes that pass's risk surface:
+   - rerun `security-privacy-review` for accepted security/privacy fixes on auth, secrets, trust boundaries, external surfaces, or concrete exposure behavior
+   - rerun `frontend-review` for meaningful UI, interaction, layout, or design-system fixes
+   - rerun `coverage-write` only when the accepted finding changes the proof surface and needs write-capable coverage follow-up
+   - rerun `task-finish-review` when the fix is large, high-risk, cross-cutting, or materially changes behavior after the first final review
+6. Do not rerun an audit solely for rejected findings, tiny wording changes, isolated test-only proof additions, or to obtain a cleaner final sentence.
+
+Stop the loop when every required audit finding is either fixed/proven or consciously rejected/out of scope with a concise reason, and no unresolved accepted/actionable findings remain.
 
 ## When To Add Simplify
 
