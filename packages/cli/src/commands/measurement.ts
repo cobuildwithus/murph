@@ -94,7 +94,7 @@ function parseMeasurementNoteEntries(
     if (measurementCount > 1 && !hasExplicitTarget) {
       throw new VaultCliError(
         'invalid_option',
-        'Each --measurement-note entry must use N:note form when multiple measurements are provided.',
+        'Grouped --measurement-note entries must use N:note, for example 1:after coffee.',
       )
     }
 
@@ -102,10 +102,16 @@ function parseMeasurementNoteEntries(
       ? Number(entry.slice(0, targetSeparatorIndex)) - 1
       : 0
     const note = hasExplicitTarget ? entry.slice(targetSeparatorIndex + 1).trim() : entry.trim()
-    if (!Number.isInteger(targetIndex) || targetIndex < 0 || targetIndex >= measurementCount || !note) {
+    if (!Number.isInteger(targetIndex) || targetIndex < 0 || targetIndex >= measurementCount) {
       throw new VaultCliError(
         'invalid_option',
-        'Each --measurement-note entry must use N:note form with a valid one-based measurement index.',
+        `--measurement-note index must be between 1 and ${measurementCount}.`,
+      )
+    }
+    if (!note) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Indexed --measurement-note entries must include note text after N:, for example 1:after coffee.',
       )
     }
 
@@ -135,17 +141,24 @@ function parseMeasurementQualifierEntries(
       ? entry.slice(targetSeparatorIndex + 1)
       : entry
     const separatorIndex = qualifierEntry.indexOf('=')
-    if (
-      targetIndex < 0 ||
-      !Number.isInteger(targetIndex) ||
-      targetIndex >= measurementCount ||
-      (measurementCount > 1 && !hasExplicitTarget) ||
-      separatorIndex <= 0 ||
-      separatorIndex === qualifierEntry.length - 1
-    ) {
+    if (measurementCount > 1 && !hasExplicitTarget) {
       throw new VaultCliError(
         'invalid_option',
-        'Each --qualifier entry must use key=value form for one measurement or N:key=value form for multiple measurements.',
+        'Grouped --qualifier entries must use N:key=value, for example 1:side=right.',
+      )
+    }
+    if (targetIndex < 0 || !Number.isInteger(targetIndex) || targetIndex >= measurementCount) {
+      throw new VaultCliError(
+        'invalid_option',
+        `--qualifier index must be between 1 and ${measurementCount}.`,
+      )
+    }
+    if (separatorIndex <= 0 || separatorIndex === qualifierEntry.length - 1) {
+      throw new VaultCliError(
+        'invalid_option',
+        hasExplicitTarget
+          ? 'Indexed --qualifier entries must use N:key=value, for example 1:side=right.'
+          : '--qualifier entries must use key=value, for example side=right.',
       )
     }
 
@@ -154,7 +167,9 @@ function parseMeasurementQualifierEntries(
     if (!key || !rawValue) {
       throw new VaultCliError(
         'invalid_option',
-        'Each --qualifier entry must use key=value form for one measurement or N:key=value form for multiple measurements.',
+        hasExplicitTarget
+          ? 'Indexed --qualifier entries must use N:key=value, for example 1:side=right.'
+          : '--qualifier entries must use key=value, for example side=right.',
       )
     }
 
@@ -243,11 +258,11 @@ export function registerMeasurementCommands(
     qualifier: z
       .array(z.string().min(1))
       .optional()
-      .describe('Optional measurement qualifier as key=value for one measurement or N:key=value for grouped measurements. Repeat --qualifier for multiple entries.'),
+      .describe('Optional measurement qualifier as key=value for one measurement or N:key=value for grouped measurements. Example values: side=right, 1:side=right, 2:posture=seated. Repeat --qualifier for multiple entries.'),
     measurementNote: z
       .array(z.string().min(1).max(4000))
       .optional()
-      .describe('Optional per-measurement note. Use note for one measurement or N:note for grouped measurements.'),
+      .describe('Optional per-measurement note. Use note for one measurement or N:note for grouped measurements. Example values: 1:after coffee, 2:five quiet minutes.'),
     note: z
       .string()
       .min(1)
@@ -303,13 +318,15 @@ export function registerMeasurementCommands(
         },
       },
       {
-        description: 'Record a grouped waist and weight measurement with typed fields.',
+        description: 'Record grouped grip and heart-rate measurements with indexed qualifiers and notes.',
         args: {},
         options: {
           vault: './vault',
-          metric: ['waist', 'body weight'],
-          value: [32.5, 181.2],
-          unit: ['in', 'lb'],
+          metric: ['grip strength', 'resting heart rate'],
+          value: [97.2, 54],
+          unit: ['lb', 'bpm'],
+          qualifier: ['1:side=right', '2:posture=seated'],
+          measurementNote: ['1:after coffee', '2:five quiet minutes'],
         },
       },
     ],

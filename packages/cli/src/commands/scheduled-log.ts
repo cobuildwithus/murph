@@ -41,6 +41,14 @@ import {
   textInputOptionSchema,
 } from "@murphai/vault-usecases";
 
+import {
+  compactNumber,
+  parseCompactFields,
+  rejectUnsupportedCompactFields,
+  requireCompactInteger,
+  requireCompactString,
+} from "./compact-field-spec.js";
+
 const scheduledLogSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const scheduledLogActionKindValues = [
   "meal.add",
@@ -132,85 +140,6 @@ function parseQualifierValue(rawValue: string): string | number | boolean {
   if (trimmed.length > 0 && Number.isFinite(numeric)) return numeric;
 
   return trimmed;
-}
-
-function parseCompactFields(spec: string, optionName: string): Map<string, string> {
-  const fields = new Map<string, string>();
-
-  for (const rawPart of spec.split(";")) {
-    const part = rawPart.trim();
-    if (part.length === 0) continue;
-
-    const separatorIndex = part.indexOf("=");
-    const key = part.slice(0, separatorIndex).trim();
-    const value = part.slice(separatorIndex + 1).trim();
-
-    if (
-      separatorIndex <= 0 ||
-      key.length === 0 ||
-      value.length === 0
-    ) {
-      invalidScheduledLogOption(`Each --${optionName} entry must use key=value fields.`);
-    }
-
-    if (fields.has(key)) {
-      invalidScheduledLogOption(`Duplicate --${optionName} field "${key}".`);
-    }
-    fields.set(key, value);
-  }
-
-  return fields;
-}
-
-function requireCompactString(
-  fields: ReadonlyMap<string, string>,
-  key: string,
-  optionName: string,
-): string {
-  const value = fields.get(key);
-  if (value === undefined) {
-    invalidScheduledLogOption(`--${optionName} requires ${key}=...`);
-  }
-  return value;
-}
-
-function compactNumber(
-  fields: ReadonlyMap<string, string>,
-  key: string,
-  optionName: string,
-): number | undefined {
-  const rawValue = fields.get(key);
-  if (rawValue === undefined) return undefined;
-
-  const value = Number(rawValue);
-  if (!Number.isFinite(value)) {
-    invalidScheduledLogOption(`--${optionName} field ${key} must be a finite number.`);
-  }
-  return value;
-}
-
-function compactInteger(
-  fields: ReadonlyMap<string, string>,
-  key: string,
-  optionName: string,
-): number | undefined {
-  const value = compactNumber(fields, key, optionName);
-  if (value !== undefined && !Number.isInteger(value)) {
-    invalidScheduledLogOption(`--${optionName} field ${key} must be an integer.`);
-  }
-  return value;
-}
-
-function requireCompactInteger(
-  fields: ReadonlyMap<string, string>,
-  key: string,
-  optionName: string,
-): number {
-  const value = compactInteger(fields, key, optionName);
-  if (value === undefined) {
-    invalidScheduledLogOption(`--${optionName} requires ${key}=...`);
-  }
-  return value;
 }
 
 function parseMeasurementNoteEntries(
@@ -455,21 +384,75 @@ const workoutOptionKeys = [
   "workoutSet",
 ] as const satisfies ReadonlyArray<keyof WorkoutOptions>;
 
+const workoutMediaFieldKeys = [
+  "kind",
+  "relativePath",
+  "mediaType",
+  "caption",
+] as const;
+
+const workoutExerciseFieldKeys = [
+  "order",
+  "name",
+  "sourceExerciseId",
+  "groupId",
+  "mode",
+  "unitOverride",
+  "note",
+] as const;
+
+const workoutSetFieldKeys = [
+  "exercise",
+  "order",
+  "type",
+  "reps",
+  "weight",
+  "weightUnit",
+  "durationSeconds",
+  "distanceMeters",
+  "rpe",
+  "bodyweightKg",
+  "assistanceKg",
+  "addedWeightKg",
+] as const;
+
 function parseWorkoutMediaEntry(entry: string): Record<string, unknown> {
-  const fields = parseCompactFields(entry, "workout-media");
+  const fields = parseCompactFields(entry, "workout-media", invalidScheduledLogOption);
+  rejectUnsupportedCompactFields(
+    fields,
+    "workout-media",
+    workoutMediaFieldKeys,
+    invalidScheduledLogOption,
+  );
   return {
-    kind: requireCompactString(fields, "kind", "workout-media"),
-    relativePath: requireCompactString(fields, "relativePath", "workout-media"),
+    kind: requireCompactString(fields, "kind", "workout-media", invalidScheduledLogOption),
+    relativePath: requireCompactString(
+      fields,
+      "relativePath",
+      "workout-media",
+      invalidScheduledLogOption,
+    ),
     ...(fields.has("mediaType") ? { mediaType: fields.get("mediaType") } : {}),
     ...(fields.has("caption") ? { caption: fields.get("caption") } : {}),
   };
 }
 
 function parseWorkoutExerciseEntry(entry: string): WorkoutExerciseDraft {
-  const fields = parseCompactFields(entry, "workout-exercise");
+  const fields = parseCompactFields(entry, "workout-exercise", invalidScheduledLogOption);
+  rejectUnsupportedCompactFields(
+    fields,
+    "workout-exercise",
+    workoutExerciseFieldKeys,
+    invalidScheduledLogOption,
+  );
   return {
-    name: requireCompactString(fields, "name", "workout-exercise"),
-    order: requireCompactInteger(fields, "order", "workout-exercise"),
+    name: requireCompactString(fields, "name", "workout-exercise", invalidScheduledLogOption),
+    order: requireCompactInteger(
+      fields,
+      "order",
+      "workout-exercise",
+      invalidScheduledLogOption,
+    ),
     sets: [],
     ...(fields.has("sourceExerciseId")
       ? { sourceExerciseId: fields.get("sourceExerciseId") }
@@ -485,10 +468,21 @@ function parseWorkoutSetEntry(entry: string): {
   exerciseOrder: number;
   set: Record<string, unknown>;
 } {
-  const fields = parseCompactFields(entry, "workout-set");
-  const exerciseOrder = requireCompactInteger(fields, "exercise", "workout-set");
+  const fields = parseCompactFields(entry, "workout-set", invalidScheduledLogOption);
+  rejectUnsupportedCompactFields(
+    fields,
+    "workout-set",
+    workoutSetFieldKeys,
+    invalidScheduledLogOption,
+  );
+  const exerciseOrder = requireCompactInteger(
+    fields,
+    "exercise",
+    "workout-set",
+    invalidScheduledLogOption,
+  );
   const set: Record<string, unknown> = {
-    order: requireCompactInteger(fields, "order", "workout-set"),
+    order: requireCompactInteger(fields, "order", "workout-set", invalidScheduledLogOption),
   };
 
   for (const key of [
@@ -510,7 +504,7 @@ function parseWorkoutSetEntry(entry: string): {
     "assistanceKg",
     "addedWeightKg",
   ]) {
-    const value = compactNumber(fields, key, "workout-set");
+    const value = compactNumber(fields, key, "workout-set", invalidScheduledLogOption);
     if (value !== undefined) {
       set[key] = value;
     }
@@ -725,6 +719,40 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
           interventionType: "sauna",
           scheduleKind: "dailyLocal",
           scheduleLocalTime: "18:00",
+          vault: "./vault",
+        },
+      },
+      {
+        args: {
+          title: "Weekly strength template",
+        },
+        description: "Save an activity scheduled log with a compact workout template.",
+        options: {
+          actionKind: "activity_session.add",
+          actionTitle: "Strength session",
+          activityType: "strength",
+          durationMinutes: 45,
+          scheduleKind: "cron",
+          scheduleCron: "0 7 * * 1",
+          workoutExercise: ["order=1;name=Goblet Squat;mode=weight_reps"],
+          workoutSet: ["exercise=1;order=1;reps=10;weight=24;weightUnit=kg"],
+          vault: "./vault",
+        },
+      },
+      {
+        args: {
+          title: "Weekly weight check",
+        },
+        description: "Save a measurement scheduled log with typed measurement entries.",
+        options: {
+          actionKind: "measurement.add",
+          actionTitle: "Weight check",
+          measurementMetric: ["weight"],
+          measurementQualifier: ["fasting=true"],
+          measurementUnit: ["kg"],
+          measurementValue: [72.5],
+          scheduleKind: "cron",
+          scheduleCron: "0 8 * * 1",
           vault: "./vault",
         },
       },

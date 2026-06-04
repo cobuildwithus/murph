@@ -27,6 +27,13 @@ interface CommandSchemaEnvelope {
   }
 }
 
+interface LlmManifestEnvelope {
+  commands: Array<{
+    name: string
+    schema: CommandSchemaEnvelope
+  }>
+}
+
 interface WorkoutAddResult {
   eventId: string
   lookupId: string
@@ -93,6 +100,32 @@ async function readCommandSchema(
   return JSON.parse(
     await runRawInProcessCli(cli, [...commandArgs, '--schema', '--format', 'json']),
   ) as CommandSchemaEnvelope
+}
+
+function optionDescription(schema: CommandSchemaEnvelope, optionName: string): string {
+  const property = schema.options.properties[optionName]
+  assert.equal(typeof property, 'object', `missing ${optionName}`)
+  assert.notEqual(property, null, `missing ${optionName}`)
+
+  const description = (property as { description?: unknown }).description
+  if (typeof description !== 'string') {
+    assert.fail(`missing ${optionName} description`)
+  }
+  return description
+}
+
+async function readLlmCommandSchema(
+  cli: Cli.Cli,
+  commandName: string,
+): Promise<CommandSchemaEnvelope> {
+  const manifest = JSON.parse(
+    await runRawInProcessCli(cli, ['--llms-full', '--format', 'json']),
+  ) as LlmManifestEnvelope
+  const command = manifest.commands.find((candidate) => candidate.name === commandName)
+  if (!command) {
+    assert.fail(`missing ${commandName}`)
+  }
+  return command.schema
 }
 
 function workoutSessionFixture(): WorkoutSession {
@@ -198,6 +231,55 @@ test('workout add schema exposes typed fields without raw input fallback', async
     assert.equal(field in schema.options.properties, true, `missing ${field}`)
   }
   assert.equal('input' in schema.options.properties, false)
+
+  assert.match(
+    optionDescription(schema, 'workoutMedia'),
+    /Supported keys: kind, relativePath, mediaType, caption/u,
+  )
+  assert.match(
+    optionDescription(schema, 'workoutExercise'),
+    /Supported keys: name, order, sourceExerciseId, groupId, mode, unitOverride, note/u,
+  )
+  assert.match(
+    optionDescription(schema, 'workoutSet'),
+    /Supported keys: exercise, order, type, weightUnit, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg/u,
+  )
+})
+
+test('workout add and edit help teach compact media, exercise, and set examples', async () => {
+  const cli = createWorkoutCli()
+
+  const addHelp = await runRawInProcessCli(cli, ['workout', 'add', '--help'])
+  const editHelp = await runRawInProcessCli(cli, ['workout', 'edit', '--help'])
+  const llmsFull = await runRawInProcessCli(cli, ['--llms-full'])
+
+  for (const rendered of [addHelp, llmsFull]) {
+    assert.match(rendered, /Capture workout media plus multiple exercises and sets/u)
+    assert.match(rendered, /raw\/workouts\/2026\/03\/upper\/bench\.jpg/u)
+    assert.match(rendered, /order=2;name=Ring row;mode=bodyweight/u)
+    assert.match(rendered, /exercise=2;order=1;type=normal;reps=10;bodyweightKg=82/u)
+  }
+
+  for (const rendered of [editHelp, llmsFull]) {
+    assert.match(rendered, /Replace workout media plus multiple exercises and sets/u)
+    assert.match(rendered, /evt_01JQY2Z0R9Z5K6BT4CB4D9F4CA/u)
+    assert.match(rendered, /raw\/workouts\/2026\/03\/upper\/bench\.jpg/u)
+    assert.match(rendered, /exercise=2;order=1;type=normal;reps=10;bodyweightKg=82/u)
+  }
+})
+
+test('workout add and edit LLM schemas expose compact supported keys', async () => {
+  const cli = createWorkoutCli()
+
+  const addSchema = await readLlmCommandSchema(cli, 'workout add')
+  assert.match(optionDescription(addSchema, 'workoutMedia'), /Compact workoutMedia grammar/u)
+  assert.match(optionDescription(addSchema, 'workoutExercise'), /Supported keys: name, order/u)
+  assert.match(optionDescription(addSchema, 'workoutSet'), /bodyweightKg, assistanceKg, addedWeightKg/u)
+
+  const editSchema = await readLlmCommandSchema(cli, 'workout edit')
+  assert.match(optionDescription(editSchema, 'workoutMedia'), /compact workoutMedia grammar/u)
+  assert.match(optionDescription(editSchema, 'workoutExercise'), /Supported keys: name, order/u)
+  assert.match(optionDescription(editSchema, 'workoutSet'), /bodyweightKg, assistanceKg, addedWeightKg/u)
 })
 
 test('workout import-json schema exposes the structured payload escape hatch', async () => {
@@ -320,7 +402,7 @@ test('workout add typed fields persist the same structured strength workout as J
   assert.deepEqual(typedShown.entity.data.workout, jsonShown.entity.data.workout)
 })
 
-test('workout add rejects incomplete or ambiguous typed workout input', async () => {
+test('workout add and edit reject incomplete or ambiguous typed workout input', async () => {
   const cli = createWorkoutCli()
   const { parentRoot, vaultRoot } = await createTempVaultContext('murph-workout-add-invalid-')
   await initializeVault({ vaultRoot, title: 'Workout add invalid typed vault' })
@@ -393,6 +475,10 @@ test('workout add rejects incomplete or ambiguous typed workout input', async ()
   assert.equal(misspelledSetField.exitCode, 1)
   assert.equal(misspelledSetField.envelope.ok, false)
   assert.match(misspelledSetField.envelope.error.message ?? '', /Unsupported --workout-set field "weightUnt"/u)
+  assert.match(
+    misspelledSetField.envelope.error.message ?? '',
+    /Supported fields: exercise, order, type, weightUnit, reps, weight/u,
+  )
 
   const traversingMediaPath = await runInProcessJsonCli(cli, [
     'workout',
@@ -441,4 +527,44 @@ test('workout add rejects incomplete or ambiguous typed workout input', async ()
     mixedInputAndNestedSessionFlag.envelope.error.message ?? '',
     /input/u,
   )
+
+  const editableWorkout = await runInProcessJsonCli<WorkoutAddResult>(cli, [
+    'workout',
+    'add',
+    '--note',
+    'Editable strength session.',
+    '--duration',
+    '45',
+    '--type',
+    'strength-training',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(editableWorkout.exitCode, null)
+  assert.equal(editableWorkout.envelope.ok, true)
+  const editableWorkoutData = requireData(editableWorkout.envelope)
+  const beforeEdit = await showWorkout(cli, vaultRoot, editableWorkoutData.lookupId)
+
+  const unsupportedEditField = await runInProcessJsonCli(cli, [
+    'workout',
+    'edit',
+    editableWorkoutData.lookupId,
+    '--workout-exercise',
+    'order=1;name=Bench press;tempo=slow',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(unsupportedEditField.exitCode, 1)
+  assert.equal(unsupportedEditField.envelope.ok, false)
+  assert.match(
+    unsupportedEditField.envelope.error.message ?? '',
+    /Unsupported --workout-exercise field "tempo"/u,
+  )
+  assert.match(
+    unsupportedEditField.envelope.error.message ?? '',
+    /Supported fields: name, order, sourceExerciseId, groupId, mode/u,
+  )
+
+  const afterEdit = await showWorkout(cli, vaultRoot, editableWorkoutData.lookupId)
+  assert.deepEqual(afterEdit.entity.data, beforeEdit.entity.data)
 })

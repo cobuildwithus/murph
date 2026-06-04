@@ -271,6 +271,18 @@ export function registerRecipeCommands(cli: Cli.Cli, services: VaultServices) {
         },
         description:
           'Edit one recipe from typed fields.',
+        examples: [
+          {
+            args: {
+              id: 'sheet-pan-salmon-bowls',
+            },
+            description: 'Replace recipe relation links with the canonical type:targetId grammar.',
+            options: {
+              link: ['supports_goal:goal_01JNV422Y2M5ZBV64ZP4N1DRB1'],
+              vault: './vault',
+            },
+          },
+        ],
         options: {
           title: z.string().min(1).max(160).optional().describe('Replace recipe title or name.'),
           slug: recipeSlugSchema.optional().describe('Replace recipe slug and rename the underlying document.'),
@@ -386,6 +398,7 @@ export function registerRecipeCommands(cli: Cli.Cli, services: VaultServices) {
         description: 'Save a recipe without a JSON payload file.',
         options: {
           ingredient: ['2 salmon fillets'],
+          link: ['supports_goal:goal_01JNV422Y2M5ZBV64ZP4N1DRB1'],
           step: ['Roast until cooked through.'],
           tag: ['weeknight'],
           vault: './vault',

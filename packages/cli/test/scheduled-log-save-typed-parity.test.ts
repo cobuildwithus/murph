@@ -154,6 +154,27 @@ test("scheduled-log save schema exposes typed parity fields while import-json re
   });
 });
 
+test("scheduled-log save help surfaces branch examples for workout and measurement actions", async () => {
+  const cli = createScheduledLogCli();
+  const help = await runRawInProcessCli(cli, ["scheduled-log", "save", "--help"]);
+  const llms = await runRawInProcessCli(cli, [
+    "scheduled-log",
+    "save",
+    "--llms-full",
+  ]);
+
+  for (const rendered of [help, llms]) {
+    assert.match(
+      rendered,
+      /Weekly strength template[\s\S]*--actionKind activity_session\.add[\s\S]*--workoutExercise order=1;name=Goblet Squat;mode=weight_reps[\s\S]*--workoutSet exercise=1;order=1;reps=10;weight=24;weightUnit=kg/u,
+    );
+    assert.match(
+      rendered,
+      /Weekly weight check[\s\S]*--actionKind measurement\.add[\s\S]*--measurementMetric weight[\s\S]*--measurementQualifier fasting=true/u,
+    );
+  }
+});
+
 test.sequential("scheduled-log save maps typed fields for every flattened schedule and action variant", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-scheduled-log-save-",
@@ -451,6 +472,104 @@ test.sequential("scheduled-log save maps typed fields for every flattened schedu
         },
       ],
     });
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("scheduled-log save rejects unsupported workout compact fields before writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-scheduled-log-save-unsupported-workout-field-",
+  );
+
+  try {
+    const cli = createScheduledLogCli();
+    await initializeVault({ vaultRoot });
+
+    const result = await runInProcessJsonCli<ScheduledLogSaveResult>(cli, [
+      "scheduled-log",
+      "save",
+      "Unsupported workout compact field",
+      "--slug",
+      "unsupported-workout-compact-field",
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "09:00",
+      "--action-kind",
+      "activity_session.add",
+      "--action-title",
+      "Strength",
+      "--activity-type",
+      "strength",
+      "--duration-minutes",
+      "30",
+      "--workout-exercise",
+      "order=1;name=Goblet Squat;unknown=ignored",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, "invalid_option");
+      assert.match(
+        result.envelope.error.message ?? "",
+        /Unsupported --workout-exercise field "unknown"/u,
+      );
+      assert.match(result.envelope.error.message ?? "", /Supported fields:/u);
+    }
+
+    const scheduledLogDir = path.join(vaultRoot, "bank", "scheduled-logs");
+    const writtenFiles = await readdir(scheduledLogDir).catch(() => []);
+    assert.deepEqual(writtenFiles, []);
+
+    const unsupportedSetField = await runInProcessJsonCli<ScheduledLogSaveResult>(cli, [
+      "scheduled-log",
+      "save",
+      "Unsupported workout set compact field",
+      "--slug",
+      "unsupported-workout-set-compact-field",
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "09:00",
+      "--action-kind",
+      "activity_session.add",
+      "--action-title",
+      "Strength",
+      "--activity-type",
+      "strength",
+      "--duration-minutes",
+      "30",
+      "--workout-exercise",
+      "order=1;name=Goblet Squat",
+      "--workout-set",
+      "exercise=1;order=1;reps=10;weightUnt=kg",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(unsupportedSetField.exitCode, 1);
+    assert.equal(unsupportedSetField.envelope.ok, false);
+    if (!unsupportedSetField.envelope.ok) {
+      assert.equal(unsupportedSetField.envelope.error.code, "invalid_option");
+      assert.match(
+        unsupportedSetField.envelope.error.message ?? "",
+        /Unsupported --workout-set field "weightUnt"/u,
+      );
+      assert.match(
+        unsupportedSetField.envelope.error.message ?? "",
+        /Supported fields: exercise, order, type, reps, weight, weightUnit/u,
+      );
+    }
+
+    const writtenFilesAfterSetFailure = await readdir(scheduledLogDir).catch(() => []);
+    assert.deepEqual(writtenFilesAfterSetFailure, []);
   } finally {
     await rm(parentRoot, {
       force: true,

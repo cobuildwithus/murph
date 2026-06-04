@@ -469,6 +469,39 @@ export function registerSamplesCommands(
     'add',
     {
       description: 'Append one manually curated sample record from typed command options.',
+      examples: [
+        {
+          description: 'Add one numeric sample with source-file and import-config provenance.',
+          options: {
+            batchDelimiter: ',',
+            batchMetadataColumns: ['device_id'],
+            batchPresetId: 'manual-glucose-csv',
+            batchSourceFileName: 'glucose.csv',
+            batchTimestampColumn: 'timestamp',
+            batchValueColumn: 'glucose_mg_dl',
+            recordedAt: '2026-03-12T07:30:00Z',
+            source: 'import',
+            sourcePath: './imports/glucose.csv',
+            stream: 'glucose',
+            unit: 'mg/dL',
+            value: 92,
+            vault: './vault',
+          },
+        },
+        {
+          description: 'Add one sleep-stage segment with the stage-specific field group.',
+          options: {
+            durationMinutes: 45,
+            endAt: '2026-03-12T07:15:00Z',
+            recordedAt: '2026-03-12T06:30:00Z',
+            stage: 'deep',
+            startAt: '2026-03-12T06:30:00Z',
+            stream: 'sleep_stage',
+            unit: 'stage',
+            vault: './vault',
+          },
+        },
+      ],
       args: emptyArgsSchema,
       options: withBaseOptions({
         stream: z
@@ -582,6 +615,16 @@ export function registerSamplesCommands(
     'import-json',
     {
       description: 'Import one or more sample records from an explicit JSON payload file or stdin.',
+      examples: [
+        {
+          description: 'Import a sample batch JSON payload containing samples plus sourcePath/importConfig provenance.',
+          options: {
+            input: '@samples-batch.json',
+            vault: './vault',
+          },
+        },
+      ],
+      hint: 'Use samples import-json for structured batches with stream, source, quality, sourcePath, importConfig, samples[], or sleep_stage segments.',
       args: emptyArgsSchema,
       options: withBaseOptions({
         input: inputFileOptionSchema.describe('JSON sample batch payload in @file.json form or - for stdin.'),

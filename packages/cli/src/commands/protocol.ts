@@ -552,6 +552,22 @@ export function registerProtocolCommands(
   protocol.command("import-json", {
     args: z.object({}),
     description: "Import one private Health Commons-backed protocol adaptation from JSON.",
+    examples: [
+      {
+        description: "Import a JSON object that is the full protocol frontmatter.",
+        options: {
+          input: "@protocol-frontmatter.json",
+          vault: "./vault",
+        },
+      },
+      {
+        description: "Import a JSON object with nested frontmatter plus a Markdown body.",
+        options: {
+          input: "@protocol-with-body.json",
+          vault: "./vault",
+        },
+      },
+    ],
     hint: "--input accepts @file.json or - and may contain either full protocol frontmatter or { frontmatter, body }.",
     options: withBaseOptions({
       input: inputFileOptionSchema,

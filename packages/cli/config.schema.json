@@ -3924,7 +3924,7 @@
                           }
                         },
                         "qualifier": {
-                          "description": "Optional measurement qualifier as key=value for one measurement or N:key=value for grouped measurements. Repeat --qualifier for multiple entries.",
+                          "description": "Optional measurement qualifier as key=value for one measurement or N:key=value for grouped measurements. Example values: side=right, 1:side=right, 2:posture=seated. Repeat --qualifier for multiple entries.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -3932,7 +3932,7 @@
                           }
                         },
                         "measurementNote": {
-                          "description": "Optional per-measurement note. Use note for one measurement or N:note for grouped measurements.",
+                          "description": "Optional per-measurement note. Use note for one measurement or N:note for grouped measurements. Example values: 1:after coffee, 2:five quiet minutes.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -4278,7 +4278,7 @@
                           "maxLength": 4000
                         },
                         "workoutMedia": {
-                          "description": "Stored workout media as kind=...;relativePath=... with optional mediaType/caption. Repeat --workout-media for multiple entries. Use --media for local file staging.",
+                          "description": "Compact workoutMedia grammar: kind=...;relativePath=... with optional mediaType/caption. Supported keys: kind, relativePath, mediaType, caption. Repeat --workout-media for multiple entries. Use --media for local file staging.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -4286,7 +4286,7 @@
                           }
                         },
                         "workoutExercise": {
-                          "description": "Workout exercise as order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Repeat --workout-exercise for multiple exercises.",
+                          "description": "Compact workoutExercise grammar: order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Supported keys: name, order, sourceExerciseId, groupId, mode, unitOverride, note. Repeat --workout-exercise for multiple exercises.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -4294,7 +4294,7 @@
                           }
                         },
                         "workoutSet": {
-                          "description": "Workout set as exercise=...;order=... plus optional type/reps/weight/weightUnit/durationSeconds/distanceMeters/rpe/bodyweightKg/assistanceKg/addedWeightKg. Repeat --workout-set for multiple sets.",
+                          "description": "Compact workoutSet grammar: exercise=...;order=... plus optional set fields. Supported keys: exercise, order, type, weightUnit, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg. Repeat --workout-set for multiple sets.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -4627,7 +4627,7 @@
                           "maxLength": 4000
                         },
                         "workoutMedia": {
-                          "description": "Replace stored workout media entries as kind=...;relativePath=...;mediaType=...;caption=.... Repeat --workout-media for multiple entries.",
+                          "description": "Replace stored media with the compact workoutMedia grammar: kind=...;relativePath=... plus optional mediaType/caption. Supported keys: kind, relativePath, mediaType, caption. Repeat --workout-media for multiple entries.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -4635,7 +4635,7 @@
                           }
                         },
                         "workoutExercise": {
-                          "description": "Replace workout exercises as order=...;name=... entries. Repeat --workout-exercise for multiple exercises.",
+                          "description": "Replace exercises with the compact workoutExercise grammar: order=...;name=... plus optional sourceExerciseId/groupId/mode/unitOverride/note. Supported keys: name, order, sourceExerciseId, groupId, mode, unitOverride, note. Repeat --workout-exercise for multiple exercises.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -4643,7 +4643,7 @@
                           }
                         },
                         "workoutSet": {
-                          "description": "Workout set as exercise=...;order=... plus optional set fields. Repeat --workout-set for multiple sets.",
+                          "description": "Attach replacement sets with the compact workoutSet grammar: exercise=...;order=... plus optional set fields. Supported keys: exercise, order, type, weightUnit, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg. Repeat --workout-set for multiple sets.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -4902,7 +4902,7 @@
                                   "maxLength": 4000
                                 },
                                 "exercise": {
-                                  "description": "Routine exercise as order=...;name=... with optional groupId/mode/unitOverride/note. Repeat --exercise for multiple exercises.",
+                                  "description": "Compact exercise grammar: order=...;name=... with optional groupId/mode/unitOverride/note. Supported keys: order, name, groupId, mode, unitOverride, note. Repeat --exercise for multiple exercises.",
                                   "type": "array",
                                   "items": {
                                     "type": "string",
@@ -4910,7 +4910,7 @@
                                   }
                                 },
                                 "setTemplate": {
-                                  "description": "Planned set as exercise=...;order=... plus optional type/targetReps/targetWeight/targetWeightUnit/targetDurationSeconds/targetDistanceMeters/targetRpe. Repeat --set-template for multiple sets.",
+                                  "description": "Compact setTemplate grammar: exercise=...;order=... plus optional planned set targets. Prefer targetReps, targetWeight, targetWeightUnit, targetDurationSeconds, targetDistanceMeters, and targetRpe. Supported keys: exercise, order, type, targetReps, reps, targetWeight, weight, targetWeightUnit, weightUnit, targetDurationSeconds, durationSeconds, targetDistanceMeters, distanceMeters, targetRpe, rpe. Repeat --set-template for multiple sets.",
                                   "type": "array",
                                   "items": {
                                     "type": "string",

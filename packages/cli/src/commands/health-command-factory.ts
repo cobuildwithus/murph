@@ -201,10 +201,10 @@ const defaultHintsByCommand: Partial<
   },
   scaffold(config) {
     const importCommand = `${config.groupName} import-json`
-    return `Edit the emitted payload, save it as ${config.payloadFile}, then import it with ${importCommand} --input @${config.payloadFile} or pipe it to --input -. The scaffold output is the current canonical field shape for this command.`
+    return `Edit the emitted payload, save it as ${config.payloadFile}, then import it with ${importCommand} --input @${config.payloadFile} or pipe it to --input -. The scaffold is a representative starter payload with canonical field names; command docs may expose additional optional branches.`
   },
   importJson(config) {
-    return `--input accepts @file.json or - so the CLI can load the structured ${config.noun} payload from disk or stdin. Run ${config.groupName} scaffold first if you need the current canonical field shape.`
+    return `--input accepts @file.json or - so the CLI can load the structured ${config.noun} payload from disk or stdin. Run ${config.groupName} scaffold first if you need a representative starter payload with canonical field names.`
   },
 }
 

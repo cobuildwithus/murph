@@ -217,6 +217,28 @@ test('experiment start schema exposes typed fields while protocol import-json ke
   assert.equal('confirmedPlan' in experimentStartSchema.output.properties, false)
 })
 
+test('protocol import-json discovery surfaces both accepted JSON payload shapes', async () => {
+  const help = await runRawSliceCli(['protocol', 'import-json', '--help'])
+  const llms = await runRawSliceCli(['protocol', 'import-json', '--llms-full'])
+
+  assert.match(
+    help,
+    /vault-cli protocol import-json --input @protocol-frontmatter\.json --vault \.\/vault/u,
+  )
+  assert.match(
+    help,
+    /vault-cli protocol import-json --input @protocol-with-body\.json --vault \.\/vault/u,
+  )
+  assert.match(help, /full protocol frontmatter/u)
+  assert.match(help, /nested frontmatter plus a Markdown body/u)
+  assert.match(help, /\{ frontmatter, body \}/u)
+
+  assert.match(llms, /@protocol-frontmatter\.json/u)
+  assert.match(llms, /@protocol-with-body\.json/u)
+  assert.match(llms, /full protocol frontmatter/u)
+  assert.match(llms, /nested frontmatter plus a Markdown body/u)
+})
+
 test.sequential('experiment start requires an explicit protocol or custom fallback source', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-start-source-'))
   const configPath = path.join(vaultRoot, 'config.json')

@@ -3,7 +3,13 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { healthEntityDefinitions, regimenRegistryEntityDefinition } from "@murphai/contracts";
+import {
+  geneticVariantUpsertPayloadSchema,
+  goalUpsertPayloadSchema,
+  healthEntityDefinitions,
+  regimenRegistryEntityDefinition,
+  regimenUpsertPayloadSchema,
+} from "@murphai/contracts";
 import { test } from "vitest";
 
 import {
@@ -40,6 +46,35 @@ test("generic CLI lookup inference stays anchored to shared aliases and prefixes
   assert.equal(goalDescriptor?.kind, "goal");
   assert.equal(goalKind, "goal");
   assert.equal(regimenDescriptor?.kind, "regimen");
+});
+
+test("health scaffold descriptors include canonical nested goal, regimen, and genetics examples", () => {
+  const goalPayload = healthEntityDescriptorByKind.get("goal")?.core?.payloadTemplate;
+  const regimenPayload = healthEntityDescriptorByKind.get("regimen")?.core?.payloadTemplate;
+  const geneticsPayload = healthEntityDescriptorByKind.get("genetics")?.core?.payloadTemplate;
+
+  assert.ok(goalPayload);
+  assert.ok(regimenPayload);
+  assert.ok(geneticsPayload);
+
+  const parsedGoal = goalUpsertPayloadSchema.parse(goalPayload);
+  const parsedRegimen = regimenUpsertPayloadSchema.parse(regimenPayload);
+  const parsedGenetics = geneticVariantUpsertPayloadSchema.parse(geneticsPayload);
+
+  assert.equal(parsedGoal.metricTargets?.[0]?.comparator, "between");
+  assert.equal(parsedGoal.metricTargets?.[0]?.highValue, 9);
+  assert.equal(parsedGoal.metricTargets?.[0]?.evaluation.kind, "rolling-window");
+  assert.equal(
+    parsedGoal.metricTargets?.[0]?.selectionPolicyOverride?.kind,
+    "daily-aggregate",
+  );
+  assert.equal(parsedRegimen.ingredients?.[0]?.compound, "magnesium-glycinate");
+  assert.deepEqual(parsedRegimen.relatedGoalIds, [
+    "goal_01JNV43AK9SK58T6GX3DWRZH9Q",
+  ]);
+  assert.deepEqual(parsedGenetics.sourceFamilyMemberIds, [
+    "fam_01JNV44M0Y6J8W2W0Q7Y2H1K9M",
+  ]);
 });
 
 test("assessment list capabilities only advertise supported date-range filtering", () => {

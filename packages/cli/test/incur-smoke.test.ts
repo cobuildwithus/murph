@@ -1735,7 +1735,7 @@ test('health command help surfaces examples and hints through Incur metadata', a
   )
   assert.match(
     goalImportJsonHelp,
-    /Run goal scaffold first if you need the current canonical field shape\./u,
+    /Run goal scaffold first if you need a representative starter payload with canonical field names\./u,
   )
   assert.match(
     journalLinkHelp,
@@ -2025,7 +2025,7 @@ test('goal scaffold help surfaces factory-provided example and hint text', async
   )
   assert.match(
     help,
-    /The scaffold output is the current canonical field shape for this command\./u,
+    /The scaffold is a representative starter payload with canonical field names; command docs may expose additional optional branches\./u,
   )
 })
 

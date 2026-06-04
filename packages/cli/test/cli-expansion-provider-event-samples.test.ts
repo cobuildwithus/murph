@@ -147,6 +147,42 @@ test('provider, food, recipe, event, and samples schemas expose the new noun ent
   assert.equal('input' in samplesImportJsonSchema.options.properties, true)
 })
 
+test('recipe and samples examples surface branchy command fields in help and LLM metadata', async () => {
+  const recipeSaveHelp = await runSliceCliRaw(['recipe', 'save', '--help'])
+  const recipeEditHelp = await runSliceCliRaw(['recipe', 'edit', '--help'])
+  const samplesAddHelp = await runSliceCliRaw(['samples', 'add', '--help'])
+  const samplesImportJsonHelp = await runSliceCliRaw(['samples', 'import-json', '--help'])
+  const recipeSaveLlms = await runSliceCliRaw(['recipe', 'save', '--llms-full'])
+  const recipeEditLlms = await runSliceCliRaw(['recipe', 'edit', '--llms-full'])
+  const samplesAddLlms = await runSliceCliRaw(['samples', 'add', '--llms-full'])
+  const samplesImportJsonLlms = await runSliceCliRaw([
+    'samples',
+    'import-json',
+    '--llms-full',
+  ])
+
+  assert.match(recipeSaveHelp, /--link supports_goal:goal_01JNV422Y2M5ZBV64ZP4N1DRB1/u)
+  assert.match(recipeEditHelp, /--link supports_goal:goal_01JNV422Y2M5ZBV64ZP4N1DRB1/u)
+  assert.match(recipeEditHelp, /canonical type:targetId grammar/u)
+  assert.match(recipeSaveLlms, /supports_goal:goal_01JNV422Y2M5ZBV64ZP4N1DRB1/u)
+  assert.match(recipeEditLlms, /supports_goal:goal_01JNV422Y2M5ZBV64ZP4N1DRB1/u)
+  assert.match(recipeEditLlms, /canonical type:targetId grammar/u)
+
+  assert.match(samplesAddHelp, /--stream glucose/u)
+  assert.match(samplesAddHelp, /--source-path <string>/u)
+  assert.match(samplesAddHelp, /--sourcePath \.\/imports\/glucose\.csv/u)
+  assert.match(samplesAddHelp, /--batch-preset-id <string>/u)
+  assert.match(samplesAddHelp, /--batchPresetId manual-glucose-csv/u)
+  assert.match(samplesAddHelp, /--stream sleep_stage/u)
+  assert.match(samplesAddHelp, /--stage deep/u)
+  assert.match(samplesAddHelp, /stage-specific field group/u)
+  assert.match(samplesImportJsonHelp, /sourcePath\/importConfig provenance/u)
+  assert.match(samplesImportJsonHelp, /sleep_stage segments/u)
+  assert.match(samplesAddLlms, /manual-glucose-csv/u)
+  assert.match(samplesAddLlms, /sleep_stage/u)
+  assert.match(samplesImportJsonLlms, /sourcePath\/importConfig provenance/u)
+})
+
 test('provider, food, recipe, and event edit/delete schemas expose shared record mutation options', async () => {
   const providerEditSchema = JSON.parse(
     await runSliceCliRaw(['provider', 'edit', '--schema']),

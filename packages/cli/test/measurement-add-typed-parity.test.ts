@@ -27,6 +27,25 @@ interface CommandSchemaEnvelope {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function getOptionDescription(
+  schema: CommandSchemaEnvelope,
+  optionName: string,
+): string {
+  const property = schema.options.properties[optionName]
+  if (!isRecord(property)) {
+    assert.fail(`${optionName} schema must be an object`)
+  }
+  const description = property.description
+  if (typeof description !== 'string') {
+    assert.fail(`${optionName} schema must include a description`)
+  }
+  return description
+}
+
 interface MeasurementAddResult {
   vault: string
   eventId: string
@@ -133,6 +152,44 @@ async function readCommandSchema(
   ) as CommandSchemaEnvelope
 }
 
+async function readMeasurementAddLlmExample(cli: Cli.Cli): Promise<string> {
+  const manifest = JSON.parse(
+    await runRawInProcessCli(cli, ['--llms-full', '--format', 'json', 'measurement']),
+  ) as unknown
+  if (!isRecord(manifest)) {
+    assert.fail('LLM manifest must be an object')
+  }
+  const commands = manifest.commands
+  if (!Array.isArray(commands)) {
+    assert.fail('LLM manifest commands must be an array')
+  }
+  const addCommand = commands.find(
+    (command): command is Record<string, unknown> =>
+      isRecord(command) && command.name === 'measurement add',
+  )
+  if (!isRecord(addCommand)) {
+    assert.fail('measurement add LLM command must exist')
+  }
+  const examples = addCommand.examples
+  if (!Array.isArray(examples)) {
+    assert.fail('measurement add LLM examples must be an array')
+  }
+  const groupedExample = examples.find(
+    (example): example is Record<string, unknown> =>
+      isRecord(example) &&
+      typeof example.command === 'string' &&
+      example.command.includes('1:side=right'),
+  )
+  if (!isRecord(groupedExample)) {
+    assert.fail('indexed grouped measurement example must exist')
+  }
+  const command = groupedExample.command
+  if (typeof command !== 'string') {
+    assert.fail('indexed grouped measurement example command must be a string')
+  }
+  return command
+}
+
 async function initVault(cli: Cli.Cli, vaultRoot: string) {
   const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
     'init',
@@ -166,6 +223,25 @@ test('measurement add schema exposes typed single-record and grouped-event field
   ]) {
     assert.equal(field in schema.options.properties, true, field)
   }
+})
+
+test('measurement add guidance surfaces show indexed grouped qualifiers and notes', async () => {
+  const cli = createMeasurementCli()
+  const help = await runRawInProcessCli(cli, ['measurement', 'add', '--help'])
+  const schema = await readCommandSchema(cli, ['measurement', 'add'])
+  const llmExample = await readMeasurementAddLlmExample(cli)
+
+  for (const rendered of [help, llmExample]) {
+    assert.match(rendered, /1:side=right/u)
+    assert.match(rendered, /2:posture=seated/u)
+    assert.match(rendered, /1:after coffee/u)
+    assert.match(rendered, /2:five quiet minutes/u)
+  }
+
+  assert.match(getOptionDescription(schema, 'qualifier'), /1:side=right/u)
+  assert.match(getOptionDescription(schema, 'qualifier'), /2:posture=seated/u)
+  assert.match(getOptionDescription(schema, 'measurementNote'), /1:after coffee/u)
+  assert.match(getOptionDescription(schema, 'measurementNote'), /2:five quiet minutes/u)
 })
 
 test('measurement import-json schema exposes the structured payload escape hatch', async () => {
@@ -415,6 +491,71 @@ test('measurement add rejects non-slug typed tags before writing', async () => {
   if (!result.envelope.ok) {
     assert.equal(result.envelope.error.code, 'VALIDATION_ERROR')
     assert.match(result.envelope.error.message ?? '', /lowercase kebab-case slug/u)
+  }
+})
+
+test('measurement add reports indexed qualifier and note shape mistakes directly', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-indexed-invalid-')
+  cleanupPaths.push(parentRoot)
+  const cli = createMeasurementCli()
+  await initVault(cli, vaultRoot)
+
+  const malformedQualifier = await runInProcessJsonCli<MeasurementAddResult>(cli, [
+    'measurement',
+    'add',
+    '--vault',
+    vaultRoot,
+    '--metric',
+    'grip-strength',
+    '--value',
+    '97.2',
+    '--unit',
+    'lb',
+    '--metric',
+    'resting-heart-rate',
+    '--value',
+    '54',
+    '--unit',
+    'bpm',
+    '--qualifier',
+    '1:after coffee',
+  ])
+
+  assert.equal(malformedQualifier.exitCode, 1)
+  assert.equal(malformedQualifier.envelope.ok, false)
+  if (!malformedQualifier.envelope.ok) {
+    assert.equal(malformedQualifier.envelope.error.code, 'invalid_option')
+    assert.match(malformedQualifier.envelope.error.message ?? '', /N:key=value/u)
+    assert.match(malformedQualifier.envelope.error.message ?? '', /1:side=right/u)
+  }
+
+  const missingNoteText = await runInProcessJsonCli<MeasurementAddResult>(cli, [
+    'measurement',
+    'add',
+    '--vault',
+    vaultRoot,
+    '--metric',
+    'grip-strength',
+    '--value',
+    '97.2',
+    '--unit',
+    'lb',
+    '--metric',
+    'resting-heart-rate',
+    '--value',
+    '54',
+    '--unit',
+    'bpm',
+    '--measurement-note',
+    '1:',
+  ])
+
+  assert.equal(missingNoteText.exitCode, 1)
+  assert.equal(missingNoteText.envelope.ok, false)
+  if (!missingNoteText.envelope.ok) {
+    assert.equal(missingNoteText.envelope.error.code, 'invalid_option')
+    assert.match(missingNoteText.envelope.error.message ?? '', /note text after N:/u)
+    assert.match(missingNoteText.envelope.error.message ?? '', /1:after coffee/u)
   }
 })
 

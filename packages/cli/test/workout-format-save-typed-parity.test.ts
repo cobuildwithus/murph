@@ -28,6 +28,13 @@ interface CommandSchemaEnvelope {
   }
 }
 
+interface LlmManifestEnvelope {
+  commands: Array<{
+    name: string
+    schema: CommandSchemaEnvelope
+  }>
+}
+
 interface WorkoutFormatSaveResult {
   name: string
   slug: string
@@ -89,6 +96,32 @@ async function readCommandSchema(
   ) as CommandSchemaEnvelope
 }
 
+function optionDescription(schema: CommandSchemaEnvelope, optionName: string): string {
+  const property = schema.options.properties[optionName]
+  assert.equal(typeof property, 'object', `missing ${optionName}`)
+  assert.notEqual(property, null, `missing ${optionName}`)
+
+  const description = (property as { description?: unknown }).description
+  if (typeof description !== 'string') {
+    assert.fail(`missing ${optionName} description`)
+  }
+  return description
+}
+
+async function readLlmCommandSchema(
+  cli: Cli.Cli,
+  commandName: string,
+): Promise<CommandSchemaEnvelope> {
+  const manifest = JSON.parse(
+    await runRawInProcessCli(cli, ['--llms-full', '--format', 'json']),
+  ) as LlmManifestEnvelope
+  const command = manifest.commands.find((candidate) => candidate.name === commandName)
+  if (!command) {
+    assert.fail(`missing ${commandName}`)
+  }
+  return command.schema
+}
+
 async function readSavedAttributes(vaultRoot: string, relativePath: string) {
   const parsed = parseFrontmatterDocument(
     await readFile(path.join(vaultRoot, relativePath), 'utf8'),
@@ -120,6 +153,42 @@ test('workout format save schema exposes typed routine-template parity fields', 
   ]) {
     assert.equal(field in schema.options.properties, true, field)
   }
+
+  assert.match(
+    optionDescription(schema, 'exercise'),
+    /Supported keys: order, name, groupId, mode, unitOverride, note/u,
+  )
+  assert.match(
+    optionDescription(schema, 'setTemplate'),
+    /Prefer targetReps, targetWeight, targetWeightUnit, targetDurationSeconds, targetDistanceMeters, and targetRpe/u,
+  )
+  assert.match(
+    optionDescription(schema, 'setTemplate'),
+    /Supported keys: exercise, order, type, targetReps, reps, targetWeight, weight/u,
+  )
+})
+
+test('workout format save help teaches typed routine compact grammar', async () => {
+  const cli = createWorkoutFormatCli()
+  const help = await runRawInProcessCli(cli, ['workout', 'format', 'save', '--help'])
+
+  assert.match(help, /Save a typed routine template with planned sets/u)
+  assert.match(help, /order=2;name=Ring row;mode=bodyweight/u)
+  assert.match(
+    help,
+    /targetReps=5;targetWeight=185;targetWeightUnit=lb;targetRpe=8/u,
+  )
+})
+
+test('workout format save LLM schema exposes compact routine keys', async () => {
+  const cli = createWorkoutFormatCli()
+  const schema = await readLlmCommandSchema(cli, 'workout format save')
+
+  assert.match(optionDescription(schema, 'exercise'), /Compact exercise grammar/u)
+  assert.match(optionDescription(schema, 'exercise'), /Supported keys: order, name/u)
+  assert.match(optionDescription(schema, 'setTemplate'), /Compact setTemplate grammar/u)
+  assert.match(optionDescription(schema, 'setTemplate'), /Prefer targetReps/u)
+  assert.match(optionDescription(schema, 'setTemplate'), /targetDurationSeconds/u)
 })
 
 test('workout format import-json schema exposes the structured template escape hatch', async () => {
@@ -487,4 +556,31 @@ test.sequential('workout format save rejects incomplete typed exercise templates
   assert.equal(result.envelope.ok, false)
   assert.equal(result.envelope.error.code, 'invalid_option')
   assert.match(result.envelope.error.message ?? '', /plannedSets/u)
+
+  const unsupportedField = await runInProcessJsonCli<WorkoutFormatSaveResult>(cli, [
+    'workout',
+    'format',
+    'save',
+    'Broken Upper',
+    '--type',
+    'strength-training',
+    '--exercise',
+    'order=1;name=pushups',
+    '--set-template',
+    'exercise=1;order=1;targetRepCount=20',
+    '--vault',
+    vaultRoot,
+  ])
+
+  assert.notEqual(unsupportedField.exitCode, null)
+  assert.equal(unsupportedField.envelope.ok, false)
+  assert.equal(unsupportedField.envelope.error.code, 'invalid_option')
+  assert.match(
+    unsupportedField.envelope.error.message ?? '',
+    /Unsupported --set-template field "targetRepCount"/u,
+  )
+  assert.match(
+    unsupportedField.envelope.error.message ?? '',
+    /Supported fields: exercise, order, type, targetReps, reps, targetWeight, weight/u,
+  )
 })

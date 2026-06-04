@@ -70,6 +70,13 @@ import {
   createCommonListCommand,
   registerFactoryCommand,
 } from './command-factory-primitives.js'
+import {
+  compactNumber,
+  parseCompactFields,
+  rejectUnsupportedCompactFields,
+  requireCompactInteger,
+  requireCompactString,
+} from './compact-field-spec.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
 const workoutSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
@@ -144,99 +151,12 @@ const workoutAddSetFields = new Set([
   'addedWeightKg',
 ])
 
+const workoutAddMediaFieldList = [...workoutAddMediaFields].join(', ')
+const workoutAddExerciseFieldList = [...workoutAddExerciseFields].join(', ')
+const workoutAddSetFieldList = [...workoutAddSetFields].join(', ')
+
 function invalidWorkoutAddOption(message: string): never {
   throw new VaultCliError('invalid_option', message)
-}
-
-function parseCompactWorkoutFields(spec: string, optionName: string): Map<string, string> {
-  const fields = new Map<string, string>()
-
-  for (const rawPart of spec.split(';')) {
-    const part = rawPart.trim()
-    if (part.length === 0) continue
-
-    const separatorIndex = part.indexOf('=')
-    const key = part.slice(0, separatorIndex).trim()
-    const value = part.slice(separatorIndex + 1).trim()
-
-    if (
-      separatorIndex <= 0
-      || key.length === 0
-      || value.length === 0
-    ) {
-      invalidWorkoutAddOption(`Each --${optionName} entry must use key=value fields.`)
-    }
-
-    if (fields.has(key)) {
-      invalidWorkoutAddOption(`Duplicate --${optionName} field "${key}".`)
-    }
-    fields.set(key, value)
-  }
-
-  return fields
-}
-
-function rejectUnknownCompactWorkoutFields(
-  fields: ReadonlyMap<string, string>,
-  supportedFields: ReadonlySet<string>,
-  optionName: string,
-) {
-  for (const key of fields.keys()) {
-    if (!supportedFields.has(key)) {
-      invalidWorkoutAddOption(`Unsupported --${optionName} field "${key}".`)
-    }
-  }
-}
-
-function requireCompactWorkoutString(
-  fields: ReadonlyMap<string, string>,
-  key: string,
-  optionName: string,
-): string {
-  const value = fields.get(key)
-  if (value === undefined) {
-    invalidWorkoutAddOption(`--${optionName} requires ${key}=...`)
-  }
-  return value
-}
-
-function compactWorkoutNumber(
-  fields: ReadonlyMap<string, string>,
-  key: string,
-  optionName: string,
-): number | undefined {
-  const rawValue = fields.get(key)
-  if (rawValue === undefined) return undefined
-
-  const value = Number(rawValue)
-  if (!Number.isFinite(value)) {
-    invalidWorkoutAddOption(`--${optionName} field ${key} must be a finite number.`)
-  }
-  return value
-}
-
-function compactWorkoutInteger(
-  fields: ReadonlyMap<string, string>,
-  key: string,
-  optionName: string,
-): number | undefined {
-  const value = compactWorkoutNumber(fields, key, optionName)
-  if (value !== undefined && !Number.isInteger(value)) {
-    invalidWorkoutAddOption(`--${optionName} field ${key} must be an integer.`)
-  }
-  return value
-}
-
-function requireCompactWorkoutInteger(
-  fields: ReadonlyMap<string, string>,
-  key: string,
-  optionName: string,
-): number {
-  const value = compactWorkoutInteger(fields, key, optionName)
-  if (value === undefined) {
-    invalidWorkoutAddOption(`--${optionName} requires ${key}=...`)
-  }
-  return value
 }
 
 function normalizeWorkoutMediaRelativePath(relativePath: string): string {
@@ -263,12 +183,22 @@ function normalizeWorkoutMediaRelativePath(relativePath: string): string {
 }
 
 function parseWorkoutAddMediaEntry(entry: string): Record<string, unknown> {
-  const fields = parseCompactWorkoutFields(entry, 'workout-media')
-  rejectUnknownCompactWorkoutFields(fields, workoutAddMediaFields, 'workout-media')
+  const fields = parseCompactFields(entry, 'workout-media', invalidWorkoutAddOption)
+  rejectUnsupportedCompactFields(
+    fields,
+    'workout-media',
+    workoutAddMediaFields,
+    invalidWorkoutAddOption,
+  )
   return {
-    kind: requireCompactWorkoutString(fields, 'kind', 'workout-media'),
+    kind: requireCompactString(fields, 'kind', 'workout-media', invalidWorkoutAddOption),
     relativePath: normalizeWorkoutMediaRelativePath(
-      requireCompactWorkoutString(fields, 'relativePath', 'workout-media'),
+      requireCompactString(
+        fields,
+        'relativePath',
+        'workout-media',
+        invalidWorkoutAddOption,
+      ),
     ),
     ...(fields.has('mediaType') ? { mediaType: fields.get('mediaType') } : {}),
     ...(fields.has('caption') ? { caption: fields.get('caption') } : {}),
@@ -276,11 +206,21 @@ function parseWorkoutAddMediaEntry(entry: string): Record<string, unknown> {
 }
 
 function parseWorkoutAddExerciseEntry(entry: string): WorkoutAddExerciseDraft {
-  const fields = parseCompactWorkoutFields(entry, 'workout-exercise')
-  rejectUnknownCompactWorkoutFields(fields, workoutAddExerciseFields, 'workout-exercise')
+  const fields = parseCompactFields(entry, 'workout-exercise', invalidWorkoutAddOption)
+  rejectUnsupportedCompactFields(
+    fields,
+    'workout-exercise',
+    workoutAddExerciseFields,
+    invalidWorkoutAddOption,
+  )
   return {
-    name: requireCompactWorkoutString(fields, 'name', 'workout-exercise'),
-    order: requireCompactWorkoutInteger(fields, 'order', 'workout-exercise'),
+    name: requireCompactString(fields, 'name', 'workout-exercise', invalidWorkoutAddOption),
+    order: requireCompactInteger(
+      fields,
+      'order',
+      'workout-exercise',
+      invalidWorkoutAddOption,
+    ),
     sets: [],
     ...(fields.has('sourceExerciseId')
       ? { sourceExerciseId: fields.get('sourceExerciseId') }
@@ -296,11 +236,21 @@ function parseWorkoutAddSetEntry(entry: string): {
   exerciseOrder: number
   set: Record<string, unknown>
 } {
-  const fields = parseCompactWorkoutFields(entry, 'workout-set')
-  rejectUnknownCompactWorkoutFields(fields, workoutAddSetFields, 'workout-set')
-  const exerciseOrder = requireCompactWorkoutInteger(fields, 'exercise', 'workout-set')
+  const fields = parseCompactFields(entry, 'workout-set', invalidWorkoutAddOption)
+  rejectUnsupportedCompactFields(
+    fields,
+    'workout-set',
+    workoutAddSetFields,
+    invalidWorkoutAddOption,
+  )
+  const exerciseOrder = requireCompactInteger(
+    fields,
+    'exercise',
+    'workout-set',
+    invalidWorkoutAddOption,
+  )
   const set: Record<string, unknown> = {
-    order: requireCompactWorkoutInteger(fields, 'order', 'workout-set'),
+    order: requireCompactInteger(fields, 'order', 'workout-set', invalidWorkoutAddOption),
   }
 
   for (const key of ['type', 'weightUnit']) {
@@ -319,7 +269,7 @@ function parseWorkoutAddSetEntry(entry: string): {
     'assistanceKg',
     'addedWeightKg',
   ]) {
-    const value = compactWorkoutNumber(fields, key, 'workout-set')
+    const value = compactNumber(fields, key, 'workout-set', invalidWorkoutAddOption)
     if (value !== undefined) {
       set[key] = value
     }
@@ -440,15 +390,22 @@ export function registerWorkoutCommands(
         },
       },
       {
-        description: 'Capture a structured strength workout through typed flags.',
+        description: 'Capture workout media plus multiple exercises and sets.',
         args: {},
         options: {
           vault: './vault',
-          note: 'Garage strength session.',
-          duration: 45,
+          note: 'Upper body session.',
           type: 'strength-training',
-          workoutExercise: ['order=1;name=Bench press;mode=weight_reps'],
-          workoutSet: ['exercise=1;order=1;type=normal;reps=5;weight=185;weightUnit=lb'],
+          duration: 45,
+          workoutMedia: ['kind=photo;relativePath=raw/workouts/2026/03/upper/bench.jpg;mediaType=image/jpeg;caption=Bench setup'],
+          workoutExercise: [
+            'order=1;name=Bench press;mode=weight_reps;unitOverride=lb',
+            'order=2;name=Ring row;mode=bodyweight',
+          ],
+          workoutSet: [
+            'exercise=1;order=1;type=normal;reps=5;weight=185;weightUnit=lb',
+            'exercise=2;order=1;type=normal;reps=10;bodyweightKg=82',
+          ],
         },
       },
     ],
@@ -540,15 +497,15 @@ export function registerWorkoutCommands(
       workoutMedia: z
         .array(z.string().min(1))
         .optional()
-        .describe('Stored workout media as kind=...;relativePath=... with optional mediaType/caption. Repeat --workout-media for multiple entries. Use --media for local file staging.'),
+        .describe(`Compact workoutMedia grammar: kind=...;relativePath=... with optional mediaType/caption. Supported keys: ${workoutAddMediaFieldList}. Repeat --workout-media for multiple entries. Use --media for local file staging.`),
       workoutExercise: z
         .array(z.string().min(1))
         .optional()
-        .describe('Workout exercise as order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Repeat --workout-exercise for multiple exercises.'),
+        .describe(`Compact workoutExercise grammar: order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Supported keys: ${workoutAddExerciseFieldList}. Repeat --workout-exercise for multiple exercises.`),
       workoutSet: z
         .array(z.string().min(1))
         .optional()
-        .describe('Workout set as exercise=...;order=... plus optional type/reps/weight/weightUnit/durationSeconds/distanceMeters/rpe/bodyweightKg/assistanceKg/addedWeightKg. Repeat --workout-set for multiple sets.'),
+        .describe(`Compact workoutSet grammar: exercise=...;order=... plus optional set fields. Supported keys: ${workoutAddSetFieldList}. Repeat --workout-set for multiple sets.`),
     }),
     output: workoutAddResultSchema,
     async run({ args, options }) {
@@ -742,6 +699,26 @@ export function registerWorkoutCommands(
     },
     description:
       'Edit one workout session from typed fields.',
+    examples: [
+      {
+        description: 'Replace workout media plus multiple exercises and sets.',
+        args: {
+          id: 'evt_01JQY2Z0R9Z5K6BT4CB4D9F4CA',
+        },
+        options: {
+          vault: './vault',
+          workoutMedia: ['kind=photo;relativePath=raw/workouts/2026/03/upper/bench.jpg;mediaType=image/jpeg;caption=Bench setup'],
+          workoutExercise: [
+            'order=1;name=Bench press;mode=weight_reps;unitOverride=lb',
+            'order=2;name=Ring row;mode=bodyweight',
+          ],
+          workoutSet: [
+            'exercise=1;order=1;type=normal;reps=5;weight=185;weightUnit=lb',
+            'exercise=2;order=1;type=normal;reps=10;bodyweightKg=82',
+          ],
+        },
+      },
+    ],
     options: {
       duration: z.number().int().positive().max(24 * 60).optional().describe('Replace duration in minutes.'),
       type: z.string().min(1).max(120).optional().describe('Replace workout activity type.'),
@@ -753,9 +730,9 @@ export function registerWorkoutCommands(
       workoutRoutineId: z.string().min(1).max(200).optional().describe('Replace nested workout routine id.'),
       workoutRoutineName: z.string().min(1).max(160).optional().describe('Replace nested workout routine name.'),
       workoutSessionNote: z.string().min(1).max(4000).optional().describe('Replace nested workout session note.'),
-      workoutMedia: z.array(z.string().min(1)).optional().describe('Replace stored workout media entries as kind=...;relativePath=...;mediaType=...;caption=.... Repeat --workout-media for multiple entries.'),
-      workoutExercise: z.array(z.string().min(1)).optional().describe('Replace workout exercises as order=...;name=... entries. Repeat --workout-exercise for multiple exercises.'),
-      workoutSet: z.array(z.string().min(1)).optional().describe('Workout set as exercise=...;order=... plus optional set fields. Repeat --workout-set for multiple sets.'),
+      workoutMedia: z.array(z.string().min(1)).optional().describe(`Replace stored media with the compact workoutMedia grammar: kind=...;relativePath=... plus optional mediaType/caption. Supported keys: ${workoutAddMediaFieldList}. Repeat --workout-media for multiple entries.`),
+      workoutExercise: z.array(z.string().min(1)).optional().describe(`Replace exercises with the compact workoutExercise grammar: order=...;name=... plus optional sourceExerciseId/groupId/mode/unitOverride/note. Supported keys: ${workoutAddExerciseFieldList}. Repeat --workout-exercise for multiple exercises.`),
+      workoutSet: z.array(z.string().min(1)).optional().describe(`Attach replacement sets with the compact workoutSet grammar: exercise=...;order=... plus optional set fields. Supported keys: ${workoutAddSetFieldList}. Repeat --workout-set for multiple sets.`),
       clearDuration: z.boolean().optional().describe('Clear saved duration.'),
       clearDistance: z.boolean().optional().describe('Clear saved distance.'),
       clearWorkout: z.boolean().optional().describe('Clear the nested workout session payload.'),
@@ -999,31 +976,24 @@ export function registerWorkoutCommands(
     'rpe',
   ])
 
+  const workoutFormatExerciseFieldList = [...workoutFormatExerciseFields].join(', ')
+  const workoutFormatSetTemplateFieldList = [...workoutFormatSetTemplateFields].join(', ')
+
   function invalidWorkoutFormatOption(message: string): never {
     throw new VaultCliError('invalid_option', message)
   }
 
-  function rejectUnknownWorkoutFormatFields(
-    fields: ReadonlyMap<string, string>,
-    supportedFields: ReadonlySet<string>,
-    optionName: string,
-  ) {
-    try {
-      rejectUnknownCompactWorkoutFields(fields, supportedFields, optionName)
-    } catch (error) {
-      if (error instanceof VaultCliError) {
-        invalidWorkoutFormatOption(error.message)
-      }
-      throw error
-    }
-  }
-
   function parseWorkoutFormatExerciseEntry(entry: string): WorkoutFormatExerciseDraft {
-    const fields = parseCompactWorkoutFields(entry, 'exercise')
-    rejectUnknownWorkoutFormatFields(fields, workoutFormatExerciseFields, 'exercise')
+    const fields = parseCompactFields(entry, 'exercise', invalidWorkoutFormatOption)
+    rejectUnsupportedCompactFields(
+      fields,
+      'exercise',
+      workoutFormatExerciseFields,
+      invalidWorkoutFormatOption,
+    )
     return {
-      name: requireCompactWorkoutString(fields, 'name', 'exercise'),
-      order: requireCompactWorkoutInteger(fields, 'order', 'exercise'),
+      name: requireCompactString(fields, 'name', 'exercise', invalidWorkoutFormatOption),
+      order: requireCompactInteger(fields, 'order', 'exercise', invalidWorkoutFormatOption),
       plannedSets: [],
       ...(fields.has('groupId') ? { groupId: fields.get('groupId') } : {}),
       ...(fields.has('mode') ? { mode: fields.get('mode') } : {}),
@@ -1038,23 +1008,29 @@ export function registerWorkoutCommands(
     fallbackKey: string,
     optionName: string,
   ): number | undefined {
-    return compactWorkoutNumber(fields, primaryKey, optionName)
-      ?? compactWorkoutNumber(fields, fallbackKey, optionName)
+    return compactNumber(fields, primaryKey, optionName, invalidWorkoutFormatOption)
+      ?? compactNumber(fields, fallbackKey, optionName, invalidWorkoutFormatOption)
   }
 
   function parseWorkoutFormatSetTemplateEntry(entry: string): {
     exerciseOrder: number
     set: Record<string, unknown>
   } {
-    const fields = parseCompactWorkoutFields(entry, 'set-template')
-    rejectUnknownWorkoutFormatFields(
+    const fields = parseCompactFields(entry, 'set-template', invalidWorkoutFormatOption)
+    rejectUnsupportedCompactFields(
       fields,
-      workoutFormatSetTemplateFields,
       'set-template',
+      workoutFormatSetTemplateFields,
+      invalidWorkoutFormatOption,
     )
-    const exerciseOrder = requireCompactWorkoutInteger(fields, 'exercise', 'set-template')
+    const exerciseOrder = requireCompactInteger(
+      fields,
+      'exercise',
+      'set-template',
+      invalidWorkoutFormatOption,
+    )
     const set: Record<string, unknown> = {
-      order: requireCompactWorkoutInteger(fields, 'order', 'set-template'),
+      order: requireCompactInteger(fields, 'order', 'set-template', invalidWorkoutFormatOption),
     }
 
     if (fields.has('type')) set.type = fields.get('type')
@@ -1246,6 +1222,25 @@ export function registerWorkoutCommands(
           vault: './vault',
         },
       },
+      {
+        description: 'Save a typed routine template with planned sets.',
+        args: {
+          name: 'Upper Body A',
+        },
+        options: {
+          vault: './vault',
+          type: 'strength-training',
+          duration: 45,
+          exercise: [
+            'order=1;name=Bench press;mode=weight_reps;unitOverride=lb',
+            'order=2;name=Ring row;mode=bodyweight',
+          ],
+          setTemplate: [
+            'exercise=1;order=1;type=normal;targetReps=5;targetWeight=185;targetWeightUnit=lb;targetRpe=8',
+            'exercise=2;order=1;type=normal;targetReps=10',
+          ],
+        },
+      },
     ],
     hint:
       'Saved workout formats support typed routine exercises, planned sets, grouping, and persistent notes. Use workout format import-json --input @routine.json for the structured JSON escape hatch.',
@@ -1295,11 +1290,11 @@ export function registerWorkoutCommands(
       exercise: z
         .array(z.string().min(1))
         .optional()
-        .describe('Routine exercise as order=...;name=... with optional groupId/mode/unitOverride/note. Repeat --exercise for multiple exercises.'),
+        .describe(`Compact exercise grammar: order=...;name=... with optional groupId/mode/unitOverride/note. Supported keys: ${workoutFormatExerciseFieldList}. Repeat --exercise for multiple exercises.`),
       setTemplate: z
         .array(z.string().min(1))
         .optional()
-        .describe('Planned set as exercise=...;order=... plus optional type/targetReps/targetWeight/targetWeightUnit/targetDurationSeconds/targetDistanceMeters/targetRpe. Repeat --set-template for multiple sets.'),
+        .describe(`Compact setTemplate grammar: exercise=...;order=... plus optional planned set targets. Prefer targetReps, targetWeight, targetWeightUnit, targetDurationSeconds, targetDistanceMeters, and targetRpe. Supported keys: ${workoutFormatSetTemplateFieldList}. Repeat --set-template for multiple sets.`),
       duration: z
         .number()
         .int()

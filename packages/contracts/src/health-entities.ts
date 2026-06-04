@@ -236,6 +236,28 @@ const checkedHealthEntityDefinitions = [
         targetAt: "2026-06-01",
       },
       domains: ["sleep"],
+      metricTargets: [
+        {
+          targetId: "sleep-duration-hours",
+          kind: "metric",
+          metricKey: "sleep-duration-hours",
+          comparator: "between",
+          value: 7,
+          highValue: 9,
+          unit: "h",
+          evaluation: {
+            kind: "rolling-window",
+            statistic: "mean",
+            windowDays: 14,
+          },
+          selectionPolicyOverride: {
+            kind: "daily-aggregate",
+            statistic: "mean",
+            latestWindowDays: 14,
+            minimumPoints: 7,
+          },
+        },
+      ],
     },
     registry: {
       frontmatterSchema: goalFrontmatterSchema,
@@ -387,6 +409,15 @@ const checkedHealthEntityDefinitions = [
       status: "active",
       startedOn: "2026-03-12",
       group: "sleep",
+      ingredients: [
+        {
+          compound: "magnesium-glycinate",
+          label: "Magnesium glycinate",
+          amount: 200,
+          unit: "mg",
+        },
+      ],
+      relatedGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
     },
     registry: {
       command: {
@@ -523,6 +554,7 @@ const checkedHealthEntityDefinitions = [
       title: "MTHFR C677T",
       gene: "MTHFR",
       significance: "risk_factor",
+      sourceFamilyMemberIds: ["fam_01JNV44M0Y6J8W2W0Q7Y2H1K9M"],
     },
     registry: {
       frontmatterSchema: geneticVariantFrontmatterSchema,
