@@ -9,6 +9,9 @@ import {
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
 import {
+  buildHostedExecutionMemberActivatedWake,
+} from "@murphai/hosted-execution";
+import {
   readHostedRuntimeTemporalEnvironment,
 } from "@murphai/hosted-execution/temporal-env";
 
@@ -30,17 +33,20 @@ import {
   readHostedMemberStripeBillingRef,
 } from "../src/lib/hosted-onboarding/hosted-member-billing-store";
 import {
-  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-} from "../src/lib/hosted-onboarding/shared";
+  appendHostedMailboxEnvelopeTx,
+} from "../src/lib/hosted-mailbox/store";
 import { createPrismaClient } from "../src/lib/prisma";
 
 type ResetMode = "dry-run" | "execute";
 
 interface ResetOptions {
   confirmCloudflareCleaned: string | null;
+  confirmEnvironment: string | null;
   confirmMemberId: string | null;
+  confirmTargetFingerprint: string | null;
   confirmTemporalTerminated: string | null;
   confirmUnsuspendAfterReset: string | null;
+  environmentLabel: string;
   execute: boolean;
   leaveSuspended: boolean;
   memberId: string;
@@ -64,9 +70,14 @@ export interface CountSnapshot {
   hostedAiUsage: number;
   hostedAiUsageNonSkipped: number;
   hostedAiUsagePeriod: number;
+  hostedConsentEventResetScopes: number;
+  hostedConsentGrantResetScopes: number;
   hostedIngressLatencyTrace: number;
   hostedInvite: number;
   hostedLinqDailyState: number;
+  hostedMemberEmailAuthorization: number;
+  hostedMemberIdentityPhoneFields: number;
+  hostedMemberRouting: number;
   hostedMailboxItem: number;
   hostedMailboxLaneCounter: number;
   hostedMailboxPayload: number;
@@ -75,6 +86,7 @@ export interface CountSnapshot {
   hostedUserCryptoAuditResetDomains: number;
   hostedUserCryptoEnvelopeControl: number;
   hostedUserCryptoEnvelopeResetDomains: number;
+  hostedWebInternalRequestNonce: number;
   hostedWebSession: number;
   hostedWorkspace: number;
 }
@@ -89,17 +101,24 @@ interface DeleteCounts {
   deviceSyncDirtyPayload: number;
   deviceSyncSignal: number;
   deviceTokenAudit: number;
+  deviceWebhookTraceOwners: number;
   hostedAiUsage: number;
   hostedAiUsagePeriod: number;
+  hostedConsentEventResetScopes: number;
+  hostedConsentGrantResetScopes: number;
   hostedIngressLatencyTrace: number;
   hostedInvite: number;
   hostedLinqDailyState: number;
+  hostedMemberEmailAuthorization: number;
+  hostedMemberIdentityPhoneFields: number;
+  hostedMemberRouting: number;
   hostedMailboxItem: number;
   hostedMailboxLaneCounter: number;
   hostedMailboxPayload: number;
   hostedRuntimeLog: number;
   hostedUserCryptoAuditResetDomains: number;
   hostedUserCryptoEnvelopeResetDomains: number;
+  hostedWebInternalRequestNonce: number;
   hostedWebSession: number;
   hostedWorkspace: number;
 }
@@ -124,22 +143,60 @@ interface CloudflareDeleteResult {
   runnerStateDeleted: boolean | null;
 }
 
+interface DeviceWebhookTraceOwner {
+  provider: string;
+  providerAccountBlindIndex: string;
+}
+
+interface ResetExecutionTargetSummary {
+  cloudflareControlBaseUrlFingerprint: string | null;
+  databaseUrlFingerprint: string;
+  executionTargetFingerprint: string;
+  temporalAddressFingerprint: string | null;
+  temporalNamespaceFingerprint: string | null;
+}
+
 const RESET_DOMAINS = ["device", "ingress", "runtime"] as const;
 const RESET_SCRIPT_SCHEMA = "murph.hosted-member-runtime-reset-script.v1";
+const DEFAULT_RESET_ENVIRONMENT = "production";
+const RESET_BOOTSTRAP_MEMBER_CHANNELS = {
+  email: false,
+  linq: false,
+  telegram: false,
+} as const;
+const PRESERVED_RESET_CONSENT_SCOPES = ["launch.legal", "launch.health-data"] as const;
+const HOSTED_MEMBER_IDENTITY_PHONE_RESET_DATA = {
+  maskedPhoneNumberHint: null,
+  phoneLookupKey: null,
+  phoneNumberEncrypted: null,
+  phoneNumberVerifiedAt: null,
+  signupPhoneCodeSentAt: null,
+  signupPhoneCodeSendAttemptId: null,
+  signupPhoneCodeSendAttemptStartedAt: null,
+  signupPhoneNumberEncrypted: null,
+} satisfies Prisma.HostedMemberIdentityUpdateManyMutationInput;
+export const RESET_TRANSACTION_OPTIONS = {
+  maxWait: 30_000,
+  timeout: 120_000,
+} as const;
 const TEMPORAL_TERMINATION_TIMEOUT_MS = 10_000;
 
 async function main(): Promise<void> {
   const options = parseResetOptions(process.argv.slice(2));
   const mode: ResetMode = options.execute ? "execute" : "dry-run";
   const memberFingerprint = fingerprintIdentifier(options.memberId);
+  const targets = readResetExecutionTargetSummary();
+  assertResetExecutionTargetConfirmed(options, targets);
   const prisma = createPrismaFromEnvironment();
 
   try {
     console.log(JSON.stringify({
+      environment: options.environmentLabel,
       member: memberFingerprint,
       mode,
       schema: RESET_SCRIPT_SCHEMA,
       step: "start",
+      targets,
     }));
 
     const preflight = await readResetPreflight({
@@ -151,6 +208,7 @@ async function main(): Promise<void> {
       counts: preflight.counts,
       deviceConnectionProviders: preflight.deviceConnectionProviders,
       deviceResetBehavior: "device sync rows are deleted; users must reconnect wearables/devices after reset",
+      environment: options.environmentLabel,
       member: {
         billingStatus: preflight.member.billingStatus,
         hasBillingRef: preflight.hasBillingRef,
@@ -164,7 +222,7 @@ async function main(): Promise<void> {
 
     if (!options.execute) {
       printJson("dry-run-complete", memberFingerprint, {
-        note: "No rows were mutated. Re-run with --execute and --confirm-member-id to reset this member.",
+        note: "No rows were mutated. Re-run with --execute, --confirm-member-id, --confirm-environment, and --confirm-target-fingerprint to reset this member.",
       });
       return;
     }
@@ -260,9 +318,12 @@ async function main(): Promise<void> {
 export function parseResetOptions(args: readonly string[]): ResetOptions {
   const options: ResetOptions = {
     confirmCloudflareCleaned: null,
+    confirmEnvironment: null,
     confirmMemberId: null,
+    confirmTargetFingerprint: null,
     confirmTemporalTerminated: null,
     confirmUnsuspendAfterReset: null,
+    environmentLabel: DEFAULT_RESET_ENVIRONMENT,
     execute: false,
     leaveSuspended: false,
     memberId: "",
@@ -281,8 +342,20 @@ export function parseResetOptions(args: readonly string[]): ResetOptions {
         options.memberId = requireNextArg(args, index, arg);
         index += 1;
         break;
+      case "--environment":
+        options.environmentLabel = requireNextArg(args, index, arg);
+        index += 1;
+        break;
+      case "--confirm-environment":
+        options.confirmEnvironment = requireNextArg(args, index, arg);
+        index += 1;
+        break;
       case "--confirm-member-id":
         options.confirmMemberId = requireNextArg(args, index, arg);
+        index += 1;
+        break;
+      case "--confirm-target-fingerprint":
+        options.confirmTargetFingerprint = requireNextArg(args, index, arg);
         index += 1;
         break;
       case "--confirm-cloudflare-cleaned":
@@ -323,13 +396,16 @@ export function parseResetOptions(args: readonly string[]): ResetOptions {
         printUsageAndExit(0);
         break;
       default:
-        throw new Error(`Unknown argument: ${arg}`);
+        throw new Error("Unknown argument.");
     }
   }
 
+  options.environmentLabel = normalizeResetEnvironmentLabel(options.environmentLabel);
   options.memberId = options.memberId.trim();
   options.confirmCloudflareCleaned = options.confirmCloudflareCleaned?.trim() || null;
+  options.confirmEnvironment = options.confirmEnvironment?.trim() || null;
   options.confirmMemberId = options.confirmMemberId?.trim() || null;
+  options.confirmTargetFingerprint = options.confirmTargetFingerprint?.trim() || null;
   options.confirmTemporalTerminated = options.confirmTemporalTerminated?.trim() || null;
   options.confirmUnsuspendAfterReset = options.confirmUnsuspendAfterReset?.trim() || null;
 
@@ -339,6 +415,10 @@ export function parseResetOptions(args: readonly string[]): ResetOptions {
 
   if (options.execute && options.confirmMemberId !== options.memberId) {
     throw new Error("--execute requires --confirm-member-id with the exact same member id.");
+  }
+
+  if (options.execute && options.confirmEnvironment !== options.environmentLabel) {
+    throw new Error("--execute requires --confirm-environment with the exact same environment label.");
   }
 
   if (options.resumeSuspendedReset && !options.execute) {
@@ -372,13 +452,27 @@ function requireNextArg(args: readonly string[], index: number, flag: string): s
   return value;
 }
 
+function normalizeResetEnvironmentLabel(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new Error("--environment requires a non-empty label.");
+  }
+  if (!/^[A-Za-z0-9_.:-]+$/u.test(normalized)) {
+    throw new Error("--environment may only contain letters, numbers, dots, colons, underscores, or hyphens.");
+  }
+  return normalized;
+}
+
 function printUsageAndExit(code: number): never {
   console.log([
     "Usage:",
-    "  pnpm --dir apps/web admin:reset-member -- --member-id <id> --dry-run",
-    "  pnpm --dir apps/web admin:reset-member -- --member-id <id> --execute --confirm-member-id <id>",
+    "  pnpm --dir apps/web admin:reset-member -- --member-id <id> --dry-run --environment production",
+    "  pnpm --dir apps/web admin:reset-member -- --member-id <id> --execute --confirm-member-id <id> --environment production --confirm-environment production --confirm-target-fingerprint <fingerprint>",
     "",
     "Optional execute flags:",
+    "  --environment <label>        Target label for operator confirmation; defaults to production.",
+    "  --confirm-environment <label>",
+    "  --confirm-target-fingerprint <fingerprint>",
     "  --resume-suspended-reset       Continue a failed reset while the member is already suspended.",
     "  --unsuspend-after-reset        Clear suspension after all reset barriers pass.",
     "  --confirm-unsuspend-after-reset <id>",
@@ -499,6 +593,19 @@ function assertPreflightAllowsReset(
   }
 }
 
+export function assertResetExecutionTargetConfirmed(
+  options: Pick<ResetOptions, "confirmTargetFingerprint" | "execute">,
+  targets: Pick<ResetExecutionTargetSummary, "executionTargetFingerprint">,
+): void {
+  if (!options.execute) {
+    return;
+  }
+
+  if (options.confirmTargetFingerprint !== targets.executionTargetFingerprint) {
+    throw new Error("--execute requires --confirm-target-fingerprint matching the printed executionTargetFingerprint.");
+  }
+}
+
 async function assertExternalExecutePreflight(options: ResetOptions): Promise<void> {
   if (!options.execute) {
     return;
@@ -530,9 +637,15 @@ async function countResetRows(input: {
     hostedAiUsage,
     hostedAiUsageNonSkipped,
     hostedAiUsagePeriod,
+    hostedConsentEventResetScopes,
+    hostedConsentGrantResetScopes,
     hostedLinqDailyState,
     hostedInvite,
+    hostedMemberRouting,
+    hostedMemberEmailAuthorization,
+    hostedMemberIdentityPhoneFields,
     hostedWorkspace,
+    hostedWebInternalRequestNonce,
     hostedWebSession,
     deviceTokenAudit,
     deviceSyncDirtyPayload,
@@ -564,9 +677,21 @@ async function countResetRows(input: {
       },
     }),
     input.prisma.hostedAiUsagePeriod.count({ where: { memberId: input.memberId } }),
+    input.prisma.hostedConsentEvent.count({
+      where: hostedConsentEventResetWhere(input.memberId),
+    }),
+    input.prisma.hostedConsentGrant.count({
+      where: hostedConsentGrantResetWhere(input.memberId),
+    }),
     input.prisma.hostedLinqDailyState.count({ where: { memberId: input.memberId } }),
     input.prisma.hostedInvite.count({ where: { memberId: input.memberId } }),
+    input.prisma.hostedMemberRouting.count({ where: { memberId: input.memberId } }),
+    input.prisma.hostedMemberEmailAuthorization.count({ where: { memberId: input.memberId } }),
+    input.prisma.hostedMemberIdentity.count({
+      where: hostedMemberIdentityPhoneResetWhere(input.memberId),
+    }),
     input.prisma.hostedWorkspace.count({ where: { userId: input.memberId } }),
+    input.prisma.hostedWebInternalRequestNonce.count({ where: { userId: input.memberId } }),
     input.prisma.hostedWebSession.count({ where: { memberId: input.memberId } }),
     input.prisma.deviceTokenAudit.count({ where: { userId: input.memberId } }),
     input.prisma.deviceSyncDirtyPayload.count({ where: { userId: input.memberId } }),
@@ -594,9 +719,14 @@ async function countResetRows(input: {
     hostedAiUsage,
     hostedAiUsageNonSkipped,
     hostedAiUsagePeriod,
+    hostedConsentEventResetScopes,
+    hostedConsentGrantResetScopes,
     hostedIngressLatencyTrace,
     hostedInvite,
     hostedLinqDailyState,
+    hostedMemberEmailAuthorization,
+    hostedMemberIdentityPhoneFields,
+    hostedMemberRouting,
     hostedMailboxItem,
     hostedMailboxLaneCounter,
     hostedMailboxPayload,
@@ -605,6 +735,7 @@ async function countResetRows(input: {
     hostedUserCryptoAuditResetDomains,
     hostedUserCryptoEnvelopeControl,
     hostedUserCryptoEnvelopeResetDomains,
+    hostedWebInternalRequestNonce,
     hostedWebSession,
     hostedWorkspace,
   };
@@ -655,11 +786,17 @@ async function resetHostedMemberDatabaseState(input: {
   prisma: PrismaClient;
 }): Promise<{
   deletedCounts: DeleteCounts;
+  freshBootstrap: {
+    inserted: boolean;
+    kind: string;
+    lane: string;
+    laneSeq: string;
+  };
   freshWorkspaceVersion: string;
   postCounts: CountSnapshot;
 }> {
   return input.prisma.$transaction(async (tx) => {
-    await lockHostedMemberForResetTx({
+    const lockedMember = await lockHostedMemberForResetTx({
       memberId: input.memberId,
       tx,
     });
@@ -702,6 +839,12 @@ async function resetHostedMemberDatabaseState(input: {
       });
     }
 
+    const freshBootstrap = await appendResetMemberActivatedMailboxItemTx({
+      memberId: input.memberId,
+      timeZone: lockedMember.pendingActivationTimeZone,
+      tx,
+    });
+
     const postCounts = await countResetRows({
       memberId: input.memberId,
       prisma: tx,
@@ -711,10 +854,65 @@ async function resetHostedMemberDatabaseState(input: {
 
     return {
       deletedCounts,
+      freshBootstrap,
       freshWorkspaceVersion: freshWorkspaceVersion.toString(),
       postCounts,
     };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  }, RESET_TRANSACTION_OPTIONS);
+}
+
+async function appendResetMemberActivatedMailboxItemTx(input: {
+  memberId: string;
+  timeZone: string | null;
+  tx: Prisma.TransactionClient;
+}): Promise<{
+  inserted: boolean;
+  kind: string;
+  lane: string;
+  laneSeq: string;
+}> {
+  const append = await appendHostedMailboxEnvelopeTx({
+    envelope: buildResetMemberActivatedWake({
+      memberId: input.memberId,
+      occurredAt: new Date().toISOString(),
+      timeZone: input.timeZone,
+    }),
+    tx: input.tx,
+  });
+
+  if (!append.inserted || append.dedupeConflict) {
+    throw new Error("Fresh member activation bootstrap mailbox item was not inserted cleanly.");
+  }
+  if (append.item.kind !== "member.activated" || append.item.lane !== "system") {
+    throw new Error("Fresh member activation bootstrap mailbox item was routed incorrectly.");
+  }
+
+  return {
+    inserted: append.inserted,
+    kind: append.item.kind,
+    lane: append.item.lane,
+    laneSeq: String(append.item.laneSeq),
+  };
+}
+
+export function buildResetMemberActivatedWake(input: {
+  memberId: string;
+  occurredAt: string;
+  timeZone?: string | null;
+}) {
+  const eventFingerprint = createHash("sha256")
+    .update(`${input.memberId}:${input.occurredAt}`)
+    .digest("hex")
+    .slice(0, 32);
+  const timeZone = input.timeZone?.trim();
+
+  return buildHostedExecutionMemberActivatedWake({
+    eventId: `member.activated:runtime-reset:${eventFingerprint}`,
+    memberChannels: RESET_BOOTSTRAP_MEMBER_CHANNELS,
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    ...(timeZone ? { timeZone } : {}),
+  });
 }
 
 export function assertPostResetCounts(counts: CountSnapshot): void {
@@ -738,15 +936,27 @@ export function assertPostResetCounts(counts: CountSnapshot): void {
   expectZero("hostedAiUsage");
   expectZero("hostedAiUsageNonSkipped");
   expectZero("hostedAiUsagePeriod");
+  expectZero("hostedConsentEventResetScopes");
+  expectZero("hostedConsentGrantResetScopes");
   expectZero("hostedIngressLatencyTrace");
   expectZero("hostedInvite");
   expectZero("hostedLinqDailyState");
-  expectZero("hostedMailboxItem");
-  expectZero("hostedMailboxLaneCounter");
+  expectZero("hostedMemberEmailAuthorization");
+  expectZero("hostedMemberIdentityPhoneFields");
+  expectZero("hostedMemberRouting");
   expectZero("hostedMailboxPayload");
-  expectZero("hostedRuntimeLog");
+  expectZero("hostedWebInternalRequestNonce");
   expectZero("hostedWebSession");
 
+  if (counts.hostedMailboxItem !== 1) {
+    failures.push(`hostedMailboxItem=${counts.hostedMailboxItem}`);
+  }
+  if (counts.hostedMailboxLaneCounter !== 1) {
+    failures.push(`hostedMailboxLaneCounter=${counts.hostedMailboxLaneCounter}`);
+  }
+  if (counts.hostedRuntimeLog !== 1) {
+    failures.push(`hostedRuntimeLog=${counts.hostedRuntimeLog}`);
+  }
   if (counts.hostedUserCryptoEnvelopeControl < 1) {
     failures.push("hostedUserCryptoEnvelopeControl<1");
   }
@@ -779,20 +989,31 @@ async function deleteResetRowsTx(input: {
     deviceSyncDirtyPayload: 0,
     deviceSyncSignal: 0,
     deviceTokenAudit: 0,
+    deviceWebhookTraceOwners: 0,
     hostedAiUsage: 0,
     hostedAiUsagePeriod: 0,
+    hostedConsentEventResetScopes: 0,
+    hostedConsentGrantResetScopes: 0,
     hostedIngressLatencyTrace: 0,
     hostedInvite: 0,
     hostedLinqDailyState: 0,
+    hostedMemberEmailAuthorization: 0,
+    hostedMemberIdentityPhoneFields: 0,
+    hostedMemberRouting: 0,
     hostedMailboxItem: 0,
     hostedMailboxLaneCounter: 0,
     hostedMailboxPayload: 0,
     hostedRuntimeLog: 0,
     hostedUserCryptoAuditResetDomains: 0,
     hostedUserCryptoEnvelopeResetDomains: 0,
+    hostedWebInternalRequestNonce: 0,
     hostedWebSession: 0,
     hostedWorkspace: 0,
   };
+  const deviceWebhookTraceWhere = await buildDeviceWebhookTraceWhereForMemberTx({
+    memberId: input.memberId,
+    tx: input.tx,
+  });
 
   counts.hostedMailboxPayload = (await input.tx.hostedMailboxPayload.deleteMany({ where: { userId: input.memberId } })).count;
   counts.hostedIngressLatencyTrace = (await input.tx.hostedIngressLatencyTrace.deleteMany({ where: { userId: input.memberId } })).count;
@@ -803,9 +1024,26 @@ async function deleteResetRowsTx(input: {
   counts.hostedUserCryptoEnvelopeResetDomains = await deleteHostedCryptoEnvelopeRows(input.tx, input.memberId, RESET_DOMAINS);
   counts.hostedAiUsage = (await input.tx.hostedAiUsage.deleteMany({ where: { memberId: input.memberId } })).count;
   counts.hostedAiUsagePeriod = (await input.tx.hostedAiUsagePeriod.deleteMany({ where: { memberId: input.memberId } })).count;
+  counts.hostedConsentEventResetScopes = (await input.tx.hostedConsentEvent.deleteMany({
+    where: hostedConsentEventResetWhere(input.memberId),
+  })).count;
+  counts.hostedConsentGrantResetScopes = (await input.tx.hostedConsentGrant.deleteMany({
+    where: hostedConsentGrantResetWhere(input.memberId),
+  })).count;
   counts.hostedLinqDailyState = (await input.tx.hostedLinqDailyState.deleteMany({ where: { memberId: input.memberId } })).count;
   counts.hostedInvite = (await input.tx.hostedInvite.deleteMany({ where: { memberId: input.memberId } })).count;
+  counts.hostedMemberRouting = (await input.tx.hostedMemberRouting.deleteMany({ where: { memberId: input.memberId } })).count;
+  counts.hostedMemberEmailAuthorization = (await input.tx.hostedMemberEmailAuthorization.deleteMany({
+    where: { memberId: input.memberId },
+  })).count;
+  counts.hostedMemberIdentityPhoneFields = (await input.tx.hostedMemberIdentity.updateMany({
+    data: HOSTED_MEMBER_IDENTITY_PHONE_RESET_DATA,
+    where: hostedMemberIdentityPhoneResetWhere(input.memberId),
+  })).count;
   counts.hostedWorkspace = (await input.tx.hostedWorkspace.deleteMany({ where: { userId: input.memberId } })).count;
+  counts.hostedWebInternalRequestNonce = (await input.tx.hostedWebInternalRequestNonce.deleteMany({
+    where: { userId: input.memberId },
+  })).count;
   counts.hostedWebSession = (await input.tx.hostedWebSession.deleteMany({ where: { memberId: input.memberId } })).count;
   counts.deviceTokenAudit = (await input.tx.deviceTokenAudit.deleteMany({ where: { userId: input.memberId } })).count;
   counts.deviceSyncDirtyPayload = (await input.tx.deviceSyncDirtyPayload.deleteMany({ where: { userId: input.memberId } })).count;
@@ -815,6 +1053,9 @@ async function deleteResetRowsTx(input: {
   counts.deviceConnectIntent = (await input.tx.deviceConnectIntent.deleteMany({ where: { memberId: input.memberId } })).count;
   counts.deviceAgentSession = (await input.tx.deviceAgentSession.deleteMany({ where: { userId: input.memberId } })).count;
   counts.deviceBrowserAssertionNonce = (await input.tx.deviceBrowserAssertionNonce.deleteMany({ where: { userId: input.memberId } })).count;
+  counts.deviceWebhookTraceOwners = deviceWebhookTraceWhere
+    ? (await input.tx.deviceWebhookTrace.deleteMany({ where: deviceWebhookTraceWhere })).count
+    : 0;
   counts.deviceConnection = (await input.tx.deviceConnection.deleteMany({ where: { userId: input.memberId } })).count;
 
   return counts;
@@ -823,9 +1064,14 @@ async function deleteResetRowsTx(input: {
 async function lockHostedMemberForResetTx(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
-}): Promise<void> {
-  const rows = await input.tx.$queryRaw<Array<{ id: string }>>`
-    SELECT id
+}): Promise<{ pendingActivationTimeZone: string | null }> {
+  const rows = await input.tx.$queryRaw<Array<{
+    id: string;
+    pendingActivationTimeZone: string | null;
+  }>>`
+    SELECT
+      id,
+      pending_activation_time_zone AS "pendingActivationTimeZone"
     FROM hosted_member
     WHERE id = ${input.memberId}
       AND suspended_at IS NOT NULL
@@ -835,6 +1081,10 @@ async function lockHostedMemberForResetTx(input: {
   if (rows.length !== 1) {
     throw new Error("Hosted member reset requires the member to be suspended and locked.");
   }
+
+  return {
+    pendingActivationTimeZone: rows[0]?.pendingActivationTimeZone ?? null,
+  };
 }
 
 async function summarizeDeviceConnectionProviders(input: {
@@ -862,6 +1112,61 @@ async function summarizeDeviceConnectionProviders(input: {
   return Array.from(counts.entries())
     .map(([provider, count]) => ({ count, provider }))
     .sort((left, right) => left.provider.localeCompare(right.provider));
+}
+
+async function buildDeviceWebhookTraceWhereForMemberTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<Prisma.DeviceWebhookTraceWhereInput | null> {
+  const traceOwners = await readDeviceWebhookTraceOwnersForMember({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+
+  return traceOwners.length > 0 ? { OR: traceOwners } : null;
+}
+
+async function readDeviceWebhookTraceOwnersForMember(input: {
+  memberId: string;
+  prisma: PrismaClient | Prisma.TransactionClient;
+}): Promise<DeviceWebhookTraceOwner[]> {
+  const connections = await input.prisma.deviceConnection.findMany({
+    orderBy: [
+      { provider: "asc" },
+      { id: "asc" },
+    ],
+    select: {
+      provider: true,
+      providerAccountBlindIndex: true,
+    },
+    where: {
+      userId: input.memberId,
+    },
+  });
+
+  const seenTraceOwners = new Set<string>();
+  const traceOwners: DeviceWebhookTraceOwner[] = [];
+  for (const connection of connections) {
+    const providerAccountBlindIndex = connection.providerAccountBlindIndex.trim();
+    if (!providerAccountBlindIndex) {
+      continue;
+    }
+
+    const key = `${connection.provider}:${providerAccountBlindIndex}`;
+    if (seenTraceOwners.has(key)) {
+      continue;
+    }
+    seenTraceOwners.add(key);
+    traceOwners.push({
+      provider: connection.provider,
+      providerAccountBlindIndex,
+    });
+  }
+
+  return traceOwners.sort((left, right) =>
+    `${left.provider}:${left.providerAccountBlindIndex}`
+      .localeCompare(`${right.provider}:${right.providerAccountBlindIndex}`)
+  );
 }
 
 async function countHostedCryptoEnvelopeRows(
@@ -908,6 +1213,40 @@ async function countDeviceWebhookTraceOwners(
     )
   `;
   return Number(rows[0]?.count ?? 0n);
+}
+
+function hostedMemberIdentityPhoneResetWhere(memberId: string): Prisma.HostedMemberIdentityWhereInput {
+  return {
+    memberId,
+    OR: [
+      { maskedPhoneNumberHint: { not: null } },
+      { phoneLookupKey: { not: null } },
+      { phoneNumberEncrypted: { not: null } },
+      { phoneNumberVerifiedAt: { not: null } },
+      { signupPhoneNumberEncrypted: { not: null } },
+      { signupPhoneCodeSentAt: { not: null } },
+      { signupPhoneCodeSendAttemptId: { not: null } },
+      { signupPhoneCodeSendAttemptStartedAt: { not: null } },
+    ],
+  };
+}
+
+function hostedConsentEventResetWhere(memberId: string): Prisma.HostedConsentEventWhereInput {
+  return {
+    memberId,
+    scope: {
+      notIn: Array.from(PRESERVED_RESET_CONSENT_SCOPES),
+    },
+  };
+}
+
+function hostedConsentGrantResetWhere(memberId: string): Prisma.HostedConsentGrantWhereInput {
+  return {
+    memberId,
+    scope: {
+      notIn: Array.from(PRESERVED_RESET_CONSENT_SCOPES),
+    },
+  };
 }
 
 async function deleteHostedCryptoEnvelopeRows(
@@ -1032,9 +1371,12 @@ async function deleteCloudflareHostedUserData(userId: string): Promise<Cloudflar
     timeoutMs: controlTimeoutMs,
   });
   const result = await client.deleteUserData(userId);
-  const deleted = result.durableObject.alarmCleared
-    && result.r2.supported
-    && !result.r2.skippedUserScopedPrefixes;
+  const deleted = isCloudflareHostedUserDataDeleteProven({
+    alarmCleared: result.durableObject.alarmCleared,
+    r2SkippedUserScopedPrefixes: result.r2.skippedUserScopedPrefixes,
+    r2Supported: result.r2.supported,
+    runnerStateDeleted: result.durableObject.stateDeleted,
+  });
 
   return {
     alarmCleared: result.durableObject.alarmCleared,
@@ -1048,6 +1390,18 @@ async function deleteCloudflareHostedUserData(userId: string): Promise<Cloudflar
 
 function isCloudflareControlConfigured(): boolean {
   return Boolean(readHostedExecutionControlBaseUrl());
+}
+
+export function isCloudflareHostedUserDataDeleteProven(input: {
+  alarmCleared: boolean | null;
+  r2SkippedUserScopedPrefixes: boolean | null;
+  r2Supported: boolean;
+  runnerStateDeleted: boolean | null;
+}): boolean {
+  return input.alarmCleared === true
+    && input.runnerStateDeleted === true
+    && input.r2Supported
+    && input.r2SkippedUserScopedPrefixes === false;
 }
 
 function hostedUserRuntimeWorkflowId(userId: string): string {
@@ -1084,6 +1438,48 @@ function printJson(step: string, memberFingerprint: string, extra: object): void
   }));
 }
 
+function readResetExecutionTargetSummary(): ResetExecutionTargetSummary {
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL must be configured before running hosted member reset.");
+  }
+
+  const temporal = readHostedRuntimeTemporalEnvironment(process.env, {
+    defaultAddress: null,
+  });
+
+  return buildResetExecutionTargetSummary({
+    cloudflareControlBaseUrlFingerprint: fingerprintOptionalValue(readHostedExecutionControlBaseUrl()),
+    databaseUrlFingerprint: fingerprintIdentifier(databaseUrl),
+    temporalAddressFingerprint: fingerprintOptionalValue(temporal.address),
+    temporalNamespaceFingerprint: fingerprintOptionalValue(temporal.namespace),
+  });
+}
+
+export function buildResetExecutionTargetSummary(input: {
+  cloudflareControlBaseUrlFingerprint: string | null;
+  databaseUrlFingerprint: string;
+  temporalAddressFingerprint: string | null;
+  temporalNamespaceFingerprint: string | null;
+}): ResetExecutionTargetSummary {
+  const executionTargetFingerprint = fingerprintIdentifier(JSON.stringify({
+    cloudflareControlBaseUrlFingerprint: input.cloudflareControlBaseUrlFingerprint,
+    databaseUrlFingerprint: input.databaseUrlFingerprint,
+    temporalAddressFingerprint: input.temporalAddressFingerprint,
+    temporalNamespaceFingerprint: input.temporalNamespaceFingerprint,
+  }));
+
+  return {
+    ...input,
+    executionTargetFingerprint,
+  };
+}
+
+function fingerprintOptionalValue(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? fingerprintIdentifier(normalized) : null;
+}
+
 function fingerprintIdentifier(value: string): string {
   return `sha256:${createHash("sha256").update(value).digest("hex").slice(0, 16)}`;
 }
@@ -1091,7 +1487,7 @@ function fingerprintIdentifier(value: string): string {
 if (process.argv[1] === new URL(import.meta.url).pathname) {
   main().catch((error: unknown) => {
     console.error(JSON.stringify({
-      error: safeErrorMessage(error),
+      error: safeErrorMessage(error, readMemberIdArgForRedaction(process.argv.slice(2))),
       schema: RESET_SCRIPT_SCHEMA,
       step: "failed",
     }));
@@ -1099,8 +1495,34 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   });
 }
 
-export function safeErrorMessage(error: unknown): string {
-  return formatHostedExecutionSafeLogError(error)
+export function safeErrorMessage(error: unknown, memberId?: string | null): string {
+  let message = formatHostedExecutionSafeLogError(error)
     .replace(/hosted-user-runtime:[^\s"']+/gu, "hosted-user-runtime:<member-id>")
     .replace(/hbm_[A-Za-z0-9_-]+/gu, "<member-id>");
+
+  const normalizedMemberId = memberId?.trim();
+  if (normalizedMemberId) {
+    message = message.replace(new RegExp(escapeRegExp(normalizedMemberId), "gu"), "<member-id>");
+  }
+
+  return message;
+}
+
+function readMemberIdArgForRedaction(args: readonly string[]): string | null {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--member-id") {
+      const next = args[index + 1];
+      return next && !next.startsWith("--") ? next : null;
+    }
+    if (arg.startsWith("--member-id=")) {
+      return arg.slice("--member-id=".length);
+    }
+  }
+
+  return null;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
