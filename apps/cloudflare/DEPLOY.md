@@ -57,8 +57,7 @@ origin in `HOSTED_WEB_PRODUCTION_BASE_URL`; production preflight also rejects
 HTTP, localhost, `host.docker.internal`, loopback, preview/development, and
 private-network Worker and hosted web origins, including DNS names
 that resolve to private-network addresses.
-The workflow enables `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`; deploy smoke signs `/internal/deploy/container-smoke`, starts the Cloudflare-managed runner container, and compares its reported runner-bundle fingerprint with the freshly rendered `.deploy/runner-bundle` manifest.
-Because Cloudflare updates Worker code before container instances finish rolling, the runner-container smoke retries through the container rollout window and does not pass until the managed container reports the freshly deployed runner bundle.
+Normal gradual deploy smoke targets the public Worker banner and health endpoints after deploy. When the workflow runs with `container_rollout=immediate`, it also enables managed-container smoke: `deploy:smoke` signs `/internal/deploy/container-smoke`, starts the Cloudflare-managed runner container, runs the direct-R2 upload check, and compares the reported runner-bundle fingerprint with the freshly rendered `.deploy/runner-bundle` manifest.
 
 ## Required GitHub Environment Secrets
 
@@ -317,6 +316,8 @@ Before the production deploy job attaches the GitHub environment, protected-main
 For `pnpm cf:deploy:immediate`, the workflow skips the slower E2E gates but still runs a protected-main-only Blacksmith build-prep handoff. That job installs the pinned Codex CLI version declared by the runner base Dockerfile, runs the hosted Codex auth regression with `MURPH_RUN_HOSTED_CODEX_AUTH_E2E=1`, assembles `.deploy/runner-bundle/`, prepares the stable base image, and uploads only the runner bundle plus a saved base-image tarball. It does not attach the production GitHub environment and does not receive Cloudflare credentials, Worker secrets, private JWKs, or provider API keys.
 The GitHub-hosted production deploy job downloads that immediate handoff only for break-glass Worker deploys, validates the runner-bundle tar entries before extraction, rejects unsafe archive entry types and symlink targets, loads the base image into Docker, validates the downloaded runner-bundle manifest against the protected-main checkout before any secret-bearing deploy preflight, renders env-specific deploy config and Worker secrets itself, refreshes the manifest timestamp for the newly rendered config, dry-runs the generated Wrangler deploy bundle, deploys directly with Wrangler, and runs the deployed endpoint smoke. This immediate path intentionally trusts protected-main Blacksmith runners for no-secret production artifact integrity, while production GitHub environment access, Worker secret rendering, Wrangler deploy, and deployed endpoint smoke remain on GitHub-hosted Ubuntu. Normal non-immediate deploys keep assembling and validating their own `.deploy/runner-bundle/` and base image inside the production deploy job after the Blacksmith gates pass, and render-only workflow runs skip the runner smoke/build-prep gates while still executing focused Cloudflare checks in the deploy job.
 
+Gradual deploys leave the deployed endpoint smoke on public banner and health checks only. The strict managed-container runner-bundle/direct-R2 deployed smoke runs only for `container_rollout=immediate`, because gradual Cloudflare container rollout can keep serving the previous runner image while the new container application version settles. The normal deploy path already proves the runner image with the protected-main Blacksmith runner smoke before production secrets are attached.
+
 ## Smoke
 
 `pnpm --dir apps/cloudflare deploy:smoke` validates only the surviving execution-plane surface:
@@ -328,17 +329,20 @@ The GitHub-hosted production deploy job downloads that immediate handoff only fo
 - if `HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT=true` is also configured, the managed-container smoke mints a short-lived write fence for `HOSTED_EXECUTION_SMOKE_USER_ID`, then runs a Codex CLI `responses` request from inside the Cloudflare container with `OPENAI_API_KEY=__cloudflare_injected__`, proving the container trusts Cloudflare's HTTPS-interception CA and the Worker injects the real OpenAI secret only under runtime authority
 - if `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, one authenticated `GET /internal/users/:userId/status`
 
+The GitHub deploy workflow enables `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER` and `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT` only when `container_rollout=immediate`. Normal gradual deploys still pass `HOSTED_EXECUTION_SMOKE_VERSION_ID` for the public Worker checks, but they do not immediately require the managed container to report the new runner-bundle fingerprint.
+
 Optional smoke env:
 
 - `HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL` to target a non-default public Worker URL
 - `HOSTED_EXECUTION_SMOKE_USER_ID` to enable the authenticated status check
 - `HOSTED_EXECUTION_SMOKE_OIDC_TOKEN` or `VERCEL_OIDC_TOKEN` for authenticated status auth
 - `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true` to run the deploy-signed managed-container health/fingerprint smoke
+- `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT=true` to extend the managed-container smoke with the direct R2 presigned upload check; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`
 - `HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT=true` to extend the managed-container smoke with the real Codex/OpenAI HTTPS-intercept probe; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`, `HOSTED_EXECUTION_SMOKE_USER_ID`, status auth for that user, and a deployed Worker `OPENAI_API_KEY` secret
 - `HOSTED_EXECUTION_SMOKE_VERSION_ID` to pin smoke requests to a version in the active deployment; the deploy workflow passes the freshly deployed version
 - `HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS` and `HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS` to override the managed-container rollout wait
 
-If `HOSTED_EXECUTION_SMOKE_USER_ID` is unset, smoke stops after the public banner and health checks.
+If neither managed-container smoke nor `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, smoke stops after the public banner and health checks.
 
 ## Wrangler SSH Debugging
 
