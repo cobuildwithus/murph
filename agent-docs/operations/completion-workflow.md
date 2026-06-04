@@ -5,7 +5,7 @@ Last verified: 2026-06-04
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether ledger or plan mechanics apply.
 Use `agent-docs/operations/verification-and-runtime.md` to choose the truthful verification command set.
-When the routed task class requires audit passes such as `security-privacy-review`, `coverage-write`, `frontend-review`, or `task-finish-review`, treat them as mandatory completion steps before handoff, not optional close-out checks after code, tests, or commit.
+When the routed task class requires audit passes such as `security-privacy-review`, `coverage-write`, `frontend-review`, `deep-review`, or `task-finish-review`, treat them as mandatory completion steps before handoff, not optional close-out checks after code, tests, or commit.
 Those required audit passes are local Codex subagent passes, not `review:gpt`, not external ChatGPT autosends, and not `thread wake` workflows.
 This completion workflow is standing user approval to spawn the required local Codex audit subagents for routed repo tasks. Do not skip or downgrade a required audit pass because generic agent instructions say subagents need an explicit user request; this document and `AGENTS.md` are that explicit repo-level request for the required completion passes.
 Required workflow audit subagents default to high reasoning. Use xhigh reasoning instead when the change is large, complex, high-risk/cross-cutting, or spans multiple owners, architecture decisions, or trust-boundary decisions. If the current subagent tooling cannot honor the required reasoning effort, report that limitation explicitly instead of silently downgrading the pass.
@@ -23,6 +23,7 @@ Required workflow audit subagents default to high reasoning. Use xhigh reasoning
    - changesets that materially touch auth/session behavior, secrets or credentials, payment/billing state, external ingress/egress, public APIs/routes, trust boundaries, or persisted/uploaded/user-facing data exposure add the dedicated `security-privacy-review` pass
    - user-facing `apps/web` UI changes add the dedicated `frontend-review` pass
    - repo code/test/config changes whose verification lane includes owner-level coverage or truthful `pnpm test:diff <path ...>` coverage require the dedicated `coverage-write` pass
+   - particularly complex or sensitive changes add the dedicated `deep-review` pass when the conditions below are met
    - ordinary repo code/test/config changes then run `task-finish-review`
    - add `simplify` only when the conditions below are met
 5. When `simplify` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/simplify.md` plus the audit handoff packet below, and run it before coverage or final review. Land only behavior-preserving reductions from that pass.
@@ -32,12 +33,13 @@ Required workflow audit subagents default to high reasoning. Use xhigh reasoning
 9. When step 8 uses an owner-coverage or truthful diff-coverage lane, run the required `coverage-write` pass on `gpt-5.5` using the workflow audit reasoning default after any simplify/security-privacy pass. Hand that worker `agent-docs/prompts/coverage-write.md` plus the audit handoff packet below, and keep its write scope limited to tests or direct-proof scaffolding for already-landed behavior.
 10. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests and record the exact evidence.
 11. Run or re-run the required checks after the implementation is stable, after any simplify updates, after any security review-driven fixes, after any required coverage pass lands, after any frontend-review-driven fixes, and after any later review-driven fixes.
-12. Run the final completion review. Use the tiny repo-internal fast path below only when it applies; otherwise spawn a dedicated audit subagent and hand it `agent-docs/prompts/task-finish-review.md` plus the audit handoff packet below.
-13. Enter the review-resolution loop below for every required audit output. Completion means there are no unresolved accepted/actionable findings, not merely that the audit pass ran.
-14. Treat the final review as the last audit of remaining coverage and proof gaps too. If it finds meaningful missing tests or boundary-level verification, add the smallest high-impact proof before handoff instead of creating another default coverage pass.
-15. Do not automatically spawn another workflow audit subagent after the first final review solely to improve wording, seek a second opinion, or re-litigate rejected findings. Rerun only the affected audit pass when review-driven fixes materially change that pass's risk surface, as described below.
-16. Close any active execution plan and use the commit path chosen by the routing doc and `AGENTS.md` before handoff. For plan-bearing work, the final scoped commit must go through `scripts/finish-task <active-plan-path> "summary" <path>...` so the matching ledger row is removed and the plan moves to `agent-docs/exec-plans/completed/`. Do not use `scripts/committer` or `git commit` as the final task commit for active-plan work; that commits code while leaving stale active-plan state behind. If overlapping dirty work blocks a safe `finish-task` commit, clear the exact ledger row, archive the plan with `scripts/close-exec-plan.sh`, and report the scoped-commit blocker before handoff.
-17. Final handoff must report required-check results, direct scenario evidence, and audit findings accepted, fixed, or rejected with reasons. Green required checks remain the default completion bar; if a required check failed for a credibly unrelated pre-existing reason, handoff must name the failing command, failing target, and why the current diff did not cause it.
+12. When `deep-review` applies, spawn a dedicated review-only audit subagent after the specialized review and coverage/proof work is stable, but before the final completion review. Hand it the `murph-deep-review` workflow plus the audit handoff packet below, and ask the exact question: "What final bugs or edge cases could still break this change in production?"
+13. Run the final completion review. Use the tiny repo-internal fast path below only when it applies; otherwise spawn a dedicated audit subagent and hand it `agent-docs/prompts/task-finish-review.md` plus the audit handoff packet below.
+14. Enter the review-resolution loop below for every required audit output. Completion means there are no unresolved accepted/actionable findings, not merely that the audit pass ran.
+15. Treat the final review as the last audit of remaining coverage and proof gaps too. If it finds meaningful missing tests or boundary-level verification, add the smallest high-impact proof before handoff instead of creating another default coverage pass.
+16. Do not automatically spawn another workflow audit subagent after the first final review solely to improve wording, seek a second opinion, or re-litigate rejected findings. Rerun only the affected audit pass when review-driven fixes materially change that pass's risk surface, as described below.
+17. Close any active execution plan and use the commit path chosen by the routing doc and `AGENTS.md` before handoff. For plan-bearing work, the final scoped commit must go through `scripts/finish-task <active-plan-path> "summary" <path>...` so the matching ledger row is removed and the plan moves to `agent-docs/exec-plans/completed/`. Do not use `scripts/committer` or `git commit` as the final task commit for active-plan work; that commits code while leaving stale active-plan state behind. If overlapping dirty work blocks a safe `finish-task` commit, clear the exact ledger row, archive the plan with `scripts/close-exec-plan.sh`, and report the scoped-commit blocker before handoff.
+18. Final handoff must report required-check results, direct scenario evidence, and audit findings accepted, fixed, or rejected with reasons. Green required checks remain the default completion bar; if a required check failed for a credibly unrelated pre-existing reason, handoff must name the failing command, failing target, and why the current diff did not cause it.
 
 ## Review-Resolution Loop
 
@@ -52,6 +54,7 @@ For every finding from a required audit pass:
    - rerun `security-privacy-review` for accepted security/privacy fixes on auth, secrets, trust boundaries, external surfaces, or concrete exposure behavior
    - rerun `frontend-review` for meaningful UI, interaction, layout, or design-system fixes
    - rerun `coverage-write` only when the accepted finding changes the proof surface and needs write-capable coverage follow-up
+   - rerun `deep-review` when an accepted deep-review finding drives a broad, cross-owner, state-machine, or sensitive-boundary fix that materially changes the pass's risk surface
    - rerun `task-finish-review` when the fix is large, high-risk, cross-cutting, or materially changes behavior after the first final review
 6. Do not rerun an audit solely for rejected findings, tiny wording changes, isolated test-only proof additions, or to obtain a cleaner final sentence.
 
@@ -67,6 +70,20 @@ Add a `simplify` pass before final review only when all of the following are tru
 4. The extra review time is justified by the size and shape of the change.
 
 If those conditions are not met, skip `simplify` and proceed directly to the normal coverage and final-review path.
+
+## When To Add Deep Review
+
+Add a `deep-review` pass before final completion review when the change is particularly complex or sensitive enough that normal specialized passes may miss cross-cutting production bugs.
+
+Use `deep-review` when one or more of these conditions apply:
+
+1. The change spans multiple owners, apps, packages, or runtime boundaries and correctness depends on their interaction.
+2. The change alters state machines, ordering, idempotency, retries, concurrency, migrations, persisted-state ownership, or fail-closed behavior.
+3. The change touches sensitive health data, auth/session authority, secrets, billing, external ingress/egress, hosted execution, Cloudflare, Temporal, or other trust-boundary surfaces in a way that creates coupled correctness and exposure risk.
+4. The implementation is a large or high-risk refactor where a first-principles bug hunt is likely to find edge cases that `security-privacy-review`, `coverage-write`, `frontend-review`, or `task-finish-review` alone may not catch.
+5. The user explicitly asks for deep review, a final bug hunt, or a production edge-case sweep as part of completion.
+
+Do not use `deep-review` as a replacement for the dedicated `security-privacy-review`, `frontend-review`, `coverage-write`, `simplify`, or `task-finish-review` passes. If none of the conditions above apply, skip it and proceed through the normal completion workflow.
 
 ## Tiny Repo-Internal Fast Path
 
@@ -91,6 +108,7 @@ Use focused component/page tests, typecheck, `git diff --check`, and stale-strin
 - `coverage-write` is the default write-capable audit pass, must run on `gpt-5.5` with the workflow audit reasoning default, and should stay narrowly scoped to tests or direct-proof scaffolding.
 - `security-privacy-review` is a review-only pass for changes that materially touch auth/session behavior, secrets, payments, external surfaces, trust boundaries, or persisted/uploaded/user-facing data exposure. It should read `agent-docs/SECURITY.md` and focus on security regressions, authority expansion, fail-closed behavior, leakage risks, and concrete unnecessary exposure.
 - `frontend-review` is a review-only pass for user-facing `apps/web` pages, components, and design-system-facing UI. It should read `agent-docs/FRONTEND.md` and focus on design-system alignment, product context, UX quality, and unnecessary UI drift.
+- `deep-review` is a review-only pass for cross-cutting, complex, or sensitive changes. It should use `murph-deep-review`, load `feynman-auditor`, follow modified files plus directly affected call paths, and focus on final bugs or edge cases that could still break the change in production.
 - Other audit passes are review-only unless the user explicitly asks for a write-capable audit worker with a widened scope.
 - The default audit response contract is plain-text findings with recommended fixes, not patch attachments and not prompts for additional agents.
 - Do not satisfy required audit passes with `pnpm review:gpt`, `review:gpt` presets, external ChatGPT threads, `cobuild-review-gpt`, or any `thread wake`/autosend flow. Those are separate optional tools, not the repo-required completion workflow.
@@ -138,6 +156,14 @@ For the required `coverage-write` pass, also provide:
 - The exact write scope, limited to tests or proof scaffolding for already-landed behavior.
 - An explicit instruction not to modify production code unless the parent agent separately widens that scope.
 - The required model choice, `gpt-5.5` with the workflow audit reasoning default; do not silently substitute a mini model or a lower/different reasoning effort for this pass.
+
+For the required `deep-review` pass, also provide:
+
+- The exact files, packages, commits, or call paths in scope.
+- The condition from `When To Add Deep Review` that made the pass required.
+- Any state-machine, ordering, idempotency, retry, owner-boundary, persisted-state, or sensitive-boundary assumptions the implementation relies on.
+- An explicit instruction to use `murph-deep-review`, load `feynman-auditor`, keep the pass review-only, and answer: "What final bugs or edge cases could still break this change in production?"
+- Any direct scenario proof already gathered, or the exact gap if production-risk proof remains incomplete.
 
 ## Safety Rules
 
