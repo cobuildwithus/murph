@@ -296,10 +296,34 @@ describe('assistant skill assets', () => {
       'three or four lightweight, bounded first-experiment options',
     )
     expect(raw).toContain(
+      'Health Commons protocol discovery pass',
+    )
+    expect(raw).toContain(
+      'Before presenting first-experiment options, check Health Commons',
+    )
+    expect(raw).toContain(
+      'vault-cli commons protocol explore <query> --format json',
+    )
+    expect(raw).toContain(
+      'vault-cli commons search "<query>" --format json',
+    )
+    expect(raw).toContain(
+      'vault-cli commons protocol list --format json',
+    )
+    expect(raw).toContain(
+      'Do not invent the option set before this Health Commons pass',
+    )
+    expect(raw).toContain(
+      'Prefer existing Health Commons protocols when they fit',
+    )
+    expect(raw).toContain(
+      'Include a custom option only when the discovered protocols are missing, too burdensome, mismatched to the user\'s data',
+    )
+    expect(raw).toContain(
       'not a single recommendation',
     )
     expect(raw).toContain(
-      'The assistant may label one option as the lowest-friction default',
+      'and may label one option as the lowest-friction default',
     )
     expect(raw).toContain(
       'but the user should still be able to choose among the options or defer',
@@ -308,7 +332,7 @@ describe('assistant skill assets', () => {
       'Keep the options concise, meaningfully distinct by intervention, outcome, or burden',
     )
     expect(raw).toContain(
-      'If you cannot find at least three reasonable experiment options',
+      'If you cannot find at least three reasonable experiment options after Health Commons discovery',
     )
     expect(raw).toContain(
       'Ask one clear question that lets them choose one option to set up now or defer',
@@ -344,6 +368,9 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('as part of the proposed experiment')
     expect(raw).not.toContain('two or three lightweight')
     expect(raw).not.toContain('at least two reasonable experiment options')
+    expect(raw).not.toContain(
+      'inspect Health Commons protocol discovery before presenting choices',
+    )
     expect(raw).not.toContain('first experiment or logging path')
     expect(raw).not.toContain('first experiment or logging setup')
     expect(raw).not.toContain('simple logging habit')
