@@ -151,7 +151,7 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('make both fields optional')
     expect(raw).toContain(
-      'ask for gender with a clear option such as "prefer not to say"',
+      'ask gender in plain language with wording like "are you a guy, girl, or prefer not to say?"',
     )
     expect(raw).toContain(
       'Do not turn this into a question about labels or phrasing',
@@ -277,9 +277,7 @@ describe('assistant skill assets', () => {
       '9. Blood tests.',
     )
     const orientationIndex = raw.indexOf('10. Orientation.')
-    const firstExperimentIndex = raw.indexOf(
-      '11. First experiment or logging decision.',
-    )
+    const firstExperimentIndex = raw.indexOf('11. First experiment setup.')
     expect(nameContextIndex).toBeGreaterThanOrEqual(0)
     expect(highLevelIndex).toBeGreaterThanOrEqual(0)
     expect(highLevelIndex).toBeGreaterThan(nameContextIndex)
@@ -292,23 +290,36 @@ describe('assistant skill assets', () => {
     expect(orientationIndex).toBeGreaterThan(bloodTestsIndex)
     expect(firstExperimentIndex).toBeGreaterThan(orientationIndex)
     expect(raw).toContain(
-      'Do not mark onboarding complete until the first experiment or logging path is resolved',
+      'Do not mark onboarding complete until first experiment setup is resolved',
     )
     expect(raw).toContain(
-      'Ask one clear question that lets them choose: start the proposed experiment now, log for a few days first, or defer',
+      'Ask one clear question that lets them choose: set up the proposed experiment now or defer',
     )
     expect(raw).toContain(
-      'A resolved first experiment or logging path means one of: an active first experiment was created through experiment onboarding, a simple logging habit was chosen, the user explicitly deferred or declined, or setup is blocked by a specific safety/logistics issue',
+      'A resolved first experiment setup means one of: an active first experiment was created through experiment onboarding, the user explicitly deferred or declined, or setup is blocked by a specific safety/logistics issue',
+    )
+    expect(raw).toContain(
+      'Do not offer standalone tracking as the alternative',
+    )
+    expect(raw).toContain(
+      'A standalone tracking routine, generic "send me updates" instruction, or "log for a few days" plan does not resolve onboarding unless it is part of a concrete experiment setup handled through experiment onboarding',
     )
     expect(raw).toContain(
       'read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md` immediately',
     )
     expect(raw).toContain(
-      'Do not settle for "text me workouts" as onboarding completion',
+      'Do not settle for "text me workouts" or "log for a few days" as onboarding completion',
+    )
+    expect(raw).toContain(
+      'If fresh baseline logging is needed because the signal is missing, stale, sparse, subjective, or protocol-required, treat that as part of experiment setup rather than a separate onboarding path',
     )
     expect(raw).not.toContain(
       'Creating an active experiment remains a separate confirmed flow',
     )
+    expect(raw).not.toContain('first experiment or logging path')
+    expect(raw).not.toContain('first experiment or logging setup')
+    expect(raw).not.toContain('simple logging habit')
+    expect(raw).not.toContain('log for a few days first')
     expect(raw).toContain(
       'whether they have recent blood tests or lab panels',
     )
@@ -368,6 +379,7 @@ describe('assistant skill assets', () => {
     expect(raw.match(/Do not use a fixed script for this turn/g)?.length).toBe(5)
     const removedFixedScripts = [
       'One high-level setup detail first: what age and gender should I use for context? You can skip either.',
+      'what gender should I use when interpreting health stuff',
       'Are you already trying any health protocols or experiments, or mostly starting fresh?',
       'Are you taking any supplements right now? Product or brand names help, plus roughly how long you\'ve taken each one or since when.',
       'Do you have any recent blood tests or lab panels, like Function Health or doctor-ordered tests? If you do, you can send the PDFs or copy/paste the results whenever you want.',
@@ -407,7 +419,7 @@ describe('assistant skill assets', () => {
       'verify that every useful setup answer they supplied has already been persisted',
     )
     expect(raw).toContain(
-      'complete a wearable/app checkpoint before first experiment or logging setup',
+      'complete a wearable/app checkpoint before first experiment setup',
     )
     expect(raw).toContain('vault-cli device account list --format json')
     expect(raw).toContain('vault-cli device connect <provider> --format json')
