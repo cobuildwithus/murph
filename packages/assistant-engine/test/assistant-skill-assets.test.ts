@@ -128,7 +128,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'current supplements, with brand or product names when they know them',
     )
-    expect(raw).toContain('birth month plus year and gender')
+    expect(raw).toContain('age plus gender')
     expect(raw).toContain(
       'whether they have recent blood tests or lab panels',
     )
@@ -137,14 +137,24 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('they can skip anything they do not want to share')
     expect(raw).toContain(
-      'Do not press for skipped demographic details, exact birth date, sex assigned at birth',
+      'Do not press for skipped demographic details, birth date, birth month/year, or sex assigned at birth',
     )
+    expect(raw).toContain(
+      'Ask follow-up questions about dosage or protocol adherence only when the user asks to set up a specific experiment',
+    )
+    expect(raw).not.toContain('birth month plus year and gender')
+    expect(raw).not.toContain('birth month plus year, gender')
     expect(raw).toContain(
       'If they send PDFs or pasted lab results, handle them through normal attachment/message intake',
     )
     expect(raw).toContain(
-      'broad health context, supplements, protocols, experiments, birth month plus year, gender, or interests go to memory',
+      'broad health context, supplements, protocols, experiments, dated age context, gender, or interests go to memory',
     )
+    expect(raw).toContain(
+      'Age: save as dated Context memory using the current prompt\'s local date',
+    )
+    expect(raw).toContain('User was 20 years old on 2026-02-01.')
+    expect(raw).toContain('Do not infer or store a birthday from age alone')
     expect(raw).toContain(
       'additional setup context prompt, blood-test prompt, and wearable/app checkpoint have been asked',
     )
