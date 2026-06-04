@@ -2270,7 +2270,7 @@
                               "additionalProperties": false,
                               "properties": {
                                 "limit": {
-                                  "default": 10,
+                                  "default": 5,
                                   "description": "Maximum number of matched protocol groups to return before family expansion.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,

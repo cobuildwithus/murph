@@ -437,7 +437,7 @@ export function registerCommonsCommands(cli: Cli.Cli) {
         .int()
         .positive()
         .max(100)
-        .default(10)
+        .default(5)
         .describe("Maximum number of matched protocol groups to return before family expansion."),
     }),
     examples: [

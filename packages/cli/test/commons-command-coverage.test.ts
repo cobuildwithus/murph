@@ -270,6 +270,9 @@ test("commons protocol explore expands sauna matches into family variants and a 
 test("commons protocol explore accepts an experiment family and includes inverse parent-family variants", async () => {
   const cli = createCommonsSliceCli();
   const result = await runInProcessJsonCli<{
+    filters: {
+      limit: number;
+    };
     groups: Array<{
       matchReason: string;
       matchedProtocol: {
@@ -294,6 +297,7 @@ test("commons protocol explore accepts an experiment family and includes inverse
 
   assert.equal(result.envelope.ok, true);
   const data = requireData(result.envelope);
+  assert.equal(data.filters.limit, 5);
   assert.equal(data.matchedEntity?.entityType, "experiment_family");
   assert.equal(data.matchedEntity?.key, "experiment_family:dry-sauna");
   assert.equal(
