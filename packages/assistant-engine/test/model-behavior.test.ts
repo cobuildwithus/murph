@@ -825,7 +825,7 @@ describe('assistant conversation onboarding guidance', () => {
       'When concrete help interrupts onboarding, handle the concrete task fully in this turn',
     )
     expect(prompt).toContain(
-      'Use the current prompt\'s date, timezone, channel, audience/privacy, and hosted wearable connection guidance as runtime context whenever the onboarding skill is actually used',
+      'Use the current prompt\'s date, timezone, channel, delivery route, and hosted wearable connection guidance as runtime context whenever the onboarding skill is actually used',
     )
     expect(prompt).not.toContain(
       'Before replying, read `$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md`',

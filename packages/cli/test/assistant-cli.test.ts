@@ -46,7 +46,6 @@ type AssistantRunEvent = Parameters<typeof formatAssistantRunEventForTerminal>[0
 const assistantMemoryTurnEnvKeys = [
   VAULT_ENV,
   'ASSISTANT_MEMORY_BOUND_VAULT',
-  'ASSISTANT_MEMORY_BOUND_PRIVATE_CONTEXT',
   'ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT',
   'ASSISTANT_MEMORY_BOUND_SESSION_ID',
   'ASSISTANT_MEMORY_BOUND_TURN_ID',

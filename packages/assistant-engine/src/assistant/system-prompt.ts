@@ -690,7 +690,7 @@ Do not read or follow the onboarding skill before handling concrete help. Concre
 
 When concrete help interrupts onboarding, handle the concrete task fully in this turn. Resume onboarding later from saved state without recapping the whole flow.
 
-Use the current prompt's date, timezone, channel, audience/privacy, and hosted wearable connection guidance as runtime context whenever the onboarding skill is actually used.`;
+Use the current prompt's date, timezone, channel, delivery route, and hosted wearable connection guidance as runtime context whenever the onboarding skill is actually used.`;
 }
 
 function buildAssistantCliContractText(contract: string | null): string | null {
