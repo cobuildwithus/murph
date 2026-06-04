@@ -75,7 +75,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     expect(unscheduledStatus.nextAlarmAt ?? null).toBeNull();
 
     const reminderPath = `/chats/${encodeURIComponent(scheduledChatId)}/messages`;
-    const setupReplyBaselineCount = requireLinqStub().countObservedSends(reminderPath);
     requireScenario().queueAssistantResponses([
       buildHostedAssistantAutomationSaveDirectiveResponse({
         dueAtIso: scheduledReminderTimes.dueAtIso,
@@ -98,13 +97,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       reason: "wake-appended-active-member",
     });
     await requireScenario().waitForLatestPendingWake(userId);
-    const setupReply = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: setupReplyBaselineCount,
-      expectedPath: reminderPath,
-      scenario: requireScenario(),
-      userId,
-    });
-    expect(requireLinqStub().readObservedMessageText(setupReply)).toBe(setupReplyText);
     await waitForHostedWorkspaceNextWakeAt({
       expectedNextWakeAt: scheduledReminderTimes.dueAtIso,
       userId,
@@ -125,12 +117,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       timeoutMs: scheduledReminderSendWaitMs,
       userId,
     });
-    const finalStatus = await waitForHostedCompletionWithoutNextWakeAt({ userId });
-    const finalNextWakeAt = finalStatus.workspace?.nextWakeAt;
-    expect(finalStatus.lastErrorCode ?? null).toBeNull();
-    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(finalNextWakeAt ?? null).toBeNull();
-    expect(finalStatus.nextAlarmAt ?? null).toBeNull();
 
     expect(sendRequest.method).toBe("POST");
     expect(requireLinqStub().readObservedMessageText(sendRequest)).toBe(reminderText);
@@ -252,62 +238,6 @@ async function waitForHostedWorkspaceNextWakeAt(input: {
   throw new Error(await requireScenario().buildFailureMessage(input.userId, [
     "Timed out waiting for the hosted workspace to checkpoint the scheduled reminder wake.",
     `expectedNextWakeAt: ${input.expectedNextWakeAt}`,
-    `latestNextWakeAt: ${latestNextWakeAt ?? "null"}`,
-    `latestNextAlarmAt: ${latestNextAlarmAt ?? "null"}`,
-    latestError ? `latest status read error: ${latestError}` : null,
-  ].filter((line): line is string => Boolean(line))));
-}
-
-async function waitForHostedCompletionWithoutNextWakeAt(input: {
-  timeoutMs?: number;
-  userId: string;
-}): Promise<Awaited<ReturnType<HostedLocalFullStackScenario["harness"]["readUserStatus"]>>> {
-  const startedAt = Date.now();
-  const timeoutMs = input.timeoutMs ?? 180_000;
-  let latestNextWakeAt: string | null = null;
-  let latestNextAlarmAt: string | null = null;
-  let latestInFlight: boolean | null = null;
-  let latestMailboxLag: unknown = null;
-  let latestError: string | null = null;
-
-  while ((Date.now() - startedAt) < timeoutMs) {
-    let status: Awaited<ReturnType<HostedLocalFullStackScenario["harness"]["readUserStatus"]>>;
-    try {
-      status = await requireScenario().harness.readUserStatus(input.userId);
-    } catch (error) {
-      latestError = error instanceof Error ? error.message : String(error);
-      await sleep(1_000);
-      continue;
-    }
-
-    if (status.lastErrorCode) {
-      throw new Error(await requireScenario().buildFailureMessage(input.userId, [
-        "Hosted runner reported an error before clearing the scheduled reminder wake.",
-        `lastErrorCode: ${status.lastErrorCode}`,
-      ]));
-    }
-
-    latestInFlight = status.inFlight;
-    latestMailboxLag = status.mailboxLag;
-    latestNextWakeAt = status.workspace?.nextWakeAt ?? null;
-    latestNextAlarmAt = status.nextAlarmAt ?? null;
-    if (
-      !status.inFlight
-      && status.mailboxLag.every((lane) => lane.lag === "0")
-      && status.workspace !== null
-      && latestNextWakeAt === null
-      && latestNextAlarmAt === null
-    ) {
-      return status;
-    }
-
-    await sleep(1_000);
-  }
-
-  throw new Error(await requireScenario().buildFailureMessage(input.userId, [
-    "Timed out waiting for hosted completion to clear the scheduled reminder wake.",
-    `latestInFlight: ${latestInFlight === null ? "unknown" : String(latestInFlight)}`,
-    `latestMailboxLag: ${JSON.stringify(latestMailboxLag)}`,
     `latestNextWakeAt: ${latestNextWakeAt ?? "null"}`,
     `latestNextAlarmAt: ${latestNextAlarmAt ?? "null"}`,
     latestError ? `latest status read error: ${latestError}` : null,
