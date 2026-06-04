@@ -590,7 +590,7 @@ export function resolveHostedAssistantLocalDevEnv(
       ...buildHostedAssistantStubEnvClearances(),
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+      HOSTED_ASSISTANT_REASONING_EFFORT: "xhigh",
       HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: hostedExecutionRunnerTimeoutMs,
       [HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
         normalizedAssistantProviderStubBaseUrl,

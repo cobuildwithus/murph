@@ -44,12 +44,12 @@ import {
 
 const HOSTED_CODEX_CONFIG_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
-const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "medium";
+const DEFAULT_HOSTED_CODEX_MODEL = "gpt-5.5";
+const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "xhigh";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
-// Keep the limit above the observed compacted steady-state prompt so resumed
-// hosted replies do not repeatedly compact and churn the prompt-cache prefix.
-const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 120_000;
+// Match local Codex defaults while staying below the gpt-5.5 context window.
+const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 233_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_API_KEY_ENV,
@@ -118,13 +118,14 @@ export async function prepareHostedCodexRuntimeEnvironment(
   const codexConfigPath = path.join(codexHome, HOSTED_CODEX_CONFIG_FILE_NAME);
   const runtimeEnv = stripHostedCodexRejectedSeedEnv(input.runtimeEnv);
   runtimeEnv.PATH = buildHostedRunnerExecutablePath(runtimeEnv.PATH);
-  const hostedModel = normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_MODEL);
+  const hostedModel = normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_MODEL)
+    ?? DEFAULT_HOSTED_CODEX_MODEL;
   delete runtimeEnv.HOSTED_ASSISTANT_MODEL;
   Object.assign(runtimeEnv, {
     CODEX_HOME: codexHome,
     [HOSTED_RUNTIME_PROCESS_ENV]: "1",
     [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
-    ...(hostedModel ? { HOSTED_ASSISTANT_MODEL: hostedModel } : {}),
+    HOSTED_ASSISTANT_MODEL: hostedModel,
     HOSTED_ASSISTANT_REASONING_EFFORT:
       normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT)
       ?? DEFAULT_HOSTED_CODEX_REASONING_EFFORT,

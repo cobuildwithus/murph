@@ -48,16 +48,31 @@ async function loadHostedAssistantModule(options?: {
 
 function assertCodexOpenAiProfile(
   profile: HostedAssistantConfig['profiles'][number] | undefined,
-  expectedModel: string | null = null,
+  expected: {
+    approvalPolicy?: string | null
+    model?: string | null
+    reasoningEffort?: string | null
+    sandbox?: string | null
+  } = {},
 ) {
+  const {
+    approvalPolicy = 'never',
+    model = 'gpt-5.5',
+    reasoningEffort = 'xhigh',
+    sandbox = 'danger-full-access',
+  } = expected
+
   assert.ok(profile)
   assert.equal(profile.target.adapter, 'codex-cli')
   if (profile.target.adapter !== 'codex-cli') {
     throw new Error('expected hosted profile to use Codex')
   }
 
-  assert.equal(profile.target.model, expectedModel)
+  assert.equal(profile.target.approvalPolicy, approvalPolicy)
+  assert.equal(profile.target.model, model)
   assert.equal(profile.target.modelProvider, 'openai')
+  assert.equal(profile.target.reasoningEffort, reasoningEffort)
+  assert.equal(profile.target.sandbox, sandbox)
 }
 
 test('hosted assistant config parsing and readiness helpers normalize Codex hosted profiles', async () => {
@@ -206,7 +221,9 @@ test('hosted assistant bootstrap maps OpenAI env to Codex model provider config'
 
   const savedProfile = hostedConfigModule.saveHostedAssistantConfig.mock.calls[0]?.[0]
     ?.profiles?.[0]
-  assertCodexOpenAiProfile(savedProfile)
+  assertCodexOpenAiProfile(savedProfile, {
+    reasoningEffort: 'medium',
+  })
   assert.equal(
     OPENAI_CODEX_MODEL_PROVIDER_CONFIG.envKey,
     'OPENAI_API_KEY',
@@ -354,8 +371,9 @@ test('hosted assistant bootstrap updates platform Codex profiles from hosted env
             providerConfig: {
               approvalPolicy: 'never',
               provider: 'codex-cli',
+              model: 'gpt-5.5',
               modelProvider: 'openai',
-              reasoningEffort: 'medium',
+              reasoningEffort: 'xhigh',
               sandbox: 'danger-full-access',
             },
           }),

@@ -134,7 +134,7 @@ Hosted crypto authority metadata:
 Hosted assistant config:
 
 - `HOSTED_ASSISTANT_PROVIDER`
-- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced launch model, currently `gpt-5.5` or `gpt-5.4-mini` for direct OpenAI. Production deploys must use `gpt-5.5` with `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
+- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced launch model, currently `gpt-5.5` or `gpt-5.4-mini` for direct OpenAI. Production deploys must use `gpt-5.5` with `HOSTED_ASSISTANT_REASONING_EFFORT=xhigh`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
@@ -258,7 +258,7 @@ export HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID=cloudflare-automation:v1
 export HOSTED_CRYPTO_ENV=preview
 export HOSTED_ASSISTANT_PROVIDER=openai
 export HOSTED_ASSISTANT_MODEL=gpt-5.5
-export HOSTED_ASSISTANT_REASONING_EFFORT=low
+export HOSTED_ASSISTANT_REASONING_EFFORT=xhigh
 
 # Set required secret-valued variables outside this snippet before running:
 # HOSTED_R2_PRESIGN_ACCESS_KEY_ID, HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY,

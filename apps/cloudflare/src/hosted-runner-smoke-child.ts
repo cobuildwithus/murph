@@ -633,7 +633,8 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
   return [
     'model = "gpt-5.5"',
     'model_provider = "openai"',
-    'model_reasoning_effort = "medium"',
+    'model_reasoning_effort = "xhigh"',
+    "model_auto_compact_token_limit = 233000",
     'approval_policy = "never"',
     'sandbox_mode = "danger-full-access"',
     "",
