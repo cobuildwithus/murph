@@ -152,18 +152,19 @@ describe("hosted local Linq first-contact e2e", () => {
       }),
       userId,
     );
+    const sendRequestPromise = requireLinqStub().waitForSend({
+      expectedPath: requireLinqStub().createChatPath,
+      matchRequest: requireLinqStub().createCreateChatRequestMatcher(userId),
+      scenario: requireScenario(),
+      userId,
+    });
 
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.workspace).not.toBeNull();
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
 
-    const sendRequest = await requireLinqStub().waitForSend({
-      expectedPath: requireLinqStub().createChatPath,
-      matchRequest: requireLinqStub().createCreateChatRequestMatcher(userId),
-      scenario: requireScenario(),
-      userId,
-    });
+    const sendRequest = await sendRequestPromise;
     expect(requireLinqStub().requireObservedChatId(userId)).toEqual(expect.any(String));
     expect(sendRequest.method).toBe("POST");
     expect(sendRequest.url).toBe(requireLinqStub().createChatPath);
@@ -207,13 +208,14 @@ describe("hosted local Linq first-contact e2e", () => {
       }),
       directReplyUserId,
     );
-    await requireScenario().waitForHostedCompletion(directReplyUserId);
-    await requireLinqStub().waitForSend({
+    const welcomeSendPromise = requireLinqStub().waitForSend({
       expectedPath: requireLinqStub().createChatPath,
       matchRequest: requireLinqStub().createCreateChatRequestMatcher(directReplyUserId),
       scenario: requireScenario(),
       userId: directReplyUserId,
     });
+    await requireScenario().waitForHostedCompletion(directReplyUserId);
+    await welcomeSendPromise;
 
     const materializedChatId = requireLinqStub().requireObservedChatId(directReplyUserId);
     const expectedDirectReplyChatPath =
@@ -332,13 +334,14 @@ describe("hosted local Linq first-contact e2e", () => {
       }),
       progressToolUserId,
     );
-    await requireScenario().waitForHostedCompletion(progressToolUserId);
-    await requireLinqStub().waitForSend({
+    const welcomeSendPromise = requireLinqStub().waitForSend({
       expectedPath: requireLinqStub().createChatPath,
       matchRequest: requireLinqStub().createCreateChatRequestMatcher(progressToolUserId),
       scenario: requireScenario(),
       userId: progressToolUserId,
     });
+    await requireScenario().waitForHostedCompletion(progressToolUserId);
+    await welcomeSendPromise;
 
     const materializedChatId = requireLinqStub().requireObservedChatId(progressToolUserId);
     const expectedDirectReplyChatPath =
