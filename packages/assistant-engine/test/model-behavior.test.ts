@@ -99,6 +99,9 @@ describe('assistant GPT-5 execution prompt overlay', () => {
         profile: 'gpt5-agentic',
       }),
     ).not.toContain('send_progress_update')
+    expect(
+      buildAssistantSystemPrompt(createCommonCodexPromptInput()),
+    ).not.toContain('send_progress_update')
 
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       assistantModelProgressUpdatesAvailable: true,
@@ -106,9 +109,9 @@ describe('assistant GPT-5 execution prompt overlay', () => {
 
     expect(prompt).toContain('send_progress_update')
     expect(prompt).toContain(
-      'If the current request might take a while',
+      'before the first non-progress tool call',
     )
-    expect(prompt).toContain('reading attachments, parsing or saving files')
+    expect(prompt).toContain('reading attachments, inspecting or parsing files')
     expect(prompt).toContain('multi-step tool work')
     expect(prompt).toContain(
       'Do not overthink the channel or task category',

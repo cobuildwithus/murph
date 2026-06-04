@@ -15,21 +15,23 @@ describe('assistant progress prompt contract', () => {
     })
 
     expect(prompt).not.toContain('send_progress_update')
-    expect(prompt).not.toContain('If the current request might take a while')
+    expect(prompt).not.toContain('before the first non-progress tool call')
     expect(prompt).not.toContain('Do not overthink the channel or task category')
   })
 
-  it('requires early progress updates for work that might take a while', () => {
+  it('requires progress preambles for longer tool-heavy work', () => {
     const prompt = buildAssistantExecutionBehaviorText({
       profile: 'gpt5-agentic',
       progressUpdatesAvailable: true,
     })
 
     expect(prompt).toContain(
-      'If the current request might take a while, call `send_progress_update` once near the start',
+      'call `send_progress_update` once before the first non-progress tool call',
     )
-    expect(prompt).toContain('reading attachments, parsing or saving files')
+    expect(prompt).toContain('reading attachments, inspecting or parsing files')
+    expect(prompt).toContain('saving recovered data')
     expect(prompt).toContain('multi-step tool work')
+    expect(prompt).toContain('quick single-step replies')
     expect(prompt).toContain('Do not overthink the channel or task category')
     expect(prompt).toContain(
       'one short, factual sentence about what you are starting or checking next',
@@ -42,10 +44,13 @@ describe('assistant progress prompt contract', () => {
   it('keeps the dynamic tool description aligned with the progress prompt rule', () => {
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.name).toBe('send_progress_update')
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'current request might take a while',
+      'before longer or tool-heavy work',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'user-facing, factual',
+      'before the first non-progress tool call',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'current user conversation',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'not include final conclusions',
@@ -59,6 +64,8 @@ describe('assistant progress prompt contract', () => {
     expect(textProperty.description).toContain('No markdown links')
     expect(textProperty.description).toContain('final answers')
     expect(textProperty.description).toContain('medical interpretation')
+    expect(textProperty.description).toContain('diagnoses')
+    expect(textProperty.description).toContain('recommendations')
     expect(textProperty.description).toContain('unchecked claims')
   })
 })

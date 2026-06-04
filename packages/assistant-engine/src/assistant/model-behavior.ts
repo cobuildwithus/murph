@@ -58,8 +58,9 @@ export function buildAssistantExecutionBehaviorText(input: {
   const progressUpdateGuidance =
     input.progressUpdatesAvailable === true
       ? `
-- If the current request might take a while, call \`send_progress_update\` once near the start.
-- Use it for any longer work, including reading attachments, parsing or saving files, research, long vault scans, or multi-step tool work.
+- For any longer or tool-heavy request, call \`send_progress_update\` once before the first non-progress tool call so the user sees a short preamble.
+- This is required for reading attachments, inspecting or parsing files, saving recovered data, research, long vault scans, or multi-step tool work.
+- For quick single-step replies, skip the progress update and answer directly.
 - Do not overthink the channel or task category. The update goes to the current user conversation.
 - Keep it to one short, factual sentence about what you are starting or checking next.
 - Do not include final answers, medical interpretations, abnormalities, diagnoses, recommendations, or claims you have not verified.`
