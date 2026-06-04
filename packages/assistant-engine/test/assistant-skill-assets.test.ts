@@ -124,7 +124,30 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Use this skill only when the current prompt includes the `Conversation onboarding:` activation',
     )
-    expect(raw).toContain('roughly 3-4 short assistant messages')
+    expect(raw).toContain('roughly 5-6 short assistant messages')
+    expect(raw).toContain(
+      'current supplements, with brand or product names when they know them',
+    )
+    expect(raw).toContain('birth month plus year and gender')
+    expect(raw).toContain(
+      'whether they have recent blood tests or lab panels',
+    )
+    expect(raw).toContain(
+      'you can send the PDFs or copy/paste the results whenever you want',
+    )
+    expect(raw).toContain('they can skip anything they do not want to share')
+    expect(raw).toContain(
+      'Do not press for skipped demographic details, exact birth date, sex assigned at birth',
+    )
+    expect(raw).toContain(
+      'If they send PDFs or pasted lab results, handle them through normal attachment/message intake',
+    )
+    expect(raw).toContain(
+      'broad health context, supplements, protocols, experiments, birth month plus year, gender, or interests go to memory',
+    )
+    expect(raw).toContain(
+      'additional setup context prompt, blood-test prompt, and wearable/app checkpoint have been asked',
+    )
     expect(raw).toContain(
       'complete a wearable/app checkpoint before first experiment or logging setup',
     )

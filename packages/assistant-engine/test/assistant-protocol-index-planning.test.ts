@@ -192,7 +192,7 @@ describe('assistant protocol index planning', () => {
       `Before replying, read \`${skillRef}\``,
     )
     expect(plan.turnContextPrompt).not.toContain(
-      'roughly 3-4 short assistant messages',
+      'roughly 5-6 short assistant messages',
     )
     expect(plan.turnContextPrompt).not.toContain('Natural first-run flow')
   })
