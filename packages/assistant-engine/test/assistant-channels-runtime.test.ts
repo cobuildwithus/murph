@@ -856,6 +856,38 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
   })
 
+  it('refreshes the Linq typing indicator every two seconds by default', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    await vi.advanceTimersByTimeAsync(1_999)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
+
+    await handle.stop()
+    await vi.advanceTimersByTimeAsync(2_000)
+
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
+    expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+  })
+
   it('recovers Linq thread sends when the stored chat id is stale', async () => {
     vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
     const missingChatError = new VaultCliError(

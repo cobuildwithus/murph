@@ -45,7 +45,7 @@ const TELEGRAM_MAX_TEXT_LENGTH = 4096
 const TELEGRAM_MAX_DELIVERY_ATTEMPTS = 3
 const TELEGRAM_MAX_RETRY_DELAY_MS = 30_000
 const TELEGRAM_SEND_TIMEOUT_MS = 30_000
-const LINQ_TYPING_REFRESH_MS = 4_000
+const LINQ_TYPING_REFRESH_MS = 2_000
 
 type TelegramParsedTarget = TelegramThreadTarget
 interface TelegramCleanupMessage {
