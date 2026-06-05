@@ -496,7 +496,33 @@ export function isSetupInvocation(
     return false
   }
 
+  if (commandToken === null && hasRootDiscoveryOrVersionFlag(args)) {
+    return false
+  }
+
   return commandToken === null || commandToken === 'help' || commandToken === 'use'
+}
+
+function hasRootDiscoveryOrVersionFlag(args: readonly string[]): boolean {
+  for (const arg of args) {
+    if (arg === '--') {
+      return false
+    }
+
+    if (
+      arg === '--help' ||
+      arg === '-h' ||
+      arg === '--llms' ||
+      arg === '--llms-full' ||
+      arg === '--mcp' ||
+      arg === '--schema' ||
+      arg === '--version'
+    ) {
+      return true
+    }
+  }
+
+  return false
 }
 
 async function persistSetupEnvOverrides(input: {

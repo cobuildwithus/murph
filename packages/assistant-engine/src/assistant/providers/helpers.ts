@@ -39,10 +39,6 @@ function requireAssistantProviderUserPrompt(
 function hasAssistantProviderUsableNativeResume(
   input: AssistantProviderTurnExecutionInput,
 ): boolean {
-  if ((input.activeTurnMessages?.length ?? 0) > 0) {
-    return false
-  }
-
   const resumeCodexThreadId = normalizeNullableString(
     input.resumeCodexThreadId,
   )
@@ -122,18 +118,6 @@ function sanitizeAssistantModelContentParts(
   })
 }
 
-export function resolveAssistantProviderFlatPromptActiveTurnSection(
-  input: AssistantProviderTurnExecutionInput,
-): string | null {
-  const activeTurnLines = serializeAssistantConversationMessages(
-    input.activeTurnMessages ?? [],
-  )
-
-  return activeTurnLines.length > 0
-    ? `Active turn so far:\n${activeTurnLines.join('\n\n')}`
-    : null
-}
-
 export function resolveAssistantProviderFlatPromptConversationHistorySection(
   input: AssistantProviderTurnExecutionInput,
 ): string | null {
@@ -194,7 +178,6 @@ export function resolveAssistantProviderPrompt(
 
   return [
     resolveAssistantProviderFlatPromptConversationHistorySection(input),
-    resolveAssistantProviderFlatPromptActiveTurnSection(input),
     resolveAssistantProviderComposedUserContent(input, {
       labelUserPrompt: true,
     }),

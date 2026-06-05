@@ -25,7 +25,6 @@ import {
 import {
   extractCodexAssistantProviderUsage,
   mergeCodexConfigOverrides,
-  resolveAssistantProviderFlatPromptActiveTurnSection,
   resolveAssistantProviderFlatPromptConversationHistorySection,
   resolveAssistantProviderPrompt,
 } from './helpers.js'
@@ -286,7 +285,6 @@ export async function executeCodexAssistantTurnAttempt(
       input.resumeCodexThreadId
         ? {
             ...input,
-            activeTurnMessages: undefined,
             conversationHistoryMessages: undefined,
           }
         : input
@@ -458,9 +456,6 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
   const systemPrompt = normalizeNullableString(input.input.systemPrompt)
   const userPrompt = normalizeNullableString(input.input.userPrompt)
   const turnContextPrompt = normalizeNullableString(input.input.turnContextPrompt)
-  const activeTurnHistoryPrompt =
-    resolveAssistantProviderFlatPromptActiveTurnSection(input.input)
-  const activeTurnHistoryCount = input.input.activeTurnMessages?.length ?? 0
   const conversationHistoryPrompt =
     resolveAssistantProviderFlatPromptConversationHistorySection(input.input)
   const conversationHistoryCount = input.input.conversationHistoryMessages?.length ?? 0
@@ -487,11 +482,8 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
         userPromptBytes: byteLength(userPrompt),
         turnContextPromptBytes: byteLength(turnContextPrompt),
         developerInstructionsBytes: byteLength(developerInstructions),
-        activeTurnHistoryBytes: byteLength(activeTurnHistoryPrompt),
         conversationHistoryBytes: byteLength(conversationHistoryPrompt),
         developerInstructionsPresent: developerInstructions !== null,
-        activeTurnHistoryCount,
-        activeTurnHistoryPresent: activeTurnHistoryCount > 0,
         conversationHistoryCount,
         conversationHistoryPresent: conversationHistoryCount > 0,
         conversationContextBytes: byteLength(conversationContextPrompt),

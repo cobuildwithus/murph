@@ -42,6 +42,7 @@ const HOSTED_LOCAL_MINIO_CONTAINER_NAME_PREFIX = "murph-hosted-local-r2-";
 const HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST_ENV = "MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST";
 
 interface HostedLocalMinioPublishTarget {
+  controlHost: string;
   dockerBridgeHost: string | null;
   publishHost: string;
 }
@@ -73,7 +74,7 @@ export async function maybeStartHostedLocalMinio(input: {
     ? parseHostedLocalMinioPort(input.env[HOSTED_LOCAL_MINIO_PORT_ENV])
     : await allocateHostedLocalMinioPort();
   const publishTarget = await resolveHostedLocalMinioPublishTarget(input.containerHost, input.env);
-  const controlHost = publishTarget.publishHost;
+  const controlHost = publishTarget.controlHost;
   await assertHostedLocalMinioPortAvailable(port, publishTarget.publishHost);
   const dataDir = resolveHostedLocalMinioDataDir({
     env: input.env,
@@ -455,13 +456,15 @@ async function resolveHostedLocalMinioPublishTarget(
     || normalized === "host.containers.internal"
   ) {
     return {
+      controlHost: "127.0.0.1",
       dockerBridgeHost: null,
-      publishHost: "127.0.0.1",
+      publishHost: "0.0.0.0",
     };
   }
 
   if (isLoopbackIpv4Host(normalized)) {
     return {
+      controlHost: normalized,
       dockerBridgeHost: null,
       publishHost: normalized,
     };
@@ -471,6 +474,7 @@ async function resolveHostedLocalMinioPublishTarget(
     const dockerBridgeGateway = await resolveDockerBridgeGatewayHost(env);
     if (normalized === dockerBridgeGateway) {
       return {
+        controlHost: normalized,
         dockerBridgeHost: normalized,
         publishHost: normalized,
       };

@@ -2,13 +2,15 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Cli } from 'incur'
 
-import { installSqliteExperimentalWarningFilterWithOptions } from '@murphai/runtime-state/node'
+import { installSqliteExperimentalWarningFilterWithOptions } from '@murphai/runtime-state/node/sqlite-warning-filter'
 import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
-  createVaultCliVaultContext,
-  extractVaultOverride,
-} from './vault-cli-vault-context.js'
+  detectCliProgramName,
+  planVaultCliInvocation,
+  type CliInvocationPlan,
+  type VaultCliProgramName,
+} from './vault-cli-routing.js'
 
 export interface MurphCliRunOptions {
   argv0?: string
@@ -17,6 +19,10 @@ export interface MurphCliRunOptions {
 
 type SuccessfulSetupContext = import('@murphai/setup-cli/setup-cli').SuccessfulSetupContext
 type CliServeOptions = Parameters<Cli.Cli['serve']>[1]
+type VaultCliVaultContext = import('./vault-cli-vault-context.js').VaultCliVaultContext
+type ExecutableCliInvocationPlan =
+  | Extract<CliInvocationPlan, { kind: 'scoped' }>
+  | Extract<CliInvocationPlan, { kind: 'full' }>
 
 export async function runMurphCliEntrypoint(
   argv: string[] = process.argv.slice(2),
@@ -77,118 +83,32 @@ export async function runMurphCliAction(
   argv: string[],
   options: MurphCliRunOptions = {},
 ): Promise<void> {
-  const vaultCliModule = await import('./vault-cli.js')
-  const operatorConfigModule = await import('@murphai/operator-config/operator-config')
-  const setupCliModule = await import('@murphai/setup-cli/setup-cli')
-  const setupRuntimeEnvModule = await import('@murphai/operator-config/setup-runtime-env')
+  const programName = detectCliProgramName(options.argv0 ?? process.argv[1])
+  const plannedInvocation = planVaultCliInvocation(argv, {
+    env: process.env,
+    programName,
+  })
+  const serveOptions = createCliServeOptions(options.exit)
 
+  if (plannedInvocation.plan.kind === 'setup') {
+    await runSetupInvocation({
+      argv,
+      programName,
+      serveOptions,
+    })
+    return
+  }
+
+  const operatorConfigModule = await import('@murphai/operator-config/operator-config')
   const {
-    expandConfiguredVaultPath,
     resolveConfiguredDefaultVault,
     resolveEffectiveTopLevelToken,
     resolveDefaultVault,
     resolveOperatorHomeDirectory,
   } = operatorConfigModule
-  const {
-    createSetupCli,
-    createSetupServices,
-    detectSetupProgramName,
-    formatSetupWearableLabel,
-    isSetupInvocation,
-    listSetupPendingWearables,
-    listSetupReadyWearables,
-    resolveSetupPostLaunchAction,
-  } = setupCliModule
-  const { SETUP_RUNTIME_ENV_NOTICE } = setupRuntimeEnvModule
 
-  const programName = detectSetupProgramName(options.argv0 ?? process.argv[1])
-  const setupTopLevelToken = resolveEffectiveTopLevelToken(argv)
-  const vaultContext = createVaultCliVaultContext()
-  const cli = vaultCliModule.createVaultCliWithOptions({
-    commandName: programName,
-    vaultContext,
-  })
   const homeDirectory = resolveOperatorHomeDirectory()
-  const serveOptions = createCliServeOptions(options.exit)
-
-  if (isSetupInvocation(argv, programName)) {
-    const successfulSetup = {
-      current: null as SuccessfulSetupContext | null,
-    }
-    const setupCli = createSetupCli({
-      commandName: programName,
-      services: createSetupServices({
-        resolveCliBinPath: resolvePublishedCliBinPath,
-      }),
-      onSetupSuccess(context) {
-        successfulSetup.current = context
-      },
-    })
-    await setupCli.serve(argv, serveOptions)
-
-    const setupContext = successfulSetup.current
-    if (setupContext === null) {
-      return
-    }
-
-    const launchVault =
-      (programName === 'murph' && setupTopLevelToken !== 'init'
-        ? await resolveConfiguredDefaultVault(homeDirectory)
-        : await resolveDefaultVault(homeDirectory)) ??
-      expandConfiguredVaultPath(setupContext.result.vault, homeDirectory)
-    vaultContext.current = launchVault
-
-    const readyWearables = listSetupReadyWearables(setupContext.result)
-    const pendingWearables = listSetupPendingWearables(setupContext.result)
-
-    if (pendingWearables.length > 0) {
-      const pendingSummary = pendingWearables
-        .map(
-          (wearable) =>
-            `${formatSetupWearableLabel(wearable.wearable)} (${wearable.missingEnv.join(', ')})`,
-        )
-        .join(', ')
-      process.stderr.write(
-        `\nSelected wearable setup is waiting on credentials: ${pendingSummary}. ${SETUP_RUNTIME_ENV_NOTICE}\n`,
-      )
-    }
-
-    for (const wearable of readyWearables) {
-      const wearableLabel = formatSetupWearableLabel(wearable)
-      process.stderr.write(
-        `\nOpening ${wearableLabel} connect flow in your browser.\n\n`,
-      )
-      try {
-        await cli.serve(
-          ['device', 'connect', wearable, '--open'],
-          serveOptions,
-        )
-      } catch (error) {
-        process.stderr.write(
-          `Could not start the ${wearableLabel} connect flow: ${formatErrorMessage(error)}\n`,
-        )
-      }
-    }
-
-    const launchAction = resolveSetupPostLaunchAction(setupContext)
-    if (launchAction === null) {
-      return
-    }
-
-    if (launchAction === 'assistant-run') {
-      process.stderr.write(
-        '\nStarting Murph assistant automation. Leave this terminal open while channel auto-reply is active for Telegram, Linq, and/or email. Press Ctrl+C to stop.\n\n',
-      )
-      await cli.serve(['assistant', 'run'], serveOptions)
-      return
-    }
-
-    process.stderr.write('\nOpening Murph assistant chat. Type /exit to quit.\n\n')
-    await cli.serve(['assistant', 'chat'], serveOptions)
-    return
-  }
-
-  const vaultOverride = extractVaultOverride(argv)
+  const { vaultOverride } = plannedInvocation
   const topLevelToken = resolveEffectiveTopLevelToken(vaultOverride.argv)
   const commandAllowsExplicitVaultOverride =
     programName === 'murph' && topLevelToken === 'init'
@@ -209,12 +129,214 @@ export async function runMurphCliAction(
     (programName === 'murph' && topLevelToken !== 'init'
       ? await resolveConfiguredDefaultVault(homeDirectory)
       : await resolveDefaultVault(homeDirectory))
-  vaultContext.current = defaultVault
+  const { createVaultCliVaultContext } = await import('./vault-cli-vault-context.js')
+  const vaultContext = createVaultCliVaultContext(defaultVault)
   vaultContext.missingVaultMessage =
     programName === 'murph' && topLevelToken !== 'init'
       ? 'No active Murph vault is configured. Run `murph onboard --vault ./vault` to create one, or `murph use <path>` to select an existing vault.'
       : null
-  await cli.serve(vaultOverride.argv, serveOptions)
+  await servePlannedVaultCliInvocation({
+    argv: vaultOverride.argv,
+    plan: executablePlanOrFullFallback(plannedInvocation.plan),
+    programName,
+    serveOptions,
+    vaultContext,
+  })
+}
+
+async function runSetupInvocation(input: {
+  argv: string[]
+  programName: VaultCliProgramName
+  serveOptions: CliServeOptions
+}): Promise<void> {
+  const operatorConfigModule = await import('@murphai/operator-config/operator-config')
+  const setupCliModule = await import('@murphai/setup-cli/setup-cli')
+  const setupRuntimeEnvModule = await import('@murphai/operator-config/setup-runtime-env')
+  const { createVaultCliVaultContext } = await import('./vault-cli-vault-context.js')
+
+  const {
+    expandConfiguredVaultPath,
+    resolveConfiguredDefaultVault,
+    resolveDefaultVault,
+    resolveEffectiveTopLevelToken,
+    resolveOperatorHomeDirectory,
+  } = operatorConfigModule
+  const {
+    createSetupCli,
+    createSetupServices,
+    formatSetupWearableLabel,
+    listSetupPendingWearables,
+    listSetupReadyWearables,
+    resolveSetupPostLaunchAction,
+  } = setupCliModule
+  const { SETUP_RUNTIME_ENV_NOTICE } = setupRuntimeEnvModule
+
+  const setupTopLevelToken = resolveEffectiveTopLevelToken(input.argv)
+  const successfulSetup = {
+    current: null as SuccessfulSetupContext | null,
+  }
+  const setupCli = createSetupCli({
+    commandName: input.programName,
+    services: createSetupServices({
+      resolveCliBinPath: resolvePublishedCliBinPath,
+    }),
+    onSetupSuccess(context) {
+      successfulSetup.current = context
+    },
+  })
+  await setupCli.serve(input.argv, input.serveOptions)
+
+  const setupContext = successfulSetup.current
+  if (setupContext === null) {
+    return
+  }
+
+  const homeDirectory = resolveOperatorHomeDirectory()
+  const launchVault =
+    (input.programName === 'murph' && setupTopLevelToken !== 'init'
+      ? await resolveConfiguredDefaultVault(homeDirectory)
+      : await resolveDefaultVault(homeDirectory)) ??
+    expandConfiguredVaultPath(setupContext.result.vault, homeDirectory)
+  const vaultContext = createVaultCliVaultContext(launchVault)
+
+  const readyWearables = listSetupReadyWearables(setupContext.result)
+  const pendingWearables = listSetupPendingWearables(setupContext.result)
+
+  if (pendingWearables.length > 0) {
+    const pendingSummary = pendingWearables
+      .map(
+        (wearable) =>
+          `${formatSetupWearableLabel(wearable.wearable)} (${wearable.missingEnv.join(', ')})`,
+      )
+      .join(', ')
+    process.stderr.write(
+      `\nSelected wearable setup is waiting on credentials: ${pendingSummary}. ${SETUP_RUNTIME_ENV_NOTICE}\n`,
+    )
+  }
+
+  for (const wearable of readyWearables) {
+    const wearableLabel = formatSetupWearableLabel(wearable)
+    process.stderr.write(
+      `\nOpening ${wearableLabel} connect flow in your browser.\n\n`,
+    )
+    try {
+      await serveVaultCliWithExistingContext({
+        argv: ['device', 'connect', wearable, '--open'],
+        programName: input.programName,
+        serveOptions: input.serveOptions,
+        vaultContext,
+      })
+    } catch (error) {
+      process.stderr.write(
+        `Could not start the ${wearableLabel} connect flow: ${formatErrorMessage(error)}\n`,
+      )
+    }
+  }
+
+  const launchAction = resolveSetupPostLaunchAction(setupContext)
+  if (launchAction === null) {
+    return
+  }
+
+  if (launchAction === 'assistant-run') {
+    process.stderr.write(
+      '\nStarting Murph assistant automation. Leave this terminal open while channel auto-reply is active for Telegram, Linq, and/or email. Press Ctrl+C to stop.\n\n',
+    )
+    await serveVaultCliWithExistingContext({
+      argv: ['assistant', 'run'],
+      programName: input.programName,
+      serveOptions: input.serveOptions,
+      vaultContext,
+    })
+    return
+  }
+
+  process.stderr.write('\nOpening Murph assistant chat. Type /exit to quit.\n\n')
+  await serveVaultCliWithExistingContext({
+    argv: ['assistant', 'chat'],
+    programName: input.programName,
+    serveOptions: input.serveOptions,
+    vaultContext,
+  })
+}
+
+async function serveVaultCliWithExistingContext(input: {
+  argv: string[]
+  programName: VaultCliProgramName
+  serveOptions: CliServeOptions
+  vaultContext: VaultCliVaultContext
+}): Promise<void> {
+  const plannedInvocation = planVaultCliInvocation(input.argv, {
+    env: process.env,
+    programName: input.programName,
+  })
+  const plan = executablePlanOrFullFallback(plannedInvocation.plan)
+
+  await servePlannedVaultCliInvocation({
+    argv: plannedInvocation.vaultOverride.argv,
+    plan,
+    programName: input.programName,
+    serveOptions: input.serveOptions,
+    vaultContext: input.vaultContext,
+  })
+}
+
+function executablePlanOrFullFallback(
+  plan: CliInvocationPlan,
+): ExecutableCliInvocationPlan {
+  return plan.kind === 'scoped' || plan.kind === 'full'
+    ? plan
+    : {
+        kind: 'full',
+        reason: 'setup-follow-on',
+      }
+}
+
+async function servePlannedVaultCliInvocation(input: {
+  argv: string[]
+  plan: ExecutableCliInvocationPlan
+  programName: VaultCliProgramName
+  serveOptions: CliServeOptions
+  vaultContext: VaultCliVaultContext
+}): Promise<void> {
+  if (
+    input.plan.kind === 'scoped' &&
+    !(await hasInstalledIncurSkillsForCli(input.programName))
+  ) {
+    const [
+      { createVaultCliShell },
+      { registerScopedVaultCliCommand },
+      { installVaultCliSchemaIndex },
+      { installVaultCliVaultContext },
+    ] = await Promise.all([
+      import('./vault-cli-shell.js'),
+      import('./vault-cli-command-routing.js'),
+      import('./vault-cli-schema-index.js'),
+      import('./vault-cli-vault-context.js'),
+    ])
+    const cli = createVaultCliShell(input.programName)
+
+    await registerScopedVaultCliCommand({
+      cli,
+      root: input.plan.root,
+    })
+    installVaultCliSchemaIndex(cli)
+    installVaultCliVaultContext(cli, input.vaultContext)
+    await cli.serve(input.argv, input.serveOptions)
+    return
+  }
+
+  const { createVaultCliWithOptions } = await import('./vault-cli.js')
+  const cli = createVaultCliWithOptions({
+    commandName: input.programName,
+    vaultContext: input.vaultContext,
+  })
+  await cli.serve(input.argv, input.serveOptions)
+}
+
+async function hasInstalledIncurSkillsForCli(commandName: string): Promise<boolean> {
+  const { SyncSkills } = await import('incur')
+  return SyncSkills.hasInstalledSkills(commandName)
 }
 
 export function formatMurphCliError(error: unknown): string {

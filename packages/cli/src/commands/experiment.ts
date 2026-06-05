@@ -16,11 +16,10 @@ import {
   experimentRunScheduleIntentSchema,
   jsonObjectSchema,
   type ExperimentRunScheduleIntent,
-  type HealthCommonsCatalogEntity,
   type HealthCommonsExpectedSignalDescription,
   type HealthCommonsTestPlan,
 } from '@murphai/contracts'
-import { getGeneratedHealthCommonsCatalogReader } from '@murphai/health-commons/runtime'
+import type { HealthCommonsProtocolRunSpec } from '@murphai/health-commons/runtime'
 import { Cli, z } from 'incur'
 import {
   requestIdFromOptions,
@@ -96,10 +95,7 @@ function currentCommandIncludesFlag(flag: string): boolean {
   return experimentCommandArgvStorage.getStore()?.includes(flag) === true
 }
 
-type ProtocolVariantEntity = HealthCommonsCatalogEntity & {
-  entityType: 'protocol_variant'
-  testPlans: HealthCommonsTestPlan[]
-}
+type ProtocolVariantEntity = HealthCommonsProtocolRunSpec
 const sha256RevisionOptionSchema = z
   .string()
   .regex(
@@ -250,40 +246,22 @@ function normalizeProtocolVariantKey(value: string, optionName = 'protocol-key')
   return trimmed
 }
 
-function isProtocolVariantEntity(
-  entity: HealthCommonsCatalogEntity | null,
-): entity is ProtocolVariantEntity {
-  return entity?.entityType === 'protocol_variant' && Array.isArray(entity.testPlans)
-}
-
-function requireProtocolVariantEntity(key: string): ProtocolVariantEntity {
-  const reader = getGeneratedHealthCommonsCatalogReader()
-  const entity = reader.findByKey(normalizeProtocolVariantKey(key))
-
-  if (!isProtocolVariantEntity(entity)) {
-    throw new VaultCliError(
-      'not_found',
-      `No Health Commons protocol variant matched ${key}.`,
-    )
-  }
-
-  return entity
-}
-
-function resolveProtocolVariantEntity(
+async function resolveProtocolVariantEntity(
   lookup: string,
   optionName = 'from-protocol',
-): ProtocolVariantEntity {
+): Promise<ProtocolVariantEntity> {
   const trimmed = lookup.trim()
-  const reader = getGeneratedHealthCommonsCatalogReader()
-  const entity = trimmed.startsWith('protocol_variant:')
-    ? reader.findByKey(normalizeProtocolVariantKey(trimmed, optionName))
-    : reader.findByRouteId({
-        entityType: 'protocol_variant',
-        routeId: trimmed,
-      })
+  const { getGeneratedHealthCommonsProtocolRunSpecReader } = await import(
+    '@murphai/health-commons/runtime'
+  )
+  const reader = getGeneratedHealthCommonsProtocolRunSpecReader()
+  const entity = reader.findByLookup(
+    trimmed.startsWith('protocol_variant:')
+      ? normalizeProtocolVariantKey(trimmed, optionName)
+      : trimmed,
+  )
 
-  if (!isProtocolVariantEntity(entity)) {
+  if (!entity) {
     throw new VaultCliError(
       'not_found',
       `No Health Commons protocol variant matched --${optionName} "${lookup}".`,
@@ -335,7 +313,7 @@ function mapExpectedSignalDirection(
 }
 
 function findExpectedSignal(
-  entity: HealthCommonsCatalogEntity,
+  entity: ProtocolVariantEntity,
   biomarkerKey: string,
 ): HealthCommonsExpectedSignalDescription | undefined {
   return entity.expectedSignalDescriptions?.find(
@@ -483,7 +461,7 @@ function resolveStartWindows(input: {
   }
 }
 
-function buildExperimentPlanPayloadFromTypedOptions(input: {
+async function buildExperimentPlanPayloadFromTypedOptions(input: {
   slug: string
   options: {
     title?: string
@@ -581,7 +559,7 @@ function buildExperimentPlanPayloadFromTypedOptions(input: {
   const protocol =
     fromProtocol === undefined
       ? undefined
-      : resolveProtocolVariantEntity(fromProtocol, 'from-protocol')
+      : await resolveProtocolVariantEntity(fromProtocol, 'from-protocol')
   const testPlan = protocol
     ? resolveProtocolTestPlan({
         entity: protocol,
@@ -793,7 +771,7 @@ async function hydrateExperimentProtocolDefaults(input: {
     )
   }
 
-  const payload = buildExperimentPlanPayloadFromTypedOptions({
+  const payload = await buildExperimentPlanPayloadFromTypedOptions({
     slug: current.slug,
     options: {
       fromProtocol: protocolKey,
@@ -1309,7 +1287,7 @@ export function registerExperimentCommands(
     }),
     output: experimentStartResultSchema,
     async run({ args, options }) {
-      const payload = buildExperimentPlanPayloadFromTypedOptions({
+      const payload = await buildExperimentPlanPayloadFromTypedOptions({
         slug: args.slug,
         options: {
           ...options,

@@ -2082,7 +2082,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const { mailboxPort } = createMailboxPort({ fetchRequests, items });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
-    const admissions: string[] = [];
+    let admissionCount = 0;
     const liveSteerInputs: unknown[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const workspacePort = createWorkspacePort({
@@ -2146,7 +2146,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           });
           const controller = createAssistantActiveTurnInputController({
             admissionHook: async (input) => {
-              admissions.push(input.phase);
+              admissionCount += 1;
               const candidates = await inputSource.listNewConversationInputs({
                 conversation: {
                   accountId: "acct_1",
@@ -2208,7 +2208,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             runtimeWakeSignal.notify();
             runtimeWakeSignal.notify();
             await waitForCondition(() => importedSeqs.includes("3"));
-            await waitForCondition(() => admissions.length === 1);
+            await waitForCondition(() => admissionCount === 1);
             await waitForCondition(() => liveSteerInputs.length === 1);
             return {
               checkpointReason: "canonical_runtime_commit",
@@ -2231,7 +2231,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "import:3",
       ]);
       assert.deepEqual(importedSeqs, ["1", "2", "3"]);
-      assert.deepEqual(admissions, ["input_available"]);
+      assert.equal(admissionCount, 1);
       assert.equal(liveSteerInputs.length, 1);
       assert.deepEqual(liveSteerInputs[0], {
         prompt: "late same-conversation input 2\n\nlate same-conversation input 3",
@@ -2644,7 +2644,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const { mailboxPort } = createMailboxPort({ fetchRequests, items });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const admissions: string[] = [];
+    let admissionCount = 0;
     const logRequests: HostedRuntimeLogRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
 
@@ -2699,8 +2699,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         runtimeWakeSignal,
         async runAssistantPhase() {
           const controller = createAssistantActiveTurnInputController({
-            admissionHook: async (input) => {
-              admissions.push(input.phase);
+            admissionHook: async () => {
+              admissionCount += 1;
               return {
                 kind: "no-new-input",
               };
@@ -2723,7 +2723,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           try {
             runtimeWakeSignal.notify();
             await waitForCondition(() => importedSeqs.includes("3"));
-            await waitForCondition(() => admissions.length === 1);
+            await waitForCondition(() => admissionCount === 1);
             return {
               checkpointReason: "canonical_runtime_commit",
               progressed: true,
@@ -2738,7 +2738,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.deepEqual(importedSeqs, ["1", "2", "3"]);
-      assert.deepEqual(admissions, ["input_available"]);
+      assert.equal(admissionCount, 1);
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
       assert.deepEqual(checkpointRequests, []);
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [

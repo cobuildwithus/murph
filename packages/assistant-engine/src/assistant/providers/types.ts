@@ -61,7 +61,6 @@ export interface AssistantProviderConversationMessage {
 export interface AssistantProviderTurnInput {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   activeTurnId?: string | null
-  activeTurnMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   activeTurnSessionId?: string | null
   abortSignal?: AbortSignal
   approvalPolicy?: AssistantApprovalPolicy | null
@@ -113,7 +112,6 @@ export type AssistantProviderFreshThreadFallbackResolver =
 export interface AssistantProviderTurnExecutionInput {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   activeTurnId?: string | null
-  activeTurnMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   activeTurnSessionId?: string | null
   abortSignal?: AbortSignal
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>

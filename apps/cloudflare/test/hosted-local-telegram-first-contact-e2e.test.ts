@@ -238,7 +238,7 @@ async function startTelegramScenario(): Promise<void> {
   });
   scenario = await startHostedLocalFullStackScenario({
     additionalEnv: {
-      TELEGRAM_API_BASE_URL: requireTelegramStub().baseUrl,
+      TELEGRAM_API_BASE_URL: requireTelegramStub().runnerBaseUrl,
       TELEGRAM_BOT_TOKEN: telegramBotToken,
     },
     localDatabaseUrl,

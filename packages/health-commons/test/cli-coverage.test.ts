@@ -57,8 +57,8 @@ describe("@murphai/health-commons coverage scaffolding", () => {
         generatedRoot,
       });
 
-      const catalogJson = await readFile(path.join(generatedRoot, "catalog.json"), "utf8");
-      expect(catalogJson).toContain("\"catalogHash\"");
+      const protocolIndexJson = await readFile(path.join(generatedRoot, "protocol-index.json"), "utf8");
+      expect(protocolIndexJson).toContain("\"catalogHash\"");
 
       await writeHealthCommonsGeneratedArtifacts({
         check: true,
@@ -110,7 +110,7 @@ describe("@murphai/health-commons coverage scaffolding", () => {
       ).rejects.toThrow("Health Commons generated artifacts are out of date");
 
       await expect(
-        readFile(path.join(generatedRoot, "catalog.json"), "utf8"),
+        readFile(path.join(generatedRoot, "protocol-index.json"), "utf8"),
       ).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await rm(contentRoot, { recursive: true, force: true });

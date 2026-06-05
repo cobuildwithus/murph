@@ -40,10 +40,8 @@ import {
   finalizeAssistantTurnFromDeliveryOutcome as finalizeDeliveredAssistantTurn,
 } from './delivery-service.js'
 import {
-  resolveAssistantResumeStateFromProviderTurn,
   persistAssistantTurnAndSession as finalizeAssistantTurnArtifacts,
 } from './turn-finalizer.js'
-import { readCodexThreadRouteFingerprint } from './codex-thread-route.js'
 import {
   readAssistantCodexResume,
 } from './conversation-persistence.js'
@@ -73,7 +71,6 @@ import { persistFailedAssistantPromptAttempt } from './prompt-attempts.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
 import { recordAssistantUsageEvent } from './service-usage.js'
 import {
-  AssistantActiveTurnInputBudgetExceededError,
   type AssistantActiveTurnInputAdmissionResult,
 } from './turn-input.js'
 import {
@@ -95,10 +92,7 @@ import {
   assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist,
 } from './active-turn-input-journal.js'
 import {
-  appendAssistantActiveTurnProviderExchange,
-  type AssistantActiveTurnProviderHistory,
-} from './active-turn-history.js'
-import {
+  createAssistantActiveTurnNotActiveError,
   createAssistantActiveTurnInputController,
   steerAssistantActiveTurnInputWithStatus,
 } from './active-turn-input-controller.js'
@@ -114,7 +108,6 @@ import { withAssistantTurnLock } from './turn-lock.js'
 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 
-const MAX_ACTIVE_TURN_INPUT_CONTINUATIONS = 3
 const DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID = 'initial'
 
 function resolveAssistantProgressDeliveryChannel(input: {
@@ -238,13 +231,10 @@ export async function sendAssistantMessageLocal(
       )
     }
     if (
-      steerResult.kind === 'no-active-turn' &&
-      typeof input.expectedActiveTurnId === 'string'
+      typeof input.expectedActiveTurnId === 'string' &&
+      steerResult.kind === 'no-active-turn'
     ) {
-      throw new VaultCliError(
-        'ASSISTANT_ACTIVE_TURN_NOT_ACTIVE',
-        'Manual active-turn input targeted a turn that is no longer active.',
-      )
+      throw createAssistantActiveTurnNotActiveError()
     }
   }
 
@@ -317,7 +307,7 @@ export async function sendAssistantMessageLocal(
       > | null = null
 
       try {
-        activeTurnInputController = createAssistantActiveTurnInputController({
+        const turnInputController = createAssistantActiveTurnInputController({
           acceptedInputValidator: async ({ acceptedInputs }) => {
             await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
               inputs: acceptedInputs,
@@ -333,6 +323,7 @@ export async function sendAssistantMessageLocal(
           turnId: receipt.turnId,
           vault: input.vault,
         })
+        activeTurnInputController = turnInputController
         userTurn = await persistUserTurn(input, resolved, sharedPlan, receipt.turnId)
         let currentUserTurn = userTurn
         const runtimeState = createAssistantRuntimeStateService(input.vault)
@@ -399,11 +390,10 @@ export async function sendAssistantMessageLocal(
               turnId: currentUserTurn.turnId,
             })
           : null
-        let activeTurnHistory: AssistantActiveTurnProviderHistory | null = null
         let providerResult: ExecutedAssistantProviderTurnResult | null = null
-        let activeTurnRouteLock: ExecutedAssistantProviderTurnResult['route'] | null = null
         let userPromptPersistedToTranscript = currentUserTurn.userPersisted
-        let acceptedInputIdsForNextProviderRequest: readonly string[] =
+        const providerRequestOrdinal = 0
+        let acceptedInputIdsForProviderRequest: readonly string[] =
           initialAcceptedInputJournal.inputIds
         const acceptActiveTurnInput = async (acceptanceInput: {
           activeTurnInput: Extract<
@@ -419,7 +409,7 @@ export async function sendAssistantMessageLocal(
             const persisted = await appendUserTranscriptEntryForTurn({
               createdAt: currentUserTurn.turnCreatedAt,
               detail:
-                'user prompt persisted before active-turn continuation',
+                'user prompt persisted before active-turn input',
               sessionId: resolved.session.sessionId,
               text: previousInput.prompt,
               turnId: currentUserTurn.turnId,
@@ -448,7 +438,6 @@ export async function sendAssistantMessageLocal(
           const acceptedInputItems = resolveAcceptedActiveTurnInputItems({
             acceptedInput: acceptanceInput.activeTurnInput,
             input: currentInput,
-            providerRequestOrdinal: acceptanceInput.providerRequestOrdinal,
           })
           assertAcceptedActiveTurnInputItemsAreNew({
             acceptedInputIds: acceptanceInput.providerRequestAcceptedInputIds,
@@ -500,224 +489,196 @@ export async function sendAssistantMessageLocal(
               vault: currentInput.vault,
             })
           }
-          const nextInput = buildActiveTurnContinuationInput({
+          const nextInput = buildActiveTurnInput({
             acceptedInput: acceptanceInput.activeTurnInput,
             input: previousInput,
           })
           currentInput = nextInput
-          acceptedInputIdsForNextProviderRequest = acceptedInputJournal.inputIds
+          acceptedInputIdsForProviderRequest = acceptedInputJournal.inputIds
           return {
             acceptedInputJournal,
             acceptedInputItems,
             previousInput,
           }
         }
-        providerLoop: for (
-          let providerRequestOrdinal = 0;
-          providerRequestOrdinal <= MAX_ACTIVE_TURN_INPUT_CONTINUATIONS;
-          providerRequestOrdinal += 1
-        ) {
-          let preProviderAdmissionCount = 0
+        const preProviderInput = await turnInputController.admitAvailable({
+          probeIfIdle: true,
+          signal: currentInput.abortSignal,
+        })
+        const preProviderAdmissionCount =
+          preProviderInput?.kind === 'accepted' ? 1 : 0
+        if (preProviderInput?.kind === 'accepted') {
+          await acceptActiveTurnInput({
+            activeTurnInput: preProviderInput,
+            providerRequestAcceptedInputIds: acceptedInputIdsForProviderRequest,
+            providerRequestOrdinal,
+            sessionId: currentSession.sessionId,
+          })
+        }
+        emitHostedAssistantContextTimingTrace({
+          message: input,
+          preProviderAdmissionCount,
+          preProviderSetupMs: elapsedSince(lockAcquiredAt),
+          providerRequestOrdinal,
+          stage: 'assistant-pre-provider-ready',
+          turnLockWaitMs,
+        })
+        let providerRequestJournal: Awaited<
+          ReturnType<typeof runtimeState.turns.acceptedInputs.recordProviderRequest>
+        > = null
+        let providerRequestAcceptedInputIds: readonly string[] =
+          acceptedInputIdsForProviderRequest
+        const drainLiveSteeredActiveTurnInputs = async (drainInput: {
+          continuation: ExecutedAssistantProviderTurnResult['codexContinuation']
+          sessionId: string
+        }) => {
           while (true) {
-            const activeTurnInput = await activeTurnInputController?.admitAvailable({
-              probeIfIdle: true,
-              signal: currentInput.abortSignal,
-            })
+            const activeTurnInput =
+              await turnInputController.admitLiveSteered()
             if (activeTurnInput?.kind !== 'accepted') {
               break
             }
-            preProviderAdmissionCount += 1
-            if (preProviderAdmissionCount > MAX_ACTIVE_TURN_INPUT_CONTINUATIONS) {
-              throw new AssistantActiveTurnInputBudgetExceededError()
-            }
-            await acceptActiveTurnInput({
+            const accepted = await acceptActiveTurnInput({
               activeTurnInput,
-              providerRequestAcceptedInputIds: acceptedInputIdsForNextProviderRequest,
+              providerRequestAcceptedInputIds,
               providerRequestOrdinal,
-              sessionId: currentSession.sessionId,
+              sessionId: drainInput.sessionId,
             })
-          }
-          emitHostedAssistantContextTimingTrace({
-            message: input,
-            preProviderAdmissionCount,
-            preProviderSetupMs: elapsedSince(lockAcquiredAt),
-            providerRequestOrdinal,
-            stage: 'assistant-pre-provider-ready',
-            turnLockWaitMs,
-          })
-          let providerRequestJournal: Awaited<
-            ReturnType<typeof runtimeState.turns.acceptedInputs.recordProviderRequest>
-          > = null
-          let providerRequestAcceptedInputIds: readonly string[] =
-            acceptedInputIdsForNextProviderRequest
-          const providerOutcome = await executeCodexTurnWithRecovery({
-            activeTurnHistory,
-            activeTurnSteering: activeTurnInputController,
-            input: currentInput,
-            onProviderRequestPlanned: async (event) => {
-              providerRequestJournal =
-                await runtimeState.turns.acceptedInputs.recordProviderRequest({
-                  continuation: event.codexContinuation,
-                  ordinal: providerRequestOrdinal,
-                  providerAttemptId: event.providerAttemptId,
-                  turnId: currentUserTurn.turnId,
-                })
-              providerRequestAcceptedInputIds =
-                providerRequestJournal?.inputIds ?? acceptedInputIdsForNextProviderRequest
-              acceptedInputIdsForNextProviderRequest = providerRequestAcceptedInputIds
-            },
-            onProviderRequestStarted: (event) => {
-              if (!currentInput.onProviderRequestStarted) {
-                return
-              }
-              return currentInput.onProviderRequestStarted({
-                acceptedInputIds: providerRequestAcceptedInputIds,
-                providerRequestOrdinal:
-                  event.providerRequestOrdinal ?? providerRequestOrdinal,
-                startedAt: event.startedAt,
-              })
-            },
-            route: activeTurnRouteLock ?? route,
-            plan: sharedPlan,
-            profile: {
-              threadScope,
-            },
-            providerRequestOrdinal,
-            resolvedSession: currentSession,
-            turnCreatedAt: currentUserTurn.turnCreatedAt,
-            progressDelivery,
-            turnId: currentUserTurn.turnId,
-          })
-          if (providerOutcome.kind === 'failed_terminal') {
-            if (!providerRequestJournal) {
-              await runtimeState.turns.acceptedInputs.recordProviderRequest({
-                continuation: providerOutcome.codexContinuation,
-                ordinal: providerRequestOrdinal,
-                providerAttemptId: null,
-                turnId: currentUserTurn.turnId,
-              })
-            } else {
+            providerRequestJournal =
               await runtimeState.turns.acceptedInputs.updateProviderRequest({
-                continuation: providerOutcome.codexContinuation,
+                acceptedInputIds: accepted.acceptedInputJournal.inputIds,
+                continuation: drainInput.continuation,
                 ordinal: providerRequestOrdinal,
                 providerAttemptId: null,
                 turnId: currentUserTurn.turnId,
-              })
-            }
-            await recordAssistantUsageEvent({
-              executionContext,
-              providerRequestOrdinal,
-              providerRequestOutcome: providerOutcome.providerRequestOutcome,
-              providerResult: {
-                attemptCount: providerOutcome.attemptCount,
-                provider: providerOutcome.route.provider,
-                providerOptions: providerOutcome.route.providerOptions,
-                route: providerOutcome.route,
-                session: providerOutcome.session,
-                usage: providerOutcome.usage,
-                usageAttribution: providerOutcome.usageAttribution,
-              },
-              turnId: currentUserTurn.turnId,
-            })
-            throw providerOutcome.error
+              }) ?? providerRequestJournal
+            providerRequestAcceptedInputIds =
+              providerRequestJournal?.inputIds ?? accepted.acceptedInputJournal.inputIds
+            acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
           }
-
-          providerResult = providerOutcome.providerTurn
+        }
+        const providerOutcome = await executeCodexTurnWithRecovery({
+          activeTurnSteering: turnInputController,
+          input: currentInput,
+          onProviderRequestPlanned: async (event) => {
+            providerRequestJournal =
+              await runtimeState.turns.acceptedInputs.recordProviderRequest({
+                continuation: event.codexContinuation,
+                ordinal: providerRequestOrdinal,
+                providerAttemptId: event.providerAttemptId,
+                turnId: currentUserTurn.turnId,
+              })
+            providerRequestAcceptedInputIds =
+              providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
+            acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
+          },
+          onProviderRequestStarted: (event) => {
+            if (!currentInput.onProviderRequestStarted) {
+              return
+            }
+            return currentInput.onProviderRequestStarted({
+              acceptedInputIds: providerRequestAcceptedInputIds,
+              providerRequestOrdinal:
+                event.providerRequestOrdinal ?? providerRequestOrdinal,
+              startedAt: event.startedAt,
+            })
+          },
+          route,
+          plan: sharedPlan,
+          profile: {
+            threadScope,
+          },
+          providerRequestOrdinal,
+          resolvedSession: currentSession,
+          turnCreatedAt: currentUserTurn.turnCreatedAt,
+          progressDelivery,
+          turnId: currentUserTurn.turnId,
+        })
+        if (providerOutcome.kind === 'failed_terminal') {
           if (!providerRequestJournal) {
             providerRequestJournal =
               await runtimeState.turns.acceptedInputs.recordProviderRequest({
-                continuation: providerResult.codexContinuation,
+                continuation: providerOutcome.codexContinuation,
                 ordinal: providerRequestOrdinal,
                 providerAttemptId: null,
                 turnId: currentUserTurn.turnId,
               })
             providerRequestAcceptedInputIds =
-              providerRequestJournal?.inputIds ?? acceptedInputIdsForNextProviderRequest
-            acceptedInputIdsForNextProviderRequest = providerRequestAcceptedInputIds
+              providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
+            acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
           } else {
             providerRequestJournal =
               await runtimeState.turns.acceptedInputs.updateProviderRequest({
-                continuation: providerResult.codexContinuation,
+                continuation: providerOutcome.codexContinuation,
                 ordinal: providerRequestOrdinal,
                 providerAttemptId: null,
                 turnId: currentUserTurn.turnId,
               }) ?? providerRequestJournal
             providerRequestAcceptedInputIds =
               providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
-            acceptedInputIdsForNextProviderRequest = providerRequestAcceptedInputIds
+            acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
           }
-          currentSession = resolveActiveTurnProviderLoopSession({
-            providerResult,
-            threadScope,
+          await drainLiveSteeredActiveTurnInputs({
+            continuation: providerOutcome.codexContinuation,
+            sessionId: providerOutcome.session.sessionId,
           })
-          responseText = providerResult.response
-          if (providerResult.nonReplayableProviderWork) {
-            activeTurnRouteLock = providerResult.route
-          }
           await recordAssistantUsageEvent({
             executionContext,
             providerRequestOrdinal,
-            providerResult,
+            providerRequestOutcome: providerOutcome.providerRequestOutcome,
+            providerResult: {
+              attemptCount: providerOutcome.attemptCount,
+              provider: providerOutcome.route.provider,
+              providerOptions: providerOutcome.route.providerOptions,
+              route: providerOutcome.route,
+              session: providerOutcome.session,
+              usage: providerOutcome.usage,
+              usageAttribution: providerOutcome.usageAttribution,
+            },
             turnId: currentUserTurn.turnId,
           })
-
-          for (const phase of ['request_boundary', 'commit_barrier'] as const) {
-            const activeTurnInput =
-              await resolveAssistantActiveTurnInputAdmission({
-                activeTurnInputController,
-                currentInput,
-                phase,
-                sessionId: providerResult.session.sessionId,
-                userTurn: currentUserTurn,
-              })
-            if (activeTurnInput?.kind !== 'accepted') {
-              if (activeTurnInput && phase === 'commit_barrier') {
-                activeTurnInputController.close()
-              }
-              continue
-            }
-            if (providerRequestOrdinal >= MAX_ACTIVE_TURN_INPUT_CONTINUATIONS) {
-              throw new AssistantActiveTurnInputBudgetExceededError()
-            }
-            const accepted = await acceptActiveTurnInput({
-              activeTurnInput,
-              providerRequestAcceptedInputIds,
-              providerRequestOrdinal,
-              sessionId: providerResult.session.sessionId,
-            })
-            if (activeTurnInput.providerAlreadySteered === true) {
-              providerRequestJournal =
-                await runtimeState.turns.acceptedInputs.updateProviderRequest({
-                  acceptedInputIds: accepted.acceptedInputJournal.inputIds,
-                  continuation: providerResult.codexContinuation,
-                  ordinal: providerRequestOrdinal,
-                  providerAttemptId: null,
-                  turnId: currentUserTurn.turnId,
-                }) ?? providerRequestJournal
-              providerRequestAcceptedInputIds =
-                providerRequestJournal?.inputIds ?? accepted.acceptedInputJournal.inputIds
-              acceptedInputIdsForNextProviderRequest = providerRequestAcceptedInputIds
-              continue
-            }
-            activeTurnHistory = appendAssistantActiveTurnProviderExchange({
-              acceptedInputIds: providerRequestAcceptedInputIds,
-              assistantResponse: providerResult.response,
-              history: activeTurnHistory,
-              nonReplayableProviderWork:
-                providerResult.nonReplayableProviderWork === true,
-              userMessageContent: accepted.previousInput.userMessageContent ?? null,
-              userPrompt: accepted.previousInput.prompt,
-            })
-            continue providerLoop
-          }
-          break
+          throw providerOutcome.error
         }
 
-        if (!providerResult) {
-          throw new Error('Assistant provider turn did not produce a result.')
+        providerResult = providerOutcome.providerTurn
+        if (!providerRequestJournal) {
+          providerRequestJournal =
+            await runtimeState.turns.acceptedInputs.recordProviderRequest({
+              continuation: providerResult.codexContinuation,
+              ordinal: providerRequestOrdinal,
+              providerAttemptId: null,
+              turnId: currentUserTurn.turnId,
+            })
+          providerRequestAcceptedInputIds =
+            providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
+          acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
+        } else {
+          providerRequestJournal =
+            await runtimeState.turns.acceptedInputs.updateProviderRequest({
+              continuation: providerResult.codexContinuation,
+              ordinal: providerRequestOrdinal,
+              providerAttemptId: null,
+              turnId: currentUserTurn.turnId,
+            }) ?? providerRequestJournal
+          providerRequestAcceptedInputIds =
+            providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
+          acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
         }
+        currentSession = providerResult.session
+        responseText = providerResult.response
+        await recordAssistantUsageEvent({
+          executionContext,
+          providerRequestOrdinal,
+          providerResult,
+          turnId: currentUserTurn.turnId,
+        })
 
-        activeTurnInputController.close()
+        await drainLiveSteeredActiveTurnInputs({
+          continuation: providerResult.codexContinuation,
+          sessionId: providerResult.session.sessionId,
+        })
+
+        turnInputController.close()
         await runtimeState.turns.acceptedInputs.updateAdmissionState({
           admissionState: 'commit-started',
           turnId: currentUserTurn.turnId,
@@ -772,7 +733,7 @@ export async function sendAssistantMessageLocal(
               ? deliveryOutcome.error
               : null,
         })
-        activeTurnInputController.complete(result)
+        turnInputController.complete(result)
         return result
       } catch (error) {
         activeTurnInputController?.fail(error)
@@ -913,57 +874,6 @@ function resolveProviderResumeStateAction(input: {
     : 'clear'
 }
 
-function resolveActiveTurnProviderLoopSession(input: {
-  providerResult: ExecutedAssistantProviderTurnResult
-  threadScope: AssistantCodexThreadScope
-}): AssistantSession {
-  if (input.threadScope !== 'session-thread') {
-    return input.providerResult.session
-  }
-
-  const codexThreadId = normalizeNullableString(
-    input.providerResult.codexThreadId,
-  )
-  const routeFingerprint = normalizeNullableString(
-    readCodexThreadRouteFingerprint(input.providerResult.route),
-  )
-  if (!codexThreadId || !routeFingerprint) {
-    return {
-      ...input.providerResult.session,
-      codexResume: null,
-      resumeState: null,
-    }
-  }
-  const nextResumeState = resolveAssistantResumeStateFromProviderTurn({
-    codexThreadId,
-    routeFingerprint,
-  })
-
-  return {
-    ...input.providerResult.session,
-    codexResume: nextResumeState,
-    resumeState: nextResumeState,
-  }
-}
-
-async function resolveAssistantActiveTurnInputAdmission(input: {
-  activeTurnInputController: ReturnType<
-    typeof createAssistantActiveTurnInputController
-  > | null
-  currentInput: AssistantMessageInput
-  phase: 'request_boundary' | 'commit_barrier'
-  sessionId: string
-  userTurn: PersistedUserTurn
-}): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
-  return input.activeTurnInputController?.admit({
-    phase: input.phase,
-    signal: input.currentInput.abortSignal,
-    sessionId: input.sessionId,
-    turnId: input.userTurn.turnId,
-    vault: input.currentInput.vault,
-  })
-}
-
 function resolveInitialAcceptedTurnInputItems(input: {
   input: AssistantMessageInput
   resolved: ResolvedAssistantSession
@@ -1024,7 +934,7 @@ async function appendAcceptedActiveTurnInputTranscriptEntries(input: {
   for (const plan of transcriptPlans) {
     const persisted = await appendUserTranscriptEntryForTurn({
       detail:
-        'accepted active-turn input persisted before provider continuation',
+        'accepted active-turn input persisted for provider request',
       sessionId: input.sessionId,
       text: plan.text,
       turnId: input.turnId,
@@ -1106,7 +1016,7 @@ function assertAcceptedActiveTurnInputItemsAreNew(input: {
     if (existingIds.has(item.id) || nextIds.has(item.id)) {
       throw new VaultCliError(
         'ASSISTANT_TURN_INPUT_JOURNAL_DUPLICATE_INPUT',
-        'Accepted active-turn input ids must be new for the current provider continuation.',
+        'Accepted active-turn input ids must be new for the current provider request.',
       )
     }
     nextIds.add(item.id)
@@ -1119,7 +1029,6 @@ function resolveAcceptedActiveTurnInputItems(input: {
     { kind: 'accepted' }
   >
   input: AssistantMessageInput
-  providerRequestOrdinal: number
 }): readonly AssistantAcceptedTurnInputItemInput[] {
   if (input.acceptedInput.acceptedInputs.length > 0) {
     return input.acceptedInput.acceptedInputs
@@ -1146,7 +1055,7 @@ function elapsedSince(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt)
 }
 
-function buildActiveTurnContinuationInput(input: {
+function buildActiveTurnInput(input: {
   acceptedInput: Extract<
     AssistantActiveTurnInputAdmissionResult,
     { kind: 'accepted' }

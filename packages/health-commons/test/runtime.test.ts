@@ -10,12 +10,16 @@ import { resolveMetricDefinition } from "@murphai/health-metrics";
 import {
   createHealthCommonsCatalogReader,
   createHealthCommonsRouteBundleReader,
-  getGeneratedHealthCommonsCatalogReader,
+  getGeneratedHealthCommonsProtocolFamilyGraphReader,
+  getGeneratedHealthCommonsProtocolIndexReader,
+  getGeneratedHealthCommonsProtocolRunSpecReader,
   getGeneratedHealthCommonsWebBiomarkerIndex,
   getGeneratedHealthCommonsWebExperimentIndex,
   getGeneratedHealthCommonsWebRouteIndex,
   listGeneratedAssistantProtocolIndexEntries,
-  loadGeneratedHealthCommonsCatalog,
+  loadGeneratedHealthCommonsProtocolFamilyGraph,
+  loadGeneratedHealthCommonsProtocolIndex,
+  loadGeneratedHealthCommonsProtocolRunSpecs,
   loadGeneratedHealthCommonsWebExperimentProtocolTab,
   loadGeneratedHealthCommonsWebExperimentResearchTab,
   loadGeneratedHealthCommonsWebExperimentResultsPublic,
@@ -304,29 +308,59 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     ).toEqual(expect.objectContaining({ sortRank: 10 }));
   });
 
-  it("exposes a compact assistant protocol index from generated experiments", () => {
-    const experimentIndex = getGeneratedHealthCommonsWebExperimentIndex();
+  it("exposes a compact assistant protocol index from generated protocol artifacts", () => {
+    const protocolIndex = loadGeneratedHealthCommonsProtocolIndex();
     const entries = listGeneratedAssistantProtocolIndexEntries();
 
     expect(entries).toEqual(
-      experimentIndex.experiments
-        .filter((entry) => entry.status !== "deprecated")
-        .map((entry) => ({
-          category: entry.category,
-          routeId: entry.routeId,
-          title: entry.title,
-        })),
+      protocolIndex.protocols.map((entry) => ({
+        category: expect.any(String),
+        routeId: entry.routeId,
+        title: entry.title,
+      })),
     );
     expect(entries).toContainEqual({
-      category: "Supplementation",
-      routeId: "creatine-monohydrate",
-      title: "Creatine Monohydrate",
+      category: "Recovery",
+      routeId: "finnish-sauna",
+      title: "Finnish Dry Sauna",
     });
+    expect(entries.some((entry) => entry.routeId === "creatine-monohydrate")).toBe(false);
     expect(
       entries.every((entry) =>
         Object.keys(entry).sort().join(",") === "category,routeId,title"
       ),
     ).toBe(true);
+  });
+
+  it("builds assistant protocol entries from the compact protocol index without web artifacts", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-protocol-index-"));
+    const protocolIndexPath = path.join(tempDir, "protocol-index.json");
+    const index = loadGeneratedHealthCommonsProtocolIndex();
+    const finnishSauna = index.protocols.find((protocol) =>
+      protocol.key === "protocol_variant:dry-sauna/murph-finnish-standard-3x-week"
+    );
+
+    if (!finnishSauna) {
+      throw new Error("Expected Finnish sauna in generated protocol index.");
+    }
+
+    await writeFile(
+      protocolIndexPath,
+      `${JSON.stringify({
+        catalogHash: index.catalogHash,
+        protocols: [finnishSauna],
+        schemaVersion: index.schemaVersion,
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    expect(listGeneratedAssistantProtocolIndexEntries({ protocolIndexPath })).toEqual([
+      {
+        category: "Recovery",
+        routeId: "finnish-sauna",
+        title: "Finnish Dry Sauna",
+      },
+    ]);
   });
 
   it("loads route-scoped web bundles and preserves the route-bundle reader contract", () => {
@@ -877,122 +911,129 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(bundle.byteLength / resultsPublic.byteLength).toBeGreaterThan(250);
   });
 
-  it("loads the generated catalog and resolves keys, slugs, and route ids", () => {
-    const catalog = loadGeneratedHealthCommonsCatalog();
-    const reader = createHealthCommonsCatalogReader(catalog);
+  it("loads compact protocol artifacts and resolves keys, slugs, and route ids", () => {
+    const index = loadGeneratedHealthCommonsProtocolIndex();
+    const runSpecs = loadGeneratedHealthCommonsProtocolRunSpecs();
+    const familyGraph = loadGeneratedHealthCommonsProtocolFamilyGraph();
+    const indexReader = getGeneratedHealthCommonsProtocolIndexReader();
+    const runSpecReader = getGeneratedHealthCommonsProtocolRunSpecReader();
+    const graphReader = getGeneratedHealthCommonsProtocolFamilyGraphReader();
 
-    expect(reader.catalogHash).toBe(catalog.catalogHash);
+    expect(index.catalogHash).toBe(runSpecs.catalogHash);
+    expect(index.catalogHash).toBe(familyGraph.catalogHash);
+    expect(Object.keys(index.protocols[0] ?? {})).toContain("searchText");
+    expect(Object.keys(familyGraph.protocols[0] ?? {})).not.toContain("searchText");
 
-    const finnishSauna = reader.findByKey("protocol_variant:finnish-sauna");
+    const finnishSauna = indexReader.findByLookup("protocol_variant:finnish-sauna");
     expect(finnishSauna?.key).toBe(
       "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
     );
 
-    expect(
-      reader.findByRouteId({
-        entityType: "protocol_variant",
-        routeId: "finnish-sauna",
-      })?.key,
-    ).toBe("protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
-
-    expect(reader.findBySlug("protocols/norwegian-4x4/norwegian-4x4")?.key).toBe(
-      "protocol_variant:norwegian-4x4/norwegian-4x4",
+    expect(indexReader.findByLookup("finnish-sauna")?.key).toBe(
+      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+    );
+    expect(indexReader.findByLookup("PROTOCOL_VARIANT:DRY-SAUNA")?.key).toBe(
+      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+    );
+    expect(indexReader.findByLookup("protocol_variant%3Afinnish-sauna")?.key).toBe(
+      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
     );
 
     expect(
-      reader.findByRouteId({
-        entityType: "protocol_variant",
-        routeId: "/protocols/norwegian-4x4/norwegian-4x4/",
-      })?.key,
-    ).toBe("protocol_variant:norwegian-4x4/norwegian-4x4");
+      indexReader.findByLookup(
+        "protocol_variant:sauna/finnish-dry/murph-standard-3x-week",
+      )?.key,
+    ).toBe("protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
 
-    const { findByRouteId } = reader;
-    expect(
-      findByRouteId({
-        entityType: "protocol_variant",
-        routeId: "norwegian-4x4",
-      })?.key,
-    ).toBe("protocol_variant:norwegian-4x4/norwegian-4x4");
+    expect(indexReader.findByLookup("protocols/norwegian-4x4/norwegian-4x4")?.key).toBe(
+      "protocol_variant:norwegian-4x4/norwegian-4x4",
+    );
 
+    expect(indexReader.findByLookup("/protocols/norwegian-4x4/norwegian-4x4/")?.key)
+      .toBe("protocol_variant:norwegian-4x4/norwegian-4x4");
     expect(
-      reader.findByRouteId({
-        entityType: "protocol_variant",
-        routeId: "%E0%A4%A",
-      }),
-    ).toBeNull();
+      indexReader.findByLookup("PROTOCOL_VARIANT:NORWEGIAN-4X4/NORWEGIAN-4X4")?.key,
+    ).toBe("protocol_variant:norwegian-4x4/norwegian-4x4");
+    expect(indexReader.findByLookup("norwegian-4x4")?.key).toBe(
+      "protocol_variant:norwegian-4x4/norwegian-4x4",
+    );
+
+    expect(indexReader.findByLookup("%E0%A4%A")).toBeNull();
+
+    expect(runSpecReader.findByLookup("finnish-sauna")?.protocol).toMatchObject({
+      doseSignature: expect.stringContaining("3x/week"),
+    });
+    expect(
+      graphReader.findEntity({
+        entityTypes: ["experiment_family"],
+        lookup: "dry-sauna",
+      })?.key,
+    ).toBe("experiment_family:dry-sauna");
+    expect(
+      graphReader.findEntity({
+        entityTypes: ["experiment_family"],
+        lookup: "experiment_family:sauna/finnish-dry",
+      })?.key,
+    ).toBe("experiment_family:dry-sauna");
+    expect(
+      graphReader.findEntity({
+        entityTypes: ["experiment_family", "protocol_variant"],
+        lookup: "protocol_variant:dry-sauna",
+      })?.key,
+    ).toBe("protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
   });
 
-  it("lists compact protocol variants and source artifacts deterministically", () => {
-    const reader = getGeneratedHealthCommonsCatalogReader();
+  it("lists compact protocol variants deterministically", () => {
+    const indexReader = getGeneratedHealthCommonsProtocolIndexReader();
+    const runSpecReader = getGeneratedHealthCommonsProtocolRunSpecReader();
 
-    const protocols = reader.listProtocolVariants({ limit: 6 });
+    const protocols = indexReader.listProtocols({ limit: 6 });
     expect(protocols.map((protocol) => protocol.key)).toEqual([
-      "protocol_variant:added-sugar-reduction/no-added-sugar-diet",
-      "protocol_variant:aerobic-base-training/zone-2-aerobic-base-block",
-      "protocol_variant:alcohol-abstinence/short-term-alcohol-abstinence",
+      "protocol_variant:static-stretching/at-home-static-stretching-for-flexibility",
+      "protocol_variant:dry-sauna/bryan-johnson-blueprint",
       "protocol_variant:caffeine-timing/caffeine-curfew-dose-reset",
       "protocol_variant:cold-water-immersion/cold-plunge",
-      "protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides",
+      "protocol_variant:consistent-wake-time/consistent-wake-time",
+      "protocol_variant:daily-step-floor/daily-step-floor",
     ]);
     expect(Object.keys(protocols[0] ?? {})).not.toContain("body");
-    expect(protocols[0]?.protocol?.runSpecRevisionId).toEqual(expect.stringMatching(/^sha256:/u));
-    const finnishSauna = reader.findByKey(
+    expect(Object.keys(protocols[0] ?? {})).not.toContain("protocol");
+    expect(protocols[0]?.revision.runSpecRevisionId).toEqual(expect.stringMatching(/^sha256:/u));
+    const finnishSauna = runSpecReader.findByLookup(
       "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
     );
     expect(finnishSauna?.protocol).toMatchObject({
       doseSignature: expect.stringContaining("3x/week"),
     });
     expect(
-      reader.findByRouteId({
-        entityType: "protocol_variant",
-        routeId: "finnish-sauna",
-      })?.key,
-    ).toBe("protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
-
-    const saunaSources = reader.listSourceArtifacts({
-      categories: ["sauna"],
-      limit: 2,
-    });
-    expect(saunaSources).toHaveLength(2);
-    expect(saunaSources.every((source) => source.entityType === "source_artifact")).toBe(true);
-    expect(saunaSources.every((source) => source.categories.includes("sauna"))).toBe(true);
-
-    expect(reader.listSourceArtifacts({ limit: 500 }).length).toBeGreaterThan(100);
+      indexReader.findByLookup("protocol_variant:creatine-supplementation/creatine-monohydrate"),
+    ).toBeNull();
+    expect(
+      runSpecReader.findByLookup("protocol_variant:creatine-supplementation/creatine-monohydrate"),
+    ).toBeNull();
   });
 
-  it("searches by query, category, and entity type with compact results", () => {
-    const reader = getGeneratedHealthCommonsCatalogReader();
+  it("filters compact protocol index entries by query and category", () => {
+    const reader = getGeneratedHealthCommonsProtocolIndexReader();
 
-    const protocolResults = reader.search({
+    const protocolResults = reader.listProtocols({
       categories: ["passive heat"],
-      entityTypes: ["protocol_variant"],
       limit: 5,
       query: "sauna",
     });
 
-    expect(protocolResults.map((result) => result.entity.key)).toContain(
+    expect(protocolResults.map((protocol) => protocol.key)).toContain(
       "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
     );
     expect(
-      protocolResults.every((result) => result.entity.entityType === "protocol_variant"),
+      protocolResults.every((protocol) => protocol.entityType === "protocol_variant"),
     ).toBe(true);
-    expect(protocolResults[0]?.score).toBeGreaterThanOrEqual(protocolResults.at(-1)?.score ?? 0);
 
-    const sourceResults = reader.search({
-      entityTypes: ["source_artifact"],
-      limit: 1,
-      query: "25705824",
-    });
-
-    expect(sourceResults[0]).toMatchObject({
-      entity: {
-        key: "source_artifact:pmid-25705824",
-        source: {
-          pmid: "25705824",
-        },
-      },
-      matchedFields: expect.arrayContaining(["source"]),
-    });
+    const bodyFieldResults = reader.listProtocols({
+      limit: 10,
+      query: "RPE",
+    }).map((protocol) => protocol.key);
+    expect(bodyFieldResults).toContain("protocol_variant:norwegian-4x4/norwegian-4x4");
   });
 
   it("lists and searches measurement methods with compact measurement fields", () => {
@@ -1091,10 +1132,10 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     });
   });
 
-  it("normalizes wildcard filters and keeps protocol search/list semantics aligned", () => {
-    const reader = getGeneratedHealthCommonsCatalogReader();
+  it("normalizes wildcard filters for compact protocol lists", () => {
+    const reader = getGeneratedHealthCommonsProtocolIndexReader();
 
-    const wildcardStatusProtocolKeys = reader.listProtocolVariants({
+    const wildcardStatusProtocolKeys = reader.listProtocols({
       limit: 20,
       query: "sauna",
       statuses: ["*"],
@@ -1103,7 +1144,7 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
     );
 
-    const wildcardCategoryProtocolKeys = reader.listProtocolVariants({
+    const wildcardCategoryProtocolKeys = reader.listProtocols({
       categories: ["*"],
       limit: 20,
       query: "sauna",
@@ -1111,32 +1152,22 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(wildcardCategoryProtocolKeys).toContain(
       "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
     );
-    expect(reader.listSourceArtifacts({
-      candidateKeys: [],
-      limit: 500,
-    })).toEqual([]);
 
-    const spacedCategoryKeys = reader.listProtocolVariants({
+    const spacedCategoryKeys = reader.listProtocols({
       categories: ["passive heat"],
       limit: 500,
     }).map((protocol) => protocol.key);
-    const slugCategoryKeys = reader.listProtocolVariants({
+    const slugCategoryKeys = reader.listProtocols({
       categories: ["passive-heat"],
       limit: 500,
     }).map((protocol) => protocol.key);
     expect(spacedCategoryKeys).toEqual(slugCategoryKeys);
 
-    const searchKeys = reader.search({
-      entityTypes: ["protocol_variant"],
-      includeBody: true,
-      limit: 500,
-      query: "sauna",
-    }).map((result) => result.entity.key);
-    const listKeys = reader.listProtocolVariants({
+    const listKeys = reader.listProtocols({
       limit: 500,
       query: "sauna",
     }).map((protocol) => protocol.key);
-    expect(listKeys).toEqual(searchKeys);
+    expect(listKeys).toContain("protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
 
     expect(reader.normalizeListOptions({
       categories: ["*"],
@@ -1153,72 +1184,50 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       statuses: [],
     });
 
-    expect(() => reader.listProtocolVariants({
+    expect(() => reader.listProtocols({
       statuses: ["active"],
     })).toThrow(/Unknown Health Commons status filter\. Expected one of:/u);
   });
 
-  it("resolves compact relations and source context for assistant tools", () => {
-    const reader = getGeneratedHealthCommonsCatalogReader();
-    const protocol = reader.findByRouteId({
-      entityType: "protocol_variant",
-      routeId: "finnish-sauna",
+  it("resolves compact protocol family graph relations", () => {
+    const reader = getGeneratedHealthCommonsProtocolFamilyGraphReader();
+    const protocol = reader.findEntity({
+      entityTypes: ["protocol_variant"],
+      lookup: "finnish-sauna",
     });
     expect(protocol).not.toBeNull();
 
-    const context = reader.resolveEntityContext({
-      entity: protocol?.key ?? "",
-      relationLimit: 4,
-      relationTypes: ["parent_family", "primary_biomarker", "secondary_biomarker"],
-      sourceLimit: 5,
-    });
+    if (!protocol || protocol.entityType !== "protocol_variant") {
+      throw new Error("Expected Finnish sauna protocol in compact family graph.");
+    }
 
-    expect(context?.entity.key).toBe(
+    expect(protocol.key).toBe(
       "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
     );
-    expect(context?.relations.map((entry) => entry.relation.type)).toEqual([
-      "parent_family",
-      "primary_biomarker",
-      "secondary_biomarker",
-      "secondary_biomarker",
-    ]);
-    expect(context?.sources).toHaveLength(5);
-    expect(context?.sources.every((entry) => entry.source.entityType === "source_artifact")).toBe(true);
-    expect(context?.sources[0]?.reasons[0]).toMatchObject({
-      claimId: "dry-sauna-evidence-broad-but-mixed",
-      kind: "claim",
-    });
-
-    const sourceContext = reader.resolveEntityContext({
-      entity: "source_artifact:pmid-25705824",
-      sourceLimit: 1,
-    });
-
-    expect(sourceContext?.sources[0]).toMatchObject({
-      reasons: [
-        {
-          kind: "self",
-        },
-      ],
-      source: {
-        key: "source_artifact:pmid-25705824",
-      },
-    });
-
-    const hyperbaric = reader.findByKey(
-      "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
+    expect(reader.parentFamilies(protocol).map((family) => family.key)).toContain(
+      "experiment_family:dry-sauna",
     );
-    expect(hyperbaric).not.toBeNull();
-    expect(reader.resolveSources({ entity: hyperbaric?.key ?? "", limit: 500 }).length)
-      .toBeGreaterThan(100);
-    expect(reader.collectSourceKeys({ entity: hyperbaric }).length).toBeGreaterThan(100);
-    expect(reader.collectSourceKeys({ entity: "source_artifact:pmid-25705824" })).toEqual([]);
-    expect(
-      reader.collectSourceKeys({
-        entity: "source_artifact:pmid-25705824",
-        includeSelf: true,
-      }),
-    ).toEqual(["source_artifact:pmid-25705824"]);
+
+    const family = reader.findEntity({
+      entityTypes: ["experiment_family"],
+      lookup: "dry-sauna",
+    });
+    if (!family || family.entityType !== "experiment_family") {
+      throw new Error("Expected dry-sauna family in compact family graph.");
+    }
+    const familyVariantKeys = reader.protocolVariantsForFamily(family).map((variant) => variant.key);
+    expect(familyVariantKeys).toContain(
+      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+    );
+    expect(familyVariantKeys).toContain(
+      "protocol_variant:dry-sauna/bryan-johnson-blueprint",
+    );
+
+    const bodyFieldMatches = reader.listProtocolMatches({
+      limit: 10,
+      lookup: "RPE",
+    }).map((match) => match.protocol.key);
+    expect(bodyFieldMatches).toContain("protocol_variant:norwegian-4x4/norwegian-4x4");
   });
 });
 

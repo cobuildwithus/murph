@@ -118,7 +118,7 @@ describe("hosted-local MinIO sidecar", () => {
     const dockerArgs = runtimeMocks.spawnChildProcess.mock.calls[0]?.[2] as string[];
     const publishArg = dockerArgs[dockerArgs.indexOf("-p") + 1];
     const volumeArg = dockerArgs[dockerArgs.indexOf("-v") + 1];
-    expect(publishArg).toEqual(expect.stringMatching(/^127\.0\.0\.1:\d+:9000$/u));
+    expect(publishArg).toEqual(expect.stringMatching(/^0\.0\.0\.0:\d+:9000$/u));
     expect(volumeArg).toBe(".tmp/hosted-local-minio-test/minio-r2:/data");
     expect(dockerArgs).toContain("murph.hosted-local.role=r2-minio");
     expect(dockerArgs).toContain("murph.hosted-local.build-id=build-test");
@@ -134,6 +134,12 @@ describe("hosted-local MinIO sidecar", () => {
     expect(runtimeMocks.spawnChildProcess.mock.calls[0]?.[3]).toEqual(expect.objectContaining({
       MINIO_REGION_NAME: "auto",
     }));
+    expect(runtimeMocks.waitForHealthyHttpEndpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: "127.0.0.1",
+        label: "minio",
+      }),
+    );
     expect(childProcessMocks.spawn).toHaveBeenCalledWith(
       "docker",
       [

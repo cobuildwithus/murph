@@ -1054,7 +1054,7 @@ async function maybeGenerateHostedWebHealthCommons(input: {
   if (input.env[HEALTH_COMMONS_GENERATED_PREPARED_ENV] === "1") {
     writePreparedGeneratedArtifactSkip(
       input.stderrTarget,
-      "Health Commons generated catalog",
+      "Health Commons generated artifacts",
     );
     return;
   }

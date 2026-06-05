@@ -58,7 +58,6 @@ import {
   buildAssistantSkillFileRef,
 } from '../src/assistant-skill-assets.js'
 import { appendAssistantTranscriptEntries } from '../src/assistant/store.js'
-import type { AssistantActiveTurnProviderHistory } from '../src/assistant/active-turn-history.js'
 import type { AssistantMessageInput } from '../src/assistant/service-contracts.js'
 import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
@@ -74,7 +73,6 @@ afterEach(() => {
 describe('assistant protocol index planning', () => {
   it('passes current explicit delivery routes through private provider env only for foreground turns', async () => {
     const foregroundPlan = await buildCodexTurnExecutionPlan({
-      activeTurnHistory: null,
       input: {
         ...createMessageInput(),
         channel: 'linq',
@@ -94,7 +92,6 @@ describe('assistant protocol index planning', () => {
     ).toBe('linq_chat_real')
 
     const cronPlan = await buildCodexTurnExecutionPlan({
-      activeTurnHistory: null,
       input: {
         ...createMessageInput(),
         channel: 'linq',
@@ -128,16 +125,6 @@ describe('assistant protocol index planning', () => {
     }
 
     const plan = await resolveAssistantRouteTurnPlan({
-      activeTurnHistory: {
-        acceptedInputIds: [],
-        messages: [
-          {
-            content: 'hello',
-            role: 'user',
-          },
-        ],
-        nonReplayableProviderWork: false,
-      } satisfies AssistantActiveTurnProviderHistory,
       executionContext: null,
       input: createMessageInput(),
       profile: executionProfile,
@@ -337,7 +324,7 @@ describe('assistant protocol index planning', () => {
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
   })
 
-  it('plans native resume while keeping active-turn history available for fallback', async () => {
+  it('plans native resume while preparing committed transcript fallback lazily', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -363,20 +350,6 @@ describe('assistant protocol index planning', () => {
     })
 
     const resumedPlan = await resolveAssistantRouteTurnPlan({
-      activeTurnHistory: {
-        acceptedInputIds: [],
-        messages: [
-          {
-            content: 'initial user prompt',
-            role: 'user',
-          },
-          {
-            content: 'draft assistant response',
-            role: 'assistant',
-          },
-        ],
-        nonReplayableProviderWork: false,
-      } satisfies AssistantActiveTurnProviderHistory,
       executionContext: null,
       input: createMessageInput(),
       profile: executionProfile,
@@ -396,16 +369,7 @@ describe('assistant protocol index planning', () => {
 
     expect(resumedPlan.resumeCodexThreadId).toBe('thread-active-turn')
     expect(resumedPlan.refreshThreadInstructions).toBe(false)
-    expect(resumedPlan.activeTurnMessages).toEqual([
-      {
-        content: 'initial user prompt',
-        role: 'user',
-      },
-      {
-        content: 'draft assistant response',
-        role: 'assistant',
-      },
-    ])
+    expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
     expect(resumedPlan.codexContinuation).toEqual({
       kind: 'provider-state-optimization',
     })

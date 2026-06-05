@@ -138,14 +138,18 @@ export async function runHostedWorkspaceInvocation(
 
   let currentLease = createHostedWorkspaceInvocationLease(job);
   const boundUserId = readHostedExecutionRunnerJobUserId(job);
-  const providerFetchBaseUrls = readCloudflareHostedProviderFetchBaseUrls({
+  const providerFetchBaseUrlSource = {
     ...options.supervisorEnv,
     ...(job.runtime?.forwardedEnv ?? {}),
     ...(job.runtime?.platformEnv ?? {}),
-  });
+  };
+  const providerFetchBaseUrls = readCloudflareHostedProviderFetchBaseUrls(
+    providerFetchBaseUrlSource,
+  );
   const platform = buildHostedExecutionRuntimePlatform({
     boundUserId,
     commitTimeoutMs: job.runtime?.commitTimeoutMs ?? null,
+    providerFetchBaseUrlSource,
     providerFetchBaseUrls,
     proxyBoundUserIdHeader: true,
     workspaceCheckpointBridge: {

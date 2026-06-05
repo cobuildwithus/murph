@@ -79,7 +79,7 @@ function createCanonicalInputCli() {
   registerVaultCommands(cli, services)
   registerBloodTestCommands(cli, services)
   registerEventCommands(cli, services)
-  registerMeasurementCommands(cli, services)
+  registerMeasurementCommands(cli)
   registerMurphAgeCommands(cli, services)
   return cli
 }

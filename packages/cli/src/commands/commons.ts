@@ -1,11 +1,13 @@
 import { Cli, z } from "incur";
 import {
-  type HealthCommonsCatalogEntity,
-} from "@murphai/contracts";
-import {
   HEALTH_COMMONS_PAGE_STATUSES,
-  getGeneratedHealthCommonsCatalogReader,
-  type HealthCommonsCatalogReader,
+  getGeneratedHealthCommonsProtocolFamilyGraphReader,
+  getGeneratedHealthCommonsProtocolIndexReader,
+  getGeneratedHealthCommonsProtocolRunSpecReader,
+  type HealthCommonsProtocolEntitySummary,
+  type HealthCommonsProtocolFamilyGraphReader,
+  type HealthCommonsProtocolIndexEntry,
+  type HealthCommonsProtocolRunSpec,
 } from "@murphai/health-commons/runtime";
 import { emptyArgsSchema } from "@murphai/operator-config/command-helpers";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
@@ -19,15 +21,11 @@ const commonsProtocolEntityTypeValues = [
 ] as const;
 
 type CommonsProtocolEntityType = typeof commonsProtocolEntityTypeValues[number];
-type CommonsProtocolEntity = HealthCommonsCatalogEntity & {
-  entityType: CommonsProtocolEntityType;
-};
-type ProtocolEntity = HealthCommonsCatalogEntity & {
-  entityType: typeof protocolEntityType;
-};
-type FamilyEntity = HealthCommonsCatalogEntity & {
-  entityType: typeof familyEntityType;
-};
+type CommonsProtocolEntity =
+  | HealthCommonsProtocolEntitySummary
+  | HealthCommonsProtocolIndexEntry
+  | HealthCommonsProtocolRunSpec;
+type ProtocolEntity = HealthCommonsProtocolIndexEntry;
 
 const revisionSchema = z.object({
   pageRevisionId: z.string().min(1),
@@ -153,7 +151,7 @@ export function registerCommonsCommands(cli: Cli.Cli) {
     ],
     output: commonsProtocolListResultSchema,
     async run({ options }) {
-      const reader = getGeneratedHealthCommonsCatalogReader();
+      const reader = getGeneratedHealthCommonsProtocolIndexReader();
       const listOptions = {
         categories: options.category,
         limit: options.limit,
@@ -162,8 +160,8 @@ export function registerCommonsCommands(cli: Cli.Cli) {
       };
       const normalizedFilters = reader.normalizeListOptions(listOptions);
       const protocols = reader
-        .listProtocolVariants(listOptions)
-        .map((protocol) => toEntitySummary(requireProtocolEntity(reader, protocol.key)));
+        .listProtocols(listOptions)
+        .map(toEntitySummary);
 
       return {
         catalogHash: reader.catalogHash,
@@ -199,10 +197,10 @@ export function registerCommonsCommands(cli: Cli.Cli) {
     ],
     output: commonsProtocolShowResultSchema,
     async run({ args }) {
-      const reader = getGeneratedHealthCommonsCatalogReader();
-      const entity = findCommonsEntity(reader, args.key, [protocolEntityType]);
+      const reader = getGeneratedHealthCommonsProtocolRunSpecReader();
+      const entity = reader.findByLookup(args.key);
 
-      if (!entity || !isProtocolEntity(entity)) {
+      if (!entity) {
         throw new VaultCliError(
           "commons_protocol_not_found",
           `No public Health Commons protocol variant matched "${args.key}".`,
@@ -253,16 +251,14 @@ export function registerCommonsCommands(cli: Cli.Cli) {
       "Use this during experiment onboarding when a broad query or named protocol may have lower-burden family variants.",
     output: commonsProtocolExploreResultSchema,
     async run({ args, options }) {
-      const reader = getGeneratedHealthCommonsCatalogReader();
-      const matchedEntity = findCommonsEntity(reader, args.lookup, [
-        familyEntityType,
-        protocolEntityType,
-      ]);
-      const matchedProtocols = resolveProtocolExploreMatches({
+      const reader = getGeneratedHealthCommonsProtocolFamilyGraphReader();
+      const matchedEntity = reader.findEntity({
+        entityTypes: [familyEntityType, protocolEntityType],
+        lookup: args.lookup,
+      });
+      const matchedProtocols = reader.listProtocolMatches({
         limit: options.limit,
         lookup: args.lookup,
-        matchedEntity,
-        reader,
       });
       const groups = matchedProtocols.map((entry) =>
         buildProtocolExploreGroup(reader, entry.protocol, entry.matchReason),
@@ -270,17 +266,11 @@ export function registerCommonsCommands(cli: Cli.Cli) {
       const starterCandidate = chooseStarterCandidate(
         uniqueProtocolVariants(groups.flatMap((group) => [
           {
-            protocol: requireProtocolEntity(reader, group.matchedProtocol.key),
+            protocol: group.matchedProtocol,
             traits: group.traits,
           },
-          ...group.relatedProtocolVariants.map((variant) => ({
-            protocol: requireProtocolEntity(reader, variant.protocol.key),
-            traits: variant.traits,
-          })),
-        ])).map((entry) => ({
-          protocol: toEntitySummary(entry.protocol),
-          traits: entry.traits,
-        })),
+          ...group.relatedProtocolVariants,
+        ])),
       );
 
       return {
@@ -299,121 +289,6 @@ export function registerCommonsCommands(cli: Cli.Cli) {
 
   commons.command(protocol);
   cli.command(commons);
-}
-
-function findCommonsEntity(
-  reader: HealthCommonsCatalogReader,
-  lookup: string,
-  entityTypes: readonly CommonsProtocolEntityType[],
-): CommonsProtocolEntity | undefined {
-  const byKey =
-    reader.findByKey(lookup) ??
-    reader.findBySlug(lookup);
-
-  if (byKey && hasProtocolEntityType(byKey, entityTypes)) {
-    return byKey;
-  }
-
-  const routeMatch = uniqueEntityMatches(
-    entityTypes.map((entityType) =>
-      reader.findByRouteId({
-        entityType,
-        routeId: lookup,
-      }),
-    ),
-  ).find((entity) => hasProtocolEntityType(entity, entityTypes));
-
-  if (routeMatch) {
-    return routeMatch;
-  }
-
-  const normalizedLookup = normalizeLookup(lookup);
-
-  for (const entityType of entityTypes) {
-    for (const entity of reader.listByEntityType(entityType)) {
-      if (!hasProtocolEntityType(entity, entityTypes)) {
-        continue;
-      }
-
-      if (
-        normalizeLookup(entity.key) === normalizedLookup ||
-        normalizeLookup(entity.slug) === normalizedLookup
-      ) {
-        return entity;
-      }
-
-      if ((entity.aliases ?? []).some((alias: string) => normalizeLookup(alias) === normalizedLookup)) {
-        return entity;
-      }
-    }
-  }
-
-  return undefined;
-}
-
-function hasProtocolEntityType(
-  entity: HealthCommonsCatalogEntity,
-  entityTypes: readonly CommonsProtocolEntityType[],
-): entity is CommonsProtocolEntity {
-  return entityTypes.some((entityType) => entity.entityType === entityType);
-}
-
-function uniqueEntityMatches(
-  matches: readonly (HealthCommonsCatalogEntity | null)[],
-): HealthCommonsCatalogEntity[] {
-  const entities: HealthCommonsCatalogEntity[] = [];
-  const seen = new Set<string>();
-
-  for (const entity of matches) {
-    if (!entity || seen.has(entity.key)) {
-      continue;
-    }
-
-    seen.add(entity.key);
-    entities.push(entity);
-  }
-
-  return entities;
-}
-
-function requireCatalogEntity(
-  reader: HealthCommonsCatalogReader,
-  key: string,
-): HealthCommonsCatalogEntity {
-  const entity = reader.findByKey(key);
-  if (!entity) {
-    throw new Error(`Health Commons catalog referenced missing entity ${key}.`);
-  }
-
-  return entity;
-}
-
-function requireProtocolEntity(
-  reader: HealthCommonsCatalogReader,
-  key: string,
-): ProtocolEntity {
-  const entity = requireCatalogEntity(reader, key);
-  if (!isProtocolEntity(entity)) {
-    throw new Error(`Health Commons protocol exploration returned non-protocol entity ${key}.`);
-  }
-
-  return entity;
-}
-
-function normalizeLookup(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/gu, " ");
-}
-
-function isProtocolEntity(
-  entity: HealthCommonsCatalogEntity,
-): entity is ProtocolEntity {
-  return entity.entityType === protocolEntityType;
-}
-
-function isFamilyEntity(
-  entity: HealthCommonsCatalogEntity,
-): entity is FamilyEntity {
-  return entity.entityType === familyEntityType;
 }
 
 function toEntitySummary(entity: CommonsProtocolEntity) {
@@ -436,7 +311,7 @@ function toEntitySummary(entity: CommonsProtocolEntity) {
 }
 
 function toProtocolShowDetail(
-  entity: ProtocolEntity,
+  entity: HealthCommonsProtocolRunSpec,
 ) {
   const hasOnboarding = entity.experimentOnboarding !== undefined
     && entity.experimentOnboarding !== null;
@@ -453,64 +328,26 @@ function toProtocolShowDetail(
 
 type ProtocolExploreMatchReason = "direct_protocol" | "direct_family" | "query_match";
 
-type ProtocolExploreMatch = {
-  matchReason: ProtocolExploreMatchReason;
-  protocol: ProtocolEntity;
+type ProtocolExploreVariant<TProtocol extends { key: string }> = {
+  protocol: TProtocol;
+  traits: ProtocolEntity["traits"];
 };
-
-type ProtocolExploreVariant = {
-  protocol: ProtocolEntity;
-  traits: ReturnType<typeof toProtocolTraits>;
-};
-
-function resolveProtocolExploreMatches(input: {
-  limit: number;
-  lookup: string;
-  matchedEntity: HealthCommonsCatalogEntity | undefined;
-  reader: HealthCommonsCatalogReader;
-}): ProtocolExploreMatch[] {
-  if (input.matchedEntity && isProtocolEntity(input.matchedEntity)) {
-    return [{
-      matchReason: "direct_protocol",
-      protocol: input.matchedEntity,
-    }];
-  }
-
-  if (input.matchedEntity && isFamilyEntity(input.matchedEntity)) {
-    return protocolVariantsForFamily(input.reader, input.matchedEntity)
-      .slice(0, input.limit)
-      .map((protocol) => ({
-        matchReason: "direct_family",
-        protocol,
-      }));
-  }
-
-  return input.reader
-    .listProtocolVariants({
-      limit: input.limit,
-      query: input.lookup,
-    })
-    .map((protocol) => ({
-      matchReason: "query_match",
-      protocol: requireProtocolEntity(input.reader, protocol.key),
-    }));
-}
 
 function buildProtocolExploreGroup(
-  reader: HealthCommonsCatalogReader,
+  reader: HealthCommonsProtocolFamilyGraphReader,
   protocol: ProtocolEntity,
   matchReason: ProtocolExploreMatchReason,
 ) {
-  const parentFamilies = parentFamilyEntities(reader, protocol);
+  const parentFamilies = reader.parentFamilies(protocol);
   const relatedProtocolVariants = uniqueProtocolVariants([
-    ...protocolVariantsRelatedTo(reader, protocol).map((relatedProtocol) => ({
+    ...reader.relatedProtocolVariants(protocol).map((relatedProtocol) => ({
       protocol: relatedProtocol,
-      traits: toProtocolTraits(relatedProtocol),
+      traits: relatedProtocol.traits,
     })),
     ...parentFamilies.flatMap((family) =>
-      protocolVariantsForFamily(reader, family).map((relatedProtocol) => ({
+      reader.protocolVariantsForFamily(family).map((relatedProtocol) => ({
         protocol: relatedProtocol,
-        traits: toProtocolTraits(relatedProtocol),
+        traits: relatedProtocol.traits,
       })),
     ),
   ])
@@ -519,7 +356,7 @@ function buildProtocolExploreGroup(
       protocol: toEntitySummary(variant.protocol),
       traits: variant.traits,
     }));
-  const traits = toProtocolTraits(protocol);
+  const traits = protocol.traits;
 
   return {
     matchedProtocol: toEntitySummary(protocol),
@@ -537,85 +374,10 @@ function buildProtocolExploreGroup(
   };
 }
 
-function parentFamilyEntities(
-  reader: HealthCommonsCatalogReader,
-  entity: HealthCommonsCatalogEntity,
-): FamilyEntity[] {
-  return (entity.relations ?? [])
-    .filter((relation) => relation.type === "parent_family")
-    .map((relation) => reader.findByKey(relation.target))
-    .filter((target): target is FamilyEntity =>
-      Boolean(target && target.entityType === familyEntityType),
-    );
-}
-
-function protocolVariantsRelatedTo(
-  reader: HealthCommonsCatalogReader,
-  entity: HealthCommonsCatalogEntity,
-): ProtocolEntity[] {
-  return (entity.relations ?? [])
-    .filter((relation) => relation.type === "related_protocol")
-    .map((relation) => reader.findByKey(relation.target))
-    .filter((target): target is ProtocolEntity =>
-      Boolean(target && target.entityType === protocolEntityType),
-    )
-    .map((target) => target);
-}
-
-function protocolVariantsForFamily(
-  reader: HealthCommonsCatalogReader,
-  family: FamilyEntity,
-  seenFamilyKeys = new Set<string>(),
-): ProtocolEntity[] {
-  if (seenFamilyKeys.has(family.key)) {
-    return [];
-  }
-
-  seenFamilyKeys.add(family.key);
-  const directRelated = protocolVariantsRelatedTo(reader, family);
-  const byParentFamily = reader.listByEntityType(protocolEntityType)
-    .map((entity) => requireProtocolEntity(reader, entity.key))
-    .filter((protocol) =>
-      (protocol.relations ?? []).some((relation) =>
-        relation.type === "parent_family" && relation.target === family.key,
-      ),
-    );
-  const fromChildFamilies = childFamilyEntities(reader, family).flatMap(
-    (childFamily) => protocolVariantsForFamily(reader, childFamily, seenFamilyKeys),
-  );
-
-  return uniqueProtocolVariants([
-    ...directRelated.map((protocol) => ({
-      protocol,
-      traits: toProtocolTraits(protocol),
-    })),
-    ...byParentFamily.map((protocol) => ({
-      protocol,
-      traits: toProtocolTraits(protocol),
-    })),
-    ...fromChildFamilies.map((protocol) => ({
-      protocol,
-      traits: toProtocolTraits(protocol),
-    })),
-  ]).map((variant) => variant.protocol);
-}
-
-function childFamilyEntities(
-  reader: HealthCommonsCatalogReader,
-  family: FamilyEntity,
-): FamilyEntity[] {
-  return (family.relations ?? [])
-    .filter((relation) => relation.type === "child_family")
-    .map((relation) => reader.findByKey(relation.target))
-    .filter((target): target is FamilyEntity =>
-      Boolean(target && target.entityType === familyEntityType),
-    );
-}
-
-function uniqueProtocolVariants(
-  input: readonly ProtocolExploreVariant[],
-): ProtocolExploreVariant[] {
-  const variants: ProtocolExploreVariant[] = [];
+function uniqueProtocolVariants<TProtocol extends { key: string }>(
+  input: readonly ProtocolExploreVariant<TProtocol>[],
+): ProtocolExploreVariant<TProtocol>[] {
+  const variants: ProtocolExploreVariant<TProtocol>[] = [];
   const seen = new Set<string>();
 
   for (const variant of input) {
@@ -633,7 +395,7 @@ function uniqueProtocolVariants(
 function chooseStarterCandidate(
   variants: readonly {
     protocol: ReturnType<typeof toEntitySummary>;
-    traits: ReturnType<typeof toProtocolTraits>;
+    traits: ProtocolEntity["traits"];
   }[],
 ) {
   const sorted = variants.slice().sort((left, right) => {
@@ -650,7 +412,7 @@ function chooseStarterCandidate(
 
 function protocolStarterScore(input: {
   protocol: ReturnType<typeof toEntitySummary>;
-  traits: ReturnType<typeof toProtocolTraits>;
+  traits: ProtocolEntity["traits"];
 }): number {
   let score = 0;
 
@@ -672,32 +434,6 @@ function protocolStarterScore(input: {
   }
 
   return score;
-}
-
-function toProtocolTraits(
-  protocol: ProtocolEntity,
-) {
-  const categories = new Set(protocol.categories ?? []);
-  const cautionLevel = extractCautionLevel(protocol.safety);
-
-  return {
-    cautionLevel,
-    externalProtocol: categories.has("external-protocol"),
-    highCaution: cautionLevel === "high",
-    murphCanonical: categories.has("murph-canonical"),
-    sourceAttributed: categories.has("source-attributed"),
-  };
-}
-
-function extractCautionLevel(value: unknown): string | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  const cautionLevel = (value as { cautionLevel?: unknown }).cautionLevel;
-  return typeof cautionLevel === "string" && cautionLevel.trim()
-    ? cautionLevel.trim()
-    : null;
 }
 
 function describeCommonsEntityType(entityType: CommonsProtocolEntityType): string {

@@ -322,7 +322,7 @@ test.sequential('experiment start requires an explicit protocol or custom fallba
         'start',
         'sauna-two-week',
         '--from-protocol',
-        'finnish-sauna',
+        'PROTOCOL_VARIANT:SAUNA/FINNISH-DRY/MURPH-STANDARD-3X-WEEK',
         '--intervention-start',
         '2026-05-01',
         '--config',

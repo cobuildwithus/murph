@@ -212,6 +212,7 @@ export function createCloudflareHostedProviderFetch(
   fetchImpl: typeof fetch,
   options: {
     injectBoundUserIdHeader?: boolean;
+    providerFetchBaseUrlSource?: Readonly<Record<string, unknown>>;
     providerFetchBaseUrls?: readonly string[];
     readCurrentLease?: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
   },
@@ -223,7 +224,11 @@ export function createCloudflareHostedProviderFetch(
     if (CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
       return await internalFetch(request);
     }
-    assertCloudflareHostedProviderFetchUrl(url, options.providerFetchBaseUrls ?? []);
+    assertCloudflareHostedProviderFetchUrl(
+      url,
+      options.providerFetchBaseUrls ?? [],
+      options.providerFetchBaseUrlSource,
+    );
 
     const headers = new Headers(request.headers);
     headers.delete(HOSTED_RUNTIME_ATTEMPT_ID_HEADER);
@@ -282,7 +287,7 @@ export function readCloudflareHostedProviderFetchBaseUrls(
 
   for (const key of CLOUDFLARE_HOSTED_PROVIDER_FETCH_BASE_URL_ENV_KEYS) {
     const value = typeof source[key] === "string" ? source[key].trim() : "";
-    if (!value || !parseAllowedCloudflareHostedProviderFetchBaseUrl(value)) {
+    if (!value || !parseAllowedCloudflareHostedProviderFetchBaseUrl(value, source)) {
       continue;
     }
     values.push(value);
@@ -294,11 +299,16 @@ export function readCloudflareHostedProviderFetchBaseUrls(
 function assertCloudflareHostedProviderFetchUrl(
   url: URL,
   providerFetchBaseUrls: readonly string[],
+  providerFetchBaseUrlSource?: Readonly<Record<string, unknown>>,
 ): void {
   if (CLOUDFLARE_HOSTED_PROVIDER_FETCH_HOSTNAMES.has(normalizeCloudflareHostedFetchHostname(url.hostname))) {
     return;
   }
-  if (isConfiguredCloudflareHostedProviderFetchUrl(url, providerFetchBaseUrls)) {
+  if (isConfiguredCloudflareHostedProviderFetchUrl(
+    url,
+    providerFetchBaseUrls,
+    providerFetchBaseUrlSource,
+  )) {
     return;
   }
 
@@ -310,9 +320,13 @@ function assertCloudflareHostedProviderFetchUrl(
 function isConfiguredCloudflareHostedProviderFetchUrl(
   url: URL,
   providerFetchBaseUrls: readonly string[],
+  providerFetchBaseUrlSource?: Readonly<Record<string, unknown>>,
 ): boolean {
   for (const value of providerFetchBaseUrls) {
-    const baseUrl = parseAllowedCloudflareHostedProviderFetchBaseUrl(value);
+    const baseUrl = parseAllowedCloudflareHostedProviderFetchBaseUrl(
+      value,
+      providerFetchBaseUrlSource,
+    );
     if (!baseUrl || url.origin !== baseUrl.origin) {
       continue;
     }
@@ -324,18 +338,30 @@ function isConfiguredCloudflareHostedProviderFetchUrl(
   return false;
 }
 
-function parseAllowedCloudflareHostedProviderFetchBaseUrl(value: string): URL | null {
+function parseAllowedCloudflareHostedProviderFetchBaseUrl(
+  value: string,
+  source?: Readonly<Record<string, unknown>>,
+): URL | null {
   try {
     const url = new URL(value);
-    return isAllowedCloudflareHostedProviderFetchBaseUrl(url) ? url : null;
+    return isAllowedCloudflareHostedProviderFetchBaseUrl(url, source) ? url : null;
   } catch {
     return null;
   }
 }
 
-function isAllowedCloudflareHostedProviderFetchBaseUrl(url: URL): boolean {
+function isAllowedCloudflareHostedProviderFetchBaseUrl(
+  url: URL,
+  source?: Readonly<Record<string, unknown>>,
+): boolean {
   return url.protocol === "https:"
-    || (url.protocol === "http:" && isLocalOrTestCloudflareHostedProviderFetchHost(url.hostname));
+    || (
+      url.protocol === "http:"
+      && (
+        isLocalOrTestCloudflareHostedProviderFetchHost(url.hostname)
+        || isConfiguredHostedRunnerHostAlias(url.hostname, source)
+      )
+    );
 }
 
 function isLocalOrTestCloudflareHostedProviderFetchHost(hostname: string): boolean {
@@ -347,6 +373,64 @@ function isLocalOrTestCloudflareHostedProviderFetchHost(hostname: string): boole
     || normalized === "host.docker.internal"
     || normalized.endsWith(".localhost")
     || normalized.endsWith(".test");
+}
+
+function isConfiguredHostedRunnerHostAlias(
+  hostname: string,
+  source?: Readonly<Record<string, unknown>>,
+): boolean {
+  const rawAlias = source?.HOSTED_EXECUTION_RUNNER_HOST_ALIAS;
+  const alias = typeof rawAlias === "string"
+    ? normalizeCloudflareHostedFetchHostname(rawAlias.trim())
+    : "";
+  return Boolean(alias)
+    && normalizeCloudflareHostedFetchHostname(hostname) === alias
+    && isHostedLocalProviderFetchHostAliasSource(source)
+    && isAllowedHostedRunnerHostAlias(alias);
+}
+
+function isHostedLocalProviderFetchHostAliasSource(
+  source?: Readonly<Record<string, unknown>>,
+): boolean {
+  const rawProfile = source?.MURPH_HOSTED_LOCAL_PROFILE;
+  const profile = typeof rawProfile === "string"
+    ? rawProfile.trim().toLowerCase()
+    : "";
+  return source?.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
+    || profile === "dev"
+    || profile === "worker-only"
+    || profile === "e2e:stub"
+    || profile === "e2e:live";
+}
+
+function isAllowedHostedRunnerHostAlias(hostname: string): boolean {
+  return isLocalOrTestCloudflareHostedProviderFetchHost(hostname)
+    || isPrivateIpv4Address(hostname);
+}
+
+function isPrivateIpv4Address(hostname: string): boolean {
+  const parts = hostname.split(".");
+  if (parts.length !== 4) {
+    return false;
+  }
+  const octets = parts.map((part) => {
+    if (!/^(0|[1-9]\d{0,2})$/u.test(part)) {
+      return null;
+    }
+    const value = Number(part);
+    return value <= 255 ? value : null;
+  });
+  if (octets.some((part) => part === null)) {
+    return false;
+  }
+  const first = octets[0];
+  const second = octets[1];
+  if (first === null || second === null) {
+    return false;
+  }
+  return first === 10
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168);
 }
 
 function isCloudflareHostedProviderFetchPathWithinBase(url: URL, baseUrl: URL): boolean {

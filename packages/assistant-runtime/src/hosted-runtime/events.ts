@@ -340,15 +340,12 @@ const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_ARRAY_KEYS = [
   "codexActionSlowDurationMs",
 ] as const;
 const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_BOOLEAN_KEYS = [
-  "activeTurnHistoryPresent",
   "conversationContextPresent",
   "developerInstructionsPresent",
   "refreshThreadInstructions",
   "resumeCodexThreadIdPresent",
 ] as const;
 const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_NUMBER_KEYS = [
-  "activeTurnHistoryBytes",
-  "activeTurnHistoryCount",
   "conversationContextBytes",
   "developerInstructionsBytes",
   "providerPromptBytes",
@@ -869,10 +866,6 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
   }
 
   const details: HostedExecutionStructuredLogDetails = {
-    activeTurnHistoryCount:
-      readHostedAssistantProviderPlanNullableNumber(record, "activeTurnHistoryCount"),
-    activeTurnHistoryPresent:
-      readHostedAssistantProviderPlanBoolean(record, "activeTurnHistoryPresent"),
     codexContinuation,
     providerPlanKind: "provider.plan",
     providerRequestOrdinal:

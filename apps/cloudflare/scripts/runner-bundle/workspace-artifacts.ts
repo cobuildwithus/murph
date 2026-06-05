@@ -13,6 +13,11 @@ import { runNpmCommand, runPnpmCommand } from "./process.js";
 const HEALTH_COMMONS_PACKAGE_NAME = "@murphai/health-commons";
 const CONTRACTS_PACKAGE_NAME = "@murphai/contracts";
 const CLI_PACKAGE_NAME = "@murphai/murph";
+const HEALTH_COMMONS_RUNTIME_GENERATED_FILES = [
+  "generated/protocol-index.json",
+  "generated/protocol-run-specs.json",
+  "generated/protocol-family-graph.json",
+] as const;
 
 interface WorkspacePackageManifest {
   bundleDependencies?: string[];
@@ -307,7 +312,7 @@ async function prepareRunnerHealthCommonsPackagePackRoot(
 
   packageJson.files = [
     "dist",
-    "generated/catalog.json",
+    ...HEALTH_COMMONS_RUNTIME_GENERATED_FILES,
     "README.md",
     "LICENSE",
   ];
@@ -319,7 +324,7 @@ async function prepareRunnerHealthCommonsPackagePackRoot(
 
   await copyPackageEntries(sourcePackageDir, packRoot, [
     "dist",
-    "generated/catalog.json",
+    ...HEALTH_COMMONS_RUNTIME_GENERATED_FILES,
     "README.md",
     "LICENSE",
   ]);
@@ -553,11 +558,13 @@ async function assertWorkspacePackageRuntimeFiles(
     path.join("dist", "runtime.js"),
     "Health Commons runtime entrypoint is missing before package packing; build workspace artifacts before packing.",
   );
-  await assertReadablePackageFile(
-    packageDir,
-    path.join("generated", "catalog.json"),
-    "Health Commons generated catalog is missing after generation preflight.",
-  );
+  for (const relativePath of HEALTH_COMMONS_RUNTIME_GENERATED_FILES) {
+    await assertReadablePackageFile(
+      packageDir,
+      relativePath,
+      `Health Commons runtime generated artifact ${relativePath} is missing after generation preflight.`,
+    );
+  }
 }
 
 async function assertReadablePackageFile(

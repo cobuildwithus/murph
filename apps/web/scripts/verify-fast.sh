@@ -249,7 +249,7 @@ run_timed_step "prisma generate" run_prisma_generate
 
 run_health_commons_generate() {
   if [[ "${MURPH_HEALTH_COMMONS_GENERATED_PREPARED:-0}" == "1" ]]; then
-    verify_log "skip health commons generated catalog; already prepared"
+    verify_log "skip health commons generated artifacts; already prepared"
     return 0
   fi
 
@@ -260,7 +260,7 @@ run_web_tests() {
   pnpm test:prepared
 }
 
-run_timed_step "health commons generated catalog" run_health_commons_generate
+run_timed_step "health commons generated artifacts" run_health_commons_generate
 
 if [[ "$verify_step_parallel" != "1" ]]; then
   run_timed_step "test" run_web_tests

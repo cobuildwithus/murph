@@ -66,7 +66,6 @@ export {
   type AssistantActiveTurnInputCheckpointHook,
   type AssistantActiveTurnInputCheckpointInput,
   type AssistantTurnInputRefreshInput,
-  type AssistantTurnInputRefreshPhase,
   type AssistantTurnInputRefreshResult,
 } from './turn-input.js'
 export {

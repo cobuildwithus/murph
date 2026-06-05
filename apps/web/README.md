@@ -42,7 +42,7 @@ adaptation, seed composition, and cross-app E2E imports.
 
 The experiment detail page composes two narrow data sources:
 
-- Health Commons is the public protocol source of truth. Server components resolve the generated catalog entity and pass a typed `ExperimentProtocol` into the page.
+- Health Commons is the public protocol source of truth. Server components resolve generated route bundles/projections and pass a typed `ExperimentProtocol` into the page.
 - The browser vault is the private run source. Client components decrypt the dashboard snapshot in-browser, project a matching `ExperimentRunProjection`, and overlay only private status, timeline, next-step, and outcome fields.
 
 The UI receives the composed `Experiment` view model, but public protocol prose, citations, and commons revisions are never copied into private run state.

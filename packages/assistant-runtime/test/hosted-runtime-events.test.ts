@@ -909,8 +909,6 @@ describe("executeHostedMailboxEvent", () => {
         rawEvent: {
           schema: "murph.assistant-provider-plan-diagnostics.v1",
           type: "assistant.provider.plan",
-          activeTurnHistoryCount: 1,
-          activeTurnHistoryPresent: true,
           providerContinuation: "provider-state-optimization",
           providerRequestOrdinal: 2,
           refreshThreadInstructions: false,
@@ -949,8 +947,6 @@ describe("executeHostedMailboxEvent", () => {
       message: "Hosted assistant provider plan captured.",
       phase: "wake.running",
       redacted: expect.objectContaining({
-        activeTurnHistoryCount: 1,
-        activeTurnHistoryPresent: true,
         codexContinuation: "provider-state-optimization",
         providerPlanKind: "provider.plan",
         providerRequestOrdinal: 2,
@@ -1015,8 +1011,6 @@ describe("executeHostedMailboxEvent", () => {
         rawEvent: {
           schema: "murph.assistant-provider-plan-diagnostics.v1",
           type: "assistant.provider.plan",
-          activeTurnHistoryCount: 1,
-          activeTurnHistoryPresent: true,
           codexContinuation: "provider-state-optimization",
           providerRequestOrdinal: 0,
           refreshThreadInstructions: false,
@@ -1093,15 +1087,12 @@ describe("executeHostedMailboxEvent", () => {
           type: "assistant.provider.prompt_size",
           providerPromptDiagnosticKind: "primary",
           providerPromptBytes: 4096,
-          activeTurnHistoryBytes: 128,
           userPromptBytes: 5,
           turnContextPromptBytes: 2048,
           developerInstructionsBytes: 1024,
           conversationContextBytes: 256,
           systemPromptBytes: 512,
           developerInstructionsPresent: true,
-          activeTurnHistoryCount: 0,
-          activeTurnHistoryPresent: false,
           conversationContextPresent: true,
           refreshThreadInstructions: false,
           resumeCodexThreadIdPresent: true,
@@ -1121,10 +1112,7 @@ describe("executeHostedMailboxEvent", () => {
       message: "Hosted assistant provider prompt-size diagnostics captured.",
       phase: "wake.running",
       redacted: expect.objectContaining({
-        activeTurnHistoryCount: 0,
-        activeTurnHistoryBytes: 128,
         conversationContextBytes: 256,
-        activeTurnHistoryPresent: false,
         conversationContextPresent: true,
         developerInstructionsBytes: 1024,
         developerInstructionsPresent: true,
@@ -1196,8 +1184,6 @@ describe("executeHostedMailboxEvent", () => {
         rawEvent: {
           schema: "murph.assistant-provider-plan-diagnostics.v1",
           type: "assistant.provider.plan",
-          activeTurnHistoryCount: 3,
-          activeTurnHistoryPresent: true,
           codexContinuation: "provider-state-optimization",
           providerRequestOrdinal: 1,
           refreshThreadInstructions: false,
@@ -1339,7 +1325,6 @@ describe("executeHostedMailboxEvent", () => {
       expect.objectContaining({
         component: "runtime.provider",
         details: expect.objectContaining({
-          activeTurnHistoryPresent: true,
           codexContinuation: "provider-state-optimization",
           providerPlanKind: "provider.plan",
           refreshThreadInstructions: false,
@@ -1417,7 +1402,6 @@ describe("executeHostedMailboxEvent", () => {
           message: "Hosted assistant provider plan captured.",
           phase: "wake.running",
           redacted: expect.objectContaining({
-            activeTurnHistoryPresent: true,
             codexContinuation: "provider-state-optimization",
             providerPlanKind: "provider.plan",
             refreshThreadInstructions: false,
