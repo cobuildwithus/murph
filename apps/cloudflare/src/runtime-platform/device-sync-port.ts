@@ -123,6 +123,11 @@ export function createHostedWebDeviceSyncPort(input: {
       connectionId: string;
       processedDirtyPayloadIds?: string[];
       processedRevision: string;
+      stagedDirtyAcks?: Array<{
+        connectionId: string;
+        processedDirtyPayloadIds?: string[];
+        processedRevision: string;
+      }>;
     }) {
       const payload = await fetchHostedWebControlPlaneJson({
         body: {
@@ -131,6 +136,9 @@ export function createHostedWebDeviceSyncPort(input: {
             ? { processedDirtyPayloadIds: runtimeInput.processedDirtyPayloadIds }
             : {}),
           processedRevision: runtimeInput.processedRevision,
+          ...(runtimeInput.stagedDirtyAcks === undefined
+            ? {}
+            : { stagedDirtyAcks: runtimeInput.stagedDirtyAcks }),
           userId: input.boundUserId,
         },
         boundUserId: input.boundUserId,

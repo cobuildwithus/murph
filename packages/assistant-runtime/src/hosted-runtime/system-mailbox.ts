@@ -739,12 +739,16 @@ async function recordHostedDeviceSyncDirtyProcessedRecords(input: {
   let stillDirty = false;
 
   for (const [index, record] of input.records.entries()) {
+    const stagedDirtyAcks = input.records
+      .slice(index + 1)
+      .map(toHostedDeviceSyncStagedDirtyAck);
     const response = await port.ackDirtyStateProcessed({
       connectionId: record.connectionId,
       ...(record.processedDirtyPayloadIds
         ? { processedDirtyPayloadIds: record.processedDirtyPayloadIds }
         : {}),
       processedRevision: record.processedRevision,
+      ...(stagedDirtyAcks.length > 0 ? { stagedDirtyAcks } : {}),
     });
     if (response.recorded) {
       recorded += 1;
@@ -759,6 +763,22 @@ async function recordHostedDeviceSyncDirtyProcessedRecords(input: {
     nextWakeAt,
     recorded,
     stillDirty,
+  };
+}
+
+function toHostedDeviceSyncStagedDirtyAck(
+  record: HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
+): {
+  connectionId: string;
+  processedDirtyPayloadIds?: string[];
+  processedRevision: string;
+} {
+  return {
+    connectionId: record.connectionId,
+    ...(record.processedDirtyPayloadIds
+      ? { processedDirtyPayloadIds: [...record.processedDirtyPayloadIds] }
+      : {}),
+    processedRevision: record.processedRevision,
   };
 }
 
