@@ -51,6 +51,7 @@ import {
   startHostedDeviceSyncReconnectNoticeWorkflowBestEffort,
 } from "./reconnect-notice";
 import { normalizeNullableString } from "./shared";
+import { signalHostedDeviceSyncBackgroundMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
 import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
 
 type HostedRuntimeConnectionSnapshot = HostedExecutionDeviceSyncRuntimeConnectionSnapshot;
@@ -483,6 +484,20 @@ export async function ackHostedDeviceSyncDirtyStateProcessed(input: {
   const stillDirty = dirty?.stillDirty ?? false;
   const hasPendingDirty = stillDirty
     || await controlPlane.store.hasPendingDirtyConnectionForUser(input.trustedUserId);
+
+  if (hasPendingDirty) {
+    const userIdPresent = input.trustedUserId.trim().length > 0;
+    try {
+      await signalHostedDeviceSyncBackgroundMaintenanceRuntime({
+        userId: input.trustedUserId,
+      });
+    } catch (error) {
+      console.warn("Hosted device-sync dirty ack recovery signal failed.", {
+        errorName: error instanceof Error ? error.name : typeof error,
+        userIdPresent,
+      });
+    }
+  }
 
   return {
     connectionId: parsed.connectionId,
