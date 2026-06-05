@@ -9,8 +9,8 @@ CREATE TEMP TABLE dailymed_import_raw (
 WITH normalized AS (
   SELECT
     payload,
-    NULLIF(btrim(payload->>'source'), '') AS source,
-    NULLIF(btrim(payload->>'sourceId'), '') AS source_id,
+    NULLIF(btrim(payload->>'dataOrigin'), '') AS data_origin,
+    NULLIF(btrim(payload->>'dataOriginId'), '') AS data_origin_id,
     COALESCE(NULLIF(payload->>'name', ''), 'Unknown supplement') AS name,
     NULLIF(payload->>'brand', '') AS brand,
     NULLIF(regexp_replace(COALESCE(payload->>'upc', ''), '\D', '', 'g'), '') AS upc,
@@ -30,53 +30,67 @@ WITH normalized AS (
       )
     ) AS search_text,
     COALESCE(payload->'label', payload) AS label,
-    NULLIF(payload->>'sourceUrl', '') AS source_url,
+    NULLIF(payload->>'dataOriginUrl', '') AS data_origin_url,
     CASE
-      WHEN payload#>>'{dedupe,matchedDsldId}' ~ '^\d+$'
-      THEN (payload#>>'{dedupe,matchedDsldId}')::BIGINT
+      WHEN payload#>>'{dedupe,dsldId}' ~ '^\d+$'
+      THEN (payload#>>'{dedupe,dsldId}')::BIGINT
       ELSE NULL
-    END AS raw_matched_dsld_id
+    END AS dedupe_dsld_id
   FROM dailymed_import_raw
 )
 
-INSERT INTO supplement_external_labels (
-  source,
-  source_id,
+INSERT INTO supplements (
+  id,
+  canonical_key,
+  data_origin,
+  data_origin_id,
+  data_origin_url,
+  data_origin_priority,
   name,
   brand,
   upc,
   off_market,
   search_text,
-  label,
-  source_url,
-  matched_dsld_id
+  label
 )
 SELECT
-  normalized.source,
-  normalized.source_id,
+  normalized.data_origin || ':' || normalized.data_origin_id,
+  COALESCE(
+    'dsld:' || supplements.data_origin_id,
+    normalized.data_origin || ':' || normalized.data_origin_id
+  ),
+  normalized.data_origin,
+  normalized.data_origin_id,
+  normalized.data_origin_url,
+  CASE
+    WHEN normalized.data_origin = 'dailymed' THEN 30
+    ELSE 100
+  END::smallint,
   normalized.name,
   normalized.brand,
   normalized.upc,
   normalized.off_market,
   normalized.search_text,
-  normalized.label,
-  normalized.source_url,
-  supplements.dsld_id
+  normalized.label
 FROM normalized
 LEFT JOIN supplements
-  ON supplements.dsld_id = normalized.raw_matched_dsld_id
+  ON supplements.data_origin = 'dsld'
+  AND supplements.data_origin_id = normalized.dedupe_dsld_id::text
 WHERE
-  normalized.source ~ '^[a-z][a-z0-9_-]*$'
-  AND normalized.source_id IS NOT NULL
-ON CONFLICT (source, source_id) DO UPDATE SET
+  normalized.data_origin ~ '^[a-z][a-z0-9_]*$'
+  AND normalized.data_origin_id IS NOT NULL
+ON CONFLICT (id) DO UPDATE SET
+  canonical_key = EXCLUDED.canonical_key,
+  data_origin = EXCLUDED.data_origin,
+  data_origin_id = EXCLUDED.data_origin_id,
+  data_origin_url = EXCLUDED.data_origin_url,
+  data_origin_priority = EXCLUDED.data_origin_priority,
   name = EXCLUDED.name,
   brand = EXCLUDED.brand,
   upc = EXCLUDED.upc,
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
-  source_url = EXCLUDED.source_url,
-  matched_dsld_id = EXCLUDED.matched_dsld_id,
   imported_at = now();
 
-ANALYZE supplement_external_labels;
+ANALYZE supplements;

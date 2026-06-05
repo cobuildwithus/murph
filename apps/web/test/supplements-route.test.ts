@@ -57,6 +57,8 @@ describe("supplements API route", () => {
     mocks.searchSupplements.mockResolvedValue([
       {
         id: "82118",
+        dataOrigin: "dsld",
+        dataOriginId: "82118",
         name: "Creatine Monohydrate",
         brand: "Example Brand",
         upc: "123456789012",
@@ -85,6 +87,8 @@ describe("supplements API route", () => {
       items: [
         {
           id: "82118",
+          dataOrigin: "dsld",
+          dataOriginId: "82118",
           name: "Creatine Monohydrate",
           brand: "Example Brand",
           upc: "123456789012",
@@ -111,6 +115,8 @@ describe("supplements API route", () => {
   it("fetches a label by DSLD id before search parameters", async () => {
     mocks.getSupplementById.mockResolvedValue({
       id: "82118",
+      dataOrigin: "dsld",
+      dataOriginId: "82118",
       name: "Creatine Monohydrate",
       brand: null,
       upc: null,
@@ -135,6 +141,8 @@ describe("supplements API route", () => {
     await expect(response.json()).resolves.toEqual({
       item: {
         id: "82118",
+        dataOrigin: "dsld",
+        dataOriginId: "82118",
         name: "Creatine Monohydrate",
         brand: null,
         upc: null,
@@ -188,6 +196,8 @@ describe("supplements API route", () => {
     mocks.searchSupplements.mockImplementation(async (input: { q: string }) => [
       {
         id: input.q === "creatine" ? "82118" : "dailymed:magnesium",
+        dataOrigin: input.q === "creatine" ? "dsld" : "dailymed",
+        dataOriginId: input.q === "creatine" ? "82118" : "magnesium",
         name: input.q === "creatine" ? "Creatine Monohydrate" : "Magnesium Glycinate",
         brand: null,
         upc: null,
@@ -232,6 +242,8 @@ describe("supplements API route", () => {
           items: [
             {
               id: "82118",
+              dataOrigin: "dsld",
+              dataOriginId: "82118",
               name: "Creatine Monohydrate",
               brand: null,
               upc: null,
@@ -244,6 +256,8 @@ describe("supplements API route", () => {
           items: [
             {
               id: "dailymed:magnesium",
+              dataOrigin: "dailymed",
+              dataOriginId: "magnesium",
               name: "Magnesium Glycinate",
               brand: null,
               upc: null,

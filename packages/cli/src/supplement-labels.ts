@@ -18,8 +18,8 @@ export const supplementLabelSearchInputSchema = z.object({
 
 export const supplementLabelSearchItemSchema = z.object({
   id: z.string().min(1),
-  source: z.string().min(1).optional(),
-  sourceId: z.string().min(1).optional(),
+  dataOrigin: z.string().min(1),
+  dataOriginId: z.string().min(1),
   name: z.string().min(1),
   brand: z.string().nullable(),
   upc: z.string().nullable(),
@@ -60,9 +60,7 @@ const supplementLabelsApiResponseSchema = z.object({
   items: z.array(supplementLabelSearchItemSchema),
 })
 const supplementLabelsApiItemResponseSchema = z.object({
-  item: supplementLabelSearchItemSchema.extend({
-    label: z.unknown().optional(),
-  }),
+  item: supplementLabelSearchItemSchema,
 })
 const supplementLabelsBatchApiResponseSchema = z.object({
   results: z.array(supplementLabelBatchSearchResultItemSchema),
@@ -285,10 +283,9 @@ async function parseSupplementLabelsApiPayload(
   }
 
   const detail = supplementLabelsApiItemResponseSchema.parse(payload)
-  const { label: _label, ...item } = detail.item
 
   return {
-    items: [item],
+    items: [detail.item],
   }
 }
 

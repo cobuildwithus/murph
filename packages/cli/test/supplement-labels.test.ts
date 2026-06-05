@@ -28,8 +28,8 @@ describe('searchSupplementLabels', () => {
       items: [
         {
           id: 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64',
-          source: 'dailymed',
-          sourceId: '00446e6a-875c-4d46-9e13-a146c5fe7a64',
+          dataOrigin: 'dailymed',
+          dataOriginId: '00446e6a-875c-4d46-9e13-a146c5fe7a64',
           name: 'JBA STANOMAX Caffe Latte',
           brand: 'Advanced Pharmaceutical Services',
           upc: null,
@@ -65,8 +65,8 @@ describe('searchSupplementLabels', () => {
       items: [
         {
           id: 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64',
-          source: 'dailymed',
-          sourceId: '00446e6a-875c-4d46-9e13-a146c5fe7a64',
+          dataOrigin: 'dailymed',
+          dataOriginId: '00446e6a-875c-4d46-9e13-a146c5fe7a64',
           name: 'JBA STANOMAX Caffe Latte',
           brand: 'Advanced Pharmaceutical Services',
           upc: null,
@@ -96,6 +96,8 @@ describe('searchSupplementLabels', () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       item: {
         id: '82118',
+        dataOrigin: 'dsld',
+        dataOriginId: '82118',
         name: 'Creatine Monohydrate',
         brand: 'Example Brand',
         upc: '123456789012',
@@ -131,6 +133,8 @@ describe('searchSupplementLabels', () => {
       items: [
         {
           id: '82118',
+          dataOrigin: 'dsld',
+          dataOriginId: '82118',
           name: 'Creatine Monohydrate',
           brand: 'Example Brand',
           upc: '123456789012',
@@ -148,6 +152,8 @@ describe('searchSupplementLabels', () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       item: {
         id: '82118',
+        dataOrigin: 'dsld',
+        dataOriginId: '82118',
         name: 'Legacy Creatine',
         brand: 'Example Brand',
         upc: null,
@@ -182,8 +188,8 @@ describe('searchSupplementLabels', () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       item: {
         id: 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64',
-        source: 'dailymed',
-        sourceId: '00446e6a-875c-4d46-9e13-a146c5fe7a64',
+        dataOrigin: 'dailymed',
+        dataOriginId: '00446e6a-875c-4d46-9e13-a146c5fe7a64',
         name: 'JBA STANOMAX Caffe Latte',
         brand: 'Advanced Pharmaceutical Services',
         upc: null,
@@ -209,7 +215,7 @@ describe('searchSupplementLabels', () => {
     )
 
     assert.equal(result.items[0]?.id, 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64')
-    assert.equal(result.items[0]?.source, 'dailymed')
+    assert.equal(result.items[0]?.dataOrigin, 'dailymed')
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(requestUrl.pathname, '/api/supplements')
     assert.equal(requestUrl.searchParams.get('id'), 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64')
@@ -232,8 +238,8 @@ describe('searchSupplementLabels', () => {
         items: [
           {
             id: 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64',
-            source: 'dailymed',
-            sourceId: '00446e6a-875c-4d46-9e13-a146c5fe7a64',
+            dataOrigin: 'dailymed',
+            dataOriginId: '00446e6a-875c-4d46-9e13-a146c5fe7a64',
             name: 'JBA STANOMAX Caffe Latte',
             brand: 'Advanced Pharmaceutical Services',
             upc: null,
@@ -260,7 +266,7 @@ describe('searchSupplementLabels', () => {
       },
     )
 
-    assert.equal(result.items[0]?.source, 'dailymed')
+    assert.equal(result.items[0]?.dataOrigin, 'dailymed')
     assert.equal(fetchMock.mock.calls.length, 2)
     assert.equal(
       new URL(String(fetchMock.mock.calls[0]?.[0])).searchParams.get('id'),
@@ -303,6 +309,8 @@ describe('searchSupplementLabels', () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       item: {
         id: '82118',
+        dataOrigin: 'dsld',
+        dataOriginId: '82118',
         name: 'Creatine Monohydrate',
         brand: null,
         upc: '123456789012',
@@ -348,6 +356,8 @@ describe('searchSupplementLabels', () => {
       return new Response(JSON.stringify({
         item: {
           id: '82118',
+          dataOrigin: 'dsld',
+          dataOriginId: '82118',
           name: 'Creatine Monohydrate',
           brand: null,
           upc: '123456789012',
@@ -436,6 +446,8 @@ describe('searchSupplementLabelsBatch', () => {
           items: [
             {
               id: '82118',
+              dataOrigin: 'dsld',
+              dataOriginId: '82118',
               name: 'Creatine Monohydrate',
               brand: null,
               upc: null,
@@ -448,8 +460,8 @@ describe('searchSupplementLabelsBatch', () => {
           items: [
             {
               id: 'dailymed:blueprint',
-              source: 'dailymed',
-              sourceId: 'blueprint',
+              dataOrigin: 'dailymed',
+              dataOriginId: 'blueprint',
               name: 'Blueprint Essential Capsules',
               brand: 'Blueprint',
               upc: null,
@@ -490,6 +502,8 @@ describe('searchSupplementLabelsBatch', () => {
           items: [
             {
               id: '82118',
+              dataOrigin: 'dsld',
+              dataOriginId: '82118',
               name: 'Creatine Monohydrate',
               brand: null,
               upc: null,
@@ -502,8 +516,8 @@ describe('searchSupplementLabelsBatch', () => {
           items: [
             {
               id: 'dailymed:blueprint',
-              source: 'dailymed',
-              sourceId: 'blueprint',
+              dataOrigin: 'dailymed',
+              dataOriginId: 'blueprint',
               name: 'Blueprint Essential Capsules',
               brand: 'Blueprint',
               upc: null,

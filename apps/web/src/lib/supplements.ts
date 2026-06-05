@@ -15,8 +15,8 @@ let defaultPool: PgPool | null = null;
 
 export type SupplementSearchItem = {
   id: string;
-  source: string;
-  sourceId: string;
+  dataOrigin: string;
+  dataOriginId: string;
   name: string;
   brand: string | null;
   upc: string | null;
@@ -44,44 +44,18 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
 } {
   return {
     async getSupplementById(input) {
-      const { id } = input;
-      const externalId = parseExternalSupplementId(id);
+      const id = input.id.trim();
 
-      if (externalId) {
-        const { rows } = await client.query<SupplementDetail>(
-          `
-          SELECT
-            source || ':' || source_id AS id,
-            source,
-            source_id AS "sourceId",
-            name,
-            brand,
-            upc,
-            off_market AS "offMarket",
-            label
-          FROM supplement_external_labels
-          WHERE
-            source = $1
-            AND source_id = $2
-            AND ($3::boolean OR off_market = false)
-          LIMIT 1
-          `,
-          [externalId.source, externalId.sourceId, input.includeOffMarket],
-        );
-
-        return rows[0] ?? null;
-      }
-
-      if (!/^\d+$/u.test(id)) {
+      if (!isSupplementLookupId(id)) {
         return null;
       }
 
       const { rows } = await client.query<SupplementDetail>(
         `
         SELECT
-          dsld_id::text AS id,
-          'dsld' AS source,
-          dsld_id::text AS "sourceId",
+          id,
+          data_origin AS "dataOrigin",
+          data_origin_id AS "dataOriginId",
           name,
           brand,
           upc,
@@ -89,7 +63,7 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
           label
         FROM supplements
         WHERE
-          dsld_id = $1
+          id = $1
           AND ($2::boolean OR off_market = false)
         LIMIT 1
         `,
@@ -109,66 +83,24 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
 
       const { rows } = await client.query<SupplementDetail>(
         `
-        WITH ranked AS (
-          SELECT
-            dsld_id::text AS id,
-            'dsld' AS source,
-            dsld_id::text AS "sourceId",
-            name,
-            brand,
-            upc,
-            off_market AS "offMarket",
-            label,
-            array_position($1::text[], upc) AS upc_order,
-            0 AS source_order
-          FROM supplements
-          WHERE
-            upc = ANY($1::text[])
-            AND ($2::boolean OR off_market = false)
-
-          UNION ALL
-
-          SELECT
-            source || ':' || source_id AS id,
-            source,
-            source_id AS "sourceId",
-            name,
-            brand,
-            upc,
-            off_market AS "offMarket",
-            label,
-            array_position($1::text[], upc) AS upc_order,
-            1 AS source_order
-          FROM supplement_external_labels
-          WHERE
-            upc = ANY($1::text[])
-            AND ($2::boolean OR off_market = false)
-            AND (
-              matched_dsld_id IS NULL
-              OR NOT EXISTS (
-                SELECT 1
-                FROM supplements matched
-                WHERE
-                  matched.dsld_id = supplement_external_labels.matched_dsld_id
-                  AND matched.upc = ANY($1::text[])
-                  AND ($2::boolean OR matched.off_market = false)
-              )
-            )
-        )
         SELECT
           id,
-          source,
-          "sourceId",
+          data_origin AS "dataOrigin",
+          data_origin_id AS "dataOriginId",
           name,
           brand,
           upc,
-          "offMarket",
+          off_market AS "offMarket",
           label
-        FROM ranked
+        FROM supplements
+        WHERE
+          upc = ANY($1::text[])
+          AND ($2::boolean OR off_market = false)
         ORDER BY
-          "offMarket" ASC,
-          upc_order ASC,
-          source_order ASC,
+          off_market ASC,
+          array_position($1::text[], upc) ASC,
+          data_origin_priority ASC,
+          name ASC,
           id ASC
         LIMIT 1
         `,
@@ -192,60 +124,42 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
         ),
         ranked AS (
           SELECT
-            dsld_id::text AS id,
-            'dsld' AS source,
-            dsld_id::text AS "sourceId",
+            id,
+            data_origin AS "dataOrigin",
+            data_origin_id AS "dataOriginId",
             name,
             brand,
             upc,
             off_market AS "offMarket",
             ts_rank_cd(to_tsvector('simple', search_text), query.tsq) AS search_rank,
-            0 AS source_order
+            data_origin_priority,
+            row_number() OVER (
+              PARTITION BY canonical_key
+              ORDER BY
+                ts_rank_cd(to_tsvector('simple', search_text), query.tsq) DESC,
+                off_market ASC,
+                data_origin_priority ASC,
+                name ASC,
+                id ASC
+            ) AS dedupe_rank
           FROM supplements, query
           WHERE
             to_tsvector('simple', search_text) @@ query.tsq
             AND ($2::boolean OR off_market = false)
-
-          UNION ALL
-
-          SELECT
-            source || ':' || source_id AS id,
-            source,
-            source_id AS "sourceId",
-            name,
-            brand,
-            upc,
-            off_market AS "offMarket",
-            ts_rank_cd(to_tsvector('simple', search_text), query.tsq) AS search_rank,
-            1 AS source_order
-          FROM supplement_external_labels, query
-          WHERE
-            to_tsvector('simple', search_text) @@ query.tsq
-            AND ($2::boolean OR off_market = false)
-            AND (
-              matched_dsld_id IS NULL
-              OR NOT EXISTS (
-                SELECT 1
-                FROM supplements matched
-                WHERE
-                  matched.dsld_id = supplement_external_labels.matched_dsld_id
-                  AND to_tsvector('simple', matched.search_text) @@ query.tsq
-                  AND ($2::boolean OR matched.off_market = false)
-              )
-            )
         )
         SELECT
           id,
-          source,
-          "sourceId",
+          "dataOrigin",
+          "dataOriginId",
           name,
           brand,
           upc,
           "offMarket"
         FROM ranked
+        WHERE dedupe_rank = 1
         ORDER BY
           search_rank DESC,
-          source_order ASC,
+          data_origin_priority ASC,
           name ASC
         LIMIT $3
         `,
@@ -257,27 +171,12 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
   };
 }
 
-function parseExternalSupplementId(id: string): { source: string; sourceId: string } | null {
+function isSupplementLookupId(id: string): boolean {
   if (id.length > 256) {
-    return null;
+    return false;
   }
 
-  const match = /^([a-z][a-z0-9_-]*):(.+)$/u.exec(id);
-
-  if (!match) {
-    return null;
-  }
-
-  const [, source, sourceId] = match;
-
-  if (!source || !sourceId.trim()) {
-    return null;
-  }
-
-  return {
-    source,
-    sourceId: sourceId.trim(),
-  };
+  return /^\d+$/u.test(id) || /^[a-z][a-z0-9_-]*:\S+$/u.test(id);
 }
 
 function buildUpcLookupVariants(upc: string): string[] {

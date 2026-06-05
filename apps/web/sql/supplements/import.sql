@@ -76,7 +76,12 @@ WITH normalized AS (
 )
 
 INSERT INTO supplements (
-  dsld_id,
+  id,
+  canonical_key,
+  data_origin,
+  data_origin_id,
+  data_origin_url,
+  data_origin_priority,
   name,
   brand,
   upc,
@@ -85,7 +90,12 @@ INSERT INTO supplements (
   label
 )
 SELECT
-  id_text::BIGINT,
+  id_text::BIGINT::text,
+  'dsld:' || id_text::BIGINT::text,
+  'dsld',
+  id_text::BIGINT::text,
+  NULL::text,
+  10::smallint,
   name,
   brand,
   upc,
@@ -109,7 +119,12 @@ SELECT
   label
 FROM normalized
 WHERE id_text ~ '^\d+$'
-ON CONFLICT (dsld_id) DO UPDATE SET
+ON CONFLICT (id) DO UPDATE SET
+  canonical_key = EXCLUDED.canonical_key,
+  data_origin = EXCLUDED.data_origin,
+  data_origin_id = EXCLUDED.data_origin_id,
+  data_origin_url = EXCLUDED.data_origin_url,
+  data_origin_priority = EXCLUDED.data_origin_priority,
   name = EXCLUDED.name,
   brand = EXCLUDED.brand,
   upc = EXCLUDED.upc,

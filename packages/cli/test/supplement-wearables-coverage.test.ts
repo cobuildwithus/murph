@@ -298,6 +298,8 @@ test('supplement search-labels calls the hosted data API without local credentia
     items: [
       {
         id: '82118',
+        dataOrigin: 'dsld',
+        dataOriginId: '82118',
         name: 'Creatine Monohydrate',
         brand: null,
         upc: null,
@@ -351,6 +353,8 @@ test('supplement search-labels-batch calls the hosted data API without local cre
         items: [
           {
             id: '82118',
+            dataOrigin: 'dsld',
+            dataOriginId: '82118',
             name: 'Creatine Monohydrate',
             brand: null,
             upc: null,

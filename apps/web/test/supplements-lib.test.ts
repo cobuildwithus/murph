@@ -43,6 +43,19 @@ describe("supplements query helpers", () => {
     expect(dailymedImportSql).not.toContain(":'DAILYMED_NDJSON_PATH'");
   });
 
+  it("keeps the supplements schema on one table without redundant origin indexes", async () => {
+    const schemaSql = await readFile(
+      new URL("../sql/supplements/schema.sql", import.meta.url),
+      "utf8",
+    );
+
+    expect(schemaSql).toContain("CREATE TABLE IF NOT EXISTS supplements");
+    expect(schemaSql).toContain("UNIQUE (data_origin, data_origin_id)");
+    expect(schemaSql).toContain("CREATE INDEX IF NOT EXISTS supplements_canonical_key_idx");
+    expect(schemaSql).not.toContain("supplement_external_labels");
+    expect(schemaSql).not.toContain("supplements_data_origin_idx");
+  });
+
   it("parameterizes search text, off-market filter, and limit", async () => {
     const calls: Array<{ text: string; values: unknown[] }> = [];
     const queries = createSupplementsQueries({
@@ -52,6 +65,8 @@ describe("supplements query helpers", () => {
           rows: [
             {
               id: "82118",
+              dataOrigin: "dsld",
+              dataOriginId: "82118",
               name: "Creatine Monohydrate",
               brand: null,
               upc: null,
@@ -72,11 +87,11 @@ describe("supplements query helpers", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.text).toContain("websearch_to_tsquery");
     expect(calls[0]?.text).toContain("FROM supplements, query");
-    expect(calls[0]?.text).toContain("FROM supplement_external_labels, query");
-    expect(calls[0]?.text).toContain("matched_dsld_id IS NULL");
-    expect(calls[0]?.text).toContain("NOT EXISTS");
-    expect(calls[0]?.text).toContain("to_tsvector('simple', matched.search_text) @@ query.tsq");
-    expect(calls[0]?.text).toContain("matched.off_market = false");
+    expect(calls[0]?.text).toContain("PARTITION BY canonical_key");
+    expect(calls[0]?.text).toContain("dedupe_rank = 1");
+    expect(calls[0]?.text).toContain("data_origin_priority ASC");
+    expect(calls[0]?.text).not.toContain("supplement_external_labels");
+    expect(calls[0]?.text).not.toContain("matched_dsld_id");
     expect(calls[0]?.values).toEqual(["creatine", false, 5]);
   });
 
@@ -102,6 +117,8 @@ describe("supplements query helpers", () => {
           rows: [
             {
               id: "82118",
+              dataOrigin: "dsld",
+              dataOriginId: "82118",
               name: "Creatine Monohydrate",
               brand: "Example",
               upc: "123456789012",
@@ -118,6 +135,8 @@ describe("supplements query helpers", () => {
       includeOffMarket: false,
     })).resolves.toEqual({
       id: "82118",
+      dataOrigin: "dsld",
+      dataOriginId: "82118",
       name: "Creatine Monohydrate",
       brand: "Example",
       upc: "123456789012",
@@ -128,7 +147,7 @@ describe("supplements query helpers", () => {
     expect(calls[0]?.values).toEqual(["82118", false]);
   });
 
-  it("fetches external source ids from the external labels table", async () => {
+  it("fetches source-qualified ids from the unified supplements table", async () => {
     const calls: Array<{ text: string; values: unknown[] }> = [];
     const queries = createSupplementsQueries({
       async query<T>(text: string, values: unknown[]) {
@@ -137,8 +156,8 @@ describe("supplements query helpers", () => {
           rows: [
             {
               id: "dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64",
-              source: "dailymed",
-              sourceId: "00446e6a-875c-4d46-9e13-a146c5fe7a64",
+              dataOrigin: "dailymed",
+              dataOriginId: "00446e6a-875c-4d46-9e13-a146c5fe7a64",
               name: "JBA STANOMAX Caffe Latte",
               brand: "Advanced Pharmaceutical Services",
               upc: null,
@@ -155,8 +174,8 @@ describe("supplements query helpers", () => {
       includeOffMarket: false,
     })).resolves.toEqual({
       id: "dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64",
-      source: "dailymed",
-      sourceId: "00446e6a-875c-4d46-9e13-a146c5fe7a64",
+      dataOrigin: "dailymed",
+      dataOriginId: "00446e6a-875c-4d46-9e13-a146c5fe7a64",
       name: "JBA STANOMAX Caffe Latte",
       brand: "Advanced Pharmaceutical Services",
       upc: null,
@@ -164,14 +183,35 @@ describe("supplements query helpers", () => {
       label: {},
     });
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.text).toContain("FROM supplement_external_labels");
-    expect(calls[0]?.text).not.toContain("matched_dsld_id IS NULL");
+    expect(calls[0]?.text).toContain("FROM supplements");
+    expect(calls[0]?.text).toContain("id = $1");
+    expect(calls[0]?.text).not.toContain("supplement_external_labels");
+    expect(calls[0]?.text).not.toContain("matched_dsld_id");
     expect(calls[0]?.text).not.toContain("NOT EXISTS");
     expect(calls[0]?.values).toEqual([
-      "dailymed",
-      "00446e6a-875c-4d46-9e13-a146c5fe7a64",
+      "dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64",
       false,
     ]);
+  });
+
+  it("accepts hyphenated public id prefixes independently from data origin names", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        return {
+          rows: [] as T[],
+        };
+      },
+    });
+
+    await expect(queries.getSupplementById({
+      id: "life-extension:product-1",
+      includeOffMarket: false,
+    })).resolves.toBeNull();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.values).toEqual(["life-extension:product-1", false]);
   });
 
   it("normalizes UPC digits, checks leading-zero variants, and orders matches deterministically", async () => {
@@ -183,6 +223,8 @@ describe("supplements query helpers", () => {
           rows: [
             {
               id: "82118",
+              dataOrigin: "dsld",
+              dataOriginId: "82118",
               name: "Creatine Monohydrate",
               brand: "Example",
               upc: "123456789012",
@@ -199,6 +241,8 @@ describe("supplements query helpers", () => {
       includeOffMarket: false,
     })).resolves.toEqual({
       id: "82118",
+      dataOrigin: "dsld",
+      dataOriginId: "82118",
       name: "Creatine Monohydrate",
       brand: "Example",
       upc: "123456789012",
@@ -207,12 +251,10 @@ describe("supplements query helpers", () => {
     });
     expect(calls[0]?.text).toContain("off_market = false");
     expect(calls[0]?.text).toContain("upc = ANY($1::text[])");
-    expect(calls[0]?.text).toContain("array_position($1::text[], upc) AS upc_order");
-    expect(calls[0]?.text).toContain("upc_order ASC");
-    expect(calls[0]?.text).toContain("FROM supplement_external_labels");
-    expect(calls[0]?.text).toContain("NOT EXISTS");
-    expect(calls[0]?.text).toContain("matched.upc = ANY($1::text[])");
-    expect(calls[0]?.text).toContain("source_order ASC");
+    expect(calls[0]?.text).toContain("array_position($1::text[], upc) ASC");
+    expect(calls[0]?.text).toContain("data_origin_priority ASC");
+    expect(calls[0]?.text).not.toContain("supplement_external_labels");
+    expect(calls[0]?.text).not.toContain("NOT EXISTS");
     expect(calls[0]?.values).toEqual([
       ["00123456789012", "123456789012", "0123456789012"],
       false,
