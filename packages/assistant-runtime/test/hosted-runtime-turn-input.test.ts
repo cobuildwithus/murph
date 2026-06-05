@@ -221,6 +221,46 @@ describe("createHostedAssistantInputSource", () => {
     expect(afterLatest.nextCursor).toEqual(latest.cursor);
   });
 
+  it("keeps foreground replay reply targets for already-known boundary inputs", async () => {
+    const vaultRoot = await createTempVault();
+    const replay = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_known_replay",
+        eventId: "evt_known_replay",
+        itemId: "item_known_replay",
+        laneSeq: "30",
+        messageId: "msg_known_replay",
+        occurredAt: "2026-04-23T00:00:05.000Z",
+        receivedAt: "2026-04-23T00:00:06.000Z",
+        text: "known replay note",
+      }),
+    });
+    const source = createHostedAssistantInputSource({
+      foregroundReplayInputIds: [replay.inputId],
+      vaultRoot,
+    });
+
+    const listed = await source.listInputCandidates({
+      afterCursor: replay.cursor,
+      knownInputIds: [replay.inputId],
+      limit: 1,
+      sourceId: "linq",
+    });
+
+    expect(listed.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      replay.inputId,
+    ]);
+    expect(listed.inputs[0]?.event.replyTarget).toEqual({
+      channel: "linq",
+      messageId: "msg_known_replay",
+      threadId: "thread_1",
+    });
+    expect(listed.inputs[0]?.event.text).toBeNull();
+    expect(listed.inputs[0]?.event.transcriptText).toBeNull();
+    expect(listed.nextCursor).toEqual(replay.cursor);
+  });
+
   it("reserves foreground replay slots when old base candidates would fill the scan page", async () => {
     const vaultRoot = await createTempVault();
     const older = await upsertAssistantInputEvent({
