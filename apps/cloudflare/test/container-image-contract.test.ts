@@ -13,9 +13,9 @@ import {
   publishedMurphBundledWorkspacePackageNames,
   runnerBundleDirectoryName,
 } from "../scripts/runner-bundle-contract.js";
-
-const hostedRunnerBaseImageTag =
-  "murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-codex0.135.0-base-en";
+import {
+  hostedLocalRunnerBaseImageTag,
+} from "../scripts/runner-base-image-contract.ts";
 
 const runnerDockerSmokeFinallyCleanupBlock = `} finally {
     await rm(SMOKE_BUNDLE_DIR, { force: true, recursive: true });
@@ -55,6 +55,12 @@ function createDeployEnvironment() {
     workerName: "murph-hosted",
     workerVars: {},
   }
+}
+
+function readDockerArg(contents: string, name: string): string {
+  const match = contents.match(new RegExp(`^ARG ${name}=(.+)$`, "mu"));
+  expect(match?.[1]).toBeTruthy();
+  return match?.[1] ?? "";
 }
 
 describe("hosted runner container image contract", () => {
@@ -362,9 +368,29 @@ describe("hosted runner container image contract", () => {
       new URL("../../../Dockerfile.cloudflare-hosted-runner-base", import.meta.url),
       "utf8",
     );
+    const whisperModelDockerfile = await readFile(
+      new URL("../../../Dockerfile.cloudflare-whisper-model", import.meta.url),
+      "utf8",
+    );
+    const runnerBasePublishWorkflow = await readFile(
+      new URL("../../../.github/workflows/cloudflare-runner-base-image.yml", import.meta.url),
+      "utf8",
+    );
+    const deployDocs = await readFile(new URL("../DEPLOY.md", import.meta.url), "utf8");
+    const hostedLocalHarnessDocs = await readFile(
+      new URL("../../../packages/hosted-local-harness/README.md", import.meta.url),
+      "utf8",
+    );
+
+    const whisperModelImage = readDockerArg(baseDockerfile, "WHISPER_MODEL_IMAGE");
+    const whisperModelSha256 = readDockerArg(baseDockerfile, "WHISPER_MODEL_SHA256");
 
     expect(baseDockerfile).toContain("ARG WHISPER_CPP_VERSION=v1.8.1");
     expect(baseDockerfile).toContain("ARG WHISPER_MODEL_FILE=ggml-base.en.bin");
+    expect(whisperModelSha256).toMatch(/^[a-f0-9]{64}$/u);
+    expect(whisperModelImage).toBe(
+      `ghcr.io/cobuildwithus/murph-whisper-model:ggml-base-en-sha256-${whisperModelSha256}`,
+    );
     expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.135.0");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
     expect(baseDockerfile).toContain(
@@ -376,6 +402,9 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("ARG WHISPER_CPP_BUILD_JOBS=1");
     expect(baseDockerfile).toContain(
       "ARG WHISPER_MODEL_SHA256=a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+    );
+    expect(baseDockerfile).toContain(
+      "FROM ${WHISPER_MODEL_IMAGE} AS whisper-model",
     );
     expect(baseDockerfile).toContain(
       "FROM node:${NODE_VERSION}-bookworm-slim@${NODE_IMAGE_DIGEST} AS whisper-builder",
@@ -402,10 +431,42 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("COPY --from=whisper-builder /opt/whisper/bin/libggml-cpu*.so /usr/local/bin/");
     expect(baseDockerfile).toContain("COPY --from=whisper-builder /opt/whisper/lib/ /usr/local/lib/");
     expect(baseDockerfile).toContain(
-      "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${WHISPER_MODEL_FILE}",
+      "COPY --from=whisper-model /model.bin /opt/whisper/${WHISPER_MODEL_FILE}",
     );
     expect(baseDockerfile).toContain(
       "printf '%s  %s\\n' \"${WHISPER_MODEL_SHA256}\" \"/opt/whisper/${WHISPER_MODEL_FILE}\" | sha256sum -c -",
+    );
+    expect(baseDockerfile).not.toContain(
+      "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${WHISPER_MODEL_FILE}",
+    );
+    expect(whisperModelDockerfile).toContain(`ADD --checksum=sha256:${whisperModelSha256}`);
+    expect(whisperModelDockerfile).toContain(
+      "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
+    );
+    expect(runnerBasePublishWorkflow).toContain("s/^ARG WHISPER_MODEL_IMAGE=//p");
+    expect(runnerBasePublishWorkflow).toContain(
+      'docker buildx imagetools inspect "${whisper_model_image}"',
+    );
+    expect(runnerBasePublishWorkflow).toContain(
+      'echo "Whisper model image already exists: ${whisper_model_image}"',
+    );
+    expect(runnerBasePublishWorkflow).toContain('--tag "${whisper_model_image}"');
+    expect(runnerBasePublishWorkflow).toContain("permissions:\n  contents: read\n  packages: write");
+    expect(runnerBasePublishWorkflow).toContain(
+      "if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}",
+    );
+    expect(runnerBasePublishWorkflow).not.toContain("pull_request:");
+    expect(runnerBasePublishWorkflow).toContain(
+      "run: pnpm --dir apps/cloudflare runner:docker:base -- --push",
+    );
+    expect(deployDocs).toContain(
+      "Pull-request hosted-local E2E does not authenticate to GHCR",
+    );
+    expect(deployDocs).toContain(
+      "For Whisper model bumps, publish the new pinned GHCR model tag before opening or",
+    );
+    expect(hostedLocalHarnessDocs).toContain(
+      "prepublish that new model tag from the branch's",
     );
     expect(baseDockerfile).toContain(
       "COPY --from=whisper-builder --chown=runner:runner /opt/whisper/${WHISPER_MODEL_FILE} /home/runner/.murph/models/whisper/model.bin",
@@ -445,7 +506,7 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("codex doctor --help >/dev/null");
     expect(baseDockerfile).toContain("tini");
     expect(baseDockerfile).not.toContain('CMD ["node", "dist/container-entrypoint.js"]');
-    expect(finalDockerfile).toContain(`ARG HOSTED_RUNNER_BASE_IMAGE=${hostedRunnerBaseImageTag}`);
+    expect(finalDockerfile).toContain(`ARG HOSTED_RUNNER_BASE_IMAGE=${hostedLocalRunnerBaseImageTag}`);
     expect(finalDockerfile).toContain("FROM ${HOSTED_RUNNER_BASE_IMAGE}");
     const finalRunnerBundleCopyIndex = finalDockerfile.indexOf(
       "COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/",
@@ -549,7 +610,7 @@ describe("hosted runner container image contract", () => {
     expect(wranglerConfig).toContain('"image": "../../Dockerfile.cloudflare-hosted-runner"');
     expect(wranglerConfig).toContain('"image_build_context": "."');
     expect(packageJson.scripts?.["deploy:worker"]).toBe(
-      "pnpm deploy:artifacts && pnpm runner:docker:base && pnpm deploy:worker:apply",
+      "pnpm deploy:artifacts && pnpm runner:docker:base -- --force && pnpm deploy:worker:apply",
     );
     expect(packageJson.scripts?.["deploy:artifacts"]).toContain("pnpm deploy:artifacts:validate");
     expect(packageJson.scripts?.["runner:docker:base"]).toBe(

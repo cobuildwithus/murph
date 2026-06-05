@@ -560,9 +560,15 @@ describe("hosted deploy automation helpers", () => {
       "uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6",
       "uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6",
       "uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6",
+      "packages: read",
+      "name: Login to GHCR",
+      "name: Login to GHCR for runner model image",
+      "docker login ghcr.io -u \"${{ github.actor }}\" --password-stdin",
+      "continuing with anonymous pulls and local rebuild fallback",
       "name: Prepare runner bundle and base image",
-      "run: pnpm --dir apps/cloudflare runner:bundle && pnpm --dir apps/cloudflare runner:docker:base",
+      "run: pnpm --dir apps/cloudflare runner:bundle && pnpm --dir apps/cloudflare runner:docker:base -- --force",
       "name: Prepare immediate runner bundle and base image",
+      "run: pnpm --dir apps/cloudflare runner:docker:base -- --force",
       "name: Save immediate build artifacts",
       "tar --hard-dereference -czf .artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz \\",
       "docker save murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-codex0.135.0-base-en \\",
@@ -582,9 +588,6 @@ describe("hosted deploy automation helpers", () => {
       "Unsafe runner bundle symlink target.",
       "tar --no-same-owner --no-same-permissions -xzf \"${bundle_archive}\" \\",
       "gzip -dc \"${runner_base_archive}\" | docker load",
-      "docker build \\",
-      "--file Dockerfile.cloudflare-hosted-runner-base \\",
-      "--tag murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-codex0.135.0-base-en \\",
       "name: Render Worker secrets",
       "if: ${{ inputs.deploy_worker && inputs.sync_worker_secrets }}",
       "run: pnpm --dir apps/cloudflare deploy:secrets:render",
@@ -713,6 +716,13 @@ describe("hosted deploy automation helpers", () => {
     expect(workflow).not.toMatch(/inputs\.deploy_worker.{0,160}blacksmith-4vcpu-ubuntu-2404/u);
     expect([
       ...workflow.matchAll(/docker run \\/gmu),
+    ]).toHaveLength(3);
+    expect([...workflow.matchAll(/^      - name: Login to GHCR$/gmu)]).toHaveLength(3);
+    expect([
+      ...workflow.matchAll(/^      - name: Login to GHCR for runner model image$/gmu),
+    ]).toHaveLength(3);
+    expect([
+      ...workflow.matchAll(/continuing with anonymous pulls and local rebuild fallback/gmu),
     ]).toHaveLength(3);
     expect(workflow).not.toContain("services:");
     expect(workflow).toContain('          )"\n          if [[ -z "${latest_log}" ]]; then');

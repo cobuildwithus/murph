@@ -283,8 +283,31 @@ pnpm --dir apps/cloudflare runner:docker:base
 
 That image is tagged `murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-codex0.135.0-base-en`.
 It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex`, `ffmpeg`, `whisper.cpp`, the default Whisper model, and PDF tooling from Poppler plus `file`, `qpdf`, and MuPDF tools, but no app bundle or worker secrets.
+`runner:docker:base` first reuses a GHCR-published base image when its source-fingerprint label matches the checked-out `Dockerfile.cloudflare-hosted-runner-base`; otherwise it rebuilds locally. Pass `-- --force` to rebuild from the checked-out Dockerfile without adopting a GHCR base image; deploy-capable production paths use that forced path so GHCR stays a CI/local cache instead of production image authority. The default Whisper model comes from the pinned `ghcr.io/cobuildwithus/murph-whisper-model` image and is still verified by SHA-256 inside the base build. Forced source rebuilds still need read access to that pinned GHCR model image, so local operators should run `docker login ghcr.io` unless the package is public. Pull-request hosted-local E2E does not authenticate to GHCR before running PR-controlled code, so the GHCR runner base and Whisper model packages must be public for fast anonymous PR cache/model pulls. `Dockerfile.cloudflare-whisper-model` is the only place that fetches the upstream Hugging Face model, and the protected-main `.github/workflows/cloudflare-runner-base-image.yml` workflow publishes that mirror image plus the full base image with `GITHUB_TOKEN`.
 The base image build runs `python3 --version`, `python --version`, `codex --version`, `codex app-server --help`, and `codex doctor --help` under the runner user, and the Docker smoke repeats the Python checks inside the final image before deploy while also proving `file`, `pdfinfo`, `pdftotext`, `pdftoppm`, `qpdf`, and `mutool` against the restored smoke PDF fixture.
 Run `pnpm --dir apps/cloudflare test:e2e:runner-python:local` when you specifically want the actual final hosted-runner app image `PATH` proof for Python. It assembles the runner bundle, builds the same `linux/amd64` app-layer Dockerfile used by the Cloudflare container, starts the image with its normal entrypoint, waits for `/health`, then checks Python as the non-root `runner` user from immutable `/app` with the baked runner env. Run `pnpm --dir apps/cloudflare runner:docker:smoke` when you want the broader final-image native smoke.
+
+For Whisper model bumps, publish the new pinned GHCR model tag before opening or
+rerunning a pull request that changes `WHISPER_MODEL_IMAGE` or
+`WHISPER_MODEL_SHA256`. From the exact branch that updates
+`Dockerfile.cloudflare-whisper-model`, an operator with GHCR package write access
+can run:
+
+```bash
+docker login ghcr.io
+docker buildx build \
+  --platform linux/amd64 \
+  --file Dockerfile.cloudflare-whisper-model \
+  --tag ghcr.io/cobuildwithus/murph-whisper-model:ggml-base-en-sha256-<sha256> \
+  --push \
+  .
+```
+
+After first publish, make the GHCR model and runner base packages public so PR
+CI can use anonymous pulls without exposing package credentials to PR-controlled
+commands. The protected-main publish workflow skips the model build when the
+pinned model image tag already exists, so ordinary base-image refreshes do not
+hit Hugging Face.
 
 When you need to backstop lifecycle rules locally or in CI:
 
@@ -307,7 +330,7 @@ That command:
 - runs deploy preflight inside the apply step before artifact validation and upload
 - renders the deploy config and worker secrets payload
 - assembles the runner bundle, building and packing the runner workspace closure with bounded parallelism (`MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY` and `MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY`, both defaulting to `4`); runner-specific CLI and Health Commons tarballs keep the deployed `murph` / `vault-cli` and catalog surfaces without the public npm package's nested bundled workspace payload or web-only Health Commons artifacts
-- prepares the stable native runner base image with Docker's local cache
+- prepares the stable native runner base image with Docker's local cache; production deploy paths force that build from source, while hosted-local E2E lanes may reuse the GHCR-published runner base image when the source fingerprint matches the current checkout
 - deploys the Worker directly with Wrangler, relying on the configured gradual container rollout by default, which builds only the small app image layer from the prepared runner bundle
 
 The normal container rollout keeps `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The manual workflow exposes a `container_rollout` input; leave it at `gradual` for ordinary deploys. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and should be reserved for hotfixes where interrupting active runner containers is acceptable.

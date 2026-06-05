@@ -51,6 +51,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   codex-cache-prefix-gate:
@@ -111,6 +112,12 @@ jobs:
 
       - name: Install/check Temporal CLI
         run: pnpm temporal:cli:setup
+
+      - name: Login to GHCR
+        shell: bash
+        run: |
+          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin \
+            || echo "GHCR login unavailable; continuing with anonymous pulls and local rebuild fallback."
 
       - name: Run Codex cache-prefix hosted-local E2E
         shell: bash
@@ -195,6 +202,12 @@ jobs:
       - name: Install/check Temporal CLI
         run: pnpm temporal:cli:setup
 
+      - name: Login to GHCR
+        shell: bash
+        run: |
+          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin \
+            || echo "GHCR login unavailable; continuing with anonymous pulls and local rebuild fallback."
+
       - name: Run Linq delivery hosted-local E2E
         shell: bash
         run: |
@@ -278,6 +291,12 @@ jobs:
       - name: Install/check Temporal CLI
         run: pnpm temporal:cli:setup
 
+      - name: Login to GHCR
+        shell: bash
+        run: |
+          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin \
+            || echo "GHCR login unavailable; continuing with anonymous pulls and local rebuild fallback."
+
       - name: Run Linq scheduled reminder hosted-local E2E
         shell: bash
         run: |
@@ -326,8 +345,11 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Login to GHCR for runner model image
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
       - name: Prepare runner bundle and base image
-        run: pnpm --dir apps/cloudflare runner:bundle && pnpm --dir apps/cloudflare runner:docker:base
+        run: pnpm --dir apps/cloudflare runner:bundle && pnpm --dir apps/cloudflare runner:docker:base -- --force
 
       - name: Run focused Cloudflare checks and smoke runner container image
         shell: bash
@@ -381,6 +403,9 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Login to GHCR for runner model image
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
       - name: Run hosted Codex auth deploy guard
         shell: bash
         env:
@@ -404,7 +429,7 @@ jobs:
           pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-codex-config.test.ts
 
       - name: Prepare immediate runner bundle and base image
-        run: pnpm --dir apps/cloudflare runner:bundle && pnpm --dir apps/cloudflare runner:docker:base
+        run: pnpm --dir apps/cloudflare runner:bundle && pnpm --dir apps/cloudflare runner:docker:base -- --force
 
       - name: Save immediate build artifacts
         shell: bash
@@ -781,13 +806,13 @@ jobs:
         if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' }}
         run: pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle:manifest:refresh
 
+      - name: Login to GHCR for runner model image
+        if: ${{ inputs.deploy_worker && !(inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate') }}
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
       - name: Prepare runner base image
         if: ${{ inputs.deploy_worker && !(inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate') }}
-        run: |
-          docker build \
-            --file Dockerfile.cloudflare-hosted-runner-base \
-            --tag murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-codex0.135.0-base-en \
-            .
+        run: pnpm --dir apps/cloudflare runner:docker:base -- --force
 
       - name: Render Worker secrets
         if: ${{ inputs.deploy_worker && inputs.sync_worker_secrets }}

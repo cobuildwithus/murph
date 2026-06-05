@@ -39,8 +39,15 @@ override any value explicitly.
 - `e2e:live`: hosted-local E2E defaults for explicit live provider testing.
 
 `runner:docker:base` is cache-aware: it skips the native runner base-image build
-when the local image already carries the current Dockerfile fingerprint label. Use
+when the local image already carries the current Dockerfile fingerprint label. On
+cold CI hosts it first tries the GHCR-published fingerprinted base image, then
+falls back to a local build. Use
 `pnpm --dir apps/cloudflare runner:docker:base -- --force` to force a rebuild.
+Pull-request CI does not authenticate to GHCR before running PR-controlled code,
+so the GHCR runner base and Whisper model packages must be public for anonymous
+cache/model pulls there. Before a pull request changes the pinned Whisper model
+tag or SHA, prepublish that new model tag from the branch's
+`Dockerfile.cloudflare-whisper-model` as described in `apps/cloudflare/DEPLOY.md`.
 
 ## State files
 

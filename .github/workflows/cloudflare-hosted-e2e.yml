@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - ".github/workflows/cloudflare-hosted-e2e.yml"
+      - "Dockerfile.cloudflare-hosted-runner"
+      - "Dockerfile.cloudflare-hosted-runner-base"
+      - "Dockerfile.cloudflare-whisper-model"
       - "package.json"
       - "apps/cloudflare/**"
       - "apps/web/src/lib/hosted-orchestration/**"

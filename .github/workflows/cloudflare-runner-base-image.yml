@@ -1,0 +1,74 @@
+name: Cloudflare Runner Base Image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/cloudflare-runner-base-image.yml"
+      - "Dockerfile.cloudflare-hosted-runner-base"
+      - "Dockerfile.cloudflare-whisper-model"
+      - "apps/cloudflare/scripts/runner-base-image.ts"
+      - "apps/cloudflare/scripts/runner-base-image-contract.ts"
+      - "apps/cloudflare/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Publish runner base image
+    if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Login to GHCR
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Publish Whisper model image
+        shell: bash
+        run: |
+          set -euo pipefail
+          whisper_model_image="$(
+            sed -n 's/^ARG WHISPER_MODEL_IMAGE=//p' Dockerfile.cloudflare-hosted-runner-base | tail -n 1
+          )"
+          if [[ -z "${whisper_model_image}" ]]; then
+            echo "Missing WHISPER_MODEL_IMAGE in Dockerfile.cloudflare-hosted-runner-base" >&2
+            exit 1
+          fi
+
+          if docker buildx imagetools inspect "${whisper_model_image}" >/dev/null 2>&1; then
+            echo "Whisper model image already exists: ${whisper_model_image}"
+            exit 0
+          fi
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --file Dockerfile.cloudflare-whisper-model \
+            --tag "${whisper_model_image}" \
+            --label org.opencontainers.image.source=https://github.com/cobuildwithus/murph \
+            --label "org.opencontainers.image.description=Murph hosted runner Whisper base.en model" \
+            --push \
+            .
+
+      - name: Publish runner base image
+        run: pnpm --dir apps/cloudflare runner:docker:base -- --push
