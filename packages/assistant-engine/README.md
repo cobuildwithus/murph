@@ -14,10 +14,10 @@ home/config, and child-env authority. A turn is an RPC into that process rather
 than a per-turn app-server subprocess. Overlapping turns fail busy instead of
 spawning parallel app-server processes.
 
-Turn prompts, session ids, and turn ids are request data, not child process env.
-The foreground current-route env remains a local CLI fallback for commands that
-need an implicit delivery route; hosted turns read that route through the CLI
-bridge instead.
+Turn prompts, session ids, turn ids, and delivery routes are request data, not
+child process env. Hosted turns read the current delivery route through the CLI
+bridge when a command needs that invocation-scoped context; local assistant
+commands must pass explicit route flags instead of relying on ambient env.
 
 Hosted runtime env projection remains hosted-specific, but the app-server
 lifecycle is not. Identity/config mismatch, abort cleanup, malformed output,

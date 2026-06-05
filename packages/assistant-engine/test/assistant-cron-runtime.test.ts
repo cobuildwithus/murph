@@ -8,10 +8,6 @@ import {
   type AssistantCronJob,
   type AssistantCronSchedule,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import {
-  ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV,
-  ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV,
-} from '@murphai/operator-config/assistant/current-delivery-route'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -135,6 +131,15 @@ import {
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import { createTempVaultContext } from './test-helpers.ts'
+
+const LEGACY_ROUTE_CHANNEL_ENV_NAME = [
+  'MURPH_ASSISTANT_CURRENT',
+  'DELIVERY_ROUTE_CHANNEL',
+].join('_')
+const LEGACY_ROUTE_TARGET_ENV_NAME = [
+  'MURPH_ASSISTANT_CURRENT',
+  'DELIVERY_ROUTE_TARGET',
+].join('_')
 
 const tempRoots: string[] = []
 
@@ -328,14 +333,12 @@ afterEach(async () => {
 })
 
 describe('assistant cron runtime orchestration', () => {
-  it('injects the current private iMessage delivery route when creating cron jobs', async () => {
+  it('preserves explicit private iMessage delivery routes when creating cron jobs', async () => {
     const { vaultRoot } = await createRuntimeContext('assistant-cron-linq-route-')
-    vi.stubEnv(ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV, 'linq')
-    vi.stubEnv(ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV, 'linq_chat_real')
 
     cronMocks.applyAssistantSelfDeliveryTargetDefaults.mockResolvedValueOnce({
       channel: 'linq',
-      deliveryTarget: null,
+      deliveryTarget: 'linq_chat_real',
       identityId: null,
       participantId: null,
       threadId: 'hid_redacted_thread',
@@ -348,6 +351,7 @@ describe('assistant cron runtime orchestration', () => {
         at: '2026-12-08T12:00:00.000Z',
         kind: 'at',
       },
+      deliveryTarget: 'linq_chat_real',
       vault: vaultRoot,
     })
 
@@ -365,6 +369,8 @@ describe('assistant cron runtime orchestration', () => {
 
   it('rejects iMessage cron jobs without an explicit delivery target', async () => {
     const { vaultRoot } = await createRuntimeContext('assistant-cron-linq-route-required-')
+    vi.stubEnv(LEGACY_ROUTE_CHANNEL_ENV_NAME, 'linq')
+    vi.stubEnv(LEGACY_ROUTE_TARGET_ENV_NAME, 'linq_chat_real')
 
     cronMocks.applyAssistantSelfDeliveryTargetDefaults.mockResolvedValueOnce({
       channel: 'linq',

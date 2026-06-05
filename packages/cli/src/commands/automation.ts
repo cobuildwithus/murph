@@ -2,7 +2,6 @@ import { Cli, z } from "incur";
 
 import {
   HostedCliBridgeRequestError,
-  isHostedRuntimeProcessEnv,
   readHostedCliBridgeEnv,
   requestHostedCliAssistantCurrentRoute,
   type HostedCliAssistantCurrentRoute,
@@ -21,7 +20,6 @@ import {
 } from "@murphai/contracts";
 import {
   looksLikePrivateAssistantRoutePlaceholder,
-  readAssistantCurrentDeliveryRouteEnv,
   resolveAssistantDeliveryRouteWithCurrentRoute,
   stripPrivateAssistantRoutePlaceholders,
 } from "@murphai/operator-config/assistant/current-delivery-route";
@@ -207,11 +205,7 @@ async function readAutomationSaveCurrentRoute(input: {
     }
   }
 
-  if (isHostedRuntimeProcessEnv(process.env)) {
-    return null;
-  }
-
-  return readAssistantCurrentDeliveryRouteEnv(process.env);
+  return null;
 }
 
 function automationSaveNeedsCurrentRoute(input: {
@@ -234,22 +228,34 @@ function automationSaveNeedsCurrentRoute(input: {
 }
 
 function assertAutomationRouteCanDeliver(route: AutomationRoute): void {
-  if (route.channel !== "linq") {
-    return;
-  }
-
-  if (!route.deliveryTarget) {
+  if (!route.channel) {
     throw new VaultCliError(
       "invalid_option",
-      "iMessage automation routes require an explicit delivery target. In assistant turns this is injected automatically; otherwise pass --delivery-target.",
+      "Automation routes require an explicit channel. Pass --channel with --delivery-target, --thread-id, or --participant-id.",
     );
   }
 
-  if (looksLikePrivateAssistantRoutePlaceholder(route.deliveryTarget)) {
+  if (!route.deliveryTarget && !route.participantId && !route.threadId) {
     throw new VaultCliError(
       "invalid_option",
-      "iMessage automation routes cannot use redacted conversation placeholders as delivery targets.",
+      "Automation routes require an explicit delivery target. Pass --delivery-target, --thread-id, or --participant-id for the selected channel.",
     );
+  }
+
+  if (route.channel === "linq") {
+    if (!route.deliveryTarget) {
+      throw new VaultCliError(
+        "invalid_option",
+        "iMessage automation routes require an explicit delivery target. Pass --delivery-target.",
+      );
+    }
+
+    if (looksLikePrivateAssistantRoutePlaceholder(route.deliveryTarget)) {
+      throw new VaultCliError(
+        "invalid_option",
+        "iMessage automation routes cannot use redacted conversation placeholders as delivery targets.",
+      );
+    }
   }
 }
 
@@ -314,6 +320,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         description: "Save a daily automation without a JSON payload.",
         options: {
           channel: "telegram",
+          deliveryTarget: "telegram_thread_real",
           instructions: "Ask about mobility work and summarize the next step.",
           scheduleKind: "dailyLocal",
           scheduleLocalTime: "08:30",

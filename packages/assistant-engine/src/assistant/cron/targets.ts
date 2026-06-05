@@ -5,7 +5,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   looksLikePrivateAssistantRoutePlaceholder,
-  resolveAssistantDeliveryRouteWithCurrentDefaults,
+  resolveAssistantDeliveryRouteWithCurrentRoute,
   stripPrivateAssistantRoutePlaceholders,
 } from '@murphai/operator-config/assistant/current-delivery-route'
 import { applyAssistantSelfDeliveryTargetDefaults } from '@murphai/operator-config/operator-config'
@@ -34,7 +34,7 @@ export async function resolveAssistantCronTargetDefaults<
     },
   )
   const resolvedRoute = stripPrivateAssistantRoutePlaceholders(
-    resolveAssistantDeliveryRouteWithCurrentDefaults(resolvedTarget),
+    resolveAssistantDeliveryRouteWithCurrentRoute(resolvedTarget, null),
   )
 
   return {
@@ -87,7 +87,7 @@ export function validateAssistantCronDeliveryTarget(
     if (!deliveryTarget) {
       throw new VaultCliError(
         'ASSISTANT_CRON_DELIVERY_REQUIRED',
-        'iMessage assistant cron jobs require an explicit delivery target. In assistant turns this is injected automatically; otherwise pass --deliveryTarget.',
+        'iMessage assistant cron jobs require an explicit delivery target. Pass --deliveryTarget.',
       )
     }
 

@@ -5,10 +5,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
-  ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV,
-  ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV,
-} from '@murphai/operator-config/assistant/current-delivery-route'
-import {
   normalizeAssistantProviderConfig,
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -71,8 +67,8 @@ afterEach(() => {
 })
 
 describe('assistant protocol index planning', () => {
-  it('passes current explicit delivery routes through private provider env only for foreground turns', async () => {
-    const foregroundPlan = await buildCodexTurnExecutionPlan({
+  it('does not expose per-turn route env in Codex execution plans', async () => {
+    const plan = await buildCodexTurnExecutionPlan({
       input: {
         ...createMessageInput(),
         channel: 'linq',
@@ -84,32 +80,10 @@ describe('assistant protocol index planning', () => {
       turnCreatedAt: '2026-05-04T00:00:00.000Z',
       turnId: 'turn-test',
     })
-    expect(
-      foregroundPlan.turnCliEnv[ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV],
-    ).toBe('linq')
-    expect(
-      foregroundPlan.turnCliEnv[ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV],
-    ).toBe('linq_chat_real')
 
-    const cronPlan = await buildCodexTurnExecutionPlan({
-      input: {
-        ...createMessageInput(),
-        channel: 'linq',
-        deliveryTarget: 'linq_chat_real',
-        turnTrigger: 'automation-cron',
-      },
-      plan: createSharedPlan(),
-      resolvedSession: createSession(),
-      route: createRoute(),
-      turnCreatedAt: '2026-05-04T00:00:00.000Z',
-      turnId: 'turn-test',
-    })
-    expect(
-      cronPlan.turnCliEnv[ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV],
-    ).toBeUndefined()
-    expect(
-      cronPlan.turnCliEnv[ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV],
-    ).toBeUndefined()
+    const removedRouteEnvProperty = ['turnCli', 'Env'].join('')
+    expect(Object.prototype.hasOwnProperty.call(plan, removedRouteEnvProperty)).toBe(false)
+    expect(plan).not.toHaveProperty(removedRouteEnvProperty)
   })
 
   it('soft-fails to an empty assistant protocol index when generated artifacts are unavailable', async () => {

@@ -506,7 +506,6 @@ describe('Codex model catalog', () => {
       },
       route,
       sharedPlan: createSharedPlan(),
-      turnCliEnv: {},
       turnId: 'turn-1',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
@@ -619,7 +618,6 @@ describe('Codex model catalog', () => {
       },
       route,
       sharedPlan: createSharedPlan(),
-      turnCliEnv: {},
       turnId: 'turn-hosted-device-connect',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({

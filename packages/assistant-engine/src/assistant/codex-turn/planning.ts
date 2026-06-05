@@ -3,9 +3,6 @@ import type {
   AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
-  createAssistantCurrentDeliveryRouteEnv,
-} from '@murphai/operator-config/assistant/current-delivery-route'
-import {
   normalizeIanaTimeZone,
   resolveSystemTimeZone,
   toLocalDayKey,
@@ -225,7 +222,6 @@ export interface AssistantCodexTurnExecutionPlan {
   route: CodexThreadIdentity
   sharedPlan: AssistantTurnSharedPlan
   progressDelivery?: AssistantProgressDelivery | null
-  turnCliEnv: NodeJS.ProcessEnv
   turnId: string
 }
 
@@ -310,12 +306,6 @@ export async function buildCodexTurnExecutionPlan(input: {
   turnId: string
 }): Promise<AssistantCodexTurnExecutionPlan> {
   const executionContext = normalizeAssistantExecutionContext(input.input.executionContext)
-  const turnCliEnv = input.input.turnTrigger === 'automation-cron'
-    ? {}
-    : createAssistantCurrentDeliveryRouteEnv({
-        channel: input.input.channel,
-        deliveryTarget: input.input.deliveryTarget,
-      })
   const profile = resolveAssistantCodexTurnExecutionProfile({
     profile: input.profile,
     turnTrigger: input.input.turnTrigger,
@@ -331,7 +321,6 @@ export async function buildCodexTurnExecutionPlan(input: {
     route: input.route,
     sharedPlan: input.plan,
     progressDelivery: input.progressDelivery ?? null,
-    turnCliEnv,
     turnId: input.turnId,
   }
 }

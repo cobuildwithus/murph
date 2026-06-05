@@ -721,7 +721,11 @@ function buildAssistantSharedAutomationActionText(
 ): string {
   return `Use ${code(
     "vault-cli automation save"
-  )} with typed schedule and instruction flags to create or update ordinary automations. In a foreground messaging turn, the current chat route is applied automatically unless explicit route flags are needed. Reserve ${code(
+  )} with typed schedule, instruction, and explicit route flags to create or update ordinary automations. Pass ${code(
+    "--channel"
+  )} with ${code("--delivery-target")}, ${code("--thread-id")}, or ${code(
+    "--participant-id"
+  )} for the intended destination. Reserve ${code(
     "vault-cli automation import-json"
   )} for advanced payload imports that the typed surface cannot express.
 
