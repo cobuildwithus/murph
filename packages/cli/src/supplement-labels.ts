@@ -4,6 +4,8 @@ import { z } from 'zod'
 
 const DEFAULT_SUPPLEMENT_LABEL_LIMIT = 10
 const MAX_SUPPLEMENT_LABEL_LIMIT = 50
+const MAX_SUPPLEMENT_LABEL_BATCH_QUERIES = 10
+const MAX_SUPPLEMENT_LABEL_BATCH_QUERY_LENGTH = 256
 const DEFAULT_SUPPLEMENT_LABEL_TIMEOUT_MS = 10_000
 const MAX_SUPPLEMENT_LABEL_TIMEOUT_MS = 30_000
 const GTIN_LENGTHS = new Set([8, 12, 13, 14])
@@ -32,6 +34,28 @@ export const supplementLabelSearchResultSchema = z.object({
   items: z.array(supplementLabelSearchItemSchema),
 })
 
+export const supplementLabelBatchSearchInputSchema = z.object({
+  queries: z
+    .array(z.string().trim().min(1).max(MAX_SUPPLEMENT_LABEL_BATCH_QUERY_LENGTH))
+    .min(1)
+    .max(MAX_SUPPLEMENT_LABEL_BATCH_QUERIES),
+  limit: z.number().int().positive().max(MAX_SUPPLEMENT_LABEL_LIMIT).optional(),
+  includeOffMarket: z.boolean().optional(),
+})
+
+const supplementLabelBatchSearchResultItemSchema = z.object({
+  query: z.string().min(1),
+  items: z.array(supplementLabelSearchItemSchema),
+})
+
+export const supplementLabelBatchSearchResultSchema = z.object({
+  source: z.literal('murph-data-api'),
+  queries: z.array(z.string().min(1)).min(1).max(MAX_SUPPLEMENT_LABEL_BATCH_QUERIES),
+  limit: z.number().int().positive().max(MAX_SUPPLEMENT_LABEL_LIMIT),
+  includeOffMarket: z.boolean(),
+  results: z.array(supplementLabelBatchSearchResultItemSchema),
+})
+
 const supplementLabelsApiResponseSchema = z.object({
   items: z.array(supplementLabelSearchItemSchema),
 })
@@ -40,9 +64,19 @@ const supplementLabelsApiItemResponseSchema = z.object({
     label: z.unknown().optional(),
   }),
 })
+const supplementLabelsBatchApiResponseSchema = z.object({
+  results: z.array(supplementLabelBatchSearchResultItemSchema),
+})
 
 export type SupplementLabelSearchInput = z.infer<typeof supplementLabelSearchInputSchema>
 export type SupplementLabelSearchResult = z.infer<typeof supplementLabelSearchResultSchema>
+export type SupplementLabelBatchSearchInput = z.infer<typeof supplementLabelBatchSearchInputSchema>
+export type SupplementLabelBatchSearchResult = z.infer<typeof supplementLabelBatchSearchResultSchema>
+
+type SupplementLabelsDependencies = {
+  env?: NodeJS.ProcessEnv
+  fetchImpl?: typeof fetch
+}
 
 type SupplementLabelLookupParam =
   | { key: 'id'; value: string }
@@ -51,22 +85,10 @@ type SupplementLabelLookupParam =
 
 export async function searchSupplementLabels(
   rawInput: SupplementLabelSearchInput,
-  dependencies: {
-    env?: NodeJS.ProcessEnv
-    fetchImpl?: typeof fetch
-  } = {},
+  dependencies: SupplementLabelsDependencies = {},
 ): Promise<SupplementLabelSearchResult> {
   const input = supplementLabelSearchInputSchema.parse(rawInput)
-  const env = dependencies.env ?? process.env
-  const fetchImpl = dependencies.fetchImpl ?? fetch
-  const hostedWebBaseUrl = readHostedWebBaseUrl(env)
-
-  if (!hostedWebBaseUrl) {
-    throw new VaultCliError(
-      'supplement_labels_api_unconfigured',
-      'Supplement label search is not configured. Set HOSTED_WEB_BASE_URL before using this command.',
-    )
-  }
+  const { env, fetchImpl, hostedWebBaseUrl } = resolveSupplementLabelsClient(dependencies)
 
   const limit = input.limit ?? DEFAULT_SUPPLEMENT_LABEL_LIMIT
   const includeOffMarket = input.includeOffMarket ?? false
@@ -87,6 +109,61 @@ export async function searchSupplementLabels(
     includeOffMarket,
     items: payload.items,
   })
+}
+
+export async function searchSupplementLabelsBatch(
+  rawInput: SupplementLabelBatchSearchInput,
+  dependencies: SupplementLabelsDependencies = {},
+): Promise<SupplementLabelBatchSearchResult> {
+  const input = supplementLabelBatchSearchInputSchema.parse(rawInput)
+  const { env, fetchImpl, hostedWebBaseUrl } = resolveSupplementLabelsClient(dependencies)
+
+  const limit = input.limit ?? DEFAULT_SUPPLEMENT_LABEL_LIMIT
+  const includeOffMarket = input.includeOffMarket ?? false
+  const url = new URL('/api/supplements', hostedWebBaseUrl)
+  const response = await fetchSupplementLabelsApi(fetchImpl, url, env, {
+    body: JSON.stringify({
+      queries: input.queries,
+      limit,
+      includeOffMarket,
+    }),
+    headers: {
+      'content-type': 'application/json',
+    },
+    method: 'POST',
+  })
+  const payload = await parseSupplementLabelsBatchApiPayload(response)
+
+  return supplementLabelBatchSearchResultSchema.parse({
+    source: 'murph-data-api',
+    queries: input.queries,
+    limit,
+    includeOffMarket,
+    results: payload.results,
+  })
+}
+
+function resolveSupplementLabelsClient(dependencies: SupplementLabelsDependencies): {
+  env: NodeJS.ProcessEnv
+  fetchImpl: typeof fetch
+  hostedWebBaseUrl: URL
+} {
+  const env = dependencies.env ?? process.env
+  const fetchImpl = dependencies.fetchImpl ?? fetch
+  const hostedWebBaseUrl = readHostedWebBaseUrl(env)
+
+  if (!hostedWebBaseUrl) {
+    throw new VaultCliError(
+      'supplement_labels_api_unconfigured',
+      'Supplement label search is not configured. Set HOSTED_WEB_BASE_URL before using this command.',
+    )
+  }
+
+  return {
+    env,
+    fetchImpl,
+    hostedWebBaseUrl,
+  }
 }
 
 function resolveSupplementLabelLookupParams(q: string): SupplementLabelLookupParam[] {
@@ -132,15 +209,20 @@ async function fetchSupplementLabelsApi(
   env: NodeJS.ProcessEnv,
   options: {
     allowNotFound?: boolean
+    body?: BodyInit
+    headers?: HeadersInit
+    method?: 'GET' | 'POST'
   } = {},
 ): Promise<Response> {
   let response: Response
 
   try {
+    const headers = new Headers(options.headers)
+    headers.set('accept', 'application/json')
     response = await fetchImpl(url, {
-      headers: {
-        accept: 'application/json',
-      },
+      body: options.body,
+      headers,
+      method: options.method ?? 'GET',
       signal: AbortSignal.timeout(resolveSupplementLabelTimeoutMs(env)),
     })
   } catch (error) {
@@ -208,6 +290,13 @@ async function parseSupplementLabelsApiPayload(
   return {
     items: [item],
   }
+}
+
+async function parseSupplementLabelsBatchApiPayload(
+  response: Response,
+): Promise<{ results: z.infer<typeof supplementLabelBatchSearchResultItemSchema>[] }> {
+  const payload: unknown = await response.json()
+  return supplementLabelsBatchApiResponseSchema.parse(payload)
 }
 
 function resolveSupplementLabelTimeoutMs(env: NodeJS.ProcessEnv): number {

@@ -64,6 +64,7 @@ const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const DEFAULT_TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file";
 const DEFAULT_WHATSAPP_API_BASE_URL = "https://graph.facebook.com";
 const HOSTED_DATA_API_SUPPLEMENTS_PATHNAME = "/api/supplements";
+const HOSTED_DATA_API_MAX_POST_BODY_BYTES = 8 * 1024;
 
 export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   artifactStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore,
@@ -562,7 +563,7 @@ async function maybeHandleHostedDataApiRequest(input: {
   if (pathMatch.pathnameSuffix !== HOSTED_DATA_API_SUPPLEMENTS_PATHNAME) {
     return null;
   }
-  if (input.request.method !== "GET") {
+  if (!["GET", "POST"].includes(input.request.method.toUpperCase())) {
     return disallowedProviderEgress();
   }
 
@@ -582,6 +583,13 @@ async function maybeHandleHostedDataApiRequest(input: {
     });
   }
 
+  const upstreamBody = input.request.method.toUpperCase() === "POST"
+    ? await readBoundedRequestBody(input.request, HOSTED_DATA_API_MAX_POST_BODY_BYTES)
+    : undefined;
+  if (upstreamBody === null) {
+    return new Response("Payload Too Large", { status: 413 });
+  }
+
   const token = readRequiredInterceptSecret(input.env.MURPH_DATA_API_KEY, "MURPH_DATA_API_KEY");
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("authorization", `Bearer ${token}`);
@@ -595,7 +603,10 @@ async function maybeHandleHostedDataApiRequest(input: {
       input.request,
       createProviderUpstreamUrl(input.url, pathMatch),
       headers,
-      { redirect: "manual" },
+      {
+        body: upstreamBody,
+        redirect: "manual",
+      },
     ),
     url: input.url,
   });
@@ -2749,6 +2760,8 @@ function stripHostedProviderUpstreamHeaders(headers: Headers): Headers {
   stripped.delete("cookie");
   stripped.delete("proxy-authorization");
   stripped.delete("x-api-key");
+  stripped.delete("x-murph-api-key");
+  stripped.delete("x-murph-data-api-key");
   stripped.delete("openai-organization");
   stripped.delete("openai-project");
   return stripped;
@@ -2775,18 +2788,68 @@ async function createHostedRunnerUpstreamRequest(
   url: URL,
   headers: Headers,
   options: {
+    body?: BodyInit | null;
     redirect?: RequestRedirect;
   } = {},
 ): Promise<Request> {
   return new Request(url, {
     body: source.method === "GET" || source.method === "HEAD"
       ? null
-      : await source.arrayBuffer(),
+      : options.body ?? await source.arrayBuffer(),
     headers,
     method: source.method,
     redirect: options.redirect ?? source.redirect,
     signal: source.signal,
   });
+}
+
+async function readBoundedRequestBody(
+  request: Request,
+  maxBytes: number,
+): Promise<ArrayBuffer | null> {
+  const contentLengthHeader = request.headers.get("content-length");
+  if (contentLengthHeader) {
+    const contentLength = Number(contentLengthHeader);
+    if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+      return null;
+    }
+  }
+
+  if (!request.body) {
+    return new ArrayBuffer(0);
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        return null;
+      }
+
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return body.buffer;
 }
 
 function readRequiredInterceptSecret(value: unknown, label: string): string {

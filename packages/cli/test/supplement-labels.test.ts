@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, expect, it, vi } from 'vitest'
 
-import { searchSupplementLabels } from '../src/supplement-labels.js'
+import {
+  searchSupplementLabels,
+  searchSupplementLabelsBatch,
+} from '../src/supplement-labels.js'
 
 describe('searchSupplementLabels', () => {
   it('requires the hosted web base URL', async () => {
@@ -405,5 +408,159 @@ describe('searchSupplementLabels', () => {
     )
 
     assert.deepEqual(result.items, [])
+  })
+})
+
+describe('searchSupplementLabelsBatch', () => {
+  it('requires the hosted web base URL', async () => {
+    await expect(
+      searchSupplementLabelsBatch(
+        {
+          queries: ['creatine'],
+        },
+        {
+          env: {},
+          fetchImpl: async () => new Response('unexpected'),
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'supplement_labels_api_unconfigured',
+    })
+  })
+
+  it('posts multiple hosted supplement label queries without local authorization headers', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      results: [
+        {
+          query: 'creatine',
+          items: [
+            {
+              id: '82118',
+              name: 'Creatine Monohydrate',
+              brand: null,
+              upc: null,
+              offMarket: false,
+            },
+          ],
+        },
+        {
+          query: 'blueprint bryan johnson',
+          items: [
+            {
+              id: 'dailymed:blueprint',
+              source: 'dailymed',
+              sourceId: 'blueprint',
+              name: 'Blueprint Essential Capsules',
+              brand: 'Blueprint',
+              upc: null,
+              offMarket: false,
+            },
+          ],
+        },
+      ],
+    }), {
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+      },
+      status: 200,
+    }))
+
+    const result = await searchSupplementLabelsBatch(
+      {
+        queries: [' creatine ', 'blueprint bryan johnson'],
+        limit: 3,
+        includeOffMarket: true,
+      },
+      {
+        env: {
+          HOSTED_WEB_BASE_URL: 'https://web.example.test',
+        },
+        fetchImpl: fetchMock,
+      },
+    )
+
+    assert.deepEqual(result, {
+      source: 'murph-data-api',
+      queries: ['creatine', 'blueprint bryan johnson'],
+      limit: 3,
+      includeOffMarket: true,
+      results: [
+        {
+          query: 'creatine',
+          items: [
+            {
+              id: '82118',
+              name: 'Creatine Monohydrate',
+              brand: null,
+              upc: null,
+              offMarket: false,
+            },
+          ],
+        },
+        {
+          query: 'blueprint bryan johnson',
+          items: [
+            {
+              id: 'dailymed:blueprint',
+              source: 'dailymed',
+              sourceId: 'blueprint',
+              name: 'Blueprint Essential Capsules',
+              brand: 'Blueprint',
+              upc: null,
+              offMarket: false,
+            },
+          ],
+        },
+      ],
+    })
+
+    assert.equal(fetchMock.mock.calls.length, 1)
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
+    assert.equal(requestUrl.origin, 'https://web.example.test')
+    assert.equal(requestUrl.pathname, '/api/supplements')
+    assert.equal(requestUrl.search, '')
+    const init = fetchMock.mock.calls[0]?.[1]
+    assert.equal(init?.method, 'POST')
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      queries: ['creatine', 'blueprint bryan johnson'],
+      limit: 3,
+      includeOffMarket: true,
+    })
+    const headers = init?.headers instanceof Headers
+      ? Object.fromEntries(init.headers.entries())
+      : init?.headers
+    assert.equal(
+      headers && !Array.isArray(headers)
+        ? Object.hasOwn(headers, 'authorization')
+        : false,
+      false,
+    )
+    assert.equal(
+      headers && !Array.isArray(headers)
+        ? headers['content-type']
+        : undefined,
+      'application/json',
+    )
+  })
+
+  it('rejects oversized batch queries before calling the hosted API', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('unexpected'))
+
+    await expect(
+      searchSupplementLabelsBatch(
+        {
+          queries: ['a'.repeat(257)],
+        },
+        {
+          env: {
+            HOSTED_WEB_BASE_URL: 'https://web.example.test',
+          },
+          fetchImpl: fetchMock,
+        },
+      ),
+    ).rejects.toMatchObject({
+      name: 'ZodError',
+    })
+    assert.equal(fetchMock.mock.calls.length, 0)
   })
 })

@@ -404,6 +404,98 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
+  it("injects data API authorization for hosted supplement batch lookups", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      results: [],
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      userId: string;
+    }) => createActiveRuntimeWriteFenceValidationResult(input));
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://web.example.test/api/supplements", {
+        body: JSON.stringify({
+          queries: ["creatine", "magnesium"],
+          limit: 3,
+        }),
+        headers: {
+          authorization: "Bearer user-supplied-token",
+          cookie: "session=user-supplied-cookie",
+          "content-type": "application/json",
+          "x-api-key": "user-supplied-api-key",
+          "x-murph-api-key": "user-supplied-murph-api-key",
+          "x-murph-data-api-key": "user-supplied-data-api-key",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        MURPH_DATA_API_KEY: "data-api-worker-secret",
+        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        validateActiveRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.method).toBe("POST");
+    expect(forwarded.url).toBe("https://web.example.test/api/supplements");
+    expect(forwarded.redirect).toBe("manual");
+    expect(forwarded.headers.get("authorization")).toBe("Bearer data-api-worker-secret");
+    expect(forwarded.headers.get("content-type")).toBe("application/json");
+    expect(forwarded.headers.has("cookie")).toBe(false);
+    expect(forwarded.headers.has("x-api-key")).toBe(false);
+    expect(forwarded.headers.has("x-murph-api-key")).toBe(false);
+    expect(forwarded.headers.has("x-murph-data-api-key")).toBe(false);
+    await expect(forwarded.json()).resolves.toEqual({
+      queries: ["creatine", "magnesium"],
+      limit: 3,
+    });
+  });
+
+  it("rejects oversized hosted supplement batch lookup bodies before upstream fetch", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      userId: string;
+    }) => createActiveRuntimeWriteFenceValidationResult(input));
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://web.example.test/api/supplements", {
+        body: JSON.stringify({
+          queries: ["a".repeat(9 * 1024)],
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        MURPH_DATA_API_KEY: "data-api-worker-secret",
+        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        validateActiveRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(413);
+    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("keeps other hosted web paths on open-internet passthrough", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
@@ -504,13 +596,13 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.get("authorization")).toBe("Bearer data-api-worker-secret");
   });
 
-  it("rejects non-GET hosted supplement label requests", async () => {
+  it("rejects non-GET-or-POST hosted supplement label requests", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await hostedRunnerIntercept(
       new Request("https://web.example.test/api/supplements", {
-        method: "POST",
+        method: "DELETE",
       }),
       createInterceptEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",

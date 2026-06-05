@@ -183,4 +183,202 @@ describe("supplements API route", () => {
       errorName: "Error",
     });
   });
+
+  it("batch searches labels with one authorized POST", async () => {
+    mocks.searchSupplements.mockImplementation(async (input: { q: string }) => [
+      {
+        id: input.q === "creatine" ? "82118" : "dailymed:magnesium",
+        name: input.q === "creatine" ? "Creatine Monohydrate" : "Magnesium Glycinate",
+        brand: null,
+        upc: null,
+        offMarket: false,
+      },
+    ]);
+
+    const response = await supplementsRoute.POST(
+      new Request("https://web.example.test/api/supplements", {
+        body: JSON.stringify({
+          queries: [" creatine ", "magnesium"],
+          limit: 99,
+          includeOffMarket: true,
+        }),
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.searchSupplements).toHaveBeenCalledTimes(2);
+    expect(mocks.searchSupplements).toHaveBeenNthCalledWith(1, {
+      q: "creatine",
+      limit: 50,
+      includeOffMarket: true,
+    });
+    expect(mocks.searchSupplements).toHaveBeenNthCalledWith(2, {
+      q: "magnesium",
+      limit: 50,
+      includeOffMarket: true,
+    });
+    await expect(response.json()).resolves.toEqual({
+      includeOffMarket: true,
+      limit: 50,
+      results: [
+        {
+          query: "creatine",
+          items: [
+            {
+              id: "82118",
+              name: "Creatine Monohydrate",
+              brand: null,
+              upc: null,
+              offMarket: false,
+            },
+          ],
+        },
+        {
+          query: "magnesium",
+          items: [
+            {
+              id: "dailymed:magnesium",
+              name: "Magnesium Glycinate",
+              brand: null,
+              upc: null,
+              offMarket: false,
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("fails closed when POST authorization is missing", async () => {
+    const response = await supplementsRoute.POST(
+      new Request("https://web.example.test/api/supplements", {
+        body: JSON.stringify({
+          queries: ["creatine"],
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: "unauthorized" });
+    expect(mocks.searchSupplements).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed POST JSON", async () => {
+    const response = await supplementsRoute.POST(
+      new Request("https://web.example.test/api/supplements", {
+        body: "{",
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "invalid_json" });
+    expect(mocks.searchSupplements).not.toHaveBeenCalled();
+  });
+
+  it("rejects empty or oversized POST query batches", async () => {
+    const emptyResponse = await supplementsRoute.POST(
+      new Request("https://web.example.test/api/supplements", {
+        body: JSON.stringify({
+          queries: [" "],
+        }),
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+    expect(emptyResponse.status).toBe(400);
+    await expect(emptyResponse.json()).resolves.toEqual({ error: "invalid_queries" });
+
+    const oversizedResponse = await supplementsRoute.POST(
+      new Request("https://web.example.test/api/supplements", {
+        body: JSON.stringify({
+          queries: Array.from({ length: 11 }, (_, index) => `query ${index}`),
+        }),
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+    expect(oversizedResponse.status).toBe(400);
+    await expect(oversizedResponse.json()).resolves.toEqual({ error: "invalid_queries" });
+    expect(mocks.searchSupplements).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized POST query strings and request bodies", async () => {
+    const longQueryResponse = await supplementsRoute.POST(
+      new Request("https://web.example.test/api/supplements", {
+        body: JSON.stringify({
+          queries: ["a".repeat(257)],
+        }),
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+    expect(longQueryResponse.status).toBe(400);
+    await expect(longQueryResponse.json()).resolves.toEqual({ error: "invalid_queries" });
+
+    const largeBodyResponse = await supplementsRoute.POST(
+      new Request("https://web.example.test/api/supplements", {
+        body: JSON.stringify({
+          queries: ["a".repeat(9 * 1024)],
+        }),
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+    expect(largeBodyResponse.status).toBe(413);
+    await expect(largeBodyResponse.json()).resolves.toEqual({ error: "payload_too_large" });
+    expect(mocks.searchSupplements).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe failure payload when a batch query throws", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.searchSupplements.mockRejectedValue(new Error("database unavailable"));
+
+    const response = await supplementsRoute.POST(
+      new Request("https://web.example.test/api/supplements", {
+        body: JSON.stringify({
+          queries: ["creatine"],
+        }),
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "supplements_api_failed",
+    });
+    expect(consoleError).toHaveBeenCalledWith("supplements_api_failed", {
+      errorName: "Error",
+    });
+  });
 });
