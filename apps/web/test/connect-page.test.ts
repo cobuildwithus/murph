@@ -1031,7 +1031,7 @@ test("ConnectPage keeps configured sources visible but renders sign-in actions w
   expectSettingResponseNotLoaded();
 });
 
-test("ConnectSourcesGrid opens auth for a pending device connect intent while signed out", async () => {
+test("ConnectSourcesGrid opens auth for a pending device connect intent while signed out without a pre-auth source target", async () => {
   const claim = "dc_12345678901234567890123456789012";
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);
@@ -1046,7 +1046,6 @@ test("ConnectSourcesGrid opens auth for a pending device connect intent while si
         authenticated: false,
         sources: [
           {
-            connectTarget: "whoop",
             description: "Recovery, strain, sleep, and heart rate.",
             id: "whoop",
             logo: {
@@ -1245,7 +1244,6 @@ test("ConnectSourcesGrid redeems an initial device connect intent through the ap
   const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
     sources: [
       {
-        connectTarget: "whoop",
         description: "Recovery, strain, sleep, and heart rate.",
         id: "whoop",
         logo: {
@@ -1416,7 +1414,6 @@ test("ConnectSourcesGrid preserves a device connect intent after consent accepta
     },
     sources: [
       {
-        connectTarget: "whoop",
         description: "Recovery, strain, sleep, and heart rate.",
         id: "whoop",
         logo: {

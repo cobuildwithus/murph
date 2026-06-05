@@ -183,7 +183,7 @@ export function ConnectSourcesGrid({
     source: ConnectSource,
     options: { intentClaim?: string } = {},
   ) => {
-    if (!source.connectTarget || !authenticated) {
+    if (!authenticated || (!options.intentClaim && !source.connectTarget)) {
       return;
     }
 
@@ -797,16 +797,6 @@ function resolveInitialConnectIntentPresentation(
     };
   }
 
-  if (!source.connectTarget) {
-    return {
-      actionError: {
-        message: "This source is not available to connect right now.",
-        sourceId: source.id,
-      },
-      notice: null,
-    };
-  }
-
   if (source.connected && !source.requiresReconnect) {
     return {
       actionError: null,
@@ -856,7 +846,7 @@ function resolveConnectIntentStartSource(
   sources: readonly ConnectSource[],
 ): ConnectSource | null {
   const source = findInitialConnectIntentSource(intent, sources);
-  if (!source || !source.connectTarget || (source.connected && !source.requiresReconnect)) {
+  if (!source || (source.connected && !source.requiresReconnect)) {
     return null;
   }
 
