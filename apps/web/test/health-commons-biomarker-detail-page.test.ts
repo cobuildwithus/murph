@@ -3,11 +3,6 @@ import path from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  healthCommonsCatalogSchema,
-  type HealthCommonsCatalog,
-} from "@murphai/contracts";
-import healthCommonsCatalogJson from "@murphai/health-commons/generated/catalog.json";
 
 import { BiomarkerAboutGrid } from "@/src/components/biomarkers/biomarker-detail/biomarker-about-grid";
 import {
@@ -58,9 +53,12 @@ import BiomarkerDetailLayout, {
 } from "../app/(dashboard)/biomarkers/[biomarkerId]/layout";
 import { generateMetadata } from "../app/(dashboard)/biomarkers/[biomarkerId]/page";
 import { createHealthCommonsCatalogReader } from "@murphai/health-commons/runtime";
+import {
+  createHealthCommonsRouteBundleFixtureCatalog,
+} from "./health-commons-fixture-catalog";
 
-function createFixtureCatalog(): HealthCommonsCatalog {
-  return structuredClone(healthCommonsCatalogSchema.parse(healthCommonsCatalogJson));
+function createFixtureCatalog() {
+  return createHealthCommonsRouteBundleFixtureCatalog();
 }
 
 const repoRoot = path.resolve(import.meta.dirname, "../../..");

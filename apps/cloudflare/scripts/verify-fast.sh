@@ -113,7 +113,7 @@ wait_for_background_jobs() {
 }
 
 if [[ "${MURPH_HEALTH_COMMONS_GENERATED_PREPARED:-0}" == "1" ]]; then
-  echo "[apps/cloudflare verify] skipping health commons generated catalog; already prepared." >&2
+  echo "[apps/cloudflare verify] skipping health commons generated protocol artifacts; already prepared." >&2
 else
   pnpm --dir "$repo_root" health-commons:generate
 fi

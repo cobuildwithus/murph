@@ -2,11 +2,6 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 import {
-  healthCommonsCatalogSchema,
-  type HealthCommonsCatalog,
-} from "@murphai/contracts";
-import healthCommonsCatalogJson from "@murphai/health-commons/generated/catalog.json";
-import {
   createHealthCommonsCatalogReader,
 } from "@murphai/health-commons/runtime";
 import {
@@ -30,6 +25,9 @@ import {
 import {
   loadGeneratedExperimentProjection,
 } from "@/src/lib/health-commons/generated-experiment-artifacts";
+import {
+  createHealthCommonsRouteBundleFixtureCatalog,
+} from "./health-commons-fixture-catalog";
 
 const SUPPLEMENT_PROTOCOL_FIXTURES = [
   {
@@ -723,6 +721,6 @@ function describeSourceKeyResidue(label: string, text: string): string | null {
   return `${label}: ${excerpt}`;
 }
 
-function createFixtureCatalog(): HealthCommonsCatalog {
-  return structuredClone(healthCommonsCatalogSchema.parse(healthCommonsCatalogJson));
+function createFixtureCatalog() {
+  return createHealthCommonsRouteBundleFixtureCatalog();
 }

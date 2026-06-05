@@ -20,6 +20,11 @@ const execFileAsync = promisify(execFile);
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const temporaryDirectories: string[] = [];
 const finnishDrySaunaProtocolKey = "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
+const healthCommonsRuntimeArtifactNames = [
+  "protocol-index.json",
+  "protocol-run-specs.json",
+  "protocol-family-graph.json",
+] as const;
 
 afterEach(async () => {
   await Promise.all(
@@ -364,7 +369,7 @@ describe("runner bundle runtime artifact staging", () => {
     ).rejects.toThrow("Failed to pack @murphai/runtime-state.");
   });
 
-  it("packs the Health Commons runtime and generated catalog for hosted runner installs", async () => {
+  it("packs the Health Commons runtime and compact protocol artifacts for hosted runner installs", async () => {
     const tarballsDir = await mkdtemp(path.join(tmpdir(), "murph-runner-pack-"));
 
     temporaryDirectories.push(tarballsDir);
@@ -396,7 +401,10 @@ describe("runner bundle runtime artifact staging", () => {
 
     expect(entries).toContain("package/dist/index.js");
     expect(entries).toContain("package/dist/runtime.js");
-    expect(entries).toContain("package/generated/catalog.json");
+    for (const artifactName of healthCommonsRuntimeArtifactNames) {
+      expect(entries).toContain(`package/generated/${artifactName}`);
+    }
+    expect(entries).not.toContain("package/generated/catalog.json");
     expect(entries).toContain("package/package.json");
     expect(entries).not.toContain("package/generated/web/routes/index.json");
     expect(entries.some((entry) => entry.startsWith("package/content/"))).toBe(false);
@@ -408,19 +416,45 @@ describe("runner bundle runtime artifact staging", () => {
       healthCommonsTarball,
       "-C",
       extractDir,
-      "package/generated/catalog.json",
+      "package/generated/protocol-index.json",
+      "package/generated/protocol-run-specs.json",
+      "package/generated/protocol-family-graph.json",
     ]);
-    const catalogRaw = await readFile(
-      path.join(extractDir, "package", "generated", "catalog.json"),
+    const protocolIndexRaw = await readFile(
+      path.join(extractDir, "package", "generated", "protocol-index.json"),
       "utf8",
     );
-    const catalog: unknown = JSON.parse(catalogRaw);
+    const protocolRunSpecsRaw = await readFile(
+      path.join(extractDir, "package", "generated", "protocol-run-specs.json"),
+      "utf8",
+    );
+    const protocolFamilyGraphRaw = await readFile(
+      path.join(extractDir, "package", "generated", "protocol-family-graph.json"),
+      "utf8",
+    );
+    const protocolIndex: unknown = JSON.parse(protocolIndexRaw);
+    const protocolRunSpecs: unknown = JSON.parse(protocolRunSpecsRaw);
+    const protocolFamilyGraph: unknown = JSON.parse(protocolFamilyGraphRaw);
 
-    expect(findCatalogEntity(catalog, finnishDrySaunaProtocolKey)).toMatchObject({
+    expect(findProtocolArtifactEntry(protocolIndex, finnishDrySaunaProtocolKey)).toMatchObject({
       entityType: "protocol_variant",
       key: finnishDrySaunaProtocolKey,
       slug: "protocols/dry-sauna/murph-finnish-standard-3x-week",
       title: "Finnish Dry Sauna",
+    });
+    expect(findProtocolArtifactEntry(protocolRunSpecs, finnishDrySaunaProtocolKey)).toMatchObject({
+      protocol: expect.objectContaining({
+        doseSignature: expect.any(String),
+      }),
+      testPlans: expect.arrayContaining([
+        expect.objectContaining({
+          planId: expect.any(String),
+        }),
+      ]),
+    });
+    expect(findProtocolFamilyGraphEdge(protocolFamilyGraph, finnishDrySaunaProtocolKey)).toMatchObject({
+      targetKey: "experiment_family:dry-sauna",
+      type: "parent_family",
     });
   });
 
@@ -493,7 +527,7 @@ describe("runner bundle runtime artifact staging", () => {
     );
     await writeFile(path.join(healthCommonsDir, "dist", "index.js"), "export const ok = true;\n", "utf8");
     await writeFile(path.join(healthCommonsDir, "dist", "runtime.js"), "export const runtime = true;\n", "utf8");
-    await writeFile(path.join(healthCommonsDir, "generated", "catalog.json"), "{\"entities\":[]}\n", "utf8");
+    await writeMinimalHealthCommonsRuntimeArtifacts(path.join(healthCommonsDir, "generated"));
     await writeFile(path.join(healthCommonsDir, "README.md"), "readme\n", "utf8");
     await writeFile(path.join(healthCommonsDir, "LICENSE"), "license\n", "utf8");
 
@@ -719,14 +753,59 @@ describe("runner bundle runtime artifact staging", () => {
   });
 });
 
-function findCatalogEntity(catalog: unknown, key: string): Record<string, unknown> | null {
-  if (!isRecord(catalog) || !Array.isArray(catalog.entities)) {
+async function writeMinimalHealthCommonsRuntimeArtifacts(generatedDir: string): Promise<void> {
+  await mkdir(generatedDir, { recursive: true });
+  await writeFile(
+    path.join(generatedDir, "protocol-index.json"),
+    `${JSON.stringify({
+      catalogHash: "sha256:test",
+      protocols: [],
+      schemaVersion: "murph.commons.protocol-index.v1",
+    })}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(generatedDir, "protocol-run-specs.json"),
+    `${JSON.stringify({
+      catalogHash: "sha256:test",
+      protocols: [],
+      schemaVersion: "murph.commons.protocol-run-specs.v1",
+    })}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(generatedDir, "protocol-family-graph.json"),
+    `${JSON.stringify({
+      catalogHash: "sha256:test",
+      edges: [],
+      families: [],
+      protocols: [],
+      schemaVersion: "murph.commons.protocol-family-graph.v1",
+    })}\n`,
+    "utf8",
+  );
+}
+
+function findProtocolArtifactEntry(artifact: unknown, key: string): Record<string, unknown> | null {
+  if (!isRecord(artifact) || !Array.isArray(artifact.protocols)) {
     return null;
   }
 
-  return catalog.entities.find((entity) =>
+  return artifact.protocols.find((entity) =>
     isRecord(entity) &&
       entity.key === key
+  ) ?? null;
+}
+
+function findProtocolFamilyGraphEdge(artifact: unknown, sourceKey: string): Record<string, unknown> | null {
+  if (!isRecord(artifact) || !Array.isArray(artifact.edges)) {
+    return null;
+  }
+
+  return artifact.edges.find((edge) =>
+    isRecord(edge) &&
+      edge.sourceKey === sourceKey &&
+      edge.type === "parent_family"
   ) ?? null;
 }
 
