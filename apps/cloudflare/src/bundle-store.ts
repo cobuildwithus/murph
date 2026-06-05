@@ -25,7 +25,7 @@ import {
 } from "./crypto.js";
 
 export interface R2BucketLike extends EncryptedR2BucketLike {
-  delete?(key: string): Promise<void>;
+  delete?(key: string | string[]): Promise<void>;
   head?(key: string): Promise<Omit<EncryptedR2ObjectBodyLike, "arrayBuffer" | "body"> | null>;
   list?(input: {
     cursor?: string;
