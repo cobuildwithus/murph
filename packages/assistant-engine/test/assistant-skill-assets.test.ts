@@ -288,13 +288,22 @@ describe('assistant skill assets', () => {
       'and add a quick note that they can also send a picture of the supplement bottles or labels if that is easier',
     )
     expect(raw).toContain(
-      'When their supplement answer will require web searches or other product-ingredient lookups',
+      'When their supplement answer will require ingredient lookup',
     )
     expect(raw).toContain(
-      'call `send_progress_update` once before the first search or lookup',
+      'call `send_progress_update` once before the first lookup',
     )
     expect(raw).toContain(
-      'Do not use it for a quick memory save or a single follow-up question',
+      'Default to `vault-cli supplement search-labels` for one supplement or `vault-cli supplement search-labels-batch` for several',
+    )
+    expect(raw).toContain(
+      'the label database covers many supplements but is not exhaustive',
+    )
+    expect(raw).toContain(
+      'fall back to web search for products or ingredients it misses',
+    )
+    expect(raw).toContain(
+      'Do not use a progress update for a quick memory save or a single follow-up question',
     )
     expect(raw).toContain(
       'Make clear that PDFs or pasted results are welcome whenever the user wants to share them',

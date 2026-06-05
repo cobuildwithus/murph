@@ -273,7 +273,7 @@ describe('assistant consumption lookup guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'For foods, drinks, menu items, supplements, pills, powders, and other consumed products',
+      'For foods, drinks, menu items, and other non-supplement consumed products',
     )
     expect(prompt).toContain(
       'use web lookup before writing when the item is identifiable',
@@ -282,7 +282,19 @@ describe('assistant consumption lookup guidance', () => {
       'local context or attachments do not provide key facts',
     )
     expect(prompt).toContain(
-      'Prefer official labels, manufacturer pages, restaurant/menu nutrition pages, or other primary sources',
+      'For supplements, pills, powders, and supplement-like consumed products',
+    )
+    expect(prompt).toContain(
+      'default to `vault-cli supplement search-labels` for one item or `vault-cli supplement search-labels-batch` for several before web lookup',
+    )
+    expect(prompt).toContain(
+      'The hosted label database covers many supplements but is not exhaustive',
+    )
+    expect(prompt).toContain(
+      'if it misses the product or brand, or lacks needed ingredients, fall back to web lookup',
+    )
+    expect(prompt).toContain(
+      'For any product lookup, prefer official labels, manufacturer pages, restaurant/menu nutrition pages, or other primary sources',
     )
     expect(prompt).toContain(
       'serving size, ingredients, active compounds, dose, calories, protein, carbs, fat, fiber, caffeine, alcohol, sodium, sugar, allergens, and warnings',
@@ -539,7 +551,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '8d71bdbc0acda2e97f66a17d61e95a15bf8fe93dc80650ed040b1e3607a6bc0e',
+      '86ebdff65a5fb69bfbba0c3ae3a6c91109618147c0fc6e1b3d54a158aaea532f',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
