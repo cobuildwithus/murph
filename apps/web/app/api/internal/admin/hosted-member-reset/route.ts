@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const RESET_ADMIN_CONTROL_TIMEOUT_MS = 120_000;
+const RESET_ADMIN_CONTROL_TIMEOUT_MS = 240_000;
 
 interface ResetRouteBody {
   confirmEnvironment?: string;

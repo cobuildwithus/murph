@@ -148,7 +148,7 @@ describe("hosted member reset admin route", () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(observedTimeout).toBe("120000");
+    expect(observedTimeout).toBe("240000");
     expect(process.env.HOSTED_EXECUTION_CONTROL_TIMEOUT_MS).toBeUndefined();
   });
 
