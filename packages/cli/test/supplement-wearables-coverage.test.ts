@@ -291,6 +291,56 @@ test('supplement list handler exercises the default limit fallback directly', as
   assert.equal(listSpy.mock.calls[0]?.[0].limit, 50)
 })
 
+test('supplement search-labels calls the hosted data API without local credentials', async () => {
+  const previousHostedWebBaseUrl = process.env.HOSTED_WEB_BASE_URL
+  process.env.HOSTED_WEB_BASE_URL = 'https://web.example.test'
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+    items: [
+      {
+        id: '82118',
+        name: 'Creatine Monohydrate',
+        brand: null,
+        upc: null,
+        offMarket: false,
+      },
+    ],
+  }), {
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+    },
+    status: 200,
+  }))
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    const cli = createCoverageCli()
+    const result = await runInProcessJsonCli<{
+      source: string
+      items: Array<{ id: string }>
+    }>(cli, [
+      'supplement',
+      'search-labels',
+      'creatine',
+      '--limit',
+      '1',
+    ])
+
+    assert.equal(result.exitCode, null)
+    assert.equal(requireData(result.envelope).source, 'murph-data-api')
+    assert.equal(requireData(result.envelope).items[0]?.id, '82118')
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
+    assert.equal(requestUrl.href, 'https://web.example.test/api/supplements?q=creatine&limit=1')
+    const init = fetchMock.mock.calls[0]?.[1]
+    assert.equal(init?.headers && 'authorization' in init.headers, false)
+  } finally {
+    if (previousHostedWebBaseUrl === undefined) {
+      delete process.env.HOSTED_WEB_BASE_URL
+    } else {
+      process.env.HOSTED_WEB_BASE_URL = previousHostedWebBaseUrl
+    }
+  }
+})
+
 test('wearables commands exercise day and list surfaces with provider normalization in-process', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-cli-wearables-coverage-',

@@ -957,6 +957,30 @@ test('route estimate schema exposes the Mapbox-backed routing inputs', async () 
   )
 })
 
+test('supplement search-labels schema exposes hosted label lookup inputs', async () => {
+  const schema = JSON.parse(
+    await runSourceCliRaw(['supplement', 'search-labels', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, { description?: string }>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, { description?: string }>
+    }
+  }
+
+  assert.deepEqual(schema.args.required, ['query'])
+  assert.match(
+    String(schema.args.properties.query?.description ?? ''),
+    /Supplement product, brand, ingredient, DSLD id, or UPC/u,
+  )
+  assert.match(
+    String(schema.options.properties.limit?.description ?? ''),
+    /Maximum label matches/u,
+  )
+})
+
 test('model schema explains preset-gated non-interactive updates', async () => {
   const schema = JSON.parse(
     await runSourceCliRaw(['model', '--schema', '--format', 'json']),

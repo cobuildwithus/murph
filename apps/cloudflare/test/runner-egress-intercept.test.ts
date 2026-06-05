@@ -347,6 +347,181 @@ describe("hostedRunnerIntercept", () => {
     expect(serializedLogs).not.toContain("Method not allowed.");
   });
 
+  it("injects data API authorization for hosted supplement label lookups", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [],
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      userId: string;
+    }) => createActiveRuntimeWriteFenceValidationResult(input));
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://web.example.test/api/supplements?q=creatine&limit=3", {
+        headers: {
+          authorization: "Bearer user-supplied-token",
+          cookie: "session=user-supplied-cookie",
+          "x-api-key": "user-supplied-api-key",
+        },
+        method: "GET",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        MURPH_DATA_API_KEY: "data-api-worker-secret",
+        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        validateActiveRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe("https://web.example.test/api/supplements?q=creatine&limit=3");
+    expect(forwarded.headers.get("authorization")).toBe("Bearer data-api-worker-secret");
+    expect(forwarded.headers.has("cookie")).toBe(false);
+    expect(forwarded.headers.has("x-api-key")).toBe(false);
+    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          host: "web.example.test",
+          providerKind: "murph_data_api",
+          providerRequestAuthorized: true,
+          writeFenceValidationMode: "active_user_fence",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+  });
+
+  it("keeps other hosted web paths on open-internet passthrough", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      userId: string;
+    }) => createActiveRuntimeWriteFenceValidationResult(input));
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://web.example.test/api/other", {
+        headers: {
+          authorization: "Bearer user-supplied-token",
+        },
+        method: "GET",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        MURPH_DATA_API_KEY: "data-api-worker-secret",
+        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        validateActiveRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe("https://web.example.test/api/other");
+    expect(forwarded.headers.get("authorization")).toBe("Bearer user-supplied-token");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          host: "web.example.test",
+          policy: "open_internet_passthrough",
+        }),
+        message: "Hosted runner open-internet passthrough forwarded outbound request.",
+      }),
+    );
+  });
+
+  it("rejects data API injection when the container has no active runtime", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      userId: string;
+    }) => createActiveRuntimeWriteFenceValidationResult(input));
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://web.example.test/api/supplements?q=creatine", {
+        method: "GET",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        MURPH_DATA_API_KEY: "data-api-worker-secret",
+        readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+        validateActiveRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("matches hosted supplement label lookups through the local runner host alias", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [],
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      userId: string;
+    }) => createActiveRuntimeWriteFenceValidationResult(input));
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://host.docker.internal:3000/api/supplements?q=magnesium", {
+        method: "GET",
+      }),
+      createInterceptEnv({
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
+        HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
+        MURPH_DATA_API_KEY: "data-api-worker-secret",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        validateActiveRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe("http://host.docker.internal:3000/api/supplements?q=magnesium");
+    expect(forwarded.headers.get("authorization")).toBe("Bearer data-api-worker-secret");
+  });
+
+  it("rejects non-GET hosted supplement label requests", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://web.example.test/api/supplements", {
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        MURPH_DATA_API_KEY: "data-api-worker-secret",
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("injects OpenAI authorization with a valid runtime write fence and strips authority headers", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
@@ -4073,9 +4248,11 @@ describe("hostedRunnerIntercept", () => {
 function createInterceptEnv(input: {
   HOSTED_EXECUTION_RUNNER_HOST_ALIAS?: string;
   HOSTED_LOG_FINGERPRINT_SECRET?: string;
+  HOSTED_WEB_BASE_URL?: string;
   LINQ_API_BASE_URL?: string;
   LINQ_API_TOKEN?: string;
   MAPBOX_ACCESS_TOKEN?: string;
+  MURPH_DATA_API_KEY?: string;
   MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED?: string;
   MURPH_HOSTED_LOCAL_PROFILE?: string;
   OPENAI_API_KEY?: string;
@@ -4104,9 +4281,13 @@ function createInterceptEnv(input: {
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
     HOSTED_EXECUTION_RUNNER_HOST_ALIAS: input.HOSTED_EXECUTION_RUNNER_HOST_ALIAS,
     HOSTED_LOG_FINGERPRINT_SECRET: input.HOSTED_LOG_FINGERPRINT_SECRET,
+    ...(input.HOSTED_WEB_BASE_URL === undefined
+      ? {}
+      : { HOSTED_WEB_BASE_URL: input.HOSTED_WEB_BASE_URL }),
     LINQ_API_BASE_URL: input.LINQ_API_BASE_URL,
     LINQ_API_TOKEN: input.LINQ_API_TOKEN,
     MAPBOX_ACCESS_TOKEN: input.MAPBOX_ACCESS_TOKEN,
+    MURPH_DATA_API_KEY: input.MURPH_DATA_API_KEY,
     MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED:
       input.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED,
     MURPH_HOSTED_LOCAL_PROFILE: input.MURPH_HOSTED_LOCAL_PROFILE,

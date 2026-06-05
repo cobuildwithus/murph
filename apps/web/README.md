@@ -170,6 +170,8 @@ Optional but recommended:
 - `DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER`
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`
 - `HOSTED_WEB_BASE_URL`
+- `MURPH_SUPPLEMENT_DB_URL` for the separate supplements label Postgres database read by `/api/supplements`
+- `MURPH_DATA_API_KEY` for server-to-server data API auth on `/api/supplements`; hosted Cloudflare owns the same secret for Worker-side injection and the key must not be exposed to browsers or runner env
 - `CRON_SECRET`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`

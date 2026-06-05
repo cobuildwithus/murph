@@ -416,6 +416,8 @@ describe("buildHostedRunnerContainerEnv", () => {
       {
         LINQ_API_TOKEN: "linq-user",
         MAPBOX_ACCESS_TOKEN: "mapbox-user",
+        MURPH_DATA_API_KEY: "data-api-user",
+        HOSTED_WEB_BASE_URL: "https://evil.example.test",
         OPENAI_API_KEY: "openai-user",
         TELEGRAM_BOT_TOKEN: "telegram-user",
         WHATSAPP_ACCESS_TOKEN: "whatsapp-user",
@@ -425,6 +427,8 @@ describe("buildHostedRunnerContainerEnv", () => {
         HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
           "LINQ_API_TOKEN",
           "MAPBOX_ACCESS_TOKEN",
+          "MURPH_DATA_API_KEY",
+          "HOSTED_WEB_BASE_URL",
           "OPENAI_API_KEY",
           "TELEGRAM_BOT_TOKEN",
           "WHATSAPP_ACCESS_TOKEN",
@@ -1119,6 +1123,7 @@ describe("hosted deploy automation device-sync surface", () => {
       expect.arrayContaining([
         "LINQ_API_TOKEN",
         "MAPBOX_ACCESS_TOKEN",
+        "MURPH_DATA_API_KEY",
         "TELEGRAM_BOT_TOKEN",
         "WHATSAPP_ACCESS_TOKEN",
         "WHATSAPP_PHONE_NUMBER_ID",

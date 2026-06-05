@@ -182,6 +182,7 @@ export interface WorkerEnvironmentContract<
   LINQ_API_BASE_URL?: string;
   LINQ_API_TOKEN?: string;
   MAPBOX_ACCESS_TOKEN?: string;
+  MURPH_DATA_API_KEY?: string;
   RUNNER_CONTAINER?: WorkerRunnerContainerNamespaceLike;
   TELEGRAM_API_BASE_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;

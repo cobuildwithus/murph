@@ -211,6 +211,12 @@ Hosted usage-reporting secrets:
   model-capable demand before signaling Temporal, and runtime/provider spend
   enforcement still happens before model calls.
 
+Hosted web data API secrets:
+
+- `MURPH_DATA_API_KEY` when hosted runner supplement-label lookup should call
+  `${HOSTED_WEB_BASE_URL}/api/supplements`. This secret is injected by the
+  Worker intercept and must not be forwarded into the hosted runtime env.
+
 Opt-in execution integrations:
 
 - `HOSTED_EMAIL_SIGNING_SECRET`

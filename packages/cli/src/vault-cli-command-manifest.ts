@@ -86,6 +86,7 @@ import {
   registerMurphAgeCommands,
 } from './commands/murph-age.js'
 import { mapboxRouteEstimateResultSchema } from './mapbox-route.js'
+import { supplementLabelSearchResultSchema } from './supplement-labels.js'
 import {
   knowledgeGetResultSchema as knowledgeShowResultSchema,
   knowledgeIndexRebuildResultSchema,
@@ -1428,6 +1429,11 @@ export const vaultCliCommandDescriptors = [
         path: ['supplement', 'show'],
         description: 'Show one supplement by canonical id or slug.',
         output: healthShowResultSchema,
+      },
+      {
+        path: ['supplement', 'search-labels'],
+        description: 'Search the hosted supplement label database without writing records.',
+        output: supplementLabelSearchResultSchema,
       },
       {
         path: ['supplement', 'save'],

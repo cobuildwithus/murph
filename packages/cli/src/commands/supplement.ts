@@ -14,6 +14,10 @@ import {
   pathSchema,
   savedEntitySnapshotSchema,
 } from "@murphai/operator-config/vault-cli-contracts"
+import {
+  searchSupplementLabels,
+  supplementLabelSearchResultSchema,
+} from "../supplement-labels.js"
 import type { VaultServices } from "@murphai/vault-usecases"
 
 const supplementSlugSchema = z
@@ -162,6 +166,49 @@ export function registerSupplementCommands(
         id: context.args.id,
         requestId: requestIdFromOptions(context.options),
         vault: context.options.vault,
+      })
+    },
+  })
+
+  supplement.command('search-labels', {
+    args: z.object({
+      query: z
+        .string()
+        .min(1)
+        .describe('Supplement product, brand, ingredient, DSLD id, or UPC search text.'),
+    }),
+    description: 'Search the hosted supplement label database without writing records.',
+    examples: [
+      {
+        args: {
+          query: 'creatine',
+        },
+        description: 'Search supplement labels by product or ingredient text.',
+        options: {
+          limit: 10,
+        },
+      },
+    ],
+    hint: 'Hosted Murph authorizes this lookup through the Worker data API intercept.',
+    options: z.object({
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(50)
+        .optional()
+        .describe('Maximum label matches to return. Defaults to 10.'),
+      includeOffMarket: z
+        .boolean()
+        .optional()
+        .describe('Include labels marked off-market.'),
+    }),
+    output: supplementLabelSearchResultSchema,
+    async run(context) {
+      return await searchSupplementLabels({
+        includeOffMarket: context.options.includeOffMarket,
+        limit: context.options.limit,
+        q: context.args.query,
       })
     },
   })

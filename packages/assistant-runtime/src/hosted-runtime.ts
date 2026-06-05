@@ -27,6 +27,7 @@ import {
   type AssistantInputReplyTarget,
 } from "@murphai/assistant-engine";
 import {
+  buildHostedRuntimeDataApiEnv,
   normalizeHostedAssistantRuntimeConfig,
   projectHostedRuntimeTrustStoreEnv,
 } from "./hosted-runtime/environment.ts";
@@ -653,6 +654,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const baseRuntimeEnv = {
       ...projectHostedRuntimeTrustStoreEnv(process.env),
       ...guardedRuntime.forwardedEnv,
+      ...buildHostedRuntimeDataApiEnv({
+        platformEnv: guardedRuntime.platformEnv,
+      }),
       ...guardedRuntime.userEnv,
       ...hostedCliBridge.env,
     };

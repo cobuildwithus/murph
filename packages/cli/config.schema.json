@@ -12178,6 +12178,28 @@
                     }
                   }
                 },
+                "search-labels": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "limit": {
+                          "description": "Maximum label matches to return. Defaults to 10.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 50
+                        },
+                        "includeOffMarket": {
+                          "description": "Include labels marked off-market.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                },
                 "stop": {
                   "type": "object",
                   "additionalProperties": false,

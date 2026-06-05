@@ -1,0 +1,180 @@
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  getSupplementById: vi.fn(),
+  getSupplementByUpc: vi.fn(),
+  searchSupplements: vi.fn(),
+}));
+
+vi.mock("@/src/lib/supplements", () => ({
+  getSupplementById: mocks.getSupplementById,
+  getSupplementByUpc: mocks.getSupplementByUpc,
+  searchSupplements: mocks.searchSupplements,
+}));
+
+type SupplementsRouteModule = typeof import("../app/api/supplements/route");
+
+let supplementsRoute: SupplementsRouteModule;
+
+describe("supplements API route", () => {
+  beforeAll(async () => {
+    supplementsRoute = await import("../app/api/supplements/route");
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.MURPH_DATA_API_KEY = "test-data-api-key";
+  });
+
+  it("fails closed when the bearer token is missing", async () => {
+    const response = await supplementsRoute.GET(
+      new Request("https://web.example.test/api/supplements?q=creatine"),
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: "unauthorized" });
+    expect(mocks.searchSupplements).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the route key is not configured", async () => {
+    delete process.env.MURPH_DATA_API_KEY;
+
+    const response = await supplementsRoute.GET(
+      new Request("https://web.example.test/api/supplements?q=creatine", {
+        headers: {
+          authorization: "Bearer test-data-api-key",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "supplements_api_unconfigured",
+    });
+  });
+
+  it("searches labels with bounded limits", async () => {
+    mocks.searchSupplements.mockResolvedValue([
+      {
+        id: "82118",
+        name: "Creatine Monohydrate",
+        brand: "Example Brand",
+        upc: "123456789012",
+        offMarket: false,
+      },
+    ]);
+
+    const response = await supplementsRoute.GET(
+      new Request(
+        "https://web.example.test/api/supplements?q=creatine&limit=99&includeOffMarket=true",
+        {
+          headers: {
+            authorization: "Bearer test-data-api-key",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.searchSupplements).toHaveBeenCalledWith({
+      q: "creatine",
+      limit: 50,
+      includeOffMarket: true,
+    });
+    await expect(response.json()).resolves.toEqual({
+      items: [
+        {
+          id: "82118",
+          name: "Creatine Monohydrate",
+          brand: "Example Brand",
+          upc: "123456789012",
+          offMarket: false,
+        },
+      ],
+    });
+  });
+
+  it("returns an empty search without touching the database when q is blank", async () => {
+    const response = await supplementsRoute.GET(
+      new Request("https://web.example.test/api/supplements?q=%20", {
+        headers: {
+          authorization: "Bearer test-data-api-key",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ items: [] });
+    expect(mocks.searchSupplements).not.toHaveBeenCalled();
+  });
+
+  it("fetches a label by DSLD id before search parameters", async () => {
+    mocks.getSupplementById.mockResolvedValue({
+      id: "82118",
+      name: "Creatine Monohydrate",
+      brand: null,
+      upc: null,
+      offMarket: false,
+      label: { id: 82118 },
+    });
+
+    const response = await supplementsRoute.GET(
+      new Request("https://web.example.test/api/supplements?id=82118&q=ignored", {
+        headers: {
+          authorization: "Bearer test-data-api-key",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getSupplementById).toHaveBeenCalledWith("82118");
+    expect(mocks.searchSupplements).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      item: {
+        id: "82118",
+        name: "Creatine Monohydrate",
+        brand: null,
+        upc: null,
+        offMarket: false,
+        label: { id: 82118 },
+      },
+    });
+  });
+
+  it("fetches a label by UPC and returns not_found for misses", async () => {
+    mocks.getSupplementByUpc.mockResolvedValue(null);
+
+    const response = await supplementsRoute.GET(
+      new Request("https://web.example.test/api/supplements?upc=123-456", {
+        headers: {
+          authorization: "Bearer test-data-api-key",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(mocks.getSupplementByUpc).toHaveBeenCalledWith("123-456");
+    await expect(response.json()).resolves.toEqual({ error: "not_found" });
+  });
+
+  it("returns a safe failure payload when the query layer throws", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.searchSupplements.mockRejectedValue(new Error("database unavailable"));
+
+    const response = await supplementsRoute.GET(
+      new Request("https://web.example.test/api/supplements?q=creatine", {
+        headers: {
+          authorization: "Bearer test-data-api-key",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "supplements_api_failed",
+    });
+    expect(consoleError).toHaveBeenCalledWith("supplements_api_failed", {
+      errorName: "Error",
+    });
+  });
+});
