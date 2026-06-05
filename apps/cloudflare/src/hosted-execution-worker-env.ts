@@ -6,9 +6,6 @@ import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "@murphai/hosted-execution/env";
-import {
-  assertHostedRuntimeProcessingTimingInvariants,
-} from "./runtime-processing-timing.ts";
 
 export interface HostedExecutionWorkerEnvironment {
   allowedRunnerSecretKeys: string | null;
@@ -27,7 +24,6 @@ export interface HostedExecutionWorkerEnvironment {
   runnerCommitTimeoutMs: number;
   runnerReadyTimeoutMs: number;
   runnerIdleTtlMs: number;
-  runnerTimeoutMs: number;
   webControlTimeoutMs: number;
 }
 
@@ -66,21 +62,11 @@ export function readHostedExecutionWorkerEnvironment(
     180_000,
     "HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS",
   );
-  const runnerTimeoutMs = parsePositiveInteger(
-    normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS),
-    600_000,
-    "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
-  );
   const runnerCommitTimeoutMs = parsePositiveInteger(
     normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS),
     30_000,
     "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
   );
-  assertHostedRuntimeProcessingTimingInvariants({
-    idleCheckpointDelayMs,
-    runnerCommitTimeoutMs,
-    runnerTimeoutMs,
-  });
   const webControlTimeoutMs = parsePositiveInteger(
     normalizeHostedExecutionString(source.HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS),
     30_000,
@@ -146,7 +132,6 @@ export function readHostedExecutionWorkerEnvironment(
       "HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS",
     ),
     runnerIdleTtlMs,
-    runnerTimeoutMs,
     webControlTimeoutMs,
   };
 }

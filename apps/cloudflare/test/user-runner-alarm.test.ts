@@ -1631,7 +1631,7 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms).not.toContain(WORKSPACE_NEXT_WAKE_AT);
   });
 
-  it("can seed a stale unexpired stuck invocation for hosted-local tests", async () => {
+  it("can seed a stale stuck invocation for hosted-local tests without scheduling expiry", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const { alarms, runner, sql } = createRunnerHarness({
@@ -1643,17 +1643,16 @@ describe("HostedUserRunner execution coordination", () => {
     await runner.bindUser(TEST_USER_ID);
 
     const stuck = await runner.startStuckInvocationForTest({
-      expiresInMs: 45_000,
       startedAgoMs: 35_000,
       userId: TEST_USER_ID,
     });
 
-    expect(stuck.nextWakeAt).toBe("2026-04-27T00:00:45.000Z");
+    expect(stuck.nextWakeAt).toBeNull();
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_expires_at: "2026-04-27T00:00:45.000Z",
+      active_expires_at: null,
       active_started_at: "2026-04-26T23:59:25.000Z",
     });
-    expect(alarms.at(-1)).toBe("2026-04-27T00:00:45.000Z");
+    expect(alarms.at(-1)).toBe("deleted");
   });
 
   it("rethrows watchdog alarm maintenance failures so Cloudflare can retry", async () => {
@@ -2115,7 +2114,6 @@ function createRunnerHarness(input: {
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",
       HOSTED_EXECUTION_RETRY_DELAY_MS: "5000",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "1000",
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "62000",
     })),
     input.bucket ?? new MemoryEncryptedR2Bucket(),
     input.runnerRuntimeEnvSource ?? TEST_RUNNER_RUNTIME_ENV_SOURCE,

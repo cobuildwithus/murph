@@ -63,10 +63,9 @@ export function projectRunnerStateRecord(input: {
   const writeFenceKind = readWriteFenceKind(input.meta.active_kind);
   const writeFenceGeneration = normalizeNonNegativeInteger(input.meta.active_generation);
   const writeFence = input.meta.active_attempt_id && input.meta.active_started_at && writeFenceKind
-    ? {
+      ? {
         attemptId: input.meta.active_attempt_id,
-        expiresAt: normalizeIsoDateOrNull(input.meta.active_expires_at)
-          ?? input.meta.active_started_at,
+        expiresAt: null,
         generation: writeFenceGeneration,
         kind: writeFenceKind,
         runnerContainerName: readRunnerContainerNameOrNull(input.meta.active_runner_container_name),

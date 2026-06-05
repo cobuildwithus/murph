@@ -454,7 +454,6 @@ function createHostedExecutionEnvironment() {
   return readHostedExecutionEnvironment(createHostedExecutionTestEnv({
     HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",
     HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "1000",
-    HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "62000",
   }));
 }
 
@@ -534,7 +533,6 @@ function createWorkspaceInvocationJob(input: {
     kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
     request: {
       attemptId: input.token.attemptId,
-      deadlineAt: input.token.expiresAt,
       idleCheckpointDelayMs: 54_000,
       leaseGeneration: input.token.generation,
       reason: input.reason,

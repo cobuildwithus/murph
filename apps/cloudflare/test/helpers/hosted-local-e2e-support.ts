@@ -13,7 +13,6 @@ import {
 
 const hostedWebSmokeDefaultEncryptionKey = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
 const hostedWebSmokeDefaultEncryptionKeyVersion = "v1";
-const hostedLocalE2eRunnerTimeoutMs = "600000";
 const hostedLocalContextCompactionSummary = "local-offline-context-compaction-summary";
 const hostedLocalResponsesCompactionSummary = "local-offline-compaction-summary";
 const temporalDevUiPortOffset = 1_000;
@@ -577,9 +576,6 @@ export function resolveHostedAssistantLocalDevEnv(
   assistantProviderStubBaseUrl: string | null,
   scenarioLabel: string,
 ): NodeJS.ProcessEnv {
-  const hostedExecutionRunnerTimeoutMs =
-    source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?.trim() || hostedLocalE2eRunnerTimeoutMs;
-
   if (assistantProviderMode === "stub") {
     const normalizedAssistantProviderStubBaseUrl = assistantProviderStubBaseUrl?.trim();
     if (!normalizedAssistantProviderStubBaseUrl) {
@@ -591,7 +587,6 @@ export function resolveHostedAssistantLocalDevEnv(
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: hostedExecutionRunnerTimeoutMs,
       [HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
         normalizedAssistantProviderStubBaseUrl,
       NODE_ENV: "test",
@@ -611,9 +606,7 @@ export function resolveHostedAssistantLocalDevEnv(
     );
   }
 
-  return {
-    HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: hostedExecutionRunnerTimeoutMs,
-  };
+  return {};
 }
 
 function buildHostedAssistantStubEnvClearances(): NodeJS.ProcessEnv {

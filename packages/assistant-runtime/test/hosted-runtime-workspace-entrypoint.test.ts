@@ -2888,7 +2888,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("runtime wakes pending after checkpoint are not drained once the host checkpoint deadline is due", async () => {
+  test("runtime wakes pending after checkpoint are drained without a host checkpoint deadline", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -2901,15 +2901,14 @@ describe("hosted workspace runtime entrypoint", () => {
       }),
     ];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let checkpointCallCount = 0;
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
-          commitTimeoutMs: 1,
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_pending_wake_deadline",
-            deadlineAt: new Date(Date.now() + 5_700).toISOString(),
             idleCheckpointDelayMs: 1,
             leaseGeneration: "9",
             reason: "nudge",
@@ -2947,14 +2946,24 @@ describe("hosted workspace runtime entrypoint", () => {
                 };
               },
               async checkpoint(request) {
+                checkpointCallCount += 1;
                 events.push(`workspace.checkpoint:${request.expectedWorkspaceVersion}`);
                 checkpointRequests.push(request);
-                mailboxItems.push(createMailboxItem({
-                  id: "mailbox_item_entrypoint_checkpoint_deadline_002",
-                  laneSeq: "2",
-                }));
-                runtimeWakeSignal.notify();
-                return await checkpointResponse.promise;
+                if (checkpointCallCount === 1) {
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_entrypoint_checkpoint_deadline_002",
+                    laneSeq: "2",
+                  }));
+                  runtimeWakeSignal.notify();
+                  return await checkpointResponse.promise;
+                }
+                return {
+                  checkpointed: true,
+                  workspace: createWorkspaceState({
+                    snapshotRef: request.snapshotRef,
+                    version: "6",
+                  }),
+                };
               },
             },
           }),
@@ -2977,14 +2986,16 @@ describe("hosted workspace runtime entrypoint", () => {
 
       const result = await resultPromise;
 
-      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0"]);
+      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "1"]);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_entrypoint_checkpoint_deadline_001",
+        "mailbox.importItem:mailbox_item_entrypoint_checkpoint_deadline_002",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.expectedWorkspaceVersion), [
         "4",
+        "5",
       ]);
-      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "1");
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "2");
       assert.equal(result.status, "idle");
     } finally {
       checkpointResponse.resolve({
@@ -3301,7 +3312,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("near-deadline wake pass can clear projected wake metadata before checkpoint", async () => {
+  test("runtime wake pass can clear projected wake metadata before checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -3315,7 +3326,6 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_near_deadline_clear",
-            deadlineAt: new Date(Date.now() + 35_100).toISOString(),
             idleCheckpointDelayMs: 10_000,
             leaseGeneration: "9",
             reason: "nudge",
@@ -3401,7 +3411,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("runtime deadline forces a dirty checkpoint without waiting for the idle delay", async () => {
+  test("dirty runtime checkpoints after the idle delay", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -3413,8 +3423,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_deadline",
-            deadlineAt: new Date(Date.now() + 1_000).toISOString(),
-            idleCheckpointDelayMs: 10_000,
+            idleCheckpointDelayMs: 250,
             leaseGeneration: "9",
             reason: "nudge",
             userId: TEST_USER_ID,
@@ -3449,8 +3458,10 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
+      const elapsedMs = performance.now() - startedAt;
       assert.equal(checkpointRequests.length, 1);
-      assert.ok(performance.now() - startedAt < 2_000);
+      assert.ok(elapsedMs >= 200);
+      assert.ok(elapsedMs < 2_000);
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -3638,7 +3649,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("host deadline wins over a later projected wake for dirty checkpoint timing", async () => {
+  test("idle checkpoint can run before a later projected wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -3651,8 +3662,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_deadline_before_projected_wake",
-            deadlineAt: new Date(Date.now() + 1_000).toISOString(),
-            idleCheckpointDelayMs: 10_000,
+            idleCheckpointDelayMs: 250,
             leaseGeneration: "9",
             reason: "nudge",
             userId: TEST_USER_ID,
@@ -3698,86 +3708,9 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.ok(performance.now() - startedAt < 2_000);
-      assert.equal(checkpointRequests.length, 1);
-      assert.equal(checkpointRequests[0]?.nextWakeAt, projectedWakeAt);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
-      assert.equal(result.nextWakeAt, projectedWakeAt);
-      assert.equal(result.status, "scheduled");
-    } finally {
-      await removeTempRoot(vaultRoot);
-    }
-  });
-
-  test("host checkpoint deadline persists due projected wake instead of draining another hot pass", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
-    const events: string[] = [];
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const projectedWakeAt = new Date(Date.now()).toISOString();
-    let assistantPhaseCalls = 0;
-
-    try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      const startedAt = performance.now();
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            attemptId: "attempt_synthetic_runtime_idle_checkpoint_deadline_due_projected_wake",
-            deadlineAt: new Date(Date.now() + 1_000).toISOString(),
-            idleCheckpointDelayMs: 10_000,
-            leaseGeneration: "9",
-            reason: "nudge",
-            userId: TEST_USER_ID,
-            workspaceVersion: "4",
-          },
-        }),
-        {
-          async createCheckpointSnapshot(snapshotInput) {
-            events.push(`snapshot:${snapshotInput.reason}`);
-            return {
-              snapshotRef: createBundleRef({
-                hash: "c".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-deadline-due-wake.bundle.json",
-                size: 640,
-              }),
-            };
-          },
-          async importItem() {
-            return { status: "imported" };
-          },
-          platform: createPlatform({
-            mailboxPort: createMailboxPort({
-              events,
-              items: [],
-            }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({ version: "4" }),
-            }),
-          }),
-          async runAssistantPhase() {
-            assistantPhaseCalls += 1;
-            events.push(`assistant.phase:${assistantPhaseCalls}`);
-            return {
-              checkpointReason: "assistant_runtime_commit",
-              nextWakeAt: projectedWakeAt,
-              progressed: true,
-              redactedStatus: {
-                hostedAssistantNextWakeAt: projectedWakeAt,
-                hostedAssistantProgressed: true,
-              },
-            };
-          },
-          vaultRoot,
-        },
-      );
-
-      assert.ok(performance.now() - startedAt < 2_000);
-      assert.equal(assistantPhaseCalls, 1);
-      assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
-        "assistant.phase:1",
-      ]);
+      const elapsedMs = performance.now() - startedAt;
+      assert.ok(elapsedMs >= 200);
+      assert.ok(elapsedMs < 2_000);
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.nextWakeAt, projectedWakeAt);
       assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
@@ -7292,12 +7225,10 @@ describe("hosted workspace runtime entrypoint", () => {
     const timedParsed = parseHostedAssistantWorkspaceRuntimeJobInput({
       request: {
         ...createWorkspaceRunRequest(),
-        deadlineAt: "2026-04-20T08:10:00.000Z",
         idleCheckpointDelayMs: 180_000,
       },
     });
     assert.equal(timedParsed.request.reason, "nudge");
-    assert.equal(timedParsed.request.deadlineAt, "2026-04-20T08:10:00.000Z");
     assert.equal(timedParsed.request.idleCheckpointDelayMs, 180_000);
 
     const browserVaultRefreshParsed = parseHostedAssistantWorkspaceRuntimeJobInput({

@@ -332,7 +332,6 @@ export class HostedUserRunner {
     let token: RunnerWriteFenceToken;
     try {
       token = await this.stateStore.beginWriteFence({
-        expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
         kind: "runtime",
         reason: "manual",
         runnerContainerName: input.userId,

@@ -22,11 +22,6 @@ export function readWriteFenceWatchdogAlarmAt(record: RunnerStateRecord): string
   return record.writeFence?.expiresAt ?? null;
 }
 
-export function isRunnerWriteFenceExpired(fence: { expiresAt: string }): boolean {
-  const expiresAtMs = Date.parse(fence.expiresAt);
-  return !Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now();
-}
-
 export function runnerWriteFenceTokensMatch(
   current: RunnerWriteFenceToken | null,
   expected: RunnerWriteFenceToken,

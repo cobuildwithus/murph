@@ -103,9 +103,6 @@ import {
   computeHostedRuntimeElapsedMs,
 } from "./hosted-runtime/utils.ts";
 import {
-  readHostedRunnerCommitTimeoutMs,
-} from "./hosted-runtime/timeouts.ts";
-import {
   normalizeHostedFutureWakeAt,
 } from "./hosted-runtime/wake-time.ts";
 import {
@@ -959,12 +956,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const runBrowserVaultRefreshMaintenance = async (maintenanceInput: {
       workspace: HostedWorkspaceState | null;
     }): Promise<HostedBrowserVaultReplicaRefreshResult> => {
-      const refreshTimeoutMs = resolveHostedBrowserVaultRefreshTimeoutMs(
-        input.request.deadlineAt ?? null,
-      );
       emitPhaseLog({
         details: {
-          browserVaultRefreshTimeoutMs: refreshTimeoutMs,
           workspacePresent: maintenanceInput.workspace !== null,
           workspaceVersion: maintenanceInput.workspace?.version ?? null,
         },
@@ -973,30 +966,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         stage: "browser_vault.refresh",
         status: "start",
       });
-      if (refreshTimeoutMs !== null && refreshTimeoutMs <= 0) {
-        const refresh: HostedBrowserVaultReplicaRefreshResult = {
-          source: {
-            fileCount: 0,
-            totalBytes: 0,
-          },
-          status: "deferred_timeout",
-        };
-        emitPhaseLog({
-          details: buildHostedBrowserVaultRefreshLogDetails(refresh),
-          input,
-          requestId,
-          stage: "browser_vault.refresh",
-          status: "done",
-        });
-        return refresh;
-      }
       const refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
         force: input.request.reason === "browser_vault_refresh",
         generatedAt: new Date().toISOString(),
         platform: guardedRuntime.platform,
         runtimeWakeSignal: options.runtimeWakeSignal ?? null,
         signal: runtimeAbortController.signal,
-        timeoutMs: refreshTimeoutMs,
+        timeoutMs: null,
         vaultRoot: restored.vaultRoot,
         workspace: maintenanceInput.workspace,
       });
@@ -1012,11 +988,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const idleCheckpointDelayMs = resolveHostedRuntimeIdleCheckpointDelayMs(
       input.request.idleCheckpointDelayMs,
     );
-    const commitTimeoutMs = readHostedRunnerCommitTimeoutMs(runtime.commitTimeoutMs);
-    const hostDeadlineCheckpointStartByMs = resolveHostedRuntimeCheckpointStartByMs({
-      commitTimeoutMs,
-      deadlineAt: input.request.deadlineAt ?? null,
-    });
     let result: HostedWorkspaceRunnerResult;
     let runtimeStateDirty = false;
     const pendingDurableCheckpointEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
@@ -1077,10 +1048,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           ...pendingMailboxPostCheckpointEffectCompletions,
         ]);
         const runtimeWakeSignal = options.runtimeWakeSignal ?? null;
-        if (
-          !runtimeWakeSignal
-          || isHostedRuntimeCheckpointStartDue(hostDeadlineCheckpointStartByMs)
-        ) {
+        if (!runtimeWakeSignal) {
           await raceHostedRuntimeCancellation(
             effectsFinished,
             runtimeAbortController.signal,
@@ -1183,7 +1151,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runtimeStateDirty ||= result.runtimeStateDirty;
       };
       while (runtimeStateDirty) {
-        let checkpointStartedForHostDeadline = false;
         if (accumulatedProjection.status !== "budget_exhausted") {
           if (idleCheckpointStartByMs === null) {
             throw new Error("Dirty hosted runtime is missing an idle checkpoint deadline.");
@@ -1197,7 +1164,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               ? accumulatedProjection.nextWakeAt
               : null;
           const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
-            hostDeadlineCheckpointStartByMs,
             idleCheckpointStartByMs,
             projectedRuntimeWakeAt,
             runtimeAbortSignal: runtimeAbortController.signal,
@@ -1207,27 +1173,20 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             dirtyWaitResult === "external_wake"
             || dirtyWaitResult === "projected_runtime_wake"
           ) {
-            if (isHostedRuntimeCheckpointStartDue(hostDeadlineCheckpointStartByMs)) {
-              checkpointStartedForHostDeadline = true;
-            } else {
-              const projectedWakeKeyBeingServiced: string | null =
-                dirtyWaitResult === "projected_runtime_wake"
-                  ? projectedRuntimeWakeKey
-                  : servicedProjectedRuntimeWakeKey;
-              await runIdleWakeForegroundPass({
-                projectedWakeKeyBeingServiced,
-                requestIdKind: "idle-wake",
-              });
-              continue;
-            }
-          } else if (dirtyWaitResult === "host_deadline_checkpoint") {
-            checkpointStartedForHostDeadline = true;
+            const projectedWakeKeyBeingServiced: string | null =
+              dirtyWaitResult === "projected_runtime_wake"
+                ? projectedRuntimeWakeKey
+                : servicedProjectedRuntimeWakeKey;
+            await runIdleWakeForegroundPass({
+              projectedWakeKeyBeingServiced,
+              requestIdKind: "idle-wake",
+            });
+            continue;
           }
         }
 
         emitPhaseLog({
           details: {
-            checkpointStartByMs: hostDeadlineCheckpointStartByMs,
             idleCheckpointStartByMs,
             nextWakeAtPresent: accumulatedProjection.nextWakeAt !== null,
             nextWakeReasonPresent: accumulatedProjection.nextWakeReason !== null,
@@ -1241,20 +1200,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const mailboxEffectsWaitResult =
           await waitForMailboxPostCheckpointEffectsBeforeIdleCheckpoint();
         if (mailboxEffectsWaitResult === "external_wake") {
-          if (isHostedRuntimeCheckpointStartDue(hostDeadlineCheckpointStartByMs)) {
-            checkpointStartedForHostDeadline = true;
-          } else {
-            await runIdleWakeForegroundPass({
-              projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
-              requestIdKind: "idle-wake",
-            });
-            continue;
-          }
-        } else if (
-          !checkpointStartedForHostDeadline
-          && !isHostedRuntimeCheckpointStartDue(hostDeadlineCheckpointStartByMs)
-          && consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null)
-        ) {
+          await runIdleWakeForegroundPass({
+            projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
+            requestIdKind: "idle-wake",
+          });
+          continue;
+        } else if (consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null)) {
           await runIdleWakeForegroundPass({
             projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
             requestIdKind: "idle-wake",
@@ -1311,9 +1262,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         checkpointMetadata.nextWakeAt = checkpoint.workspace.nextWakeAt ?? null;
         checkpointMetadata.nextWakeReason = checkpoint.workspace.nextWakeReason ?? null;
         servicedProjectedRuntimeWakeKey = null;
-        const shouldDrainCheckpointWake = !checkpointStartedForHostDeadline
-          && !isHostedRuntimeCheckpointStartDue(hostDeadlineCheckpointStartByMs)
-          && consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null);
+        const shouldDrainCheckpointWake =
+          consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null);
         if (shouldDrainCheckpointWake) {
           idleWakeOrdinal += 1;
           result = await runForegroundPass({
@@ -1645,12 +1595,10 @@ function buildHostedRuntimePhaseTraceMetadata(
 
 const DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 const DEFAULT_HOSTED_FOREGROUND_MAILBOX_IMPORT_LIMIT = 10;
-const HOSTED_RUNTIME_DEADLINE_MARGIN_MS = 5_000;
 const HOSTED_RUNTIME_MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 type HostedRuntimeDirtyWaitResult =
   | "external_wake"
-  | "host_deadline_checkpoint"
   | "idle_checkpoint"
   | "projected_runtime_wake";
 
@@ -1857,41 +1805,6 @@ function resolveHostedRuntimeIdleCheckpointDelayMs(value: number | null | undefi
   return DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS;
 }
 
-function resolveHostedRuntimeCheckpointStartByMs(input: {
-  commitTimeoutMs: number;
-  deadlineAt?: string | null;
-}): number | null {
-  if (!input.deadlineAt) {
-    return null;
-  }
-
-  const deadlineMs = Date.parse(input.deadlineAt);
-  if (!Number.isFinite(deadlineMs)) {
-    return null;
-  }
-
-  return deadlineMs - input.commitTimeoutMs - HOSTED_RUNTIME_DEADLINE_MARGIN_MS;
-}
-
-function resolveHostedBrowserVaultRefreshTimeoutMs(
-  deadlineAt?: string | null,
-): number | null {
-  if (!deadlineAt) {
-    return null;
-  }
-
-  const deadlineMs = Date.parse(deadlineAt);
-  if (!Number.isFinite(deadlineMs)) {
-    return null;
-  }
-
-  return Math.max(0, deadlineMs - Date.now() - HOSTED_RUNTIME_DEADLINE_MARGIN_MS);
-}
-
-function isHostedRuntimeCheckpointStartDue(checkpointStartByMs: number | null): boolean {
-  return checkpointStartByMs !== null && checkpointStartByMs <= Date.now();
-}
-
 function buildHostedRuntimeWakeKey(input: {
   nextWakeAt: string | null;
   nextWakeReason: string | null;
@@ -1904,26 +1817,16 @@ function buildHostedRuntimeWakeKey(input: {
 }
 
 async function waitForHostedRuntimeDirtyWindow(input: {
-  hostDeadlineCheckpointStartByMs: number | null;
   idleCheckpointStartByMs: number;
   projectedRuntimeWakeAt: string | null;
   runtimeAbortSignal: AbortSignal;
   runtimeWakeSignal: RuntimeWakeSignal | null;
 }): Promise<HostedRuntimeDirtyWaitResult> {
   const nowMs = Date.now();
-  if (
-    input.hostDeadlineCheckpointStartByMs !== null
-    && input.hostDeadlineCheckpointStartByMs <= nowMs
-  ) {
-    return "host_deadline_checkpoint";
-  }
   if (input.idleCheckpointStartByMs <= nowMs) {
     return "idle_checkpoint";
   }
 
-  const hostDeadlineDelayMs = input.hostDeadlineCheckpointStartByMs === null
-    ? null
-    : Math.max(0, input.hostDeadlineCheckpointStartByMs - nowMs);
   const idleCheckpointDelayMs = Math.max(0, input.idleCheckpointStartByMs - nowMs);
   const projectedWakeDelayMs = resolveHostedProjectedRuntimeWakeDelayMs(
     input.projectedRuntimeWakeAt,
@@ -1931,10 +1834,6 @@ async function waitForHostedRuntimeDirtyWindow(input: {
   );
   let timeoutDelayMs = idleCheckpointDelayMs;
   let timeoutResult: HostedRuntimeDirtyWaitResult = "idle_checkpoint";
-  if (hostDeadlineDelayMs !== null && hostDeadlineDelayMs <= timeoutDelayMs) {
-    timeoutDelayMs = hostDeadlineDelayMs;
-    timeoutResult = "host_deadline_checkpoint";
-  }
   if (projectedWakeDelayMs !== null && projectedWakeDelayMs < timeoutDelayMs) {
     timeoutDelayMs = projectedWakeDelayMs;
     timeoutResult = "projected_runtime_wake";

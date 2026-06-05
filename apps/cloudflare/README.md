@@ -108,16 +108,8 @@ Defaulted worker vars:
   native container shell after a bounded number of clean invocations
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=30000`
-- `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=600000`
 - `HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS=30000`
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=production`
-
-`HOSTED_EXECUTION_RUNNER_TIMEOUT_MS` must stay greater than
-`HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS` plus
-`HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS` plus the owner-watchdog recheck
-margin, otherwise the Worker fails startup. That keeps Temporal from re-reading
-mailbox demand before the runtime has had time to enter and commit its idle
-checkpoint window.
 
 `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` bounds consecutive failed hosted runner
 invocations for a Durable Object. Temporal decides when durable work is due by
@@ -148,8 +140,8 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 
 The native Cloudflare container is a warm per-user shell. Successful workspace
 invocations keep the same Durable Object write fence while the runtime waits for
-`HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS`, a coalesced wake, or the
-write-fence deadline. If local runtime state is dirty, the direct invocation checkpoints
+`HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS`, a coalesced wake, or a projected
+runtime wake. If local runtime state is dirty, the direct invocation checkpoints
 with reason `idle_shutdown` before returning success. When Cloudflare reports
 the container `sleepAfter` lifecycle expiry, the container only yields to an
 active foreground operation or tears down the warm shell.

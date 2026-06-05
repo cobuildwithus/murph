@@ -509,8 +509,6 @@ function buildHostedLocalE2eSuiteEnv(input: {
   const env: NodeJS.ProcessEnv = {
     ...input.env,
     ...e2eDefaults,
-    HOSTED_EXECUTION_RUNNER_TIMEOUT_MS:
-      input.env.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?.trim() || "600000",
     MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
     [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]: localBuildId,
   };

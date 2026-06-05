@@ -37,15 +37,9 @@ export function computeRuntimeProcessingRetryAt(
 }
 
 export function computeRuntimeProcessingOwnerWatchdogAt(input: {
-  activeFence: Pick<NonNullable<RunnerStateRecord["writeFence"]>, "expiresAt">;
   env: HostedExecutionEnvironment;
 }): string {
-  const activeRuntimeWakeRecheckMs = Date.parse(computeActiveRuntimeWakeRecheckAt(input.env));
-  const expiresAtMs = Date.parse(input.activeFence.expiresAt);
-  const watchdogMs = Number.isFinite(expiresAtMs)
-    ? Math.min(expiresAtMs, activeRuntimeWakeRecheckMs)
-    : activeRuntimeWakeRecheckMs;
-  return new Date(Math.max(Date.now(), watchdogMs)).toISOString();
+  return computeActiveRuntimeWakeRecheckAt(input.env);
 }
 
 export function createRuntimeProcessingRetryLater(input: {
@@ -74,7 +68,6 @@ export function createActiveWorkspaceWakeRetryLater(input: {
   userId: string;
 }): HostedRuntimeEnsureProcessingResponse {
   const retryAt = computeRuntimeProcessingOwnerWatchdogAt({
-    activeFence: input.activeFence,
     env: input.env,
   });
   emitHostedExecutionStructuredLog({

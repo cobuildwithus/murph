@@ -1224,14 +1224,6 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
             "Hosted workspace invocation request budget",
           ),
         }),
-    ...(record.deadlineAt === undefined
-      ? {}
-      : {
-          deadlineAt: readNullableString(
-            record.deadlineAt,
-            "Hosted workspace invocation request deadlineAt",
-          ),
-        }),
     ...(record.idleCheckpointDelayMs === undefined
       ? {}
       : {

@@ -29,14 +29,10 @@ export function buildRunnerRecordTimingLogDetails(
 ): HostedExecutionStructuredLogDetails {
   const writeFence = record.writeFence;
   const writeFenceStartedAtMs = writeFence ? Date.parse(writeFence.startedAt) : NaN;
-  const writeFenceExpiresAtMs = writeFence ? Date.parse(writeFence.expiresAt) : NaN;
 
   return {
     activeWriteFenceAgeMs: Number.isFinite(writeFenceStartedAtMs)
       ? Math.max(0, nowMs - writeFenceStartedAtMs)
-      : null,
-    activeWriteFenceExpiresInMs: Number.isFinite(writeFenceExpiresAtMs)
-      ? Math.max(0, writeFenceExpiresAtMs - nowMs)
       : null,
     activeWriteFenceGeneration: writeFence?.generation ?? null,
     activeWriteFencePresent: writeFence !== null,

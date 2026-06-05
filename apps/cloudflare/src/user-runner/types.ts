@@ -41,7 +41,7 @@ export type RunnerWriteFenceKind = "runtime";
 
 export interface RunnerWriteFenceRecord {
   attemptId: string;
-  expiresAt: string;
+  expiresAt: string | null;
   generation: number;
   kind: RunnerWriteFenceKind;
   runnerContainerName: string | null;
@@ -66,7 +66,7 @@ export interface RunnerStateRecord {
    */
   active: {
     attemptId: string;
-    expiresAt: string;
+    expiresAt: string | null;
     leaseGeneration: string;
     reason: string | null;
     startedAt: string;

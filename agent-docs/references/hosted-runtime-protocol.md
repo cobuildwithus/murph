@@ -36,10 +36,10 @@ The live ownership split is:
   coordination, container invocation, encrypted object plumbing, and signed
   callback transport.
   UserRunner holds one foreground runtime write fence for the whole hosted
-  invocation, passes the fence expiry as `deadlineAt`, and passes the single
-  `idleCheckpointDelayMs` runtime policy knob. The runtime, not the host,
-  waits for the idle window or deadline and checkpoints dirty local runtime
-  state before returning success. When Cloudflare reports container activity
+  invocation and passes the single `idleCheckpointDelayMs` runtime policy knob.
+  The runtime, not the host, waits for the idle window or a scheduled wake and
+  checkpoints dirty local runtime state before returning success. When
+  Cloudflare reports container activity
   expiry, the shell yields to any active foreground operation; otherwise it runs
   cleanup only. There is no pending idle-checkpoint Durable Object state, idle
   checkpoint lease, idle checkpoint alarm, or host-owned shutdown checkpoint
@@ -72,7 +72,7 @@ import mailbox prefix into local runtime state and stage AssistantInputEvent row
 pull pending device-sync dirty rows
 run best-effort local inbox projection plus audio/video transcript enrichment without checkpointing it
 run local runtime work until idle or budget
-wait for the runtime idle window, a coalesced wake, or the host deadline
+wait for the runtime idle window, a coalesced wake, or a projected runtime wake
 checkpoint final dirty runtime state with checkpoint reason idle_shutdown
 project redacted status/logs
 ```
@@ -87,7 +87,7 @@ source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner / activ
 The hosted adapter is the mailbox importer. It decodes a conversation mailbox
 row into a bounded `AssistantInputEvent`, stages it in local runtime state,
 marks the active invocation dirty, and checkpoints that dirty state only at the
-final runtime-owned idle/deadline checkpoint. Best-effort inbox projection may
+final runtime-owned idle or scheduled-wake checkpoint. Best-effort inbox projection may
 run while the decoded wake is still in memory. Projection status is logged and
 local inbox artifacts may help the same invocation, but hosted runtime must not
 take a separate workspace checkpoint just to persist projection/cache cleanup.
@@ -319,10 +319,9 @@ pre-accept budget is clamped by Cloudflare's configured web-control timeout, and
 workspace read/readiness steps are capped by the remaining budget. Accepted
 background invocations are registered with the Durable Object lifetime.
 Accepted starts and wakes return an owner-watchdog recheck aligned to the
-expected idle checkpoint horizon or active write-fence expiry rather than a
-short durable-lag polling loop. A confirmed non-wakeable child is replaced after
-the startup grace window when a later ensure command observes it, instead of
-waiting for the full write-fence timeout.
+expected idle checkpoint horizon rather than a short durable-lag polling loop. A
+confirmed non-wakeable child is replaced after the startup grace window when a
+later ensure command observes it.
 The separate signed `runtime/prewarm` command exists only for Temporal-mediated
 typing hints. It may bind the per-user Durable Object and touch the runner
 container readiness path, but it must not begin a write fence, read hosted
@@ -332,11 +331,6 @@ already active it returns `already_running`; if the shell is already responsive
 it returns `already_warm`; otherwise it returns `started` or `retry_later`.
 Prewarm readiness must be preemptible by real workspace invocation or
 ensure-processing calls.
-Cloudflare worker config fails closed when `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS`
-is not greater than `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS` plus
-`HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS` plus the owner-watchdog recheck
-margin, so env overrides cannot make Temporal re-read demand before the runtime
-has had a fair idle-checkpoint window and commit budget.
 The Durable Object keeps lease, in-flight invocation, alarm, and short-lived
 coordination metadata only. It does not persist queue history, per-message
 completion, outbox truth, assistant channel enablement state, or checkpoint
@@ -369,7 +363,7 @@ the same invocation instead of hiding them behind a stale pre-restore read. The
 runtime stages decoded conversation rows as assistant input and marks the active
 invocation dirty. Foreground runtime work may defer intermediate checkpoints.
 The active invocation remains dirty until the runtime-owned
-idle/deadline/scheduled-wake checkpoint succeeds. RunnerContainer never records
+idle or scheduled-wake checkpoint succeeds. RunnerContainer never records
 pending checkpoint intent. Activity expiry is cleanup-only. Projection status
 is logged and artifacts remain rebuildable best-effort state rather than a
 reason to take another workspace checkpoint, so failed or slow projection does
@@ -422,7 +416,7 @@ provider confirms a safe retry contract.
 
 This is the deploy/reset recovery contract. If a Cloudflare Durable Object,
 worker isolate, or runner container resets after local mailbox staging but
-before the final runtime-owned idle/deadline checkpoint succeeds, the next
+before the final runtime-owned idle or scheduled-wake checkpoint succeeds, the next
 invocation reimports from the web-owned mailbox because the staged watermark was
 never checkpointed. If reset happens after a successful final checkpoint but
 before terminal handling, the next invocation must still run the assistant
@@ -439,7 +433,7 @@ workspace checkpoint. Linq inbound message deletion is still eventual, but it is
 queued only after terminal handling evidence is durable under
 `.runtime/operations/assistant/auto-reply/evidence/<captureId>.json` and is
 drained through the hosted provider-cleanup retry state after the next successful
-runtime-owned idle/deadline workspace checkpoint.
+runtime-owned idle or scheduled-wake workspace checkpoint.
 
 The hosted workspace checkpoint ref may be a v2 direct-R2 snapshot ref, a
 legacy full/base workspace bundle, a legacy working `{base, delta}` ref, or a

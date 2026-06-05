@@ -909,7 +909,6 @@ export interface HostedWorkspaceInvocationBudget {
 export interface HostedWorkspaceInvocationRequest {
   attemptId: string;
   budget?: HostedWorkspaceInvocationBudget | null;
-  deadlineAt?: string | null;
   idleCheckpointDelayMs?: number | null;
   leaseGeneration: string;
   providerEgressToken?: string | null;

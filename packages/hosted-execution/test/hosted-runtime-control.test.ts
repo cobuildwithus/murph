@@ -207,7 +207,6 @@ describe("hosted runtime control contracts", () => {
         maxMailboxItems: 25,
         maxRuntimeMs: 30_000,
       },
-      deadlineAt: "2026-04-27T00:10:00.000Z",
       idleCheckpointDelayMs: 180_000,
       leaseGeneration: "7",
       providerEgressToken: "provider-egress-token-contract",

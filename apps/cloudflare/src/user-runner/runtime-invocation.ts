@@ -490,7 +490,6 @@ export class RuntimeInvocationService {
       kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
       request: {
         attemptId: input.token.attemptId,
-        deadlineAt: input.token.expiresAt,
         idleCheckpointDelayMs: this.input.env.idleCheckpointDelayMs,
         leaseGeneration: input.token.generation,
         providerEgressToken: input.token.providerEgressToken,
@@ -545,8 +544,6 @@ export class RuntimeInvocationService {
       job: input.job,
       runnerContainerName: input.runnerContainerName,
       runnerContainerNamespace: this.input.runnerContainerNamespace,
-      signal: AbortSignal.timeout(this.input.env.runnerTimeoutMs),
-      timeoutMs: this.input.env.runnerTimeoutMs,
       userId: input.input.userId,
     });
   }

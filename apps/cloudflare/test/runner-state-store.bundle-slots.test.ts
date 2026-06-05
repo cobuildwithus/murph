@@ -298,7 +298,7 @@ describe("RunnerStateStore schema guard", () => {
       wakeAt: null,
       writeFence: {
         attemptId: "workspace-invocation-1",
-        expiresAt: "2030-04-27T00:01:00.000Z",
+        expiresAt: null,
         generation: 3,
         kind: "runtime",
         workspaceVersion: "42",
@@ -504,7 +504,7 @@ describe("RunnerStateStore schema guard", () => {
     });
   });
 
-  it("rejects expired write fences during exact ownership validation without clearing state", async () => {
+  it("treats legacy write-fence expiry timestamps as inert during exact ownership validation", async () => {
     const { db, store } = createRunnerStateStoreHarness();
     const lease = await store.beginWriteFence({
       expiresAt: "2000-04-27T00:30:00.000Z",
@@ -518,11 +518,11 @@ describe("RunnerStateStore schema guard", () => {
       generation: lease.generation,
       userId: lease.userId,
     })).resolves.toMatchObject({
-      owns: false,
+      owns: true,
       record: {
         writeFence: {
           attemptId: lease.attemptId,
-          expiresAt: "2000-04-27T00:30:00.000Z",
+          expiresAt: null,
           runnerContainerName: "user-write",
         },
       },
@@ -534,7 +534,7 @@ describe("RunnerStateStore schema guard", () => {
     expect(readActiveRunnerContainerName(db)).toBe("user-write");
   });
 
-  it("rejects expired write fences during active-user validation without clearing state", async () => {
+  it("treats legacy write-fence expiry timestamps as inert during active-user validation", async () => {
     const { db, store } = createRunnerStateStoreHarness();
     const lease = await store.beginWriteFence({
       expiresAt: "2000-04-27T00:30:00.000Z",
@@ -546,12 +546,11 @@ describe("RunnerStateStore schema guard", () => {
     await expect(store.validateActiveWriteFence({
       userId: "user-active",
     })).resolves.toMatchObject({
-      owns: false,
-      reason: "expired_write_fence",
+      owns: true,
       record: {
         writeFence: {
           attemptId: lease.attemptId,
-          expiresAt: "2000-04-27T00:30:00.000Z",
+          expiresAt: null,
           runnerContainerName: "user-active",
         },
       },
@@ -563,7 +562,7 @@ describe("RunnerStateStore schema guard", () => {
     expect(readActiveRunnerContainerName(db)).toBe("user-active");
   });
 
-  it("expires write fences without scheduling retry work", async () => {
+  it("projects legacy write-fence expiry timestamps as null", async () => {
     const { db, store } = createRunnerStateStoreHarness();
     await store.beginWriteFence({
       expiresAt: "2030-04-27T00:00:05.000Z",
@@ -572,29 +571,15 @@ describe("RunnerStateStore schema guard", () => {
       userId: "user-expired",
     });
 
-    await expect(store.readState())
-      .resolves.toMatchObject({
-        writeFence: expect.objectContaining({
-          expiresAt: "2030-04-27T00:00:05.000Z",
-        }),
-      });
-    await expect(store.clearExpiredWriteFence(Date.parse("2030-04-27T00:00:10.000Z")))
-      .resolves.toMatchObject({
-        cleared: true,
-        record: {
-          backoffUntil: null,
-          failureCount: 1,
-          lastErrorAt: "2030-04-27T00:00:10.000Z",
-          wakeAt: null,
-          writeFence: null,
-        },
-      });
     await expect(store.readState()).resolves.toMatchObject({
       backoffUntil: null,
+      failureCount: 0,
       wakeAt: null,
-      writeFence: null,
+      writeFence: expect.objectContaining({
+        expiresAt: null,
+      }),
     });
-    expect(readActiveRunnerContainerName(db)).toBe(null);
+    expect(readActiveRunnerContainerName(db)).toBe("user-expired");
   });
 
   it("keeps legacy wake and backoff columns inert in projected state", async () => {

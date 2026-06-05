@@ -93,14 +93,6 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
             "Hosted assistant workspace runtime job request.budget",
           ),
         }),
-    ...(record.deadlineAt === undefined
-      ? {}
-      : {
-          deadlineAt: readNullableString(
-            record.deadlineAt,
-            "Hosted assistant workspace runtime job request.deadlineAt",
-          ),
-        }),
     ...(record.idleCheckpointDelayMs === undefined
       ? {}
       : {

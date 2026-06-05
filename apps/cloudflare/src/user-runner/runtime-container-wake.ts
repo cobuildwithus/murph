@@ -57,7 +57,7 @@ export async function ensureActiveRuntimeProcessing(
           reason: input.reason,
           userId: input.activeRuntime.userId,
         }),
-        stepTimeoutMs: input.env.runnerTimeoutMs,
+        stepTimeoutMs: input.env.webControlTimeoutMs,
       });
       if (
         result.kind === "accepted"
@@ -95,7 +95,7 @@ export async function ensureActiveRuntimeProcessing(
       await runRuntimeProcessingCommandStep({
         budget: input.commandBudget,
         operation: async () => await wakeRuntime(input.activeRuntime),
-        stepTimeoutMs: input.env.runnerTimeoutMs,
+        stepTimeoutMs: input.env.webControlTimeoutMs,
       }),
     );
     if (runtimeWake.kind === "accepted") {

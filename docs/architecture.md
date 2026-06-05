@@ -185,7 +185,7 @@ to Codex.
   input spine. It restores the encrypted workspace, imports hosted mailbox rows,
   stages `AssistantInputEvent` records, runs the local scanner/active-turn
   machinery, and keeps dirty runtime state local until the runtime-owned
-  idle/deadline/scheduled-wake `idle_shutdown` checkpoint writes the updated
+  idle/scheduled-wake `idle_shutdown` checkpoint writes the updated
   workspace checkpoint.
 - Mailbox import progress is not assistant handling progress. If a deploy,
   Durable Object reset, or runner restart lands after mailbox import has

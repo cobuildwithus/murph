@@ -142,7 +142,7 @@ export class HostedExecutionConfigurationError extends Error {
 
 interface HostedExecutionContainerInvokeRequest {
   job: HostedExecutionRunnerJobInput;
-  timeoutMs: number;
+  timeoutMs?: number | null;
   userId: string;
 }
 
@@ -167,7 +167,7 @@ interface HostedExecutionContainerRunnerInput {
   runnerContainerName?: string;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
   signal?: AbortSignal;
-  timeoutMs: number;
+  timeoutMs?: number | null;
   userId: string;
 }
 
@@ -913,7 +913,6 @@ export class RunnerContainer extends Container {
     this.workspaceInvocationActiveOperation = activeOperation;
 
     try {
-      const startTime = Date.now();
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -924,7 +923,7 @@ export class RunnerContainer extends Container {
           workspaceVersion: input.job.request.workspaceVersion,
           runnerIdleTtlMs: readRunnerContainerIdleTtlMs(this.environment),
           runnerPort: RUNNER_PORT,
-          timeoutMs: input.timeoutMs,
+          readinessTimeoutMs: input.timeoutMs ?? null,
         },
         message: "Hosted execution container invocation received.",
         phase: "container.starting",
@@ -935,24 +934,16 @@ export class RunnerContainer extends Container {
       this.noteRunnerActivity("container-ready");
       throwIfRunnerContainerOperationAborted(operationAbortController.signal);
 
-      const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
       activeOperationAcquired = true;
       stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
       this.noteRunnerActivity("invoke-started");
       this.noteRunnerActivity("runner-request-starting");
       emitHostedExecutionStructuredLog({
         component: "container",
-        details: {
-          remainingTimeoutMs,
-        },
         message: "Hosted execution container sending runner request.",
         phase: "container.ready",
         userId: routeUserId,
       });
-      const requestSignal = combineRunnerContainerAbortSignals(
-        operationAbortController.signal,
-        AbortSignal.timeout(remainingTimeoutMs),
-      );
       const runnerRequest = this.containerFetch(
         RUNNER_EXECUTE_URL,
         {
@@ -964,7 +955,7 @@ export class RunnerContainer extends Container {
             "content-type": "application/json; charset=utf-8",
           },
           method: "POST",
-          signal: requestSignal,
+          signal: operationAbortController.signal,
         },
       );
       const stopWatcherAbortController = new AbortController();
@@ -978,7 +969,7 @@ export class RunnerContainer extends Container {
       try {
         response = await raceRunnerContainerOperationAbort(
           Promise.race([runnerRequest, stoppedContainer]),
-          requestSignal,
+          operationAbortController.signal,
         );
       } finally {
         stopWatcherAbortController.abort();
@@ -1082,6 +1073,7 @@ export class RunnerContainer extends Container {
     const readinessStartedAt = Date.now();
     const status = readContainerStatus(await this.getState());
     const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
+    const readinessBudgetMs = input.timeoutMs ?? readyTimeoutMs;
 
     if (isRunnerContainerStopped(status)) {
       this.warmShellInvalidatedByUnsettledDestroy = false;
@@ -1103,17 +1095,18 @@ export class RunnerContainer extends Container {
         reason: "warm-invalidated",
       });
     } else if (!isRunnerContainerStopped(status)) {
+      const readinessTimeoutMs = Math.min(readinessBudgetMs, readyTimeoutMs);
       try {
         await assertRunnerHealthy(
           this,
-          Math.min(input.timeoutMs, readyTimeoutMs),
+          readinessTimeoutMs,
           operationAbortSignal,
         );
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
             readinessLatencyMs: Date.now() - readinessStartedAt,
-            readinessTimeoutMs: Math.min(input.timeoutMs, readyTimeoutMs),
+            readinessTimeoutMs,
             startMode: "warm",
             statusBeforeStart: status,
           },
@@ -1130,7 +1123,7 @@ export class RunnerContainer extends Container {
           component: "container",
           details: {
             readinessLatencyMs: Date.now() - readinessStartedAt,
-            readinessTimeoutMs: Math.min(input.timeoutMs, readyTimeoutMs),
+            readinessTimeoutMs,
             startMode: "warm",
             statusBeforeStart: status,
           },
@@ -1155,7 +1148,7 @@ export class RunnerContainer extends Container {
       details: {
         readinessPollIntervalMs: RUNNER_WAIT_INTERVAL_MS,
         readinessTimeoutMs: Math.min(
-          Math.max(1, input.timeoutMs - (Date.now() - readinessStartedAt)),
+          Math.max(1, readinessBudgetMs - (Date.now() - readinessStartedAt)),
           readyTimeoutMs,
         ),
         runnerPort: RUNNER_PORT,
@@ -1167,7 +1160,7 @@ export class RunnerContainer extends Container {
       userId: input.userId,
     });
 
-    const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - readinessStartedAt));
+    const remainingTimeoutMs = Math.max(1, readinessBudgetMs - (Date.now() - readinessStartedAt));
     const readinessTimeoutMs = Math.min(remainingTimeoutMs, readyTimeoutMs);
 
     try {
@@ -1690,7 +1683,9 @@ export async function invokeHostedExecutionContainerRunner(
   const container = input.runnerContainerNamespace.getByName(input.runnerContainerName ?? jobUserId);
   const invokeRequest: HostedExecutionContainerInvokeRequest = {
     job: input.job,
-    timeoutMs: input.timeoutMs,
+    ...(input.timeoutMs === undefined || input.timeoutMs === null
+      ? {}
+      : { timeoutMs: input.timeoutMs }),
     userId: jobUserId,
   };
   const invocation = invokeRunnerContainerProcessing(container, invokeRequest);
@@ -2330,7 +2325,7 @@ function parseHostedExecutionContainerInvokeInput(
 
   return {
     job,
-    timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
+    timeoutMs: readOptionalTimeoutMs(payload.timeoutMs),
     userId,
   };
 }
@@ -2353,6 +2348,14 @@ function readTimeoutMs(value: unknown, fallback: number): number {
   }
 
   return Math.trunc(value);
+}
+
+function readOptionalTimeoutMs(value: unknown): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  return readTimeoutMs(value, DEFAULT_RUNNER_READY_TIMEOUT_MS);
 }
 
 function readRunnerContainerDeadlineRemainingMs(deadlineMs: number): number {

@@ -10,7 +10,6 @@ export interface WorkerSendEmailBindingLike {
 }
 
 export type WorkerActiveRuntimeWriteFenceValidationRejectReason =
-  | "expired_write_fence"
   | "missing_runner_state"
   | "missing_write_fence"
   | "write_fence_mismatch";
@@ -29,7 +28,6 @@ export type WorkerActiveRuntimeWriteFenceValidationResult =
     };
 
 export type WorkerProviderEgressTokenValidationRejectReason =
-  | "expired_write_fence"
   | "missing_provider_egress_token"
   | "missing_runner_state"
   | "missing_write_fence"
@@ -150,7 +148,6 @@ export interface WorkerEnvironmentContract<
   HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;
   HOSTED_EXECUTION_RETRY_DELAY_MS?: string;
   HOSTED_EXECUTION_RUNNER_ENV_PROFILES?: string;
-  HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?: string;
   HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS?: string;
   HOSTED_R2_PRESIGN_ACCESS_KEY_ID?: string;
   HOSTED_R2_PRESIGN_ACCOUNT_ID?: string;

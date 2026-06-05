@@ -2880,7 +2880,6 @@ function createRuntimeControlRunnerHarness(input: {
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "1000",
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "62000",
     })),
     createBucketStore().api,
     {

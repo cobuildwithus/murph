@@ -58,7 +58,6 @@ import type {
   RunnerStateRecord,
 } from "./types.js";
 import {
-  isRunnerWriteFenceExpired,
   RunnerWatchdog,
   runnerWriteFenceTokensMatch,
 } from "./watchdog.js";
@@ -101,23 +100,13 @@ export class RuntimeProcessingController {
 
   async alarm(): Promise<void> {
     try {
-      const result = await this.input.stateStore.clearExpiredWriteFence(Date.now());
-      await this.syncWatchdogAlarm(result.record);
-      if (result.cleared) {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: buildRunnerRecordTimingLogDetails(result.record),
-          message: "Hosted runner alarm cleared an expired write fence.",
-          phase: "scheduled",
-          userId: result.record.userId,
-        });
-      }
+      await this.syncWatchdogAlarm(await this.input.stateStore.readState());
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: buildHostedRunnerMetadataOnlyErrorDetails(error),
         level: "warn",
-        message: "Hosted runner watchdog alarm maintenance failed.",
+        message: "Hosted runner alarm maintenance failed.",
         phase: "failed",
         userId: await this.tryReadBoundUserId(),
       });
@@ -135,7 +124,7 @@ export class RuntimeProcessingController {
       webControlTimeoutMs: this.input.env.webControlTimeoutMs,
     });
     await this.input.stateStore.bindUser(input.userId);
-    const record = await this.readRunnerStateAfterClearingExpiredWriteFence();
+    const record = await this.input.stateStore.readState();
     if (record.writeFence) {
       return await this.ensureExistingRuntimeProcessing({
         commandBudget,
@@ -186,10 +175,7 @@ export class RuntimeProcessingController {
 
     try {
       const result = await container.prewarmForProcessing({
-        timeoutMs: Math.min(
-          this.input.env.runnerTimeoutMs,
-          HOSTED_RUNTIME_PREWARM_TIMEOUT_MS,
-        ),
+        timeoutMs: HOSTED_RUNTIME_PREWARM_TIMEOUT_MS,
         userId: input.userId,
       });
       if (result.kind === "busy") {
@@ -227,35 +213,12 @@ export class RuntimeProcessingController {
     await this.input.watchdog.sync(record);
   }
 
-  async readRunnerStateAfterClearingExpiredWriteFence(): Promise<RunnerStateRecord> {
-    const record = await this.input.stateStore.readState();
-    if (!record.writeFence || !isRunnerWriteFenceExpired(record.writeFence)) {
-      return record;
-    }
-
-    const expired = await this.input.stateStore.clearExpiredWriteFence(Date.now());
-    await this.syncWatchdogAlarm(expired.record);
-    if (expired.cleared) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: buildRunnerRecordTimingLogDetails(expired.record),
-        message: "Hosted runner cleared an expired write fence before accepting processing.",
-        phase: "runtime.starting",
-        userId: expired.record.userId,
-      });
-    }
-    return expired.record;
-  }
-
   computeRuntimeProcessingRetryAt(reason: RuntimeProcessingRetryReason): string {
     return computeRuntimeProcessingRetryAtValue(reason);
   }
 
-  computeRuntimeProcessingOwnerWatchdogAt(input: {
-    expiresAt: string;
-  }): string {
+  computeRuntimeProcessingOwnerWatchdogAt(): string {
     return computeRuntimeProcessingOwnerWatchdogAtValue({
-      activeFence: input,
       env: this.input.env,
     });
   }
@@ -308,7 +271,7 @@ export class RuntimeProcessingController {
         action,
         kind: "runtime_processing_accepted",
         recommendedRecheckAt:
-          this.computeRuntimeProcessingOwnerWatchdogAt(activeFence),
+          this.computeRuntimeProcessingOwnerWatchdogAt(),
         runtimeAttemptId: activeFence.attemptId,
       };
     }
@@ -390,7 +353,6 @@ export class RuntimeProcessingController {
     let token: RunnerWriteFenceToken;
     try {
       token = await this.input.stateStore.beginWriteFence({
-        expiresAt: new Date(Date.now() + this.input.env.runnerTimeoutMs).toISOString(),
         kind: "runtime",
         reason: input.input.reason,
         runnerContainerName,
@@ -476,7 +438,7 @@ export class RuntimeProcessingController {
     return {
       action: input.action,
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: this.computeRuntimeProcessingOwnerWatchdogAt(prepared.token),
+      recommendedRecheckAt: this.computeRuntimeProcessingOwnerWatchdogAt(),
       runtimeAttemptId: prepared.token.attemptId,
     };
   }
@@ -544,10 +506,7 @@ export class RuntimeProcessingController {
     try {
       const timeoutMs = readRuntimeProcessingCommandStepTimeoutMs({
         budget: input.commandBudget,
-        stepTimeoutMs: Math.min(
-          this.input.env.runnerTimeoutMs,
-          RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS,
-        ),
+        stepTimeoutMs: RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS,
       });
       await container.ensureReadyForProcessing({
         timeoutMs,
@@ -650,12 +609,6 @@ export class RuntimeProcessingController {
   private shouldPreserveStartingWriteFence(
     fence: NonNullable<RunnerStateRecord["writeFence"]>,
   ): boolean {
-    if (isRunnerWriteFenceExpired(fence)) {
-      return false;
-    }
-    if (this.runtimeExecutionTasks.has(fence.attemptId)) {
-      return true;
-    }
     const startedAtMs = Date.parse(fence.startedAt);
     if (!Number.isFinite(startedAtMs)) {
       return false;
