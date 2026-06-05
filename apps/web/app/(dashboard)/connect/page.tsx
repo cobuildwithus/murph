@@ -9,6 +9,7 @@ import {
 } from "@murphai/device-syncd/connect-config";
 
 import { PageHeader } from "@/src/components/ui/page-header";
+import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
 import { buildHostedDeviceSyncSettingsResponse } from "@/src/lib/device-sync/settings-service";
 import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -247,6 +248,9 @@ export default async function ConnectPage({
   const reconnectTargetBySourceId = new Map<string, string>();
   const disconnectConnectionIdBySourceId = new Map<string, string>();
   let initialLoadError: ConnectPageInitialLoadError | null = null;
+  const recoveryContactAction = await resolveDeviceConnectRecoveryContactAction(
+    Boolean(auth.authenticatedMember),
+  );
 
   if (auth.authenticatedMember) {
     try {
@@ -301,6 +305,7 @@ export default async function ConnectPage({
 
       <ConnectSourcesGrid
         authenticated={Boolean(auth.authenticatedMember)}
+        deviceConnectRecoveryContactAction={recoveryContactAction}
         initialCallback={resolveVerifiedInitialConnectCallback(resolvedSearchParams, sources)}
         initialLoadError={initialLoadError}
         sources={sources}
@@ -327,6 +332,22 @@ export function listVisibleConnectSources(): ConnectSource[] {
         ]
       : [];
   });
+}
+
+async function resolveDeviceConnectRecoveryContactAction(authenticated: boolean) {
+  if (!authenticated) {
+    return null;
+  }
+
+  try {
+    return await resolveHostedMurphContactOption({
+      message: {
+        body: "Can you send me a fresh device connection link?",
+      },
+    });
+  } catch {
+    return null;
+  }
 }
 
 function hasHostedConnectRoute(routes: readonly DeviceConnectRoute[]): boolean {

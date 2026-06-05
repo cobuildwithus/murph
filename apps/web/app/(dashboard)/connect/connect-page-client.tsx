@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
-import { LoaderCircleIcon } from "lucide-react";
+import {
+  AlertCircleIcon,
+  LoaderCircleIcon,
+  MessageCircleIcon,
+} from "lucide-react";
 
 import { DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS } from "@murphai/device-syncd/callback-redirect";
 
@@ -17,7 +21,7 @@ import {
 } from "@/src/components/settings/hosted-device-sync-settings-utils";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { AuthButton } from "@/src/components/ui/auth-button";
-import { Button } from "@/src/components/ui/button";
+import { Button, buttonVariants } from "@/src/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -27,6 +31,10 @@ import {
 } from "@/src/components/ui/dialog";
 import { Input } from "@/src/components/ui/input";
 import { formatHostedDeviceSyncProviderLabel } from "@/src/lib/device-sync/settings-surface";
+import {
+  buildMurphEmailHref,
+  type MurphContactOption,
+} from "@/src/lib/murph-contact-routing";
 
 import { sortConnectSourcesByConnectionState } from "./connect-source-order";
 
@@ -81,6 +89,11 @@ type ConnectConsentRequest = {
   source: ConnectSource;
 };
 
+type ConnectIntentRecoveryRequest = {
+  message: string;
+  sourceName: string;
+};
+
 type ConnectCallbackNotice = {
   kind: "error" | "success" | "warning";
   message: string;
@@ -89,12 +102,14 @@ type ConnectCallbackNotice = {
 
 export function ConnectSourcesGrid({
   authenticated = true,
+  deviceConnectRecoveryContactAction = null,
   initialCallback = null,
   initialConnectIntent = null,
   initialLoadError = null,
   sources,
 }: {
   authenticated?: boolean;
+  deviceConnectRecoveryContactAction?: MurphContactOption | null;
   initialCallback?: ConnectCallbackInput;
   initialConnectIntent?: InitialDeviceConnectIntent;
   initialLoadError?: ConnectPageInitialLoadError | null;
@@ -111,6 +126,8 @@ export function ConnectSourcesGrid({
     sourceId: string;
   } | null>(null);
   const [consentRequest, setConsentRequest] = useState<ConnectConsentRequest | null>(null);
+  const [connectIntentRecovery, setConnectIntentRecovery] =
+    useState<ConnectIntentRecoveryRequest | null>(null);
   const [disconnectSource, setDisconnectSource] = useState<ConnectSource | null>(null);
   const [disconnectedConnectionIds, setDisconnectedConnectionIds] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -192,6 +209,7 @@ export function ConnectSourcesGrid({
     setActionError(null);
     setNotice(null);
     setConsentRequest(null);
+    setConnectIntentRecovery(null);
 
     try {
       const authorizationUrl = await requestConnectionAuthorizationUrl(source, options);
@@ -201,6 +219,15 @@ export function ConnectSourcesGrid({
         setConsentRequest({
           ...(options.intentClaim ? { intentClaim: options.intentClaim } : {}),
           source,
+        });
+        setPendingSourceId(null);
+        return;
+      }
+
+      if (options.intentClaim && isHostedDeviceConnectIntentUnavailableError(error)) {
+        setConnectIntentRecovery({
+          message: error.message,
+          sourceName: source.name,
         });
         setPendingSourceId(null);
         return;
@@ -253,6 +280,14 @@ export function ConnectSourcesGrid({
           setConsentRequest({
             intentClaim: activeConnectIntent.claim,
             source,
+          });
+          return;
+        }
+
+        if (isHostedDeviceConnectIntentUnavailableError(error)) {
+          setConnectIntentRecovery({
+            message: error.message,
+            sourceName: source.name,
           });
           return;
         }
@@ -406,6 +441,16 @@ export function ConnectSourcesGrid({
 
       <ConnectRedirectDialog sourceName={connectIntentRedirectName} />
 
+      <ConnectIntentRecoveryDialog
+        contactAction={deviceConnectRecoveryContactAction}
+        request={connectIntentRecovery}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConnectIntentRecovery(null);
+          }
+        }}
+      />
+
     </section>
   );
 }
@@ -541,6 +586,13 @@ function readConnectAuthorizationUrl(response: HostedDeviceSyncConnectResponse):
 
 function isHostedConsentRequiredError(error: unknown): boolean {
   return readHostedOnboardingErrorCode(error) === "HOSTED_CONSENT_REQUIRED";
+}
+
+function isHostedDeviceConnectIntentUnavailableError(
+  error: unknown,
+): error is HostedOnboardingApiError {
+  const code = readHostedOnboardingErrorCode(error);
+  return code?.startsWith("HOSTED_DEVICE_CONNECT_INTENT_") === true;
 }
 
 function readHostedOnboardingErrorCode(error: unknown): string | null {
@@ -1026,4 +1078,105 @@ function ConnectRedirectDialog({ sourceName }: { sourceName: string | null }) {
       </DialogContent>
     </Dialog>
   );
+}
+
+function ConnectIntentRecoveryDialog({
+  contactAction,
+  onOpenChange,
+  request,
+}: {
+  contactAction: MurphContactOption | null;
+  onOpenChange: (open: boolean) => void;
+  request: ConnectIntentRecoveryRequest | null;
+}) {
+  const resolvedContactAction = contactAction ?? buildConnectIntentRecoveryFallbackContactAction();
+  const contactLabel = resolveConnectIntentRecoveryContactLabel(resolvedContactAction);
+
+  return (
+    <Dialog open={Boolean(request)} onOpenChange={onOpenChange}>
+      <DialogContent
+        showCloseButton={false}
+        className="max-w-md gap-6 rounded-2xl border border-border bg-popover p-6 text-popover-foreground ring-border md:p-7"
+      >
+        <DialogHeader className="items-center gap-4 text-center">
+          <span
+            aria-hidden="true"
+            className="flex size-16 items-center justify-center rounded-2xl bg-destructive/10 text-destructive"
+          >
+            <AlertCircleIcon className="size-8" />
+          </span>
+          <div className="flex flex-col gap-2">
+            <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
+              Connection link unavailable
+            </DialogTitle>
+            <DialogDescription className="text-sm leading-6 text-muted-foreground">
+              {request?.message ?? "This connection link is no longer available."}
+            </DialogDescription>
+          </div>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-2">
+          <a
+            aria-label={resolveConnectIntentRecoveryContactAriaLabel({
+              action: resolvedContactAction,
+              label: contactLabel,
+              sourceName: request?.sourceName ?? null,
+            })}
+            className={buttonVariants({
+              className: "w-full",
+              size: "xl",
+            })}
+            href={resolvedContactAction.href}
+            rel={resolvedContactAction.rel}
+            target={resolvedContactAction.target}
+          >
+            <MessageCircleIcon data-icon="inline-start" />
+            {contactLabel}
+          </a>
+          <Button
+            type="button"
+            className="w-full"
+            size="xl"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+          >
+            Continue exploring
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function buildConnectIntentRecoveryFallbackContactAction(): MurphContactOption {
+  return {
+    href: buildMurphEmailHref({
+      body: "Can you send me a fresh device connection link?",
+      subject: "Fresh device connection link",
+    }),
+    kind: "email",
+    label: "Email",
+  };
+}
+
+function resolveConnectIntentRecoveryContactLabel(action: MurphContactOption): string {
+  if (action.kind === "text") {
+    return "Text Murph";
+  }
+
+  if (action.kind === "telegram") {
+    return "Open Telegram";
+  }
+
+  return "Email Murph";
+}
+
+function resolveConnectIntentRecoveryContactAriaLabel(input: {
+  action: MurphContactOption;
+  label: string;
+  sourceName: string | null;
+}): string {
+  const sourceName = input.sourceName ?? "device";
+  const suffix = input.action.target === "_blank" ? " (opens in a new tab)" : "";
+  return `${input.label} for a fresh ${sourceName} connection link${suffix}`;
 }
