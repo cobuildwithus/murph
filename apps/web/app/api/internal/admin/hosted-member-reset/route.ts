@@ -72,14 +72,6 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 function requireHostedMemberResetAdminRequest(request: Request): void {
-  if (process.env.HOSTED_MEMBER_RESET_ADMIN_ENABLED !== "1") {
-    throw new ResetRouteError(
-      "HOSTED_MEMBER_RESET_ADMIN_DISABLED",
-      "Hosted member reset admin route is disabled.",
-      404,
-    );
-  }
-
   const expectedToken = process.env.HOSTED_MEMBER_RESET_ADMIN_TOKEN?.trim();
   if (!expectedToken) {
     throw new ResetRouteError(

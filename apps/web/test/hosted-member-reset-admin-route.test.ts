@@ -15,7 +15,6 @@ vi.mock("@/scripts/reset-hosted-member-runtime", () => ({
 describe("hosted member reset admin route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.HOSTED_MEMBER_RESET_ADMIN_ENABLED = "1";
     process.env.HOSTED_MEMBER_RESET_ADMIN_TOKEN = "test-admin-token";
     mocks.runResetHostedMemberRuntimeCommand.mockResolvedValue([
       {
@@ -36,12 +35,11 @@ describe("hosted member reset admin route", () => {
   });
 
   afterEach(() => {
-    delete process.env.HOSTED_MEMBER_RESET_ADMIN_ENABLED;
     delete process.env.HOSTED_MEMBER_RESET_ADMIN_TOKEN;
   });
 
-  it("stays disabled unless the production env flag is set", async () => {
-    delete process.env.HOSTED_MEMBER_RESET_ADMIN_ENABLED;
+  it("rejects requests when the admin token is not configured", async () => {
+    delete process.env.HOSTED_MEMBER_RESET_ADMIN_TOKEN;
     const { POST } = await import("../app/api/internal/admin/hosted-member-reset/route");
 
     const response = await POST(buildRequest({
@@ -49,7 +47,7 @@ describe("hosted member reset admin route", () => {
       mode: "dry-run",
     }));
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(503);
     expect(mocks.runResetHostedMemberRuntimeCommand).not.toHaveBeenCalled();
   });
 
