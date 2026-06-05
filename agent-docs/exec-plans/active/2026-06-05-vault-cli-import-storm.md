@@ -47,9 +47,49 @@ by too much infrastructure in the hot path:
   commands know whether they need those services.
 
 The clean fix is to delete the global, eager command graph from the execution
-path. The replacement should be explicit, small, and boring: identify the first
-root command token, import that command module, mount its normal Incur command
-group, and then call `cli.serve(argv)` with the original argv.
+path. The replacement must stay explicit, small, and boring: remove avoidable
+imports first, then only if the measured manifest cost remains material, select
+one root command family, mount its normal Incur command group, and call
+`cli.serve(argv)` with the same argv Incur receives today.
+
+That selector is not a command parser. It is fail-closed root classification:
+a conservative pre-dispatch choice between:
+
+- no command modules for root `--version`;
+- setup/onboarding;
+- full command registration for root discovery, MCP, unknown, or ambiguous
+  invocations;
+- one known command family for ordinary execution.
+
+If an invocation is not plainly safe to scope, it must use full registration.
+
+The contract should be this small:
+
+```ts
+type CliInvocationPlan =
+  | { kind: 'version' }
+  | { kind: 'setup' }
+  | { kind: 'scoped'; root: KnownRootCommand }
+  | { kind: 'full'; reason: string }
+```
+
+The classifier must never return command-specific args, command-specific
+options, nested command paths, handler inputs, output modes, or rewritten argv.
+It only decides which command definitions exist before Incur receives the
+invocation.
+
+`--vault` is the one explicit exception to "no argv mutation" because current
+behavior already strips Murph-owned `--vault` before Incur parses command args.
+The invariant is:
+
+1. extract and validate `--vault` once using the existing semantics;
+2. classify the vault-stripped argv;
+3. mount the selected or full command set;
+4. install schema index, then install vault context so the vault-context wrapper
+   remains the outer `serve()` wrapper as it is today;
+5. call `cli.serve(vaultStrippedArgv, serveOptions)`.
+
+No other argv normalization is allowed.
 
 ## Non-Goals
 
@@ -131,15 +171,29 @@ Incur's public model is:
   features
 
 Incur does not expose a public lazy command-module loader. It expects a command
-map to exist by the time `serve()` runs. Therefore the clean Murph-side solution
-is to decide which command module to import before `serve()`, then mount a
-normal Incur command group and let Incur proceed unchanged.
+map to exist by the time `serve()` runs. Therefore the only Murph-side lazy
+option is to decide which command family to import before `serve()`, mount a
+normal Incur command group, and let Incur proceed unchanged.
+
+This is acceptable only if Murph does not duplicate Incur command semantics.
+The selector may reuse Murph-owned pre-dispatch semantics that already exist
+today, such as program-name detection, setup invocation detection, and `--vault`
+override extraction. It must not grow a broad Incur flag parser, and it should
+not reuse a broader helper when a narrower full-fallback classifier is safer for
+lazy loading.
 
 The Murph code must not:
 
 - parse command-specific arguments;
 - parse command-specific options;
+- parse general Incur discovery/transport flags beyond the minimum needed to
+  decide full vs scoped registration;
+- inspect nested command names beyond the root token;
+- normalize nested aliases;
 - call command handlers directly;
+- rewrite argv except for the existing Murph-owned `--vault` stripping;
+- retry through a different argv shape after failure;
+- reproduce Incur error messages;
 - reconstruct Incur help/schema/LLM output;
 - rewrite argv into a different command shape;
 - synthesize fake action args for nested commands.
@@ -147,10 +201,12 @@ The Murph code must not:
 The Murph code may:
 
 - inspect enough argv to identify the first root command token;
+- detect root `--version`;
 - decide that the invocation is global discovery and should load all commands;
 - decide that the invocation is setup/onboarding and should load setup;
 - mount the chosen command group using the existing registrar;
-- call `cli.serve()` with the original argv.
+- call `cli.serve()` with the vault-stripped argv that Incur already receives
+  today.
 
 ## Target Architecture
 
@@ -161,18 +217,19 @@ For ordinary command execution:
 1. `bin.ts` imports the entrypoint only.
 2. `cli-entry.ts` installs process-level behavior that is genuinely global:
    - broken pipe handler;
-   - SQLite warning filter;
+   - SQLite warning filter through the narrow
+     `@murphai/runtime-state/node/sqlite-warning-filter` subpath, not the broad
+     `@murphai/runtime-state/node` barrel;
    - local env file loading;
    - structured error formatting.
-3. `cli-entry.ts` determines the program name and the first effective root
-   command token using a tiny local helper with no setup, assistant, inbox, or
-   vault-service imports.
+3. `cli-entry.ts` determines the program name and, only for lazy optimization,
+   an obvious root command token using a tiny no-heavy-import classifier.
 4. If the invocation is setup/onboarding, import setup and use the setup CLI.
 5. Otherwise create the lightweight root Incur shell.
 6. Resolve default vault context using operator-config only after the command is
    known to be a data-plane command.
 7. Mount only the requested root command family.
-8. Call `cli.serve(originalArgv, serveOptions)`.
+8. Call `cli.serve(vaultStrippedArgv, serveOptions)`.
 
 ### Discovery Path
 
@@ -205,7 +262,56 @@ from the real command definitions.
 
 ## File-Level Plan
 
-### 1. Add a tiny argv/root routing helper
+### 0. Narrow root entrypoint imports first
+
+Current issue:
+
+`cli-entry.ts` imports the broad `@murphai/runtime-state/node` barrel only to
+install the SQLite warning filter. That broad barrel is allowed for callers that
+need runtime-state helpers, but it is too much for `vault-cli --version`.
+
+Target:
+
+- Import `installSqliteExperimentalWarningFilterWithOptions` from
+  `@murphai/runtime-state/node/sqlite-warning-filter`.
+- Fast-path `--version` directly from the entrypoint without creating an Incur
+  shell. Reading package version and writing it is simpler than importing the
+  shell, config metadata, or error bridge for a version string.
+- Keep root process setup limited to broken-pipe handling, the warning filter,
+  env loading, and error formatting.
+- Do not import `node:sqlite`, runtime-state filesystem helpers, setup,
+  assistant, inbox, vault services, command modules, or Health Commons for
+  `vault-cli --version`.
+
+This is deletion-first work. It should be done before adding routing code,
+because if a broad root import is responsible for a measurable cost, the
+correct fix is to remove that import rather than hide it behind another layer.
+
+### 1. Split vault argv parsing from command wrapping
+
+Current issue:
+
+`extractVaultOverride()` lives in `vault-cli-vault-context.ts`, but that file
+also imports Incur and Zod because it mutates registered command definitions to
+strip the `vault` option from help/schema and inject the selected vault at run
+time. The entrypoint needs vault argv handling before it should pay for Incur,
+Zod, or command mutation code.
+
+Target:
+
+- Move the pure argv logic into a tiny module, for example
+  `packages/cli/src/vault-cli-vault-argv.ts`.
+- Keep support for `--vault <path>` and `--vault=<path>` exactly as today.
+- Keep duplicate/missing-value validation exactly as today.
+- Import that tiny module from both the entrypoint and
+  `vault-cli-vault-context.ts`.
+- Leave `createVaultCliVaultContext()` and `installVaultCliVaultContext()` in
+  the command-context module where Incur/Zod imports are actually needed.
+
+This avoids importing Incur/Zod command-wrapping code just to identify the
+effective root token or serve `--version`.
+
+### 2. Add a tiny pre-dispatch selector
 
 Candidate file:
 
@@ -214,9 +320,11 @@ Candidate file:
 Responsibilities:
 
 - Detect the effective program name for `murph` vs `vault-cli`.
-- Extract the first root command token from argv.
+- Apply Murph-owned `--vault` override stripping exactly as today.
+- Identify an obvious first root command token for hot-path optimization.
 - Detect whether an invocation requires full command registration.
 - Detect whether an invocation is a setup/onboarding invocation.
+- Return only a routing decision, never parsed command arguments or options.
 
 This file must not import:
 
@@ -235,38 +343,62 @@ Allowed imports:
 - Very small local helpers, only after measurement proves they do not import
   the heavy graph.
 
-Root-token extraction should be deliberately conservative.
+Root classification should be deliberately conservative and should not become a
+copy of Incur's parser. It is a performance hint, not the owner of command
+semantics.
 
-It should understand only Incur/global flags that can appear before the root
-command:
+Do not reuse `resolveEffectiveTopLevelToken()` directly for the lazy selector.
+That helper is current behavior for setup/default-vault decisions, including
+its `--` handling, but lazy classification can safely be narrower. The selector
+should fast-path only obvious command-first shapes plus a tiny stable global
+prefix allowlist, then full-register everything else.
 
-- `--format <value>`
-- `--format=<value>`
-- `--json`
-- `--full-output`
-- `--filter-output <value>`
-- `--filter-output=<value>`
-- `--token-limit <value>`
-- `--token-limit=<value>`
-- `--token-offset <value>`
-- `--token-offset=<value>`
-- `--token-count`
-- `--schema`
-- `--llms`
-- `--llms-full`
-- `--help`
-- `--version`
-- `--mcp`
-- `--config <value>`
-- `--config=<value>`
-- `--no-config`
-- `--`
+The tiny allowlist may include only stable root/global syntax needed by measured
+hot paths, such as:
 
-If the helper sees an unknown leading flag before any command token, it should
-fall back to full registration rather than guessing. This preserves behavior
-for unusual argv ordering such as putting a command option before the command.
-It is acceptable for weird ordering to stay slow. The common shape should be
-fast.
+- `--vault <path>` and `--vault=<path>` using the extracted Murph-owned vault
+  argv helper;
+- `--format <value>` and `--format=<value>`;
+- `--json`;
+- `--full-output`;
+- `--filter-output <value>` and `--filter-output=<value>`;
+- `--token-limit <value>` and `--token-limit=<value>`;
+- `--token-offset <value>` and `--token-offset=<value>`;
+- `--token-count`;
+- `--config <value>` and `--config=<value>`;
+- `--no-config`.
+
+Root-level discovery and built-ins are full-registration paths. Unknown leading
+flags are full-registration paths. `--` before the root is a full-registration
+path unless a focused compatibility test proves scoped behavior is exactly
+equivalent.
+
+The selector may handle Murph-owned `--vault` / `--vault=<path>` before root
+selection because that behavior is already owned by `vault-cli`, and hosted
+runner smoke paths use leading `--vault`. It should reuse or extract
+`extractVaultOverride()` semantics rather than reimplementing a different
+`--vault` parser.
+
+The selector must treat root-level discovery and transport modes as full
+registration unless scoped by an already identified root command:
+
+- root `--help`, `--llms`, `--llms-full`, or `--schema`;
+- `--mcp`;
+- root `skills ...`;
+- root `skill ...`;
+- root `mcp ...`, including `mcp add`;
+- root `completions ...`;
+- dynamic completion mode when `COMPLETE` is set;
+- shell completion callbacks with no clear root command;
+- unknown or ambiguous leading flags before any command token.
+
+It is acceptable for unusual ordering to stay slow. The common command shapes
+should be fast, especially:
+
+- `vault-cli device account list --vault <fixture>`;
+- `vault-cli --vault <fixture> device account list`;
+- `vault-cli experiment list --vault <fixture>`;
+- `vault-cli --vault=<fixture> experiment list`.
 
 The helper must not try to understand nested commands such as
 `device account list`. Once it identifies `device`, it is done.
@@ -282,13 +414,22 @@ Test cases:
 - `['--format=json', 'device', 'account', 'list']`
 - `['device', '--help']`
 - `['device', 'account', 'list', '--schema', '--format', 'json']`
-- `['--vault', './vault', 'device', 'account', 'list']` falls back to full.
-- `['--', 'device']` does not treat `device` after `--` as a command token.
+- `['--vault', './fixture-vault', 'device', 'account', 'list']` routes device.
+- `['--vault=./fixture-vault', 'experiment', 'list']` routes experiment.
+- `['device', 'account', 'list', '--vault', './fixture-vault']` routes device.
+- `['--', 'device']` uses full registration unless a focused compatibility test
+  proves scoped behavior is exactly equivalent for this shape.
+- `['skills', 'add']` uses full registration unless Incur exposes a scoped
+  skills mode that is proven equivalent.
+- `['completions', 'bash']` uses full registration.
+- `['--mcp']` uses full registration.
 - `['onboard']` routes setup.
 - `['use', './vault']` routes setup only when program name is `murph`.
+- `['--config', './config.json', 'use', './vault']` routes setup only when
+  program name is `murph`.
 - `[]` routes setup only when program name is `murph`.
 
-### 2. Split lightweight shell creation away from vault services
+### 3. Split lightweight shell creation away from vault services
 
 Current file:
 
@@ -339,7 +480,7 @@ Then either:
 
 Prefer deletion if the split leaves `vault-cli-bootstrap.ts` as a thin alias.
 
-### 3. Keep setup/onboarding out of normal commands
+### 4. Keep setup/onboarding out of normal commands
 
 Current issue:
 
@@ -367,7 +508,7 @@ Preserve behavior:
 Do not move the whole setup CLI into the data-plane package. Do not make setup
 part of the normal command graph.
 
-### 4. Add command-family mounting for the hot path
+### 5. Add command-family mounting for the hot path
 
 Candidate file:
 
@@ -380,7 +521,22 @@ It must not statically import command modules.
 
 It should not be generic. Avoid filesystem scans, naming conventions, or
 plugin-style registration. A small explicit list is easier to review and less
-fragile.
+fragile. It must also not become descriptor metadata: no leaf command paths, no
+duplicated descriptions, no duplicated schemas, no service-binding registry, and
+no command-specific option knowledge.
+
+First shippable scope should be deliberately small:
+
+- `device`;
+- `experiment`;
+- `commons`;
+- core vault roots needed by the measured paths, such as `init`, `validate`,
+  and `vault`.
+
+All other roots may full-fallback in the first cut with a documented reason.
+Do not eagerly build a complete second root topology. Add more lazy roots only
+after measurement proves they matter or descriptor deletion makes the command
+owned registrar list the single topology source.
 
 Example shape:
 
@@ -419,21 +575,26 @@ rules are:
 - one root token maps to one imported command family;
 - import functions are explicit;
 - Incur command definitions remain inside the command modules;
-- `cli.serve()` receives the original argv;
+- `cli.serve()` receives the vault-stripped argv;
 - full registration is an intentional fallback, not the default path.
+- full and lazy paths should call command-owned registrars, not separate
+  descriptor-owned implementations.
 
-Root aliases and special top-level commands must be handled explicitly:
+Root aliases and special top-level commands outside the first shippable scope
+must either be handled explicitly or documented as full-only:
 
-- `init`, `validate`, and `vault` mount the vault command family.
+- `init`, `validate`, and `vault` mount the vault command family in the first
+  cut if they are part of the measured raw-vault flow.
 - assistant aliases such as `assistant`, `chat`, `run`, `status`, `doctor`, and
-  `stop` mount the assistant command family.
-- `age` mounts the Murph Age command family.
+  `stop` may stay full-only initially.
+- `age` may stay full-only initially.
 - health entity commands such as `goal`, `condition`, `allergy`, `blood-test`,
-  `family`, and `genetics` mount their corresponding health command family.
-- every existing root in the current command topology must have one route or be
-  intentionally full-registration-only with a documented reason.
+  `family`, and `genetics` may stay full-only initially.
+- every existing root in the current command topology must have one lazy route
+  or be intentionally full-registration-only with a documented reason before the
+  lazy entrypoint is accepted.
 
-### 5. Preserve the synchronous public CLI builder until it can be simplified
+### 6. Preserve the synchronous public CLI builder until it can be simplified
 
 Current public behavior:
 
@@ -455,22 +616,33 @@ Instead:
   `cli-entry.ts`.
 - Ensure root runtime discovery commands that need the full surface can still
   call full registration.
+- Make both full and lazy registration call command-owned registrar functions.
+  The lazy route table may choose a registrar, but it must not own command
+  metadata.
 
 This creates a temporary dual path, but it avoids breaking existing API
 contracts. Keep the dual path narrow:
 
-- full builder: static full command tree for programmatic/discovery/typegen;
-- lazy entrypoint: installed command execution.
+- full builder: static full command tree for programmatic/discovery/typegen,
+  assembled from the same command-owned registrars;
+- lazy entrypoint: installed command execution, selecting a subset of those
+  registrars.
 
-Do not add user-facing config around this. Do not add runtime flags. Do not add
-environment switches except temporary diagnostic instrumentation if needed.
+The temporary state must not leave three topology authorities: old descriptor
+manifest, new lazy route table, and command modules. If the descriptor manifest
+must remain briefly for `createVaultCli()`, keep it out of the lazy path and do
+not add new behavior to it. The deletion target is command-owned registrars as
+the single command-topology source.
+
+Do not add user-facing config around this. Do not add runtime flags,
+environment switches, or production diagnostic hooks for lazy loading.
 
 After the lazy path is stable, evaluate whether `createVaultCli()` can delegate
 to shared command-owned registration helpers without the old descriptor
 manifest. Do not force that cleanup into the first behavior-preserving cut if it
 creates unnecessary risk.
 
-### 6. Delete the descriptor layer from the hot path
+### 7. Delete the descriptor layer from the hot path
 
 Current file:
 
@@ -495,6 +667,11 @@ First cut:
 - Remove `vault-cli-command-manifest.ts` from the installed binary hot path.
 - Keep it only if needed by the synchronous full builder and generated artifact
   tooling during the transition.
+- Do not add new descriptor metadata to support lazy routing.
+- Do not let the lazy route table duplicate `leafCommands`,
+  `directVaultServiceBindings`, descriptions, output schemas, or nested paths.
+- Prefer extracting plain full-registration functions that call command-owned
+  registrars over preserving the descriptor list as the long-term full builder.
 
 Final cleanup target:
 
@@ -510,7 +687,7 @@ If any descriptor metadata is still genuinely needed, split it into a small
 metadata-only file that contains plain strings and no command implementation
 imports. Do this only after proving the need. The default is deletion.
 
-### 7. Move Health Commons catalog reads deeper
+### 8. Move Health Commons catalog reads deeper
 
 Problem:
 
@@ -535,7 +712,7 @@ Testing:
   paths must still load and use the catalog.
 - Commons commands must retain current behavior and output contracts.
 
-### 8. Avoid premature service micro-optimization
+### 9. Avoid premature service micro-optimization
 
 The first-order cost is eager command-family import. Do not split every service
 package before measuring the lazy command path.
@@ -560,22 +737,38 @@ around timing anecdotes.
 
 | Invocation | Expected registration | Notes |
 | --- | --- | --- |
-| `vault-cli --version` | none beyond shell | Must be near Node plus shell startup. |
+| `vault-cli --version` | version | Direct version output; no Incur shell or command graph. |
 | `vault-cli --help` | full | Root help should list the full surface. |
+| `vault-cli help` | full | Preserve current root-help/unknown-command behavior intentionally. |
 | `vault-cli --llms` | full | Root agent discovery needs the full command index. |
 | `vault-cli --llms-full` | full | Full manifest is intentionally expensive. |
+| `vault-cli --mcp` | full | MCP should expose the complete tool list unless Incur later provides a proven scoped mode. |
+| `vault-cli skills ...` | full | Incur-owned skill behavior should not be reimplemented. |
+| `vault-cli skill ...` | full | Treat possible Incur skill aliases as framework-owned. |
+| `vault-cli mcp ...` | full | Incur-owned MCP registration behavior should not be reimplemented. |
+| `vault-cli completions ...` | full | Root completion setup depends on the command map and built-ins. |
+| `COMPLETE=<shell> vault-cli ...` | full | Dynamic completion should see the full tree until scoped completion is proven. |
 | `vault-cli device --help` | device only | Scoped help comes from real device Incur group. |
 | `vault-cli device account list` | device only | Common hosted runner read path. |
+| `vault-cli --vault <fixture> device account list` | device only | Leading explicit vault is a common hosted-runner shape and must stay fast. |
+| `vault-cli device account list --vault <fixture>` | device only | Existing trailing explicit-vault behavior preserved. |
 | `vault-cli experiment list` | experiment only | Must not import setup, assistant, inbox, or parse Commons catalog. |
+| `vault-cli --vault=<fixture> experiment list` | experiment only | Leading `--vault=` stays on the scoped path. |
 | `vault-cli commons protocol show ...` | commons only | Health Commons cost is legitimate here. |
 | `vault-cli init ...` | vault only | Data-plane vault init. |
 | `murph init ...` | vault only | Explicit vault override remains allowed only here. |
+| `murph --version` | version | Direct version output, no setup import. |
+| `murph --help` | full | Product root discovery should not route to setup by accident. |
+| `murph help` | setup or full by explicit current-behavior test | Current setup routing treats `help` as setup-owned for `murph`; preserve or intentionally change with a test. |
+| `murph --llms-full` | full | Root agent discovery needs the full command index. |
 | `murph onboard ...` | setup only | Setup import is expected. |
 | `murph use ...` | setup only | Existing active-vault selection behavior preserved. |
+| `murph --config <path> use ...` | setup only | Config prefix should not hide the setup-owned `use` command. |
 | bare `murph` | setup only | Existing onboarding/default behavior preserved. |
 | `murph device account list` | device only | Uses configured default vault before serve. |
 | `vault-cli unknown` | full fallback | Preserve Incur suggestions and current error behavior. |
 | leading unknown flag before root command | full fallback | Preserve unusual option ordering instead of guessing. |
+| `vault-cli -- device` | current behavior or full fallback | Must be covered by an explicit compatibility test before changing behavior. |
 
 ## Test Plan
 
@@ -584,8 +777,11 @@ around timing anecdotes.
 Add focused tests for the routing helper:
 
 - program name detection;
-- root token extraction;
-- known global option skipping;
+- fail-closed root token classification;
+- leading and trailing `--vault` / `--vault=<path>` stripping;
+- root discovery and MCP full-registration decisions;
+- root Incur built-in decisions for `skills`, `skill`, `mcp`,
+  `completions`, and `COMPLETE`;
 - setup invocation detection;
 - full-registration fallback cases;
 - root-command alias mapping.
@@ -596,13 +792,76 @@ These tests should be small and should not import command modules.
 
 Update or add tests that prove:
 
-- `vault-cli --version` can be served without importing command modules. This
-  can be tested with module mocks in source tests or a tiny diagnostic hook in a
-  test-only path. Avoid production instrumentation.
+- `vault-cli --version` can be served without importing command modules.
 - `device account list` mounts only the device registrar.
 - `commons protocol show` mounts Commons and still works.
 - root `--help` and root `--llms-full` still load the full surface.
 - scoped `device --help` does not require unrelated command modules.
+- lazy execution mounts commands before installing schema/vault context, because
+  `installVaultCliVaultContext()` only mutates commands already registered.
+- scoped schemas and LLM manifests hide `--vault`, while command execution still
+  injects the selected vault.
+- setup follow-on actions prove the same invariant for `device connect`,
+  `assistant run`, and `assistant chat`: either each follow-on uses a fresh
+  shell/mount/wrap/serve dispatch, or all follow-on roots are mounted before
+  wrappers are installed.
+- root schema and root LLM output full-register before schema-index behavior
+  runs, because the schema index is derived from the currently registered
+  command map and uses `--llms-full` internally.
+- schema-index fallback does not override Incur help precedence for combined
+  `--help --schema --format json`; when `--help` or `-h` is present, help wins.
+- every full CLI root is either lazily routable in the first slice or listed as
+  full-only with a reason.
+- programmatic `createVaultCli().fetch(...)` still handles vault override and
+  injection on the full-builder path.
+
+Add a built-runtime fresh-process import sentinel. It should execute
+`node packages/cli/dist/bin.js ...` in a new process and fail if hot paths load
+modules they should not load. Do not rely on Vitest module mocks or the
+persistent CLI harness for this proof, because both can hide cold-start import
+behavior.
+
+The sentinel should cover at least:
+
+- `--version` does not load `vault-cli-command-manifest`, command modules,
+  setup, assistant, inbox, Health Commons runtime, or `node:sqlite`.
+- `device account list` does not load setup, assistant, inbox, Commons command
+  modules, or Health Commons runtime.
+- `experiment list` does not load setup, assistant, inbox, Commons command
+  modules, or Health Commons runtime.
+- `commons protocol show` may load Health Commons runtime but should not load
+  setup, assistant, or inbox.
+
+Keep the sentinel test-only. Do not add production instrumentation, env flags,
+or user-visible diagnostics for this.
+
+### Incur Surface Tests
+
+The lazy route table must prove more than root names. Add focused built or
+source tests for Incur-owned surfaces:
+
+- `vault-cli device --schema --format json`
+- `vault-cli experiment --llms --format json`
+- `vault-cli commons protocol show --schema --format json`
+- shell completion callback behavior for root and scoped commands
+- `vault-cli --mcp`
+- `vault-cli skills ...`
+
+Root MCP and skills may stay full-registration paths. The important invariant is
+that Murph does not reimplement those Incur surfaces.
+
+### Health Commons Tests
+
+Deferral must be proven in both directions:
+
+- `experiment list` and `experiment show` do not load Health Commons runtime or
+  construct the generated catalog reader.
+- `experiment start --from-protocol ...` loads and uses Health Commons runtime.
+- `experiment edit --hydrate-protocol-defaults ...` loads and uses Health
+  Commons runtime.
+- Editing an already protocol-backed experiment to another protocol either
+  keeps `commonsProtocolRef` and
+  `effectiveProtocolSnapshot.effectiveSpecHash` consistent or rejects the edit.
 
 ### Existing Test Migration
 
@@ -664,11 +923,19 @@ Acceptance targets should be relative, not absolute:
 ### Required Verification
 
 For the implementation change under `packages/cli`, use the CLI verification
-lane from repo policy:
+lane from repo policy. Because this change is specifically about the built
+binary cold-start path and generated Incur/package shape, source-first
+`pnpm test:diff` is not sufficient as final proof.
 
 - `pnpm typecheck`
-- `pnpm test:diff <changed paths>` when it truthfully covers the change, or
-  `pnpm --dir packages/cli verify:coverage`
+- `pnpm --dir packages/cli verify:coverage`
+
+If `verify:coverage` is blocked by a credibly unrelated existing failure, the
+minimum scoped replacement is:
+
+- `pnpm build:test-runtime:prepared`
+- `pnpm --dir packages/cli verify:package-shape`
+- the focused built-runtime import sentinel and direct smokes from this plan
 
 Because command topology and generated Incur artifacts are involved, expect the
 package-local CLI verification path to be the safer final proof.
@@ -677,75 +944,92 @@ Also run direct built CLI smoke checks after build:
 
 - `node packages/cli/dist/bin.js --version`
 - `node packages/cli/dist/bin.js --help`
+- `node packages/cli/dist/bin.js help`
 - `node packages/cli/dist/bin.js device --help`
 - `node packages/cli/dist/bin.js device account list --vault <fixture>`
+- `node packages/cli/dist/bin.js --vault <fixture> device account list`
 - `node packages/cli/dist/bin.js experiment list --vault <fixture>`
+- `node packages/cli/dist/bin.js --vault=<fixture> experiment list`
 - `node packages/cli/dist/bin.js commons protocol list --limit 1`
+
+Compare key lazy-bin outputs against the full-builder path for representative
+commands, especially scoped help/schema/LLM output and root discovery output.
+Generated/package-shape checks prove `dist/index.js`; these comparisons prove
+the installed lazy binary behaves the same where it should.
 
 Use a fixture or temporary vault path that does not contain personal identifiers
 and do not print local absolute paths in committed artifacts.
 
 ## Implementation Sequence
 
-### Phase 0: Baseline and Guardrails
+### Cut 0: Baseline and root cleanup
 
 1. Record current cold timings locally and in the hosted runner container if it
    is available.
-2. Add or identify tests that cover:
-   - `--version`;
-   - root help;
-   - scoped help;
-   - `device account list`;
-   - `experiment list`;
-   - Commons commands;
-   - generated artifact freshness.
-3. Confirm which tests currently import `vaultCliCommandDescriptors`.
-4. Decide which descriptor tests should become Incur-surface tests.
+2. Narrow the runtime-state warning-filter import.
+3. Split pure `--vault` argv extraction away from vault-context command
+   wrapping.
+4. Fast-path `--version` directly without creating an Incur shell.
+5. Split lightweight shell creation away from service bootstrap.
+6. Defer setup imports for obvious non-setup invocations.
+7. Confirm these changes do not import vault services, setup, assistant, inbox,
+   query, commands, or Health Commons for `--version`.
 
-Do not edit command architecture until the current behavior surface is clear.
+This cut is deletion-first. If it removes enough latency for the current need,
+stop and do not add lazy root classification.
 
-### Phase 1: Lightweight Routing Helpers
+### Cut 1: Lazy entrypoint for measured hot roots
 
-1. Add `vault-cli-routing.ts`.
-2. Unit test it without importing command modules.
-3. Extract setup invocation detection into this helper for the CLI entrypoint.
-4. Leave setup package exports alone initially unless there is a clear reason to
-   centralize the helper elsewhere.
+1. Add `classifyVaultCliInvocation()` or equivalent. Keep the name about
+   classification, not parsing.
+2. Add the small command-family mounting function for measured hot roots only:
+   `device`, `experiment`, `commons`, and the core vault roots needed by raw
+   vault smoke paths.
+3. Make normal data-plane command execution:
+   - extract `--vault` once;
+   - classify the vault-stripped argv;
+   - create the lightweight shell;
+   - mount the selected or full command set;
+   - install schema index;
+   - install vault context so it remains the outer serve wrapper;
+   - call Incur with the vault-stripped argv.
+4. Preserve setup launch behavior after successful onboarding by running
+   follow-on `device connect`, `assistant run`, or `assistant chat` through a
+   fresh shell/mount/wrap/serve dispatch, or by mounting every needed follow-on
+   root before installing wrappers. Prefer fresh dispatch because it keeps the
+   wrapper invariant obvious and avoids reusing a partially wrapped shell.
+5. Route root discovery, Incur built-ins, completion mode, unknown roots, and
+   ambiguous leading flags to full registration.
+6. Keep `createVaultCli()` synchronous for programmatic full-tree consumers, but
+   make full registration use the same command-owned registrars where possible.
+7. Add route parity as a Cut 1 acceptance test: every full CLI root is either
+   lazily routable or documented full-only.
 
-This phase should be behavior-preserving.
+This cut is the first one that should materially reduce ordinary command
+latency. Do not add broad route coverage until measurements prove the smaller
+slice is insufficient.
 
-### Phase 2: Lightweight Root Shell
-
-1. Add `vault-cli-shell.ts`.
-2. Move shell-only constants and `createVaultCliShell()` there.
-3. Update existing bootstrap/full builder imports.
-4. Confirm importing the shell does not import vault services, setup, assistant,
-   inbox, query, commands, or Health Commons.
-
-This phase should be behavior-preserving.
-
-### Phase 3: Lazy Binary Execution Path
-
-1. Add the small command routing/mounting function.
-2. Update `cli-entry.ts` so normal data-plane command execution creates the
-   lightweight shell, mounts the requested command family, installs existing
-   schema/vault context behavior, and calls Incur.
-3. Preserve setup launch behavior after successful onboarding, including
-   follow-on `assistant run` and `assistant chat`.
-4. Keep `createVaultCli()` unchanged for programmatic full-tree consumers.
-5. Make root discovery and unknown commands use full registration.
-
-This is the first phase that should materially reduce latency.
-
-### Phase 4: Health Commons Import Deferral
+### Cut 2: Health Commons deferral and final proof
 
 1. Move `@murphai/health-commons/runtime` top-level imports out of
    `commands/experiment.ts`.
 2. Import Commons runtime only inside protocol hydration/defaulting functions.
-3. Prove `experiment list` does not construct the generated catalog reader.
-4. Prove protocol hydration commands still work.
+3. Prove `experiment list` and `experiment show` do not construct the generated
+   catalog reader.
+4. Prove protocol-backed start/edit/hydration commands still load and use the
+   catalog correctly.
+5. Regenerate Incur config/types after command topology changes.
+6. Run package-shape verification and required CLI coverage.
+7. Run direct built CLI smokes and fresh-process import sentinels.
+8. Compare representative lazy-bin outputs against the full-builder outputs.
+9. Re-measure cold timings and compare against the baseline.
 
-### Phase 5: Descriptor Deletion
+`experiment list` is part of the success criteria, so this is not optional
+cleanup for the first shippable performance fix.
+
+### Follow-Up: Descriptor deletion
+
+After the lazy binary path is proven:
 
 1. Remove `vault-cli-command-manifest.ts` from any remaining hot path.
 2. Convert descriptor tests to Incur-surface tests.
@@ -754,23 +1038,9 @@ This is the first phase that should materially reduce latency.
 5. If full static registration still needs a central list, make it a simple
    registration function with static imports, not a descriptor abstraction.
 
-This phase should reduce long-term maintenance risk.
-
-### Phase 6: Generated Artifacts and Package Shape
-
-1. Regenerate Incur config/types after command topology changes.
-2. Run package-shape verification.
-3. Keep generated artifact changes scoped and explain any intentional topology
-   differences in the commit message.
-
-### Phase 7: Final Verification and Measurement
-
-1. Run required typecheck and CLI verification.
-2. Run direct built CLI smokes.
-3. Re-measure cold timings.
-4. Compare against Phase 0.
-5. Document remaining costs. Do not add another layer unless the new evidence
-   proves it is necessary.
+Do this as a follow-up unless it is mechanically smaller during the first cut.
+The first fix should not combine latency remediation with a broad descriptor
+rewrite if that increases risk.
 
 ## Failure Modes To Avoid
 
@@ -810,6 +1080,22 @@ The setup package currently owns real setup behavior. The CLI entrypoint should
 only copy or extract the tiny setup-routing predicate. It should not import or
 reimplement setup workflows.
 
+Setup follow-ons must preserve vault-context wrapping. Either each follow-on
+uses a fresh shell/mount/wrap/serve dispatch, or every follow-on root is mounted
+before schema/vault wrappers are installed.
+
+### Breaking Vault Injection
+
+`installVaultCliVaultContext()` mutates commands already registered. Lazy
+execution must mount the selected or full command set before installing vault
+context. It must call Incur with the vault-stripped argv that current behavior
+already uses, and it must not perform any other argv rewrite.
+
+### Breaking Schema Help Precedence
+
+The schema-index wrapper should not override Incur help behavior for combined
+`--help --schema --format json` requests. If help is present, help should win.
+
 ### Keeping Descriptor Metadata Because Tests Use It
 
 Tests are not product requirements. If a descriptor exists only because tests
@@ -829,8 +1115,8 @@ Before landing implementation:
 - No new dependency was added.
 - No user-facing flag or config toggle was added for lazy loading.
 - No command handler is called outside Incur.
-- `cli.serve()` still receives original argv.
-- Root command routing helper has no heavy imports.
+- `cli.serve()` receives the vault-stripped argv and no other rewritten argv.
+- Root classification helper has no heavy imports.
 - Root shell module has no heavy imports.
 - Setup imports occur only for setup invocations.
 - Common data-plane commands do not import assistant/setup/inbox.
@@ -838,9 +1124,13 @@ Before landing implementation:
 - Commons commands still work.
 - Root discovery still works.
 - Scoped discovery still works.
+- Incur built-ins and completion modes full-register or have proven scoped
+  equivalence.
+- Setup follow-ons preserve vault injection and hidden `--vault`.
 - Generated Incur artifacts are fresh.
-- CLI package verification passes.
-- Fresh-process timing proves the regression is fixed.
+- CLI package `verify:coverage` passes, or the documented built-runtime scoped
+  replacement is run because of an unrelated blocker.
+- Fresh-process import sentinels and timing prove the regression is fixed.
 
 ## Expected End State
 
