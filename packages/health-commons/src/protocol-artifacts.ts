@@ -328,6 +328,11 @@ function buildProtocolFamilyGraphEdges(
   graphEntityKeys: ReadonlySet<string>,
 ): HealthCommonsProtocolFamilyGraphEdge[] {
   const edges: HealthCommonsProtocolFamilyGraphEdge[] = [];
+  const graphEntityTypesByKey = new Map(
+    catalog.entities
+      .filter((entity) => graphEntityKeys.has(entity.key))
+      .map((entity) => [entity.key, protocolFamilyGraphEntityType(entity)]),
+  );
 
   for (const entity of catalog.entities) {
     if (!graphEntityKeys.has(entity.key)) {
@@ -342,6 +347,18 @@ function buildProtocolFamilyGraphEdges(
       const targetKey = stripRevision(relation.target);
       if (!graphEntityKeys.has(targetKey)) {
         continue;
+      }
+
+      if (
+        !isValidProtocolFamilyGraphEdgeDirection({
+          sourceType: graphEntityTypesByKey.get(entity.key),
+          targetType: graphEntityTypesByKey.get(targetKey),
+          type: relation.type,
+        })
+      ) {
+        throw new Error(
+          `Invalid Health Commons protocol family graph relation ${entity.key} ${relation.type} ${targetKey}.`,
+        );
       }
 
       edges.push({
@@ -438,6 +455,38 @@ function isProtocolFamilyGraphRelationType(
   return value === "child_family" ||
     value === "parent_family" ||
     value === "related_protocol";
+}
+
+function protocolFamilyGraphEntityType(
+  entity: HealthCommonsCatalogEntity,
+): HealthCommonsProtocolEntityType | undefined {
+  if (
+    entity.entityType === "experiment_family" ||
+    entity.entityType === "protocol_variant"
+  ) {
+    return entity.entityType;
+  }
+
+  return undefined;
+}
+
+function isValidProtocolFamilyGraphEdgeDirection(input: {
+  sourceType: HealthCommonsProtocolEntityType | undefined;
+  targetType: HealthCommonsProtocolEntityType | undefined;
+  type: HealthCommonsProtocolFamilyGraphEdge["type"];
+}): boolean {
+  if (input.type === "parent_family") {
+    return input.sourceType === "protocol_variant" &&
+      input.targetType === "experiment_family";
+  }
+
+  if (input.type === "child_family") {
+    return input.sourceType === "experiment_family" &&
+      input.targetType === "experiment_family";
+  }
+
+  return input.type === "related_protocol" &&
+    input.targetType === "protocol_variant";
 }
 
 function routeIdFromBundlePath(bundlePath: string): string | null {
