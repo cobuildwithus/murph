@@ -856,7 +856,6 @@ export async function runAssistantAutomationPass(
       }
   const inputRefreshResult = applyCanonicalWrites
     ? await inputSource.refresh({
-        phase: 'input_available',
         signal: input.signal,
       })
     : null

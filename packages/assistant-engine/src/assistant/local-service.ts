@@ -92,6 +92,7 @@ import {
   assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist,
 } from './active-turn-input-journal.js'
 import {
+  createAssistantActiveTurnNotActiveError,
   createAssistantActiveTurnInputController,
   steerAssistantActiveTurnInputWithStatus,
 } from './active-turn-input-controller.js'
@@ -228,6 +229,12 @@ export async function sendAssistantMessageLocal(
         'ASSISTANT_ACTIVE_TURN_ID_MISMATCH',
         'Manual active-turn input targeted a stale or different active turn.',
       )
+    }
+    if (
+      typeof input.expectedActiveTurnId === 'string' &&
+      steerResult.kind === 'no-active-turn'
+    ) {
+      throw createAssistantActiveTurnNotActiveError()
     }
   }
 
@@ -494,18 +501,15 @@ export async function sendAssistantMessageLocal(
             previousInput,
           }
         }
-        let preProviderAdmissionCount = 0
-        while (true) {
-          const activeTurnInput = await turnInputController.admitAvailable({
-            probeIfIdle: true,
-            signal: currentInput.abortSignal,
-          })
-          if (activeTurnInput?.kind !== 'accepted') {
-            break
-          }
-          preProviderAdmissionCount += 1
+        const preProviderInput = await turnInputController.admitAvailable({
+          probeIfIdle: true,
+          signal: currentInput.abortSignal,
+        })
+        const preProviderAdmissionCount =
+          preProviderInput?.kind === 'accepted' ? 1 : 0
+        if (preProviderInput?.kind === 'accepted') {
           await acceptActiveTurnInput({
-            activeTurnInput,
+            activeTurnInput: preProviderInput,
             providerRequestAcceptedInputIds: acceptedInputIdsForProviderRequest,
             providerRequestOrdinal,
             sessionId: currentSession.sessionId,

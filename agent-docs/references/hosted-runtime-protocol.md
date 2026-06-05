@@ -394,9 +394,11 @@ run prompt-preparation effects best-effort, and notify active-turn admission.
 The assistant engine then admits the persisted input through live steering or
 pre-provider admission without using hosted-specific mailbox
 refresh/checkpoint ports. While a Codex turn is live, same-conversation input is
-steered into that live provider turn. After the live provider turn ends, new
-input remains staged for a normal later assistant turn; the assistant engine
-does not synthesize another provider request inside the same assistant turn.
+steered into that live provider turn. After the live provider turn ends,
+untargeted new input remains staged for a normal later assistant turn, while
+strict active-turn-targeted input fails closed instead of falling through; the
+assistant engine does not synthesize another provider request inside the same
+assistant turn.
 Accepted-input journaling, transcript updates, checkpoint bookkeeping,
 provider-request metadata, and outbox intent creation remain on the normal
 local assistant-service path. The same-reply coalescing window ends when the
@@ -479,7 +481,8 @@ Fresh-thread starts and stale native-resume fallback may include bounded recent
 committed transcript history; primary native-resume attempts do not replay that
 history into the provider prompt. Active-turn input is not serialized as
 provider prompt history; it is either folded in before the first provider
-request or steered through the live Codex turn.
+request, steered through the live Codex turn, or left unaccepted for a later
+normal turn when it misses the live steering window.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
 state. `apps/web` assesses freshness from the latest replica ref, checkpoint

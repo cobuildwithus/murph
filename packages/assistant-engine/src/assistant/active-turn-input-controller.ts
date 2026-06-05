@@ -1,11 +1,11 @@
 import type { AssistantAskResult } from '@murphai/operator-config/assistant-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantMessageInput } from './service-contracts.js'
 import type { AssistantAcceptedTurnInputItemInput } from './active-turn-input-journal.js'
 import type {
   AssistantActiveTurnInputAdmissionHook,
   AssistantActiveTurnInputAdmissionInput,
   AssistantActiveTurnInputAdmissionResult,
-  AssistantActiveTurnInputPhase,
   AssistantActiveTurnLiveProviderTurn,
 } from './turn-input.js'
 import {
@@ -34,9 +34,17 @@ type AssistantAcceptedActiveTurnInputAdmission =
 
 interface QueuedAssistantActiveTurnInputAdmission {
   admission: AssistantAcceptedActiveTurnInputAdmission
+  manualCompletion?: AssistantActiveTurnManualInputCompletion | null
   providerInputAck?: Promise<boolean> | null
   providerInputAckTurnKey?: AssistantActiveTurnLiveProviderTurnKey | null
   providerInputAcknowledgedTurnKey?: AssistantActiveTurnLiveProviderTurnKey | null
+}
+
+interface AssistantActiveTurnManualInputCompletion {
+  accepted: boolean
+  promise: Promise<AssistantAskResult>
+  reject(error: unknown): void
+  resolve(result: AssistantAskResult): void
 }
 
 type AssistantActiveTurnInputSteerResult =
@@ -46,9 +54,6 @@ type AssistantActiveTurnInputSteerResult =
     }
   | {
       kind: 'no-active-turn'
-    }
-  | {
-      kind: 'turn-ended'
     }
   | {
       kind: 'turn-id-mismatch'
@@ -66,13 +71,7 @@ class AssistantActiveTurnInputController {
   private liveProviderTurnEnded = false
   private completedProviderTurnKey: AssistantActiveTurnLiveProviderTurnKey | null = null
   private pending: QueuedAssistantActiveTurnInputAdmission[] = []
-  private completion:
-    | {
-        promise: Promise<AssistantAskResult>
-        reject(error: unknown): void
-        resolve(result: AssistantAskResult): void
-      }
-    | null = null
+  private manualCompletions: AssistantActiveTurnManualInputCompletion[] = []
 
   constructor(
     private readonly input: {
@@ -100,22 +99,25 @@ class AssistantActiveTurnInputController {
     }
     if (this.liveProviderTurnEnded) {
       return {
-        kind: 'turn-ended',
+        kind: 'no-active-turn',
       }
     }
     const id = `manual-${this.nextInputOrdinal}`
+    const manualCompletion = createAssistantActiveTurnManualInputCompletion()
     const queued: QueuedAssistantActiveTurnInputAdmission = {
       admission: buildManualAcceptedActiveTurnInputAdmission({
         id,
         input,
       }),
+      manualCompletion,
       providerInputAcknowledgedTurnKey: null,
     }
     this.pending.push(queued)
+    this.manualCompletions.push(manualCompletion)
     this.nextInputOrdinal += 1
     this.tryStartLiveSteers()
     return {
-      completion: this.resolveCompletion().promise,
+      completion: manualCompletion.promise,
       kind: 'queued',
     }
   }
@@ -137,7 +139,6 @@ class AssistantActiveTurnInputController {
     signal?: AbortSignal
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
     return this.admitAvailableInput({
-      phase: 'input_available',
       signal: input?.signal,
     }).catch(async (error: unknown) => {
       await this.handleInputAvailableAdmissionError(error)
@@ -230,7 +231,13 @@ class AssistantActiveTurnInputController {
   }
 
   complete(result: AssistantAskResult): void {
-    this.completion?.resolve(result)
+    for (const completion of this.manualCompletions) {
+      if (completion.accepted) {
+        completion.resolve(result)
+      } else {
+        completion.reject(createAssistantActiveTurnNotActiveError())
+      }
+    }
   }
 
   fail(error: unknown): void {
@@ -238,34 +245,12 @@ class AssistantActiveTurnInputController {
     this.liveProviderTurn = null
     this.liveProviderTurnKey = null
     this.liveProviderTurnEnded = true
-    this.completion?.reject(error)
-  }
-
-  private resolveCompletion(): {
-    promise: Promise<AssistantAskResult>
-    reject(error: unknown): void
-    resolve(result: AssistantAskResult): void
-  } {
-    if (this.completion) {
-      return this.completion
+    for (const completion of this.manualCompletions) {
+      completion.reject(error)
     }
-
-    let rejectCompletion!: (error: unknown) => void
-    let resolveCompletion!: (result: AssistantAskResult) => void
-    const promise = new Promise<AssistantAskResult>((resolve, reject) => {
-      rejectCompletion = reject
-      resolveCompletion = resolve
-    })
-    this.completion = {
-      promise,
-      reject: rejectCompletion,
-      resolve: resolveCompletion,
-    }
-    return this.completion
   }
 
   private async admitAvailableInput(input: {
-    phase: AssistantActiveTurnInputPhase
     signal?: AbortSignal
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
     if (!this.input.admissionHook || this.closed) {
@@ -288,7 +273,6 @@ class AssistantActiveTurnInputController {
   }
 
   private async runInputAvailableAdmissionLoop(input: {
-    phase: AssistantActiveTurnInputPhase
     signal?: AbortSignal
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
     let acceptedResult: AssistantActiveTurnInputAdmissionResult | undefined
@@ -359,12 +343,10 @@ class AssistantActiveTurnInputController {
   }
 
   private buildAdmissionInput(input: {
-    phase: AssistantActiveTurnInputPhase
     signal?: AbortSignal
   }): AssistantActiveTurnInputAdmissionInput {
     return {
       ...this.resolveKnownAdmissionInput(),
-      phase: input.phase,
       sessionId: this.input.sessionId,
       signal: input.signal,
       turnId: this.input.turnId,
@@ -460,6 +442,11 @@ class AssistantActiveTurnInputController {
     }
 
     this.pending.splice(0, accepted.length)
+    for (const item of accepted) {
+      if (item.manualCompletion) {
+        item.manualCompletion.accepted = true
+      }
+    }
     this.tryStartLiveSteers()
     return accepted
   }
@@ -530,6 +517,19 @@ class AssistantActiveTurnInputController {
       return
     }
 
+    if (
+      this.liveProviderTurn === null &&
+      this.completedProviderTurnKey === input.liveProviderTurnKey &&
+      isCodexLiveTurnInactiveError(input.error)
+    ) {
+      if (input.item.providerInputAckTurnKey === input.liveProviderTurnKey) {
+        input.item.providerInputAck = null
+        input.item.providerInputAckTurnKey = null
+        input.item.providerInputAcknowledgedTurnKey = null
+      }
+      return
+    }
+
     const shouldInterrupt = this.liveProviderTurn === input.liveProviderTurn
     this.fatalAdmissionError = input.error
     this.fail(input.error)
@@ -590,20 +590,31 @@ export function createAssistantActiveTurnInputController(input: {
   for (const key of keys) {
     activeTurnInputControllers.set(key, controller)
   }
+  let disposed = false
+  const dispose = () => {
+    if (disposed) {
+      return
+    }
+    disposed = true
+    for (const key of keys) {
+      if (activeTurnInputControllers.get(key) === controller) {
+        activeTurnInputControllers.delete(key)
+      }
+    }
+  }
 
   return {
     admitAvailable: (input) => controller.admitAvailable(input),
     admitLiveSteered: () => controller.admitLiveSteered(),
     close() {
       controller.close()
-      for (const key of keys) {
-        if (activeTurnInputControllers.get(key) === controller) {
-          activeTurnInputControllers.delete(key)
-        }
-      }
+      dispose()
     },
     complete: (result) => controller.complete(result),
-    fail: (error) => controller.fail(error),
+    fail(error) {
+      controller.fail(error)
+      dispose()
+    },
     notifyInputAvailable: (notificationInput) =>
       controller.notifyInputAvailable(notificationInput),
     registerLiveProviderTurn: (turn) => controller.registerLiveProviderTurn(turn),
@@ -743,6 +754,53 @@ function formatAssistantActiveTurnLiveProviderTurnKey(
   input: Pick<AssistantActiveTurnLiveProviderTurn, 'codexThreadId' | 'providerTurnId'>,
 ): AssistantActiveTurnLiveProviderTurnKey {
   return `${input.codexThreadId}\u0000${input.providerTurnId}`
+}
+
+function createAssistantActiveTurnManualInputCompletion(): AssistantActiveTurnManualInputCompletion {
+  let settled = false
+  let rejectCompletion!: (error: unknown) => void
+  let resolveCompletion!: (result: AssistantAskResult) => void
+  const promise = new Promise<AssistantAskResult>((resolve, reject) => {
+    rejectCompletion = reject
+    resolveCompletion = resolve
+  })
+  return {
+    accepted: false,
+    promise,
+    reject(error) {
+      if (settled) {
+        return
+      }
+      settled = true
+      rejectCompletion(error)
+    },
+    resolve(result) {
+      if (settled) {
+        return
+      }
+      settled = true
+      resolveCompletion(result)
+    },
+  }
+}
+
+export function createAssistantActiveTurnNotActiveError(): VaultCliError {
+  return new VaultCliError(
+    'ASSISTANT_ACTIVE_TURN_NOT_ACTIVE',
+    'Manual active-turn input targeted a turn that is no longer active.',
+  )
+}
+
+function isCodexLiveTurnInactiveError(error: unknown): boolean {
+  return readErrorCode(error) === 'ASSISTANT_CODEX_APP_SERVER_LIVE_TURN_INACTIVE'
+}
+
+function readErrorCode(error: unknown): string | null {
+  if (typeof error !== 'object' || error === null || !('code' in error)) {
+    return null
+  }
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'string' ? code : null
 }
 
 function mergeAssistantActiveTurnInputAdmissions(

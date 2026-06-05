@@ -832,10 +832,7 @@ test('sendAssistantMessageLocal live-steers event-backed input without provider 
     response: 'final after event input',
   })
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
-  assert.deepEqual(
-    activeTurnInput.mock.calls.map((call) => call[0]?.phase),
-    ['input_available', 'input_available'],
-  )
+  assert.equal(activeTurnInput.mock.calls.length, 2)
   const journal = await readAssistantAcceptedTurnInputJournal(
     context.vaultRoot,
     'turn-1',
@@ -1432,6 +1429,342 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
   ).toBe(true)
 })
 
+test('sendAssistantMessageLocal keeps provider success when live steer misses provider close', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
+  })
+  const providerStarted = createDeferred<void>()
+  const steerStarted = createDeferred<void>()
+  const steerRelease = createDeferred<void>()
+  const liveSteeredPrompts: string[] = []
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
+      interrupt: async () => undefined,
+      codexThreadId: 'thread-live',
+      providerTurnId: 'turn-live-provider',
+      sessionId: session.sessionId,
+      steer: async (input) => {
+        liveSteeredPrompts.push(input.prompt)
+        steerStarted.resolve()
+        await steerRelease.promise
+        const error = new Error('Codex app-server live turn is no longer active.')
+        Object.assign(error, {
+          code: 'ASSISTANT_CODEX_APP_SERVER_LIVE_TURN_INACTIVE',
+        })
+        throw error
+      },
+      turnId: 'turn-1',
+    })
+    providerStarted.resolve()
+    await steerStarted.promise
+    releaseLiveTurn?.()
+    steerRelease.resolve()
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        response: 'final before missed live steer',
+        session,
+      },
+    }
+  })
+
+  const capture = <T>(promise: Promise<T>) =>
+    promise.then(
+      (result) => ({ result, status: 'fulfilled' as const }),
+      (error: unknown) => ({ error, status: 'rejected' as const }),
+    )
+
+  const firstResultPromise = sendAssistantMessageLocal({
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+  await providerStarted.promise
+
+  const missedSteerResultPromise = capture(sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'Misses provider close',
+    vault: '/vaults/test',
+  }))
+  await steerStarted.promise
+
+  const [firstResult, missedSteerOutcome] = await Promise.all([
+    firstResultPromise,
+    missedSteerResultPromise,
+  ])
+
+  assert.equal(firstResult.response, 'final before missed live steer')
+  assert.equal(missedSteerOutcome.status, 'rejected')
+  expect(missedSteerOutcome.error).toMatchObject({
+    code: 'ASSISTANT_ACTIVE_TURN_NOT_ACTIVE',
+  })
+  expect(liveSteeredPrompts).toEqual(['Misses provider close'])
+  assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 1)
+  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
+  assert.equal(mocks.runtimeState.turns.acceptedInputs.append.mock.calls.length, 1)
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateProviderRequest.mock.calls
+      .map((call) => call[0])
+      .some((input) =>
+        input.ordinal === 0 &&
+        input.turnId === 'turn-1' &&
+        input.acceptedInputIds?.join(',') === 'initial,manual-1'
+      ),
+  ).toBe(false)
+})
+
+test('sendAssistantMessageLocal resolves an admitted manual input and rejects a later missed target', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
+  })
+  const providerStarted = createDeferred<void>()
+  const secondSteerStarted = createDeferred<void>()
+  const secondSteerRelease = createDeferred<void>()
+  const liveSteeredPrompts: string[] = []
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
+      codexThreadId: 'thread-live',
+      interrupt: async () => undefined,
+      providerTurnId: 'turn-live-provider',
+      sessionId: session.sessionId,
+      steer: async (input) => {
+        liveSteeredPrompts.push(input.prompt)
+        if (input.prompt === 'Second misses close') {
+          secondSteerStarted.resolve()
+          await secondSteerRelease.promise
+          const error = new Error('Codex app-server live turn is no longer active.')
+          Object.assign(error, {
+            code: 'ASSISTANT_CODEX_APP_SERVER_LIVE_TURN_INACTIVE',
+          })
+          throw error
+        }
+      },
+      turnId: 'turn-1',
+    })
+    providerStarted.resolve()
+    await secondSteerStarted.promise
+    releaseLiveTurn?.()
+    secondSteerRelease.resolve()
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        response: 'final after first live input',
+        session,
+      },
+    }
+  })
+
+  const capture = <T>(promise: Promise<T>) =>
+    promise.then(
+      (result) => ({ result, status: 'fulfilled' as const }),
+      (error: unknown) => ({ error, status: 'rejected' as const }),
+    )
+
+  const firstResultPromise = sendAssistantMessageLocal({
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+  await providerStarted.promise
+
+  const admittedResultPromise = capture(sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'First admitted',
+    vault: '/vaults/test',
+  }))
+  await vi.waitFor(() => {
+    expect(liveSteeredPrompts).toEqual(['First admitted'])
+  })
+
+  const missedSteerResultPromise = capture(sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'Second misses close',
+    vault: '/vaults/test',
+  }))
+  await vi.waitFor(() => {
+    expect(liveSteeredPrompts).toEqual(['First admitted', 'Second misses close'])
+  })
+
+  const [firstResult, admittedOutcome, missedSteerOutcome] = await Promise.all([
+    firstResultPromise,
+    admittedResultPromise,
+    missedSteerResultPromise,
+  ])
+
+  assert.equal(firstResult.response, 'final after first live input')
+  assert.equal(firstResult.prompt, 'First admitted')
+  if (admittedOutcome.status !== 'fulfilled') {
+    assert.fail('expected admitted active-turn input to resolve')
+  }
+  assert.equal(admittedOutcome.result.response, 'final after first live input')
+  assert.equal(admittedOutcome.result.prompt, 'First admitted')
+  if (missedSteerOutcome.status !== 'rejected') {
+    assert.fail('expected missed active-turn input to reject')
+  }
+  expect(missedSteerOutcome.error).toMatchObject({
+    code: 'ASSISTANT_ACTIVE_TURN_NOT_ACTIVE',
+  })
+  expect(liveSteeredPrompts).toEqual(['First admitted', 'Second misses close'])
+  assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 1)
+  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
+  assert.equal(mocks.runtimeState.turns.acceptedInputs.append.mock.calls.length, 2)
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.append.mock.calls[1]?.[0]?.inputs,
+  ).toEqual([
+      expect.objectContaining({
+        id: 'manual-1',
+        promptFallbackReason: 'manual-input',
+        promptFallbackText: 'First admitted',
+        source: 'manual',
+      }),
+    ])
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateProviderRequest.mock.calls
+      .map((call) => call[0])
+      .some((input) =>
+        input.ordinal === 0 &&
+        input.turnId === 'turn-1' &&
+        input.acceptedInputIds?.join(',') === 'initial,manual-1'
+      ),
+  ).toBe(true)
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateProviderRequest.mock.calls
+      .map((call) => call[0])
+      .some((input) =>
+        input.ordinal === 0 &&
+        input.turnId === 'turn-1' &&
+        input.acceptedInputIds?.join(',') === 'initial,manual-2'
+      ),
+  ).toBe(false)
+})
+
+test('sendAssistantMessageLocal rejects queued targeted input when provider never becomes live', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
+  })
+  const providerStarted = createDeferred<void>()
+  const providerRelease = createDeferred<void>()
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async () => {
+    providerStarted.resolve()
+    await providerRelease.promise
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        response: 'final without live provider',
+        session,
+      },
+    }
+  })
+
+  const capture = <T>(promise: Promise<T>) =>
+    promise.then(
+      (result) => ({ result, status: 'fulfilled' as const }),
+      (error: unknown) => ({ error, status: 'rejected' as const }),
+    )
+
+  const firstResultPromise = sendAssistantMessageLocal({
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+  await providerStarted.promise
+
+  const targetedResultPromise = capture(sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'Cannot be live-steered',
+    vault: '/vaults/test',
+  }))
+
+  providerRelease.resolve()
+  const [firstResult, targetedOutcome] = await Promise.all([
+    firstResultPromise,
+    targetedResultPromise,
+  ])
+
+  assert.equal(firstResult.response, 'final without live provider')
+  assert.equal(targetedOutcome.status, 'rejected')
+  expect(targetedOutcome.error).toMatchObject({
+    code: 'ASSISTANT_ACTIVE_TURN_NOT_ACTIVE',
+  })
+  assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 1)
+  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
+  assert.equal(mocks.runtimeState.turns.acceptedInputs.append.mock.calls.length, 1)
+})
+
 test('sendAssistantMessageLocal fails closed when live steering fails', async () => {
   const session = createAssistantSession({
     binding: {
@@ -1902,6 +2235,27 @@ test('sendAssistantMessageLocal starts a new turn when same-conversation input l
   const firstResult = await firstResultPromise
   assert.equal(firstResult.response, 'first turn response')
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 2)
+})
+
+test('sendAssistantMessageLocal rejects targeted active-turn input when no active turn exists', async () => {
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
+
+  await expect(
+    sendAssistantMessageLocal({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      expectedActiveTurnId: 'turn-missing',
+      prompt: 'Targeted stale turn',
+      vault: '/vaults/test',
+    }),
+  ).rejects.toMatchObject({
+    code: 'ASSISTANT_ACTIVE_TURN_NOT_ACTIVE',
+  })
+  assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 0)
+  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 0)
 })
 
 test('active-turn controller only steers exact conversations while open', async () => {
@@ -2532,13 +2886,8 @@ test('active-turn controller interrupts live provider when input-available check
   )
   const interrupt = vi.fn(async () => undefined)
   const controller = createAssistantActiveTurnInputController({
-    admissionHook: async (input) => {
-      if (input.phase === 'input_available') {
-        throw checkpointRejected
-      }
-      return {
-        kind: 'no-new-input',
-      }
+    admissionHook: async () => {
+      throw checkpointRejected
     },
     conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
     sessionId: 'session-test',
@@ -2598,8 +2947,8 @@ test('active-turn controller retries input-available admission after non-fatal i
   let failedOnce = false
   let probeAdmissions = 0
   const controller = createAssistantActiveTurnInputController({
-    admissionHook: async (input) => {
-      if (input.phase === 'input_available' && !failedOnce) {
+    admissionHook: async () => {
+      if (!failedOnce) {
         failedOnce = true
         throw unavailable
       }
@@ -2664,10 +3013,10 @@ test('active-turn controller only probes input after explicit notification or pr
     notifyAssistantActiveTurnInputAvailable,
   } = await import('../src/assistant/active-turn-input-controller.ts')
   const steer = vi.fn(async () => undefined)
-  const admissions: string[] = []
+  let admissionCount = 0
   const controller = createAssistantActiveTurnInputController({
-    admissionHook: async (input) => {
-      admissions.push(input.phase)
+    admissionHook: async () => {
+      admissionCount += 1
       return {
         acceptedInputs: [
           {
@@ -2705,11 +3054,11 @@ test('active-turn controller only probes input after explicit notification or pr
   try {
     assert.equal(vi.getTimerCount(), 0)
     await vi.advanceTimersByTimeAsync(1500)
-    assert.deepEqual(admissions, [])
+    assert.equal(admissionCount, 0)
     expect(steer).not.toHaveBeenCalled()
 
     assert.equal(await controller.admitAvailable(), undefined)
-    assert.deepEqual(admissions, [])
+    assert.equal(admissionCount, 0)
 
     await notifyAssistantActiveTurnInputAvailable({
       conversation: {
@@ -2720,7 +3069,7 @@ test('active-turn controller only probes input after explicit notification or pr
       vault: '/vaults/test',
     })
 
-    assert.deepEqual(admissions, ['input_available'])
+    assert.equal(admissionCount, 1)
     expect(steer).toHaveBeenCalledWith({
       prompt: 'Notification hook input',
       userMessageContent: [
@@ -2936,12 +3285,12 @@ test('active-turn controller reruns input-available admission for in-flight noti
   } = await import('../src/assistant/active-turn-input-controller.ts')
   const firstAdmissionStarted = createDeferred<void>()
   const firstAdmissionRelease = createDeferred<void>()
-  const phases: string[] = []
+  let admissionCount = 0
   const steer = vi.fn(async () => undefined)
   let ordinal = 0
   const controller = createAssistantActiveTurnInputController({
-    admissionHook: async (input) => {
-      phases.push(input.phase)
+    admissionHook: async () => {
+      admissionCount += 1
       ordinal += 1
       if (ordinal === 1) {
         firstAdmissionStarted.resolve()
@@ -3004,14 +3353,14 @@ test('active-turn controller reruns input-available admission for in-flight noti
       vault: '/vaults/test',
     })
     await Promise.resolve()
-    assert.deepEqual(phases, ['input_available'])
+    assert.equal(admissionCount, 1)
 
     firstAdmissionRelease.resolve()
     const [firstResult, secondResult] = await Promise.all([
       firstNotification,
       secondNotification,
     ])
-    assert.deepEqual(phases, ['input_available', 'input_available'])
+    assert.equal(admissionCount, 2)
     assert.equal(firstResult?.kind, 'accepted')
     assert.equal(secondResult?.kind, 'accepted')
     expect(steer).toHaveBeenCalledTimes(1)
@@ -3058,13 +3407,13 @@ test('active-turn controller reruns input-available admission after an accepted 
   } = await import('../src/assistant/active-turn-input-controller.ts')
   const firstAdmissionStarted = createDeferred<void>()
   const firstAdmissionRelease = createDeferred<void>()
-  const phases: string[] = []
+  let admissionCount = 0
   const knownInputSnapshots: string[][] = []
   const steer = vi.fn(async () => undefined)
   let ordinal = 0
   const controller = createAssistantActiveTurnInputController({
     admissionHook: async (input) => {
-      phases.push(input.phase)
+      admissionCount += 1
       knownInputSnapshots.push([...(input.knownInputIds ?? [])])
       ordinal += 1
       const id = `hook-${ordinal}`
@@ -3127,14 +3476,14 @@ test('active-turn controller reruns input-available admission after an accepted 
       vault: '/vaults/test',
     })
     await Promise.resolve()
-    assert.deepEqual(phases, ['input_available'])
+    assert.equal(admissionCount, 1)
 
     firstAdmissionRelease.resolve()
     const [firstResult, secondResult] = await Promise.all([
       firstNotification,
       secondNotification,
     ])
-    assert.deepEqual(phases, ['input_available', 'input_available'])
+    assert.equal(admissionCount, 2)
     assert.deepEqual(knownInputSnapshots, [[], ['hook-1']])
     assert.equal(firstResult?.kind, 'accepted')
     assert.equal(secondResult?.kind, 'accepted')
@@ -3184,10 +3533,10 @@ test('active-turn controller can probe store-backed input before provider execut
   const {
     createAssistantActiveTurnInputController,
   } = await import('../src/assistant/active-turn-input-controller.ts')
-  const admissions: string[] = []
+  let admissionCount = 0
   const controller = createAssistantActiveTurnInputController({
-    admissionHook: async (input) => {
-      admissions.push(input.phase)
+    admissionHook: async () => {
+      admissionCount += 1
       return {
         acceptedInputs: [
           {
@@ -3223,7 +3572,7 @@ test('active-turn controller can probe store-backed input before provider execut
       prompt: 'Polled hook input',
       transcriptText: 'Polled hook transcript',
     })
-    assert.deepEqual(admissions, ['input_available'])
+    assert.equal(admissionCount, 1)
   } finally {
     controller.close()
   }
@@ -3339,12 +3688,12 @@ test('active-turn controller serializes overlapping input-available hook admissi
     createAssistantActiveTurnInputController,
   } = await import('../src/assistant/active-turn-input-controller.ts')
   const releaseFirst = createDeferred<void>()
-  const phases: string[] = []
+  let admissionCount = 0
   const knownInputSnapshots: string[][] = []
   let ordinal = 0
   const controller = createAssistantActiveTurnInputController({
     admissionHook: async (input) => {
-      phases.push(input.phase)
+      admissionCount += 1
       knownInputSnapshots.push([...(input.knownInputIds ?? [])])
       ordinal += 1
       const currentOrdinal = ordinal
@@ -3374,11 +3723,11 @@ test('active-turn controller serializes overlapping input-available hook admissi
   try {
     const notified = controller.notifyInputAvailable().catch(() => undefined)
     await vi.waitFor(() => {
-      expect(phases).toEqual(['input_available'])
+      expect(admissionCount).toBe(1)
     })
     const probe = controller.admitAvailable({ probeIfIdle: true })
     await Promise.resolve()
-    assert.deepEqual(phases, ['input_available'])
+    assert.equal(admissionCount, 1)
 
     releaseFirst.resolve()
     assert.deepEqual(await probe, {
@@ -3395,7 +3744,7 @@ test('active-turn controller serializes overlapping input-available hook admissi
       transcriptText: 'Hook transcript 1',
     })
     await notified
-    assert.deepEqual(phases, ['input_available'])
+    assert.equal(admissionCount, 1)
     assert.deepEqual(knownInputSnapshots, [[]])
   } finally {
     releaseFirst.resolve()
@@ -3484,7 +3833,6 @@ test('sendAssistantMessageLocal treats input after provider close as a normal ne
       identityId: 'identity-1',
       threadId: 'thread-1',
     },
-    expectedActiveTurnId: 'turn-1',
     prompt: 'Arrived after provider close',
     vault: '/vaults/test',
   })
@@ -3505,11 +3853,73 @@ test('sendAssistantMessageLocal treats input after provider close as a normal ne
     'Arrived after provider close',
   )
   assert.equal(activeTurnInput.mock.calls.length, 1)
-  assert.deepEqual(
-    activeTurnInput.mock.calls.map((call) => call[0]?.phase),
-    ['input_available'],
-  )
   assert.equal(activeTurnCheckpoint.mock.calls.length, 0)
+})
+
+test('sendAssistantMessageLocal probes active-turn input once before provider start', async () => {
+  let admissionOrdinal = 0
+  const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(async () => {
+    admissionOrdinal += 1
+    return {
+      acceptedInputs: [
+        {
+          id: `hook-${admissionOrdinal}`,
+          promptFallbackReason: 'manual-input',
+          promptFallbackText: `Pre-provider hook input ${admissionOrdinal}`,
+          source: 'manual',
+        },
+      ],
+      kind: 'accepted' as const,
+      prompt: `Pre-provider hook input ${admissionOrdinal}`,
+      transcriptText: `Pre-provider hook transcript ${admissionOrdinal}`,
+      userMessageContent: [
+        {
+          text: `Pre-provider hook input ${admissionOrdinal}`,
+          type: 'text' as const,
+        },
+      ],
+    }
+  })
+  const activeTurnCheckpoint = vi.fn(
+    async (_input: AssistantActiveTurnInputCheckpointInput) => undefined,
+  )
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
+    },
+  })
+
+  const result = await sendAssistantMessageLocal({
+    activeTurnCheckpoint,
+    activeTurnInput,
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+
+  assert.equal(result.response, 'assistant response')
+  assert.equal(activeTurnInput.mock.calls.length, 1)
+  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
+  assert.equal(
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.input.prompt,
+    'Pre-provider hook input 1',
+  )
+  expect(activeTurnCheckpoint).toHaveBeenCalledWith({
+    acceptedInputIds: ['initial', 'hook-1'],
+    providerRequestOrdinal: 0,
+    sessionId: 'session-test',
+    signal: undefined,
+    turnId: 'turn-1',
+    vault: '/vaults/test',
+  })
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.append.mock.calls[1]?.[0]?.inputs,
+  ).toEqual([
+    expect.objectContaining({
+      id: 'hook-1',
+      source: 'manual',
+    }),
+  ])
 })
 
 test('sendAssistantMessageLocal probes active-turn input before hosted queue-only auto-replies', async () => {
@@ -3540,10 +3950,6 @@ test('sendAssistantMessageLocal probes active-turn input before hosted queue-onl
 
   assert.equal(result.response, 'assistant response')
   assert.equal(activeTurnInput.mock.calls.length, 1)
-  assert.deepEqual(
-    activeTurnInput.mock.calls.map((call) => call[0]?.phase),
-    ['input_available'],
-  )
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
   assert.ok(mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery)
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
