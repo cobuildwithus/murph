@@ -803,6 +803,153 @@ describe('assistant codex runtime', () => {
     ).toHaveLength(1)
   })
 
+  it('reuses the warm Codex app-server across noisy local env changes', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-local-warm-noisy-work-')
+    const codexHome = await createTempDir('assistant-codex-local-warm-noisy-home-')
+    const spawnedChildren: MockChildProcess[] = []
+    mockHostedCodexIdentityServer(spawnedChildren)
+
+    const baseInput = {
+      approvalPolicy: 'never',
+      codexHome,
+      env: {
+        ASSISTANT_MEMORY_BOUND_TURN_ID: 'ambient-turn-one',
+        MURPH_LOCAL_TURN_SCOPED_TEST_ENV: 'turn-one',
+        PATH: '/custom/bin',
+      },
+      sandbox: 'workspace-write' as const,
+      workingDirectory,
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...baseInput,
+        prompt: 'first noisy local warm turn',
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-identity-1-1',
+      turnId: 'turn-warm-identity-1-1',
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...baseInput,
+        env: {
+          ...baseInput.env,
+          ASSISTANT_MEMORY_BOUND_TURN_ID: 'ambient-turn-two',
+          MURPH_LOCAL_TURN_SCOPED_TEST_ENV: 'turn-two',
+        },
+        prompt: 'second noisy local warm turn',
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-identity-1-2',
+      turnId: 'turn-warm-identity-1-2',
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    const messages = readWrittenRpcMessages(requireMockChildProcess(spawnedChildren[0] ?? null))
+    expect(messages.filter((message) => message.method === 'initialize')).toHaveLength(1)
+    expect(messages.filter((message) => message.method === 'thread/start'))
+      .toHaveLength(2)
+    expect(messages.filter((message) => message.method === 'turn/start'))
+      .toHaveLength(2)
+  })
+
+  it.each([
+    {
+      firstEnv: {
+        PATH: '/custom/bin-one',
+      },
+      name: 'PATH',
+      secondEnv: {
+        PATH: '/custom/bin-two',
+      },
+    },
+    {
+      firstEnv: {
+        PATH: '/custom/bin',
+        VERCEL_AI_API_KEY: 'fixture-provider-key-one',
+      },
+      name: 'registered provider credential',
+      secondEnv: {
+        VERCEL_AI_API_KEY: 'fixture-provider-key-two',
+      },
+    },
+    {
+      firstEnv: {
+        CODEX_API_KEY: 'fixture-codex-key-one',
+        PATH: '/custom/bin',
+      },
+      name: 'Codex auth alias',
+      secondEnv: {
+        CODEX_API_KEY: 'fixture-codex-key-two',
+      },
+    },
+    {
+      firstEnv: {
+        CODEX_ACCESS_TOKEN: 'fixture-codex-token-one',
+        PATH: '/custom/bin',
+      },
+      name: 'Codex access-token alias',
+      secondEnv: {
+        CODEX_ACCESS_TOKEN: 'fixture-codex-token-two',
+      },
+    },
+  ] as const)(
+    'starts a fresh warm Codex app-server when allowlisted local env changes: $name',
+    async (scenario) => {
+      const workingDirectory = await createTempDir('assistant-codex-local-warm-env-work-')
+      const codexHome = await createTempDir('assistant-codex-local-warm-env-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      mockHostedCodexIdentityServer(spawnedChildren)
+
+      const baseInput = {
+        approvalPolicy: 'never',
+        codexHome,
+        env: scenario.firstEnv,
+        sandbox: 'workspace-write' as const,
+        workingDirectory,
+      }
+
+      await expect(
+        executeCodexAppServerTurn({
+          ...baseInput,
+          prompt: 'first local allowlisted env turn',
+        }),
+      ).resolves.toMatchObject({
+        sessionId: 'thread-warm-identity-1-1',
+        turnId: 'turn-warm-identity-1-1',
+      })
+
+      await expect(
+        executeCodexAppServerTurn({
+          ...baseInput,
+          env: {
+            ...baseInput.env,
+            ...scenario.secondEnv,
+          },
+          prompt: 'second local allowlisted env turn',
+        }),
+      ).resolves.toMatchObject({
+        sessionId: 'thread-warm-identity-2-1',
+        turnId: 'turn-warm-identity-2-1',
+      })
+
+      expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+      expect(process.kill).toHaveBeenCalledWith(-40_000, 'SIGTERM')
+      const firstMessages = readWrittenRpcMessages(
+        requireMockChildProcess(spawnedChildren[0] ?? null),
+      )
+      const secondMessages = readWrittenRpcMessages(
+        requireMockChildProcess(spawnedChildren[1] ?? null),
+      )
+      expect(firstMessages.filter((message) => message.method === 'turn/start'))
+        .toHaveLength(1)
+      expect(secondMessages.filter((message) => message.method === 'turn/start'))
+        .toHaveLength(1)
+    },
+  )
+
   it('rejects overlapping local turns without replacing the warm Codex app-server', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-busy-work-')
     const codexHome = await createTempDir('assistant-codex-local-busy-home-')

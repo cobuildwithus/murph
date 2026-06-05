@@ -13,6 +13,9 @@ import {
 import type {
   HostedExpectedCodexRootProcess,
 } from '@murphai/hosted-execution/runtime-control'
+import {
+  ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS,
+} from '@murphai/operator-config/assistant/target-runtime'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -125,8 +128,12 @@ const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   'murph.assistant-codex-app-server-timing.v1'
 const CODEX_APP_SERVER_TIMING_TRACE_TYPE =
   'assistant.codex.app_server_timing'
-const HOSTED_CODEX_APP_SERVER_STABLE_IDENTITY_ENV_NAMES = [
+const CODEX_APP_SERVER_PROVIDER_IDENTITY_ENV_NAMES =
+  ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS.map((config) => config.envKey)
+const CODEX_APP_SERVER_PROCESS_IDENTITY_ENV_NAMES = [
   'ALL_PROXY',
+  'CODEX_ACCESS_TOKEN',
+  'CODEX_API_KEY',
   'CODEX_CA_CERTIFICATE',
   'CODEX_HOME',
   'CURL_CA_BUNDLE',
@@ -146,7 +153,6 @@ const HOSTED_CODEX_APP_SERVER_STABLE_IDENTITY_ENV_NAMES = [
   'NO_PROXY',
   'NODE_ENV',
   'NODE_EXTRA_CA_CERTS',
-  'OPENAI_API_KEY',
   'PATH',
   'REQUESTS_CA_BUNDLE',
   'SSL_CERT_DIR',
@@ -156,6 +162,7 @@ const HOSTED_CODEX_APP_SERVER_STABLE_IDENTITY_ENV_NAMES = [
   'TMPDIR',
   'TZ',
   'VAULT',
+  ...CODEX_APP_SERVER_PROVIDER_IDENTITY_ENV_NAMES,
 ] as const
 const HOSTED_CODEX_APP_SERVER_REJECTED_CHILD_ENV_NAMES = [
   'MURPH_HOSTED_CODEX_BOUND_USER_ID',
@@ -535,10 +542,10 @@ function projectHostedCodexAppServerChildEnv(env: NodeJS.ProcessEnv): NodeJS.Pro
   }
 }
 
-function projectHostedCodexAppServerIdentityEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+function projectCodexAppServerProcessIdentityEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const projected: NodeJS.ProcessEnv = {}
 
-  for (const key of HOSTED_CODEX_APP_SERVER_STABLE_IDENTITY_ENV_NAMES) {
+  for (const key of CODEX_APP_SERVER_PROCESS_IDENTITY_ENV_NAMES) {
     const value = env[key]
     if (typeof value === 'string') {
       projected[key] = value
@@ -1133,9 +1140,7 @@ async function buildCodexAppServerProcessIdentity(input: {
     codexCommand: input.codexCommand,
   }
   const configTomlDigest = await readCodexConfigTomlDigest(input.env.CODEX_HOME)
-  const identityEnv = input.hostedRuntimeProcess
-    ? projectHostedCodexAppServerIdentityEnv(input.env)
-    : input.env
+  const identityEnv = projectCodexAppServerProcessIdentityEnv(input.env)
   const identity = {
     ...commandIdentity,
     codexHome: normalizeNullableString(input.env.CODEX_HOME),
