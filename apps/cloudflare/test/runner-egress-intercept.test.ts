@@ -406,6 +406,58 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
+  it("rejects non-supplement data API paths before upstream fetch", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      userId: string;
+    }) => createActiveRuntimeWriteFenceValidationResult(input));
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://murph-data-api.worker/api/other", {
+        method: "GET",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        MURPH_DATA_API_KEY: "data-api-worker-secret",
+        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        validateActiveRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when data API upstream configuration is missing", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      userId: string;
+    }) => createActiveRuntimeWriteFenceValidationResult(input));
+    const env = createInterceptEnv({
+      MURPH_DATA_API_KEY: "data-api-worker-secret",
+      readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+      validateActiveRuntimeWriteFence,
+    });
+    delete env.HOSTED_WEB_BASE_URL;
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://murph-data-api.worker/api/supplements?q=creatine", {
+        method: "GET",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.text()).toBe("Hosted data API upstream is not configured.");
+    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("injects data API authorization for hosted supplement batch lookups", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       results: [],

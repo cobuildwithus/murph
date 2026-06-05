@@ -548,7 +548,6 @@ test("hosted runtime platform env selector and timeout parser are reusable outsi
       WHATSAPP_PHONE_NUMBER_ID: "whatsapp-phone-number-id",
     }),
     {
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       JUNCTION_API_KEY: "junction-api-key",
       JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
@@ -644,7 +643,7 @@ test("hosted platform-backed env keeps platform Telegram values when forwarded e
   );
 });
 
-test("hosted runtime config keeps hosted web base URL platform-owned", () => {
+test("hosted runtime config strips hosted web base URL from runtime env", () => {
   const platform = createHostedRuntimePlatformStub();
 
   const normalized = normalizeHostedAssistantRuntimeConfig(
@@ -658,18 +657,9 @@ test("hosted runtime config keeps hosted web base URL platform-owned", () => {
     },
     platform,
   );
-  const runtimeEnv = {
-    ...buildHostedRuntimeDataApiEnv({
-      platformEnv: normalized.platformEnv,
-    }),
-    ...normalized.userEnv,
-  };
 
-  assert.deepEqual(normalized.platformEnv, {
-    HOSTED_WEB_BASE_URL: "https://web.example.test",
-  });
+  assert.deepEqual(normalized.platformEnv, {});
   assert.deepEqual(normalized.userEnv, {});
-  assert.equal(runtimeEnv.HOSTED_WEB_BASE_URL, "https://web.example.test");
 });
 
 test("hosted runtime config strips ingress-only secrets from forwarded env", () => {

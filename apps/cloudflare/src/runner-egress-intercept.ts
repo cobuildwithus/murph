@@ -6,8 +6,6 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
-  HOSTED_DATA_API_RUNTIME_BASE_URL,
-  HOSTED_DATA_API_SUPPLEMENTS_PATH,
   HOSTED_RUNTIME_LOG_PATH,
 } from "@murphai/hosted-execution/routes";
 
@@ -65,6 +63,8 @@ const DEFAULT_MAPBOX_API_BASE_URL = "https://api.mapbox.com";
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const DEFAULT_TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file";
 const DEFAULT_WHATSAPP_API_BASE_URL = "https://graph.facebook.com";
+const HOSTED_DATA_API_RUNTIME_BASE_URL = "http://murph-data-api.worker";
+const HOSTED_DATA_API_SUPPLEMENTS_PATH = "/api/supplements";
 const HOSTED_DATA_API_RUNTIME_HOST =
   new URL(HOSTED_DATA_API_RUNTIME_BASE_URL).hostname;
 const HOSTED_DATA_API_MAX_POST_BODY_BYTES = 8 * 1024;

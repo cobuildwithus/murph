@@ -213,11 +213,6 @@ test("hosted-assistant-env-constants subpath stays wired to the hosted env const
   assert.ok(HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES_PUBLIC.includes("JUNCTION_API_KEY"));
   assert.ok(
     (HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES_PUBLIC as readonly string[]).includes(
-      "HOSTED_WEB_BASE_URL",
-    ),
-  );
-  assert.ok(
-    (HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES_PUBLIC as readonly string[]).includes(
       "TELEGRAM_BOT_TOKEN",
     ),
   );

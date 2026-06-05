@@ -1,10 +1,7 @@
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
+import { HOSTED_RUNTIME_PROCESS_ENV } from '@murphai/hosted-execution/cli-runtime-bridge'
 import { z } from 'zod'
-import {
-  HOSTED_DATA_API_RUNTIME_BASE_URL,
-  HOSTED_DATA_API_SUPPLEMENTS_PATH,
-} from '@murphai/hosted-execution/routes'
 
 const DEFAULT_SUPPLEMENT_LABEL_LIMIT = 10
 const MAX_SUPPLEMENT_LABEL_LIMIT = 50
@@ -12,6 +9,8 @@ const MAX_SUPPLEMENT_LABEL_BATCH_QUERIES = 10
 const MAX_SUPPLEMENT_LABEL_BATCH_QUERY_LENGTH = 256
 const DEFAULT_SUPPLEMENT_LABEL_TIMEOUT_MS = 10_000
 const MAX_SUPPLEMENT_LABEL_TIMEOUT_MS = 30_000
+const SUPPLEMENT_LABELS_API_BASE_URL = 'http://murph-data-api.worker'
+const SUPPLEMENT_LABELS_API_PATH = '/api/supplements'
 const GTIN_LENGTHS = new Set([8, 12, 13, 14])
 
 export const supplementLabelSearchInputSchema = z.object({
@@ -122,7 +121,7 @@ export async function searchSupplementLabelsBatch(
 
   const limit = input.limit ?? DEFAULT_SUPPLEMENT_LABEL_LIMIT
   const includeOffMarket = input.includeOffMarket ?? false
-  const url = new URL(HOSTED_DATA_API_SUPPLEMENTS_PATH, supplementLabelsApiBaseUrl)
+  const url = new URL(SUPPLEMENT_LABELS_API_PATH, supplementLabelsApiBaseUrl)
   const response = await fetchSupplementLabelsApi(fetchImpl, url, env, {
     body: JSON.stringify({
       queries: input.queries,
@@ -152,12 +151,24 @@ function resolveSupplementLabelsClient(dependencies: SupplementLabelsDependencie
 } {
   const env = dependencies.env ?? process.env
   const fetchImpl = dependencies.fetchImpl ?? fetch
+  assertHostedRuntime(env)
 
   return {
     env,
     fetchImpl,
-    supplementLabelsApiBaseUrl: new URL(HOSTED_DATA_API_RUNTIME_BASE_URL),
+    supplementLabelsApiBaseUrl: new URL(SUPPLEMENT_LABELS_API_BASE_URL),
   }
+}
+
+function assertHostedRuntime(env: NodeJS.ProcessEnv): void {
+  if (env[HOSTED_RUNTIME_PROCESS_ENV] === '1') {
+    return
+  }
+
+  throw new VaultCliError(
+    'supplement_labels_api_hosted_only',
+    'Supplement label search runs through the hosted Murph data API and is only available inside hosted assistant runtime.',
+  )
 }
 
 function resolveSupplementLabelLookupParams(q: string): SupplementLabelLookupParam[] {
@@ -233,7 +244,7 @@ async function fetchSupplementLabelsPayload(input: {
   lookupParams: SupplementLabelLookupParam[]
 }): Promise<{ items: z.infer<typeof supplementLabelSearchItemSchema>[] }> {
   for (const lookup of input.lookupParams) {
-    const url = new URL(HOSTED_DATA_API_SUPPLEMENTS_PATH, input.supplementLabelsApiBaseUrl)
+    const url = new URL(SUPPLEMENT_LABELS_API_PATH, input.supplementLabelsApiBaseUrl)
     url.searchParams.set(lookup.key, lookup.value)
     url.searchParams.set('limit', String(input.limit))
     if (input.includeOffMarket) {

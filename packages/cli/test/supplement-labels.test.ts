@@ -6,6 +6,10 @@ import {
   searchSupplementLabelsBatch,
 } from '../src/supplement-labels.js'
 
+const hostedRuntimeEnv = {
+  MURPH_HOSTED_RUNTIME_PROCESS: '1',
+}
+
 describe('searchSupplementLabels', () => {
   it('calls the internal supplements API without local authorization headers or hosted web config', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
@@ -34,7 +38,7 @@ describe('searchSupplementLabels', () => {
         includeOffMarket: true,
       },
       {
-        env: {},
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -100,9 +104,7 @@ describe('searchSupplementLabels', () => {
         q: '82118',
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -154,9 +156,7 @@ describe('searchSupplementLabels', () => {
         includeOffMarket: true,
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -189,9 +189,7 @@ describe('searchSupplementLabels', () => {
         q: 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64',
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -241,9 +239,7 @@ describe('searchSupplementLabels', () => {
         q: 'dailymed:missing',
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -275,9 +271,7 @@ describe('searchSupplementLabels', () => {
         q: 'brand: creatine',
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -310,9 +304,7 @@ describe('searchSupplementLabels', () => {
         q: '123-456-789012',
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -358,9 +350,7 @@ describe('searchSupplementLabels', () => {
         q: '123456789012',
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -392,14 +382,32 @@ describe('searchSupplementLabels', () => {
         q: '82118',
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
 
     assert.deepEqual(result.items, [])
+  })
+
+  it('fails explicitly outside hosted assistant runtime', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('unexpected'))
+
+    await expect(
+      searchSupplementLabels(
+        {
+          q: 'creatine',
+        },
+        {
+          env: {},
+          fetchImpl: fetchMock,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'supplement_labels_api_hosted_only',
+      message: 'Supplement label search runs through the hosted Murph data API and is only available inside hosted assistant runtime.',
+    })
+    assert.equal(fetchMock.mock.calls.length, 0)
   })
 })
 
@@ -450,9 +458,7 @@ describe('searchSupplementLabelsBatch', () => {
         includeOffMarket: true,
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -532,9 +538,7 @@ describe('searchSupplementLabelsBatch', () => {
           queries: ['a'.repeat(257)],
         },
         {
-          env: {
-            HOSTED_WEB_BASE_URL: 'https://web.example.test',
-          },
+          env: hostedRuntimeEnv,
           fetchImpl: fetchMock,
         },
       ),

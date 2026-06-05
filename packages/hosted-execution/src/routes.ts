@@ -1,5 +1,3 @@
-export const HOSTED_DATA_API_RUNTIME_BASE_URL = "http://murph-data-api.worker";
-export const HOSTED_DATA_API_SUPPLEMENTS_PATH = "/api/supplements";
 export const HOSTED_RUNTIME_MAILBOX_FETCH_PATH = "/api/internal/hosted-mailbox/fetch";
 export const HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH =
   "/api/internal/hosted-mailbox/payload/fetch";
