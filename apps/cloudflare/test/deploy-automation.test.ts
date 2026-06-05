@@ -737,9 +737,13 @@ describe("hosted deploy automation helpers", () => {
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
       expect(deployWorkerStep).toContain(`${name}: \${{ secrets.${name} }}`);
     }
-    expect(
-      workflow.slice(validateDeployEnvStepIndex, workflow.indexOf("- name: Prepare deploy artifacts")),
-    ).toContain("HOSTED_LOG_FINGERPRINT_SECRET: ${{ secrets.HOSTED_LOG_FINGERPRINT_SECRET }}");
+    const validateDeployEnvStep = workflow.slice(
+      validateDeployEnvStepIndex,
+      workflow.indexOf("\n      - name:", validateDeployEnvStepIndex + 1),
+    );
+    for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
+      expect(validateDeployEnvStep).toContain(`${name}: \${{ secrets.${name} }}`);
+    }
     for (const name of HOSTED_WORKER_REQUIRED_VAR_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("vars");
     }
@@ -953,6 +957,7 @@ describe("hosted deploy automation helpers", () => {
       JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
       JUNCTION_WEBHOOK_SECRET: "junction-webhook-secret",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
+      MURPH_DATA_API_KEY: "data-api-key",
       STRAVA_CLIENT_ID: "strava-client-id",
       STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
@@ -970,6 +975,7 @@ describe("hosted deploy automation helpers", () => {
       JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
       JUNCTION_WEBHOOK_SECRET: "junction-webhook-secret",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
+      MURPH_DATA_API_KEY: "data-api-key",
       STRAVA_CLIENT_ID: "strava-client-id",
       STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
@@ -987,6 +993,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      MURPH_DATA_API_KEY: "data-api-key",
       OPENAI_API_KEY: "openai-key",
     });
 
@@ -1004,6 +1011,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      MURPH_DATA_API_KEY: "data-api-key",
       OPENAI_API_KEY: "openai-key",
     });
     expect(providerSecretsPayload).toMatchObject({
@@ -1021,6 +1029,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      MURPH_DATA_API_KEY: "data-api-key",
       OPENAI_API_KEY: "openai-key",
     });
     expect(platformSecretsPayload).toMatchObject({
@@ -1037,6 +1046,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      MURPH_DATA_API_KEY: "data-api-key",
       OPENAI_API_KEY: "openai-key",
       OPENAI_ENTERPRISE_API_KEY: "enterprise-openai-key",
     }).OPENAI_ENTERPRISE_API_KEY).toBeUndefined();

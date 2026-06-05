@@ -227,6 +227,8 @@ declare module 'incur' {
       'supplement compound show': { args: { compound: string }; options: { requestId?: string; status?: string } }
       'supplement list': { args: {}; options: { requestId?: string; limit: number; status?: string } }
       'supplement save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "stopped"; startedOn?: string; stoppedOn?: string; schedule?: string; group?: string; substance?: string; dose?: number; doseUnit?: string; brand?: string; manufacturer?: string; servingSize?: string; compound?: string; ingredientLabel?: string; amount?: number; unit?: string; ingredientActive?: boolean; note?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[] } }
+      'supplement search-labels': { args: { query: string }; options: { limit?: number; includeOffMarket?: boolean } }
+      'supplement search-labels-batch': { args: {}; options: { query: string[]; limit?: number; includeOffMarket?: boolean } }
       'supplement show': { args: { id: string }; options: { requestId?: string } }
       'supplement stop': { args: { id: string }; options: { requestId?: string; stoppedOn?: string } }
       'timeline': { args: {}; options: { requestId?: string; from?: string; to?: string; experiment?: string; kind?: string[]; stream?: string[]; entryType?: string[]; limit: number } }

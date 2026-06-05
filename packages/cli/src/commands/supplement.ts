@@ -14,6 +14,12 @@ import {
   pathSchema,
   savedEntitySnapshotSchema,
 } from "@murphai/operator-config/vault-cli-contracts"
+import {
+  searchSupplementLabels,
+  searchSupplementLabelsBatch,
+  supplementLabelBatchSearchResultSchema,
+  supplementLabelSearchResultSchema,
+} from "../supplement-labels.js"
 import type { VaultServices } from "@murphai/vault-usecases"
 
 const supplementSlugSchema = z
@@ -162,6 +168,90 @@ export function registerSupplementCommands(
         id: context.args.id,
         requestId: requestIdFromOptions(context.options),
         vault: context.options.vault,
+      })
+    },
+  })
+
+  supplement.command('search-labels', {
+    args: z.object({
+      query: z
+        .string()
+        .min(1)
+        .describe('Supplement product, brand, ingredient, DSLD id, or UPC search text.'),
+    }),
+    description: 'Search the hosted supplement label database without writing records.',
+    examples: [
+      {
+        args: {
+          query: 'creatine',
+        },
+        description: 'Search supplement labels by product or ingredient text.',
+        options: {
+          limit: 10,
+        },
+      },
+    ],
+    hint: 'Hosted Murph authorizes this lookup through the Worker data API intercept.',
+    options: z.object({
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(50)
+        .optional()
+        .describe('Maximum label matches to return. Defaults to 10.'),
+      includeOffMarket: z
+        .boolean()
+        .optional()
+        .describe('Include labels marked off-market.'),
+    }),
+    output: supplementLabelSearchResultSchema,
+    async run(context) {
+      return await searchSupplementLabels({
+        includeOffMarket: context.options.includeOffMarket,
+        limit: context.options.limit,
+        q: context.args.query,
+      })
+    },
+  })
+
+  supplement.command('search-labels-batch', {
+    args: z.object({}),
+    description: 'Search multiple hosted supplement label queries without writing records.',
+    examples: [
+      {
+        description: 'Search labels for several supplement names in one hosted API call.',
+        options: {
+          query: ['creatine', 'magnesium glycinate', 'blueprint bryan johnson'],
+          limit: 5,
+        },
+      },
+    ],
+    hint: 'Repeat --query for each supplement. Hosted Murph authorizes this lookup through the Worker data API intercept.',
+    options: z.object({
+      query: z
+        .array(z.string().min(1).max(256))
+        .min(1)
+        .max(10)
+        .describe('Supplement product, brand, or ingredient search text. Repeat --query for multiple values.'),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(50)
+        .optional()
+        .describe('Maximum label matches to return per query. Defaults to 10.'),
+      includeOffMarket: z
+        .boolean()
+        .optional()
+        .describe('Include labels marked off-market.'),
+    }),
+    output: supplementLabelBatchSearchResultSchema,
+    async run(context) {
+      return await searchSupplementLabelsBatch({
+        includeOffMarket: context.options.includeOffMarket,
+        limit: context.options.limit,
+        queries: context.options.query,
       })
     },
   })

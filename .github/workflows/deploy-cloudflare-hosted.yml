@@ -795,6 +795,7 @@ jobs:
           HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: ${{ secrets.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK }}
           JUNCTION_API_KEY: ${{ secrets.JUNCTION_API_KEY }}
           JUNCTION_CLIENT_USER_ID_SECRET: ${{ secrets.JUNCTION_CLIENT_USER_ID_SECRET }}
+          MURPH_DATA_API_KEY: ${{ secrets.MURPH_DATA_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: pnpm --dir apps/cloudflare deploy:preflight
 
@@ -835,6 +836,7 @@ jobs:
           LINQ_API_TOKEN: ${{ secrets.LINQ_API_TOKEN }}
           LINQ_WEBHOOK_SECRET: ${{ secrets.LINQ_WEBHOOK_SECRET }}
           MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
+          MURPH_DATA_API_KEY: ${{ secrets.MURPH_DATA_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OURA_CLIENT_ID: ${{ secrets.OURA_CLIENT_ID }}
           OURA_CLIENT_SECRET: ${{ secrets.OURA_CLIENT_SECRET }}
@@ -917,6 +919,7 @@ jobs:
           LINQ_API_TOKEN: ${{ secrets.LINQ_API_TOKEN }}
           LINQ_WEBHOOK_SECRET: ${{ secrets.LINQ_WEBHOOK_SECRET }}
           MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
+          MURPH_DATA_API_KEY: ${{ secrets.MURPH_DATA_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OURA_CLIENT_ID: ${{ secrets.OURA_CLIENT_ID }}
           OURA_CLIENT_SECRET: ${{ secrets.OURA_CLIENT_SECRET }}

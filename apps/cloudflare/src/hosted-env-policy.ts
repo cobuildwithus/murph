@@ -96,6 +96,12 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   "HOSTED_AI_USAGE_REPORTING_SECRET",
   // This is a platform-owned HMAC key for non-identifying log correlation.
   "HOSTED_LOG_FINGERPRINT_SECRET",
+  // Platform-owned data API auth is injected by the Worker on matching hosted
+  // web egress. The hosted container and member runner secrets must not carry it.
+  "MURPH_DATA_API_KEY",
+  // This non-secret origin is platform-owned. Member runner secrets cannot
+  // redirect Worker-authorized data API egress to arbitrary origins.
+  "HOSTED_WEB_BASE_URL",
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,

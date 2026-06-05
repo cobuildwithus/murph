@@ -12178,6 +12178,61 @@
                     }
                   }
                 },
+                "search-labels": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "limit": {
+                          "description": "Maximum label matches to return. Defaults to 10.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 50
+                        },
+                        "includeOffMarket": {
+                          "description": "Include labels marked off-market.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                },
+                "search-labels-batch": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "query": {
+                          "minItems": 1,
+                          "maxItems": 10,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "description": "Supplement product, brand, or ingredient search text. Repeat --query for multiple values."
+                        },
+                        "limit": {
+                          "description": "Maximum label matches to return per query. Defaults to 10.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 50
+                        },
+                        "includeOffMarket": {
+                          "description": "Include labels marked off-market.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                },
                 "stop": {
                   "type": "object",
                   "additionalProperties": false,
