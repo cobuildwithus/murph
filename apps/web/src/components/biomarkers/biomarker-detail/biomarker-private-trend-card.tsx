@@ -52,7 +52,14 @@ interface TrendContextValue {
 
 type PrivateTrendState =
   | { status: "loading" }
-  | { body: string; detail?: string; panelStatus: BrowserVaultBiomarkerPanelStatus; status: "empty"; title: string }
+  | {
+      action?: { href: string; label: string } | null;
+      body: string;
+      detail?: string;
+      panelStatus: BrowserVaultBiomarkerPanelStatus;
+      status: "empty";
+      title: string;
+    }
   | { message: string; status: "error" }
   | {
       comparison: BrowserVaultBiomarkerTrend | null;
@@ -68,10 +75,10 @@ export function BiomarkerPrivateTrendCard({
 }: {
   biomarker: BiomarkerOverviewProjection;
 }) {
-  const { client, error, refresh, status } = useBrowserVault();
+  const { client, deviceSyncImportPending, error, refresh, status } = useBrowserVault();
   const trend = useMemo(
-    () => resolvePrivateTrend({ biomarker, browserVaultStatus: status, client, error }),
-    [biomarker, client, error, status],
+    () => resolvePrivateTrend({ biomarker, browserVaultStatus: status, client, deviceSyncImportPending, error }),
+    [biomarker, client, deviceSyncImportPending, error, status],
   );
 
   const { avg7, avg30, pctChange, pctDirection } = useMemo(
@@ -95,7 +102,9 @@ export function BiomarkerPrivateTrendCard({
   }
 
   if (trend.status === "empty") {
-    const action = emptyStateAction(trend.panelStatus);
+    const action = trend.action === undefined
+      ? emptyStateAction(trend.panelStatus)
+      : trend.action;
 
     return (
       <div className="rounded-xl border border-dashed border-border/60">
@@ -248,6 +257,7 @@ function resolvePrivateTrend(input: {
   biomarker: BiomarkerOverviewProjection;
   browserVaultStatus: BrowserVaultStatus;
   client: BrowserVaultQueryClient | null;
+  deviceSyncImportPending: boolean;
   error: string | null;
 }): PrivateTrendState {
   if (input.browserVaultStatus === "loading") {
@@ -270,9 +280,18 @@ function resolvePrivateTrend(input: {
     unit: input.biomarker.unit,
     valuePrecision: input.biomarker.valuePrecision,
   });
+  const canFillFromDeviceImport =
+    input.deviceSyncImportPending && input.biomarker.privateMetricBindings.length > 0;
 
   if (panel.status === "insufficient_data") {
     const sampleCount = panel.primary?.sampleCount ?? 0;
+    if (canFillFromDeviceImport) {
+      return pendingDeviceImportState(
+        panel.status,
+        `Found ${sampleCount} point${sampleCount === 1 ? "" : "s"} so far.`,
+      );
+    }
+
     return {
       body: "Murph found private values, but not enough for a clean trend yet.",
       detail: `Found ${sampleCount} point${sampleCount === 1 ? "" : "s"}; Murph waits for at least ${input.biomarker.trendDefaults.minimumPoints} before summarizing a trend.`,
@@ -283,6 +302,10 @@ function resolvePrivateTrend(input: {
   }
 
   if (panel.status !== "ready" && panel.status !== "stale") {
+    if (canFillFromDeviceImport && panel.status === "no_data") {
+      return pendingDeviceImportState(panel.status);
+    }
+
     return {
       body: panel.emptyState?.body ?? "Your private biomarker trend is not available yet.",
       panelStatus: panel.status,
@@ -294,6 +317,10 @@ function resolvePrivateTrend(input: {
   const latest = panel.primary?.latest;
 
   if (!latest) {
+    if (canFillFromDeviceImport) {
+      return pendingDeviceImportState("no_data");
+    }
+
     return {
       body: panel.emptyState?.body ?? `No ${input.biomarker.shortName} values were found in browser-vault.`,
       panelStatus: "no_data",
@@ -327,6 +354,20 @@ function resolvePrivateTrend(input: {
     series: panel.primary?.series.map((point) => ({ date: point.date, value: point.value })) ?? [],
     stale: panel.status === "stale",
     status: "ready",
+  };
+}
+
+function pendingDeviceImportState(
+  panelStatus: BrowserVaultBiomarkerPanelStatus,
+  detail?: string,
+): Extract<PrivateTrendState, { status: "empty" }> {
+  return {
+    action: null,
+    body: "Wearable data is still importing. This trend may fill in shortly.",
+    ...(detail ? { detail } : {}),
+    panelStatus,
+    status: "empty",
+    title: "Still importing private data",
   };
 }
 
@@ -367,13 +408,11 @@ function ContextMetricStrip({ metrics }: { metrics: TrendContextValue[] }) {
 }
 
 function emptyStateAction(status: BrowserVaultBiomarkerPanelStatus): { href: string; label: string } | null {
-  const normalizedStatus = String(status);
-
-  if (normalizedStatus === "stale") {
+  if (status === "stale") {
     return { href: "/settings", label: "View sync status" };
   }
 
-  if (new Set(["no_data", "no_private_vault"]).has(normalizedStatus)) {
+  if (status === "no_data" || status === "no_private_vault") {
     return { href: "/connect", label: "Connect a device" };
   }
 

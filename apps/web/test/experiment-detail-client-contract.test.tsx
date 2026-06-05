@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   useBrowserVault: vi.fn<() => BrowserVaultContextValue>(() => ({
     client: null,
     dataVersion: null,
+    deviceSyncImportPending: false,
     error: null,
     freshness: "fresh",
     ref: null,
@@ -137,6 +138,7 @@ beforeEach(() => {
   mocks.useBrowserVault.mockReturnValue({
     client: null,
     dataVersion: null,
+    deviceSyncImportPending: false,
     error: null,
     freshness: "fresh",
     ref: null,
@@ -319,6 +321,7 @@ test("experiment start action becomes a results link for a running browser-vault
   mocks.useBrowserVault.mockReturnValue({
     client: null,
     dataVersion: null,
+    deviceSyncImportPending: false,
     error: null,
     freshness: "fresh",
     ref: null,

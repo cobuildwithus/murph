@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
+  hasPendingDirtyConnectionForUser: vi.fn(),
   prismaClient: {
     label: "test-prisma",
   },
@@ -67,6 +68,14 @@ vi.mock("@/src/lib/hosted-workspace/store", () => ({
   readHostedWorkspace: mocks.readHostedWorkspace,
 }));
 
+vi.mock("@/src/lib/device-sync/prisma-store/dirty-connections", () => ({
+  PrismaHostedDirtyConnectionStore: class PrismaHostedDirtyConnectionStore {
+    async hasPendingDirtyConnectionForUser(userId: string): Promise<boolean> {
+      return Boolean(await mocks.hasPendingDirtyConnectionForUser(userId));
+    }
+  },
+}));
+
 type BrowserVaultSessionRouteModule = typeof import("../app/api/browser-vault/session/route");
 type SettingsVaultExportSessionRouteModule = typeof import("../app/api/settings/vault-export/session/route");
 
@@ -90,6 +99,7 @@ describe("browser vault session route", () => {
     });
     mocks.assertHostedOnboardingMutationOrigin.mockReturnValue(undefined);
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
+    mocks.hasPendingDirtyConnectionForUser.mockResolvedValue(false);
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.requireActivePrivyMemberAuth.mockResolvedValue({
       member: {
@@ -137,16 +147,63 @@ describe("browser vault session route", () => {
       memberId: "member_123",
       prisma: mocks.prismaClient,
     });
+    expect(mocks.hasPendingDirtyConnectionForUser).toHaveBeenCalledWith("member_123");
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
     expect(scheduleBrowserVaultRefresh).not.toHaveBeenCalled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
       userId: "member_123",
     });
     await expect(response.json()).resolves.toMatchObject({
+      deviceSyncImportPending: false,
       encryptedReplica: null,
       replicaAad: null,
       replicaKeyEnvelope: null,
       replicaRef: null,
+      refreshPending: true,
+      state: "empty",
+    });
+  });
+
+  it("includes pending device import state without gating browser vault refresh", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const createBrowserVaultSession = vi.fn();
+    mocks.hasPendingDirtyConnectionForUser.mockResolvedValue(true);
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      deviceSyncImportPending: true,
+      refreshPending: true,
+      state: "empty",
+    });
+  });
+
+  it("does not fail browser vault sessions when pending device import metadata is unavailable", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const createBrowserVaultSession = vi.fn();
+    mocks.hasPendingDirtyConnectionForUser.mockRejectedValue(new Error("dirty state unavailable"));
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      deviceSyncImportPending: false,
       refreshPending: true,
       state: "empty",
     });
@@ -739,6 +796,7 @@ describe("browser vault session route", () => {
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
+      deviceSyncImportPending: false,
       encryptedReplica: null,
       freshness: "fresh",
       replicaAad: null,
@@ -791,6 +849,7 @@ describe("browser vault session route", () => {
     });
     releaseSchedule();
     await expect(response.json()).resolves.toEqual({
+      deviceSyncImportPending: false,
       encryptedReplica: null,
       freshness: "stale",
       replicaAad: null,

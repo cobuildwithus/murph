@@ -36,6 +36,7 @@ export interface BrowserVaultContextValue {
    */
   client: BrowserVaultQueryClient | null;
   dataVersion: string | null;
+  deviceSyncImportPending: boolean;
   error: string | null;
   freshness: BrowserVaultFreshness;
   ref: HostedBrowserVaultReplicaRef | null;
@@ -50,6 +51,7 @@ const BrowserVaultContext = createContext<BrowserVaultContextValue | null>(null)
 const anonymousBrowserVaultContext: BrowserVaultContextValue = {
   client: null,
   dataVersion: null,
+  deviceSyncImportPending: false,
   error: null,
   freshness: "stale",
   ref: null,
@@ -80,6 +82,7 @@ function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }
   const [refreshPending, setRefreshPending] = useState(false);
   const [workspaceVersion, setWorkspaceVersion] = useState<string | null>(null);
   const [client, setClient] = useState<BrowserVaultQueryClient | null>(null);
+  const [deviceSyncImportPending, setDeviceSyncImportPending] = useState(false);
   const [ref, setRef] = useState<HostedBrowserVaultReplicaRef | null>(null);
   const clientRef = useRef<BrowserVaultQueryClient | null>(null);
   const refRef = useRef<HostedBrowserVaultReplicaRef | null>(null);
@@ -103,6 +106,7 @@ function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }
   }, []);
 
   const commitLoadResult = useCallback((result: BrowserVaultSessionLoadResult) => {
+    setDeviceSyncImportPending(result.deviceSyncImportPending);
     setFreshness(result.freshness);
     setRefreshPending(result.refreshPending);
     setWorkspaceVersion(result.workspaceVersion);
@@ -246,6 +250,7 @@ function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }
   const value = useMemo<BrowserVaultContextValue>(() => ({
     client,
     dataVersion: ref?.dataVersion ?? null,
+    deviceSyncImportPending,
     error,
     freshness,
     ref,
@@ -253,7 +258,7 @@ function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }
     refresh: load,
     status,
     workspaceVersion,
-  }), [client, error, freshness, load, ref, refreshPending, status, workspaceVersion]);
+  }), [client, deviceSyncImportPending, error, freshness, load, ref, refreshPending, status, workspaceVersion]);
   const showSyncIndicator =
     status !== "error"
     && refreshPending;

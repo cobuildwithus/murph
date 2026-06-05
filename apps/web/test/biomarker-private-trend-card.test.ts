@@ -169,6 +169,7 @@ test("renders private trend values from the browser-vault selector", () => {
       ],
     })),
     dataVersion: "sha256:browser-vault-private-card-test",
+    deviceSyncImportPending: true,
     error: null,
     ref: null,
     refresh: async () => {},
@@ -186,6 +187,8 @@ test("renders private trend values from the browser-vault selector", () => {
   assert.doesNotMatch(markup, /WHOOP/u);
   assert.match(markup, /7-day average/u);
   assert.match(markup, /30d avg/u);
+  assert.doesNotMatch(markup, /Still importing private data/u);
+  assert.doesNotMatch(markup, /Wearable data is still importing/u);
   assert.match(markup, /text-muted-foreground">↓/u);
   assert.doesNotMatch(markup, /text-amber-600">↓/u);
   assert.doesNotMatch(markup, /demo wearable/iu);
@@ -423,6 +426,38 @@ test("renders the insufficient-data state from real browser-vault rows", () => {
   assert.doesNotMatch(markup, /demo wearable/iu);
 });
 
+test("renders importing copy when pending device data may fill an insufficient trend", () => {
+  const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
+  assert.ok(biomarker);
+  const metricRows = restingHeartRateRows([
+    ["2026-04-28", 56],
+    ["2026-04-29", 57],
+  ]);
+
+  mocks.useBrowserVault.mockReturnValue({
+    client: createBrowserVaultQueryClient(createReplica({
+      metricRows,
+      metricSelectionRows: [metricSelectionFromRows(metricRows, { status: "insufficient_data", value: null, valueLabel: null })],
+    })),
+    dataVersion: "sha256:browser-vault-private-card-test",
+    deviceSyncImportPending: true,
+    error: null,
+    ref: null,
+    refresh: async () => {},
+    status: "ready",
+  });
+
+  const markup = renderToStaticMarkup(
+    createElement(BiomarkerPrivateTrendCard, { biomarker }),
+  );
+
+  assert.match(markup, /Still importing private data/u);
+  assert.match(markup, /Wearable data is still importing\. This trend may fill in shortly\./u);
+  assert.match(markup, /Found 2 points so far/u);
+  assert.doesNotMatch(markup, /Connect a device/u);
+  assert.doesNotMatch(markup, /Murph waits for at least/u);
+});
+
 test("renders a no-data state when the browser-vault replica has no matching rows", () => {
   const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
@@ -446,6 +481,30 @@ test("renders a no-data state when the browser-vault replica has no matching row
   assert.doesNotMatch(markup, /demo wearable/iu);
 });
 
+test("renders importing copy when pending device data may fill an empty trend", () => {
+  const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
+  assert.ok(biomarker);
+
+  mocks.useBrowserVault.mockReturnValue({
+    client: createBrowserVaultQueryClient(createReplica()),
+    dataVersion: "sha256:browser-vault-private-card-test",
+    deviceSyncImportPending: true,
+    error: null,
+    ref: null,
+    refresh: async () => {},
+    status: "ready",
+  });
+
+  const markup = renderToStaticMarkup(
+    createElement(BiomarkerPrivateTrendCard, { biomarker }),
+  );
+
+  assert.match(markup, /Still importing private data/u);
+  assert.match(markup, /Wearable data is still importing\. This trend may fill in shortly\./u);
+  assert.doesNotMatch(markup, /Connect a device/u);
+  assert.doesNotMatch(markup, /No private values yet/u);
+});
+
 test("renders an unsupported state for biomarkers without browser-vault metric bindings", () => {
   const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
@@ -460,6 +519,7 @@ test("renders an unsupported state for biomarkers without browser-vault metric b
   mocks.useBrowserVault.mockReturnValue({
     client: createBrowserVaultQueryClient(createReplica()),
     dataVersion: "sha256:browser-vault-private-card-test",
+    deviceSyncImportPending: true,
     error: null,
     ref: null,
     refresh: async () => {},
@@ -472,6 +532,7 @@ test("renders an unsupported state for biomarkers without browser-vault metric b
 
   assert.match(markup, /Biomarker unavailable/u);
   assert.match(markup, /Private tracking for this biomarker is not available yet/u);
+  assert.doesNotMatch(markup, /Still importing private data/u);
   assert.doesNotMatch(markup, /Connect a device/u);
 });
 

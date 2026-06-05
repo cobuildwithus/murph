@@ -24,6 +24,7 @@ import { browserVaultReplicaRefsMatch } from "./ref";
 export type BrowserVaultFreshness = "fresh" | "stale";
 
 export interface BrowserVaultSessionMetadata {
+  deviceSyncImportPending: boolean;
   freshness: BrowserVaultFreshness;
   refreshPending: boolean;
   workspaceVersion: string | null;
@@ -96,6 +97,7 @@ export async function loadBrowserVaultReplica({
 
   if (session.state === "empty") {
     return {
+      deviceSyncImportPending: session.deviceSyncImportPending,
       freshness: session.freshness,
       refreshPending: session.refreshPending,
       state: "empty",
@@ -111,6 +113,7 @@ export async function loadBrowserVaultReplica({
     });
 
     return {
+      deviceSyncImportPending: session.deviceSyncImportPending,
       freshness: session.freshness,
       replicaRef: session.replicaRef,
       refreshPending: session.refreshPending,
@@ -163,6 +166,7 @@ export async function loadBrowserVaultReplica({
 
   return {
     client: createBrowserVaultQueryClient(replica),
+    deviceSyncImportPending: session.deviceSyncImportPending,
     freshness: session.freshness,
     replicaRef: session.replicaRef,
     refreshPending: session.refreshPending,
@@ -200,6 +204,7 @@ export function isBrowserVaultAbortError(error: unknown): boolean {
 export type BrowserVaultSessionResponse =
   | {
       encryptedReplica: null;
+      deviceSyncImportPending: boolean;
       freshness: BrowserVaultFreshness;
       replicaAad: null;
       replicaKeyEnvelope: null;
@@ -210,6 +215,7 @@ export type BrowserVaultSessionResponse =
     }
   | {
       encryptedReplica: null;
+      deviceSyncImportPending: boolean;
       freshness: BrowserVaultFreshness;
       replicaAad: null;
       replicaKeyEnvelope: null;
@@ -220,6 +226,7 @@ export type BrowserVaultSessionResponse =
     }
   | {
       encryptedReplica: HostedCipherEnvelope;
+      deviceSyncImportPending: boolean;
       freshness: BrowserVaultFreshness;
       replicaAad: BrowserVaultReplicaAad;
       replicaKeyEnvelope: HostedBrowserSessionKeyEnvelope;
@@ -239,11 +246,16 @@ export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSe
 
     return {
       encryptedReplica: null,
+      deviceSyncImportPending: readOptionalBoolean(
+        record.deviceSyncImportPending,
+        false,
+        "deviceSyncImportPending",
+      ),
       freshness: parseBrowserVaultFreshness(record.freshness, "stale"),
       replicaAad: null,
       replicaKeyEnvelope: null,
       replicaRef: null,
-      refreshPending: readOptionalBoolean(record.refreshPending, false),
+      refreshPending: readOptionalBoolean(record.refreshPending, false, "refreshPending"),
       state,
       workspaceVersion: readOptionalNullableString(record.workspaceVersion, "Browser vault session response.workspaceVersion"),
     };
@@ -254,11 +266,16 @@ export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSe
 
     return {
       encryptedReplica: null,
+      deviceSyncImportPending: readOptionalBoolean(
+        record.deviceSyncImportPending,
+        false,
+        "deviceSyncImportPending",
+      ),
       freshness: parseBrowserVaultFreshness(record.freshness, "fresh"),
       replicaAad: null,
       replicaKeyEnvelope: null,
       replicaRef: parseRequiredReplicaRef(record.replicaRef, "Browser vault session response replicaRef"),
-      refreshPending: readOptionalBoolean(record.refreshPending, false),
+      refreshPending: readOptionalBoolean(record.refreshPending, false, "refreshPending"),
       state,
       workspaceVersion: readOptionalNullableString(record.workspaceVersion, "Browser vault session response.workspaceVersion"),
     };
@@ -273,6 +290,11 @@ export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSe
       record.encryptedReplica,
       "Browser vault session response encryptedReplica",
     ),
+    deviceSyncImportPending: readOptionalBoolean(
+      record.deviceSyncImportPending,
+      false,
+      "deviceSyncImportPending",
+    ),
     freshness: parseBrowserVaultFreshness(record.freshness, "fresh"),
     replicaAad: parseBrowserVaultReplicaAad(
       record.replicaAad,
@@ -283,7 +305,7 @@ export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSe
       "Browser vault session response replicaKeyEnvelope",
     ),
     replicaRef: parseRequiredReplicaRef(record.replicaRef, "Browser vault session response replicaRef"),
-    refreshPending: readOptionalBoolean(record.refreshPending, false),
+    refreshPending: readOptionalBoolean(record.refreshPending, false, "refreshPending"),
     state,
     workspaceVersion: readOptionalNullableString(record.workspaceVersion, "Browser vault session response.workspaceVersion"),
   };
@@ -461,6 +483,7 @@ function requireNonEmptyString(value: unknown, label: string): string {
 
 function createEmptyLoadResult(): Extract<BrowserVaultSessionLoadResult, { state: "empty" }> {
   return {
+    deviceSyncImportPending: false,
     freshness: "stale",
     refreshPending: false,
     state: "empty",
@@ -483,13 +506,13 @@ function parseBrowserVaultFreshness(
   throw new TypeError("Browser vault session response freshness must be fresh or stale.");
 }
 
-function readOptionalBoolean(value: unknown, fallback: boolean): boolean {
+function readOptionalBoolean(value: unknown, fallback: boolean, fieldName: string): boolean {
   if (value === undefined) {
     return fallback;
   }
 
   if (typeof value !== "boolean") {
-    throw new TypeError("Browser vault session response refreshPending must be a boolean.");
+    throw new TypeError(`Browser vault session response ${fieldName} must be a boolean.`);
   }
 
   return value;

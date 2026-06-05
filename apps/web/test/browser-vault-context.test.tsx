@@ -161,6 +161,41 @@ test("browser-vault provider does not poll stale empty sessions without pending 
   await rendered.cleanup();
 });
 
+test("browser-vault provider exposes pending device imports without showing a global sync warning", async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+    deviceSyncImportPending: true,
+    encryptedReplica: null,
+    freshness: "stale",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: null,
+    refreshPending: false,
+    state: "empty",
+    workspaceVersion: null,
+  }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultImportProbe)),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, "empty:importing");
+  assert.equal(rendered.container.textContent?.includes("Importing wearable data..."), false);
+  assert.equal(rendered.container.textContent?.includes("Preparing dashboard..."), false);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(25_000);
+  });
+
+  assert.equal(fetchMock.mock.calls.length, 1);
+
+  await rendered.cleanup();
+});
+
 test("browser-vault provider hides ready data immediately when auth context becomes anonymous", async () => {
   const ref = createReplicaRef();
   const fetchMock = vi.fn()
@@ -336,6 +371,16 @@ function BrowserVaultSelectorProbe() {
     "button",
     { onClick: () => void vault.refresh() },
     `${vault.status}:${dataVersion ?? "none"}`,
+  );
+}
+
+function BrowserVaultImportProbe() {
+  const vault = useBrowserVault();
+
+  return createElement(
+    "button",
+    { onClick: () => void vault.refresh() },
+    `${vault.status}:${vault.deviceSyncImportPending ? "importing" : "idle"}`,
   );
 }
 

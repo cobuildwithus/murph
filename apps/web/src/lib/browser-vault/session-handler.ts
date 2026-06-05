@@ -26,6 +26,7 @@ import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
 import { assertHostedLaunchRequiredConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
+import { PrismaHostedDirtyConnectionStore } from "../device-sync/prisma-store/dirty-connections";
 import { browserVaultReplicaRefsMatch } from "./ref";
 
 const BROWSER_VAULT_SESSION_REQUEST_BODY_LIMIT_BYTES = 16 * 1024;
@@ -56,7 +57,12 @@ export function createBrowserVaultSessionRoute(input: {
       body.knownReplicaRef ?? null,
       "Browser vault session request knownReplicaRef",
     );
-    const workspace = await readHostedWorkspace({ userId: auth.member.id });
+    const [workspace, deviceSyncImportPending] = await Promise.all([
+      readHostedWorkspace({ userId: auth.member.id }),
+      new PrismaHostedDirtyConnectionStore(prisma).hasPendingDirtyConnectionForUser(
+        auth.member.id,
+      ).catch(() => false),
+    ]);
     const replicaRef = parseHostedBrowserVaultReplicaRef(
       workspace?.browserVaultReplicaRef ?? null,
       "Hosted browser vault session workspace replica ref",
@@ -85,6 +91,7 @@ export function createBrowserVaultSessionRoute(input: {
 
     if (!replicaRef) {
       return emptyBrowserVaultSession({
+        deviceSyncImportPending,
         refreshPending: true,
         workspaceVersion,
       });
@@ -92,6 +99,7 @@ export function createBrowserVaultSessionRoute(input: {
 
     if (browserVaultReplicaRefsMatch(knownReplicaRef, replicaRef)) {
       return jsonOk({
+        deviceSyncImportPending,
         encryptedReplica: null,
         freshness,
         replicaAad: null,
@@ -121,6 +129,7 @@ export function createBrowserVaultSessionRoute(input: {
             replicaRef,
             userId: auth.member.id,
           })),
+          deviceSyncImportPending,
           freshness,
           refreshPending: freshnessAssessment.shouldRefresh,
           workspaceVersion,
@@ -130,6 +139,7 @@ export function createBrowserVaultSessionRoute(input: {
       if (error instanceof Error && error.message === "Hosted execution browser vault replica was not found.") {
         scheduleRefreshAfterResponse();
         return emptyBrowserVaultSession({
+          deviceSyncImportPending,
           refreshPending: true,
           workspaceVersion,
         });
@@ -157,10 +167,12 @@ function scheduleAfterResponseOrFireAndForget(task: () => Promise<void>): void {
 }
 
 function emptyBrowserVaultSession(input: {
+  deviceSyncImportPending?: boolean;
   refreshPending?: boolean;
   workspaceVersion?: string | null;
 } = {}) {
   return jsonOk({
+    deviceSyncImportPending: input.deviceSyncImportPending ?? false,
     encryptedReplica: null,
     freshness: "stale" as const,
     replicaAad: null,

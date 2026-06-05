@@ -67,6 +67,7 @@ test("browser vault session parser accepts freshness metadata and defaults old r
     replicaRef: null,
     state: "empty",
   }), {
+    deviceSyncImportPending: false,
     encryptedReplica: null,
     freshness: "stale",
     replicaAad: null,
@@ -79,6 +80,7 @@ test("browser vault session parser accepts freshness metadata and defaults old r
 
   assert.deepEqual(parseBrowserVaultSessionResponse({
     encryptedReplica: null,
+    deviceSyncImportPending: true,
     freshness: "stale",
     replicaAad: null,
     replicaKeyEnvelope: null,
@@ -88,6 +90,7 @@ test("browser vault session parser accepts freshness metadata and defaults old r
     workspaceVersion: "7",
   }), {
     encryptedReplica: null,
+    deviceSyncImportPending: true,
     freshness: "stale",
     replicaAad: null,
     replicaKeyEnvelope: null,
@@ -122,6 +125,7 @@ test("browser vault loader treats unauthorized responses as empty by default", a
   });
 
   assert.deepEqual(result, {
+    deviceSyncImportPending: false,
     freshness: "stale",
     refreshPending: false,
     state: "empty",
@@ -131,6 +135,7 @@ test("browser vault loader treats unauthorized responses as empty by default", a
 
 test("browser vault loader opts in to stale replicas explicitly", async () => {
   const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+    deviceSyncImportPending: true,
     encryptedReplica: null,
     freshness: "stale",
     replicaAad: null,
@@ -150,6 +155,7 @@ test("browser vault loader opts in to stale replicas explicitly", async () => {
   });
 
   assert.deepEqual(result, {
+    deviceSyncImportPending: true,
     freshness: "stale",
     refreshPending: true,
     state: "empty",
