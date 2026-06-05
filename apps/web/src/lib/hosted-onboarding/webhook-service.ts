@@ -46,8 +46,11 @@ import {
 import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
+  logHostedOnboardingDiagnostic,
   startHostedOnboardingTiming,
   toHostedOnboardingLogIdSuffix,
+  type HostedOnboardingTimingDetails,
+  type HostedOnboardingTimingHandle,
 } from "./logging";
 import {
   drainHostedLinqSideEffectsDirect,
@@ -223,9 +226,10 @@ async function handleHostedLinqTypingPrewarm(input: {
   );
 
   if (!isHostedLinqIMessageService(typingEvent.data.service)) {
-    finishHostedOnboardingTiming(timing, "ignored-unsupported-service", {
+    finishHostedLinqTypingPrewarmDecision(timing, "ignored-unsupported-service", {
       decision: "ignored-unsupported-service",
       eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
+      responseReason: "typing-prewarm-ignored-unsupported-service",
       servicePresent: Boolean(typingEvent.data.service),
       scopeHashPresent: false,
     });
@@ -241,9 +245,11 @@ async function handleHostedLinqTypingPrewarm(input: {
     prisma: input.prisma,
   });
   if (!routing) {
-    finishHostedOnboardingTiming(timing, "ignored-no-active-route", {
+    finishHostedLinqTypingPrewarmDecision(timing, "ignored-no-active-route", {
       decision: "ignored-no-active-route",
       eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
+      responseReason: "typing-prewarm-ignored-no-active-route",
+      routeFound: false,
       scopeHashPresent: false,
     });
     return {
@@ -254,11 +260,14 @@ async function handleHostedLinqTypingPrewarm(input: {
   }
 
   if (!hasHostedMemberActiveAccess(routing.core)) {
-    finishHostedOnboardingTiming(timing, "ignored-inactive-member", {
+    finishHostedLinqTypingPrewarmDecision(timing, "ignored-inactive-member", {
       decision: "ignored-inactive-member",
       eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
-      userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
+      memberActive: false,
+      responseReason: "typing-prewarm-ignored-inactive-member",
+      routeFound: true,
       scopeHashPresent: false,
+      userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
     });
     return {
       ignored: true,
@@ -268,11 +277,14 @@ async function handleHostedLinqTypingPrewarm(input: {
   }
 
   if (!canSignalHostedLinqTypingPrewarm(routing.core.id)) {
-    finishHostedOnboardingTiming(timing, "coalesced", {
+    finishHostedLinqTypingPrewarmDecision(timing, "coalesced", {
       decision: "coalesced",
       eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
-      userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
+      memberActive: true,
+      responseReason: "typing-prewarm-coalesced",
+      routeFound: true,
       scopeHashPresent: false,
+      userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
     });
     return {
       ignored: true,
@@ -289,12 +301,15 @@ async function handleHostedLinqTypingPrewarm(input: {
       userId: routing.core.id,
     });
   } catch (error) {
-    finishHostedOnboardingTiming(timing, "temporal-signal-failed", {
+    finishHostedLinqTypingPrewarmDecision(timing, "temporal-signal-failed", {
       decision: "temporal-signal-failed",
       errorName: deriveHostedOnboardingTimingErrorName(error),
       eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
-      userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
+      memberActive: true,
+      responseReason: "typing-prewarm-temporal-signal-failed",
+      routeFound: true,
       scopeHashPresent: false,
+      userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
     });
     return {
       ignored: true,
@@ -303,11 +318,15 @@ async function handleHostedLinqTypingPrewarm(input: {
     };
   }
 
-  finishHostedOnboardingTiming(timing, "signaled", {
+  finishHostedLinqTypingPrewarmDecision(timing, "signaled", {
     decision: "signaled",
     eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
-    userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
+    memberActive: true,
+    responseReason: "typing-prewarm-signaled",
+    routeFound: true,
     scopeHashPresent: false,
+    temporalSignalAttempted: true,
+    userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
   });
   recordHostedLinqTypingPrewarmSignal(routing.core.id);
   return {
@@ -315,6 +334,15 @@ async function handleHostedLinqTypingPrewarm(input: {
     ok: true,
     reason: "typing-prewarm-signaled",
   };
+}
+
+function finishHostedLinqTypingPrewarmDecision(
+  timing: HostedOnboardingTimingHandle,
+  outcome: string,
+  details: HostedOnboardingTimingDetails,
+): void {
+  finishHostedOnboardingTiming(timing, outcome, details);
+  logHostedOnboardingDiagnostic("linq.typing-prewarm-decision", details);
 }
 
 function canSignalHostedLinqTypingPrewarm(userId: string): boolean {

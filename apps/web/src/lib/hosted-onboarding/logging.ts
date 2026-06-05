@@ -40,6 +40,21 @@ export function finishHostedOnboardingTiming(
   });
 }
 
+export function logHostedOnboardingDiagnostic(
+  name: string,
+  details: HostedOnboardingStructuredLogDetails = {},
+): void {
+  const diagnostic =
+    sanitizeHostedOnboardingTimingLabel(
+      name,
+      HOSTED_ONBOARDING_TIMING_LABEL_MAX_LENGTH,
+    ) ?? "unknown";
+  console.info(`Hosted onboarding diagnostic: ${diagnostic}.`, {
+    diagnostic,
+    ...sanitizeHostedOnboardingStructuredLogDetails(details),
+  });
+}
+
 export function deriveHostedOnboardingTimingErrorName(error: unknown): string {
   if (error instanceof Error && error.name) {
     return error.name;
