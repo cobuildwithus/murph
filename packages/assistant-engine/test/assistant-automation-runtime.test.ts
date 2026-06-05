@@ -4024,6 +4024,7 @@ describe('assistant auto-reply runtime', () => {
             id: newerInput.event.inputId,
           }),
         ],
+        deliveryTarget: 'thread-1',
         deliveryReplyToMessageId: 'newer_msg',
         kind: 'accepted',
       })
@@ -5747,6 +5748,7 @@ describe('assistant auto-reply runtime', () => {
             id: hostedInput.event.inputId,
           }),
         ],
+        deliveryTarget: 'real_thread_initial',
         deliveryReplyToMessageId: 'real_msg_late',
         kind: 'accepted',
         prompt: expect.stringContaining('late captureless route text'),

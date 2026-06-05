@@ -811,6 +811,11 @@ function mergeAssistantActiveTurnInputAdmissions(
     return first
   }
 
+  const deliveryTarget =
+    second.deliveryTarget === undefined
+      ? first.deliveryTarget
+      : second.deliveryTarget
+
   return {
     acceptedInputs: [
       ...(first.acceptedInputs ?? []),
@@ -824,6 +829,7 @@ function mergeAssistantActiveTurnInputAdmissions(
       second.deliveryIdempotencyKey === undefined
         ? first.deliveryIdempotencyKey
         : second.deliveryIdempotencyKey,
+    ...(deliveryTarget === undefined ? {} : { deliveryTarget }),
     kind: 'accepted',
     prompt: joinAssistantActiveTurnInputText([first.prompt, second.prompt]) ?? '',
     receiptMetadata: mergeAssistantActiveTurnReceiptMetadata([

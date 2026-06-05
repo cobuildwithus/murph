@@ -34,6 +34,7 @@ export type AssistantActiveTurnInputAdmissionResult =
       acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
       deliveryIdempotencyKey?: string | null
       deliveryReplyToMessageId?: string | null
+      deliveryTarget?: string | null
       prompt: string
       receiptMetadata?: Record<string, string> | null
       transcriptText?: string | null

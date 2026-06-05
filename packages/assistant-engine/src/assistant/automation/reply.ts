@@ -1706,17 +1706,22 @@ function admitCapturelessAssistantInputs(input: {
     candidates: input.lateInputs,
     expectedChannel: queuedContext.firstItem.summary.source,
   })
+  const deliveryTarget = readLatestAssistantInputDeliveryTarget({
+    candidates: input.lateInputs,
+    expectedChannel: queuedContext.firstItem.summary.source,
+  })
 
   return {
     acceptedInputs,
     deliveryIdempotencyKey: createHostedAutoReplyDeliveryIdempotencyKey({
       context: nextContext,
-      deliveryTarget: input.deliveryTarget,
+      deliveryTarget: deliveryTarget ?? input.deliveryTarget,
       executionContext: input.executionContext,
     }),
     ...(deliveryReplyToMessageId !== undefined
       ? { deliveryReplyToMessageId }
       : {}),
+    ...(deliveryTarget !== null ? { deliveryTarget } : {}),
     kind: 'accepted',
     prompt,
     receiptMetadata: {
@@ -2041,6 +2046,21 @@ function readAutoReplyDeliveryTarget(
     candidates: autoReplyInputCandidatesFromContext(context),
     expectedChannel: context.firstItem.summary.source,
   })
+  return readAssistantInputReplyTargetDeliveryTarget(replyTarget)
+}
+
+function readLatestAssistantInputDeliveryTarget(input: {
+  candidates: readonly AssistantInputCandidate[]
+  expectedChannel: string | null
+}): string | null {
+  return readAssistantInputReplyTargetDeliveryTarget(
+    readLatestAssistantInputReplyTarget(input),
+  )
+}
+
+function readAssistantInputReplyTargetDeliveryTarget(
+  replyTarget: AssistantInputCandidate['event']['replyTarget'],
+): string | null {
   if (!replyTargetUsesThreadAsExplicitDeliveryTarget(replyTarget)) {
     return null
   }

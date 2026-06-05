@@ -1072,6 +1072,10 @@ function buildActiveTurnInput(input: {
       input.acceptedInput.deliveryIdempotencyKey === undefined
         ? input.input.deliveryIdempotencyKey
         : input.acceptedInput.deliveryIdempotencyKey,
+    deliveryTarget:
+      input.acceptedInput.deliveryTarget === undefined
+        ? input.input.deliveryTarget
+        : input.acceptedInput.deliveryTarget,
     prompt: input.acceptedInput.prompt,
     receiptMetadata:
       input.acceptedInput.receiptMetadata === undefined
