@@ -9,6 +9,9 @@ import {
   deleteHostedRunnerUserData,
 } from "../src/user-runner/user-data-deletion.js";
 import {
+  deleteR2ObjectsWithPrefix,
+} from "../src/user-runner/r2-delete.js";
+import {
   createWorkspaceSnapshotSessionService,
   workspaceSnapshotOrphanCandidateStorageKey,
 } from "../src/user-runner/workspace-snapshot-sessions.js";
@@ -93,6 +96,21 @@ describe("hosted runner user data cleanup", () => {
     );
     expect(serializedLogs).not.toContain(leakedPrefix);
     expect(serializedLogs).not.toContain("R2 list failed for");
+  });
+
+  it("bulk-deletes every listed R2 prefix page without cursor skips", async () => {
+    const bucket = new ListableMemoryEncryptedR2Bucket();
+    const prefix = await hostedBundleUserPrefix({ userId: USER_ID });
+    for (let index = 0; index < 1_001; index += 1) {
+      await bucket.put(`${prefix}${String(index).padStart(4, "0")}.bundle.json`, "data");
+    }
+
+    await expect(deleteR2ObjectsWithPrefix(bucket, prefix)).resolves.toEqual({
+      deletedCount: 1_001,
+    });
+
+    expect(bucket.deleteBatches.map((batch) => batch.length)).toEqual([1_000, 1]);
+    expect(bucket.objects.size).toBe(0);
   });
 
   it("skips malformed workspace snapshot orphan candidates and keeps cleaning valid candidates", async () => {
@@ -247,6 +265,14 @@ function createWorkspaceState(userId: string): HostedWorkspaceState {
 }
 
 class ListableMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
+  readonly deleteBatches: string[][] = [];
+
+  override async delete(key: string | string[]): Promise<void> {
+    const keys = Array.isArray(key) ? key : [key];
+    this.deleteBatches.push(keys);
+    await super.delete(keys);
+  }
+
   async list(input: {
     cursor?: string;
     limit?: number;
@@ -278,11 +304,14 @@ class FailingDeleteListableR2Bucket extends ListableMemoryEncryptedR2Bucket {
     super();
   }
 
-  override async delete(key: string): Promise<void> {
-    if (key === this.failedKey) {
-      throw new Error(`R2 delete failed for ${key}`);
+  override async delete(key: string | string[]): Promise<void> {
+    const keys = Array.isArray(key) ? key : [key];
+    for (const item of keys) {
+      if (item === this.failedKey) {
+        throw new Error(`R2 delete failed for ${item}`);
+      }
+      await super.delete(item);
     }
-    await super.delete(key);
   }
 }
 

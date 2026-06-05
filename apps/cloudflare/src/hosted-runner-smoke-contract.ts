@@ -23,7 +23,6 @@ export interface HostedRunnerSmokeResult {
   codexVersion: string;
   healthCommonsCatalogHash: string;
   healthCommonsCliProtocolListBytes: number;
-  healthCommonsCliSearchBytes: number;
   healthCommonsFinnishDrySaunaTitle: string;
   healthCommonsRuntimeProtocolHitKeys: readonly string[];
   healthCommonsRuntimeSearchHitKeys: readonly string[];
@@ -59,7 +58,6 @@ const HOSTED_RUNNER_SMOKE_RESULT_KEYS = new Set([
   "codexVersion",
   "healthCommonsCatalogHash",
   "healthCommonsCliProtocolListBytes",
-  "healthCommonsCliSearchBytes",
   "healthCommonsFinnishDrySaunaTitle",
   "healthCommonsRuntimeProtocolHitKeys",
   "healthCommonsRuntimeSearchHitKeys",
@@ -165,10 +163,6 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
     healthCommonsCliProtocolListBytes: readFiniteNumber(
       record.healthCommonsCliProtocolListBytes,
       "Hosted runner smoke result.healthCommonsCliProtocolListBytes",
-    ),
-    healthCommonsCliSearchBytes: readFiniteNumber(
-      record.healthCommonsCliSearchBytes,
-      "Hosted runner smoke result.healthCommonsCliSearchBytes",
     ),
     healthCommonsFinnishDrySaunaTitle: readNonEmptyString(
       record.healthCommonsFinnishDrySaunaTitle,

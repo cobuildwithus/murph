@@ -15,6 +15,7 @@ vi.mock("@/scripts/reset-hosted-member-runtime", () => ({
 describe("hosted member reset admin route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.HOSTED_EXECUTION_CONTROL_TIMEOUT_MS;
     process.env.HOSTED_MEMBER_RESET_ADMIN_TOKEN = "test-admin-token";
     mocks.runResetHostedMemberRuntimeCommand.mockResolvedValue([
       {
@@ -35,6 +36,7 @@ describe("hosted member reset admin route", () => {
   });
 
   afterEach(() => {
+    delete process.env.HOSTED_EXECUTION_CONTROL_TIMEOUT_MS;
     delete process.env.HOSTED_MEMBER_RESET_ADMIN_TOKEN;
   });
 
@@ -114,6 +116,40 @@ describe("hosted member reset admin route", () => {
       "member_fixture",
       "--resume-suspended-reset",
     ]);
+  });
+
+  it("extends hosted control timeout only while the reset command runs", async () => {
+    let observedTimeout: string | undefined;
+    mocks.runResetHostedMemberRuntimeCommand.mockImplementationOnce(async () => {
+      observedTimeout = process.env.HOSTED_EXECUTION_CONTROL_TIMEOUT_MS;
+      return [
+        {
+          member: "sha256:member",
+          mode: "dry-run",
+          schema: "murph.hosted-member-runtime-reset-script.v1",
+          step: "start",
+          targets: {
+            executionTargetFingerprint: "sha256:target",
+          },
+        },
+        {
+          member: "sha256:member",
+          schema: "murph.hosted-member-runtime-reset-script.v1",
+          step: "dry-run-complete",
+        },
+      ];
+    });
+
+    const { POST } = await import("../app/api/internal/admin/hosted-member-reset/route");
+
+    const response = await POST(buildRequest({
+      memberId: "member_fixture",
+      mode: "dry-run",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(observedTimeout).toBe("240000");
+    expect(process.env.HOSTED_EXECUTION_CONTROL_TIMEOUT_MS).toBeUndefined();
   });
 
   it("rejects missing bearer tokens", async () => {

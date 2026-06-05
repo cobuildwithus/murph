@@ -13,6 +13,15 @@ import {
 import {
   ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
 } from '../src/assistant/first-contact-welcome.js'
+import {
+  buildAssistantSystemPrompt,
+} from '../src/assistant/system-prompt.js'
+
+const DELETED_COMMONS_COMMANDS = [
+  'vault-cli commons search',
+  'vault-cli commons get',
+  'vault-cli commons source list',
+] as const
 
 describe('assistant skill assets', () => {
   async function readSkillFile(skill: (typeof ASSISTANT_SKILLS)[number]) {
@@ -20,6 +29,12 @@ describe('assistant skill assets', () => {
       path.join(resolveAssistantSkillsRoot(), skill.slug, 'SKILL.md'),
       'utf8',
     )
+  }
+
+  function expectNoDeletedCommonsCommands(raw: string) {
+    for (const deletedCommand of DELETED_COMMONS_COMMANDS) {
+      expect(raw).not.toContain(deletedCommand)
+    }
   }
 
   it('has a valid SKILL.md for every registered assistant skill', async () => {
@@ -71,6 +86,49 @@ describe('assistant skill assets', () => {
     })
     expect(canonical[MURPH_ASSISTANT_SKILLS_ROOT_ENV]).toBe(
       resolveAssistantSkillsRoot(),
+    )
+  })
+
+  it('keeps assistant prompt and skills on remaining Commons protocol commands', async () => {
+    const systemPrompt = buildAssistantSystemPrompt({
+      assistantCliContract: null,
+      assistantContextSnapshotPrompt: null,
+      assistantHostedDeviceConnectAvailable: false,
+      assistantHostedDeviceConnectProviders: [],
+      assistantKnowledgeToolsAvailable: false,
+      channel: 'local',
+      cliAccess: {
+        rawCommand: 'vault-cli',
+        setupCommand: 'murph',
+      },
+      currentLocalDate: '2026-06-05',
+      currentTimeZone: 'America/New_York',
+      onboardingGuidance: true,
+      modelBehaviorProfile: 'gpt5-agentic',
+      turnTrigger: null,
+    })
+    const skillTexts = await Promise.all(ASSISTANT_SKILLS.map(readSkillFile))
+    const registeredSkillText = skillTexts.join('\n')
+
+    expectNoDeletedCommonsCommands(systemPrompt)
+    expectNoDeletedCommonsCommands(registeredSkillText)
+    expect(systemPrompt).toContain(
+      'vault-cli commons protocol explore <query> --format json',
+    )
+    expect(systemPrompt).toContain(
+      'vault-cli commons protocol list --query <query> --format json',
+    )
+    expect(systemPrompt).toContain(
+      'vault-cli commons protocol show <key-or-slug> --format json',
+    )
+    expect(registeredSkillText).toContain(
+      'vault-cli commons protocol explore <query> --format json',
+    )
+    expect(registeredSkillText).toContain(
+      'vault-cli commons protocol list --query <query> --format json',
+    )
+    expect(registeredSkillText).toContain(
+      'vault-cli commons protocol show <key-or-slug> --format json',
     )
   })
 
@@ -305,11 +363,9 @@ describe('assistant skill assets', () => {
       'vault-cli commons protocol explore <query> --format json',
     )
     expect(raw).toContain(
-      'vault-cli commons search "<query>" --format json',
+      'vault-cli commons protocol list --query <query> --format json',
     )
-    expect(raw).toContain(
-      'vault-cli commons protocol list --format json',
-    )
+    expectNoDeletedCommonsCommands(raw)
     expect(raw).toContain(
       'Do not invent the option set before this Health Commons pass',
     )

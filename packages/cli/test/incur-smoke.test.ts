@@ -33,6 +33,11 @@ const packageJson = require('../package.json') as { version?: string }
 const INCUR_ROOT_HELP_TIMEOUT_MS = 90_000
 const INCUR_HELP_TIMEOUT_MS = 45_000
 const INCUR_SCHEMA_TIMEOUT_MS = 45_000
+const DELETED_COMMONS_COMMANDS = [
+  'commons search',
+  'commons get',
+  'commons source list',
+] as const
 let inProcessCliProcessStateQueue: Promise<void> = Promise.resolve()
 
 function withMachineJsonOutput(args: string[]): string[] {
@@ -1913,13 +1918,19 @@ test('compact llms json manifest remains available', async () => {
     true,
   )
   assert.equal(
-    manifest.commands.some((command) => command.name === 'commons search'),
-    true,
-  )
-  assert.equal(
     manifest.commands.some((command) => command.name === 'commons protocol show'),
     true,
   )
+  assert.equal(
+    manifest.commands.some((command) => command.name === 'commons protocol explore'),
+    true,
+  )
+  for (const deletedCommand of DELETED_COMMONS_COMMANDS) {
+    assert.equal(
+      manifest.commands.some((command) => command.name === deletedCommand),
+      false,
+    )
+  }
   assert.equal(
     manifest.commands.some((command) => command.name === 'query projection status'),
     true,
@@ -1978,9 +1989,15 @@ test('full llms json manifest remains available for schema-rich commands', async
     true,
   )
   assert.equal(
-    manifest.commands.some((command) => command.name === 'commons source list'),
+    manifest.commands.some((command) => command.name === 'commons protocol list'),
     true,
   )
+  for (const deletedCommand of DELETED_COMMONS_COMMANDS) {
+    assert.equal(
+      manifest.commands.some((command) => command.name === deletedCommand),
+      false,
+    )
+  }
   assert.equal(
     manifest.commands.some((command) => command.name === 'query projection status'),
     true,

@@ -191,7 +191,6 @@ async function runSmokeChecks(input: {
     codexVersion: codexPreflight.version,
     healthCommonsCatalogHash: healthCommonsRuntime.catalogHash,
     healthCommonsCliProtocolListBytes: healthCommonsCli.protocolListBytes,
-    healthCommonsCliSearchBytes: healthCommonsCli.searchBytes,
     healthCommonsFinnishDrySaunaTitle: healthCommonsRuntime.finnishDrySaunaTitle,
     healthCommonsRuntimeProtocolHitKeys: healthCommonsRuntime.runtimeProtocolHitKeys,
     healthCommonsRuntimeSearchHitKeys: healthCommonsRuntime.runtimeSearchHitKeys,
@@ -1499,19 +1498,7 @@ function parsePositiveByteCount(value: string | undefined, label: string): numbe
 
 async function runHealthCommonsCliSmoke(): Promise<{
   protocolListBytes: number;
-  searchBytes: number;
 }> {
-  const searchOutput = await runTextCommand("vault-cli", [
-    "commons",
-    "search",
-    "sauna",
-    "--type",
-    "protocol_variant",
-    "--limit",
-    "10",
-    "--format",
-    "json",
-  ]);
   const protocolListOutput = await runTextCommand("vault-cli", [
     "commons",
     "protocol",
@@ -1524,16 +1511,8 @@ async function runHealthCommonsCliSmoke(): Promise<{
     "json",
   ]);
 
-  const searchJson = JSON.parse(searchOutput);
   const protocolListJson = JSON.parse(protocolListOutput);
-  const serializedSearch = JSON.stringify(searchJson);
   const serializedProtocolList = JSON.stringify(protocolListJson);
-
-  if (!serializedSearch.includes(FINNISH_DRY_SAUNA_KEY)) {
-    throw new Error(
-      `Hosted runner CLI Health Commons search smoke did not include ${FINNISH_DRY_SAUNA_KEY}.`,
-    );
-  }
 
   if (!serializedProtocolList.includes(FINNISH_DRY_SAUNA_KEY)) {
     throw new Error(
@@ -1543,7 +1522,6 @@ async function runHealthCommonsCliSmoke(): Promise<{
 
   return {
     protocolListBytes: Buffer.byteLength(protocolListOutput, "utf8"),
-    searchBytes: Buffer.byteLength(searchOutput, "utf8"),
   };
 }
 

@@ -506,12 +506,12 @@ function buildAssistantHealthCommonsCoreGuidanceText(): string {
 - Health Commons is the public source-backed reference corpus for protocols, biomarkers, sources, and related health pages. It is separate from the user's private vault.
 - In user-facing replies, lead with the useful protocol, evidence, or next step instead of presenting Health Commons as a separate place the user is being sent to. Mention Health Commons only when provenance matters: source-backed protocol pages, exact protocol versions, public-vs-private boundaries, or saved experiment references.
 - A Health Commons \`protocol_variant\` is a public reference protocol, available through \`commons protocol\` lookup. A private vault \`protocol\` is the user's saved adaptation of a Health Commons protocol. A private \`regimen\` is the medication, supplement, therapy, or habit registry. An experiment is a private time-bounded evaluation run with a hypothesis, plan, adherence evidence, metrics, and outcome.
-- Do not say Health Commons lacks a relevant protocol, source, or page unless a same-turn Health Commons search/list/get lookup for the relevant terms actually returned no match.
+- Do not say Health Commons lacks a relevant protocol unless a same-turn Health Commons protocol explore or protocol list lookup for the relevant terms actually returned no match.
 - Do not use private \`vault-cli protocol show\` or \`vault-cli protocol list\` as the discovery path for public Health Commons protocols. Use private vault protocol records only when the user is inspecting or editing their own saved adaptation.`;
 }
 
 function buildHealthCommonsDiscoverySurfaceText(): string {
-  return "Use `vault-cli commons search \"<query>\" --format json` or `vault-cli commons protocol list --format json` for discovery, `vault-cli commons protocol show <key-or-slug> --format json` for the exact page, and `vault-cli commons source list --protocol <key-or-slug> --format json` when the user asks what evidence backs a protocol.";
+  return "Use `vault-cli commons protocol explore <query> --format json` for broad or ambiguous discovery, `vault-cli commons protocol list --query <query> --format json` for protocol-only listing, and `vault-cli commons protocol show <key-or-slug> --format json` for the exact page.";
 }
 
 function buildAssistantSupportedExperimentProtocolIndexText(
@@ -754,5 +754,5 @@ function buildAssistantKnowledgeGuidanceText(input: {
 }
 
 function buildHealthCommonsKnowledgeDistinctionText(): string {
-  return "`vault-cli knowledge ...` is for the user's derived knowledge wiki. It is not the canonical Health Commons corpus; use `vault-cli commons ...` for public Health Commons protocol, biomarker, and source discovery.";
+  return "`vault-cli knowledge ...` is for the user's derived knowledge wiki. It is not the canonical Health Commons corpus; use `vault-cli commons protocol ...` for public Health Commons protocol discovery.";
 }

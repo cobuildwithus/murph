@@ -50,12 +50,9 @@ declare module 'incur' {
       'capture manifest': { args: { id: string }; options: { requestId?: string } }
       'capture show': { args: { id: string }; options: { requestId?: string } }
       'chat': { args: { prompt?: string }; options: { requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; codexCommand?: string; codexHome?: string; model?: string; modelProvider?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string } }
-      'commons get': { args: { key: string }; options: { type?: string } }
       'commons protocol explore': { args: { lookup: string }; options: { limit: number } }
       'commons protocol list': { args: {}; options: { query?: string; status?: string; category?: string[]; limit: number } }
       'commons protocol show': { args: { key: string }; options: {} }
-      'commons search': { args: { query?: string }; options: { text?: string; type?: string[]; limit: number } }
-      'commons source list': { args: {}; options: { query?: string; kind?: string; protocol?: string; status?: string; limit: number } }
       'condition import-json': { args: {}; options: { requestId?: string; input: string } }
       'condition list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
       'condition save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; clinicalStatus?: "active" | "inactive" | "resolved"; verificationStatus?: "unconfirmed" | "provisional" | "confirmed" | "refuted"; assertedOn?: string; resolvedOn?: string; severity?: "mild" | "moderate" | "severe"; bodySite?: string[]; relatedGoalId?: string[]; relatedRegimenId?: string[]; note?: string } }

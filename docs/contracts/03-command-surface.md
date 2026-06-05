@@ -64,12 +64,9 @@ vault-cli device account disconnect <accountId> --vault <path> [--baseUrl <url>]
 vault-cli device daemon status --vault <path> [--baseUrl <url>]
 vault-cli device daemon start --vault <path> [--baseUrl <url>]
 vault-cli device daemon stop --vault <path> [--baseUrl <url>]
-vault-cli commons search <query> [--limit <n>]
-vault-cli commons get <key-or-slug>
 vault-cli commons protocol list [--query <query>] [--category <category>] [--limit <n>]
 vault-cli commons protocol show <key-or-slug>
 vault-cli commons protocol explore <query> [--limit <n>]
-vault-cli commons source list --protocol <key-or-slug> [--limit <n>]
 vault-cli provider scaffold --vault <path> [--request-id <id>]
 vault-cli provider import-json --vault <path> --input @file.json [--request-id <id>]
 vault-cli provider show <id> --vault <path> [--request-id <id>]

@@ -25,17 +25,20 @@ export async function deleteR2ObjectsWithPrefix(
     return { deletedCount: 0 };
   }
 
-  let cursor: string | undefined;
   let deletedCount = 0;
 
-  do {
-    const page = await bucket.list({ cursor, limit: 1_000, prefix });
-    for (const object of page.objects) {
-      await bucket.delete(object.key);
-      deletedCount += 1;
+  for (;;) {
+    const page = await bucket.list({ limit: 1_000, prefix });
+    const keys = page.objects.map((object) => object.key);
+    if (keys.length === 0) {
+      return { deletedCount };
     }
-    cursor = page.truncated ? page.cursor : undefined;
-  } while (cursor);
 
-  return { deletedCount };
+    await bucket.delete(keys);
+    deletedCount += keys.length;
+
+    if (!page.truncated) {
+      return { deletedCount };
+    }
+  }
 }

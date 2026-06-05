@@ -9,6 +9,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
+const RESET_ADMIN_CONTROL_TIMEOUT_MS = 240_000;
+
 interface ResetRouteBody {
   confirmEnvironment?: string;
   confirmMemberId?: string;
@@ -42,7 +44,8 @@ export async function POST(request: Request): Promise<Response> {
     const body = await readResetRouteBody(request);
     requestedMemberId = body.memberId ?? null;
     const args = buildResetCommandArgs(body);
-    const events = await runResetHostedMemberRuntimeCommand(args);
+    const restoreControlTimeout = applyHostedResetControlTimeout();
+    const events = await runResetHostedMemberRuntimeCommand(args).finally(restoreControlTimeout);
     const targetFingerprint = readExecutionTargetFingerprint(events);
 
     return Response.json({
@@ -69,6 +72,26 @@ export async function POST(request: Request): Promise<Response> {
       status,
     });
   }
+}
+
+function applyHostedResetControlTimeout(): () => void {
+  const previous = process.env.HOSTED_EXECUTION_CONTROL_TIMEOUT_MS;
+  const current = previous ? Number.parseInt(previous, 10) : Number.NaN;
+
+  if (
+    !Number.isFinite(current)
+    || current < RESET_ADMIN_CONTROL_TIMEOUT_MS
+  ) {
+    process.env.HOSTED_EXECUTION_CONTROL_TIMEOUT_MS = String(RESET_ADMIN_CONTROL_TIMEOUT_MS);
+  }
+
+  return () => {
+    if (previous === undefined) {
+      delete process.env.HOSTED_EXECUTION_CONTROL_TIMEOUT_MS;
+    } else {
+      process.env.HOSTED_EXECUTION_CONTROL_TIMEOUT_MS = previous;
+    }
+  };
 }
 
 function requireHostedMemberResetAdminRequest(request: Request): void {

@@ -21,9 +21,12 @@ export class MemoryEncryptedR2Bucket {
     this.objects.set(key, value);
   }
 
-  async delete(key: string): Promise<void> {
-    this.deleted.push(key);
-    this.objects.delete(key);
+  async delete(key: string | string[]): Promise<void> {
+    const keys = Array.isArray(key) ? key : [key];
+    for (const item of keys) {
+      this.deleted.push(item);
+      this.objects.delete(item);
+    }
   }
 }
 
