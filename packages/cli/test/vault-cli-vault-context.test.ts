@@ -284,8 +284,13 @@ test('vault override parsing is a single boundary option, not a command option',
     vault: null,
   })
   assert.throws(() => extractVaultOverride(['--vault']), /Missing value for --vault/u)
+  assert.throws(() => extractVaultOverride(['--vault=']), /Missing value for --vault/u)
   assert.throws(
     () => extractVaultOverride(['--vault', './one', '--vault', './two']),
+    /Pass --vault only once/u,
+  )
+  assert.throws(
+    () => extractVaultOverride(['--vault', './one', '--vault=./two']),
     /Pass --vault only once/u,
   )
 })

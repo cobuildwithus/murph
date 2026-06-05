@@ -29,7 +29,7 @@ export function installVaultCliSchemaIndex(cli: Cli.Cli): void {
   const serve = cli.serve.bind(cli)
 
   cli.serve = async (argv = process.argv.slice(2), options = {}) => {
-    if (!isJsonSchemaRequest(argv)) {
+    if (!isJsonSchemaRequest(argv) || isHelpRequest(argv)) {
       await serve(argv, options)
       return
     }
@@ -114,6 +114,10 @@ function exitProcess(options: CliServeOptions | undefined, code: number): void {
 
 function isJsonSchemaRequest(argv: readonly string[]): boolean {
   return argv.includes('--schema') && usesJsonFormat(argv)
+}
+
+function isHelpRequest(argv: readonly string[]): boolean {
+  return argv.includes('--help') || argv.includes('-h')
 }
 
 function usesJsonFormat(argv: readonly string[]): boolean {

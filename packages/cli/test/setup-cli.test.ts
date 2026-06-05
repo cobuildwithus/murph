@@ -3361,7 +3361,11 @@ test('setup routing helpers recognize murph onboarding and active-vault selectio
   assert.equal(isSetupInvocation(['setup', '--dryRun']), false)
   assert.equal(isSetupInvocation(['inbox', 'doctor']), false)
   assert.equal(isSetupInvocation([], 'murph'), true)
-  assert.equal(isSetupInvocation(['--help'], 'murph'), true)
+  assert.equal(isSetupInvocation(['--help'], 'murph'), false)
+  assert.equal(isSetupInvocation(['--llms-full', '--format', 'json'], 'murph'), false)
+  assert.equal(isSetupInvocation(['--schema'], 'murph'), false)
+  assert.equal(isSetupInvocation(['--mcp'], 'murph'), false)
+  assert.equal(isSetupInvocation(['--version'], 'murph'), false)
   assert.equal(isSetupInvocation(['use', './vault'], 'murph'), true)
   assert.equal(isSetupInvocation(['--full-output', '--format', 'json'], 'murph'), true)
   assert.equal(
@@ -3370,11 +3374,11 @@ test('setup routing helpers recognize murph onboarding and active-vault selectio
   )
   assert.equal(
     isSetupInvocation(['--filter-output', 'steps[0].title', '--help'], 'murph'),
-    true,
+    false,
   )
   assert.equal(
     isSetupInvocation(['--token-limit', '10', '--help'], 'murph'),
-    true,
+    false,
   )
   assert.equal(
     isSetupInvocation(['--token-offset', '5', 'setup', '--dry-run'], 'murph'),
@@ -3406,31 +3410,28 @@ test('setup routing helpers recognize murph onboarding and active-vault selectio
   assert.ok(cli)
 })
 
-test.sequential('murph alias routes empty and help invocations to onboarding help', async () => {
+test.sequential('murph alias keeps empty invocations setup-owned while root help shows the product CLI', async () => {
   const help = await runMurphAliasActionRaw(['--help'])
   const onboardHelp = await runMurphAliasActionRaw(['onboard', '--help'])
   const useHelp = await runMurphAliasActionRaw(['use', '--help'])
   const emptyInvocation = await runMurphAliasActionRaw([])
 
-  assert.match(help, /Murph local machine onboarding helpers\./u)
+  assert.match(help, /Typed operator surface for the Murph vault baseline/u)
   assert.match(
     help,
-    /onboard\s+Provision the local parser\/runtime toolchain for macOS or Linux/u,
+    /device\s+Device sync commands for provider auth/u,
   )
-  assert.doesNotMatch(help, /setup\s+Provision the local parser\/runtime toolchain for macOS or Linux/u)
+  assert.match(help, /experiment\s+Experiment bank commands/u)
+  assert.doesNotMatch(help, /Murph local machine onboarding helpers\./u)
+  assert.doesNotMatch(help, /onboard\s+Provision the local parser\/runtime toolchain/u)
   assert.match(
     onboardHelp,
     /onboard\s+[-—]\s+Provision the local parser\/runtime toolchain for macOS or Linux/u,
   )
   assert.match(
-    help,
-    /use\s+Set the active Murph vault for future `murph` commands/u,
-  )
-  assert.match(
     useHelp,
     /murph use\s+[-—]\s+Set the active Murph vault for future `murph` commands/u,
   )
-  assert.doesNotMatch(help, /search\s+Search commands for the local read model/u)
   assert.match(emptyInvocation, /Murph local machine onboarding helpers\./u)
 }, SETUP_ALIAS_TIMEOUT_MS)
 
