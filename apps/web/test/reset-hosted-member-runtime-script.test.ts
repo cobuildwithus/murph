@@ -287,6 +287,7 @@ describe("reset hosted member runtime script guards", () => {
       deleted: true,
       r2DeletedObjectCount: 0,
       r2SkippedUserScopedPrefixes: false,
+      r2Supported: true,
       runnerStateDeleted: true,
     };
     const alreadyAbsent = {
@@ -314,6 +315,13 @@ describe("reset hosted member runtime script guards", () => {
       },
       resumeSuspendedReset: true,
     })).toBe(false);
+    expect(isCloudflareHostedUserDataPreDbDeleteProven({
+      deleteResult: {
+        ...alreadyAbsent,
+        r2Supported: false,
+      },
+      resumeSuspendedReset: true,
+    })).toBe(false);
   });
 
   it("allows idempotent post-DB Cloudflare cleanup only after pre-DB deletion was proven", () => {
@@ -323,6 +331,7 @@ describe("reset hosted member runtime script guards", () => {
       deleted: false,
       r2DeletedObjectCount: 0,
       r2SkippedUserScopedPrefixes: false,
+      r2Supported: true,
       runnerStateDeleted: false,
     };
     const provenBeforeDb = {
@@ -336,6 +345,15 @@ describe("reset hosted member runtime script guards", () => {
       afterDbDelete: afterDbAlreadyDeleted,
       beforeDbDelete: provenBeforeDb,
     })).toBe(true);
+    expect(isCloudflareHostedUserDataPostDbDeleteProven({
+      afterDbDelete: afterDbAlreadyDeleted,
+      beforeDbDelete: {
+        ...afterDbAlreadyDeleted,
+        deleted: false,
+        runnerStateDeleted: false,
+      },
+      beforeDbDeleteProven: true,
+    })).toBe(true);
 
     expect(isCloudflareHostedUserDataPostDbDeleteProven({
       afterDbDelete: afterDbAlreadyDeleted,
@@ -346,6 +364,13 @@ describe("reset hosted member runtime script guards", () => {
       afterDbDelete: {
         ...afterDbAlreadyDeleted,
         configured: false,
+      },
+      beforeDbDelete: provenBeforeDb,
+    })).toBe(false);
+    expect(isCloudflareHostedUserDataPostDbDeleteProven({
+      afterDbDelete: {
+        ...afterDbAlreadyDeleted,
+        r2Supported: false,
       },
       beforeDbDelete: provenBeforeDb,
     })).toBe(false);

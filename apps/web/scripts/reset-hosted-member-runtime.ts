@@ -154,6 +154,7 @@ interface CloudflareDeleteResult {
   deleted: boolean;
   r2DeletedObjectCount: number | null;
   r2SkippedUserScopedPrefixes: boolean | null;
+  r2Supported: boolean | null;
   runnerStateDeleted: boolean | null;
 }
 
@@ -269,13 +270,15 @@ export async function runResetHostedMemberRuntimeCommand(
     }
 
     let cloudflareBeforeDb: CloudflareDeleteResult | null = null;
+    let cloudflareBeforeDbProven = false;
     if (!options.skipCloudflareDelete) {
       printJson("cloudflare-delete-before-db-start", memberFingerprint, {});
       cloudflareBeforeDb = await deleteCloudflareHostedUserData(options.memberId);
-      if (!isCloudflareHostedUserDataPreDbDeleteProven({
+      cloudflareBeforeDbProven = isCloudflareHostedUserDataPreDbDeleteProven({
         deleteResult: cloudflareBeforeDb,
         resumeSuspendedReset: options.resumeSuspendedReset,
-      })) {
+      });
+      if (!cloudflareBeforeDbProven) {
         throw new Error("Cloudflare user-data deletion before DB reset did not prove deletion.");
       }
       printJson("cloudflare-delete-before-db-complete", memberFingerprint, cloudflareBeforeDb);
@@ -294,6 +297,7 @@ export async function runResetHostedMemberRuntimeCommand(
       const cloudflare = await deleteCloudflareHostedUserData(options.memberId);
       if (!isCloudflareHostedUserDataPostDbDeleteProven({
         beforeDbDelete: cloudflareBeforeDb,
+        beforeDbDeleteProven: cloudflareBeforeDbProven,
         afterDbDelete: cloudflare,
       })) {
         throw new Error("Cloudflare user-data deletion after DB reset did not prove deletion.");
@@ -1519,6 +1523,7 @@ async function deleteCloudflareHostedUserData(userId: string): Promise<Cloudflar
       deleted: false,
       r2DeletedObjectCount: null,
       r2SkippedUserScopedPrefixes: null,
+      r2Supported: null,
       runnerStateDeleted: null,
     };
   }
@@ -1543,6 +1548,7 @@ async function deleteCloudflareHostedUserData(userId: string): Promise<Cloudflar
     deleted,
     r2DeletedObjectCount: result.r2.deletedObjectCount,
     r2SkippedUserScopedPrefixes: result.r2.skippedUserScopedPrefixes,
+    r2Supported: result.r2.supported,
     runnerStateDeleted: result.durableObject.stateDeleted,
   };
 }
@@ -1574,6 +1580,7 @@ export function isCloudflareHostedUserDataPreDbDeleteProven(input: {
   return input.resumeSuspendedReset
     && input.deleteResult.configured === true
     && input.deleteResult.alarmCleared === true
+    && input.deleteResult.r2Supported === true
     && input.deleteResult.runnerStateDeleted === false
     && input.deleteResult.r2SkippedUserScopedPrefixes === false;
 }
@@ -1581,12 +1588,15 @@ export function isCloudflareHostedUserDataPreDbDeleteProven(input: {
 export function isCloudflareHostedUserDataPostDbDeleteProven(input: {
   afterDbDelete: CloudflareDeleteResult;
   beforeDbDelete: CloudflareDeleteResult | null;
+  beforeDbDeleteProven?: boolean;
 }): boolean {
   return input.afterDbDelete.configured === true
     && input.afterDbDelete.alarmCleared === true
+    && input.afterDbDelete.r2Supported === true
     && input.afterDbDelete.r2SkippedUserScopedPrefixes === false
     && (
       input.afterDbDelete.runnerStateDeleted === true
+      || input.beforeDbDeleteProven === true
       || input.beforeDbDelete?.deleted === true
     );
 }
