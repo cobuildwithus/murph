@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-06-04
+Last verified: 2026-06-05
 
 ## Decision
 
@@ -123,6 +123,16 @@ Runtime-controlled provider integrations such as Linq, Telegram, WhatsApp, and
 Mapbox still use provider-egress token proof when exact runtime authority
 headers are absent. Runner container names remain lifecycle/routing handles, not
 provider-egress authority.
+Hosted-local may rewrite loopback provider bases to the configured
+`HOSTED_EXECUTION_RUNNER_HOST_ALIAS` so Linux runner containers can reach host
+stubs through the Docker bridge. The provider-fetch allowlist may accept HTTP
+for that exact alias only when hosted-local markers are present and the alias is
+a local/test host or private IPv4 address; arbitrary HTTP provider base URLs
+must still fail closed.
+Hosted-local direct-R2 MinIO keeps host control checks on loopback but publishes
+the Docker-facing sidecar port on a container-reachable bind address, because
+runner containers reach the sidecar through their host alias rather than the
+host process loopback socket.
 `workspaceVersion` is the workspace checkpoint compare-and-swap guard and must
 stay on the checkpoint path rather than becoming generic side-effect
 authorization.
@@ -391,14 +401,19 @@ supported by the hosted foreground mailbox import loop plus the store-backed
 assistant input spine: a payloadless runtime wake causes the active child to
 import conversation mailbox rows, stage any new `AssistantInputEvent` records,
 run prompt-preparation effects best-effort, and notify active-turn admission.
-The assistant engine then admits the persisted input through live steer,
-event-driven, provider-boundary, or pre-provider admission without using
-hosted-specific mailbox refresh/checkpoint ports. Accepted-input journaling,
-transcript updates, checkpoint bookkeeping, provider-request metadata, and
-outbox intent creation remain on the normal local assistant-service path.
-The same-reply coalescing window ends at the local commit barrier/outbox intent
-decision, not at physical provider delivery; mailbox input that arrives after
-that boundary remains durable staged input for a later turn.
+The assistant engine then admits the persisted input through live steering or
+pre-provider admission without using hosted-specific mailbox
+refresh/checkpoint ports. While a Codex turn is live, same-conversation input is
+steered into that live provider turn. After the live provider turn ends,
+untargeted new input remains staged for a normal later assistant turn, while
+strict active-turn-targeted input fails closed instead of falling through; the
+assistant engine does not synthesize another provider request inside the same
+assistant turn.
+Accepted-input journaling, transcript updates, checkpoint bookkeeping,
+provider-request metadata, and outbox intent creation remain on the normal
+local assistant-service path. The same-reply coalescing window ends when the
+live provider turn ends, not at physical provider delivery; mailbox input that
+arrives after that boundary remains durable staged input for a later turn.
 Hosted Linq reply sends are idempotent when an outbox idempotency key is
 present. The Linq HTTP layer may retry those POST sends on transient transport,
 408, or 5xx failures, and the hosted outbox must keep such failures retryable
@@ -474,7 +489,10 @@ restore must still be correct from durable mailbox, transcript, and assistant
 runtime state even if provider-native resume optimization is unavailable.
 Fresh-thread starts and stale native-resume fallback may include bounded recent
 committed transcript history; primary native-resume attempts do not replay that
-history into the provider prompt.
+history into the provider prompt. Active-turn input is not serialized as
+provider prompt history; it is either folded in before the first provider
+request, steered through the live Codex turn, or left unaccepted for a later
+normal turn when it misses the live steering window.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
 state. `apps/web` assesses freshness from the latest replica ref, checkpoint

@@ -90,7 +90,7 @@ export interface AssistantInputSource {
     input: AssistantTurnConversationInputQuery,
   ): Promise<AssistantInputCandidateBatch>
   refresh(
-    input: AssistantTurnInputRefreshInput,
+    input?: AssistantTurnInputRefreshInput,
   ): Promise<AssistantTurnInputRefreshResult>
 }
 

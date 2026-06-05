@@ -28,6 +28,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
+  providerFetchBaseUrlSource?: Readonly<Record<string, unknown>> | null;
   providerFetchBaseUrls?: readonly string[] | null;
   proxyBoundUserIdHeader?: boolean | null;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
@@ -88,6 +89,8 @@ export function buildHostedExecutionRuntimePlatform(input: {
             baseFetchImpl,
             {
               injectBoundUserIdHeader: true,
+              providerFetchBaseUrlSource:
+                input.providerFetchBaseUrlSource ?? undefined,
               providerFetchBaseUrls: input.providerFetchBaseUrls ?? undefined,
               readCurrentLease: input.workspaceCheckpointBridge.readCurrentLease,
             },

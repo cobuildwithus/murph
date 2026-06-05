@@ -1,13 +1,7 @@
 import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantAcceptedTurnInputItemInput } from './active-turn-input-journal.js'
 
-export type AssistantTurnInputRefreshPhase =
-  | 'input_available'
-  | 'request_boundary'
-  | 'commit_barrier'
-
 export interface AssistantTurnInputRefreshInput {
-  phase: AssistantTurnInputRefreshPhase
   signal?: AbortSignal
 }
 
@@ -23,17 +17,11 @@ export interface AssistantTurnInputRefreshResult {
 export interface AssistantActiveTurnInputAdmissionBaseInput {
   knownProjectionCaptureIds?: readonly string[]
   knownInputIds?: readonly string[]
-  phase: AssistantActiveTurnInputPhase
   signal?: AbortSignal
   sessionId: string
   turnId: string
   vault: string
 }
-
-export type AssistantActiveTurnInputPhase =
-  | 'input_available'
-  | 'request_boundary'
-  | 'commit_barrier'
 
 export interface AssistantActiveTurnInputAdmissionInput
   extends AssistantActiveTurnInputAdmissionBaseInput {}
