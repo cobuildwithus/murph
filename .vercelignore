@@ -20,6 +20,11 @@
 .next-dev/
 .next-smoke/
 .next-smoke*/
+**/.next/
+**/.next-dev/
+**/.next-smoke/
+**/.next-smoke*/
+**/.swc/
 assistant-state/
 audit-packages/
 coverage/
@@ -32,9 +37,17 @@ source-artifacts/
 vault/
 
 apps/cloudflare/.deploy
+apps/cloudflare/.deploy/
 apps/cloudflare/.dev.vars*
 apps/cloudflare/.runner.env*
 apps/cloudflare/.wrangler/
+apps/web/.agents/
+apps/web/.clawpatch/
+apps/web/.next/
+apps/web/.next-dev/
+apps/web/.next-smoke/
+apps/web/.next-smoke*/
+apps/web/.swc/
 packages/health-commons/generated/
 scripts/murph-age/
 
