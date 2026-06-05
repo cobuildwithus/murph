@@ -21,8 +21,7 @@ const steps: {
   {
     id: "devices",
     title: "Connect devices",
-    description:
-      "Add Fitbit or another supported wearable to sync sleep, activity, recovery, and more.",
+    description: "Sync sleep, activity, and recovery from your wearable.",
     cta: "Connect",
     href: "/connect",
     icon: WatchHeartIcon,
@@ -30,8 +29,7 @@ const steps: {
   {
     id: "labs",
     title: "Sync labs",
-    description:
-      "Share blood work or lab results to track biomarkers over time.",
+    description: "Upload blood work to track biomarkers over time.",
     cta: "Sync",
     href: "/settings",
     icon: LabReportIcon,
@@ -39,8 +37,7 @@ const steps: {
   {
     id: "experiments",
     title: "Start an experiment",
-    description:
-      "Browse protocols like sauna, creatine, or zone 2 and see what improves your markers.",
+    description: "Try protocols like sauna or creatine and see what works.",
     cta: "View experiments",
     href: "/experiments",
     icon: FlaskSparkleIcon,
