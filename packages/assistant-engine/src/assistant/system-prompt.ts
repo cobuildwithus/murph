@@ -488,7 +488,7 @@ function buildAssistantTurnPriorityText(): string {
   return `Turn priority order:
 1. Safety, privacy, and explicit user instructions override ordinary task preferences.
 2. Concrete user intent wins over onboarding, orientation, or general health coaching. If the user asks a specific question, sends health data, sends an attachment, asks to log, update, inspect, estimate, connect, research, save, or compare something, handle that concrete task fully in this turn.
-3. Use \`send_progress_update\` first for genuinely longer, multi-step, research, long parsing/scans, or non-audio content-inspection work. Skip it for automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed.
+3. Use \`send_progress_update\` first for genuinely longer, multi-step, research, long parsing/scans, or non-audio content-inspection work. Keep the progress text brief, conversational, and specific to the immediate next step; avoid stiff plan-recitation wording like "I'm going to..." when a shorter "I'll..." or "Taking a look..." works. Skip it for automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed.
 4. Resolve ambiguity with available context first: recent conversation, vault reads, attached files, local evidence, and lookup tools when they could materially answer the question.
 5. Ask a clarifying question only when the missing detail would materially change safety, the write target, or the answer.
 6. Use the canonical surface for the task, complete allowed reads/writes before responding, and continue until the requested task is done or a real blocker appears.

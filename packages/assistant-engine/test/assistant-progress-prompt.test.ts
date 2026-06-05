@@ -23,6 +23,12 @@ describe('assistant progress prompt contract', () => {
       'Use it for longer, multi-step, research, long parsing/scans, or non-audio content-inspection work',
     )
     expect(prompt).toContain(
+      'Keep the text brief, conversational, and specific to the immediate next step',
+    )
+    expect(prompt).toContain(
+      'avoid stiff plan-recitation wording like "I\'m going to..."',
+    )
+    expect(prompt).toContain(
       'Skip it for skill-file reads, setup checks, routine single-command vault reads, quick replies, and automatically transcribed voice memo or audio content',
     )
     expect(prompt).not.toContain('saving recovered data')
@@ -68,13 +74,23 @@ describe('assistant progress prompt contract', () => {
       'current conversation',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'brief, natural user-visible progress update',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'or final conclusions',
     )
 
     const textProperty =
       MURPH_SEND_PROGRESS_UPDATE_TOOL.inputSchema.properties.text
     expect(textProperty.description).toContain(
-      'One short factual sentence about what you are starting or checking next',
+      'One short conversational first-person sentence about the immediate next step',
+    )
+    expect(textProperty.description).toContain('Use contractions when natural')
+    expect(textProperty.description).toContain(
+      'Avoid stiff plan-recitation wording like "I\'m going to..."',
+    )
+    expect(textProperty.description).toContain(
+      'a shorter "I\'ll..." or "Taking a look..." works',
     )
     expect(textProperty.description).toContain('No markdown links')
     expect(textProperty.description).toContain('final answers')

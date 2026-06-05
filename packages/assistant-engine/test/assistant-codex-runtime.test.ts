@@ -3738,7 +3738,7 @@ describe('assistant codex runtime', () => {
                 tool: 'send_progress_update',
                 arguments: {
                   text:
-                    'Blood test received - I will extract the PDF and check the relevant results.',
+                    'Got it. I\'ll pull out the lab values and check what is usable.',
                 },
               },
             }),
@@ -3802,7 +3802,7 @@ describe('assistant codex runtime', () => {
     })
 
     expect(progressDelivery.send).toHaveBeenCalledWith(
-      'Blood test received - I will extract the PDF and check the relevant results.',
+      'Got it. I\'ll pull out the lab values and check what is usable.',
       { source: 'model' },
     )
     expect(progressDelivery.send).not.toHaveBeenCalledWith('Provider-side status text')

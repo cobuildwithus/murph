@@ -104,6 +104,15 @@ describe('assistant execution prompt contract', () => {
       'Use it for longer, multi-step, research, long parsing/scans, or non-audio content-inspection work',
     )
     expect(prompt).toContain(
+      'Keep the text brief, conversational, and specific to the immediate next step',
+    )
+    expect(prompt).toContain(
+      '3. Use `send_progress_update` first for genuinely longer, multi-step, research, long parsing/scans, or non-audio content-inspection work. Keep the progress text brief, conversational, and specific to the immediate next step; avoid stiff plan-recitation wording like "I\'m going to..." when a shorter "I\'ll..." or "Taking a look..." works.',
+    )
+    expect(prompt).toContain(
+      'avoid stiff plan-recitation wording like "I\'m going to..."',
+    )
+    expect(prompt).toContain(
       'Skip it for skill-file reads, setup checks, routine single-command vault reads, quick replies, and automatically transcribed voice memo or audio content',
     )
     expect(prompt).not.toContain('saving recovered data')
@@ -539,7 +548,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '7439a14ef2fc5041535b3cb5d8be1c0c17e66396fb2a74d22d8779725c36fa16',
+      '8d71bdbc0acda2e97f66a17d61e95a15bf8fe93dc80650ed040b1e3607a6bc0e',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
