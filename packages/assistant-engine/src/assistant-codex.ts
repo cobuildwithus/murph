@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -128,6 +128,7 @@ const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   'murph.assistant-codex-app-server-timing.v1'
 const CODEX_APP_SERVER_TIMING_TRACE_TYPE =
   'assistant.codex.app_server_timing'
+const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
 const CODEX_APP_SERVER_PROVIDER_IDENTITY_ENV_NAMES =
   ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS.map((config) => config.envKey)
 const CODEX_APP_SERVER_PROCESS_IDENTITY_ENV_NAMES = [
@@ -206,6 +207,39 @@ type CodexAppServerActiveTurnBinding = {
   onStderrText(text: string): void
   onStdinError(error: unknown): VaultCliError | null
   onStdoutText(text: string): void
+}
+
+function buildCodexAppServerNotFoundError(codexCommand: string): VaultCliError {
+  return new VaultCliError(
+    'ASSISTANT_CODEX_NOT_FOUND',
+    `Codex app-server executable "${codexCommand}" was not found. Install @openai/codex or pass --codexCommand.`,
+  )
+}
+
+function normalizeCodexStartupFailure(input: {
+  codexCommand: string
+  error: unknown
+}): Error {
+  if (readNodeErrorCode(input.error) === 'ENOENT') {
+    return buildCodexAppServerNotFoundError(input.codexCommand)
+  }
+
+  return input.error instanceof Error
+    ? input.error
+    : new VaultCliError(
+        'ASSISTANT_CODEX_FAILED',
+        'Codex app-server failed during startup.',
+        {
+          retryable: false,
+        },
+      )
+}
+
+function appendCodexStartupStderr(previous: string, next: string): string {
+  const combined = `${previous}${next}`
+  return combined.length > CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH
+    ? combined.slice(-CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH)
+    : combined
 }
 
 function resolveCodexAppServerProgressDelivery(
@@ -421,6 +455,7 @@ export async function executeCodexAppServerTurn(
   const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(input.approvalPolicy)
   const hostedRuntimeProcess = isHostedCodexAppServerRuntime(input.env)
   const workingDirectory = path.resolve(input.workingDirectory)
+  await assertCodexAppServerWorkingDirectory(workingDirectory)
   const resolvedChildEnv = await resolveCodexChildEnv({
     codexHome: resolveCodexAppServerCodexHome({
       codexHome: input.codexHome,
@@ -477,6 +512,33 @@ export async function executeCodexAppServerTurn(
       recursive: true,
       force: true,
     })
+  }
+}
+
+async function assertCodexAppServerWorkingDirectory(
+  workingDirectory: string,
+): Promise<void> {
+  let stats: Awaited<ReturnType<typeof stat>>
+  try {
+    stats = await stat(workingDirectory)
+  } catch {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_WORKING_DIRECTORY_MISSING',
+      'Codex app-server working directory does not exist.',
+      {
+        retryable: false,
+      },
+    )
+  }
+
+  if (!stats.isDirectory()) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_WORKING_DIRECTORY_INVALID',
+      'Codex app-server working directory is not a directory.',
+      {
+        retryable: false,
+      },
+    )
   }
 }
 
@@ -596,6 +658,7 @@ class CodexAppServerProcess {
   private activeTurn: CodexAppServerActiveTurnBinding | null = null
   private cleanupProcessExitListener: () => void
   private completedTurnCount = 0
+  private readonly codexCommand: string
   private ignoredResponseIds = new Set<CodexRpcId>()
   private initialized = false
   private nextRequestId = 1
@@ -604,10 +667,13 @@ class CodexAppServerProcess {
   private stopCompleted = false
   private state: CodexAppServerProcessState = 'idle'
   private stderrBuffer = ''
+  private startupStderr = ''
+  private startupFailure: Error | null = null
   private stdinFailure: VaultCliError | null = null
   private stdoutBuffer = ''
 
   constructor(input: CodexAppServerProcessInput) {
+    this.codexCommand = input.codexCommand
     this.identityDigest = input.identityDigest
 
     const useProcessGroup = process.platform !== 'win32'
@@ -670,6 +736,7 @@ class CodexAppServerProcess {
   }
 
   bindTurn(binding: CodexAppServerActiveTurnBinding): void {
+    this.throwStartupFailure()
     if (
       (this.state !== 'idle' && this.state !== 'reserved') ||
       this.activeTurn ||
@@ -716,7 +783,17 @@ class CodexAppServerProcess {
   }
 
   async waitForSpawn(): Promise<void> {
-    await waitForCodexSpawn(this.child)
+    this.throwStartupFailure()
+    try {
+      await waitForCodexSpawn(this.child)
+    } catch (error) {
+      const failure =
+        this.startupFailure ??
+        this.buildSpawnWaitFailure(error)
+      this.startupFailure ??= failure
+      throw failure
+    }
+    this.throwStartupFailure()
   }
 
   async initialize(): Promise<void> {
@@ -739,6 +816,7 @@ class CodexAppServerProcess {
       'initialize',
     )
     this.initialized = true
+    this.startupStderr = ''
     this.sendNotification('initialized', {})
   }
 
@@ -919,29 +997,45 @@ class CodexAppServerProcess {
     const failure =
       this.stdinFailure ??
       this.activeTurn?.onStdinError(error) ??
-      new VaultCliError(
-        'ASSISTANT_CODEX_FAILED',
-        'Codex app-server stdin failed.',
-        {
-          retryable: false,
-        },
-      )
+      buildCodexProcessExitError({
+        abortRequested: false,
+        code: this.child.exitCode,
+        diagnostics: this.buildStartupProcessDiagnostics(),
+        fallback: buildCodexStdinFailureFallback({
+          error,
+          lastEventError: null,
+          stderr: this.startupStderr,
+        }),
+        providerActionCount: 0,
+        codexThreadId: null,
+        signal: this.child.signalCode ?? null,
+        stderr: this.startupStderr,
+      })
     this.stdinFailure = failure
     this.poisoned = true
+    if (!this.initialized) {
+      this.startupFailure ??= failure
+    }
     if (!this.activeTurn) {
+      this.startupFailure ??= failure
       this.rejectPending(failure)
     }
     return failure
   }
 
   private handleProcessError(error: Error): void {
+    const failure = normalizeCodexStartupFailure({
+      codexCommand: this.codexCommand,
+      error,
+    })
     this.poisoned = true
     if (this.activeTurn) {
-      this.activeTurn.onError(error)
+      this.activeTurn.onError(failure)
       return
     }
 
-    this.rejectPending(error)
+    this.startupFailure ??= failure
+    this.rejectPending(failure)
   }
 
   private handleStdoutData(text: string): void {
@@ -953,6 +1047,9 @@ class CodexAppServerProcess {
   }
 
   private handleStderrData(text: string): void {
+    if (!this.initialized) {
+      this.startupStderr = appendCodexStartupStderr(this.startupStderr, text)
+    }
     this.activeTurn?.onStderrText(text)
     this.stderrBuffer += text
     this.stderrBuffer = consumeCompleteLines(this.stderrBuffer, (line) => {
@@ -1010,15 +1107,69 @@ class CodexAppServerProcess {
       return
     }
 
-    this.rejectPending(
-      new VaultCliError(
-        'ASSISTANT_CODEX_FAILED',
-        'Codex app-server process exited unexpectedly.',
-        {
-          retryable: false,
-        },
-      ),
-    )
+    const failure = buildCodexProcessExitError({
+      abortRequested: false,
+      code,
+      diagnostics: this.buildStartupProcessDiagnostics(),
+      fallback: null,
+      providerActionCount: 0,
+      codexThreadId: null,
+      signal,
+      stderr: this.startupStderr,
+    })
+    this.startupFailure ??= failure
+    this.rejectPending(failure)
+  }
+
+  private buildStartupProcessDiagnostics(): CodexProcessExitDiagnostics {
+    return {
+      abortRequested: false,
+      jsonEventCount: 0,
+      lifecycleStage: 'startup',
+      liveTurnOpen: false,
+      pendingRpcCount: this.pendingRequests.size,
+      pendingRpcMethod: this.readPendingRpcMethod(),
+      processGroupPresent: this.processGroupPid !== null,
+      processLifetimeMs: this.processLifetimeMs,
+      providerRequestStarted: false,
+      shutdownRequested: this.normalShutdown,
+      stderrBytes: Buffer.byteLength(this.startupStderr, 'utf8'),
+      terminationSignalSent: null,
+    }
+  }
+
+  private buildSpawnWaitFailure(error: unknown): Error {
+    const normalized = normalizeCodexStartupFailure({
+      codexCommand: this.codexCommand,
+      error,
+    })
+    const spawnClosedBeforeReady =
+      normalized instanceof VaultCliError &&
+      normalized.context?.codexSpawnClosedBeforeReady === true
+
+    if (
+      spawnClosedBeforeReady &&
+      (this.child.exitCode !== null || this.child.signalCode !== null)
+    ) {
+      return buildCodexProcessExitError({
+        abortRequested: false,
+        code: this.child.exitCode,
+        diagnostics: this.buildStartupProcessDiagnostics(),
+        fallback: null,
+        providerActionCount: 0,
+        codexThreadId: null,
+        signal: this.child.signalCode ?? null,
+        stderr: this.startupStderr,
+      })
+    }
+
+    return normalized
+  }
+
+  private throwStartupFailure(): void {
+    if (this.startupFailure) {
+      throw this.startupFailure
+    }
   }
 }
 
@@ -2098,17 +2249,12 @@ async function runCodexAppServerTurnOnProcess(
       )
     },
     onError(error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        rejectOnce(
-          new VaultCliError(
-            'ASSISTANT_CODEX_NOT_FOUND',
-            `Codex app-server executable "${input.codexCommand}" was not found. Install @openai/codex or pass --codexCommand.`,
-          ),
-        )
-        return
-      }
-
-      rejectOnce(error)
+      rejectOnce(
+        normalizeCodexStartupFailure({
+          codexCommand: input.codexCommand,
+          error,
+        }),
+      )
     },
     onFramingError() {
       rejectOnce(

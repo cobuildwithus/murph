@@ -4969,6 +4969,145 @@ describe('assistant codex runtime', () => {
     })
   })
 
+  it('reports missing working directories before spawning Codex', async () => {
+    const tempRoot = await createTempDir('assistant-codex-missing-workdir-')
+    const workingDirectory = path.join(tempRoot, 'missing')
+
+    await expect(
+      executeCodexAppServerTurn({
+        prompt: 'missing cwd',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_WORKING_DIRECTORY_MISSING',
+      message: 'Codex app-server working directory does not exist.',
+    })
+
+    expect(codexMocks.spawn).not.toHaveBeenCalled()
+  })
+
+  it('preserves missing Codex startup errors emitted before turn binding', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-prebind-not-found-')
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 0
+
+      process.nextTick(() => {
+        const error = new Error('spawn codex ENOENT') as NodeJS.ErrnoException
+        error.code = 'ENOENT'
+        emitProcessErrorAndExit(child, error)
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        prompt: 'missing binary before bind',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_NOT_FOUND',
+      message:
+        'Codex app-server executable "codex" was not found. Install @openai/codex or pass --codexCommand.',
+    })
+  })
+
+  it('normalizes missing Codex startup errors while waiting for spawn', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-spawn-wait-not-found-')
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 0
+
+      setImmediate(() => {
+        const error = new Error('spawn codex ENOENT') as NodeJS.ErrnoException
+        error.code = 'ENOENT'
+        emitProcessErrorAndExit(child, error)
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        prompt: 'missing binary during spawn wait',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_NOT_FOUND',
+      message:
+        'Codex app-server executable "codex" was not found. Install @openai/codex or pass --codexCommand.',
+    })
+  })
+
+  it('preserves startup stderr when Codex exits before turn binding', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-prebind-stderr-')
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 0
+
+      process.nextTick(() => {
+        child.stderr.write('native runtime missing during startup\n')
+        child.emit('exit', 1, null)
+        child.emit('close', 1, null)
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        prompt: 'bad install before bind',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_FAILED',
+      context: {
+        codexExitCode: 1,
+        codexFailureDetailPresent: true,
+        codexFailureStage: 'process_exit',
+        codexLifecycleStage: 'startup',
+        codexStderrPresent: true,
+        retryable: false,
+      },
+      message: expect.stringContaining('native runtime missing during startup'),
+    })
+  })
+
+  it('preserves startup stdin error details emitted before spawn completes', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-prebind-stdin-')
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 0
+
+      process.nextTick(() => {
+        child.stdin.emit('error', createErrnoException('EPIPE', 'write EPIPE before bind'))
+        child.emit('exit', 1, null)
+        child.emit('close', 1, null)
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        prompt: 'stdin failure before bind',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_FAILED',
+      context: {
+        codexFailureDetailPresent: true,
+        retryable: false,
+      },
+      message: expect.stringContaining('write EPIPE before bind'),
+    })
+  })
+
   it('marks connection-loss failures as retryable and preserves the Codex thread id', async () => {
     const workingDirectory = await createTempDir('assistant-codex-connection-loss-')
 
