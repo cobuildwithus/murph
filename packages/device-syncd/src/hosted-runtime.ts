@@ -379,6 +379,7 @@ export interface HostedExecutionDeviceSyncDirtyAckRequest {
   connectionId: string;
   processedDirtyPayloadIds?: string[];
   processedRevision: string;
+  stagedDirtyAcks?: HostedExecutionDeviceSyncStagedDirtyAck[];
   userId: string;
 }
 
@@ -775,6 +776,12 @@ export function parseHostedExecutionDeviceSyncDirtyAckRequest(
   trustedUserId: string | null = null,
 ): HostedExecutionDeviceSyncDirtyAckRequest {
   const record = requireObject(value, "Hosted device-sync dirty ack request");
+  const stagedDirtyAcks = record.stagedDirtyAcks === undefined
+    ? undefined
+    : parseHostedExecutionDeviceSyncStagedDirtyAcks(
+      record.stagedDirtyAcks,
+      "Hosted device-sync dirty ack request stagedDirtyAcks",
+    );
 
   return {
     connectionId: requireString(record.connectionId, "Hosted device-sync dirty ack request connectionId"),
@@ -795,6 +802,7 @@ export function parseHostedExecutionDeviceSyncDirtyAckRequest(
       record.processedRevision,
       "Hosted device-sync dirty ack request processedRevision",
     ),
+    ...(stagedDirtyAcks === undefined ? {} : { stagedDirtyAcks }),
     userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
   };
 }

@@ -458,6 +458,68 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
     expect(response.nextWakeAt).toBeNull();
   });
 
+  it("does not signal when remaining dirty work is staged later in the same ack batch", async () => {
+    const markDirtyConnectionProcessed = vi.fn(async () => ({
+      connectionId: "conn_dirty_first",
+      dirtyRevision: 3n,
+      processedRevision: 3n,
+      stillDirty: false,
+      userId: "user_123",
+    }));
+    const hasPendingDirtyConnectionForUser = vi.fn(async () => {
+      throw new Error("hasPendingDirtyConnectionForUser should not be called with staged acks");
+    });
+    const listPendingDirtyConnectionsForUser = vi.fn(async () => ({
+      hasMore: false,
+      items: [],
+    }));
+    mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      store: {
+        hasPendingDirtyConnectionForUser,
+        listPendingDirtyConnectionsForUser,
+        markDirtyConnectionProcessed,
+      },
+    });
+    const { ackHostedDeviceSyncDirtyStateProcessed } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await ackHostedDeviceSyncDirtyStateProcessed({
+      request: new Request("https://example.test/device-sync/runtime/dirty-ack", {
+        body: JSON.stringify({
+          connectionId: "conn_dirty_first",
+          processedRevision: "3",
+          stagedDirtyAcks: [
+            {
+              connectionId: "conn_dirty_second",
+              processedDirtyPayloadIds: ["dsp_payload_2"],
+              processedRevision: "4",
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(listPendingDirtyConnectionsForUser).toHaveBeenCalledWith({
+      limit: 1,
+      stagedDirtyAcks: [
+        {
+          connectionId: "conn_dirty_second",
+          processedDirtyPayloadIds: ["dsp_payload_2"],
+          processedRevision: "4",
+        },
+      ],
+      userId: "user_123",
+    });
+    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).not.toHaveBeenCalled();
+    expect(response.recorded).toBe(true);
+    expect(response.stillDirty).toBe(false);
+    expect(response.nextWakeAt).toBeNull();
+  });
+
   it("fails the dirty ack when pending dirty work remains but the maintenance signal fails", async () => {
     mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime.mockRejectedValueOnce(
       new Error("Temporal unavailable"),

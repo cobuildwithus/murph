@@ -5,6 +5,7 @@ import {
   buildHostedExecutionDeviceSyncConnectLinkPath,
   normalizeHostedDeviceSyncJobHints,
   parseHostedExecutionDeviceSyncConnectLinkResponse,
+  parseHostedExecutionDeviceSyncDirtyAckRequest,
   parseHostedExecutionDeviceSyncWakeHint,
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
@@ -86,6 +87,39 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         "trusted-user",
       )
     ).toThrowError(/processedDirtyPayloadIds must include no more than 5000 total entries/u);
+  });
+
+  it("parses staged dirty ack overlays on dirty-ack requests", () => {
+    expect(
+      parseHostedExecutionDeviceSyncDirtyAckRequest(
+        {
+          connectionId: "dsc_current",
+          processedDirtyPayloadIds: ["dsp_current"],
+          processedRevision: "21",
+          stagedDirtyAcks: [
+            {
+              connectionId: "dsc_next",
+              processedDirtyPayloadIds: ["dsp_next_1", "dsp_next_2"],
+              processedRevision: "22",
+            },
+          ],
+          userId: "trusted-user",
+        },
+        "trusted-user",
+      ),
+    ).toEqual({
+      connectionId: "dsc_current",
+      processedDirtyPayloadIds: ["dsp_current"],
+      processedRevision: "21",
+      stagedDirtyAcks: [
+        {
+          connectionId: "dsc_next",
+          processedDirtyPayloadIds: ["dsp_next_1", "dsp_next_2"],
+          processedRevision: "22",
+        },
+      ],
+      userId: "trusted-user",
+    });
   });
 
   it("parses hosted runtime link and snapshot payloads with normalized timestamps", () => {

@@ -19,9 +19,12 @@ dirty-ack boundary instead of depending on assistant workspace wake metadata.
 2. Fail the dirty-ack response if that signal fails or hangs so the existing
    mailbox retry path retries the ack boundary; keep `nextWakeAt` only as
    compatibility data after a successful ack.
-3. Add focused regressions proving dirty-ack requeue and foreground preemption
+3. Pass remaining staged dirty-ack batch records through the existing staged
+   overlay so early records in the same batch do not require redundant recovery
+   signals before the batch finishes.
+4. Add focused regressions proving dirty-ack requeue and foreground preemption
    expectations.
-4. Run focused verification, completion audits, then archive this plan in the
+5. Run focused verification, completion audits, then archive this plan in the
    final scoped commit.
 
 ## Verification
@@ -32,6 +35,14 @@ dirty-ack boundary instead of depending on assistant workspace wake metadata.
   passed.
 - `pnpm exec vitest run --config vitest.config.ts --no-coverage packages/assistant-runtime/test/hosted-runtime-system-mailbox-notification.test.ts -t "dirty"`
   passed.
+- `pnpm exec vitest run --config vitest.config.ts --no-coverage packages/device-syncd/test/hosted-runtime.test.ts`
+  passed.
+- `pnpm --dir apps/cloudflare exec vitest run --config vitest.node.workspace.ts --no-coverage test/runner-platform.test.ts -t "device-sync dirty"`
+  passed.
 - `pnpm test:diff` passed.
 - `pnpm typecheck` passed.
-- Completion audit subagents pending.
+- Security/privacy audit: no medium-or-higher findings.
+- Task-finish audit: no findings; noted split coverage is reasonable.
+- Runtime deep audit: accepted batch-staging finding; fixed by passing remaining
+  batch records as `stagedDirtyAcks` through the existing dirty-ack protocol.
+- Focused audit reruns pending after the staged batch fix.
