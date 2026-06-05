@@ -467,43 +467,43 @@ async function runHealthCommonsSmoke(): Promise<{
   runtimeSearchHitKeys: string[];
 }> {
   const runtime = await import(HEALTH_COMMONS_RUNTIME_MODULE) as SmokeHealthCommonsRuntime;
-  const reader = runtime.getGeneratedHealthCommonsCatalogReader();
-  const runtimeSearchHitKeys = reader
-    .search({
-      query: "sauna",
-      entityTypes: ["protocol_variant"],
-      limit: 20,
-      includeBody: true,
-    })
-    .map((hit) => hit.entity.key);
-  const runtimeProtocolHitKeys = reader
-    .listProtocolVariants({
-      query: "sauna",
+  const indexReader = runtime.getGeneratedHealthCommonsProtocolIndexReader();
+  const runSpecReader = runtime.getGeneratedHealthCommonsProtocolRunSpecReader();
+  const graphReader = runtime.getGeneratedHealthCommonsProtocolFamilyGraphReader();
+  const runtimeSearchHitKeys = graphReader
+    .listProtocolMatches({
+      lookup: "sauna",
       limit: 20,
     })
-    .map((entity) => entity.key);
-  const finnishDrySauna = reader.findByKey(FINNISH_DRY_SAUNA_KEY);
+    .map((hit) => hit.protocol.key);
+  const runtimeProtocolHitKeys = indexReader
+    .listProtocols({
+      query: "sauna",
+      limit: 20,
+    })
+    .map((protocol) => protocol.key);
+  const finnishDrySauna = runSpecReader.findByLookup(FINNISH_DRY_SAUNA_KEY);
 
   if (!finnishDrySauna) {
     throw new Error(
-      `Health Commons runtime catalog is missing ${FINNISH_DRY_SAUNA_KEY}. catalogHash=${reader.catalogHash}`,
+      `Health Commons runtime protocol run specs are missing ${FINNISH_DRY_SAUNA_KEY}. catalogHash=${runSpecReader.catalogHash}`,
     );
   }
 
   if (!runtimeSearchHitKeys.includes(FINNISH_DRY_SAUNA_KEY)) {
     throw new Error(
-      `Health Commons runtime search did not return Finnish Dry Sauna. catalogHash=${reader.catalogHash}; hits=${runtimeSearchHitKeys.join(",")}`,
+      `Health Commons runtime protocol graph did not return Finnish Dry Sauna. catalogHash=${graphReader.catalogHash}; hits=${runtimeSearchHitKeys.join(",")}`,
     );
   }
 
   if (!runtimeProtocolHitKeys.includes(FINNISH_DRY_SAUNA_KEY)) {
     throw new Error(
-      `Health Commons runtime protocol list did not return Finnish Dry Sauna. catalogHash=${reader.catalogHash}; hits=${runtimeProtocolHitKeys.join(",")}`,
+      `Health Commons runtime protocol index did not return Finnish Dry Sauna. catalogHash=${indexReader.catalogHash}; hits=${runtimeProtocolHitKeys.join(",")}`,
     );
   }
 
   return {
-    catalogHash: reader.catalogHash,
+    catalogHash: indexReader.catalogHash,
     finnishDrySaunaTitle: finnishDrySauna.title,
     runtimeProtocolHitKeys,
     runtimeSearchHitKeys,
@@ -1622,23 +1622,31 @@ interface SmokeParseResult {
 }
 
 interface SmokeHealthCommonsRuntime {
-  getGeneratedHealthCommonsCatalogReader(): SmokeHealthCommonsCatalogReader;
+  getGeneratedHealthCommonsProtocolFamilyGraphReader(): SmokeHealthCommonsProtocolFamilyGraphReader;
+  getGeneratedHealthCommonsProtocolIndexReader(): SmokeHealthCommonsProtocolIndexReader;
+  getGeneratedHealthCommonsProtocolRunSpecReader(): SmokeHealthCommonsProtocolRunSpecReader;
 }
 
-interface SmokeHealthCommonsCatalogReader {
+interface SmokeHealthCommonsProtocolIndexReader {
   catalogHash: string;
-  findByKey(key: string): { title: string } | null;
-  listProtocolVariants(input: {
+  listProtocols(input: {
     limit: number;
     query: string;
   }): Array<{ key: string }>;
-  search(input: {
-    entityTypes: readonly ["protocol_variant"];
-    includeBody: true;
+}
+
+interface SmokeHealthCommonsProtocolRunSpecReader {
+  catalogHash: string;
+  findByLookup(key: string): { title: string } | null;
+}
+
+interface SmokeHealthCommonsProtocolFamilyGraphReader {
+  catalogHash: string;
+  listProtocolMatches(input: {
     limit: number;
-    query: string;
+    lookup: string;
   }): Array<{
-    entity: {
+    protocol: {
       key: string;
     };
   }>;

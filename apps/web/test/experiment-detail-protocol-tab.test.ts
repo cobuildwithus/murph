@@ -2,19 +2,20 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
-  healthCommonsCatalogSchema,
   type HealthCommonsCatalog,
   type HealthCommonsCatalogEntity,
   type HealthCommonsMeasurementMethodModality,
   type HealthCommonsMeasurementMethodTier,
 } from "@murphai/contracts";
-import healthCommonsCatalogJson from "@murphai/health-commons/generated/catalog.json";
 import { createHealthCommonsCatalogReader } from "@murphai/health-commons/runtime";
 
 import { composeExperimentDetail } from "@/src/lib/experiments/experiment-detail";
 import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
 import { resolveHealthCommonsExperimentProtocolTab } from "@/src/lib/health-commons/experiment-projections";
 import type { ExperimentResearchGroup } from "@/src/types/experiments";
+import {
+  createHealthCommonsRouteBundleFixtureCatalog,
+} from "./health-commons-fixture-catalog";
 
 vi.mock("@/src/components/experiments/experiment-detail/expected-signal-card", () => ({
   ExpectedSignalCard({ label }: { label: string }) {
@@ -381,7 +382,7 @@ describe("ProtocolTab", () => {
 });
 
 function createMeasurementPathFixtureCatalog(): HealthCommonsCatalog {
-  const catalog = structuredClone(healthCommonsCatalogSchema.parse(healthCommonsCatalogJson));
+  const catalog = createHealthCommonsRouteBundleFixtureCatalog();
   const protocolIndex = catalog.entities.findIndex(
     (entity) => entity.key === "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
   );

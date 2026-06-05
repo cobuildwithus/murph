@@ -4,7 +4,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS,
-  healthCommonsCatalogSchema,
   type HealthCommonsCatalog,
   type HealthCommonsCatalogEntity,
   type HealthCommonsEntityType,
@@ -15,6 +14,26 @@ import {
   type HealthCommonsRelation,
   type HealthCommonsRelationType,
 } from "@murphai/contracts";
+import {
+  HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
+  HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION,
+  HEALTH_COMMONS_PROTOCOL_RUN_SPECS_SCHEMA_VERSION,
+  type HealthCommonsProtocolEntitySummary,
+  type HealthCommonsProtocolEntityType,
+  type HealthCommonsProtocolFamilySummary,
+  type HealthCommonsProtocolFamilyGraphArtifact,
+  type HealthCommonsProtocolFamilyGraphEdge,
+  type HealthCommonsProtocolIndexArtifact,
+  type HealthCommonsProtocolIndexEntry,
+  type HealthCommonsProtocolRunSpec,
+  type HealthCommonsProtocolRunSpecsArtifact,
+} from "./protocol-artifacts.ts";
+export type {
+  HealthCommonsProtocolEntitySummary,
+  HealthCommonsProtocolFamilySummary,
+  HealthCommonsProtocolIndexEntry,
+  HealthCommonsProtocolRunSpec,
+} from "./protocol-artifacts.ts";
 import {
   HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_EXPERIMENT_PROTOCOL_TAB_SCHEMA_VERSION,
@@ -84,8 +103,16 @@ export type HealthCommonsSearchMatchedField =
   | "summary"
   | "title";
 
-export interface LoadGeneratedHealthCommonsCatalogOptions {
-  catalogPath?: string | URL;
+export interface LoadGeneratedHealthCommonsProtocolIndexOptions {
+  protocolIndexPath?: string | URL;
+}
+
+export interface LoadGeneratedHealthCommonsProtocolRunSpecsOptions {
+  protocolRunSpecsPath?: string | URL;
+}
+
+export interface LoadGeneratedHealthCommonsProtocolFamilyGraphOptions {
+  protocolFamilyGraphPath?: string | URL;
 }
 
 export interface LoadGeneratedHealthCommonsWebArtifactOptions {
@@ -274,6 +301,49 @@ export interface HealthCommonsCatalogReader {
   search(input?: HealthCommonsCatalogSearchInput): HealthCommonsCatalogSearchResult[];
 }
 
+export interface HealthCommonsProtocolIndexReader {
+  artifact: HealthCommonsProtocolIndexArtifact;
+  catalogHash: string;
+  findByLookup(lookup: string): HealthCommonsProtocolIndexEntry | null;
+  listProtocols(options?: HealthCommonsEntityListOptions): HealthCommonsProtocolIndexEntry[];
+  normalizeListOptions(options?: HealthCommonsEntityListOptions): HealthCommonsNormalizedEntityListOptions;
+}
+
+export interface HealthCommonsProtocolRunSpecReader {
+  artifact: HealthCommonsProtocolRunSpecsArtifact;
+  catalogHash: string;
+  findByLookup(lookup: string): HealthCommonsProtocolRunSpec | null;
+}
+
+export type HealthCommonsProtocolFamilyGraphEntity =
+  | HealthCommonsProtocolFamilySummary
+  | HealthCommonsProtocolIndexEntry;
+
+export interface HealthCommonsProtocolExploreMatch {
+  matchReason: "direct_family" | "direct_protocol" | "query_match";
+  protocol: HealthCommonsProtocolIndexEntry;
+}
+
+export interface HealthCommonsProtocolFamilyGraphReader {
+  artifact: HealthCommonsProtocolFamilyGraphArtifact;
+  catalogHash: string;
+  childFamilies(family: HealthCommonsProtocolFamilySummary): HealthCommonsProtocolFamilySummary[];
+  findEntity(input: {
+    entityTypes: readonly HealthCommonsProtocolEntityType[];
+    lookup: string;
+  }): HealthCommonsProtocolFamilyGraphEntity | null;
+  listProtocolMatches(input: {
+    limit: number;
+    lookup: string;
+  }): HealthCommonsProtocolExploreMatch[];
+  parentFamilies(protocol: HealthCommonsProtocolIndexEntry): HealthCommonsProtocolFamilySummary[];
+  protocolVariantsForFamily(
+    family: HealthCommonsProtocolFamilySummary,
+    seenFamilyKeys?: Set<string>,
+  ): HealthCommonsProtocolIndexEntry[];
+  relatedProtocolVariants(entity: HealthCommonsProtocolFamilyGraphEntity): HealthCommonsProtocolIndexEntry[];
+}
+
 export interface HealthCommonsRouteBundleReader extends HealthCommonsCatalogReader {
   bundle: HealthCommonsWebRouteBundle;
   getSourceSnippet(sourceKey: string): HealthCommonsWebRouteBundle["sourceSnippets"][string] | null;
@@ -285,7 +355,9 @@ export interface HealthCommonsRouteBundleReader extends HealthCommonsCatalogRead
   route: HealthCommonsWebRouteBundle["route"];
 }
 
-const DEFAULT_GENERATED_CATALOG_URL = new URL("../generated/catalog.json", import.meta.url);
+const DEFAULT_GENERATED_PROTOCOL_INDEX_URL = new URL("../generated/protocol-index.json", import.meta.url);
+const DEFAULT_GENERATED_PROTOCOL_RUN_SPECS_URL = new URL("../generated/protocol-run-specs.json", import.meta.url);
+const DEFAULT_GENERATED_PROTOCOL_FAMILY_GRAPH_URL = new URL("../generated/protocol-family-graph.json", import.meta.url);
 const DEFAULT_LIST_LIMIT = 25;
 const DEFAULT_RELATION_LIMIT = 12;
 const DEFAULT_SEARCH_LIMIT = 20;
@@ -308,7 +380,9 @@ const HEALTH_COMMONS_WEB_PROJECTION_KEYS: readonly HealthCommonsWebProjectionKey
   "experiment.shell",
 ];
 
-let cachedGeneratedCatalogReader: HealthCommonsCatalogReader | null = null;
+let cachedGeneratedProtocolIndexReader: HealthCommonsProtocolIndexReader | null = null;
+let cachedGeneratedProtocolRunSpecReader: HealthCommonsProtocolRunSpecReader | null = null;
+let cachedGeneratedProtocolFamilyGraphReader: HealthCommonsProtocolFamilyGraphReader | null = null;
 let cachedGeneratedWebBiomarkerIndex: HealthCommonsWebBiomarkerIndex | null = null;
 let cachedGeneratedWebExperimentIndex: HealthCommonsWebExperimentIndex | null = null;
 let cachedGeneratedWebRouteIndex: HealthCommonsWebRouteIndex | null = null;
@@ -330,18 +404,79 @@ const cachedGeneratedWebExperimentResultsPublic = new Map<
   HealthCommonsWebExperimentResultsPublic | null
 >();
 
-export function loadGeneratedHealthCommonsCatalog(
-  options: LoadGeneratedHealthCommonsCatalogOptions = {},
-): HealthCommonsCatalog {
-  const raw = readFileSync(options.catalogPath ?? DEFAULT_GENERATED_CATALOG_URL, "utf8");
-  return healthCommonsCatalogSchema.parse(JSON.parse(raw));
+export function loadGeneratedHealthCommonsProtocolIndex(
+  options: LoadGeneratedHealthCommonsProtocolIndexOptions = {},
+): HealthCommonsProtocolIndexArtifact {
+  const raw = readFileSync(options.protocolIndexPath ?? DEFAULT_GENERATED_PROTOCOL_INDEX_URL, "utf8");
+  const parsed = parseJsonObject(raw);
+  assertGeneratedHealthCommonsProtocolIndex(parsed);
+  return parsed;
 }
 
-export function getGeneratedHealthCommonsCatalogReader(): HealthCommonsCatalogReader {
-  cachedGeneratedCatalogReader ??= createHealthCommonsCatalogReader(
-    loadGeneratedHealthCommonsCatalog(),
+export function getGeneratedHealthCommonsProtocolIndexReader(
+  options: LoadGeneratedHealthCommonsProtocolIndexOptions = {},
+): HealthCommonsProtocolIndexReader {
+  if (options.protocolIndexPath) {
+    return createHealthCommonsProtocolIndexReader(
+      loadGeneratedHealthCommonsProtocolIndex(options),
+    );
+  }
+
+  cachedGeneratedProtocolIndexReader ??= createHealthCommonsProtocolIndexReader(
+    loadGeneratedHealthCommonsProtocolIndex(),
   );
-  return cachedGeneratedCatalogReader;
+  return cachedGeneratedProtocolIndexReader;
+}
+
+export function loadGeneratedHealthCommonsProtocolRunSpecs(
+  options: LoadGeneratedHealthCommonsProtocolRunSpecsOptions = {},
+): HealthCommonsProtocolRunSpecsArtifact {
+  const raw = readFileSync(options.protocolRunSpecsPath ?? DEFAULT_GENERATED_PROTOCOL_RUN_SPECS_URL, "utf8");
+  const parsed = parseJsonObject(raw);
+  assertGeneratedHealthCommonsProtocolRunSpecs(parsed);
+  return parsed;
+}
+
+export function getGeneratedHealthCommonsProtocolRunSpecReader(
+  options: LoadGeneratedHealthCommonsProtocolRunSpecsOptions = {},
+): HealthCommonsProtocolRunSpecReader {
+  if (options.protocolRunSpecsPath) {
+    return createHealthCommonsProtocolRunSpecReader(
+      loadGeneratedHealthCommonsProtocolRunSpecs(options),
+    );
+  }
+
+  cachedGeneratedProtocolRunSpecReader ??= createHealthCommonsProtocolRunSpecReader(
+    loadGeneratedHealthCommonsProtocolRunSpecs(),
+  );
+  return cachedGeneratedProtocolRunSpecReader;
+}
+
+export function loadGeneratedHealthCommonsProtocolFamilyGraph(
+  options: LoadGeneratedHealthCommonsProtocolFamilyGraphOptions = {},
+): HealthCommonsProtocolFamilyGraphArtifact {
+  const raw = readFileSync(options.protocolFamilyGraphPath ?? DEFAULT_GENERATED_PROTOCOL_FAMILY_GRAPH_URL, "utf8");
+  const parsed = parseJsonObject(raw);
+  assertGeneratedHealthCommonsProtocolFamilyGraph(parsed);
+  return parsed;
+}
+
+export function getGeneratedHealthCommonsProtocolFamilyGraphReader(
+  options: LoadGeneratedHealthCommonsProtocolFamilyGraphOptions = {},
+): HealthCommonsProtocolFamilyGraphReader {
+  if (options.protocolFamilyGraphPath) {
+    return createHealthCommonsProtocolFamilyGraphReader(
+      loadGeneratedHealthCommonsProtocolFamilyGraph(options),
+    );
+  }
+
+  cachedGeneratedProtocolFamilyGraphReader ??= createHealthCommonsProtocolFamilyGraphReader(
+    loadGeneratedHealthCommonsProtocolFamilyGraph(),
+    {
+      protocolSearchEntries: getGeneratedHealthCommonsProtocolIndexReader().artifact.protocols,
+    },
+  );
+  return cachedGeneratedProtocolFamilyGraphReader;
 }
 
 export function loadGeneratedHealthCommonsWebRouteIndex(
@@ -403,14 +538,13 @@ export function getGeneratedHealthCommonsWebExperimentIndex(
 }
 
 export function listGeneratedAssistantProtocolIndexEntries(
-  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
+  options: LoadGeneratedHealthCommonsProtocolIndexOptions = {},
 ): HealthCommonsAssistantProtocolIndexEntry[] {
-  return getGeneratedHealthCommonsWebExperimentIndex(options).experiments
-    .filter((entry) => entry.status !== "deprecated")
-    .map((entry) => ({
-      category: entry.category,
-      routeId: entry.routeId,
-      title: entry.title,
+  return getGeneratedHealthCommonsProtocolIndexReader(options).artifact.protocols
+    .map((protocol) => ({
+      category: formatProtocolIndexCategory(protocol),
+      routeId: protocol.routeId,
+      title: protocol.title,
     }));
 }
 
@@ -563,6 +697,191 @@ function loadGeneratedHealthCommonsWebExperimentArtifact<T>(input: {
   }
 
   return artifact;
+}
+
+export function createHealthCommonsProtocolIndexReader(
+  artifact: HealthCommonsProtocolIndexArtifact,
+): HealthCommonsProtocolIndexReader {
+  const lookup = createProtocolLookup(artifact.protocols, "protocol_variant");
+
+  const normalizeListOptions = (
+    options: HealthCommonsEntityListOptions = {},
+  ): HealthCommonsNormalizedEntityListOptions => {
+    const normalized = normalizeEntitySelectionInput(options, DEFAULT_LIST_LIMIT);
+    return {
+      categories: normalized.categories,
+      ignoredWildcards: normalized.ignoredWildcards,
+      limit: normalized.limit,
+      query: normalized.query,
+      sourceKinds: normalized.sourceKinds,
+      statuses: normalized.statuses,
+    };
+  };
+
+  return {
+    artifact,
+    catalogHash: artifact.catalogHash,
+    findByLookup(lookupValue) {
+      return lookup.find(lookupValue) as HealthCommonsProtocolIndexEntry | null;
+    },
+    listProtocols(options = {}) {
+      return listCompactProtocols(artifact.protocols, options);
+    },
+    normalizeListOptions,
+  };
+}
+
+export function createHealthCommonsProtocolRunSpecReader(
+  artifact: HealthCommonsProtocolRunSpecsArtifact,
+): HealthCommonsProtocolRunSpecReader {
+  const lookup = createProtocolLookup(artifact.protocols, "protocol_variant");
+
+  return {
+    artifact,
+    catalogHash: artifact.catalogHash,
+    findByLookup(lookupValue) {
+      return lookup.find(lookupValue) as HealthCommonsProtocolRunSpec | null;
+    },
+  };
+}
+
+export function createHealthCommonsProtocolFamilyGraphReader(
+  artifact: HealthCommonsProtocolFamilyGraphArtifact,
+  options: {
+    protocolSearchEntries?: readonly HealthCommonsProtocolIndexEntry[];
+  } = {},
+): HealthCommonsProtocolFamilyGraphReader {
+  const protocolsByKey = new Map(artifact.protocols.map((protocol) => [protocol.key, protocol]));
+  const familiesByKey = new Map(artifact.families.map((family) => [family.key, family]));
+  const protocolLookup = createProtocolLookup(artifact.protocols, "protocol_variant");
+  const familyLookup = createProtocolLookup(artifact.families, "experiment_family");
+  const protocolSearchEntries = options.protocolSearchEntries ?? artifact.protocols;
+
+  const graphTargets = <T extends HealthCommonsProtocolFamilyGraphEntity>(
+    input: {
+      entity: HealthCommonsProtocolFamilyGraphEntity;
+      relationType: HealthCommonsProtocolFamilyGraphEdge["type"];
+      targetByKey: ReadonlyMap<string, T>;
+    },
+  ): T[] =>
+    uniqueProtocolGraphEntities(
+      artifact.edges
+        .filter((edge) =>
+          edge.sourceKey === input.entity.key &&
+          edge.type === input.relationType
+        )
+        .map((edge) => input.targetByKey.get(edge.targetKey))
+        .filter((entity): entity is T => entity !== undefined),
+    );
+
+  const protocolVariantsForFamily = (
+    family: HealthCommonsProtocolFamilySummary,
+    seenFamilyKeys = new Set<string>(),
+  ): HealthCommonsProtocolIndexEntry[] => {
+    if (seenFamilyKeys.has(family.key)) {
+      return [];
+    }
+
+    seenFamilyKeys.add(family.key);
+    const directRelated = graphTargets({
+      entity: family,
+      relationType: "related_protocol",
+      targetByKey: protocolsByKey,
+    });
+    const byParentFamily = artifact.protocols.filter((protocol) =>
+      artifact.edges.some((edge) =>
+        edge.sourceKey === protocol.key &&
+        edge.targetKey === family.key &&
+        edge.type === "parent_family"
+      )
+    );
+    const fromChildFamilies = graphTargets({
+      entity: family,
+      relationType: "child_family",
+      targetByKey: familiesByKey,
+    }).flatMap((childFamily) => protocolVariantsForFamily(childFamily, seenFamilyKeys));
+
+    return uniqueProtocolGraphEntities([
+      ...directRelated,
+      ...byParentFamily,
+      ...fromChildFamilies,
+    ]);
+  };
+  const findGraphEntity = (input: {
+    entityTypes: readonly HealthCommonsProtocolEntityType[];
+    lookup: string;
+  }): HealthCommonsProtocolFamilyGraphEntity | null => {
+    for (const entityType of input.entityTypes) {
+      const found = entityType === "protocol_variant"
+        ? protocolLookup.find(input.lookup)
+        : familyLookup.find(input.lookup);
+      if (found) {
+        return found;
+      }
+    }
+
+    return null;
+  };
+
+  return {
+    artifact,
+    catalogHash: artifact.catalogHash,
+    childFamilies(family) {
+      return graphTargets({
+        entity: family,
+        relationType: "child_family",
+        targetByKey: familiesByKey,
+      });
+    },
+    findEntity(input) {
+      return findGraphEntity(input);
+    },
+    listProtocolMatches(input) {
+      const matchedEntity = findGraphEntity({
+        entityTypes: ["experiment_family", "protocol_variant"],
+        lookup: input.lookup,
+      });
+
+      if (matchedEntity?.entityType === "protocol_variant") {
+        return [{
+          matchReason: "direct_protocol",
+          protocol: matchedEntity as HealthCommonsProtocolIndexEntry,
+        }];
+      }
+
+      if (matchedEntity?.entityType === "experiment_family") {
+        return protocolVariantsForFamily(matchedEntity)
+          .slice(0, normalizeLimit(input.limit, 5))
+          .map((protocol) => ({
+            matchReason: "direct_family",
+            protocol,
+          }));
+      }
+
+      return searchCompactProtocols(protocolSearchEntries, {
+        limit: normalizeLimit(input.limit, 5),
+        query: input.lookup,
+      }).map((protocol) => ({
+        matchReason: "query_match",
+        protocol,
+      }));
+    },
+    parentFamilies(protocol) {
+      return graphTargets({
+        entity: protocol,
+        relationType: "parent_family",
+        targetByKey: familiesByKey,
+      });
+    },
+    protocolVariantsForFamily,
+    relatedProtocolVariants(entity) {
+      return graphTargets({
+        entity,
+        relationType: "related_protocol",
+        targetByKey: protocolsByKey,
+      });
+    },
+  };
 }
 
 export function createHealthCommonsRouteBundleReader(
@@ -1145,6 +1464,263 @@ function toCompactMeasurementPlan(
   };
 }
 
+function createProtocolLookup<T extends HealthCommonsProtocolFamilyGraphEntity>(
+  entities: readonly T[],
+  lookupEntityType: HealthCommonsProtocolEntityType,
+): { find(lookup: string): T | null } {
+  const byKey = new Map<string, T>();
+  const byRouteId = new Map<string, T>();
+  const byAlias = new Map<string, T>();
+
+  const setFirst = (map: Map<string, T>, key: string, entity: T) => {
+    if (!key || map.has(key)) {
+      return;
+    }
+    map.set(key, entity);
+  };
+
+  for (const entity of entities) {
+    setFirst(byKey, normalizeLookupKey(entity.key), entity);
+    setFirst(byRouteId, normalizeRouteId(entity.slug), entity);
+    setFirst(byRouteId, normalizeRouteId(stripEntityTypePrefix(entity.key)), entity);
+    for (const routeId of entity.routeIds) {
+      setFirst(byRouteId, normalizeRouteId(routeId), entity);
+    }
+    for (const alias of entity.aliases) {
+      setFirst(byAlias, normalizeSearchText(alias), entity);
+    }
+  }
+
+  return {
+    find(lookup) {
+      const trimmed = lookup.trim();
+      if (!trimmed) {
+        return null;
+      }
+
+      const exact = byKey.get(normalizeLookupKey(trimmed));
+      if (exact) {
+        return exact;
+      }
+
+      const lookupType = protocolEntityTypePrefix(trimmed);
+      if (lookupType && lookupType !== lookupEntityType) {
+        return null;
+      }
+
+      const routeLookup = lookupType === lookupEntityType
+        ? stripEntityTypePrefix(trimmed)
+        : trimmed;
+
+      return byRouteId.get(normalizeRouteId(routeLookup)) ??
+        byAlias.get(normalizeSearchText(trimmed)) ??
+        null;
+    },
+  };
+}
+
+function listCompactProtocols(
+  protocols: readonly HealthCommonsProtocolIndexEntry[],
+  options: HealthCommonsEntityListOptions,
+): HealthCommonsProtocolIndexEntry[] {
+  const normalized = normalizeEntitySelectionInput(options, DEFAULT_LIST_LIMIT);
+  const statusSet = new Set<string>(normalized.statuses);
+  const candidateKeys = normalized.candidateKeys === null
+    ? null
+    : new Set(normalized.candidateKeys.map(stripRevision));
+  const filtered = protocols.filter((protocol) => {
+    if (candidateKeys && !candidateKeys.has(protocol.key)) {
+      return false;
+    }
+    if (statusSet.size > 0 && (!protocol.status || !statusSet.has(protocol.status))) {
+      return false;
+    }
+    if (!matchesProtocolCategories(protocol, normalized.categories)) {
+      return false;
+    }
+    return true;
+  });
+
+  if (!normalized.query) {
+    return filtered.slice(0, normalized.limit);
+  }
+
+  return scoreCompactProtocols(filtered, normalized.query)
+    .slice(0, normalized.limit)
+    .map((result) => result.protocol);
+}
+
+function searchCompactProtocols(
+  protocols: readonly HealthCommonsProtocolIndexEntry[],
+  input: {
+    limit: number;
+    query: string;
+  },
+): HealthCommonsProtocolIndexEntry[] {
+  const query = normalizeNullableSearchQuery(input.query);
+  const limit = normalizeLimit(input.limit, DEFAULT_SEARCH_LIMIT);
+  if (!query) {
+    return protocols.slice(0, limit);
+  }
+
+  return scoreCompactProtocols(protocols, query)
+    .slice(0, limit)
+    .map((result) => result.protocol);
+}
+
+function scoreCompactProtocols(
+  protocols: readonly HealthCommonsProtocolIndexEntry[],
+  normalizedQuery: string,
+): { protocol: HealthCommonsProtocolIndexEntry; score: number }[] {
+  const tokens = tokenizeSearchQuery(normalizedQuery);
+
+  return protocols
+    .map((protocol) => ({
+      protocol,
+      score: scoreCompactProtocolSearch(protocol, normalizedQuery, tokens),
+    }))
+    .filter((result) => result.score > 0)
+    .sort((left, right) => {
+      if (left.score !== right.score) {
+        return right.score - left.score;
+      }
+
+      const titleComparison = left.protocol.title.localeCompare(right.protocol.title);
+      if (titleComparison !== 0) {
+        return titleComparison;
+      }
+
+      return left.protocol.key.localeCompare(right.protocol.key);
+    });
+}
+
+function scoreCompactProtocolSearch(
+  protocol: HealthCommonsProtocolIndexEntry,
+  normalizedQuery: string,
+  tokens: readonly string[],
+): number {
+  let score = 0;
+
+  for (const field of buildCompactProtocolSearchFields(protocol)) {
+    const normalizedValue = normalizeSearchText(field.value);
+    if (!normalizedValue) {
+      continue;
+    }
+
+    if (normalizedValue === normalizedQuery) {
+      score += field.weight * 12;
+    } else if (normalizedValue.startsWith(normalizedQuery)) {
+      score += field.weight * 8;
+    } else if (normalizedValue.includes(normalizedQuery)) {
+      score += field.weight * 5;
+    }
+
+    for (const token of tokens) {
+      if (normalizedValue.includes(token)) {
+        score += field.weight;
+      }
+    }
+  }
+
+  return score;
+}
+
+function buildCompactProtocolSearchFields(
+  protocol: HealthCommonsProtocolIndexEntry,
+): { value: string; weight: number }[] {
+  return [
+    { value: protocol.title, weight: 12 },
+    { value: protocol.aliases.join(" "), weight: 10 },
+    {
+      value: [
+        protocol.key,
+        protocol.slug,
+        protocol.routeId,
+        ...protocol.routeIds,
+      ].join(" "),
+      weight: 9,
+    },
+    { value: protocol.categories.join(" "), weight: 8 },
+    { value: protocol.summary ?? "", weight: 5 },
+    { value: protocol.searchText ?? "", weight: 3 },
+    {
+      value: [
+        protocol.status,
+        protocol.traits.cautionLevel,
+        protocol.traits.externalProtocol ? "external protocol" : "",
+        protocol.traits.highCaution ? "high caution" : "",
+        protocol.traits.murphCanonical ? "murph canonical" : "",
+        protocol.traits.sourceAttributed ? "source attributed" : "",
+      ].filter(isNonEmptyString).join(" "),
+      weight: 4,
+    },
+  ];
+}
+
+function formatProtocolIndexCategory(protocol: HealthCommonsProtocolIndexEntry): string {
+  const categories = protocol.categories;
+
+  if (categories.includes("sleep") || categories.includes("circadian")) {
+    return "Sleep";
+  }
+
+  if (
+    categories.includes("exercise") ||
+    categories.includes("hiit") ||
+    categories.includes("vo2max")
+  ) {
+    return "Exercise";
+  }
+
+  if (
+    categories.includes("recovery") ||
+    categories.includes("dry-sauna") ||
+    categories.includes("passive-heat")
+  ) {
+    return "Recovery";
+  }
+
+  return formatCategory(categories[0] ?? protocol.entityType);
+}
+
+function formatCategory(value: string): string {
+  return value
+    .split(/[._/-]+/u)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function matchesProtocolCategories(
+  protocol: HealthCommonsProtocolEntitySummary,
+  normalizedCategories: readonly string[],
+): boolean {
+  if (normalizedCategories.length === 0) {
+    return true;
+  }
+
+  const protocolCategories = new Set(protocol.categories.map(normalizeCategory));
+  return normalizedCategories.every((category) => protocolCategories.has(category));
+}
+
+function uniqueProtocolGraphEntities<T extends HealthCommonsProtocolFamilyGraphEntity>(
+  entities: readonly T[],
+): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+
+  for (const entity of entities) {
+    if (seen.has(entity.key)) {
+      continue;
+    }
+
+    seen.add(entity.key);
+    result.push(entity);
+  }
+
+  return result;
+}
+
 function matchesCategories(
   entity: HealthCommonsEntity,
   normalizedCategories: readonly string[],
@@ -1487,7 +2063,11 @@ function normalizeLimit(value: number | undefined, defaultValue: number): number
 }
 
 function normalizeRouteId(value: string): string {
-  return safeDecodeURIComponent(value).trim().replace(/^\/+|\/+$/gu, "");
+  return safeDecodeURIComponent(value).trim().replace(/^\/+|\/+$/gu, "").toLowerCase();
+}
+
+function normalizeLookupKey(value: string): string {
+  return safeDecodeURIComponent(stripRevision(value)).trim().toLowerCase();
 }
 
 function safeDecodeURIComponent(value: string): string {
@@ -1630,6 +2210,147 @@ function parseJsonObject(raw: string): unknown {
   }
 
   return parsed;
+}
+
+function assertGeneratedHealthCommonsProtocolIndex(
+  value: unknown,
+): asserts value is HealthCommonsProtocolIndexArtifact {
+  if (!isRecord(value)) {
+    throw new Error("Health Commons generated protocol index is invalid.");
+  }
+
+  if (
+    value["schemaVersion"] !== HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION ||
+    typeof value["catalogHash"] !== "string" ||
+    !Array.isArray(value["protocols"]) ||
+    !value["protocols"].every(isGeneratedProtocolIndexEntry) ||
+    !value["protocols"].every(hasGeneratedProtocolSearchText)
+  ) {
+    throw new Error("Health Commons generated protocol index is invalid.");
+  }
+}
+
+function assertGeneratedHealthCommonsProtocolRunSpecs(
+  value: unknown,
+): asserts value is HealthCommonsProtocolRunSpecsArtifact {
+  if (!isRecord(value)) {
+    throw new Error("Health Commons generated protocol run specs are invalid.");
+  }
+
+  if (
+    value["schemaVersion"] !== HEALTH_COMMONS_PROTOCOL_RUN_SPECS_SCHEMA_VERSION ||
+    typeof value["catalogHash"] !== "string" ||
+    !Array.isArray(value["protocols"]) ||
+    !value["protocols"].every(isGeneratedProtocolRunSpec)
+  ) {
+    throw new Error("Health Commons generated protocol run specs are invalid.");
+  }
+}
+
+function assertGeneratedHealthCommonsProtocolFamilyGraph(
+  value: unknown,
+): asserts value is HealthCommonsProtocolFamilyGraphArtifact {
+  if (!isRecord(value)) {
+    throw new Error("Health Commons generated protocol family graph is invalid.");
+  }
+
+  if (
+    value["schemaVersion"] !== HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION ||
+    typeof value["catalogHash"] !== "string" ||
+    !Array.isArray(value["protocols"]) ||
+    !value["protocols"].every(isGeneratedProtocolIndexEntry) ||
+    !Array.isArray(value["families"]) ||
+    !value["families"].every(isGeneratedProtocolFamilySummary) ||
+    !Array.isArray(value["edges"]) ||
+    !value["edges"].every(isGeneratedProtocolFamilyGraphEdge)
+  ) {
+    throw new Error("Health Commons generated protocol family graph is invalid.");
+  }
+}
+
+function isGeneratedProtocolRunSpec(value: unknown): boolean {
+  if (!isGeneratedProtocolIndexEntry(value) || !isRecord(value)) {
+    return false;
+  }
+
+  return (
+    Array.isArray(value["expectedSignalDescriptions"]) &&
+    Array.isArray(value["testPlans"]) &&
+    Array.isArray(value["whyItWorks"]) &&
+    value["whyItWorks"].every(isString) &&
+    isNullableRecord(value["experimentOnboarding"]) &&
+    isNullableRecord(value["protocol"]) &&
+    isNullableRecord(value["safety"])
+  );
+}
+
+function isGeneratedProtocolIndexEntry(value: unknown): boolean {
+  return isGeneratedProtocolEntitySummary(value, "protocol_variant") &&
+    isRecord(value) &&
+    (value["searchText"] === undefined || typeof value["searchText"] === "string") &&
+    isGeneratedProtocolTraits(value["traits"]);
+}
+
+function hasGeneratedProtocolSearchText(value: unknown): boolean {
+  return isRecord(value) && typeof value["searchText"] === "string";
+}
+
+function isGeneratedProtocolFamilySummary(value: unknown): boolean {
+  return isGeneratedProtocolEntitySummary(value, "experiment_family");
+}
+
+function isGeneratedProtocolEntitySummary(
+  value: unknown,
+  entityType: HealthCommonsProtocolEntityType,
+): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    Array.isArray(value["aliases"]) &&
+    value["aliases"].every(isString) &&
+    Array.isArray(value["categories"]) &&
+    value["categories"].every(isString) &&
+    value["entityType"] === entityType &&
+    typeof value["key"] === "string" &&
+    typeof value["relativePath"] === "string" &&
+    isGeneratedProtocolRevision(value["revision"]) &&
+    typeof value["routeId"] === "string" &&
+    Array.isArray(value["routeIds"]) &&
+    value["routeIds"].every(isString) &&
+    typeof value["slug"] === "string" &&
+    isNullableString(value["status"]) &&
+    isNullableString(value["summary"]) &&
+    typeof value["title"] === "string"
+  );
+}
+
+function isGeneratedProtocolRevision(value: unknown): boolean {
+  return isRecord(value) &&
+    typeof value["pageRevisionId"] === "string" &&
+    isNullableString(value["recipeHash"]) &&
+    isNullableString(value["runSpecRevisionId"]);
+}
+
+function isGeneratedProtocolTraits(value: unknown): boolean {
+  return isRecord(value) &&
+    isNullableString(value["cautionLevel"]) &&
+    typeof value["externalProtocol"] === "boolean" &&
+    typeof value["highCaution"] === "boolean" &&
+    typeof value["murphCanonical"] === "boolean" &&
+    typeof value["sourceAttributed"] === "boolean";
+}
+
+function isGeneratedProtocolFamilyGraphEdge(value: unknown): boolean {
+  return isRecord(value) &&
+    typeof value["sourceKey"] === "string" &&
+    typeof value["targetKey"] === "string" &&
+    (
+      value["type"] === "child_family" ||
+      value["type"] === "parent_family" ||
+      value["type"] === "related_protocol"
+    );
 }
 
 function assertGeneratedWebRouteIndex(
@@ -2481,13 +3202,20 @@ function stripRevision(key: string): string {
 }
 
 function stripEntityTypePrefix(key: string): string {
-  return stripRevision(key).replace(/^[a-z_]+:/u, "");
+  return stripRevision(safeDecodeURIComponent(key)).replace(/^[a-z_]+:/iu, "");
 }
 
 function entityTypePrefix(key: string): string | null {
-  const baseKey = stripRevision(key);
+  const baseKey = stripRevision(safeDecodeURIComponent(key));
   const separatorIndex = baseKey.indexOf(":");
-  return separatorIndex > 0 ? baseKey.slice(0, separatorIndex) : null;
+  return separatorIndex > 0 ? baseKey.slice(0, separatorIndex).toLowerCase() : null;
+}
+
+function protocolEntityTypePrefix(key: string): HealthCommonsProtocolEntityType | null {
+  const prefix = entityTypePrefix(key);
+  return prefix === "experiment_family" || prefix === "protocol_variant"
+    ? prefix
+    : null;
 }
 
 function toTrailingSlug(slug: string): string {
@@ -2579,6 +3307,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isString(value: unknown): value is string {
   return typeof value === "string";
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function isNullableRecord(value: unknown): value is Record<string, unknown> | null {
+  return value === null || isRecord(value);
 }
 
 function isNonEmptyString(value: string | null | undefined): value is string {

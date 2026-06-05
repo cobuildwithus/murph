@@ -66,6 +66,25 @@ test("commons protocol list and show expose protocol revisions distinctly from p
       (protocol) => protocol.key === "protocol_variant:norwegian-4x4/norwegian-4x4",
     ),
   );
+  const bodyQueryResult = await runInProcessJsonCli<{
+    protocols: Array<{
+      key: string;
+    }>;
+  }>(cli, [
+    "commons",
+    "protocol",
+    "list",
+    "--query",
+    "RPE",
+    "--limit",
+    "10",
+  ]);
+  assert.equal(bodyQueryResult.envelope.ok, true);
+  assert.ok(
+    requireData(bodyQueryResult.envelope).protocols.some(
+      (protocol) => protocol.key === "protocol_variant:norwegian-4x4/norwegian-4x4",
+    ),
+  );
 
   const showResult = await runInProcessJsonCli<{
     lookup: string;
@@ -134,15 +153,20 @@ test("commons protocol list and show expose protocol revisions distinctly from p
       experimentOnboarding: {
         adaptationPolicy?: unknown;
       } | null;
+      key: string;
     };
   }>(cli, [
     "commons",
     "protocol",
     "show",
-    "finnish-sauna",
+    "protocol_variant:sauna/finnish-dry/murph-standard-3x-week",
   ]);
   assert.equal(saunaShowResult.envelope.ok, true);
   const saunaShowData = requireData(saunaShowResult.envelope);
+  assert.equal(
+    saunaShowData.protocol.key,
+    "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+  );
   assert.ok(saunaShowData.protocol.experimentOnboarding?.adaptationPolicy);
   for (const omittedField of [
     "aliases",
@@ -346,6 +370,45 @@ test("commons protocol explore distinguishes direct protocol lookup from query f
   assert.equal(
     directData.starterCandidate?.protocol.key,
     "protocol_variant:norwegian-4x4/norwegian-4x4",
+  );
+
+  const typedShorthandResult = await runInProcessJsonCli<{
+    groups: Array<{
+      matchReason: string;
+      matchedProtocol: {
+        key: string;
+      };
+    }>;
+    matchedEntity: {
+      entityType: string;
+      key: string;
+    } | null;
+    starterCandidate: {
+      protocol: {
+        key: string;
+      };
+    } | null;
+  }>(cli, [
+    "commons",
+    "protocol",
+    "explore",
+    "PROTOCOL_VARIANT:DRY-SAUNA",
+  ]);
+
+  assert.equal(typedShorthandResult.envelope.ok, true);
+  const typedShorthandData = requireData(typedShorthandResult.envelope);
+  assert.equal(typedShorthandData.matchedEntity?.entityType, "protocol_variant");
+  assert.equal(
+    typedShorthandData.matchedEntity?.key,
+    "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+  );
+  assert.deepEqual(
+    typedShorthandData.groups.map((group) => group.matchReason),
+    ["direct_protocol"],
+  );
+  assert.equal(
+    typedShorthandData.starterCandidate?.protocol.key,
+    "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
   );
 
   const queryResult = await runInProcessJsonCli<{

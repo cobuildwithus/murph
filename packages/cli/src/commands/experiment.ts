@@ -16,11 +16,13 @@ import {
   experimentRunScheduleIntentSchema,
   jsonObjectSchema,
   type ExperimentRunScheduleIntent,
-  type HealthCommonsCatalogEntity,
   type HealthCommonsExpectedSignalDescription,
   type HealthCommonsTestPlan,
 } from '@murphai/contracts'
-import { getGeneratedHealthCommonsCatalogReader } from '@murphai/health-commons/runtime'
+import {
+  getGeneratedHealthCommonsProtocolRunSpecReader,
+  type HealthCommonsProtocolRunSpec,
+} from '@murphai/health-commons/runtime'
 import { Cli, z } from 'incur'
 import {
   requestIdFromOptions,
@@ -96,10 +98,7 @@ function currentCommandIncludesFlag(flag: string): boolean {
   return experimentCommandArgvStorage.getStore()?.includes(flag) === true
 }
 
-type ProtocolVariantEntity = HealthCommonsCatalogEntity & {
-  entityType: 'protocol_variant'
-  testPlans: HealthCommonsTestPlan[]
-}
+type ProtocolVariantEntity = HealthCommonsProtocolRunSpec
 const sha256RevisionOptionSchema = z
   .string()
   .regex(
@@ -250,40 +249,19 @@ function normalizeProtocolVariantKey(value: string, optionName = 'protocol-key')
   return trimmed
 }
 
-function isProtocolVariantEntity(
-  entity: HealthCommonsCatalogEntity | null,
-): entity is ProtocolVariantEntity {
-  return entity?.entityType === 'protocol_variant' && Array.isArray(entity.testPlans)
-}
-
-function requireProtocolVariantEntity(key: string): ProtocolVariantEntity {
-  const reader = getGeneratedHealthCommonsCatalogReader()
-  const entity = reader.findByKey(normalizeProtocolVariantKey(key))
-
-  if (!isProtocolVariantEntity(entity)) {
-    throw new VaultCliError(
-      'not_found',
-      `No Health Commons protocol variant matched ${key}.`,
-    )
-  }
-
-  return entity
-}
-
 function resolveProtocolVariantEntity(
   lookup: string,
   optionName = 'from-protocol',
 ): ProtocolVariantEntity {
   const trimmed = lookup.trim()
-  const reader = getGeneratedHealthCommonsCatalogReader()
-  const entity = trimmed.startsWith('protocol_variant:')
-    ? reader.findByKey(normalizeProtocolVariantKey(trimmed, optionName))
-    : reader.findByRouteId({
-        entityType: 'protocol_variant',
-        routeId: trimmed,
-      })
+  const reader = getGeneratedHealthCommonsProtocolRunSpecReader()
+  const entity = reader.findByLookup(
+    trimmed.startsWith('protocol_variant:')
+      ? normalizeProtocolVariantKey(trimmed, optionName)
+      : trimmed,
+  )
 
-  if (!isProtocolVariantEntity(entity)) {
+  if (!entity) {
     throw new VaultCliError(
       'not_found',
       `No Health Commons protocol variant matched --${optionName} "${lookup}".`,
@@ -335,7 +313,7 @@ function mapExpectedSignalDirection(
 }
 
 function findExpectedSignal(
-  entity: HealthCommonsCatalogEntity,
+  entity: ProtocolVariantEntity,
   biomarkerKey: string,
 ): HealthCommonsExpectedSignalDescription | undefined {
   return entity.expectedSignalDescriptions?.find(

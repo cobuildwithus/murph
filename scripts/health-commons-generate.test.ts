@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-describe("Health Commons generated catalog setup", () => {
+describe("Health Commons generated artifact setup", () => {
   it("runs without the global workspace-artifact lock", () => {
     const rootPackageJson = JSON.parse(
       readFileSync(path.join(repoRoot, "package.json"), "utf8"),

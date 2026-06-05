@@ -1510,7 +1510,7 @@ describe("hosted local dev stack", () => {
       "Skipping hosted web Prisma client generation; already prepared for this hosted-local E2E run.",
     );
     expect(stderr.text()).toContain(
-      "Skipping Health Commons generated catalog; already prepared for this hosted-local E2E run.",
+      "Skipping Health Commons generated artifacts; already prepared for this hosted-local E2E run.",
     );
   });
 

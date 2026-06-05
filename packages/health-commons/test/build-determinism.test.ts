@@ -146,7 +146,7 @@ describe("@murphai/health-commons build determinism", () => {
         generatedRoot: "health-commons-generated",
       }),
     ).rejects.toThrow(
-      "Health Commons generated artifacts are nondeterministic: catalog.json, catalog.hash, source-index.json, source-artifact-index.json, web/routes/index.json, web/browse/experiments.json, web/browse/biomarkers.json.",
+      "Health Commons generated artifacts are nondeterministic: catalog.hash, protocol-index.json, protocol-run-specs.json, protocol-family-graph.json, source-index.json, source-artifact-index.json, web/routes/index.json, web/browse/experiments.json, web/browse/biomarkers.json.",
     );
 
     expect(buildHealthCommonsCatalogMock).toHaveBeenCalledTimes(2);
@@ -170,6 +170,15 @@ describe("@murphai/health-commons build determinism", () => {
     );
     await expect(readFile(path.join(generatedRoot, "source-artifact-index.json"), "utf8")).resolves.toContain(
       '"schemaVersion": "murph.commons.source-artifact-index.v1"',
+    );
+    await expect(readFile(path.join(generatedRoot, "protocol-index.json"), "utf8")).resolves.toContain(
+      '"schemaVersion": "murph.commons.protocol-index.v1"',
+    );
+    await expect(readFile(path.join(generatedRoot, "protocol-run-specs.json"), "utf8")).resolves.toContain(
+      '"schemaVersion": "murph.commons.protocol-run-specs.v1"',
+    );
+    await expect(readFile(path.join(generatedRoot, "protocol-family-graph.json"), "utf8")).resolves.toContain(
+      '"schemaVersion": "murph.commons.protocol-family-graph.v1"',
     );
     await expect(readFile(path.join(generatedRoot, "web/routes/index.json"), "utf8")).resolves.toContain(
       '"schemaVersion": "murph.commons.web.route-index.v1"',
@@ -199,9 +208,11 @@ describe("@murphai/health-commons build determinism", () => {
         generatedRoot,
       });
 
-      await expect(readFile(path.join(generatedRoot, "catalog.json"), "utf8")).resolves.toContain(
+      await expect(readFile(path.join(generatedRoot, "protocol-index.json"), "utf8")).resolves.toContain(
         '"catalogHash": "sha256:first"',
       );
+      await expect(readFile(path.join(generatedRoot, "catalog.json"), "utf8"))
+        .rejects.toMatchObject({ code: "ENOENT" });
       await expect(readFile(path.join(generatedRoot, "obsolete.json"), "utf8"))
         .rejects.toMatchObject({ code: "ENOENT" });
       await expect(readFile(path.join(generatedRoot, "web", "stale", "old.json"), "utf8"))
@@ -219,6 +230,7 @@ describe("@murphai/health-commons build determinism", () => {
 
     try {
       await mkdir(generatedRoot, { recursive: true });
+      await writeFile(path.join(generatedRoot, "protocol-index.json"), "{}\n", "utf8");
       await writeFile(path.join(generatedRoot, "catalog.json"), "{}\n", "utf8");
       await writeFile(path.join(generatedRoot, "obsolete.json"), "{}\n", "utf8");
 
