@@ -490,7 +490,6 @@ describe('Codex model catalog', () => {
       createProviderAttemptResult(),
     )
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnHistory: null,
       activeTurnSteering: null,
       executionContext: {
         hosted: null,
@@ -514,7 +513,6 @@ describe('Codex model catalog', () => {
       attemptCount: 1,
       route,
       routePlan: {
-        activeTurnMessages: undefined,
         assistantCliContract: null,
         cliEnv: {},
         developerInstructions: null,
@@ -564,7 +562,6 @@ describe('Codex model catalog', () => {
     ])
     expect(providerTurnRunnerMocks.recordCodexPlan).toHaveBeenCalledWith(
       expect.objectContaining({
-        activeTurnHistoryPresent: false,
         codexContinuation: 'explicit-structured-history',
         providerRequestOrdinal: 1,
         refreshThreadInstructions: false,
@@ -608,7 +605,6 @@ describe('Codex model catalog', () => {
     } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
 
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnHistory: null,
       activeTurnSteering: null,
       executionContext: input.executionContext,
       input,
@@ -630,7 +626,6 @@ describe('Codex model catalog', () => {
       attemptCount: 1,
       route,
       routePlan: {
-        activeTurnMessages: undefined,
         assistantCliContract: null,
         cliEnv: {},
         developerInstructions: null,

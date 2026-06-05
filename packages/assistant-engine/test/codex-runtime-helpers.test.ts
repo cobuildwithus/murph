@@ -184,7 +184,6 @@ describe('Codex assistant registry helpers', () => {
     }
 
     await recordCodexAttemptStarted({
-      activeTurnMessagesPresent: true,
       attemptCount: 2,
       at: '2026-05-04T00:00:00.000Z',
       hasResumeCodexThreadId: true,
@@ -214,7 +213,6 @@ describe('Codex assistant registry helpers', () => {
         sessionId: 'session-1',
         turnId: 'turn-1',
         data: {
-          activeTurnMessagesPresent: true,
           attempt: 2,
           hasResumeCodexThreadId: true,
           model: 'gpt-5.4',
@@ -230,7 +228,6 @@ describe('Codex assistant registry helpers', () => {
     expect(
       diagnosticsMocks.recordAssistantDiagnosticEvent.mock.calls[0]?.[0]?.data,
     ).toEqual({
-      activeTurnMessagesPresent: true,
       attempt: 2,
       hasResumeCodexThreadId: true,
       model: 'gpt-5.4',
@@ -262,8 +259,6 @@ describe('Codex assistant registry helpers', () => {
     }
 
     await recordCodexPlan({
-      activeTurnHistoryMessageCount: 3,
-      activeTurnHistoryPresent: true,
       at: '2026-05-04T00:10:24.000Z',
       codexContinuation: 'provider-state-optimization',
       providerRequestOrdinal: 1,
@@ -285,8 +280,6 @@ describe('Codex assistant registry helpers', () => {
         sessionId: 'session-plan',
         turnId: 'turn-plan',
         data: {
-          activeTurnHistoryPresent: true,
-          activeTurnHistoryMessageCount: 3,
           codexHomeHash: expect.stringMatching(/^h1_[a-f0-9]{24}$/u),
           codexContinuation: 'provider-state-optimization',
           providerRequestOrdinal: 1,
@@ -1082,63 +1075,9 @@ describe('Codex assistant registry helpers', () => {
     ).toThrow('Assistant provider turns require either prompt or userPrompt.')
   })
 
-  it('serializes active turn content into a Codex flat prompt', () => {
-    const binding = createAssistantBinding({
-      actorId: 'actor-9',
-      channel: 'linq',
-      identityId: 'identity-9',
-      threadId: 'chat-9',
-      threadIsDirect: false,
-    })
-
+  it('serializes committed conversation history before the current user message', () => {
     expect(
       resolveAssistantProviderPrompt({
-        activeTurnMessages: [
-          {
-            role: 'assistant',
-            content: '  Draft answer  ',
-          },
-        ],
-        providerConfig: normalizeAssistantProviderConfig({
-          provider: 'codex-cli',
-        }),
-        sessionContext: {
-          binding,
-        },
-        systemPrompt: 'You are Murph.',
-        userPrompt: 'Latest question.',
-        workingDirectory: '/tmp/provider-tests',
-      }),
-    ).toBe(
-      [
-        'Active turn so far:',
-        'Assistant:',
-        'Draft answer',
-        '',
-        'Conversation context:',
-        'channel: linq (user-facing: iMessage)',
-        'identity: identity-9',
-        'actor: actor-9',
-        'thread: chat-9',
-        'thread is direct: false',
-        'delivery: thread route available',
-        'iMessage route note: this is not a confirmed direct iMessage thread, so do not use it as a personal reminder route unless the user explicitly asks to send in this thread; use internal channel "linq" only for route fields.',
-        '',
-        'User message:',
-        'Latest question.',
-      ].join('\n'),
-    )
-  })
-
-  it('serializes committed conversation history before active turn content', () => {
-    expect(
-      resolveAssistantProviderPrompt({
-        activeTurnMessages: [
-          {
-            role: 'assistant',
-            content: 'Draft answer',
-          },
-        ],
         conversationHistoryMessages: [
           {
             role: 'user',
@@ -1163,10 +1102,6 @@ describe('Codex assistant registry helpers', () => {
         '',
         'Assistant:',
         'Earlier answer',
-        '',
-        'Active turn so far:',
-        'Assistant:',
-        'Draft answer',
         '',
         'User message:',
         'Latest question.',
@@ -1201,8 +1136,6 @@ describe('Codex assistant registry helpers', () => {
 
   it('emits metadata-only provider prompt-size diagnostics', async () => {
     const traceEvents: AssistantProviderTraceEvent[] = []
-    const activeTurnHistoryPrompt =
-      'Active turn so far:\nAssistant:\nprivate draft should not be logged'
     const sessionBinding = createAssistantBinding({
       actorId: 'actor-private',
       channel: 'telegram',
@@ -1224,12 +1157,6 @@ describe('Codex assistant registry helpers', () => {
     })
 
     const attempt = await executeCodexAssistantTurnAttempt({
-      activeTurnMessages: [
-        {
-          content: 'private draft should not be logged',
-          role: 'assistant',
-        },
-      ],
       developerInstructions: 'Private developer instructions.',
       onTraceEvent: (event) => {
         traceEvents.push(event)
@@ -1258,9 +1185,6 @@ describe('Codex assistant registry helpers', () => {
       'primary',
     )
     expect(diagnostic).toMatchObject({
-      activeTurnHistoryCount: 1,
-      activeTurnHistoryBytes: Buffer.byteLength(activeTurnHistoryPrompt, 'utf8'),
-      activeTurnHistoryPresent: true,
       conversationContextBytes: Buffer.byteLength(conversationContextPrompt, 'utf8'),
       conversationContextPresent: true,
       developerInstructionsBytes: Buffer.byteLength(
@@ -1284,7 +1208,6 @@ describe('Codex assistant registry helpers', () => {
     })
     const serializedDiagnostic = JSON.stringify(diagnostic)
     expect(serializedDiagnostic).not.toContain('hello')
-    expect(serializedDiagnostic).not.toContain('private draft')
     expect(serializedDiagnostic).not.toContain('Private developer')
     expect(serializedDiagnostic).not.toContain('Private system')
     expect(serializedDiagnostic).not.toContain('Private runtime')
@@ -1462,7 +1385,7 @@ describe('Codex assistant registry helpers', () => {
     )
   })
 
-  it('replays committed and active-turn history only on stale native-resume fallback', async () => {
+  it('replays committed conversation history only on stale native-resume fallback', async () => {
     const traceEvents: AssistantProviderTraceEvent[] = []
 
     codexAppServerMocks.executeCodexAppServerTurn
@@ -1484,16 +1407,6 @@ describe('Codex assistant registry helpers', () => {
       })
 
     const attempt = await executeCodexAssistantTurnAttempt({
-      activeTurnMessages: [
-        {
-          content: 'initial prompt',
-          role: 'user',
-        },
-        {
-          content: 'draft before interruption',
-          role: 'assistant',
-        },
-      ],
       conversationHistoryMessages: [
         {
           content: 'earlier committed user context',
@@ -1528,12 +1441,12 @@ describe('Codex assistant registry helpers', () => {
     expect(
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0],
     ).toMatchObject({
-      prompt: expect.stringContaining('Active turn so far:'),
+      prompt: expect.stringContaining('Recent conversation history:'),
       resumeSessionId: undefined,
     })
     expect(
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]?.prompt,
-    ).toContain('draft before interruption')
+    ).not.toContain('Active turn so far:')
     expect(
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]?.prompt,
     ).toContain('earlier committed assistant context')
@@ -1547,8 +1460,6 @@ describe('Codex assistant registry helpers', () => {
       traceEvents,
       'primary',
     )).toMatchObject({
-      activeTurnHistoryCount: 0,
-      activeTurnHistoryPresent: false,
       conversationHistoryCount: 0,
       conversationHistoryPresent: false,
       providerPromptDiagnosticKind: 'primary',
@@ -1559,8 +1470,6 @@ describe('Codex assistant registry helpers', () => {
       traceEvents,
       'fresh-thread-fallback',
     )).toMatchObject({
-      activeTurnHistoryCount: 2,
-      activeTurnHistoryPresent: true,
       conversationHistoryCount: 2,
       conversationHistoryPresent: true,
       providerPromptDiagnosticKind: 'fresh-thread-fallback',
@@ -1655,16 +1564,6 @@ describe('Codex assistant registry helpers', () => {
     })
 
     const attempt = await executeCodexAssistantTurnAttempt({
-      activeTurnMessages: [
-        {
-          content: 'initial prompt',
-          role: 'user',
-        },
-        {
-          content: 'draft before invalid resume',
-          role: 'assistant',
-        },
-      ],
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
@@ -1688,12 +1587,9 @@ describe('Codex assistant registry helpers', () => {
     expect(
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0],
     ).toMatchObject({
-      prompt: expect.stringContaining('Active turn so far:'),
+      prompt: expect.not.stringContaining('Active turn so far:'),
       resumeSessionId: undefined,
     })
-    expect(
-      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]?.prompt,
-    ).toContain('draft before invalid resume')
     if (!attempt.ok) {
       throw new Error('expected successful provider attempt')
     }

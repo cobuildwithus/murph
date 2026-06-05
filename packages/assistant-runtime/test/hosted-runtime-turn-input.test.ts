@@ -31,7 +31,7 @@ describe("createHostedAssistantInputSource", () => {
       vaultRoot,
     });
 
-    await expect(source.refresh({ phase: "request_boundary" })).resolves.toEqual({
+    await expect(source.refresh({ phase: "input_available" })).resolves.toEqual({
       progressed: false,
       reason: "no_new_input",
     });

@@ -3427,7 +3427,7 @@ describe('assistant auto-reply runtime', () => {
       async (input: {
         activeTurnInput?: (
           value: {
-            phase: 'input_available' | 'request_boundary' | 'commit_barrier'
+            phase: 'input_available'
             sessionId: string
             turnId: string
             vault: string
@@ -3448,7 +3448,7 @@ describe('assistant auto-reply runtime', () => {
         response?: string
       }) => {
         const admitted = await input.activeTurnInput?.({
-          phase: 'request_boundary',
+          phase: 'input_available',
           sessionId: 'session-1',
           turnId: 'turn-1',
           vault: '/tmp/assistant-automation-vault',
@@ -3709,14 +3709,14 @@ describe('assistant auto-reply runtime', () => {
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnCheckpoint?: (checkpoint: AssistantActiveTurnInputCheckpointInput) => Promise<void>
       activeTurnInput?: (admission: {
-        phase: 'input_available' | 'request_boundary' | 'commit_barrier'
+        phase: 'input_available'
         sessionId: string
         turnId: string
         vault: string
       }) => Promise<unknown>
     }) => {
       const admitted = await input.activeTurnInput?.({
-        phase: 'request_boundary',
+        phase: 'input_available',
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
@@ -3858,7 +3858,7 @@ describe('assistant auto-reply runtime', () => {
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnCheckpoint?: (checkpoint: AssistantActiveTurnInputCheckpointInput) => Promise<void>
       activeTurnInput?: (admission: {
-        phase: 'input_available' | 'request_boundary' | 'commit_barrier'
+        phase: 'input_available'
         sessionId: string
         turnId: string
         vault: string
@@ -3867,7 +3867,7 @@ describe('assistant auto-reply runtime', () => {
     }) => {
       expect(input.deliveryReplyToMessageId).toBe('initial_msg_1')
       const admitted = await input.activeTurnInput?.({
-        phase: 'request_boundary',
+        phase: 'input_available',
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
@@ -4010,14 +4010,14 @@ describe('assistant auto-reply runtime', () => {
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnCheckpoint?: (checkpoint: AssistantActiveTurnInputCheckpointInput) => Promise<void>
       activeTurnInput?: (admission: {
-        phase: 'input_available' | 'request_boundary' | 'commit_barrier'
+        phase: 'input_available'
         sessionId: string
         turnId: string
         vault: string
       }) => Promise<unknown>
     }) => {
       const admitted = await input.activeTurnInput?.({
-        phase: 'request_boundary',
+        phase: 'input_available',
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
@@ -4216,7 +4216,7 @@ describe('assistant auto-reply runtime', () => {
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnCheckpoint?: (checkpoint: AssistantActiveTurnInputCheckpointInput) => Promise<void>
       activeTurnInput?: (admission: {
-        phase: 'input_available' | 'request_boundary' | 'commit_barrier'
+        phase: 'input_available'
         sessionId: string
         turnId: string
         vault: string
@@ -4224,14 +4224,14 @@ describe('assistant auto-reply runtime', () => {
     }) => {
       const phases = [
         'input_available',
-        'request_boundary',
-        'request_boundary',
-        'request_boundary',
-        'commit_barrier',
+        'input_available',
+        'input_available',
+        'input_available',
+        'input_available',
       ] as const
       for (const [index, lateInput] of lateInputs.entries()) {
         const admission = await input.activeTurnInput?.({
-          phase: phases[index] ?? 'request_boundary',
+          phase: phases[index] ?? 'input_available',
           sessionId: 'session-1',
           turnId: 'turn-1',
           vault: '/tmp/assistant-automation-vault',
@@ -4439,14 +4439,14 @@ describe('assistant auto-reply runtime', () => {
 
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnInput?: (admission: {
-        phase: 'input_available' | 'request_boundary' | 'commit_barrier'
+        phase: 'input_available'
         sessionId: string
         turnId: string
         vault: string
       }) => Promise<unknown>
     }) => {
       await input.activeTurnInput?.({
-        phase: 'commit_barrier',
+        phase: 'input_available',
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
@@ -4520,14 +4520,14 @@ describe('assistant auto-reply runtime', () => {
 
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnInput?: (admission: {
-        phase: 'input_available' | 'request_boundary' | 'commit_barrier'
+        phase: 'input_available'
         sessionId: string
         turnId: string
         vault: string
       }) => Promise<unknown>
     }) => {
       await input.activeTurnInput?.({
-        phase: 'request_boundary',
+        phase: 'input_available',
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
@@ -5605,14 +5605,14 @@ describe('assistant auto-reply runtime', () => {
     }
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnInput?: (admission: {
-        phase: 'input_available' | 'request_boundary' | 'commit_barrier'
+        phase: 'input_available'
         sessionId: string
         turnId: string
         vault: string
       }) => Promise<unknown>
     }) => {
       const admitted = await input.activeTurnInput?.({
-        phase: 'request_boundary',
+        phase: 'input_available',
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
@@ -5755,14 +5755,14 @@ describe('assistant auto-reply runtime', () => {
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnCheckpoint?: (checkpoint: AssistantActiveTurnInputCheckpointInput) => Promise<void>
       activeTurnInput?: (admission: {
-        phase: 'input_available' | 'request_boundary' | 'commit_barrier'
+        phase: 'input_available'
         sessionId: string
         turnId: string
         vault: string
       }) => Promise<unknown>
     }) => {
       const admitted = await input.activeTurnInput?.({
-        phase: 'request_boundary',
+        phase: 'input_available',
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
@@ -6413,7 +6413,7 @@ describe('assistant auto-reply runtime', () => {
       async (input: {
         activeTurnInput?: (
           value: {
-            phase: 'input_available' | 'request_boundary' | 'commit_barrier'
+            phase: 'input_available'
             sessionId: string
             turnId: string
             vault: string
@@ -6430,7 +6430,7 @@ describe('assistant auto-reply runtime', () => {
         expect(input.deliveryIdempotencyKey).toMatch(/^sha256:[0-9a-f]{64}$/u)
         expect(input.deliveryIdempotencyKey).not.toBe(replayKey)
         const admitted = await input.activeTurnInput?.({
-          phase: 'request_boundary',
+          phase: 'input_available',
           sessionId: 'session-1',
           turnId: 'turn-1',
           vault: '/tmp/assistant-automation-vault',
@@ -6789,14 +6789,14 @@ describe('assistant auto-reply runtime', () => {
     }
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnInput?: (admission: {
-        phase: 'input_available' | 'request_boundary' | 'commit_barrier'
+        phase: 'input_available'
         sessionId: string
         turnId: string
         vault: string
       }) => Promise<unknown>
     }) => {
       await input.activeTurnInput?.({
-        phase: 'request_boundary',
+        phase: 'input_available',
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',

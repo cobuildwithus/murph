@@ -62,21 +62,19 @@ import {
   resolveAssistantMurphProductBaseUrl,
   type AssistantPromptCacheMetadata,
 } from '../system-prompt.js'
-import {
-  type AssistantActiveTurnProviderHistory,
-  type AssistantActiveTurnProviderHistoryMessage,
-} from '../active-turn-history.js'
 import type {
   AssistantCodexContinuation,
 } from '../active-turn-input-journal.js'
+import type {
+  AssistantProviderConversationMessage,
+} from '../providers/types.js'
 import { normalizeNullableString } from '../shared.js'
 
 export interface AssistantRouteTurnPlan {
   assistantCliContract: string | null
   cliEnv: NodeJS.ProcessEnv
   developerInstructions: string | null
-  activeTurnMessages?: readonly AssistantActiveTurnProviderHistoryMessage[]
-  conversationHistoryMessages?: readonly AssistantActiveTurnProviderHistoryMessage[]
+  conversationHistoryMessages?: readonly AssistantProviderConversationMessage[]
   diagnosticsPolicy: AssistantDiagnosticsPolicy
   freshThreadFallback?: AssistantRouteFreshThreadFallbackPlan
   prepareFreshThreadFallback?: () => Promise<AssistantRouteFreshThreadFallbackPlan | null>
@@ -165,7 +163,7 @@ const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_TOTAL_BYTES = 12_000
 const assistantConversationHistoryTextEncoder = new TextEncoder()
 
 export interface AssistantRouteFreshThreadFallbackPlan {
-  conversationHistoryMessages?: readonly AssistantActiveTurnProviderHistoryMessage[]
+  conversationHistoryMessages?: readonly AssistantProviderConversationMessage[]
   developerInstructions: string | null
   sessionContext?: {
     binding: AssistantSession['binding']
@@ -221,7 +219,6 @@ export interface AssistantCodexThreadPlan {
 
 export interface AssistantCodexTurnExecutionPlan {
   activeTurnSteering: AssistantActiveTurnLiveProviderSteering | null
-  activeTurnHistory: AssistantActiveTurnProviderHistory | null
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext>
   input: AssistantMessageInput
   memoryTurnEnv: NodeJS.ProcessEnv
@@ -303,7 +300,6 @@ export function resolveAssistantCodexThreadScope(input: {
 }
 
 export async function buildCodexTurnExecutionPlan(input: {
-  activeTurnHistory?: AssistantActiveTurnProviderHistory | null
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
@@ -338,7 +334,6 @@ export async function buildCodexTurnExecutionPlan(input: {
   return {
     activeTurnSteering: input.activeTurnSteering ?? null,
     executionContext,
-    activeTurnHistory: input.activeTurnHistory ?? null,
     input: input.input,
     memoryTurnEnv,
     profile,
@@ -361,7 +356,6 @@ export async function buildCodexTurnAttemptPlan(input: {
     route,
     routePlan: await resolveAssistantRouteTurnPlan({
       executionContext: input.executionPlan.executionContext,
-      activeTurnHistory: input.executionPlan.activeTurnHistory,
       input: input.executionPlan.input,
       profile: input.executionPlan.profile,
       promptTimeContext: input.executionPlan.promptTimeContext,
@@ -375,7 +369,6 @@ export async function buildCodexTurnAttemptPlan(input: {
 }
 
 export async function resolveAssistantRouteTurnPlan(input: {
-  activeTurnHistory?: AssistantActiveTurnProviderHistory | null
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext> | null
   input: AssistantMessageInput
   profile: AssistantCodexTurnResolvedExecutionProfile
@@ -403,13 +396,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
       ...input.route.providerOptions,
     }),
   )
-  const activeTurnHistory = input.activeTurnHistory ?? null
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread'
   const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
-          activeTurnHistory,
           currentUserPrompt: input.input.prompt,
           sessionId: input.session.sessionId,
           vault: input.input.vault,
@@ -454,10 +445,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const shouldPrepareConversationThreadInstructions =
     shouldPrepareBootstrapContext && input.profile.promptProfile === 'conversation'
   let cliBootstrapElapsedMs: number | null = null
- const bootstrapAssistantCliContract = shouldPrepareConversationThreadInstructions
-   ? await measureRoutePlanningAsync(
-       routePlanningSpans,
-       'cliBootstrapElapsedMs',
+  const bootstrapAssistantCliContract = shouldPrepareConversationThreadInstructions
+    ? await measureRoutePlanningAsync(
+        routePlanningSpans,
+        'cliBootstrapElapsedMs',
         () => readAssistantCliSurfaceBootstrapContext({
           sessionId: input.session.sessionId,
           vault: input.input.vault,
@@ -613,7 +604,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
     assistantCliContract: actualAssistantCliContract,
     cliEnv: input.sharedPlan.cliAccess.env,
     developerInstructions: normalizeNullableString(developerInstructions),
-    activeTurnMessages: activeTurnHistory?.messages ?? undefined,
     conversationHistoryMessages:
       conversationHistoryMessages.length > 0
         ? conversationHistoryMessages
@@ -659,11 +649,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
 }
 
 async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
-  activeTurnHistory: AssistantActiveTurnProviderHistory | null
   currentUserPrompt: string
   sessionId: string
   vault: string
-}): Promise<readonly AssistantActiveTurnProviderHistoryMessage[]> {
+}): Promise<readonly AssistantProviderConversationMessage[]> {
   let entries: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>
   try {
     entries = await listAssistantTranscriptEntries(input.vault, input.sessionId)
@@ -672,7 +661,7 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   }
 
   type TranscriptHistoryCandidate = {
-    message: AssistantActiveTurnProviderHistoryMessage
+    message: AssistantProviderConversationMessage
     userPromptKey: string | null
   }
 
@@ -699,15 +688,6 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   })
 
   const currentPromptKey = normalizeAssistantConversationHistoryText(input.currentUserPrompt)
-  const activeTurnUserPromptKeys = new Set(
-    (input.activeTurnHistory?.messages ?? []).flatMap((message) => {
-      if (message.role !== 'user' || typeof message.content !== 'string') {
-        return []
-      }
-      const normalized = normalizeAssistantConversationHistoryText(message.content)
-      return normalized ? [normalized] : []
-    }),
-  )
 
   while (messages.length > 0) {
     const lastMessage = messages[messages.length - 1]
@@ -723,8 +703,7 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
       normalizeAssistantConversationHistoryText(lastMessage.message.content)
     if (
       !lastUserPromptKey ||
-      (currentPromptKey && lastUserPromptKey === currentPromptKey) ||
-      activeTurnUserPromptKeys.has(lastUserPromptKey)
+      (currentPromptKey && lastUserPromptKey === currentPromptKey)
     ) {
       messages.pop()
       continue
@@ -743,10 +722,10 @@ function normalizeAssistantConversationHistoryText(value: string): string | null
 }
 
 function limitAssistantConversationHistoryMessages(
-  messages: readonly AssistantActiveTurnProviderHistoryMessage[],
-): AssistantActiveTurnProviderHistoryMessage[] {
+  messages: readonly AssistantProviderConversationMessage[],
+): AssistantProviderConversationMessage[] {
   const countLimited = messages.slice(-ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT)
-  const retained: AssistantActiveTurnProviderHistoryMessage[] = []
+  const retained: AssistantProviderConversationMessage[] = []
   let retainedBytes = 0
 
   for (const message of [...countLimited].reverse()) {

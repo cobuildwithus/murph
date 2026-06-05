@@ -17,6 +17,7 @@ import { normalizeNullableString } from './shared.js'
 import { resolveAssistantConversationLookupKey } from './store/paths.js'
 
 type AssistantActiveTurnInputControllerKey = string
+type AssistantActiveTurnLiveProviderTurnKey = string
 
 interface AssistantActiveTurnInputControllerKeyInput extends AssistantSessionLocator {
   conversationKeys?: readonly string[] | null
@@ -34,7 +35,8 @@ type AssistantAcceptedActiveTurnInputAdmission =
 interface QueuedAssistantActiveTurnInputAdmission {
   admission: AssistantAcceptedActiveTurnInputAdmission
   providerInputAck?: Promise<boolean> | null
-  providerInputAcknowledged: boolean
+  providerInputAckTurnKey?: AssistantActiveTurnLiveProviderTurnKey | null
+  providerInputAcknowledgedTurnKey?: AssistantActiveTurnLiveProviderTurnKey | null
 }
 
 type AssistantActiveTurnInputSteerResult =
@@ -44,6 +46,9 @@ type AssistantActiveTurnInputSteerResult =
     }
   | {
       kind: 'no-active-turn'
+    }
+  | {
+      kind: 'turn-ended'
     }
   | {
       kind: 'turn-id-mismatch'
@@ -57,6 +62,9 @@ class AssistantActiveTurnInputController {
   private inputAvailableAdmission: Promise<AssistantActiveTurnInputAdmissionResult | undefined> | null = null
   private inputAvailableAdmissionRerunRequested = false
   private liveProviderTurn: AssistantActiveTurnLiveProviderTurn | null = null
+  private liveProviderTurnKey: AssistantActiveTurnLiveProviderTurnKey | null = null
+  private liveProviderTurnEnded = false
+  private completedProviderTurnKey: AssistantActiveTurnLiveProviderTurnKey | null = null
   private pending: QueuedAssistantActiveTurnInputAdmission[] = []
   private completion:
     | {
@@ -72,7 +80,6 @@ class AssistantActiveTurnInputController {
       acceptedInputValidator?: (input: {
         acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
       }) => Promise<void>
-      boundaryAdmissionEnabled?: boolean
       eventAdmissionEnabled?: boolean
       sessionId: string
       turnId: string
@@ -91,13 +98,18 @@ class AssistantActiveTurnInputController {
         kind: 'turn-id-mismatch',
       }
     }
+    if (this.liveProviderTurnEnded) {
+      return {
+        kind: 'turn-ended',
+      }
+    }
     const id = `manual-${this.nextInputOrdinal}`
     const queued: QueuedAssistantActiveTurnInputAdmission = {
       admission: buildManualAcceptedActiveTurnInputAdmission({
         id,
         input,
       }),
-      providerInputAcknowledged: false,
+      providerInputAcknowledgedTurnKey: null,
     }
     this.pending.push(queued)
     this.nextInputOrdinal += 1
@@ -111,7 +123,10 @@ class AssistantActiveTurnInputController {
   notifyInputAvailable(input?: {
     signal?: AbortSignal
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
-    if (this.input.eventAdmissionEnabled === false) {
+    if (
+      this.input.eventAdmissionEnabled === false ||
+      this.liveProviderTurnEnded
+    ) {
       return Promise.resolve(undefined)
     }
 
@@ -133,6 +148,8 @@ class AssistantActiveTurnInputController {
   close(): void {
     this.closed = true
     this.liveProviderTurn = null
+    this.liveProviderTurnKey = null
+    this.liveProviderTurnEnded = true
   }
 
   registerLiveProviderTurn(input: AssistantActiveTurnLiveProviderTurn): () => void {
@@ -146,30 +163,21 @@ class AssistantActiveTurnInputController {
       return () => {}
     }
 
+    const liveProviderTurnKey = formatAssistantActiveTurnLiveProviderTurnKey(input)
     this.liveProviderTurn = input
+    this.liveProviderTurnKey = liveProviderTurnKey
+    this.liveProviderTurnEnded = false
+    this.completedProviderTurnKey = null
     this.tryStartLiveSteers()
 
     return () => {
       if (this.liveProviderTurn === input) {
         this.liveProviderTurn = null
+        this.liveProviderTurnKey = null
+        this.liveProviderTurnEnded = true
+        this.completedProviderTurnKey = liveProviderTurnKey
       }
     }
-  }
-
-  async admit(
-    input: AssistantActiveTurnInputAdmissionInput,
-  ): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
-    const availableAdmission = await this.admitAvailable()
-    if (availableAdmission?.kind === 'accepted') {
-      return availableAdmission
-    }
-
-    if (this.input.boundaryAdmissionEnabled === false) {
-      return undefined
-    }
-
-    const hookAdmission = await this.admitHookInput(input)
-    return (await this.admitPending()) ?? hookAdmission
   }
 
   async admitAvailable(input?: {
@@ -192,8 +200,20 @@ class AssistantActiveTurnInputController {
     return await this.admitPending()
   }
 
-  private async admitPending(): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
-    const accepted = await this.dequeueAdmissiblePendingPrefix()
+  async admitLiveSteered(): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
+    this.throwFatalAdmissionError()
+    await this.waitForInputAvailableAdmission()
+    return await this.admitPending({ requireProviderAcknowledged: true })
+  }
+
+  private async admitPending(input?: {
+    requireProviderAcknowledged?: boolean
+  }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
+    const providerTurnKey = this.resolveProviderAcknowledgementKey()
+    const accepted = await this.dequeueAdmissiblePendingPrefix({
+      providerTurnKey,
+      requireProviderAcknowledged: input?.requireProviderAcknowledged,
+    })
     if (accepted.length === 0) {
       return undefined
     }
@@ -202,7 +222,10 @@ class AssistantActiveTurnInputController {
       accepted
         .map((item) => item.admission)
         .reduce(mergeAcceptedActiveTurnInputAdmissions),
-      accepted.every((item) => item.providerInputAcknowledged),
+      providerTurnKey !== null &&
+        accepted.every((item) =>
+          item.providerInputAcknowledgedTurnKey === providerTurnKey
+        ),
     )
   }
 
@@ -213,6 +236,8 @@ class AssistantActiveTurnInputController {
   fail(error: unknown): void {
     this.closed = true
     this.liveProviderTurn = null
+    this.liveProviderTurnKey = null
+    this.liveProviderTurnEnded = true
     this.completion?.reject(error)
   }
 
@@ -284,19 +309,6 @@ class AssistantActiveTurnInputController {
     return acceptedResult ?? result
   }
 
-  private async admitHookInput(
-    input: AssistantActiveTurnInputAdmissionInput,
-  ): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
-    if (!this.input.admissionHook) {
-      return undefined
-    }
-
-    return await this.runAdmissionHook(() => ({
-      ...input,
-      ...this.resolveKnownAdmissionInput(),
-    }))
-  }
-
   private async runAdmissionHook(
     buildInput: () => AssistantActiveTurnInputAdmissionInput,
   ): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
@@ -315,7 +327,12 @@ class AssistantActiveTurnInputController {
       }
 
       const result = await this.input.admissionHook(buildInput())
-      await this.queueHookAdmission(result)
+      const queued = await this.queueHookAdmission(result)
+      if (result?.kind === 'accepted' && !queued) {
+        return {
+          kind: 'no-new-input',
+        }
+      }
       return result
     } finally {
       release()
@@ -357,9 +374,13 @@ class AssistantActiveTurnInputController {
 
   private async queueHookAdmission(
     result: AssistantActiveTurnInputAdmissionResult | undefined,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (result?.kind !== 'accepted') {
-      return
+      return true
+    }
+
+    if (this.liveProviderTurnEnded && !this.liveProviderTurn) {
+      return false
     }
 
     await this.input.acceptedInputValidator?.({
@@ -367,10 +388,11 @@ class AssistantActiveTurnInputController {
     })
     const queued = {
       admission: normalizeAcceptedActiveTurnInputAdmission(result),
-      providerInputAcknowledged: false,
+      providerInputAcknowledgedTurnKey: null,
     }
     this.pending.push(queued)
     this.tryStartLiveSteers()
+    return true
   }
 
   private resolveKnownAdmissionInput(): Pick<
@@ -395,14 +417,27 @@ class AssistantActiveTurnInputController {
     }
   }
 
-  private async dequeueAdmissiblePendingPrefix(): Promise<QueuedAssistantActiveTurnInputAdmission[]> {
+  private resolveProviderAcknowledgementKey(): AssistantActiveTurnLiveProviderTurnKey | null {
+    return this.liveProviderTurnKey ?? this.completedProviderTurnKey
+  }
+
+  private async dequeueAdmissiblePendingPrefix(input: {
+    providerTurnKey: AssistantActiveTurnLiveProviderTurnKey | null
+    requireProviderAcknowledged?: boolean
+  }): Promise<QueuedAssistantActiveTurnInputAdmission[]> {
     const first = this.pending[0]
     if (!first) {
       return []
     }
 
     await first.providerInputAck?.catch(() => undefined)
-    const providerInputAcknowledged = first.providerInputAcknowledged
+    this.throwFatalAdmissionError()
+    const providerInputAcknowledged =
+      input.providerTurnKey !== null &&
+      first.providerInputAcknowledgedTurnKey === input.providerTurnKey
+    if (input.requireProviderAcknowledged === true && !providerInputAcknowledged) {
+      return []
+    }
     const accepted: QueuedAssistantActiveTurnInputAdmission[] = []
     const pendingLength = this.pending.length
 
@@ -413,7 +448,11 @@ class AssistantActiveTurnInputController {
       }
 
       await item.providerInputAck?.catch(() => undefined)
-      if (item.providerInputAcknowledged !== providerInputAcknowledged) {
+      this.throwFatalAdmissionError()
+      const itemProviderInputAcknowledged =
+        input.providerTurnKey !== null &&
+        item.providerInputAcknowledgedTurnKey === input.providerTurnKey
+      if (itemProviderInputAcknowledged !== providerInputAcknowledged) {
         break
       }
 
@@ -427,34 +466,75 @@ class AssistantActiveTurnInputController {
 
   private tryStartLiveSteers(): void {
     const liveProviderTurn = this.liveProviderTurn
-    if (this.closed || !liveProviderTurn) {
+    const liveProviderTurnKey = this.liveProviderTurnKey
+    if (this.closed || !liveProviderTurn || !liveProviderTurnKey) {
       return
     }
 
     for (const item of this.pending) {
-      if (item.providerInputAcknowledged) {
+      if (item.providerInputAcknowledgedTurnKey === liveProviderTurnKey) {
         continue
       }
-      if (item.providerInputAck) {
+      if (item.providerInputAck && item.providerInputAckTurnKey === liveProviderTurnKey) {
         return
       }
 
+      item.providerInputAckTurnKey = liveProviderTurnKey
       item.providerInputAck = liveProviderTurn
         .steer({
           prompt: normalizeNullableString(item.admission.prompt) ?? '',
           userMessageContent: item.admission.userMessageContent ?? null,
         })
         .then(() => {
-          const acknowledged =
-            !this.closed && this.liveProviderTurn === liveProviderTurn
-          if (acknowledged) {
-            item.providerInputAcknowledged = true
+          if (
+            !this.closed &&
+            item.providerInputAckTurnKey === liveProviderTurnKey
+          ) {
+            item.providerInputAcknowledgedTurnKey = liveProviderTurnKey
           }
           this.tryStartLiveSteers()
-          return acknowledged
+          return item.providerInputAcknowledgedTurnKey === liveProviderTurnKey
         })
-        .catch(() => false)
+        .catch(async (error: unknown) => {
+          await this.handleLiveProviderSteerError({
+            error,
+            item,
+            liveProviderTurn,
+            liveProviderTurnKey,
+          })
+          return false
+        })
       return
+    }
+  }
+
+  private async handleLiveProviderSteerError(input: {
+    error: unknown
+    item: QueuedAssistantActiveTurnInputAdmission
+    liveProviderTurn: AssistantActiveTurnLiveProviderTurn
+    liveProviderTurnKey: AssistantActiveTurnLiveProviderTurnKey
+  }): Promise<void> {
+    if (this.closed) {
+      return
+    }
+
+    if (
+      this.liveProviderTurn !== null &&
+      this.liveProviderTurn !== input.liveProviderTurn
+    ) {
+      if (input.item.providerInputAckTurnKey === input.liveProviderTurnKey) {
+        input.item.providerInputAck = null
+        input.item.providerInputAckTurnKey = null
+      }
+      this.tryStartLiveSteers()
+      return
+    }
+
+    const shouldInterrupt = this.liveProviderTurn === input.liveProviderTurn
+    this.fatalAdmissionError = input.error
+    this.fail(input.error)
+    if (shouldInterrupt) {
+      await input.liveProviderTurn.interrupt().catch(() => undefined)
     }
   }
 
@@ -479,20 +559,17 @@ export function createAssistantActiveTurnInputController(input: {
     acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
   }) => Promise<void>
   admissionHook?: AssistantActiveTurnInputAdmissionHook | null
-  boundaryAdmissionEnabled?: boolean
   conversationKeys?: readonly string[] | null
   eventAdmissionEnabled?: boolean
   sessionId: string
   turnId: string
   vault: string
 }): {
-  admit(input: AssistantActiveTurnInputAdmissionInput): Promise<
-    AssistantActiveTurnInputAdmissionResult | undefined
-  >
   admitAvailable(input?: {
     probeIfIdle?: boolean
     signal?: AbortSignal
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined>
+  admitLiveSteered(): Promise<AssistantActiveTurnInputAdmissionResult | undefined>
   close(): void
   complete(result: AssistantAskResult): void
   fail(error: unknown): void
@@ -505,7 +582,6 @@ export function createAssistantActiveTurnInputController(input: {
   const controller = new AssistantActiveTurnInputController({
     acceptedInputValidator: input.acceptedInputValidator,
     admissionHook: input.admissionHook,
-    boundaryAdmissionEnabled: input.boundaryAdmissionEnabled,
     eventAdmissionEnabled: input.eventAdmissionEnabled,
     sessionId: input.sessionId,
     turnId: input.turnId,
@@ -516,8 +592,8 @@ export function createAssistantActiveTurnInputController(input: {
   }
 
   return {
-    admit: (admissionInput) => controller.admit(admissionInput),
     admitAvailable: (input) => controller.admitAvailable(input),
+    admitLiveSteered: () => controller.admitLiveSteered(),
     close() {
       controller.close()
       for (const key of keys) {
@@ -661,6 +737,12 @@ function formatAssistantActiveTurnInputControllerKey(input: {
   vault: string
 }): AssistantActiveTurnInputControllerKey {
   return `${input.vault}\u0000${input.kind}\u0000${input.value}`
+}
+
+function formatAssistantActiveTurnLiveProviderTurnKey(
+  input: Pick<AssistantActiveTurnLiveProviderTurn, 'codexThreadId' | 'providerTurnId'>,
+): AssistantActiveTurnLiveProviderTurnKey {
+  return `${input.codexThreadId}\u0000${input.providerTurnId}`
 }
 
 function mergeAssistantActiveTurnInputAdmissions(

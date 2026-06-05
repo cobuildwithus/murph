@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-06-04
+Last verified: 2026-06-05
 
 ## Decision
 
@@ -391,14 +391,17 @@ supported by the hosted foreground mailbox import loop plus the store-backed
 assistant input spine: a payloadless runtime wake causes the active child to
 import conversation mailbox rows, stage any new `AssistantInputEvent` records,
 run prompt-preparation effects best-effort, and notify active-turn admission.
-The assistant engine then admits the persisted input through live steer,
-event-driven, provider-boundary, or pre-provider admission without using
-hosted-specific mailbox refresh/checkpoint ports. Accepted-input journaling,
-transcript updates, checkpoint bookkeeping, provider-request metadata, and
-outbox intent creation remain on the normal local assistant-service path.
-The same-reply coalescing window ends at the local commit barrier/outbox intent
-decision, not at physical provider delivery; mailbox input that arrives after
-that boundary remains durable staged input for a later turn.
+The assistant engine then admits the persisted input through live steering or
+pre-provider admission without using hosted-specific mailbox
+refresh/checkpoint ports. While a Codex turn is live, same-conversation input is
+steered into that live provider turn. After the live provider turn ends, new
+input remains staged for a normal later assistant turn; the assistant engine
+does not synthesize another provider request inside the same assistant turn.
+Accepted-input journaling, transcript updates, checkpoint bookkeeping,
+provider-request metadata, and outbox intent creation remain on the normal
+local assistant-service path. The same-reply coalescing window ends when the
+live provider turn ends, not at physical provider delivery; mailbox input that
+arrives after that boundary remains durable staged input for a later turn.
 Hosted Linq reply sends are idempotent when an outbox idempotency key is
 present. The Linq HTTP layer may retry those POST sends on transient transport,
 408, or 5xx failures, and the hosted outbox must keep such failures retryable
@@ -474,7 +477,9 @@ restore must still be correct from durable mailbox, transcript, and assistant
 runtime state even if provider-native resume optimization is unavailable.
 Fresh-thread starts and stale native-resume fallback may include bounded recent
 committed transcript history; primary native-resume attempts do not replay that
-history into the provider prompt.
+history into the provider prompt. Active-turn input is not serialized as
+provider prompt history; it is either folded in before the first provider
+request or steered through the live Codex turn.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
 state. `apps/web` assesses freshness from the latest replica ref, checkpoint

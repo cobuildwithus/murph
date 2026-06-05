@@ -48,7 +48,6 @@ import type {
   AssistantProgressDelivery,
 } from './turn-progress.js'
 import type { AssistantCodexContinuation } from './active-turn-input-journal.js'
-import type { AssistantActiveTurnProviderHistory } from './active-turn-history.js'
 import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantProviderTraceEvent } from './provider-traces.js'
 import {
@@ -127,7 +126,6 @@ export type AssistantCodexTurnRecoveryOutcome =
     }
 
 export async function executeCodexTurnWithRecovery(input: {
-  activeTurnHistory?: AssistantActiveTurnProviderHistory | null
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   input: AssistantMessageInput
   onProviderRequestPlanned?: (event: {
@@ -229,8 +227,6 @@ function createAssistantProviderUsageAttribution(input: {
 }
 
 function emitCodexPlanTraceEvent(input: {
-  activeTurnHistoryMessageCount: number
-  activeTurnHistoryPresent: boolean
   onTraceEvent?: ((event: AssistantProviderTraceEvent) => void) | null
   codexContinuation: string
   providerRequestOrdinal: number | null
@@ -249,8 +245,6 @@ function emitCodexPlanTraceEvent(input: {
       rawEvent: {
         schema: ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA,
         type: ASSISTANT_PROVIDER_PLAN_TRACE_TYPE,
-        activeTurnHistoryCount: input.activeTurnHistoryMessageCount,
-        activeTurnHistoryPresent: input.activeTurnHistoryPresent,
         codexContinuation: input.codexContinuation,
         providerRequestOrdinal: input.providerRequestOrdinal,
         routePlanningElapsedMs: input.routePlanningDiagnostics.routePlanningElapsedMs,
@@ -319,10 +313,6 @@ async function executeAssistantCodexAttempt(input: {
 
   const attemptAt = new Date().toISOString()
   await recordCodexPlan({
-    activeTurnHistoryMessageCount:
-      executionPlan.activeTurnHistory?.messages.length ?? 0,
-    activeTurnHistoryPresent:
-      (executionPlan.activeTurnHistory?.messages.length ?? 0) > 0,
     at: attemptAt,
     codexContinuation: attemptPlan.routePlan.codexContinuation.kind,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
@@ -337,10 +327,6 @@ async function executeAssistantCodexAttempt(input: {
     workingDirectory: attemptPlan.routePlan.workingDirectory,
   })
   emitCodexPlanTraceEvent({
-    activeTurnHistoryMessageCount:
-      executionPlan.activeTurnHistory?.messages.length ?? 0,
-    activeTurnHistoryPresent:
-      (executionPlan.activeTurnHistory?.messages.length ?? 0) > 0,
     onTraceEvent: executionPlan.input.onTraceEvent,
     codexContinuation: attemptPlan.routePlan.codexContinuation.kind,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
@@ -351,8 +337,6 @@ async function executeAssistantCodexAttempt(input: {
     workingDirectory: attemptPlan.routePlan.workingDirectory,
   })
   await recordCodexAttemptStarted({
-    activeTurnMessagesPresent:
-      (attemptPlan.routePlan.activeTurnMessages?.length ?? 0) > 0,
     attemptCount: attemptPlan.attemptCount,
     at: attemptAt,
     hasResumeCodexThreadId:
@@ -436,7 +420,6 @@ async function executeAssistantCodexAttempt(input: {
       reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
       sandbox: attemptPlan.route.providerOptions.sandbox,
       approvalPolicy: attemptPlan.route.providerOptions.approvalPolicy,
-      activeTurnMessages: attemptPlan.routePlan.activeTurnMessages,
       conversationHistoryMessages:
         attemptPlan.routePlan.conversationHistoryMessages,
       onEvent: executionPlan.input.onProviderEvent ?? undefined,

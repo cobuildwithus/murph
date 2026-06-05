@@ -1,10 +1,7 @@
 import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantAcceptedTurnInputItemInput } from './active-turn-input-journal.js'
 
-export type AssistantTurnInputRefreshPhase =
-  | 'input_available'
-  | 'request_boundary'
-  | 'commit_barrier'
+export type AssistantTurnInputRefreshPhase = 'input_available'
 
 export interface AssistantTurnInputRefreshInput {
   phase: AssistantTurnInputRefreshPhase
@@ -30,10 +27,7 @@ export interface AssistantActiveTurnInputAdmissionBaseInput {
   vault: string
 }
 
-export type AssistantActiveTurnInputPhase =
-  | 'input_available'
-  | 'request_boundary'
-  | 'commit_barrier'
+export type AssistantActiveTurnInputPhase = 'input_available'
 
 export interface AssistantActiveTurnInputAdmissionInput
   extends AssistantActiveTurnInputAdmissionBaseInput {}

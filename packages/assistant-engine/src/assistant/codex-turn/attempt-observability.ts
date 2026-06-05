@@ -13,7 +13,6 @@ import {
 } from '../turns.js'
 
 export async function recordCodexAttemptStarted(input: {
-  activeTurnMessagesPresent: boolean
   attemptCount: number
   at: string
   hasResumeCodexThreadId: boolean
@@ -55,7 +54,6 @@ export async function recordCodexAttemptStarted(input: {
       codexContinuationKind: input.codexContinuationKind,
       refreshThreadInstructions: input.refreshThreadInstructions,
       hasResumeCodexThreadId: input.hasResumeCodexThreadId,
-      activeTurnMessagesPresent: input.activeTurnMessagesPresent,
     },
     counterDeltas: {
       providerAttempts: 1,
@@ -65,8 +63,6 @@ export async function recordCodexAttemptStarted(input: {
 }
 
 export async function recordCodexPlan(input: {
-  activeTurnHistoryMessageCount: number
-  activeTurnHistoryPresent: boolean
   at: string
   codexContinuation: string
   providerRequestOrdinal: number | null
@@ -99,8 +95,6 @@ export async function recordCodexPlan(input: {
       codexContinuation: input.codexContinuation,
       resumeCodexThreadIdPresent: input.resumeCodexThreadIdPresent,
       refreshThreadInstructions: input.refreshThreadInstructions,
-      activeTurnHistoryPresent: input.activeTurnHistoryPresent,
-      activeTurnHistoryMessageCount: input.activeTurnHistoryMessageCount,
       ...pathDiagnostics,
     },
     at: input.at,
