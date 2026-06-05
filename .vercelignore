@@ -3,18 +3,40 @@
 !.env.example
 
 .artifacts/
+.claude/
+.codex-audit/
+.codex-runs/
+.codex-worker-prompts/
+.codex-worktrees/
+.deepsec/
+.gstack/
 .runtime/
 .tmp/
 .turbo/
 .vercel/
+.windsurf/
 
 .next/
 .next-dev/
 .next-smoke/
 .next-smoke*/
+assistant-state/
+audit-packages/
 coverage/
 dist/
 node_modules/
+output-packages/
+research-artifacts/
+review-stage/
+source-artifacts/
+vault/
+
+apps/cloudflare/.deploy
+apps/cloudflare/.dev.vars*
+apps/cloudflare/.runner.env*
+apps/cloudflare/.wrangler/
+packages/health-commons/generated/
+scripts/murph-age/
 
 *.log
 *.tsbuildinfo
