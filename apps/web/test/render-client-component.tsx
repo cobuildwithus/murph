@@ -14,6 +14,7 @@ type RenderClientComponentResult<TButton extends HTMLButtonElement | null> = {
   cleanup: () => Promise<void>;
   container: HTMLElement;
   open: ReturnType<typeof vi.fn>;
+  reload: ReturnType<typeof vi.fn>;
   window: Window & typeof globalThis;
 };
 
@@ -38,10 +39,12 @@ export async function renderClientComponent(
   installGlobals(window, document);
   const assign = vi.fn();
   const open = vi.fn();
+  const reload = vi.fn();
   Object.defineProperty(window, "location", {
     configurable: true,
     value: {
       assign,
+      reload,
       ...(options.location ?? {}),
     },
   });
@@ -73,6 +76,7 @@ export async function renderClientComponent(
     },
     container,
     open,
+    reload,
     window,
   };
 }

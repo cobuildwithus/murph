@@ -2782,7 +2782,7 @@ describe("HostedPhoneAuth", () => {
       vi.unstubAllGlobals();
     }
 
-    assert.equal(refreshUser.mock.calls.length, 2);
+    assert.equal(refreshUser.mock.calls.length, 1);
     assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
     assert.equal(typeof ensureHostedPrivyPhoneReady.mock.calls[0]?.[0]?.createWallet, "function");
     assert.deepEqual(ensureHostedPrivyPhoneReady.mock.calls[0]?.[0]?.user, {

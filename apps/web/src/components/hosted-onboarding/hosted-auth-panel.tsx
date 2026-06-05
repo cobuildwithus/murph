@@ -7,6 +7,7 @@ import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-cons
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import type { HostedAuthCompletionResult } from "./hosted-auth-completion";
+import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 
 import {
   HostedAuthLegalNotice,
@@ -65,7 +66,7 @@ export function HostedAuthPanel({
       return;
     }
 
-    window.location.assign(result.redirectUrl);
+    navigateHostedAuthRedirect(result.redirectUrl);
   }
 
   async function handleConsentSatisfied() {
@@ -80,7 +81,7 @@ export function HostedAuthPanel({
     }
 
     pendingAuthCompletionRef.current = null;
-    window.location.assign(result.redirectUrl);
+    navigateHostedAuthRedirect(result.redirectUrl);
   }
 
   if (pendingAuthCompletion) {
@@ -184,6 +185,7 @@ function shouldGateHostedAuthCompletionWithLaunchConsent({
   result: HostedAuthCompletionResult;
 }): boolean {
   if (!requireLaunchConsentOnCompletion) return false;
+  if (result.payload.launchConsentGranted) return false;
 
   return (
     result.payload.stage === "checkout"

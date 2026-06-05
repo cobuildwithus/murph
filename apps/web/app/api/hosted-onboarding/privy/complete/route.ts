@@ -19,6 +19,8 @@ import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-servic
 import { requirePrivyCompletionSession } from "@/src/lib/hosted-onboarding/request-auth";
 import { issueHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { resolveHostedSignupTimeZone } from "@/src/lib/hosted-onboarding/time-zone-hint";
+import { readHostedConsentStatus } from "@/src/lib/legal/consent";
+import { getPrisma } from "@/src/lib/prisma";
 import {
   remapHostedPrivyCompletionLagError,
   type HostedPrivyIdentity,
@@ -48,10 +50,13 @@ export const POST = withJsonError(async (request: Request) => {
     }).catch((error: unknown) => {
       throw remapHostedPrivyCompletionLagError(error);
     });
-    const status = await getHostedInviteStatus({
-      authenticatedMember: result.member,
-      inviteCode: result.inviteCode,
-    });
+    const [status, launchConsentGranted] = await Promise.all([
+      getHostedInviteStatus({
+        authenticatedMember: result.member,
+        inviteCode: result.inviteCode,
+      }),
+      readHostedCompletionLaunchConsentGranted(result.memberId),
+    ]);
     const appSession = await issueHostedAppSession({
       memberId: result.memberId,
       privyUserId: auth.identity.userId,
@@ -65,6 +70,7 @@ export const POST = withJsonError(async (request: Request) => {
     const response = jsonOk({
       inviteCode: result.inviteCode,
       joinUrl: result.joinUrl,
+      launchConsentGranted,
       messagingSetupRequired: result.messagingSetupRequired,
       ok: true,
       stage: result.stage,
@@ -79,6 +85,18 @@ export const POST = withJsonError(async (request: Request) => {
     throw error;
   }
 });
+
+async function readHostedCompletionLaunchConsentGranted(memberId: string): Promise<boolean> {
+  try {
+    const status = await readHostedConsentStatus({
+      memberId,
+      prisma: getPrisma(),
+    });
+    return status.launchGranted;
+  } catch {
+    return false;
+  }
+}
 
 function resolveHostedPrivyCompletionAuthMethod(input: {
   body: Record<string, unknown>;

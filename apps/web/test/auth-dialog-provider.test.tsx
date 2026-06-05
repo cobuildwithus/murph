@@ -55,6 +55,7 @@ test("AuthProvider resumes a pending device connect intent after sign-in complet
     "@/src/components/hosted-onboarding/auth-dialog-provider"
   );
   const assign = vi.fn();
+  const reload = vi.fn();
   const claim = "dc_12345678901234567890123456789012";
 
   function OpenAuthButton() {
@@ -81,7 +82,9 @@ test("AuthProvider resumes a pending device connect intent after sign-in complet
       assign,
       hash: `#deviceConnectIntent=${claim}&connectSource=whoop`,
       href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop`,
+      origin: "https://join.example.test",
       pathname: "/connect",
+      reload,
       search: "",
     },
   });
@@ -99,9 +102,8 @@ test("AuthProvider resumes a pending device connect intent after sign-in complet
     completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
   });
 
-  expect(assign).toHaveBeenCalledWith(
-    `/connect#deviceConnectIntent=${claim}&connectSource=whoop`,
-  );
+  expect(reload).toHaveBeenCalledTimes(1);
+  expect(assign).not.toHaveBeenCalled();
 
   await rendered.cleanup();
 });
@@ -136,6 +138,7 @@ test("AuthProvider keeps the default home redirect for ordinary sign-in completi
       assign,
       hash: "",
       href: "https://join.example.test/connect",
+      origin: "https://join.example.test",
       pathname: "/connect",
       search: "",
     },

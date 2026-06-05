@@ -283,6 +283,49 @@ test("HostedAuthPanel can require launch consent after homepage login completion
   });
 });
 
+test("HostedAuthPanel skips launch consent handoff when completion says launch consent is already granted", async () => {
+  mocks.completeHostedPrivyAuth.mockResolvedValueOnce({
+    payload: {
+      activationPending: false,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      launchConsentGranted: true,
+      stage: "active",
+    },
+    redirectUrl: "/home",
+  });
+
+  const { assign, cleanup, container, reload, window } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+      requireLaunchConsentOnCompletion: true,
+    }),
+    {
+      location: {
+        hash: "#stale-auth-dialog-state",
+        href: "https://join.example.test/home#stale-auth-dialog-state",
+        origin: "https://join.example.test",
+        pathname: "/home",
+        search: "",
+      },
+    },
+  );
+  cleanupRender = cleanup;
+
+  const telegramButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Telegram"),
+  ) as HTMLButtonElement | undefined;
+
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(reload).toHaveBeenCalledTimes(1);
+  expect(assign).not.toHaveBeenCalled();
+  expect(container.textContent).not.toContain("Hosted legal consent card");
+  expect(mocks.legalConsentCardProps).toBeNull();
+});
+
 test("HostedAuthPanel shows launch consent after homepage signup auth before redirecting", async () => {
   const { assign, cleanup, container, window } = await renderClientComponent(
     createElement(HostedAuthPanel, {

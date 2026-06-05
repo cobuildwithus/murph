@@ -13,6 +13,8 @@ import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
+import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
+
 const DEVICE_CONNECT_INTENT_CLAIM_PATTERN = /^dc_[A-Za-z0-9_-]{32}$/u;
 
 interface AuthContextValue {
@@ -44,16 +46,18 @@ export function AuthProvider({
 
   const handleAuthCompleted = useCallback((payload: HostedPrivyCompletionPayload) => {
     if (shouldResumeCurrentDeviceConnectIntentUrl(payload)) {
-      window.location.assign(`${window.location.pathname}${window.location.search}${window.location.hash}`);
+      navigateHostedAuthRedirect(
+        `${window.location.pathname}${window.location.search}${window.location.hash}`,
+      );
       return;
     }
 
     if (isHostedOnboardingAccessibleStage(payload.stage)) {
-      window.location.assign("/home");
+      navigateHostedAuthRedirect("/home");
       return;
     }
 
-    window.location.assign(payload.joinUrl);
+    navigateHostedAuthRedirect(payload.joinUrl);
   }, []);
 
   const value = useMemo(

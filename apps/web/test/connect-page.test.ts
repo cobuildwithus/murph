@@ -64,8 +64,20 @@ vi.mock("@/src/components/legal/hosted-legal-consent-card", () => ({
 }));
 
 const mocks = vi.hoisted(() => ({
+  authDialogProps: null as { open?: boolean } | null,
   buildHostedDeviceSyncSettingsResponse: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
+}));
+
+vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
+  AuthDialog(props: { open?: boolean }) {
+    mocks.authDialogProps = props;
+    return props.open
+      ? createElement("div", { "data-auth-dialog-open": "true" }, "Auth dialog")
+      : null;
+  },
+  preloadHostedAuthPanelIsland: vi.fn(),
+  useHostedAuthPanelIslandIdlePreload: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/settings-service", () => ({
@@ -101,6 +113,7 @@ afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  mocks.authDialogProps = null;
 });
 
 test("ConnectPage renders source search, source names, and logo marks", async () => {
@@ -1018,6 +1031,148 @@ test("ConnectPage keeps configured sources visible but renders sign-in actions w
   expectSettingResponseNotLoaded();
 });
 
+test("ConnectSourcesGrid opens auth for a pending device connect intent while signed out without a pre-auth source target", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+
+  const { AuthProvider } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(
+    createElement(AuthProvider, { authenticated: false },
+      createElement(ConnectSourcesGrid, {
+        authenticated: false,
+        sources: [
+          {
+            description: "Recovery, strain, sleep, and heart rate.",
+            id: "whoop",
+            logo: {
+              className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+              height: 15,
+              src: "/brand-logos/connect/whoop.svg",
+              width: 96,
+            },
+            name: "Whoop",
+          },
+        ],
+      }),
+    ),
+    {
+      location: {
+        hash: `#deviceConnectIntent=${claim}&connectSource=whoop`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop`,
+        pathname: "/connect",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+
+  await vi.waitFor(() => {
+    assert.equal(mocks.authDialogProps?.open, true);
+    assert.match(rendered.container.textContent ?? "", /Auth dialog/);
+  });
+
+  assert.equal(fetch.mock.calls.length, 0);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid ignores malformed pending device connect intents while signed out", async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+
+  const { AuthProvider } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(
+    createElement(AuthProvider, { authenticated: false },
+      createElement(ConnectSourcesGrid, {
+        authenticated: false,
+        sources: [
+          {
+            connectTarget: "whoop",
+            description: "Recovery, strain, sleep, and heart rate.",
+            id: "whoop",
+            logo: {
+              className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+              height: 15,
+              src: "/brand-logos/connect/whoop.svg",
+              width: 96,
+            },
+            name: "Whoop",
+          },
+        ],
+      }),
+    ),
+    {
+      location: {
+        hash: "#deviceConnectIntent=not-a-claim&connectSource=whoop",
+        href: "https://join.example.test/connect#deviceConnectIntent=not-a-claim&connectSource=whoop",
+        pathname: "/connect",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+
+  assert.equal(mocks.authDialogProps?.open, false);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Auth dialog/);
+  assert.equal(fetch.mock.calls.length, 0);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid ignores unmatched pending device connect intents while signed out", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+
+  const { AuthProvider } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(
+    createElement(AuthProvider, { authenticated: false },
+      createElement(ConnectSourcesGrid, {
+        authenticated: false,
+        sources: [
+          {
+            connectTarget: "whoop",
+            description: "Recovery, strain, sleep, and heart rate.",
+            id: "whoop",
+            logo: {
+              className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+              height: 15,
+              src: "/brand-logos/connect/whoop.svg",
+              width: 96,
+            },
+            name: "Whoop",
+          },
+        ],
+      }),
+    ),
+    {
+      location: {
+        hash: `#deviceConnectIntent=${claim}&connectSource=garmin`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=garmin`,
+        pathname: "/connect",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+
+  assert.equal(mocks.authDialogProps?.open, false);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Auth dialog/);
+  assert.equal(fetch.mock.calls.length, 0);
+
+  await rendered.cleanup();
+});
+
 test("ConnectSourcesGrid starts a configured Garmin target and redirects to the returned link", async () => {
   const fetch = vi.fn(async (
     _input: RequestInfo | URL,
@@ -1089,7 +1244,6 @@ test("ConnectSourcesGrid redeems an initial device connect intent through the ap
   const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
     sources: [
       {
-        connectTarget: "whoop",
         description: "Recovery, strain, sleep, and heart rate.",
         id: "whoop",
         logo: {
@@ -1260,7 +1414,6 @@ test("ConnectSourcesGrid preserves a device connect intent after consent accepta
     },
     sources: [
       {
-        connectTarget: "whoop",
         description: "Recovery, strain, sleep, and heart rate.",
         id: "whoop",
         logo: {

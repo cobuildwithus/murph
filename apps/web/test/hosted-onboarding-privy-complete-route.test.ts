@@ -5,9 +5,11 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   completeHostedPrivyVerification: vi.fn(),
+  getPrisma: vi.fn(),
   getHostedInviteStatus: vi.fn(),
   issueHostedAppSession: vi.fn(),
   requirePrivyCompletionSession: vi.fn(),
+  readHostedConsentStatus: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -29,6 +31,14 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   issueHostedAppSession: mocks.issueHostedAppSession,
+}));
+
+vi.mock("@/src/lib/legal/consent", () => ({
+  readHostedConsentStatus: mocks.readHostedConsentStatus,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
 }));
 
 type PrivyCompleteRouteModule = typeof import("../app/api/hosted-onboarding/privy/complete/route");
@@ -55,9 +65,13 @@ describe("hosted onboarding Privy completion route", () => {
       stage: "checkout",
     });
     mocks.getHostedInviteStatus.mockResolvedValue(createInviteStatus("checkout"));
+    mocks.getPrisma.mockReturnValue({ prisma: "mock" });
     mocks.issueHostedAppSession.mockResolvedValue({
       cookie: "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
       sessionId: "hws_123",
+    });
+    mocks.readHostedConsentStatus.mockResolvedValue({
+      launchGranted: false,
     });
     mocks.requirePrivyCompletionSession.mockResolvedValue({
       identity: {
@@ -94,6 +108,7 @@ describe("hosted onboarding Privy completion route", () => {
     await expect(response.json()).resolves.toEqual({
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
+      launchConsentGranted: false,
       messagingSetupRequired: false,
       ok: true,
       stage: "checkout",
@@ -148,10 +163,71 @@ describe("hosted onboarding Privy completion route", () => {
     await expect(response.json()).resolves.toEqual({
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
+      launchConsentGranted: false,
       messagingSetupRequired: false,
       ok: true,
       stage: "active",
       status: createInviteStatus("active"),
+    });
+  });
+
+  it("marks completion as launch-consented when the member already granted launch consent", async () => {
+    mocks.completeHostedPrivyVerification.mockResolvedValueOnce({
+      inviteCode: "invite_123",
+      joinUrl: "https://join.example.test/join/invite_123",
+      member: createHostedMember(),
+      memberId: "member_123",
+      messagingSetupRequired: false,
+      stage: "active",
+    });
+    mocks.getHostedInviteStatus.mockResolvedValueOnce(createInviteStatus("active"));
+    mocks.readHostedConsentStatus.mockResolvedValueOnce({
+      launchGranted: true,
+    });
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      launchConsentGranted: true,
+      stage: "active",
+    });
+    expect(mocks.readHostedConsentStatus).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: { prisma: "mock" },
+    });
+  });
+
+  it("keeps completion unconsented when launch consent status cannot be read", async () => {
+    mocks.readHostedConsentStatus.mockRejectedValueOnce(
+      new Error("consent status unavailable"),
+    );
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      launchConsentGranted: false,
+      ok: true,
+      stage: "checkout",
+    });
+    expect(mocks.issueHostedAppSession).toHaveBeenCalledWith({
+      memberId: "member_123",
+      privyUserId: "did:privy:user_123",
     });
   });
 
