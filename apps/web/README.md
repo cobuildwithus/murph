@@ -177,6 +177,17 @@ Optional but recommended:
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON`
 
+## Supplements label database
+
+`/api/supplements` reads the separate supplements Postgres database configured
+by `MURPH_SUPPLEMENT_DB_URL`. Apply `sql/supplements/schema.sql`, import DSLD,
+then import source extensions such as DailyMed before deploying web code that
+depends on those tables. Runtime credentials should be read-only after import.
+
+The current search path uses built-in Postgres full-text search only. No
+extensions such as `pg_trgm`, `pgvector`, or vector indexes are required for
+this v1 label lookup.
+
 Provider-owned webhook-admin settings:
 
 - `OURA_WEBHOOK_VERIFICATION_TOKEN` when the shared Oura provider config should answer webhook preflight challenges and maintain Oura webhook subscriptions. This secret should stay on the provider-owned config path rather than the generic hosted env surface.

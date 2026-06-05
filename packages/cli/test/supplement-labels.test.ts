@@ -24,10 +24,12 @@ describe('searchSupplementLabels', () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       items: [
         {
-          id: '82118',
-          name: 'Creatine Monohydrate',
-          brand: 'Example Brand',
-          upc: '123456789012',
+          id: 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64',
+          source: 'dailymed',
+          sourceId: '00446e6a-875c-4d46-9e13-a146c5fe7a64',
+          name: 'JBA STANOMAX Caffe Latte',
+          brand: 'Advanced Pharmaceutical Services',
+          upc: null,
           offMarket: false,
         },
       ],
@@ -59,10 +61,12 @@ describe('searchSupplementLabels', () => {
       includeOffMarket: true,
       items: [
         {
-          id: '82118',
-          name: 'Creatine Monohydrate',
-          brand: 'Example Brand',
-          upc: '123456789012',
+          id: 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64',
+          source: 'dailymed',
+          sourceId: '00446e6a-875c-4d46-9e13-a146c5fe7a64',
+          name: 'JBA STANOMAX Caffe Latte',
+          brand: 'Advanced Pharmaceutical Services',
+          upc: null,
           offMarket: false,
         },
       ],
@@ -169,6 +173,127 @@ describe('searchSupplementLabels', () => {
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(requestUrl.searchParams.get('id'), '82118')
     assert.equal(requestUrl.searchParams.get('includeOffMarket'), 'true')
+  })
+
+  it('looks up source-qualified external ids through the exact id endpoint', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      item: {
+        id: 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64',
+        source: 'dailymed',
+        sourceId: '00446e6a-875c-4d46-9e13-a146c5fe7a64',
+        name: 'JBA STANOMAX Caffe Latte',
+        brand: 'Advanced Pharmaceutical Services',
+        upc: null,
+        offMarket: false,
+      },
+    }), {
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+      },
+      status: 200,
+    }))
+
+    const result = await searchSupplementLabels(
+      {
+        q: 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64',
+      },
+      {
+        env: {
+          HOSTED_WEB_BASE_URL: 'https://web.example.test',
+        },
+        fetchImpl: fetchMock,
+      },
+    )
+
+    assert.equal(result.items[0]?.id, 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64')
+    assert.equal(result.items[0]?.source, 'dailymed')
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
+    assert.equal(requestUrl.pathname, '/api/supplements')
+    assert.equal(requestUrl.searchParams.get('id'), 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64')
+    assert.equal(requestUrl.searchParams.has('q'), false)
+  })
+
+  it('falls back to text search when source-qualified external ids miss', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (_url) => {
+      const requestUrl = new URL(String(_url))
+      if (requestUrl.searchParams.has('id')) {
+        return new Response(JSON.stringify({ error: 'not_found' }), {
+          headers: {
+            'content-type': 'application/json; charset=utf-8',
+          },
+          status: 404,
+        })
+      }
+
+      return new Response(JSON.stringify({
+        items: [
+          {
+            id: 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64',
+            source: 'dailymed',
+            sourceId: '00446e6a-875c-4d46-9e13-a146c5fe7a64',
+            name: 'JBA STANOMAX Caffe Latte',
+            brand: 'Advanced Pharmaceutical Services',
+            upc: null,
+            offMarket: false,
+          },
+        ],
+      }), {
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+        },
+        status: 200,
+      })
+    })
+
+    const result = await searchSupplementLabels(
+      {
+        q: 'dailymed:missing',
+      },
+      {
+        env: {
+          HOSTED_WEB_BASE_URL: 'https://web.example.test',
+        },
+        fetchImpl: fetchMock,
+      },
+    )
+
+    assert.equal(result.items[0]?.source, 'dailymed')
+    assert.equal(fetchMock.mock.calls.length, 2)
+    assert.equal(
+      new URL(String(fetchMock.mock.calls[0]?.[0])).searchParams.get('id'),
+      'dailymed:missing',
+    )
+    assert.equal(
+      new URL(String(fetchMock.mock.calls[1]?.[0])).searchParams.get('q'),
+      'dailymed:missing',
+    )
+  })
+
+  it('keeps colon text with spaces on normal search', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [],
+    }), {
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+      },
+      status: 200,
+    }))
+
+    await searchSupplementLabels(
+      {
+        q: 'brand: creatine',
+      },
+      {
+        env: {
+          HOSTED_WEB_BASE_URL: 'https://web.example.test',
+        },
+        fetchImpl: fetchMock,
+      },
+    )
+
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
+    assert.equal(requestUrl.searchParams.get('q'), 'brand: creatine')
+    assert.equal(requestUrl.searchParams.has('id'), false)
   })
 
   it('looks up GTIN-shaped UPC input through the exact UPC endpoint', async () => {

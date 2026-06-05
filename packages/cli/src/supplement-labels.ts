@@ -16,6 +16,8 @@ export const supplementLabelSearchInputSchema = z.object({
 
 export const supplementLabelSearchItemSchema = z.object({
   id: z.string().min(1),
+  source: z.string().min(1).optional(),
+  sourceId: z.string().min(1).optional(),
   name: z.string().min(1),
   brand: z.string().nullable(),
   upc: z.string().nullable(),
@@ -90,6 +92,10 @@ export async function searchSupplementLabels(
 function resolveSupplementLabelLookupParams(q: string): SupplementLabelLookupParam[] {
   const trimmed = q.trim()
   const digits = trimmed.replace(/\D/gu, '')
+
+  if (/^[a-z][a-z0-9_-]*:\S+$/u.test(trimmed)) {
+    return [{ key: 'id', value: trimmed }, { key: 'q', value: trimmed }]
+  }
 
   if (/^\d+$/u.test(trimmed)) {
     return GTIN_LENGTHS.has(digits.length)
