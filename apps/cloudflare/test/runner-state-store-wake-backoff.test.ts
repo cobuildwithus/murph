@@ -166,7 +166,6 @@ describe("RunnerStateStore execution lease authority", () => {
     const { store } = createHarness();
     await store.bindUser("member_123");
     const token = await store.beginWriteFence({
-      kind: "runtime",
       reason: "manual",
       runnerContainerName: "member_123",
       userId: "member_123",

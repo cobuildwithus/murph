@@ -151,7 +151,6 @@ export class RunnerStateStore {
   }
 
   async beginWriteFence(input: {
-    kind?: RunnerWriteFenceKind;
     reason: HostedWorkspaceInvocationReason;
     runnerContainerName: string;
     userId: string;
@@ -167,7 +166,7 @@ export class RunnerStateStore {
     const startedAt = new Date().toISOString();
     const attemptId = createRuntimeWriteAttemptId();
     const providerEgressToken = createProviderEgressToken();
-    const kind = input.kind ?? "runtime";
+    const kind: RunnerWriteFenceKind = "runtime";
 
     meta.active_attempt_id = attemptId;
     meta.active_expires_at = null;

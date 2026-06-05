@@ -55,13 +55,6 @@ interface SmokeRunnerBundleManifest {
   sourceFingerprint?: string;
 }
 
-interface SmokeOpenAiInterceptResult {
-  client?: unknown;
-  model?: unknown;
-  stderrBytes?: unknown;
-  stdoutBytes?: unknown;
-}
-
 interface SmokeCodexShellResult {
   client?: unknown;
   murphPathBytes?: unknown;
@@ -149,35 +142,16 @@ export async function runSmokeHostedDeploy(input: {
     source.HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER,
     false,
   );
-  const shouldSmokeOpenAiIntercept = readBooleanEnv(
-    source.HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT,
-    false,
-  );
   const shouldSmokeDirectR2PresignedPut = readBooleanEnv(
     source.HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT,
     false,
   );
-  if (shouldSmokeOpenAiIntercept && !shouldSmokeRunnerContainer) {
-    throw new Error(
-      "HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT requires HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true.",
-    );
-  }
   if (shouldSmokeDirectR2PresignedPut && !shouldSmokeRunnerContainer) {
     throw new Error(
       "HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT requires HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true.",
     );
   }
-  if (shouldSmokeOpenAiIntercept && !smokeUserId) {
-    throw new Error(
-      "HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT requires HOSTED_EXECUTION_SMOKE_USER_ID.",
-    );
-  }
   const authorizationHeader = readSmokeOidcAuthorizationHeader(source);
-  if (shouldSmokeOpenAiIntercept && !authorizationHeader) {
-    throw new Error(
-      "HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT requires HOSTED_EXECUTION_SMOKE_OIDC_TOKEN or VERCEL_OIDC_TOKEN.",
-    );
-  }
   const versionOverrideHeaders = buildVersionOverrideHeaders(source);
   const smokeBaseUrl = `${workerBaseUrl}/`;
 
@@ -205,15 +179,6 @@ export async function runSmokeHostedDeploy(input: {
       }
     : null;
 
-  if (shouldSmokeOpenAiIntercept) {
-    if (!statusRequest) {
-      throw new Error(
-        "HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT requires authenticated hosted status configuration.",
-      );
-    }
-    status = await readSmokeUserStatus(statusRequest);
-  }
-
   if (shouldSmokeRunnerContainer) {
     await assertRunnerContainerSmoke({
       fetchImpl,
@@ -221,12 +186,10 @@ export async function runSmokeHostedDeploy(input: {
       source,
       url: buildRunnerContainerSmokeUrl({
         directR2PresignedPut: shouldSmokeDirectR2PresignedPut,
-        openAiIntercept: shouldSmokeOpenAiIntercept,
         smokeBaseUrl,
       }),
       versionOverrideHeaders,
       expectDirectR2PresignedPut: shouldSmokeDirectR2PresignedPut,
-      expectOpenAiIntercept: shouldSmokeOpenAiIntercept,
     });
   }
 
@@ -255,7 +218,6 @@ export async function runSmokeHostedDeploy(input: {
 
 async function assertRunnerContainerSmoke(input: {
   expectDirectR2PresignedPut: boolean;
-  expectOpenAiIntercept: boolean;
   fetchImpl: FetchLike;
   log: (message: string) => void;
   source: EnvSource;
@@ -291,17 +253,13 @@ async function assertRunnerContainerSmoke(input: {
 
 async function readRunnerContainerSmoke(input: {
   expectDirectR2PresignedPut: boolean;
-  expectOpenAiIntercept: boolean;
   fetchImpl: FetchLike;
   source: EnvSource;
   url: string;
   versionOverrideHeaders: Record<string, string> | undefined;
 }): Promise<SmokeRunnerBundleManifest | null> {
   const url = new URL(input.url);
-  const smokeUserId = normalizeOptionalString(input.source.HOSTED_EXECUTION_SMOKE_USER_ID);
-  const payload = input.expectOpenAiIntercept
-    ? JSON.stringify({ openAiInterceptUserId: smokeUserId })
-    : "";
+  const payload = "";
   const signatureHeaders = await createHostedWebCallbackSignatureHeaders({
     environment: readHostedWebCallbackSigningEnvironment(input.source),
     method: "POST",
@@ -334,7 +292,6 @@ async function readRunnerContainerSmoke(input: {
       codexShell?: SmokeCodexShellResult | null;
       directR2PresignedPut?: SmokeDirectR2PresignedPutResult | null;
       ok?: unknown;
-      openAiIntercept?: SmokeOpenAiInterceptResult | null;
       runnerBundle?: SmokeRunnerBundleManifest | null;
       service?: unknown;
     };
@@ -349,9 +306,6 @@ async function readRunnerContainerSmoke(input: {
   }
 
   assertSmokeCodexShellResult(responsePayload.runnerContainer.codexShell);
-  if (input.expectOpenAiIntercept) {
-    assertSmokeOpenAiInterceptResult(responsePayload.runnerContainer.openAiIntercept);
-  }
   if (input.expectDirectR2PresignedPut) {
     assertSmokeDirectR2PresignedPutResult(responsePayload.runnerContainer.directR2PresignedPut);
   }
@@ -385,37 +339,13 @@ function redactSmokeFailureBody(value: string): string {
 
 function buildRunnerContainerSmokeUrl(input: {
   directR2PresignedPut: boolean;
-  openAiIntercept: boolean;
   smokeBaseUrl: string;
 }): string {
   const url = new URL("/internal/deploy/container-smoke", input.smokeBaseUrl);
-  if (input.openAiIntercept) {
-    url.searchParams.set("openAiIntercept", "1");
-  }
   if (input.directR2PresignedPut) {
     url.searchParams.set("directR2PresignedPut", "1");
   }
   return url.toString();
-}
-
-function assertSmokeOpenAiInterceptResult(
-  value: SmokeOpenAiInterceptResult | null | undefined,
-): void {
-  if (!value || typeof value !== "object") {
-    throw new Error("runner container smoke did not return OpenAI intercept metadata.");
-  }
-  if (value.client !== "codex") {
-    throw new Error("runner container OpenAI intercept smoke did not use the Codex client.");
-  }
-  if (typeof value.model !== "string" || value.model.length === 0) {
-    throw new Error("runner container OpenAI intercept smoke did not report a model.");
-  }
-  if (typeof value.stdoutBytes !== "number" || value.stdoutBytes <= 0) {
-    throw new Error("runner container OpenAI intercept smoke did not report Codex output.");
-  }
-  if (typeof value.stderrBytes !== "number" || value.stderrBytes < 0) {
-    throw new Error("runner container OpenAI intercept smoke reported invalid stderr bytes.");
-  }
 }
 
 function assertSmokeCodexShellResult(

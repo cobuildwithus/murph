@@ -52,7 +52,6 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
     let token: RunnerWriteFenceToken;
     try {
       token = await this.stateStore.beginWriteFence({
-        kind: "runtime",
         reason: input.reason,
         runnerContainerName: input.userId,
         userId: input.userId,
@@ -93,7 +92,6 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
   }): Promise<HostedRunnerStuckInvocationTestResult> {
     await this.stateStore.bindUser(input.userId);
     const token = await this.stateStore.beginWriteFence({
-      kind: "runtime",
       reason: input.reason ?? "manual",
       runnerContainerName: input.userId,
       userId: input.userId,

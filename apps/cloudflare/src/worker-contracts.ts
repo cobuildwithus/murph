@@ -70,23 +70,8 @@ export interface WorkerRunnerContainerNamespaceLike<
 }
 
 export interface WorkerUserRunnerStubLike {
-  beginDeploySmokeRuntimeWriteFence?(input: {
-    userId: string;
-    workspaceVersion: string;
-  }): Promise<{
-    attemptId: string;
-    generation: string;
-    leaseGeneration: string;
-    userId: string;
-    workspaceVersion: string | null;
-  } | null>;
   bindUser?(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData?(userId: string): Promise<unknown>;
-  finishDeploySmokeRuntimeWriteFence?(input: {
-    attemptId: string;
-    generation: string;
-    userId: string;
-  }): Promise<{ completed: boolean }>;
   createHostedWorkspaceSnapshotUploadSession?(
     input: HostedWorkspaceSnapshotUploadSession,
   ): Promise<HostedWorkspaceSnapshotUploadSession>;

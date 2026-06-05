@@ -35,7 +35,6 @@ import {
 } from "./runner-state-store.js";
 import type {
   DurableObjectStateLike,
-  RunnerStateRecord,
 } from "./types.js";
 import {
   type HostedWorkspaceSnapshotOrphanCandidate,
@@ -66,12 +65,6 @@ import {
   type RuntimePrewarmInput,
   type RuntimeProcessingInput,
 } from "./runtime-processing-controller.js";
-import {
-  readRunnerWriteFenceAlreadyActiveRecord,
-} from "./write-fence-errors.js";
-import {
-  isDeploySmokeWriteFenceStale,
-} from "./runner-state-helpers.js";
 
 export type { DurableObjectStateLike } from "./types.js";
 
@@ -320,88 +313,6 @@ export class HostedUserRunner {
     userId: string;
   }): Promise<{ deleted: boolean }> {
     return await this.workspaceSnapshotSessions.delete(input);
-  }
-
-  async beginDeploySmokeRuntimeWriteFence(input: {
-    userId: string;
-    workspaceVersion: string;
-  }): Promise<RunnerWriteFenceToken | null> {
-    await this.stateStore.bindUser(input.userId);
-
-    for (let acquisitionAttempt = 0; acquisitionAttempt < 2; acquisitionAttempt += 1) {
-      const existing = await this.stateStore.readState();
-      if (!await this.clearStaleDeploySmokeWriteFenceIfSafe(existing)) {
-        return null;
-      }
-
-      try {
-        const token = await this.stateStore.beginWriteFence({
-          kind: "deploy_smoke",
-          reason: "manual",
-          runnerContainerName: input.userId,
-          userId: input.userId,
-        });
-        const bound = await this.stateStore.bindWriteFenceWorkspaceVersion({
-          token,
-          workspaceVersion: input.workspaceVersion,
-        });
-        await this.runtimeProcessing.syncRunnerAlarm(
-          await this.stateStore.readState(),
-        );
-        return bound;
-      } catch (error) {
-        const activeRecord = readRunnerWriteFenceAlreadyActiveRecord(error);
-        if (!activeRecord) {
-          throw error;
-        }
-        if (await this.clearStaleDeploySmokeWriteFenceIfSafe(activeRecord)) {
-          continue;
-        }
-        return null;
-      }
-    }
-    return null;
-  }
-
-  async finishDeploySmokeRuntimeWriteFence(input: {
-    attemptId: string;
-    generation: string;
-    userId: string;
-  }): Promise<{ completed: boolean }> {
-    const result = await this.stateStore.clearWriteFenceIdentityAfterCompletion({
-      attemptId: input.attemptId,
-      finishedAt: new Date().toISOString(),
-      generation: input.generation,
-      userId: input.userId,
-    });
-    if (result.completed) {
-      await this.runtimeProcessing.syncRunnerAlarm(
-        await this.stateStore.readState(),
-      );
-    }
-    return { completed: result.completed };
-  }
-
-  private async clearStaleDeploySmokeWriteFenceIfSafe(
-    record: RunnerStateRecord,
-  ): Promise<boolean> {
-    const fence = record.writeFence;
-    if (!fence) {
-      return true;
-    }
-    if (fence.kind !== "deploy_smoke" || !isDeploySmokeWriteFenceStale(fence)) {
-      await this.runtimeProcessing.syncRunnerAlarm(record);
-      return false;
-    }
-
-    const cleared = await this.stateStore.clearWriteFenceForReplacement({
-      attemptId: fence.attemptId,
-      finishedAt: new Date().toISOString(),
-      generation: String(fence.generation),
-      userId: record.userId,
-    });
-    await this.runtimeProcessing.syncRunnerAlarm(cleared.record);
-    return cleared.cleared;
   }
 
   private async readHostedRuntimeStatusFromWeb(

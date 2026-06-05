@@ -266,7 +266,6 @@ describe("hosted runner container identity", () => {
     const stateStore = new RunnerStateStore(durable.state);
     await stateStore.bindUser(TEST_USER_ID);
     const token = await stateStore.beginWriteFence({
-      kind: "runtime",
       reason: "nudge",
       runnerContainerName: "member_123--v-version-a",
       userId: TEST_USER_ID,

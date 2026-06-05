@@ -100,8 +100,7 @@ hidden runtime-only inbox rows to make Codex admission succeed.
 Invocation-local Worker routes such as artifact writes, browser-vault replica
 writes, provider effects, and mailbox payload decode authorize the current
 runner by runtime-kind write-fence identity (`attemptId`, `generation`, and
-`userId`). Deploy-smoke fences are control-plane smoke leases and do not satisfy
-runtime side-effect or provider-egress validators. The transport still carries the generation in the historical
+`userId`). The transport still carries the generation in the historical
 `leaseGeneration` header until the 2026-05-25 compatibility deletion.
 External provider egress must not send exact runtime authority headers to
 third-party provider origins. Runtime provider fetches instead carry the
@@ -325,9 +324,7 @@ expected idle checkpoint horizon rather than a short durable-lag polling loop. A
 runtime fence whose child is missing is replaced after the startup grace window
 when a later ensure command observes it. A wake-unconfirmed active child is not
 replaced; the caller retries until the child finishes, becomes wakeable, or is no
-longer active. Deploy-smoke fences are control-plane fences; fresh ones make
-normal runtime demand retry, while stale ones are cleared by deploy-smoke
-acquisition or replaced when real runtime demand arrives.
+longer active.
 The separate signed `runtime/prewarm` command exists only for Temporal-mediated
 typing hints. It may bind the per-user Durable Object and touch the runner
 container readiness path, but it must not begin a write fence, read hosted
