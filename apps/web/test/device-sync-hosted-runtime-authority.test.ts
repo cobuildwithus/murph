@@ -314,6 +314,10 @@ function createAuthorityHarness(input: {
 describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime-user_123",
+    });
   });
 
   it("signals background maintenance when the acked dirty connection still has work", async () => {
@@ -454,8 +458,7 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
     expect(response.nextWakeAt).toBeNull();
   });
 
-  it("keeps the immediate wake fallback when the maintenance signal fails", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  it("fails the dirty ack when pending dirty work remains but the maintenance signal fails", async () => {
     mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime.mockRejectedValueOnce(
       new Error("Temporal unavailable"),
     );
@@ -477,8 +480,8 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
       "@/src/lib/device-sync/hosted-runtime-authority"
     );
 
-    try {
-      const response = await ackHostedDeviceSyncDirtyStateProcessed({
+    await expect(
+      ackHostedDeviceSyncDirtyStateProcessed({
         request: new Request("https://example.test/device-sync/runtime/dirty-ack", {
           body: JSON.stringify({
             connectionId: "conn_dirty_first",
@@ -488,23 +491,58 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
           method: "POST",
         }),
         trustedUserId: "user_123",
-      });
+      }),
+    ).rejects.toThrow(/Temporal unavailable/u);
+    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledWith({
+      userId: "user_123",
+    });
+  });
 
+  it("bounds dirty ack waiting when the maintenance signal hangs", async () => {
+    vi.useFakeTimers();
+    mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime.mockImplementationOnce(
+      async () => await new Promise<never>(() => undefined),
+    );
+    const markDirtyConnectionProcessed = vi.fn(async () => ({
+      connectionId: "conn_dirty_first",
+      dirtyRevision: 3n,
+      processedRevision: 3n,
+      stillDirty: false,
+      userId: "user_123",
+    }));
+    const hasPendingDirtyConnectionForUser = vi.fn(async () => true);
+    mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      store: {
+        hasPendingDirtyConnectionForUser,
+        markDirtyConnectionProcessed,
+      },
+    });
+    const { ackHostedDeviceSyncDirtyStateProcessed } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    try {
+      const responsePromise = expect(
+        ackHostedDeviceSyncDirtyStateProcessed({
+          request: new Request("https://example.test/device-sync/runtime/dirty-ack", {
+            body: JSON.stringify({
+              connectionId: "conn_dirty_first",
+              processedRevision: "3",
+              userId: "user_123",
+            }),
+            method: "POST",
+          }),
+          trustedUserId: "user_123",
+        }),
+      ).rejects.toThrow(/timed out after 5000ms/u);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await responsePromise;
       expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledWith({
         userId: "user_123",
       });
-      expect(warn).toHaveBeenCalledWith(
-        "Hosted device-sync dirty ack recovery signal failed.",
-        {
-          errorName: "Error",
-          userIdPresent: true,
-        },
-      );
-      expect(response.recorded).toBe(true);
-      expect(response.nextWakeAt).toEqual(expect.any(String));
-      expect(Number.isFinite(Date.parse(response.nextWakeAt ?? ""))).toBe(true);
     } finally {
-      warn.mockRestore();
+      vi.useRealTimers();
     }
   });
 });

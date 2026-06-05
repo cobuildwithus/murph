@@ -63,6 +63,8 @@ type HostedRuntimeSnapshotWireResponse = Omit<
   connections: HostedRuntimeConnectionSnapshot[];
 };
 
+const HOSTED_DEVICE_SYNC_DIRTY_ACK_RECOVERY_SIGNAL_TIMEOUT_MS = 5_000;
+
 export async function readHostedDeviceSyncRuntimeState(input: {
   request: Request;
   trustedUserId: string;
@@ -486,17 +488,7 @@ export async function ackHostedDeviceSyncDirtyStateProcessed(input: {
     || await controlPlane.store.hasPendingDirtyConnectionForUser(input.trustedUserId);
 
   if (hasPendingDirty) {
-    const userIdPresent = input.trustedUserId.trim().length > 0;
-    try {
-      await signalHostedDeviceSyncBackgroundMaintenanceRuntime({
-        userId: input.trustedUserId,
-      });
-    } catch (error) {
-      console.warn("Hosted device-sync dirty ack recovery signal failed.", {
-        errorName: error instanceof Error ? error.name : typeof error,
-        userIdPresent,
-      });
-    }
+    await signalHostedDeviceSyncDirtyAckRecovery(input.trustedUserId);
   }
 
   return {
@@ -508,6 +500,40 @@ export async function ackHostedDeviceSyncDirtyStateProcessed(input: {
     stillDirty,
     userId: input.trustedUserId,
   };
+}
+
+async function signalHostedDeviceSyncDirtyAckRecovery(userId: string): Promise<void> {
+  const signalPromise = signalHostedDeviceSyncBackgroundMaintenanceRuntime({ userId });
+  void signalPromise.catch(() => undefined);
+  await withHostedDeviceSyncDirtyAckRecoverySignalTimeout(signalPromise);
+}
+
+async function withHostedDeviceSyncDirtyAckRecoverySignalTimeout<T>(
+  signalPromise: Promise<T>,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      signalPromise,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(createHostedDeviceSyncDirtyAckRecoverySignalTimeoutError());
+        }, HOSTED_DEVICE_SYNC_DIRTY_ACK_RECOVERY_SIGNAL_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeout !== null) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+function createHostedDeviceSyncDirtyAckRecoverySignalTimeoutError(): Error {
+  const error = new Error(
+    `Hosted device-sync dirty ack recovery signal timed out after ${HOSTED_DEVICE_SYNC_DIRTY_ACK_RECOVERY_SIGNAL_TIMEOUT_MS}ms.`,
+  );
+  error.name = "TimeoutError";
+  return error;
 }
 
 function mapHostedDeviceSyncDirtyStateResponse(
