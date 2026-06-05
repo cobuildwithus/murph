@@ -45,4 +45,9 @@ dirty-ack boundary instead of depending on assistant workspace wake metadata.
 - Task-finish audit: no findings; noted split coverage is reasonable.
 - Runtime deep audit: accepted batch-staging finding; fixed by passing remaining
   batch records as `stagedDirtyAcks` through the existing dirty-ack protocol.
-- Focused audit reruns pending after the staged batch fix.
+- Focused audit reruns after the staged batch fix: security/privacy no
+  medium-or-higher findings, runtime/idempotency no findings, task-finish no
+  findings.
+Status: completed
+Updated: 2026-06-05
+Completed: 2026-06-05
