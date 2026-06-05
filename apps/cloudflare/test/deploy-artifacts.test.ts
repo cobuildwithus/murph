@@ -89,6 +89,7 @@ const finnishDrySaunaProtocolSummary = {
     finnishDrySaunaProtocol.slug,
     "dry-sauna/murph-finnish-standard-3x-week",
   ],
+  searchText: "Finnish Dry Sauna RPE heat exposure",
   slug: finnishDrySaunaProtocol.slug,
   status: "field-testing",
   summary: "Finnish Dry Sauna summary.",
@@ -100,6 +101,15 @@ const finnishDrySaunaProtocolSummary = {
     murphCanonical: true,
     sourceAttributed: false,
   },
+} as const;
+const extraProtocolSummary = {
+  ...finnishDrySaunaProtocolSummary,
+  key: "protocol_variant:extra/extra-protocol",
+  relativePath: "protocols/extra/extra-protocol.md",
+  routeId: "extra-protocol",
+  routeIds: ["extra-protocol", "protocols/extra/extra-protocol"],
+  slug: "protocols/extra/extra-protocol",
+  title: "Extra Protocol",
 } as const;
 const healthCommonsRuntimeArtifactNames = [
   "protocol-index.json",
@@ -178,23 +188,43 @@ describe("deploy artifact validation", () => {
 
   it("rejects a runner bundle with a stale Health Commons protocol index", async () => {
     const fixture = await createDeployArtifactFixture();
-
-    await writeFile(
-      path.join(
-        fixture.runnerBundleDir,
-        "node_modules",
-        "@murphai",
-        "health-commons",
-        "generated",
-        "protocol-index.json",
-      ),
-      `${JSON.stringify({
-        catalogHash: "sha256:stale",
-        protocols: [],
-        schemaVersion: "murph.commons.protocol-index.v1",
-      }, null, 2)}\n`,
-      "utf8",
+    const generatedDir = path.join(
+      fixture.runnerBundleDir,
+      "node_modules",
+      "@murphai",
+      "health-commons",
+      "generated",
     );
+
+    await writeHealthCommonsRuntimeArtifacts(generatedDir, {
+      familyGraph: {
+        catalogHash: "sha256:test",
+        edges: [],
+        families: [],
+        protocols: [extraProtocolSummary],
+        schemaVersion: "murph.commons.protocol-family-graph.v1",
+      },
+      protocolIndex: {
+        catalogHash: "sha256:test",
+        protocols: [extraProtocolSummary],
+        schemaVersion: "murph.commons.protocol-index.v1",
+      },
+      protocolRunSpecs: {
+        catalogHash: "sha256:test",
+        protocols: [
+          {
+            ...extraProtocolSummary,
+            expectedSignalDescriptions: [],
+            experimentOnboarding: null,
+            protocol: finnishDrySaunaProtocol.protocol,
+            safety: finnishDrySaunaProtocol.safety,
+            testPlans: finnishDrySaunaProtocol.testPlans,
+            whyItWorks: [],
+          },
+        ],
+        schemaVersion: "murph.commons.protocol-run-specs.v1",
+      },
+    });
     await rewriteRunnerBundleManifest(fixture);
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
@@ -215,7 +245,7 @@ describe("deploy artifact validation", () => {
         "protocol-run-specs.json",
       ),
       `${JSON.stringify({
-        catalogHash: "sha256:invalid",
+        catalogHash: "sha256:test",
         protocols: [
           {
             ...finnishDrySaunaProtocolSummary,
@@ -284,6 +314,318 @@ describe("deploy artifact validation", () => {
       "Runner Health Commons protocol family graph is stale or missing Finnish Dry Sauna",
     );
   });
+
+  it("rejects a runner bundle with an invalid Health Commons compact artifact schema", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "protocol-index.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().protocolIndex,
+        schemaVersion: "murph.commons.protocol-index.v0",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons protocol index is invalid.",
+    );
+  });
+
+  it("rejects a runner bundle with mismatched Health Commons compact artifact hashes", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "protocol-run-specs.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().protocolRunSpecs,
+        catalogHash: "sha256:other",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons protocol artifacts have mismatched catalog hashes",
+    );
+  });
+
+  it("rejects a runner bundle with inconsistent Health Commons compact protocol keys", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "protocol-index.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().protocolIndex,
+        protocols: [finnishDrySaunaProtocolSummary, extraProtocolSummary],
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons compact protocol artifacts disagree on protocol keys",
+    );
+  });
+
+  it("rejects a runner bundle with mismatched Health Commons compact protocol summaries", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "protocol-run-specs.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().protocolRunSpecs,
+        protocols: [
+          {
+            ...finnishDrySaunaProtocolSummary,
+            expectedSignalDescriptions: [],
+            experimentOnboarding: null,
+            protocol: finnishDrySaunaProtocol.protocol,
+            routeId: "stale-finnish-sauna",
+            routeIds: ["stale-finnish-sauna"],
+            safety: finnishDrySaunaProtocol.safety,
+            testPlans: finnishDrySaunaProtocol.testPlans,
+            whyItWorks: [],
+          },
+        ],
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons compact protocol artifacts disagree on shared protocol summaries",
+    );
+  });
+
+  it("rejects a runner bundle with missing Health Commons protocol index search text", async () => {
+    const fixture = await createDeployArtifactFixture();
+    const protocolWithoutSearchText: Record<string, unknown> = {
+      ...finnishDrySaunaProtocolSummary,
+    };
+    delete protocolWithoutSearchText.searchText;
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "protocol-index.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().protocolIndex,
+        protocols: [protocolWithoutSearchText],
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons protocol index entry is invalid.",
+    );
+  });
+
+  it("rejects a runner bundle with unusable Health Commons route ids", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "protocol-index.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().protocolIndex,
+        protocols: [
+          {
+            ...finnishDrySaunaProtocolSummary,
+            routeIds: [],
+          },
+        ],
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons protocol index entry is invalid.",
+    );
+  });
+
+  it("rejects a runner bundle with duplicate Health Commons compact protocol keys", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "protocol-index.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().protocolIndex,
+        protocols: [
+          finnishDrySaunaProtocolSummary,
+          finnishDrySaunaProtocolSummary,
+        ],
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons protocol index protocols include duplicate key",
+    );
+  });
+
+  it("rejects a runner bundle with dangling Health Commons protocol family graph edges", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "protocol-family-graph.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().familyGraph,
+        edges: [
+          {
+            sourceKey: finnishDrySaunaProtocol.key,
+            targetKey: "experiment_family:missing-family",
+            type: "parent_family",
+          },
+        ],
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons protocol family graph is invalid.",
+    );
+  });
+
+  it("rejects a runner bundle with invalid Health Commons protocol family graph edge direction", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "protocol-family-graph.json",
+      ),
+      `${JSON.stringify({
+        ...createHealthCommonsRuntimeArtifacts().familyGraph,
+        edges: [
+          {
+            sourceKey: drySaunaFamily.key,
+            targetKey: finnishDrySaunaProtocol.key,
+            type: "parent_family",
+          },
+        ],
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons protocol family graph is invalid.",
+    );
+  });
+
+  it("rejects a runner bundle that still ships the obsolete Health Commons runtime catalog", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "catalog.json",
+      ),
+      `${JSON.stringify({ schemaVersion: "murph.commons.catalog.v1" }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner dependency @murphai/health-commons must not ship obsolete Health Commons runtime catalog.",
+    );
+  });
+
+  it.each([
+    ["entities.ndjson", "Health Commons runtime entities index", "stale entities\n"],
+    ["web", "Health Commons generated web artifacts", null],
+  ] as const)(
+    "rejects a runner bundle that still ships obsolete Health Commons %s",
+    async (artifactName, label, contents) => {
+      const fixture = await createDeployArtifactFixture();
+      const artifactPath = path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        artifactName,
+      );
+
+      if (contents === null) {
+        await mkdir(artifactPath, { recursive: true });
+      } else {
+        await writeFile(artifactPath, contents, "utf8");
+      }
+      await rewriteRunnerBundleManifest(fixture);
+
+      await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+        `Runner dependency @murphai/health-commons must not ship obsolete ${label}.`,
+      );
+    },
+  );
 
   it("rejects a runner bundle missing the Health Commons runtime entrypoint", async () => {
     const fixture = await createDeployArtifactFixture();

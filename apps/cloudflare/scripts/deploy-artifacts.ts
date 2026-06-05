@@ -34,8 +34,6 @@ const expectedDeployContainerBuildContext = "..";
 const healthCommonsPackageName = "@murphai/health-commons";
 const healthCommonsFinnishDrySaunaProtocol = {
   key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-  slug: "protocols/dry-sauna/murph-finnish-standard-3x-week",
-  title: "Finnish Dry Sauna",
 } as const;
 const healthCommonsRuntimeGeneratedArtifacts = [
   {
@@ -51,6 +49,26 @@ const healthCommonsRuntimeGeneratedArtifacts = [
     relativePath: path.join("generated", "protocol-family-graph.json"),
   },
 ] as const;
+const healthCommonsRuntimeObsoleteGeneratedArtifacts = [
+  {
+    label: "Health Commons runtime catalog",
+    relativePath: path.join("generated", "catalog.json"),
+  },
+  {
+    label: "Health Commons runtime entities index",
+    relativePath: path.join("generated", "entities.ndjson"),
+  },
+  {
+    label: "Health Commons generated web artifacts",
+    relativePath: path.join("generated", "web"),
+  },
+] as const;
+const healthCommonsProtocolIndexSchemaVersion =
+  "murph.commons.protocol-index.v1";
+const healthCommonsProtocolRunSpecsSchemaVersion =
+  "murph.commons.protocol-run-specs.v1";
+const healthCommonsProtocolFamilyGraphSchemaVersion =
+  "murph.commons.protocol-family-graph.v1";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -562,6 +580,13 @@ async function assertRunnerBundleHealthCommonsPackageFiles(bundleDir: string): P
         rootDir: bundleDir,
       });
     }
+    for (const artifact of healthCommonsRuntimeObsoleteGeneratedArtifacts) {
+      await assertRunnerDependencyPathAbsent({
+        filePath: path.join(packageDir, artifact.relativePath),
+        label: artifact.label,
+        packageName: healthCommonsPackageName,
+      });
+    }
   }
 }
 
@@ -596,10 +621,32 @@ async function assertRunnerBundleHealthCommonsProtocolArtifacts(bundleDir: strin
         );
       }),
     );
-    assertHealthCommonsProtocolIndexIncludesFinnishDrySauna(protocolIndex);
-    assertHealthCommonsProtocolRunSpecsIncludeFinnishDrySauna(protocolRunSpecs);
-    assertHealthCommonsProtocolFamilyGraphIncludesFinnishDrySauna(protocolFamilyGraph);
+    assertHealthCommonsProtocolArtifacts({
+      protocolFamilyGraph,
+      protocolIndex,
+      protocolRunSpecs,
+    });
   }
+}
+
+async function assertRunnerDependencyPathAbsent(input: {
+  filePath: string;
+  label: string;
+  packageName: string;
+}): Promise<void> {
+  try {
+    await lstat(input.filePath);
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return;
+    }
+
+    throw error;
+  }
+
+  throw new Error(
+    `Runner dependency ${input.packageName} must not ship obsolete ${input.label}.`,
+  );
 }
 
 async function resolveContainedRunnerDependencyFile(input: {
@@ -789,6 +836,386 @@ function isRecordObject(value: unknown): value is Record<string, unknown> {
   );
 }
 
+function assertHealthCommonsProtocolArtifacts(input: {
+  protocolFamilyGraph: Record<string, unknown>;
+  protocolIndex: Record<string, unknown>;
+  protocolRunSpecs: Record<string, unknown>;
+}): void {
+  const indexProtocols = assertHealthCommonsProtocolIndexArtifact(input.protocolIndex);
+  const runSpecProtocols = assertHealthCommonsProtocolRunSpecsArtifact(
+    input.protocolRunSpecs,
+  );
+  const familyGraphProtocols = assertHealthCommonsProtocolFamilyGraphArtifact(
+    input.protocolFamilyGraph,
+  );
+
+  if (
+    input.protocolIndex.catalogHash !== input.protocolRunSpecs.catalogHash ||
+    input.protocolIndex.catalogHash !== input.protocolFamilyGraph.catalogHash
+  ) {
+    throw new Error(
+      "Runner Health Commons protocol artifacts have mismatched catalog hashes; rebuild deploy artifacts before deploying.",
+    );
+  }
+
+  if (
+    !stringArraysEqual(protocolKeys(indexProtocols), protocolKeys(runSpecProtocols)) ||
+    !stringArraysEqual(protocolKeys(indexProtocols), protocolKeys(familyGraphProtocols))
+  ) {
+    throw new Error(
+      "Runner Health Commons compact protocol artifacts disagree on protocol keys; rebuild deploy artifacts before deploying.",
+    );
+  }
+  assertProtocolSummariesMatch({
+    familyGraphProtocols,
+    indexProtocols,
+    runSpecProtocols,
+  });
+
+  assertHealthCommonsProtocolIndexIncludesFinnishDrySauna(input.protocolIndex);
+  assertHealthCommonsProtocolRunSpecsIncludeFinnishDrySauna(input.protocolRunSpecs);
+  assertHealthCommonsProtocolFamilyGraphIncludesFinnishDrySauna(
+    input.protocolFamilyGraph,
+  );
+}
+
+function assertHealthCommonsProtocolIndexArtifact(
+  artifact: Record<string, unknown>,
+): Record<string, unknown>[] {
+  if (
+    artifact.schemaVersion !== healthCommonsProtocolIndexSchemaVersion ||
+    typeof artifact.catalogHash !== "string"
+  ) {
+    throw new Error("Runner Health Commons protocol index is invalid.");
+  }
+
+  const protocols = readRecordArrayProperty(
+    artifact,
+    "protocols",
+    "protocol index protocols",
+  );
+  for (const protocol of protocols) {
+    assertHealthCommonsProtocolSummary(protocol, "protocol index entry", {
+      requireSearchText: true,
+    });
+  }
+  assertUniqueArtifactKeys(protocols, "protocol index protocols");
+
+  return protocols;
+}
+
+function assertHealthCommonsProtocolRunSpecsArtifact(
+  artifact: Record<string, unknown>,
+): Record<string, unknown>[] {
+  if (
+    artifact.schemaVersion !== healthCommonsProtocolRunSpecsSchemaVersion ||
+    typeof artifact.catalogHash !== "string"
+  ) {
+    throw new Error("Runner Health Commons protocol run specs are invalid.");
+  }
+
+  const protocols = readRecordArrayProperty(
+    artifact,
+    "protocols",
+    "protocol run specs protocols",
+  );
+  for (const protocol of protocols) {
+    assertHealthCommonsProtocolSummary(protocol, "protocol run spec entry");
+    if (
+      !Array.isArray(protocol.expectedSignalDescriptions) ||
+      !Array.isArray(protocol.testPlans) ||
+      !Array.isArray(protocol.whyItWorks) ||
+      !protocol.whyItWorks.every((entry) => typeof entry === "string") ||
+      !isNullableRecordObject(protocol.experimentOnboarding) ||
+      !isNullableRecordObject(protocol.protocol) ||
+      !isNullableRecordObject(protocol.safety)
+    ) {
+      throw new Error("Runner Health Commons protocol run specs are invalid.");
+    }
+  }
+  assertUniqueArtifactKeys(protocols, "protocol run specs protocols");
+
+  return protocols;
+}
+
+function assertHealthCommonsProtocolFamilyGraphArtifact(
+  artifact: Record<string, unknown>,
+): Record<string, unknown>[] {
+  if (
+    artifact.schemaVersion !== healthCommonsProtocolFamilyGraphSchemaVersion ||
+    typeof artifact.catalogHash !== "string"
+  ) {
+    throw new Error("Runner Health Commons protocol family graph is invalid.");
+  }
+
+  const protocols = readRecordArrayProperty(
+    artifact,
+    "protocols",
+    "protocol family graph protocols",
+  );
+  const families = readRecordArrayProperty(
+    artifact,
+    "families",
+    "protocol family graph families",
+  );
+  const edges = readRecordArrayProperty(
+    artifact,
+    "edges",
+    "protocol family graph edges",
+  );
+  const graphKeys = new Set<string>();
+  const graphEntityTypesByKey = new Map<string, "experiment_family" | "protocol_variant">();
+
+  for (const protocol of protocols) {
+    assertHealthCommonsProtocolSummary(protocol, "protocol family graph protocol");
+    const key = protocol.key;
+    if (typeof key === "string") {
+      graphKeys.add(key);
+      graphEntityTypesByKey.set(key, "protocol_variant");
+    }
+  }
+  for (const family of families) {
+    assertHealthCommonsProtocolEntitySummary(
+      family,
+      "experiment_family",
+      "protocol family graph family",
+    );
+    const key = family.key;
+    if (typeof key === "string") {
+      graphKeys.add(key);
+      graphEntityTypesByKey.set(key, "experiment_family");
+    }
+  }
+  assertUniqueArtifactKeys(protocols, "protocol family graph protocols");
+  assertUniqueArtifactKeys(families, "protocol family graph families");
+  for (const edge of edges) {
+    const sourceKey = edge.sourceKey;
+    const targetKey = edge.targetKey;
+    const sourceType = typeof sourceKey === "string"
+      ? graphEntityTypesByKey.get(sourceKey)
+      : undefined;
+    const targetType = typeof targetKey === "string"
+      ? graphEntityTypesByKey.get(targetKey)
+      : undefined;
+    if (
+      typeof sourceKey !== "string" ||
+      typeof targetKey !== "string" ||
+      (
+        edge.type !== "child_family" &&
+        edge.type !== "parent_family" &&
+        edge.type !== "related_protocol"
+      ) ||
+      !graphKeys.has(sourceKey) ||
+      !graphKeys.has(targetKey) ||
+      !isValidHealthCommonsProtocolFamilyGraphEdgeDirection({
+        sourceType,
+        targetType,
+        type: edge.type,
+      })
+    ) {
+      throw new Error("Runner Health Commons protocol family graph is invalid.");
+    }
+  }
+
+  return protocols;
+}
+
+function assertHealthCommonsProtocolSummary(
+  value: Record<string, unknown>,
+  label: string,
+  options: {
+    requireSearchText?: boolean;
+  } = {},
+): void {
+  assertHealthCommonsProtocolEntitySummary(value, "protocol_variant", label);
+
+  const traits = value.traits;
+  if (
+    (
+      options.requireSearchText === true
+        ? typeof value.searchText !== "string"
+        : value.searchText !== undefined && typeof value.searchText !== "string"
+    ) ||
+    !isRecordObject(traits) ||
+    !isNullableString(traits.cautionLevel) ||
+    typeof traits.externalProtocol !== "boolean" ||
+    typeof traits.highCaution !== "boolean" ||
+    typeof traits.murphCanonical !== "boolean" ||
+    typeof traits.sourceAttributed !== "boolean"
+  ) {
+    throw new Error(`Runner Health Commons ${label} is invalid.`);
+  }
+}
+
+function assertHealthCommonsProtocolEntitySummary(
+  value: Record<string, unknown>,
+  entityType: "experiment_family" | "protocol_variant",
+  label: string,
+): void {
+  const revision = value.revision;
+  if (
+    !isStringArray(value.aliases) ||
+    !isStringArray(value.categories) ||
+    value.entityType !== entityType ||
+    !isNonEmptyString(value.key) ||
+    !isNonEmptyString(value.relativePath) ||
+    !isRecordObject(revision) ||
+    !isNonEmptyString(revision.pageRevisionId) ||
+    !isNullableString(revision.recipeHash) ||
+    !isNullableString(revision.runSpecRevisionId) ||
+    !isNonEmptyString(value.routeId) ||
+    !isNonEmptyStringArray(value.routeIds) ||
+    !value.routeIds.includes(value.routeId) ||
+    !isNonEmptyString(value.slug) ||
+    !isNullableString(value.status) ||
+    !isNullableString(value.summary) ||
+    !isNonEmptyString(value.title)
+  ) {
+    throw new Error(`Runner Health Commons ${label} is invalid.`);
+  }
+}
+
+function readRecordArrayProperty(
+  artifact: Record<string, unknown>,
+  key: string,
+  label: string,
+): Record<string, unknown>[] {
+  const value = artifact[key];
+  if (!Array.isArray(value) || !value.every(isRecordObject)) {
+    throw new Error(`Runner Health Commons ${label} is invalid.`);
+  }
+
+  return value;
+}
+
+function protocolKeys(protocols: readonly Record<string, unknown>[]): string[] {
+  return protocols
+    .map((protocol) => protocol.key)
+    .filter((key): key is string => typeof key === "string")
+    .sort();
+}
+
+function assertProtocolSummariesMatch(input: {
+  familyGraphProtocols: readonly Record<string, unknown>[];
+  indexProtocols: readonly Record<string, unknown>[];
+  runSpecProtocols: readonly Record<string, unknown>[];
+}): void {
+  const runSpecProtocolsByKey = recordArrayByKey(input.runSpecProtocols);
+  const familyGraphProtocolsByKey = recordArrayByKey(input.familyGraphProtocols);
+
+  for (const indexProtocol of input.indexProtocols) {
+    const key = indexProtocol.key;
+    if (typeof key !== "string") {
+      continue;
+    }
+
+    const expected = protocolSummarySnapshot(indexProtocol);
+    const runSpecProtocol = runSpecProtocolsByKey.get(key);
+    const familyGraphProtocol = familyGraphProtocolsByKey.get(key);
+
+    if (
+      !runSpecProtocol ||
+      !familyGraphProtocol ||
+      !stableJsonEqual(expected, protocolSummarySnapshot(runSpecProtocol)) ||
+      !stableJsonEqual(expected, protocolSummarySnapshot(familyGraphProtocol))
+    ) {
+      throw new Error(
+        "Runner Health Commons compact protocol artifacts disagree on shared protocol summaries; rebuild deploy artifacts before deploying.",
+      );
+    }
+  }
+}
+
+function recordArrayByKey(
+  entries: readonly Record<string, unknown>[],
+): ReadonlyMap<string, Record<string, unknown>> {
+  const result = new Map<string, Record<string, unknown>>();
+
+  for (const entry of entries) {
+    const key = entry.key;
+    if (typeof key === "string") {
+      result.set(key, entry);
+    }
+  }
+
+  return result;
+}
+
+function protocolSummarySnapshot(protocol: Record<string, unknown>): Record<string, unknown> {
+  return {
+    aliases: protocol.aliases,
+    categories: protocol.categories,
+    entityType: protocol.entityType,
+    key: protocol.key,
+    relativePath: protocol.relativePath,
+    revision: protocol.revision,
+    routeId: protocol.routeId,
+    routeIds: protocol.routeIds,
+    slug: protocol.slug,
+    status: protocol.status,
+    summary: protocol.summary,
+    title: protocol.title,
+    traits: protocol.traits,
+  };
+}
+
+function isValidHealthCommonsProtocolFamilyGraphEdgeDirection(input: {
+  sourceType: "experiment_family" | "protocol_variant" | undefined;
+  targetType: "experiment_family" | "protocol_variant" | undefined;
+  type: unknown;
+}): boolean {
+  if (input.type === "parent_family") {
+    return input.sourceType === "protocol_variant" &&
+      input.targetType === "experiment_family";
+  }
+
+  if (input.type === "child_family") {
+    return input.sourceType === "experiment_family" &&
+      input.targetType === "experiment_family";
+  }
+
+  if (input.type === "related_protocol") {
+    return input.targetType === "protocol_variant";
+  }
+
+  return false;
+}
+
+function assertUniqueArtifactKeys(
+  entries: readonly Record<string, unknown>[],
+  label: string,
+): void {
+  const seen = new Set<string>();
+
+  for (const entry of entries) {
+    const key = entry.key;
+    if (typeof key !== "string") {
+      continue;
+    }
+    if (seen.has(key)) {
+      throw new Error(`Runner Health Commons ${label} include duplicate key ${key}.`);
+    }
+
+    seen.add(key);
+  }
+}
+
+function isNullableRecordObject(value: unknown): value is Record<string, unknown> | null {
+  return value === null || isRecordObject(value);
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isNonEmptyStringArray(value: unknown): value is string[] {
+  return isStringArray(value) && value.length > 0 && value.every(isNonEmptyString);
+}
+
 function assertHealthCommonsProtocolIndexIncludesFinnishDrySauna(
   artifact: Record<string, unknown>,
 ): void {
@@ -859,9 +1286,7 @@ function findProtocolArtifactEntry(
 
   if (
     !isRecordObject(protocol) ||
-    protocol.entityType !== "protocol_variant" ||
-    protocol.slug !== healthCommonsFinnishDrySaunaProtocol.slug ||
-    protocol.title !== healthCommonsFinnishDrySaunaProtocol.title
+    protocol.entityType !== "protocol_variant"
   ) {
     return null;
   }

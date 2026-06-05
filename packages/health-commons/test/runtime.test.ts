@@ -308,29 +308,59 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     ).toEqual(expect.objectContaining({ sortRank: 10 }));
   });
 
-  it("exposes a compact assistant protocol index from generated experiments", () => {
-    const experimentIndex = getGeneratedHealthCommonsWebExperimentIndex();
+  it("exposes a compact assistant protocol index from generated protocol artifacts", () => {
+    const protocolIndex = loadGeneratedHealthCommonsProtocolIndex();
     const entries = listGeneratedAssistantProtocolIndexEntries();
 
     expect(entries).toEqual(
-      experimentIndex.experiments
-        .filter((entry) => entry.status !== "deprecated")
-        .map((entry) => ({
-          category: entry.category,
-          routeId: entry.routeId,
-          title: entry.title,
-        })),
+      protocolIndex.protocols.map((entry) => ({
+        category: expect.any(String),
+        routeId: entry.routeId,
+        title: entry.title,
+      })),
     );
     expect(entries).toContainEqual({
-      category: "Supplementation",
-      routeId: "creatine-monohydrate",
-      title: "Creatine Monohydrate",
+      category: "Recovery",
+      routeId: "finnish-sauna",
+      title: "Finnish Dry Sauna",
     });
+    expect(entries.some((entry) => entry.routeId === "creatine-monohydrate")).toBe(false);
     expect(
       entries.every((entry) =>
         Object.keys(entry).sort().join(",") === "category,routeId,title"
       ),
     ).toBe(true);
+  });
+
+  it("builds assistant protocol entries from the compact protocol index without web artifacts", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-protocol-index-"));
+    const protocolIndexPath = path.join(tempDir, "protocol-index.json");
+    const index = loadGeneratedHealthCommonsProtocolIndex();
+    const finnishSauna = index.protocols.find((protocol) =>
+      protocol.key === "protocol_variant:dry-sauna/murph-finnish-standard-3x-week"
+    );
+
+    if (!finnishSauna) {
+      throw new Error("Expected Finnish sauna in generated protocol index.");
+    }
+
+    await writeFile(
+      protocolIndexPath,
+      `${JSON.stringify({
+        catalogHash: index.catalogHash,
+        protocols: [finnishSauna],
+        schemaVersion: index.schemaVersion,
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    expect(listGeneratedAssistantProtocolIndexEntries({ protocolIndexPath })).toEqual([
+      {
+        category: "Recovery",
+        routeId: "finnish-sauna",
+        title: "Finnish Dry Sauna",
+      },
+    ]);
   });
 
   it("loads route-scoped web bundles and preserves the route-bundle reader contract", () => {
@@ -891,6 +921,8 @@ describe("@murphai/health-commons runtime catalog reader", () => {
 
     expect(index.catalogHash).toBe(runSpecs.catalogHash);
     expect(index.catalogHash).toBe(familyGraph.catalogHash);
+    expect(Object.keys(index.protocols[0] ?? {})).toContain("searchText");
+    expect(Object.keys(familyGraph.protocols[0] ?? {})).not.toContain("searchText");
 
     const finnishSauna = indexReader.findByLookup("protocol_variant:finnish-sauna");
     expect(finnishSauna?.key).toBe(
@@ -900,6 +932,18 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(indexReader.findByLookup("finnish-sauna")?.key).toBe(
       "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
     );
+    expect(indexReader.findByLookup("PROTOCOL_VARIANT:DRY-SAUNA")?.key).toBe(
+      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+    );
+    expect(indexReader.findByLookup("protocol_variant%3Afinnish-sauna")?.key).toBe(
+      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+    );
+
+    expect(
+      indexReader.findByLookup(
+        "protocol_variant:sauna/finnish-dry/murph-standard-3x-week",
+      )?.key,
+    ).toBe("protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
 
     expect(indexReader.findByLookup("protocols/norwegian-4x4/norwegian-4x4")?.key).toBe(
       "protocol_variant:norwegian-4x4/norwegian-4x4",
@@ -907,6 +951,9 @@ describe("@murphai/health-commons runtime catalog reader", () => {
 
     expect(indexReader.findByLookup("/protocols/norwegian-4x4/norwegian-4x4/")?.key)
       .toBe("protocol_variant:norwegian-4x4/norwegian-4x4");
+    expect(
+      indexReader.findByLookup("PROTOCOL_VARIANT:NORWEGIAN-4X4/NORWEGIAN-4X4")?.key,
+    ).toBe("protocol_variant:norwegian-4x4/norwegian-4x4");
     expect(indexReader.findByLookup("norwegian-4x4")?.key).toBe(
       "protocol_variant:norwegian-4x4/norwegian-4x4",
     );
@@ -922,6 +969,18 @@ describe("@murphai/health-commons runtime catalog reader", () => {
         lookup: "dry-sauna",
       })?.key,
     ).toBe("experiment_family:dry-sauna");
+    expect(
+      graphReader.findEntity({
+        entityTypes: ["experiment_family"],
+        lookup: "experiment_family:sauna/finnish-dry",
+      })?.key,
+    ).toBe("experiment_family:dry-sauna");
+    expect(
+      graphReader.findEntity({
+        entityTypes: ["experiment_family", "protocol_variant"],
+        lookup: "protocol_variant:dry-sauna",
+      })?.key,
+    ).toBe("protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
   });
 
   it("lists compact protocol variants deterministically", () => {
@@ -935,7 +994,7 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       "protocol_variant:caffeine-timing/caffeine-curfew-dose-reset",
       "protocol_variant:cold-water-immersion/cold-plunge",
       "protocol_variant:consistent-wake-time/consistent-wake-time",
-      "protocol_variant:creatine-supplementation/creatine-monohydrate",
+      "protocol_variant:daily-step-floor/daily-step-floor",
     ]);
     expect(Object.keys(protocols[0] ?? {})).not.toContain("body");
     expect(Object.keys(protocols[0] ?? {})).not.toContain("protocol");
@@ -946,6 +1005,12 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(finnishSauna?.protocol).toMatchObject({
       doseSignature: expect.stringContaining("3x/week"),
     });
+    expect(
+      indexReader.findByLookup("protocol_variant:creatine-supplementation/creatine-monohydrate"),
+    ).toBeNull();
+    expect(
+      runSpecReader.findByLookup("protocol_variant:creatine-supplementation/creatine-monohydrate"),
+    ).toBeNull();
   });
 
   it("filters compact protocol index entries by query and category", () => {
@@ -963,6 +1028,12 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(
       protocolResults.every((protocol) => protocol.entityType === "protocol_variant"),
     ).toBe(true);
+
+    const bodyFieldResults = reader.listProtocols({
+      limit: 10,
+      query: "RPE",
+    }).map((protocol) => protocol.key);
+    expect(bodyFieldResults).toContain("protocol_variant:norwegian-4x4/norwegian-4x4");
   });
 
   it("lists and searches measurement methods with compact measurement fields", () => {
@@ -1151,6 +1222,12 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(familyVariantKeys).toContain(
       "protocol_variant:dry-sauna/bryan-johnson-blueprint",
     );
+
+    const bodyFieldMatches = reader.listProtocolMatches({
+      limit: 10,
+      lookup: "RPE",
+    }).map((match) => match.protocol.key);
+    expect(bodyFieldMatches).toContain("protocol_variant:norwegian-4x4/norwegian-4x4");
   });
 });
 

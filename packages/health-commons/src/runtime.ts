@@ -103,10 +103,6 @@ export type HealthCommonsSearchMatchedField =
   | "summary"
   | "title";
 
-export interface LoadGeneratedHealthCommonsWebArtifactOptions {
-  generatedWebRoot?: string | URL;
-}
-
 export interface LoadGeneratedHealthCommonsProtocolIndexOptions {
   protocolIndexPath?: string | URL;
 }
@@ -117,6 +113,10 @@ export interface LoadGeneratedHealthCommonsProtocolRunSpecsOptions {
 
 export interface LoadGeneratedHealthCommonsProtocolFamilyGraphOptions {
   protocolFamilyGraphPath?: string | URL;
+}
+
+export interface LoadGeneratedHealthCommonsWebArtifactOptions {
+  generatedWebRoot?: string | URL;
 }
 
 export interface HealthCommonsAssistantProtocolIndexEntry {
@@ -472,6 +472,9 @@ export function getGeneratedHealthCommonsProtocolFamilyGraphReader(
 
   cachedGeneratedProtocolFamilyGraphReader ??= createHealthCommonsProtocolFamilyGraphReader(
     loadGeneratedHealthCommonsProtocolFamilyGraph(),
+    {
+      protocolSearchEntries: getGeneratedHealthCommonsProtocolIndexReader().artifact.protocols,
+    },
   );
   return cachedGeneratedProtocolFamilyGraphReader;
 }
@@ -535,14 +538,13 @@ export function getGeneratedHealthCommonsWebExperimentIndex(
 }
 
 export function listGeneratedAssistantProtocolIndexEntries(
-  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
+  options: LoadGeneratedHealthCommonsProtocolIndexOptions = {},
 ): HealthCommonsAssistantProtocolIndexEntry[] {
-  return getGeneratedHealthCommonsWebExperimentIndex(options).experiments
-    .filter((entry) => entry.status !== "deprecated")
-    .map((entry) => ({
-      category: entry.category,
-      routeId: entry.routeId,
-      title: entry.title,
+  return getGeneratedHealthCommonsProtocolIndexReader(options).artifact.protocols
+    .map((protocol) => ({
+      category: formatProtocolIndexCategory(protocol),
+      routeId: protocol.routeId,
+      title: protocol.title,
     }));
 }
 
@@ -700,7 +702,7 @@ function loadGeneratedHealthCommonsWebExperimentArtifact<T>(input: {
 export function createHealthCommonsProtocolIndexReader(
   artifact: HealthCommonsProtocolIndexArtifact,
 ): HealthCommonsProtocolIndexReader {
-  const lookup = createProtocolLookup(artifact.protocols);
+  const lookup = createProtocolLookup(artifact.protocols, "protocol_variant");
 
   const normalizeListOptions = (
     options: HealthCommonsEntityListOptions = {},
@@ -732,7 +734,7 @@ export function createHealthCommonsProtocolIndexReader(
 export function createHealthCommonsProtocolRunSpecReader(
   artifact: HealthCommonsProtocolRunSpecsArtifact,
 ): HealthCommonsProtocolRunSpecReader {
-  const lookup = createProtocolLookup(artifact.protocols);
+  const lookup = createProtocolLookup(artifact.protocols, "protocol_variant");
 
   return {
     artifact,
@@ -745,11 +747,15 @@ export function createHealthCommonsProtocolRunSpecReader(
 
 export function createHealthCommonsProtocolFamilyGraphReader(
   artifact: HealthCommonsProtocolFamilyGraphArtifact,
+  options: {
+    protocolSearchEntries?: readonly HealthCommonsProtocolIndexEntry[];
+  } = {},
 ): HealthCommonsProtocolFamilyGraphReader {
   const protocolsByKey = new Map(artifact.protocols.map((protocol) => [protocol.key, protocol]));
   const familiesByKey = new Map(artifact.families.map((family) => [family.key, family]));
-  const protocolLookup = createProtocolLookup(artifact.protocols);
-  const familyLookup = createProtocolLookup(artifact.families);
+  const protocolLookup = createProtocolLookup(artifact.protocols, "protocol_variant");
+  const familyLookup = createProtocolLookup(artifact.families, "experiment_family");
+  const protocolSearchEntries = options.protocolSearchEntries ?? artifact.protocols;
 
   const graphTargets = <T extends HealthCommonsProtocolFamilyGraphEntity>(
     input: {
@@ -852,7 +858,7 @@ export function createHealthCommonsProtocolFamilyGraphReader(
           }));
       }
 
-      return searchCompactProtocols(artifact.protocols, {
+      return searchCompactProtocols(protocolSearchEntries, {
         limit: normalizeLimit(input.limit, 5),
         query: input.lookup,
       }).map((protocol) => ({
@@ -1460,6 +1466,7 @@ function toCompactMeasurementPlan(
 
 function createProtocolLookup<T extends HealthCommonsProtocolFamilyGraphEntity>(
   entities: readonly T[],
+  lookupEntityType: HealthCommonsProtocolEntityType,
 ): { find(lookup: string): T | null } {
   const byKey = new Map<string, T>();
   const byRouteId = new Map<string, T>();
@@ -1473,7 +1480,7 @@ function createProtocolLookup<T extends HealthCommonsProtocolFamilyGraphEntity>(
   };
 
   for (const entity of entities) {
-    setFirst(byKey, entity.key, entity);
+    setFirst(byKey, normalizeLookupKey(entity.key), entity);
     setFirst(byRouteId, normalizeRouteId(entity.slug), entity);
     setFirst(byRouteId, normalizeRouteId(stripEntityTypePrefix(entity.key)), entity);
     for (const routeId of entity.routeIds) {
@@ -1491,10 +1498,21 @@ function createProtocolLookup<T extends HealthCommonsProtocolFamilyGraphEntity>(
         return null;
       }
 
-      return byKey.get(trimmed) ??
-        byKey.get(stripRevision(trimmed)) ??
-        byRouteId.get(normalizeRouteId(trimmed)) ??
-        byRouteId.get(normalizeRouteId(stripEntityTypePrefix(trimmed))) ??
+      const exact = byKey.get(normalizeLookupKey(trimmed));
+      if (exact) {
+        return exact;
+      }
+
+      const lookupType = protocolEntityTypePrefix(trimmed);
+      if (lookupType && lookupType !== lookupEntityType) {
+        return null;
+      }
+
+      const routeLookup = lookupType === lookupEntityType
+        ? stripEntityTypePrefix(trimmed)
+        : trimmed;
+
+      return byRouteId.get(normalizeRouteId(routeLookup)) ??
         byAlias.get(normalizeSearchText(trimmed)) ??
         null;
     },
@@ -1624,6 +1642,7 @@ function buildCompactProtocolSearchFields(
     },
     { value: protocol.categories.join(" "), weight: 8 },
     { value: protocol.summary ?? "", weight: 5 },
+    { value: protocol.searchText ?? "", weight: 3 },
     {
       value: [
         protocol.status,
@@ -1636,6 +1655,40 @@ function buildCompactProtocolSearchFields(
       weight: 4,
     },
   ];
+}
+
+function formatProtocolIndexCategory(protocol: HealthCommonsProtocolIndexEntry): string {
+  const categories = protocol.categories;
+
+  if (categories.includes("sleep") || categories.includes("circadian")) {
+    return "Sleep";
+  }
+
+  if (
+    categories.includes("exercise") ||
+    categories.includes("hiit") ||
+    categories.includes("vo2max")
+  ) {
+    return "Exercise";
+  }
+
+  if (
+    categories.includes("recovery") ||
+    categories.includes("dry-sauna") ||
+    categories.includes("passive-heat")
+  ) {
+    return "Recovery";
+  }
+
+  return formatCategory(categories[0] ?? protocol.entityType);
+}
+
+function formatCategory(value: string): string {
+  return value
+    .split(/[._/-]+/u)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function matchesProtocolCategories(
@@ -2010,7 +2063,11 @@ function normalizeLimit(value: number | undefined, defaultValue: number): number
 }
 
 function normalizeRouteId(value: string): string {
-  return safeDecodeURIComponent(value).trim().replace(/^\/+|\/+$/gu, "");
+  return safeDecodeURIComponent(value).trim().replace(/^\/+|\/+$/gu, "").toLowerCase();
+}
+
+function normalizeLookupKey(value: string): string {
+  return safeDecodeURIComponent(stripRevision(value)).trim().toLowerCase();
 }
 
 function safeDecodeURIComponent(value: string): string {
@@ -2166,7 +2223,8 @@ function assertGeneratedHealthCommonsProtocolIndex(
     value["schemaVersion"] !== HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION ||
     typeof value["catalogHash"] !== "string" ||
     !Array.isArray(value["protocols"]) ||
-    !value["protocols"].every(isGeneratedProtocolIndexEntry)
+    !value["protocols"].every(isGeneratedProtocolIndexEntry) ||
+    !value["protocols"].every(hasGeneratedProtocolSearchText)
   ) {
     throw new Error("Health Commons generated protocol index is invalid.");
   }
@@ -2229,7 +2287,12 @@ function isGeneratedProtocolRunSpec(value: unknown): boolean {
 function isGeneratedProtocolIndexEntry(value: unknown): boolean {
   return isGeneratedProtocolEntitySummary(value, "protocol_variant") &&
     isRecord(value) &&
+    (value["searchText"] === undefined || typeof value["searchText"] === "string") &&
     isGeneratedProtocolTraits(value["traits"]);
+}
+
+function hasGeneratedProtocolSearchText(value: unknown): boolean {
+  return isRecord(value) && typeof value["searchText"] === "string";
 }
 
 function isGeneratedProtocolFamilySummary(value: unknown): boolean {
@@ -3139,13 +3202,20 @@ function stripRevision(key: string): string {
 }
 
 function stripEntityTypePrefix(key: string): string {
-  return stripRevision(key).replace(/^[a-z_]+:/u, "");
+  return stripRevision(safeDecodeURIComponent(key)).replace(/^[a-z_]+:/iu, "");
 }
 
 function entityTypePrefix(key: string): string | null {
-  const baseKey = stripRevision(key);
+  const baseKey = stripRevision(safeDecodeURIComponent(key));
   const separatorIndex = baseKey.indexOf(":");
-  return separatorIndex > 0 ? baseKey.slice(0, separatorIndex) : null;
+  return separatorIndex > 0 ? baseKey.slice(0, separatorIndex).toLowerCase() : null;
+}
+
+function protocolEntityTypePrefix(key: string): HealthCommonsProtocolEntityType | null {
+  const prefix = entityTypePrefix(key);
+  return prefix === "experiment_family" || prefix === "protocol_variant"
+    ? prefix
+    : null;
 }
 
 function toTrailingSlug(slug: string): string {

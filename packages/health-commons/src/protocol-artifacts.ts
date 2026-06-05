@@ -59,6 +59,7 @@ export type HealthCommonsProtocolFamilySummary = HealthCommonsProtocolEntitySumm
 export interface HealthCommonsProtocolIndexEntry
   extends HealthCommonsProtocolEntitySummary {
   entityType: "protocol_variant";
+  searchText?: string;
   traits: HealthCommonsProtocolTraits;
 }
 
@@ -112,25 +113,53 @@ export function buildHealthCommonsProtocolGeneratedArtifacts(input: {
   routeIndex: HealthCommonsWebRouteIndex;
 }): HealthCommonsProtocolGeneratedArtifacts {
   const routeEntriesByKey = groupRouteEntriesByKey(input.routeIndex);
-  const protocols = input.catalog.entities
-    .filter(isProtocolVariant)
-    .map((entity) => toProtocolIndexEntry(entity, routeEntriesByKey))
+  const redirectSourcesByTarget = groupRedirectSourcesByResolvedTarget(
+    input.catalog.redirects,
+  );
+  const protocolEntities = input.catalog.entities.filter(isPublicProtocolVariant);
+  const protocols = protocolEntities
+    .map((entity) =>
+      toProtocolIndexEntry(entity, routeEntriesByKey, {
+        includeSearchText: true,
+        redirectSources: redirectSourcesByTarget.get(entity.key) ?? [],
+      })
+    )
     .sort(compareProtocolSummaries);
-  const runSpecs = input.catalog.entities
-    .filter(isProtocolVariant)
-    .map((entity) => toProtocolRunSpec(entity, routeEntriesByKey))
+  const graphProtocols = protocolEntities
+    .map((entity) =>
+      toProtocolIndexEntry(entity, routeEntriesByKey, {
+        redirectSources: redirectSourcesByTarget.get(entity.key) ?? [],
+      })
+    )
+    .sort(compareProtocolSummaries);
+  const runSpecs = protocolEntities
+    .map((entity) =>
+      toProtocolRunSpec(entity, routeEntriesByKey, {
+        redirectSources: redirectSourcesByTarget.get(entity.key) ?? [],
+      })
+    )
     .sort(compareProtocolSummaries);
   const families = input.catalog.entities
-    .filter(isExperimentFamily)
-    .map((entity) => toProtocolFamilySummary(entity, routeEntriesByKey))
+    .filter(isPublicExperimentFamily)
+    .map((entity) =>
+      toProtocolFamilySummary(
+        entity,
+        routeEntriesByKey,
+        redirectSourcesByTarget.get(entity.key) ?? [],
+      )
+    )
     .sort(compareProtocolSummaries);
+  const familyGraphEntityKeys = new Set([
+    ...families.map((family) => family.key),
+    ...graphProtocols.map((protocol) => protocol.key),
+  ]);
 
   return {
     familyGraph: {
       catalogHash: input.catalog.catalogHash,
-      edges: buildProtocolFamilyGraphEdges(input.catalog),
+      edges: buildProtocolFamilyGraphEdges(input.catalog, familyGraphEntityKeys),
       families,
-      protocols,
+      protocols: graphProtocols,
       schemaVersion: HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
     },
     index: {
@@ -160,12 +189,49 @@ function groupRouteEntriesByKey(
   return routeEntriesByKey;
 }
 
+function groupRedirectSourcesByResolvedTarget(
+  redirects: HealthCommonsCatalog["redirects"],
+): ReadonlyMap<string, string[]> {
+  const redirectsByTarget = new Map<string, string[]>();
+
+  for (const redirect of redirects) {
+    const target = resolveRedirectTarget(redirect.to, redirects);
+    const existing = redirectsByTarget.get(target) ?? [];
+    existing.push(stripRevision(redirect.from));
+    redirectsByTarget.set(target, existing);
+  }
+
+  return redirectsByTarget;
+}
+
+function resolveRedirectTarget(
+  target: string,
+  redirects: HealthCommonsCatalog["redirects"],
+): string {
+  const redirectsBySource = new Map(
+    redirects.map((redirect) => [
+      stripRevision(redirect.from),
+      stripRevision(redirect.to),
+    ]),
+  );
+  const seen = new Set<string>();
+  let current = stripRevision(target);
+
+  while (redirectsBySource.has(current) && !seen.has(current)) {
+    seen.add(current);
+    current = redirectsBySource.get(current) ?? current;
+  }
+
+  return current;
+}
+
 function toProtocolFamilySummary(
   entity: HealthCommonsCatalogEntity & { entityType: "experiment_family" },
   routeEntriesByKey: ReadonlyMap<string, HealthCommonsWebRouteIndex["routes"]>,
+  redirectSources: readonly string[],
 ): HealthCommonsProtocolFamilySummary {
   return {
-    ...toProtocolEntitySummary(entity, routeEntriesByKey),
+    ...toProtocolEntitySummary(entity, routeEntriesByKey, redirectSources),
     entityType: "experiment_family",
   };
 }
@@ -173,9 +239,14 @@ function toProtocolFamilySummary(
 function toProtocolRunSpec(
   entity: HealthCommonsCatalogEntity & { entityType: "protocol_variant" },
   routeEntriesByKey: ReadonlyMap<string, HealthCommonsWebRouteIndex["routes"]>,
+  options: {
+    redirectSources: readonly string[];
+  },
 ): HealthCommonsProtocolRunSpec {
   return {
-    ...toProtocolIndexEntry(entity, routeEntriesByKey),
+    ...toProtocolIndexEntry(entity, routeEntriesByKey, {
+      redirectSources: options.redirectSources,
+    }),
     expectedSignalDescriptions: [...(entity.expectedSignalDescriptions ?? [])],
     experimentOnboarding: entity.experimentOnboarding ?? null,
     protocol: entity.protocol ?? null,
@@ -188,10 +259,15 @@ function toProtocolRunSpec(
 function toProtocolIndexEntry(
   entity: HealthCommonsCatalogEntity & { entityType: "protocol_variant" },
   routeEntriesByKey: ReadonlyMap<string, HealthCommonsWebRouteIndex["routes"]>,
+  options: {
+    includeSearchText?: boolean;
+    redirectSources: readonly string[];
+  },
 ): HealthCommonsProtocolIndexEntry {
   return {
-    ...toProtocolEntitySummary(entity, routeEntriesByKey),
+    ...toProtocolEntitySummary(entity, routeEntriesByKey, options.redirectSources),
     entityType: "protocol_variant",
+    ...(options.includeSearchText ? { searchText: toProtocolSearchText(entity) } : {}),
     traits: toProtocolTraits(entity),
   };
 }
@@ -201,8 +277,13 @@ function toProtocolEntitySummary(
     entityType: HealthCommonsProtocolEntityType;
   },
   routeEntriesByKey: ReadonlyMap<string, HealthCommonsWebRouteIndex["routes"]>,
+  redirectSources: readonly string[],
 ): HealthCommonsProtocolEntitySummary {
-  const routeIds = buildProtocolRouteIds(entity, routeEntriesByKey.get(entity.key) ?? []);
+  const routeIds = buildProtocolRouteIds(
+    entity,
+    routeEntriesByKey.get(entity.key) ?? [],
+    redirectSources,
+  );
 
   return {
     aliases: [...(entity.aliases ?? [])],
@@ -223,9 +304,13 @@ function toProtocolEntitySummary(
 function buildProtocolRouteIds(
   entity: HealthCommonsCatalogEntity,
   routeEntries: HealthCommonsWebRouteIndex["routes"],
+  redirectSources: readonly string[],
 ): string[] {
   const primaryRoute = routeEntries.find((entry) =>
     entry.routeId === routeIdFromBundlePath(entry.bundlePath)
+  );
+  const sameTypeRedirectSources = redirectSources.filter(
+    (redirectSource) => entityTypePrefix(redirectSource) === entity.entityType,
   );
 
   return uniqueStrings([
@@ -234,20 +319,14 @@ function buildProtocolRouteIds(
     toTrailingRouteId(entity.slug),
     stripEntityTypePrefix(entity.key),
     entity.slug,
+    ...sameTypeRedirectSources.map(stripEntityTypePrefix),
   ]);
 }
 
 function buildProtocolFamilyGraphEdges(
   catalog: HealthCommonsCatalog,
+  graphEntityKeys: ReadonlySet<string>,
 ): HealthCommonsProtocolFamilyGraphEdge[] {
-  const graphEntityKeys = new Set(
-    catalog.entities
-      .filter((entity) =>
-        entity.entityType === "experiment_family" ||
-        entity.entityType === "protocol_variant"
-      )
-      .map((entity) => entity.key),
-  );
   const edges: HealthCommonsProtocolFamilyGraphEdge[] = [];
 
   for (const entity of catalog.entities) {
@@ -278,6 +357,28 @@ function buildProtocolFamilyGraphEdges(
       `${right.sourceKey}:${right.type}:${right.targetKey}`,
     )
   );
+}
+
+function toProtocolSearchText(
+  entity: HealthCommonsCatalogEntity & { entityType: "protocol_variant" },
+): string {
+  return uniqueStrings(collectSearchableUnknownValues([
+    entity.key,
+    entity.slug,
+    entity.title,
+    entity.summary,
+    entity.aliases,
+    entity.categories,
+    entity.protocol,
+    entity.measurementPlan,
+    entity.safety,
+    entity.testPlans,
+    entity.expectedSignalDescriptions,
+    entity.experimentOnboarding,
+    entity.whyItWorks,
+    entity.claims,
+    entity.body,
+  ])).join(" ");
 }
 
 function toProtocolTraits(
@@ -315,16 +416,20 @@ function compareProtocolSummaries(
   return left.key.localeCompare(right.key);
 }
 
-function isProtocolVariant(
+function isPublicProtocolVariant(
   entity: HealthCommonsCatalogEntity,
 ): entity is HealthCommonsCatalogEntity & { entityType: "protocol_variant" } {
-  return entity.entityType === "protocol_variant";
+  return entity.entityType === "protocol_variant" &&
+    entity.status !== "deprecated" &&
+    entity.hidden !== true;
 }
 
-function isExperimentFamily(
+function isPublicExperimentFamily(
   entity: HealthCommonsCatalogEntity,
 ): entity is HealthCommonsCatalogEntity & { entityType: "experiment_family" } {
-  return entity.entityType === "experiment_family";
+  return entity.entityType === "experiment_family" &&
+    entity.status !== "deprecated" &&
+    entity.hidden !== true;
 }
 
 function isProtocolFamilyGraphRelationType(
@@ -348,6 +453,12 @@ function stripEntityTypePrefix(key: string): string {
   return key.includes(":") ? key.slice(key.indexOf(":") + 1) : key;
 }
 
+function entityTypePrefix(key: string): string | null {
+  const baseKey = stripRevision(key);
+  const separatorIndex = baseKey.indexOf(":");
+  return separatorIndex > 0 ? baseKey.slice(0, separatorIndex) : null;
+}
+
 function stripRevision(key: string): string {
   const revisionIndex = key.indexOf("@sha256:");
   return revisionIndex >= 0 ? key.slice(0, revisionIndex) : key;
@@ -368,4 +479,46 @@ function uniqueStrings(values: readonly (string | null | undefined)[]): string[]
   }
 
   return result;
+}
+
+function collectSearchableUnknownValues(value: unknown): string[] {
+  const values: string[] = [];
+  appendSearchableUnknownValues(value, values, 0);
+  return values;
+}
+
+function appendSearchableUnknownValues(
+  value: unknown,
+  values: string[],
+  depth: number,
+): void {
+  if (depth > 4) {
+    return;
+  }
+
+  if (typeof value === "string") {
+    values.push(value);
+    return;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    values.push(String(value));
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      appendSearchableUnknownValues(item, values, depth + 1);
+    }
+    return;
+  }
+
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  for (const [key, nestedValue] of Object.entries(value)) {
+    values.push(key);
+    appendSearchableUnknownValues(nestedValue, values, depth + 1);
+  }
 }
