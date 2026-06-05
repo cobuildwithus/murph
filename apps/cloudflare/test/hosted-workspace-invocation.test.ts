@@ -140,13 +140,18 @@ describe("runHostedWorkspaceInvocation", () => {
       status: "idle" as const,
     };
     const capturedInvocationInputs: Record<string, unknown>[] = [];
+    const wakeResultsDuringInvocation: boolean[] = [];
+    const onRuntimeWakeReady = vi.fn();
     mocks.runPackageHostedWorkspaceInvocation.mockImplementation(
       async (input: Record<string, unknown>) => {
         capturedInvocationInputs.push(input);
+        const sendWake = onRuntimeWakeReady.mock.calls[0]?.[0];
+        if (sendWake) {
+          wakeResultsDuringInvocation.push(sendWake());
+        }
         return runtimeResult;
       },
     );
-    const onRuntimeWakeReady = vi.fn();
     const abortController = new AbortController();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
@@ -219,7 +224,8 @@ describe("runHostedWorkspaceInvocation", () => {
     expect(capturedInput.runtimeWakeSignal).toBeTruthy();
     expect(capturedInput.signal).toBe(abortController.signal);
     expect(onRuntimeWakeReady).toHaveBeenCalledTimes(1);
-    expect(onRuntimeWakeReady.mock.calls[0]?.[0]()).toBe(true);
+    expect(wakeResultsDuringInvocation).toEqual([true]);
+    expect(onRuntimeWakeReady.mock.calls[0]?.[0]()).toBe(false);
     const capturedJob = capturedInput.job;
     if (!isWorkspaceInvocationJob(capturedJob)) {
       throw new Error("Expected package invocation input to include the job.");

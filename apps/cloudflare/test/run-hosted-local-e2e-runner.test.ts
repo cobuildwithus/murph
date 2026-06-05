@@ -73,7 +73,6 @@ const expectedScenarioFilesAfterTyping = expectedScenarioFiles.slice(
   expectedScenarioFiles.indexOf(expectedTypingPrewarmScenarioFile) + 1,
 );
 const controlledEnvKeys = [
-  "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
   "MURPH_HEALTH_COMMONS_GENERATED_PREPARED",
   "MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID",
   "MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE",
@@ -299,7 +298,6 @@ function expectAggregateVitestSpawnCalls(expectedVitestCalls: 1 | 4): void {
   expect(typeof options?.cwd).toBe("string");
   expect(options?.env === process.env).toBe(false);
   expect(options?.env.MURPH_HOSTED_LOCAL_PROFILE).toBe("e2e:stub");
-  expect(options?.env.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS).toBe(expectedRunnerTimeoutMs());
   expect(options?.env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED).toBe("1");
   expect(options?.env.MURPH_HOSTED_LOCAL_RUN_ID).toEqual(expect.any(String));
   expect(options?.env.MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID).toBe(
@@ -333,7 +331,6 @@ function expectAggregateVitestSpawnCalls(expectedVitestCalls: 1 | 4): void {
   ]);
   expect(scheduledOptions?.env).not.toBe(options?.env);
   expect(scheduledOptions?.env).toEqual(expect.objectContaining({
-    HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: expectedRunnerTimeoutMs(),
     MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
     MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
     MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
@@ -367,7 +364,6 @@ function expectAggregateVitestSpawnCalls(expectedVitestCalls: 1 | 4): void {
   ]);
   expect(typingOptions?.env).not.toBe(options?.env);
   expect(typingOptions?.env).toEqual(expect.objectContaining({
-    HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: expectedRunnerTimeoutMs(),
     MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
     MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
     MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
@@ -403,10 +399,6 @@ function expectAggregateVitestSpawnCalls(expectedVitestCalls: 1 | 4): void {
   ]);
   expect(finalOptions?.env).toMatchObject(options?.env ?? {});
   expect(finalOptions?.stdio).toBe("inherit");
-}
-
-function expectedRunnerTimeoutMs(): string {
-  return process.env.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?.trim() || "600000";
 }
 
 function restoreControlledEnv(): void {

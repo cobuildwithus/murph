@@ -1,17 +1,13 @@
 import { request as httpRequest, type ClientRequest } from "node:http";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostedAssistantConfigurationError } from "@murphai/assistant-runtime/hosted-assistant-env";
-import {
-  HOSTED_RUNNER_EXECUTABLE_PATH,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
-
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
   runHostedWorkspaceInvocation: vi.fn(),
@@ -738,59 +734,6 @@ describe("startHostedContainerEntrypoint", () => {
     expect(readFile).toHaveBeenCalledTimes(1);
   });
 
-  it("runs the managed-container OpenAI intercept smoke through the Codex client hook", async () => {
-    const runOpenAiInterceptSmoke = vi.fn(async () => ({
-      client: "codex" as const,
-      model: "gpt-5.4-mini",
-      stderrBytes: 0,
-      stdoutBytes: 128,
-    }));
-    const server = await startHostedContainerEntrypoint({
-      port: 0,
-      runtime: {
-        runOpenAiInterceptSmoke,
-      },
-    });
-    servers.push(server);
-    const address = server.address();
-
-    if (!address || typeof address === "string") {
-      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-    }
-
-    const response = await sendHostedContainerJsonRequest({
-      body: "",
-      path: "/internal/deploy-openai-intercept-smoke",
-      port: address.port,
-      headers: {
-        "x-hosted-runner-bound-user-id": "member_smoke",
-        "x-hosted-runtime-attempt-id": "attempt_smoke",
-        "x-hosted-runtime-lease-generation": "17",
-        "x-hosted-runtime-workspace-version": "42",
-      },
-    });
-
-    expect(response).toMatchObject({ status: 200 });
-    expect(response.json).toEqual({
-      ok: true,
-      openAiIntercept: {
-        client: "codex",
-        model: "gpt-5.4-mini",
-        stderrBytes: 0,
-        stdoutBytes: 128,
-      },
-    });
-    expect(runOpenAiInterceptSmoke).toHaveBeenCalledWith({
-      authority: {
-        attemptId: "attempt_smoke",
-        leaseGeneration: "17",
-        userId: "member_smoke",
-        workspaceVersion: "42",
-      },
-      signal: expect.any(AbortSignal),
-    });
-  });
-
   it("runs the managed-container Codex shell smoke through the app-server hook", async () => {
     const runCodexShellSmoke = vi.fn(async () => ({
       client: "codex-app-server" as const,
@@ -888,160 +831,6 @@ describe("startHostedContainerEntrypoint", () => {
         "https://example-account.r2.cloudflarestorage.com/test-bucket/snapshot.enc?X-Amz-Signature=test",
       signal: expect.any(AbortSignal),
     });
-  });
-
-  it("runs the OpenAI intercept smoke Codex process with an allowlisted environment", async () => {
-    const originalPath = process.env.PATH;
-    const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
-    const originalSecret = process.env.HOSTED_CONTAINER_SMOKE_SECRET_SHOULD_NOT_LEAK;
-    const originalCaCert = process.env.CODEX_CA_CERTIFICATE;
-    const originalSslCertFile = process.env.SSL_CERT_FILE;
-    const originalAllProxy = process.env.ALL_PROXY;
-    const originalHttpProxy = process.env.HTTP_PROXY;
-    const originalHttpsProxy = process.env.HTTPS_PROXY;
-    const originalNoProxy = process.env.NO_PROXY;
-    const root = await mkdtemp(path.join(tmpdir(), "hosted-container-codex-smoke-test-"));
-    const binDir = path.join(root, "bin");
-    const capturePath = path.join(root, "env.json");
-    const codexPath = path.join(binDir, "codex");
-
-    try {
-      await mkdir(binDir, { recursive: true });
-      await writeFile(
-        codexPath,
-        [
-          "#!/usr/bin/env node",
-          "const fs = require('node:fs');",
-          `fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({`,
-          "  ALL_PROXY: process.env.ALL_PROXY,",
-          "  CODEX_CA_CERTIFICATE: process.env.CODEX_CA_CERTIFICATE,",
-          "  CODEX_HOME: process.env.CODEX_HOME,",
-          "  CODEX_CONFIG: fs.readFileSync(`${process.env.CODEX_HOME}/config.toml`, 'utf8'),",
-          "  HOME: process.env.HOME,",
-          "  HTTP_PROXY: process.env.HTTP_PROXY,",
-          "  HTTPS_PROXY: process.env.HTTPS_PROXY,",
-          "  NO_PROXY: process.env.NO_PROXY,",
-          "  NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS,",
-          "  OPENAI_API_KEY: process.env.OPENAI_API_KEY,",
-          "  PATH: process.env.PATH,",
-          "  REQUESTS_CA_BUNDLE: process.env.REQUESTS_CA_BUNDLE,",
-          "  SECRET: process.env.HOSTED_CONTAINER_SMOKE_SECRET_SHOULD_NOT_LEAK,",
-          "  SSL_CERT_FILE: process.env.SSL_CERT_FILE,",
-          "}));",
-          "process.stdout.write('OK\\n');",
-          "",
-        ].join("\n"),
-        "utf8",
-      );
-      await chmod(codexPath, 0o700);
-
-      process.env.PATH = `${binDir}${path.delimiter}${originalPath ?? ""}`;
-      process.env.OPENAI_API_KEY = "real-provider-secret";
-      process.env.HOSTED_CONTAINER_SMOKE_SECRET_SHOULD_NOT_LEAK = "do-not-forward";
-      process.env.CODEX_CA_CERTIFICATE = "/managed-container/cloudflare-ca.pem";
-      process.env.SSL_CERT_FILE = "/managed-container/ssl-cert-file.pem";
-      process.env.ALL_PROXY = "http://cloudflare-local-all-proxy.example.test:8080";
-      process.env.HTTP_PROXY = "http://cloudflare-local-proxy.example.test:8080";
-      process.env.HTTPS_PROXY = "http://cloudflare-local-proxy.example.test:8080";
-      process.env.NO_PROXY = "localhost,127.0.0.1,host.docker.internal";
-
-      const server = await startHostedContainerEntrypoint({ port: 0 });
-      servers.push(server);
-      const address = server.address();
-
-      if (!address || typeof address === "string") {
-        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-      }
-
-      const response = await sendHostedContainerJsonRequest({
-        body: "",
-        path: "/internal/deploy-openai-intercept-smoke",
-        port: address.port,
-        headers: {
-          "x-hosted-runner-bound-user-id": "member_smoke",
-          "x-hosted-runtime-attempt-id": "attempt_smoke",
-          "x-hosted-runtime-lease-generation": "17",
-          "x-hosted-runtime-workspace-version": "42",
-        },
-      });
-
-      expect(response.status).toBe(200);
-      expect(response.json).toMatchObject({
-        ok: true,
-        openAiIntercept: {
-          client: "codex",
-          model: "gpt-5.4-mini",
-        },
-      });
-      const captured = JSON.parse(await readFile(capturePath, "utf8")) as Record<string, unknown>;
-      expect(captured).toMatchObject({
-        ALL_PROXY: "http://cloudflare-local-all-proxy.example.test:8080",
-        CODEX_CA_CERTIFICATE: "/managed-container/cloudflare-ca.pem",
-        HTTP_PROXY: "http://cloudflare-local-proxy.example.test:8080",
-        HTTPS_PROXY: "http://cloudflare-local-proxy.example.test:8080",
-        NO_PROXY: "localhost,127.0.0.1,host.docker.internal",
-        OPENAI_API_KEY: "__cloudflare_injected__",
-        SSL_CERT_FILE: "/managed-container/ssl-cert-file.pem",
-      });
-      expect(captured.CODEX_HOME).toEqual(expect.stringContaining(".codex-smoke"));
-      expect(captured.CODEX_CONFIG).not.toEqual(expect.stringContaining("env_http_headers"));
-      expect(captured.CODEX_CONFIG).not.toEqual(expect.stringContaining(
-        "MURPH_HOSTED_CODEX_",
-      ));
-      expect(captured.HOME).toEqual(expect.stringContaining("hosted-openai-intercept-smoke-"));
-      expect(captured.NODE_EXTRA_CA_CERTS).toEqual(expect.any(String));
-      expect(captured.PATH).toEqual(expect.stringContaining(HOSTED_RUNNER_EXECUTABLE_PATH));
-      expect(captured.PATH).toEqual(expect.stringContaining(binDir));
-      expect(captured.REQUESTS_CA_BUNDLE).toEqual(expect.any(String));
-      expect(captured.SECRET).toBeUndefined();
-    } finally {
-      if (originalPath === undefined) {
-        delete process.env.PATH;
-      } else {
-        process.env.PATH = originalPath;
-      }
-      if (originalOpenAiApiKey === undefined) {
-        delete process.env.OPENAI_API_KEY;
-      } else {
-        process.env.OPENAI_API_KEY = originalOpenAiApiKey;
-      }
-      if (originalSecret === undefined) {
-        delete process.env.HOSTED_CONTAINER_SMOKE_SECRET_SHOULD_NOT_LEAK;
-      } else {
-        process.env.HOSTED_CONTAINER_SMOKE_SECRET_SHOULD_NOT_LEAK = originalSecret;
-      }
-      if (originalCaCert === undefined) {
-        delete process.env.CODEX_CA_CERTIFICATE;
-      } else {
-        process.env.CODEX_CA_CERTIFICATE = originalCaCert;
-      }
-      if (originalSslCertFile === undefined) {
-        delete process.env.SSL_CERT_FILE;
-      } else {
-        process.env.SSL_CERT_FILE = originalSslCertFile;
-      }
-      if (originalAllProxy === undefined) {
-        delete process.env.ALL_PROXY;
-      } else {
-        process.env.ALL_PROXY = originalAllProxy;
-      }
-      if (originalHttpProxy === undefined) {
-        delete process.env.HTTP_PROXY;
-      } else {
-        process.env.HTTP_PROXY = originalHttpProxy;
-      }
-      if (originalHttpsProxy === undefined) {
-        delete process.env.HTTPS_PROXY;
-      } else {
-        process.env.HTTPS_PROXY = originalHttpsProxy;
-      }
-      if (originalNoProxy === undefined) {
-        delete process.env.NO_PROXY;
-      } else {
-        process.env.NO_PROXY = originalNoProxy;
-      }
-      await rm(root, { force: true, recursive: true });
-    }
   });
 
   it("rejects the removed legacy internal run alias", async () => {

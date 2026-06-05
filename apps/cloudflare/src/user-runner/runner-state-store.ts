@@ -13,6 +13,7 @@ import {
   normalizeIsoDateOrNull,
   normalizeNonNegativeInteger,
   projectRunnerStateRecord,
+  readWriteFenceKind,
   type RunnerMetaRow,
 } from "./runner-state-helpers.js";
 import {
@@ -23,8 +24,9 @@ import {
 
 export interface RunnerWriteFenceToken {
   attemptId: string;
-  expiresAt: string;
+  expiresAt: string | null;
   generation: string;
+  kind: RunnerWriteFenceKind;
   leaseGeneration: string;
   providerEgressToken: string | null;
   reason: HostedWorkspaceInvocationReason;
@@ -52,13 +54,11 @@ export interface RunnerWriteFenceValidationResult {
 }
 
 export type RunnerActiveWriteFenceValidationRejectReason =
-  | "expired_write_fence"
   | "missing_runner_state"
   | "missing_write_fence"
   | "write_fence_mismatch";
 
 export type RunnerProviderEgressTokenValidationRejectReason =
-  | "expired_write_fence"
   | "missing_provider_egress_token"
   | "missing_runner_state"
   | "missing_write_fence"
@@ -94,20 +94,6 @@ export type RunnerProviderEgressTokenValidationResult =
       userId: string;
       workspaceVersion: string | null;
     };
-
-export type RunnerExpiredActiveRunResult =
-  | {
-      cleared: false;
-      record: RunnerStateRecord;
-    }
-  | {
-      cleared: true;
-      record: RunnerStateRecord;
-    };
-
-export function resolveActiveInvocationRecoveryDecision(_input?: unknown): { action: "none" } {
-  return { action: "none" };
-}
 
 export class RunnerStateStore {
   private userId: string | null = null;
@@ -164,24 +150,10 @@ export class RunnerStateStore {
     }
   }
 
-  async clearExpiredWriteFence(nowMs: number): Promise<RunnerExpiredActiveRunResult> {
-    const meta = this.requireMetaRowSync();
-    const cleared = this.clearExpiredActiveRunSync(meta, nowMs);
-    if (cleared) {
-      this.writeMetaRowSync(meta);
-    }
-    return {
-      cleared,
-      record: this.readStateFromMetaSync(meta),
-    };
-  }
-
   async beginWriteFence(input: {
-    kind?: RunnerWriteFenceKind;
     reason: HostedWorkspaceInvocationReason;
     runnerContainerName: string;
     userId: string;
-    expiresAt?: string | null;
   }): Promise<RunnerWriteFenceToken> {
     await this.bindUser(input.userId);
 
@@ -192,29 +164,27 @@ export class RunnerStateStore {
 
     const nextGeneration = normalizeNonNegativeInteger(meta.active_generation) + 1;
     const startedAt = new Date().toISOString();
-    const expiresAt = normalizeIsoDateOrNull(input.expiresAt ?? null)
-      ?? new Date(Date.parse(startedAt) + 30 * 60_000).toISOString();
     const attemptId = createRuntimeWriteAttemptId();
     const providerEgressToken = createProviderEgressToken();
+    const kind: RunnerWriteFenceKind = "runtime";
 
     meta.active_attempt_id = attemptId;
-    meta.active_expires_at = expiresAt;
+    meta.active_expires_at = null;
     meta.active_generation = nextGeneration;
-    meta.active_kind = input.kind ?? "runtime";
+    meta.active_kind = kind;
     meta.active_provider_egress_token_hash = await hashProviderEgressToken(providerEgressToken);
     meta.active_reason = input.reason;
     meta.active_runner_container_name = requireRunnerContainerName(input.runnerContainerName);
     meta.active_started_at = startedAt;
     meta.active_workspace_version = null;
-    if (meta.active_kind === "runtime") {
-      meta.wake_at = null;
-    }
+    meta.wake_at = null;
     this.writeMetaRowSync(meta);
 
     return {
       attemptId,
-      expiresAt,
+      expiresAt: null,
       generation: nextGeneration.toString(),
+      kind,
       leaseGeneration: nextGeneration.toString(),
       providerEgressToken,
       reason: input.reason,
@@ -389,10 +359,6 @@ export class RunnerStateStore {
     };
   }
 
-  async clearStaleInvocationIfExpired(_input?: unknown): Promise<RunnerExpiredActiveRunResult> {
-    return await this.clearExpiredWriteFence(Date.now());
-  }
-
   async clearWriteFenceForUserDeletion(userId: string): Promise<{
     attemptId: string | null;
     cleared: boolean;
@@ -439,14 +405,9 @@ export class RunnerStateStore {
     }
 
     const token = this.readWriteFenceTokenSync(meta);
-    if (token && this.isWriteFenceTokenExpiredSync(token, Date.now())) {
-      return {
-        owns: false,
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
     if (
       !token
+      || token.kind !== "runtime"
       || token.attemptId !== input.attemptId
       || token.generation !== input.generation
       || token.userId !== input.userId
@@ -479,13 +440,6 @@ export class RunnerStateStore {
       };
     }
     const token = this.readWriteFenceTokenSync(meta);
-    if (token && this.isWriteFenceTokenExpiredSync(token, Date.now())) {
-      return {
-        owns: false,
-        reason: "expired_write_fence",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
     if (!token) {
       return {
         owns: false,
@@ -494,7 +448,8 @@ export class RunnerStateStore {
       };
     }
     if (
-      token.userId !== input.userId
+      token.kind !== "runtime"
+      || token.userId !== input.userId
     ) {
       return {
         owns: false,
@@ -535,13 +490,6 @@ export class RunnerStateStore {
       };
     }
     const token = this.readWriteFenceTokenSync(meta);
-    if (token && this.isWriteFenceTokenExpiredSync(token, Date.now())) {
-      return {
-        owns: false,
-        reason: "expired_write_fence",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
     if (!token) {
       return {
         owns: false,
@@ -549,7 +497,7 @@ export class RunnerStateStore {
         record: this.readStateFromMetaSync(meta),
       };
     }
-    if (token.userId !== input.userId) {
+    if (token.kind !== "runtime" || token.userId !== input.userId) {
       return {
         owns: false,
         reason: "write_fence_mismatch",
@@ -579,34 +527,6 @@ export class RunnerStateStore {
       userId: token.userId,
       workspaceVersion: token.workspaceVersion,
     };
-  }
-
-  private clearExpiredActiveRunSync(meta: RunnerMetaRow, nowMs: number): boolean {
-    const writeFence = this.readWriteFenceTokenSync(meta);
-    if (!writeFence) {
-      return false;
-    }
-
-    if (!this.isWriteFenceTokenExpiredSync(writeFence, nowMs)) {
-      return false;
-    }
-
-    const error = new Error("Hosted runtime write fence timed out.");
-    const errorCode = deriveHostedExecutionErrorCode(error);
-    this.clearActiveRunMetaSync(meta);
-    const failedAt = new Date(nowMs).toISOString();
-    meta.failure_count = normalizeNonNegativeInteger(meta.failure_count) + 1;
-    meta.last_error_at = failedAt;
-    meta.last_error_code = errorCode;
-    return true;
-  }
-
-  private isWriteFenceTokenExpiredSync(
-    token: RunnerWriteFenceToken,
-    nowMs: number,
-  ): boolean {
-    const expiresAtMs = Date.parse(token.expiresAt);
-    return Number.isFinite(expiresAtMs) && nowMs >= expiresAtMs;
   }
 
   private readStateSync(): RunnerStateRecord {
@@ -674,10 +594,10 @@ export class RunnerStateStore {
       WHERE singleton = 1`,
     ).toArray()[0] ?? null;
 
-    if (row) {
-      this.userId = row.user_id;
+    if (!row) {
+      return null;
     }
-
+    this.userId = row.user_id;
     return row;
   }
 
@@ -758,23 +678,25 @@ export class RunnerStateStore {
   ): boolean {
     return meta.active_attempt_id === token.attemptId
       && normalizeNonNegativeInteger(meta.active_generation).toString() === token.generation
+      && readWriteFenceKind(meta.active_kind) === token.kind
       && meta.user_id === token.userId;
   }
 
   private readWriteFenceTokenSync(meta: RunnerMetaRow): RunnerWriteFenceToken | null {
+    const kind = readWriteFenceKind(meta.active_kind);
     if (
       !meta.active_attempt_id
       || !meta.active_started_at
-      || meta.active_kind !== "runtime"
+      || !kind
     ) {
       return null;
     }
 
     return {
       attemptId: meta.active_attempt_id,
-      expiresAt: meta.active_expires_at
-        ?? new Date(Date.parse(meta.active_started_at) + 30 * 60_000).toISOString(),
+      expiresAt: null,
       generation: normalizeNonNegativeInteger(meta.active_generation).toString(),
+      kind,
       leaseGeneration: normalizeNonNegativeInteger(meta.active_generation).toString(),
       providerEgressToken: null,
       reason: readHostedWorkspaceInvocationReasonOrDefault(meta.active_reason),

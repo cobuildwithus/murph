@@ -185,7 +185,7 @@ to Codex.
   input spine. It restores the encrypted workspace, imports hosted mailbox rows,
   stages `AssistantInputEvent` records, runs the local scanner/active-turn
   machinery, and keeps dirty runtime state local until the runtime-owned
-  idle/deadline/scheduled-wake `idle_shutdown` checkpoint writes the updated
+  idle/scheduled-wake `idle_shutdown` checkpoint writes the updated
   workspace checkpoint.
 - Mailbox import progress is not assistant handling progress. If a deploy,
   Durable Object reset, or runner restart lands after mailbox import has
@@ -205,7 +205,7 @@ to Codex.
 - Normal webhook and app paths commit durable demand in web-owned storage and
   signal Temporal only. Temporal calls Cloudflare `ensure-processing`; Cloudflare
   responds with `runtime_processing_accepted` or `retry_later` and owns runner
-  start, wake, watchdog, and cleanup.
+  start, wake, active-fence alarm cleanup, and execution cleanup.
 
 ## Explicit Non-Goals
 

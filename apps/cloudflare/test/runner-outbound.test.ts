@@ -512,7 +512,6 @@ describe("handleRunnerOutboundRequest", () => {
         }),
         createRunnerOutboundEnv({
           HOSTED_WEB_BASE_URL: "https://web.example.test",
-          HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "600000",
           HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
         }),
         "member_123" ,

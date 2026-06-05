@@ -137,21 +137,6 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     return await this.runner.validateRuntimeProviderEgressToken(input);
   }
 
-  async beginDeploySmokeRuntimeWriteFence(input: {
-    userId: string;
-    workspaceVersion: string;
-  }): ReturnType<HostedUserRunner["beginDeploySmokeRuntimeWriteFence"]> {
-    return this.runner.beginDeploySmokeRuntimeWriteFence(input);
-  }
-
-  async finishDeploySmokeRuntimeWriteFence(input: {
-    attemptId: string;
-    generation: string;
-    userId: string;
-  }): ReturnType<HostedUserRunner["finishDeploySmokeRuntimeWriteFence"]> {
-    return this.runner.finishDeploySmokeRuntimeWriteFence(input);
-  }
-
   async wake(input: TestWake): Promise<HostedRunnerStatusResponse> {
     return wakeRunnerForTest(this.runner, this.runtimeEnv, input);
   }

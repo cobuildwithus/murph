@@ -912,7 +912,6 @@ export function buildWranglerLocalDevConfig(
     HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: resolveWranglerEnvValue("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", source) ?? "30000",
     // Local Cloudflare container cold starts are materially slower than the hosted runtime.
     HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: resolveWranglerEnvValue("HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS", source) ?? "60000",
-    HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: resolveWranglerEnvValue("HOSTED_EXECUTION_RUNNER_TIMEOUT_MS", source) ?? "120000",
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: resolveWranglerEnvValue("HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT", source) ?? "development",
   };
 

@@ -240,13 +240,11 @@ type HostedProviderEgressActiveContainerIdentitySource =
   | "bound_user_header"
   | "container_name";
 const HOSTED_ACTIVE_WRITE_FENCE_REJECT_REASONS = [
-  "expired_write_fence",
   "missing_runner_state",
   "missing_write_fence",
   "write_fence_mismatch",
 ] as const;
 const HOSTED_PROVIDER_EGRESS_TOKEN_REJECT_REASONS = [
-  "expired_write_fence",
   "missing_provider_egress_token",
   "missing_runner_state",
   "missing_write_fence",

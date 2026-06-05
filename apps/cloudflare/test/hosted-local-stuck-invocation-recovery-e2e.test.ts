@@ -1,4 +1,4 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHmac } from "node:crypto";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -102,23 +102,6 @@ describe("hosted local stuck invocation recovery e2e", () => {
     const firstCompletionStatus = await waitForHostedInvocationIdleWithLogs();
     expectMailboxLagDrained(firstCompletionStatus);
     expectDeferredMailboxImportLog(firstCompletionStatus);
-    const checkpointFenceResult = await checkpointAndUploadArtifactThroughWriteFence(
-      firstCompletionStatus,
-    );
-    expect(checkpointFenceResult.ok).toBe(true);
-    expect(checkpointFenceResult.checkpoint.previousWorkspaceVersion).toBe(
-      requireWorkspaceVersion(firstCompletionStatus),
-    );
-    expect(checkpointFenceResult.checkpoint.workspaceVersion).not.toBe(
-      checkpointFenceResult.checkpoint.previousWorkspaceVersion,
-    );
-    expect(checkpointFenceResult.artifact).toMatchObject({
-      sha256: createHash("sha256")
-        .update(checkpointArtifactText())
-        .digest("hex"),
-      size: Buffer.byteLength(checkpointArtifactText(), "utf8"),
-      status: 200,
-    });
 
     const recoveryBaselineSendCount = requireLinqStub().countObservedSends(replyPath);
     const baselineProviderRequestCount = countAssistantProviderResponsesApiRequests();
@@ -126,6 +109,7 @@ describe("hosted local stuck invocation recovery e2e", () => {
 
     const stuckInvocation = await requireScenario().harness.startStuckInvocationForTest(userId, {
       reason: "manual",
+      startedAgoMs: 35_000,
     });
     expect(stuckInvocation.ok).toBe(true);
     expect(stuckInvocation.attemptId).toMatch(/^runtime-write-/u);
@@ -289,53 +273,6 @@ async function readHostedRunnerStatusWithLogLimit(
     throw new Error("Hosted runner status read returned a different user.");
   }
   return status;
-}
-
-interface CheckpointArtifactWriteFenceTestResult {
-  artifact: {
-    sha256: string;
-    size: number;
-    status: number;
-  };
-  checkpoint: {
-    checkpointed: true;
-    previousWorkspaceVersion: string;
-    status: number;
-    workspaceVersion: string;
-  };
-  ok: true;
-}
-
-async function checkpointAndUploadArtifactThroughWriteFence(
-  status: HostedRunnerStatusResponse,
-): Promise<CheckpointArtifactWriteFenceTestResult> {
-  return await requireScenario().harness.requestJson<CheckpointArtifactWriteFenceTestResult>(
-    `/__test/users/${encodeURIComponent(userId)}/checkpoint-artifact-write-fence`,
-    {
-      body: JSON.stringify({
-        artifactText: checkpointArtifactText(),
-        expectedWorkspaceVersion: requireWorkspaceVersion(status),
-        snapshotRef: status.workspace?.snapshotRef ?? null,
-      }),
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-        "content-type": "application/json; charset=utf-8",
-      },
-      method: "POST",
-    },
-  );
-}
-
-function checkpointArtifactText(): string {
-  return `checkpoint write-fence artifact ${runId}`;
-}
-
-function requireWorkspaceVersion(status: Pick<HostedRunnerStatusResponse, "workspace">): string {
-  const version = status.workspace?.version;
-  if (!version) {
-    throw new Error("Hosted runner status did not include a workspace version.");
-  }
-  return version;
 }
 
 function summarizeMailboxImportLogs(

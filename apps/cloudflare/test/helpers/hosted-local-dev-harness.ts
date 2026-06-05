@@ -53,7 +53,6 @@ export interface HostedLocalDevHarness {
   runHostedManualInvocationForTest(userId: string): Promise<HostedWorkspaceInvocationResult>;
   runHostedAlarmForTest(userId: string): Promise<{ ok: true }>;
   startStuckInvocationForTest(userId: string, input?: {
-    expiresInMs?: number;
     reason?: HostedWorkspaceInvocationReason;
     startedAgoMs?: number;
   }): Promise<{
@@ -200,7 +199,6 @@ export async function startHostedLocalDevHarness(input: {
       startStuckInvocationForTest: async (
         userId: string,
         stuckInput?: {
-          expiresInMs?: number;
           reason?: HostedWorkspaceInvocationReason;
           startedAgoMs?: number;
         },
@@ -210,9 +208,6 @@ export async function startHostedLocalDevHarness(input: {
         ok: true;
       }> => {
         const searchParams = new URLSearchParams();
-        if (typeof stuckInput?.expiresInMs === "number") {
-          searchParams.set("expiresInMs", String(stuckInput.expiresInMs));
-        }
         if (stuckInput?.reason) {
           searchParams.set("reason", stuckInput.reason);
         }
@@ -293,14 +288,11 @@ export async function startHostedLocalDevHarness(input: {
           }
           if (
             now >= nextRecoveryNudgeAt
-            && (
-              hostedStatusHasStaleMailboxLag({
-                firstObservedAt: mailboxLagFirstObservedAt,
-                now,
-                status,
-              })
-              || hostedStatusHasDueScheduledRecovery(status, now)
-            )
+            && hostedStatusHasStaleMailboxLag({
+              firstObservedAt: mailboxLagFirstObservedAt,
+              now,
+              status,
+            })
           ) {
             nextRecoveryNudgeAt = now + 2_000;
             await nudgeHostedUserBestEffort(userId);
@@ -647,25 +639,7 @@ function hostedStatusHasStaleMailboxLag(input: {
 
 function hostedStatusHasCompletedWithError(status: HostedRunnerStatusResponse): boolean {
   return !status.inFlight
-    && Boolean(status.lastErrorCode)
-    && !hostedStatusHasMailboxLag(status)
-    && !hostedStatusHasScheduledRecovery(status);
-}
-
-function hostedStatusHasScheduledRecovery(status: HostedRunnerStatusResponse): boolean {
-  return typeof status.nextAlarmAt === "string" && status.nextAlarmAt.trim().length > 0;
-}
-
-function hostedStatusHasDueScheduledRecovery(
-  status: HostedRunnerStatusResponse,
-  nowMs: number,
-): boolean {
-  if (status.inFlight || !status.lastErrorCode || !hostedStatusHasScheduledRecovery(status)) {
-    return false;
-  }
-
-  const nextAlarmAtMs = Date.parse(status.nextAlarmAt!);
-  return Number.isFinite(nextAlarmAtMs) && nextAlarmAtMs <= nowMs;
+    && Boolean(status.lastErrorCode);
 }
 
 function resolveHostedLocalHarnessDistDir(

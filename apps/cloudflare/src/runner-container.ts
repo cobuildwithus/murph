@@ -16,9 +16,6 @@ import {
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
 } from "./runner-egress-intercept.ts";
 import {
-  HOSTED_RUNNER_BOUND_USER_ID_HEADER,
-} from "./runner-outbound/headers.ts";
-import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "./hosted-runtime-architecture.ts";
 import {
@@ -26,10 +23,6 @@ import {
   resolveHostedExecutionRunnerContainerName as resolveHostedExecutionRunnerContainerNameFromIdentity,
   type HostedRunnerContainerIdentitySource,
 } from "./hosted-runner-container-identity.js";
-import {
-  writeRunnerRuntimeWriteFenceHeaders,
-  type RunnerRuntimeWriteFenceToken,
-} from "./runner-outbound/write-fence.ts";
 import {
   assertHostedExecutionRunnerJobResult,
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
@@ -46,8 +39,6 @@ const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
 const RUNNER_HEALTH_URL = "http://container/health";
 const RUNNER_EXECUTE_URL = "http://container/internal/workspace-invocation";
-const RUNNER_OPENAI_INTERCEPT_SMOKE_URL =
-  "http://container/internal/deploy-openai-intercept-smoke";
 const RUNNER_CODEX_SHELL_SMOKE_URL =
   "http://container/internal/deploy-codex-shell-smoke";
 const RUNNER_DIRECT_R2_PRESIGNED_PUT_SMOKE_URL =
@@ -142,7 +133,7 @@ export class HostedExecutionConfigurationError extends Error {
 
 interface HostedExecutionContainerInvokeRequest {
   job: HostedExecutionRunnerJobInput;
-  timeoutMs: number;
+  timeoutMs?: number | null;
   userId: string;
 }
 
@@ -167,7 +158,7 @@ interface HostedExecutionContainerRunnerInput {
   runnerContainerName?: string;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
   signal?: AbortSignal;
-  timeoutMs: number;
+  timeoutMs?: number | null;
   userId: string;
 }
 
@@ -247,12 +238,6 @@ interface HostedExecutionContainerSmokeHealthResult {
     status: number | null;
   } | null;
   ok: boolean;
-  openAiIntercept?: {
-    client: string | null;
-    model: string | null;
-    stderrBytes: number | null;
-    stdoutBytes: number | null;
-  } | null;
   runnerBundle: {
     buildSkipped?: boolean;
     bundleFingerprint?: string;
@@ -270,8 +255,6 @@ interface HostedExecutionContainerSmokeHealthInput {
     presignedPutUrl: string;
     tlsCaCertificatePem?: string;
   };
-  openAiIntercept?: boolean;
-  openAiInterceptAuthority?: RunnerRuntimeWriteFenceToken & { userId: string };
 }
 
 interface RunnerActivityTimeoutRenewable {
@@ -636,9 +619,6 @@ export class RunnerContainer extends Container {
           });
         }
 
-        const openAiIntercept = input.openAiIntercept === true
-          ? await this.smokeOpenAiIntercept(readyTimeoutMs, input.openAiInterceptAuthority)
-          : undefined;
         const codexShell = await this.smokeCodexShell(readyTimeoutMs);
         const directR2PresignedPut = input.directR2PresignedPut
           ? await this.smokeDirectR2PresignedPut(readyTimeoutMs, input.directR2PresignedPut)
@@ -648,7 +628,6 @@ export class RunnerContainer extends Container {
           codexShell,
           ...(directR2PresignedPut === undefined ? {} : { directR2PresignedPut }),
           ok: true,
-          ...(openAiIntercept === undefined ? {} : { openAiIntercept }),
           runnerBundle: parseRunnerContainerSmokeBundle(payload.runnerBundle),
           service: typeof payload.service === "string" ? payload.service : null,
           status: response.status,
@@ -734,45 +713,6 @@ export class RunnerContainer extends Container {
         ? result.responseBodyBytes
         : null,
       status: typeof result.status === "number" ? result.status : null,
-    };
-  }
-
-  private async smokeOpenAiIntercept(
-    readyTimeoutMs: number,
-    authority: HostedExecutionContainerSmokeHealthInput["openAiInterceptAuthority"],
-  ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["openAiIntercept"]>> {
-    if (!authority) {
-      throw new Error("Hosted runner OpenAI intercept smoke requires a runtime write fence.");
-    }
-    const headers = new Headers();
-    headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, authority.userId);
-    writeRunnerRuntimeWriteFenceHeaders(headers, authority);
-    const smokeSignal = AbortSignal.timeout(Math.max(
-      readyTimeoutMs,
-      130_000,
-    ));
-    const response = await this.containerFetch(
-      RUNNER_OPENAI_INTERCEPT_SMOKE_URL,
-      {
-        headers,
-        method: "POST",
-        signal: smokeSignal,
-      },
-    );
-    const payload = await readRunnerContainerMetadataJsonObject(response, {
-      signal: smokeSignal,
-    });
-
-    if (!response.ok || payload.ok !== true) {
-      throw new Error(`Hosted runner OpenAI intercept smoke failed with HTTP ${response.status}.`);
-    }
-
-    const result = readRunnerContainerMetadataRecordProperty(payload.openAiIntercept);
-    return {
-      client: typeof result.client === "string" ? result.client : null,
-      model: typeof result.model === "string" ? result.model : null,
-      stderrBytes: typeof result.stderrBytes === "number" ? result.stderrBytes : null,
-      stdoutBytes: typeof result.stdoutBytes === "number" ? result.stdoutBytes : null,
     };
   }
 
@@ -913,7 +853,6 @@ export class RunnerContainer extends Container {
     this.workspaceInvocationActiveOperation = activeOperation;
 
     try {
-      const startTime = Date.now();
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -924,7 +863,7 @@ export class RunnerContainer extends Container {
           workspaceVersion: input.job.request.workspaceVersion,
           runnerIdleTtlMs: readRunnerContainerIdleTtlMs(this.environment),
           runnerPort: RUNNER_PORT,
-          timeoutMs: input.timeoutMs,
+          readinessTimeoutMs: input.timeoutMs ?? null,
         },
         message: "Hosted execution container invocation received.",
         phase: "container.starting",
@@ -935,24 +874,16 @@ export class RunnerContainer extends Container {
       this.noteRunnerActivity("container-ready");
       throwIfRunnerContainerOperationAborted(operationAbortController.signal);
 
-      const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
       activeOperationAcquired = true;
       stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
       this.noteRunnerActivity("invoke-started");
       this.noteRunnerActivity("runner-request-starting");
       emitHostedExecutionStructuredLog({
         component: "container",
-        details: {
-          remainingTimeoutMs,
-        },
         message: "Hosted execution container sending runner request.",
         phase: "container.ready",
         userId: routeUserId,
       });
-      const requestSignal = combineRunnerContainerAbortSignals(
-        operationAbortController.signal,
-        AbortSignal.timeout(remainingTimeoutMs),
-      );
       const runnerRequest = this.containerFetch(
         RUNNER_EXECUTE_URL,
         {
@@ -964,7 +895,7 @@ export class RunnerContainer extends Container {
             "content-type": "application/json; charset=utf-8",
           },
           method: "POST",
-          signal: requestSignal,
+          signal: operationAbortController.signal,
         },
       );
       const stopWatcherAbortController = new AbortController();
@@ -978,7 +909,7 @@ export class RunnerContainer extends Container {
       try {
         response = await raceRunnerContainerOperationAbort(
           Promise.race([runnerRequest, stoppedContainer]),
-          requestSignal,
+          operationAbortController.signal,
         );
       } finally {
         stopWatcherAbortController.abort();
@@ -1082,6 +1013,7 @@ export class RunnerContainer extends Container {
     const readinessStartedAt = Date.now();
     const status = readContainerStatus(await this.getState());
     const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
+    const readinessBudgetMs = input.timeoutMs ?? readyTimeoutMs;
 
     if (isRunnerContainerStopped(status)) {
       this.warmShellInvalidatedByUnsettledDestroy = false;
@@ -1103,17 +1035,18 @@ export class RunnerContainer extends Container {
         reason: "warm-invalidated",
       });
     } else if (!isRunnerContainerStopped(status)) {
+      const readinessTimeoutMs = Math.min(readinessBudgetMs, readyTimeoutMs);
       try {
         await assertRunnerHealthy(
           this,
-          Math.min(input.timeoutMs, readyTimeoutMs),
+          readinessTimeoutMs,
           operationAbortSignal,
         );
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
             readinessLatencyMs: Date.now() - readinessStartedAt,
-            readinessTimeoutMs: Math.min(input.timeoutMs, readyTimeoutMs),
+            readinessTimeoutMs,
             startMode: "warm",
             statusBeforeStart: status,
           },
@@ -1130,7 +1063,7 @@ export class RunnerContainer extends Container {
           component: "container",
           details: {
             readinessLatencyMs: Date.now() - readinessStartedAt,
-            readinessTimeoutMs: Math.min(input.timeoutMs, readyTimeoutMs),
+            readinessTimeoutMs,
             startMode: "warm",
             statusBeforeStart: status,
           },
@@ -1155,7 +1088,7 @@ export class RunnerContainer extends Container {
       details: {
         readinessPollIntervalMs: RUNNER_WAIT_INTERVAL_MS,
         readinessTimeoutMs: Math.min(
-          Math.max(1, input.timeoutMs - (Date.now() - readinessStartedAt)),
+          Math.max(1, readinessBudgetMs - (Date.now() - readinessStartedAt)),
           readyTimeoutMs,
         ),
         runnerPort: RUNNER_PORT,
@@ -1167,7 +1100,7 @@ export class RunnerContainer extends Container {
       userId: input.userId,
     });
 
-    const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - readinessStartedAt));
+    const remainingTimeoutMs = Math.max(1, readinessBudgetMs - (Date.now() - readinessStartedAt));
     const readinessTimeoutMs = Math.min(remainingTimeoutMs, readyTimeoutMs);
 
     try {
@@ -1690,7 +1623,9 @@ export async function invokeHostedExecutionContainerRunner(
   const container = input.runnerContainerNamespace.getByName(input.runnerContainerName ?? jobUserId);
   const invokeRequest: HostedExecutionContainerInvokeRequest = {
     job: input.job,
-    timeoutMs: input.timeoutMs,
+    ...(input.timeoutMs === undefined || input.timeoutMs === null
+      ? {}
+      : { timeoutMs: input.timeoutMs }),
     userId: jobUserId,
   };
   const invocation = invokeRunnerContainerProcessing(container, invokeRequest);
@@ -2330,7 +2265,7 @@ function parseHostedExecutionContainerInvokeInput(
 
   return {
     job,
-    timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
+    timeoutMs: readOptionalTimeoutMs(payload.timeoutMs),
     userId,
   };
 }
@@ -2353,6 +2288,14 @@ function readTimeoutMs(value: unknown, fallback: number): number {
   }
 
   return Math.trunc(value);
+}
+
+function readOptionalTimeoutMs(value: unknown): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  return readTimeoutMs(value, DEFAULT_RUNNER_READY_TIMEOUT_MS);
 }
 
 function readRunnerContainerDeadlineRemainingMs(deadlineMs: number): number {

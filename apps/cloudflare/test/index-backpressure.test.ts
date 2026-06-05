@@ -30,6 +30,7 @@ const TEST_VERCEL_OIDC_PUBLIC_JWK = {
 
 describe("cloudflare worker queue backpressure routes", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -80,38 +81,6 @@ describe("cloudflare worker queue backpressure routes", () => {
     expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
   });
 
-  it("exposes runtime write-fence methods for deploy smoke on the user runner durable object", async () => {
-    const harness = createUserRunnerDurableObject();
-    await harness.durableObject.bindUser("member_123");
-
-    const lease = await harness.durableObject.beginDeploySmokeRuntimeWriteFence({
-      userId: "member_123",
-      workspaceVersion: "7",
-    });
-
-    expect(lease).toMatchObject({
-      reason: "manual",
-      userId: "member_123",
-      workspaceVersion: "7",
-    });
-    expect(lease).not.toBeNull();
-    if (!lease) {
-      throw new Error("Expected runtime write fence.");
-    }
-
-    await expect(harness.durableObject.validateRuntimeWriteFence({
-      attemptId: lease.attemptId,
-      generation: lease.generation,
-      userId: "member_123",
-    })).resolves.toBe(true);
-
-    await expect(harness.durableObject.finishDeploySmokeRuntimeWriteFence({
-      attemptId: lease.attemptId,
-      generation: lease.generation,
-      userId: "member_123",
-    })).resolves.toEqual({ completed: true });
-  });
-
   it("keeps an active write fence in flight through the production Durable Object constructor", async () => {
     const harness = createUserRunnerDurableObject({
       CF_VERSION_METADATA: {
@@ -121,7 +90,6 @@ describe("cloudflare worker queue backpressure routes", () => {
     const stateStore = new RunnerStateStore(harness.storage.state);
     await stateStore.bindUser("member_123");
     await stateStore.beginInvocation({
-      expiresAt: "2999-01-01T00:00:00.000Z",
       reason: "manual",
       runnerContainerName: "member_123--v-worker_version_current",
       userId: "member_123",
@@ -157,7 +125,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     const state = await stateStore.readState();
 
     expect(state.writeFence).toMatchObject({
-      expiresAt: "2999-01-01T00:00:00.000Z",
+      expiresAt: null,
       kind: "runtime",
     });
   });

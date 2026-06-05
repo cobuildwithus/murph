@@ -115,21 +115,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.recordHostedWorkspaceSnapshotOrphanCandidate(input);
   }
 
-  async beginDeploySmokeRuntimeWriteFence(input: {
-    userId: string;
-    workspaceVersion: string;
-  }): ReturnType<HostedUserRunner["beginDeploySmokeRuntimeWriteFence"]> {
-    return this.runner.beginDeploySmokeRuntimeWriteFence(input);
-  }
-
-  async finishDeploySmokeRuntimeWriteFence(input: {
-    attemptId: string;
-    generation: string;
-    userId: string;
-  }): ReturnType<HostedUserRunner["finishDeploySmokeRuntimeWriteFence"]> {
-    return this.runner.finishDeploySmokeRuntimeWriteFence(input);
-  }
-
   async fetch(): Promise<Response> {
     return notFound();
   }

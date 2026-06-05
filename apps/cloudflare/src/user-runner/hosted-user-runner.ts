@@ -44,9 +44,9 @@ import {
   buildRunnerWriteFenceValidationRejectedDetails,
 } from "./diagnostics.js";
 import {
-  RunnerWatchdog,
-  readWriteFenceWatchdogAlarmAt,
-} from "./watchdog.js";
+  RunnerAlarmCoordinator,
+  readRunnerNextAlarmAt,
+} from "./alarm-coordinator.js";
 import {
   createWorkspaceSnapshotSessionService,
   type WorkspaceSnapshotSessionService,
@@ -65,9 +65,6 @@ import {
   type RuntimePrewarmInput,
   type RuntimeProcessingInput,
 } from "./runtime-processing-controller.js";
-import {
-  readRunnerWriteFenceAlreadyActiveRecord,
-} from "./write-fence-errors.js";
 
 export type { DurableObjectStateLike } from "./types.js";
 
@@ -96,7 +93,7 @@ export class HostedUserRunner {
       env,
       runnerRuntimeEnvSource,
     });
-    const watchdog = new RunnerWatchdog(state);
+    const alarmCoordinator = new RunnerAlarmCoordinator(state);
     const runtimeInvocation = new RuntimeInvocationService({
       env,
       runnerContainerNamespace,
@@ -109,7 +106,7 @@ export class HostedUserRunner {
       readHostedRuntimeStatusFromWeb: async (userId) => await this.readHostedRuntimeStatusFromWeb(userId),
       readHostedWebControlBaseUrl: () => this.readHostedWebControlBaseUrl(),
       readHostedWorkspaceFromWeb: async (userId, input) => await this.readHostedWorkspaceFromWeb(userId, input),
-      watchdog,
+      alarmCoordinator,
     });
     this.runtimeInvocation = runtimeInvocation;
     const runtimeProcessing = new RuntimeProcessingController({
@@ -119,7 +116,7 @@ export class HostedUserRunner {
       runnerRuntimeEnvSource,
       state,
       stateStore: this.stateStore,
-      watchdog,
+      alarmCoordinator,
     });
     this.runtimeProcessing = runtimeProcessing;
     this.userDataDeletionInput = {
@@ -171,7 +168,7 @@ export class HostedUserRunner {
       ...(record.lastErrorAt ? { lastErrorAt: record.lastErrorAt } : {}),
       ...(record.lastErrorCode ? { lastErrorCode: record.lastErrorCode } : {}),
       ...(record.lastInvocationAt ? { lastInvocationAt: record.lastInvocationAt } : {}),
-      nextAlarmAt: readWriteFenceWatchdogAlarmAt(record),
+      nextAlarmAt: readRunnerNextAlarmAt(record),
       mailboxLag: webStatus.mailboxLag,
       userId: record.userId,
       workspace: webStatus.workspace,
@@ -316,63 +313,6 @@ export class HostedUserRunner {
     userId: string;
   }): Promise<{ deleted: boolean }> {
     return await this.workspaceSnapshotSessions.delete(input);
-  }
-
-  async beginDeploySmokeRuntimeWriteFence(input: {
-    userId: string;
-    workspaceVersion: string;
-  }): Promise<RunnerWriteFenceToken | null> {
-    await this.stateStore.bindUser(input.userId);
-    const existing = await this.stateStore.readState();
-    if (existing.writeFence) {
-      await this.runtimeProcessing.syncWatchdogAlarm(existing);
-      return null;
-    }
-
-    let token: RunnerWriteFenceToken;
-    try {
-      token = await this.stateStore.beginWriteFence({
-        expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
-        kind: "runtime",
-        reason: "manual",
-        runnerContainerName: input.userId,
-        userId: input.userId,
-      });
-    } catch (error) {
-      const activeRecord = readRunnerWriteFenceAlreadyActiveRecord(error);
-      if (!activeRecord) {
-        throw error;
-      }
-      await this.runtimeProcessing.syncWatchdogAlarm(activeRecord);
-      return null;
-    }
-    const bound = await this.stateStore.bindWriteFenceWorkspaceVersion({
-      token,
-      workspaceVersion: input.workspaceVersion,
-    });
-    await this.runtimeProcessing.syncWatchdogAlarm(
-      await this.stateStore.readState(),
-    );
-    return bound;
-  }
-
-  async finishDeploySmokeRuntimeWriteFence(input: {
-    attemptId: string;
-    generation: string;
-    userId: string;
-  }): Promise<{ completed: boolean }> {
-    const result = await this.stateStore.clearWriteFenceIdentityAfterCompletion({
-      attemptId: input.attemptId,
-      finishedAt: new Date().toISOString(),
-      generation: input.generation,
-      userId: input.userId,
-    });
-    if (result.completed) {
-      await this.runtimeProcessing.syncWatchdogAlarm(
-        await this.stateStore.readState(),
-      );
-    }
-    return { completed: result.completed };
   }
 
   private async readHostedRuntimeStatusFromWeb(

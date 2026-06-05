@@ -32,7 +32,6 @@ export function buildHostedWranglerDeployConfig(
     HOSTED_EXECUTION_RETRY_DELAY_MS: environment.retryDelayMs,
     HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: environment.runnerCommitTimeoutMs,
     HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: environment.runnerReadyTimeoutMs,
-    HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: environment.runnerTimeoutMs,
     HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: environment.webControlTimeoutMs,
     ...environment.workerVars,
   };

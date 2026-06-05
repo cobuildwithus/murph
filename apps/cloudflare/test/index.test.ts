@@ -68,7 +68,6 @@ import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
-  HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
 } from "@murphai/hosted-execution/routes";
 import type {
   HostedWorkspaceInvocationReason,
@@ -325,7 +324,6 @@ describe("cloudflare worker routes", () => {
       "test-run-alarm",
       "test-container-activity-expired",
       "test-start-stuck-invocation",
-      "test-checkpoint-artifact-write-fence",
       "test-direct-r2-presigned-put",
       "deploy-container-smoke",
       "runtime-ensure-processing",
@@ -402,7 +400,6 @@ describe("cloudflare worker routes", () => {
         byteLength: number;
         presignedPutUrl: string;
       };
-      openAiIntercept?: boolean;
     }) => {
       const directR2PresignedPut = input.directR2PresignedPut;
       if (!directR2PresignedPut) {
@@ -489,7 +486,6 @@ describe("cloudflare worker routes", () => {
           "https://r2-account.r2.cloudflarestorage.com/smoke-bucket/deploy-smoke/direct-r2-presigned-put/",
         ),
       },
-      openAiIntercept: false,
     });
     expect(deletedKeys).toHaveLength(1);
     expect(deletedKeys[0]).toMatch(/^deploy-smoke\/direct-r2-presigned-put\/.+\.bin$/u);
@@ -504,80 +500,6 @@ describe("cloudflare worker routes", () => {
         },
       },
       service: "cloudflare-hosted-runner",
-    });
-  });
-
-  it("passes the OpenAI intercept option to the managed container smoke route", async () => {
-    const userRunner = createUserRunnerStub();
-    const smokeHealth = vi.fn(async () => ({
-      ok: true,
-      openAiIntercept: {
-        client: "codex",
-        model: "gpt-5.4-mini",
-        stderrBytes: 0,
-        stdoutBytes: 256,
-      },
-      runnerBundle: null,
-      service: "cloudflare-hosted-runner-node",
-      status: 200,
-    }));
-    const env = {
-      ...createWorkerEnv(userRunner),
-      RUNNER_CONTAINER_SMOKE: {
-        getByName() {
-          return {
-            async destroyInstance() {},
-            async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
-              throw new Error("Runner container should not be invoked by smoke route tests.");
-            },
-            smokeHealth,
-          };
-        },
-      },
-    };
-    const url = new URL("https://runner.example.test/internal/deploy/container-smoke?openAiIntercept=1");
-    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
-    const payload = JSON.stringify({ openAiInterceptUserId: "member_123" });
-    const request = new Request(url, {
-      body: payload,
-      headers: await createHostedWebCallbackSignatureHeaders({
-        environment: callbackSigning,
-        method: "POST",
-        path: url.pathname,
-        payload,
-        search: url.search,
-      }),
-      method: "POST",
-    });
-
-    const response = await worker.fetch(request, env);
-
-    expect(response.status).toBe(200);
-    expect(userRunner.beginDeploySmokeRuntimeWriteFence).toHaveBeenCalledWith({
-      userId: "member_123",
-      workspaceVersion: "0",
-    });
-    expect(smokeHealth).toHaveBeenCalledWith({
-      openAiIntercept: true,
-      openAiInterceptAuthority: {
-        attemptId: "smoke_attempt_1",
-        leaseGeneration: "1",
-        userId: "member_123",
-        workspaceVersion: "0",
-      },
-    });
-    expect(userRunner.finishDeploySmokeRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: "smoke_attempt_1",
-      generation: "1",
-      userId: "member_123",
-    });
-    await expect(response.json()).resolves.toMatchObject({
-      ok: true,
-      runnerContainer: {
-        openAiIntercept: {
-          client: "codex",
-        },
-      },
     });
   });
 
@@ -1004,31 +926,6 @@ describe("cloudflare worker routes", () => {
       error: "Hosted execution bound user does not match the test runner user.",
     });
 
-    const checkpointArtifactResponse = await hostedLocalTestWorker.fetch(
-      await signControlRequest(new Request(
-        "https://runner.example.test/__test/users/member_123/checkpoint-artifact-write-fence",
-        {
-          body: JSON.stringify({
-            artifactText: "checkpoint artifact payload",
-            expectedWorkspaceVersion: "4",
-            snapshotRef: null,
-          }),
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        },
-      ), {
-        boundUserId: "member_other",
-      }),
-      env,
-    );
-
-    expect(checkpointArtifactResponse.status).toBe(401);
-    await expect(checkpointArtifactResponse.json()).resolves.toEqual({
-      error: "Hosted execution bound user does not match the test runner user.",
-    });
-
     const directR2Response = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123/direct-r2-presigned-put",
@@ -1336,7 +1233,7 @@ describe("cloudflare worker routes", () => {
 
     const response = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
-        "https://runner.example.test/__test/users/member_123/stuck-invocation?expiresInMs=45000&reason=manual&startedAgoMs=35000",
+        "https://runner.example.test/__test/users/member_123/stuck-invocation?reason=manual&startedAgoMs=35000",
         {
           method: "POST",
         },
@@ -1348,82 +1245,8 @@ describe("cloudflare worker routes", () => {
 
     expect(response.status).toBe(200);
     expect(stub.startStuckInvocationForTest).toHaveBeenCalledWith({
-      expiresInMs: 45000,
       reason: "manual",
       startedAgoMs: 35000,
-      userId: "member_123",
-    });
-  });
-
-  it("runs the hosted-local checkpoint artifact write-fence regression route for correctly bound callers", async () => {
-    const artifactText = "checkpoint artifact payload";
-    const artifactSha256 = createHash("sha256").update(artifactText).digest("hex");
-    const validateRuntimeWriteFence = vi.fn(async () => true);
-    const stub = createUserRunnerStub({
-      validateRuntimeWriteFence,
-    });
-    const env = createWorkerEnv(stub, {
-      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
-      NODE_ENV: "test",
-    });
-    const request = await signControlRequest(new Request(
-      "https://runner.example.test/__test/users/member_123/checkpoint-artifact-write-fence",
-      {
-        body: JSON.stringify({
-          artifactText,
-          expectedWorkspaceVersion: "4",
-          snapshotRef: null,
-        }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      },
-    ), {
-      boundUserId: "member_123",
-    });
-    installOidcJwksFetch(async (input: RequestInfo | URL) => {
-      const url = new URL(String(input));
-      if (url.pathname !== HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH) {
-        throw new Error(`Unexpected checkpoint artifact write-fence fetch: ${String(input)}`);
-      }
-      return Response.json({
-        checkpointed: true,
-        workspace: {
-          browserVaultReplicaRef: null,
-          checkpointedAt: "2026-05-19T00:00:00.000Z",
-          createdAt: "2026-05-19T00:00:00.000Z",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          redactedStatus: null,
-          snapshotRef: null,
-          updatedAt: "2026-05-19T00:00:01.000Z",
-          userId: "member_123",
-          version: "5",
-        },
-      });
-    });
-
-    const response = await hostedLocalTestWorker.fetch(request, env);
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      artifact: {
-        sha256: artifactSha256,
-        size: Buffer.byteLength(artifactText, "utf8"),
-        status: 200,
-      },
-      checkpoint: {
-        checkpointed: true,
-        previousWorkspaceVersion: "4",
-        status: 200,
-        workspaceVersion: "5",
-      },
-      ok: true,
-    });
-    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: "smoke_attempt_1",
-      generation: "1",
       userId: "member_123",
     });
   });
@@ -2151,7 +1974,6 @@ describe("cloudflare worker routes", () => {
         failure_count: 0,
         wake_at: null,
       });
-      expect(alarms).toContain("2026-04-27T00:01:02.000Z");
       expect(alarms).toContain("deleted");
       expect(alarms).not.toContain(runtimeNextWakeAt);
     });
@@ -2165,11 +1987,12 @@ describe("cloudflare worker routes", () => {
           kind: "accepted" as const,
         })),
       });
-      const token = await runner.beginDeploySmokeRuntimeWriteFence({
+      const token = await writeRuntimeControlFenceForTest({
+        runner,
+        sql,
         userId: "test-user",
         workspaceVersion: "7",
       });
-      expect(token).not.toBeNull();
 
       const response = await runner.ensureRuntimeProcessingForUser({
         orchestrationAttemptId: "orchestration-attempt-test",
@@ -2181,12 +2004,12 @@ describe("cloudflare worker routes", () => {
         action: "woken",
         kind: "runtime_processing_accepted",
         recommendedRecheckAt: "2026-04-27T00:01:00.000Z",
-        runtimeAttemptId: token?.attemptId,
+        runtimeAttemptId: token.attemptId,
       });
       expect(ensureProcessing).toHaveBeenCalledWith({
         activeRuntime: {
-          attemptId: token?.attemptId,
-          leaseGeneration: token?.generation,
+          attemptId: token.attemptId,
+          leaseGeneration: token.generation,
           userId: "test-user",
         },
         reason: "nudge",
@@ -2194,7 +2017,7 @@ describe("cloudflare worker routes", () => {
       });
       expect(invoke).not.toHaveBeenCalled();
       expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
-        active_attempt_id: token?.attemptId,
+        active_attempt_id: token.attemptId,
         backoff_until: null,
         wake_at: null,
       });
@@ -2210,11 +2033,12 @@ describe("cloudflare worker routes", () => {
         })),
         invocationResults: [{ nextWakeAt: null, status: "idle" }],
       });
-      const oldToken = await runner.beginDeploySmokeRuntimeWriteFence({
+      const oldToken = await writeRuntimeControlFenceForTest({
+        runner,
+        sql,
         userId: "test-user",
         workspaceVersion: "7",
       });
-      expect(oldToken).not.toBeNull();
 
       const response = await runner.ensureRuntimeProcessingForUser({
         orchestrationAttemptId: "orchestration-attempt-test",
@@ -2229,8 +2053,8 @@ describe("cloudflare worker routes", () => {
       expect(ensureProcessing).toHaveBeenCalledOnce();
       expect(ensureProcessing).toHaveBeenCalledWith({
         activeRuntime: {
-          attemptId: oldToken?.attemptId,
-          leaseGeneration: oldToken?.generation,
+          attemptId: oldToken.attemptId,
+          leaseGeneration: oldToken.generation,
           userId: "test-user",
         },
         reason: "nudge",
@@ -2238,7 +2062,7 @@ describe("cloudflare worker routes", () => {
       });
       expect(invoke).not.toHaveBeenCalled();
       expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
-        active_attempt_id: oldToken?.attemptId,
+        active_attempt_id: oldToken.attemptId,
         backoff_until: null,
         wake_at: null,
       });
@@ -2253,11 +2077,12 @@ describe("cloudflare worker routes", () => {
           reason: "container-rpc-timeout" as const,
         })),
       });
-      const token = await runner.beginDeploySmokeRuntimeWriteFence({
+      const token = await writeRuntimeControlFenceForTest({
+        runner,
+        sql,
         userId: "test-user",
         workspaceVersion: "7",
       });
-      expect(token).not.toBeNull();
 
       await expect(runner.ensureRuntimeProcessingForUser({
         orchestrationAttemptId: "orchestration-attempt-test",
@@ -2270,7 +2095,7 @@ describe("cloudflare worker routes", () => {
 
       expect(invoke).not.toHaveBeenCalled();
       expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
-        active_attempt_id: token?.attemptId,
+        active_attempt_id: token.attemptId,
         backoff_until: null,
         wake_at: null,
       });
@@ -2880,7 +2705,6 @@ function createRuntimeControlRunnerHarness(input: {
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "1000",
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "62000",
     })),
     createBucketStore().api,
     {
@@ -2920,6 +2744,42 @@ function readRunnerMetaForRuntimeControl(
      FROM runner_meta
      WHERE singleton = 1`,
   ).one();
+}
+
+async function writeRuntimeControlFenceForTest(input: {
+  runner: HostedUserRunner;
+  sql: ReturnType<typeof createTestSqlStorage>;
+  userId: string;
+  workspaceVersion: string;
+}): Promise<{
+  attemptId: string;
+  generation: string;
+}> {
+  await input.runner.bindUser(input.userId);
+  const attemptId = "attempt_runtime_control_active";
+  const generation = 2;
+  input.sql.exec(
+    `UPDATE runner_meta
+     SET active_attempt_id = ?,
+         active_generation = ?,
+         active_kind = ?,
+         active_reason = ?,
+         active_runner_container_name = ?,
+         active_started_at = ?,
+         active_workspace_version = ?
+     WHERE singleton = 1`,
+    attemptId,
+    generation,
+    "runtime",
+    "nudge",
+    input.userId,
+    "2026-04-27T00:00:00.000Z",
+    input.workspaceVersion,
+  );
+  return {
+    attemptId,
+    generation: String(generation),
+  };
 }
 
 function createRunnerContainerNamespace(): WorkerEnvironmentSource["RUNNER_CONTAINER"] {
@@ -3160,7 +3020,6 @@ type WorkerTestUserRunnerStub = UserRunnerDurableObjectStubLike & {
     userId: string;
   }): Promise<HostedWorkspaceInvocationResult>;
   startStuckInvocationForTest(input: {
-    expiresInMs?: number;
     reason?: HostedWorkspaceInvocationReason;
     startedAgoMs?: number;
     userId: string;
@@ -3170,16 +3029,6 @@ type WorkerTestUserRunnerStub = UserRunnerDurableObjectStubLike & {
 function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
   return {
     bindUser: vi.fn(async (userId: string) => ({ userId })),
-    beginDeploySmokeRuntimeWriteFence: vi.fn(async (input: {
-      userId: string;
-      workspaceVersion: string;
-    }) => ({
-      attemptId: "smoke_attempt_1",
-      generation: "1",
-      leaseGeneration: "1",
-      userId: input.userId,
-      workspaceVersion: input.workspaceVersion,
-    })),
     deleteHostedUserData: vi.fn(async (userId: string) => ({
       deletedAt: "2026-04-29T00:00:00.000Z",
       durableObject: {
@@ -3223,7 +3072,6 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       userId: "member_123",
       workspace: null,
     })),
-    finishDeploySmokeRuntimeWriteFence: vi.fn(async () => ({ completed: true })),
     validateRuntimeWriteFence: vi.fn(async () => true),
     ...overrides,
   } satisfies WorkerTestUserRunnerStub;

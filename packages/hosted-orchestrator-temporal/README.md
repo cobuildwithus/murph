@@ -241,7 +241,7 @@ Worker shutdown:
   the Render Blueprint's `maxShutdownDelaySeconds: 300` platform cap.
   Ensure-processing calls are short-lived; long runtime execution continues
   under Cloudflare runner write-fence ownership and is recovered by demand
-  rechecks and watchdogs.
+  rechecks.
 
 Worker concurrency:
 

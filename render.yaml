@@ -31,7 +31,5 @@ services:
         sync: false
       - key: HOSTED_RUNTIME_DEMAND_TIMEOUT_MS
         value: "10000"
-      - key: HOSTED_EXECUTION_RUNNER_TIMEOUT_MS
-        value: "600000"
       - key: HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS
         value: "30000"

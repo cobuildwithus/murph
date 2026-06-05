@@ -73,7 +73,6 @@ export interface HostedDeployAutomationEnvironment {
   retryDelayMs: string;
   runnerCommitTimeoutMs: string;
   runnerReadyTimeoutMs: string;
-  runnerTimeoutMs: string;
   traceHeadSamplingRate: number;
   webControlTimeoutMs: string;
   workerName: string;
@@ -137,11 +136,6 @@ export function readHostedDeployAutomationEnvironment(
       source.CF_RUNNER_READY_TIMEOUT_MS,
       "20000",
       "CF_RUNNER_READY_TIMEOUT_MS",
-    ),
-    runnerTimeoutMs: normalizePositiveIntegerString(
-      source.CF_RUNNER_TIMEOUT_MS,
-      "600000",
-      "CF_RUNNER_TIMEOUT_MS",
     ),
     traceHeadSamplingRate: normalizeSamplingRate(
       source.CF_TRACE_HEAD_SAMPLING_RATE,

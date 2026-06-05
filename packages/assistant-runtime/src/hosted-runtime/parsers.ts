@@ -52,6 +52,11 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
   );
   rejectRemovedHostedAssistantRuntimeField(
     record,
+    "deadlineAt",
+    "Hosted assistant workspace runtime job request",
+  );
+  rejectRemovedHostedAssistantRuntimeField(
+    record,
     "run",
     "Hosted assistant workspace runtime job request",
   );
@@ -91,14 +96,6 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
           budget: parseHostedWorkspaceInvocationBudget(
             record.budget,
             "Hosted assistant workspace runtime job request.budget",
-          ),
-        }),
-    ...(record.deadlineAt === undefined
-      ? {}
-      : {
-          deadlineAt: readNullableString(
-            record.deadlineAt,
-            "Hosted assistant workspace runtime job request.deadlineAt",
           ),
         }),
     ...(record.idleCheckpointDelayMs === undefined

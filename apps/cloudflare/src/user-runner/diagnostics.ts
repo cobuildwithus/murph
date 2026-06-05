@@ -8,7 +8,7 @@ import type {
   RunnerContainerEnsureProcessingResult,
 } from "../runner-container.js";
 import type { RunnerStateRecord } from "./types.js";
-import { readWriteFenceWatchdogAlarmAt } from "./watchdog.js";
+import { readRunnerNextAlarmAt } from "./alarm-coordinator.js";
 
 export type RuntimeProcessingRetryReason =
   | "active_child_rejected"
@@ -29,21 +29,17 @@ export function buildRunnerRecordTimingLogDetails(
 ): HostedExecutionStructuredLogDetails {
   const writeFence = record.writeFence;
   const writeFenceStartedAtMs = writeFence ? Date.parse(writeFence.startedAt) : NaN;
-  const writeFenceExpiresAtMs = writeFence ? Date.parse(writeFence.expiresAt) : NaN;
 
   return {
     activeWriteFenceAgeMs: Number.isFinite(writeFenceStartedAtMs)
       ? Math.max(0, nowMs - writeFenceStartedAtMs)
-      : null,
-    activeWriteFenceExpiresInMs: Number.isFinite(writeFenceExpiresAtMs)
-      ? Math.max(0, writeFenceExpiresAtMs - nowMs)
       : null,
     activeWriteFenceGeneration: writeFence?.generation ?? null,
     activeWriteFencePresent: writeFence !== null,
     activeWriteFenceWorkspaceVersion: writeFence?.workspaceVersion ?? null,
     failureCount: record.failureCount,
     lastErrorCode: record.lastErrorCode,
-    watchdogAlarmAt: readWriteFenceWatchdogAlarmAt(record),
+    runnerAlarmAt: readRunnerNextAlarmAt(record),
   };
 }
 

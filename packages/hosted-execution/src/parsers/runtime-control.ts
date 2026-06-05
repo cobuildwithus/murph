@@ -260,6 +260,7 @@ const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONE_KEYS = new Set([
 const HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS = [
   "checkpointNextWakeAt",
   "committedSeq",
+  "deadlineAt",
   "events",
   "finalizeRequired",
   "inputCommittedSeq",
@@ -1222,14 +1223,6 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
           budget: parseHostedWorkspaceInvocationBudget(
             record.budget,
             "Hosted workspace invocation request budget",
-          ),
-        }),
-    ...(record.deadlineAt === undefined
-      ? {}
-      : {
-          deadlineAt: readNullableString(
-            record.deadlineAt,
-            "Hosted workspace invocation request deadlineAt",
           ),
         }),
     ...(record.idleCheckpointDelayMs === undefined

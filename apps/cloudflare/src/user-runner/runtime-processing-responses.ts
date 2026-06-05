@@ -14,9 +14,6 @@ import {
 import type {
   RuntimeProcessingRetryReason,
 } from "./diagnostics.js";
-import type {
-  RunnerStateRecord,
-} from "./types.js";
 
 type RuntimePrewarmResponseInput = HostedRuntimePrewarmRequest & {
   userId: string;
@@ -36,16 +33,10 @@ export function computeRuntimeProcessingRetryAt(
   return new Date(Date.now() + delayMs).toISOString();
 }
 
-export function computeRuntimeProcessingOwnerWatchdogAt(input: {
-  activeFence: Pick<NonNullable<RunnerStateRecord["writeFence"]>, "expiresAt">;
+export function computeRuntimeProcessingOwnerRecheckAt(input: {
   env: HostedExecutionEnvironment;
 }): string {
-  const activeRuntimeWakeRecheckMs = Date.parse(computeActiveRuntimeWakeRecheckAt(input.env));
-  const expiresAtMs = Date.parse(input.activeFence.expiresAt);
-  const watchdogMs = Number.isFinite(expiresAtMs)
-    ? Math.min(expiresAtMs, activeRuntimeWakeRecheckMs)
-    : activeRuntimeWakeRecheckMs;
-  return new Date(Math.max(Date.now(), watchdogMs)).toISOString();
+  return computeActiveRuntimeWakeRecheckAt(input.env);
 }
 
 export function createRuntimeProcessingRetryLater(input: {
@@ -65,32 +56,6 @@ export function createRuntimeProcessingRetryLater(input: {
   return {
     kind: "retry_later",
     retryAt: computeRuntimeProcessingRetryAt(input.reason),
-  };
-}
-
-export function createActiveWorkspaceWakeRetryLater(input: {
-  activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
-  env: HostedExecutionEnvironment;
-  userId: string;
-}): HostedRuntimeEnsureProcessingResponse {
-  const retryAt = computeRuntimeProcessingOwnerWatchdogAt({
-    activeFence: input.activeFence,
-    env: input.env,
-  });
-  emitHostedExecutionStructuredLog({
-    component: "hosted.runner",
-    details: {
-      retryAt,
-      runtimeProcessingRetryReason: "active_runtime_workspace_wake",
-      workspaceAttemptIdPresent: input.activeFence.attemptId.length > 0,
-    },
-    message: "Hosted runner deferred workspace wake while runtime processing is already active.",
-    phase: "runtime.starting",
-    userId: input.userId,
-  });
-  return {
-    kind: "retry_later",
-    retryAt,
   };
 }
 

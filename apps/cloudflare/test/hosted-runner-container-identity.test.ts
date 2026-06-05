@@ -48,8 +48,8 @@ import type {
   DurableObjectStorageLike,
 } from "../src/user-runner/types.js";
 import {
-  RunnerWatchdog,
-} from "../src/user-runner/watchdog.js";
+  RunnerAlarmCoordinator,
+} from "../src/user-runner/alarm-coordinator.js";
 import {
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.js";
@@ -63,8 +63,6 @@ import {
 
 const FIXED_NOW = "2026-06-03T00:00:00.000Z";
 const TEST_USER_ID = "member_123";
-const TEST_RUNNER_TIMEOUT_AT = "2026-06-03T00:01:02.000Z";
-
 describe("hosted runner container identity", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -154,7 +152,7 @@ describe("hosted runner container identity", () => {
       runnerRuntimeEnvSource,
       state: durable.state,
       stateStore,
-      watchdog: new RunnerWatchdog(durable.state),
+      alarmCoordinator: new RunnerAlarmCoordinator(durable.state),
     });
 
     await expect(controller.ensureForUser({
@@ -199,7 +197,7 @@ describe("hosted runner container identity", () => {
       },
       state: durable.state,
       stateStore,
-      watchdog: new RunnerWatchdog(durable.state),
+      alarmCoordinator: new RunnerAlarmCoordinator(durable.state),
     });
 
     await expect(controller.ensureForUser({
@@ -235,7 +233,6 @@ describe("hosted runner container identity", () => {
       state: durable.state,
     });
     const token = await stateStore.beginWriteFence({
-      expiresAt: TEST_RUNNER_TIMEOUT_AT,
       reason: "nudge",
       runnerContainerName: "member_123--v-version_1",
       userId: TEST_USER_ID,
@@ -262,6 +259,47 @@ describe("hosted runner container identity", () => {
     expect(invokedContainerNames).toEqual(["member_123--v-version_1"]);
   });
 
+  it("wakes an active runtime through the write fence's stored runner container name", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    await stateStore.bindUser(TEST_USER_ID);
+    const token = await stateStore.beginWriteFence({
+      reason: "nudge",
+      runnerContainerName: "member_123--v-version-a",
+      userId: TEST_USER_ID,
+    });
+    const ensuredContainerNames: string[] = [];
+    const controller = new RuntimeProcessingController({
+      env: createHostedExecutionEnvironment(),
+      invocationService: new RecordingRuntimeInvocationService(),
+      runnerContainerNamespace: createRunnerContainerNamespace({
+        ensuredContainerNames,
+      }),
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: {
+          id: "version-b",
+        },
+      },
+      state: durable.state,
+      stateStore,
+      alarmCoordinator: new RunnerAlarmCoordinator(durable.state),
+    });
+
+    await expect(controller.ensureForUser({
+      orchestrationAttemptId: "orchestration_attempt_1",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "already_running",
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: token.attemptId,
+    });
+
+    expect(ensuredContainerNames).toEqual(["member_123--v-version-a"]);
+  });
+
   it("fails closed when runtime invocation parses a different user from the write-fence token name", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -281,7 +319,6 @@ describe("hosted runner container identity", () => {
       state: durable.state,
     });
     const token = await stateStore.beginWriteFence({
-      expiresAt: TEST_RUNNER_TIMEOUT_AT,
       reason: "nudge",
       runnerContainerName: "member_456--v-version_1",
       userId: TEST_USER_ID,
@@ -324,7 +361,7 @@ class RecordingRuntimeInvocationService extends RuntimeInvocationService {
       runnerRuntimeEnvSource: {},
       runnerStoreCache: new TestRunnerStoreCache({}),
       stateStore,
-      watchdog: new RunnerWatchdog(durable.state),
+      alarmCoordinator: new RunnerAlarmCoordinator(durable.state),
     });
   }
 
@@ -446,7 +483,7 @@ function createRuntimeInvocationService(input: {
     runnerRuntimeEnvSource: input.runnerRuntimeEnvSource,
     runnerStoreCache: new TestRunnerStoreCache(input.runnerRuntimeEnvSource),
     stateStore: input.stateStore,
-    watchdog: new RunnerWatchdog(input.state),
+    alarmCoordinator: new RunnerAlarmCoordinator(input.state),
   });
 }
 
@@ -454,7 +491,6 @@ function createHostedExecutionEnvironment() {
   return readHostedExecutionEnvironment(createHostedExecutionTestEnv({
     HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",
     HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "1000",
-    HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "62000",
   }));
 }
 
@@ -484,12 +520,14 @@ function createRunnerDurableState(): {
 }
 
 function createRunnerContainerNamespace(input: {
+  ensuredContainerNames?: string[];
   invokedContainerNames?: string[];
   readyContainerNames?: string[];
 }): HostedExecutionContainerNamespaceLike {
   return {
     getByName(name) {
       return createRunnerContainerStub({
+        ensuredContainerNames: input.ensuredContainerNames,
         name,
         invokedContainerNames: input.invokedContainerNames,
         readyContainerNames: input.readyContainerNames,
@@ -499,6 +537,7 @@ function createRunnerContainerNamespace(input: {
 }
 
 function createRunnerContainerStub(input: {
+  ensuredContainerNames?: string[];
   invokedContainerNames?: string[];
   name: string;
   readyContainerNames?: string[];
@@ -509,6 +548,17 @@ function createRunnerContainerStub(input: {
       input.readyContainerNames?.push(input.name);
       return { kind: "ready" };
     },
+    ...(input.ensuredContainerNames
+      ? {
+          ensureProcessing: async () => {
+            input.ensuredContainerNames?.push(input.name);
+            return {
+              action: "already_running",
+              kind: "accepted",
+            };
+          },
+        }
+      : {}),
     invoke: async () => {
       input.invokedContainerNames?.push(input.name);
       return {
@@ -534,7 +584,6 @@ function createWorkspaceInvocationJob(input: {
     kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
     request: {
       attemptId: input.token.attemptId,
-      deadlineAt: input.token.expiresAt,
       idleCheckpointDelayMs: 54_000,
       leaseGeneration: input.token.generation,
       reason: input.reason,

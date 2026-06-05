@@ -73,7 +73,7 @@ describe("hosted local stale deferred invocation recovery", () => {
   }, 600_000);
 
   it(
-    "preempts a stale unexpired write fence when a Linq message arrives",
+    "preempts a stale write fence when a Linq message arrives",
     async () => {
       const memberPhone = buildLinqRecipientPhoneNumber(userId);
       const homePhone = buildLinqHomePhoneNumber(userId);
@@ -99,7 +99,6 @@ describe("hosted local stale deferred invocation recovery", () => {
       const stuckInvocation = await requireScenario().harness.startStuckInvocationForTest(
         userId,
         {
-          expiresInMs: 45_000,
           reason: "manual",
           startedAgoMs: 35_000,
         },
@@ -157,7 +156,6 @@ async function startScenario(): Promise<void> {
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "1000",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "2000",
       HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "45000",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,

@@ -11,7 +11,7 @@ Current responsibilities:
 - own the canonical hosted runtime launch spec: semantic env split,
   forwarded env profiles, platform-only runtime config, typed resolved config,
   typed parser toolchain validation, commit timeout, and child-env projection helpers
-- keep hosted execution local-runtime-first: normal hosted turns write mailbox and assistant input state into the warm container, may defer intermediate foreground checkpoints, and keep dirty state dirty until the runtime-owned idle/deadline/scheduled-wake `idle_shutdown` checkpoint succeeds
+- keep hosted execution local-runtime-first: normal hosted turns write mailbox and assistant input state into the warm container, may defer intermediate foreground checkpoints, and keep dirty state dirty until the runtime-owned idle/scheduled-wake `idle_shutdown` checkpoint succeeds
 - collect and deliver due hosted side effects from live container state without waiting for foreground hosted workspace checkpointing
 - export sanitized pending assistant-runtime issue records through the injected host platform after commit instead of persisting raw hosted diagnostics in the worker
 - expose the method-based `HostedRuntimePlatform` seam that hosted apps inject at runtime
@@ -31,7 +31,7 @@ in memory. That projection preserves raw attachment paths for inspectable files
 and drains only audio/video transcription jobs before prompt construction when
 media parser output is available. Normal foreground work may defer intermediate hosted workspace
 checkpoints before Codex admission or reply delivery. The active invocation
-remains dirty until the runtime-owned idle/deadline/scheduled-wake
+remains dirty until the runtime-owned idle/scheduled-wake
 `idle_shutdown` checkpoint succeeds; if the container dies before that
 checkpoint, local runtime residue since the last accepted checkpoint can be
 lost. Inbox capture, audio/video transcript work,

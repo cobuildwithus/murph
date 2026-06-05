@@ -7,9 +7,6 @@ import {
   HostedUserRunner,
 } from "./hosted-user-runner.js";
 import {
-  normalizeIsoDate,
-} from "./runner-state-helpers.js";
-import {
   RunnerWriteFenceAlreadyActiveError,
   type RunnerWriteFenceToken,
 } from "./runner-state-store.js";
@@ -17,8 +14,8 @@ import type {
   DurableObjectStateLike,
 } from "./types.js";
 import {
-  readWriteFenceWatchdogAlarmAt,
-} from "./watchdog.js";
+  readRunnerNextAlarmAt,
+} from "./alarm-coordinator.js";
 
 export interface HostedRunnerStuckInvocationTestResult {
   attemptId: string;
@@ -39,12 +36,12 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
     userId: string;
   }): Promise<HostedWorkspaceInvocationResult> {
     await this.stateStore.bindUser(input.userId);
-    const record = await this.runtimeProcessing.readRunnerStateAfterClearingExpiredWriteFence();
+    const record = await this.stateStore.readState();
     if (record.writeFence) {
-      await this.runtimeProcessing.syncWatchdogAlarm(record);
+      await this.runtimeProcessing.syncRunnerAlarm(record);
       return {
         nextWakeAt:
-          this.runtimeProcessing.computeRuntimeProcessingOwnerWatchdogAt(record.writeFence),
+          this.runtimeProcessing.computeRuntimeProcessingOwnerRecheckAt(),
         status: "scheduled",
       };
     }
@@ -55,8 +52,6 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
     let token: RunnerWriteFenceToken;
     try {
       token = await this.stateStore.beginWriteFence({
-        expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
-        kind: "runtime",
         reason: input.reason,
         runnerContainerName: input.userId,
         userId: input.userId,
@@ -65,12 +60,10 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
       if (!(error instanceof RunnerWriteFenceAlreadyActiveError)) {
         throw error;
       }
-      await this.runtimeProcessing.syncWatchdogAlarm(error.record);
+      await this.runtimeProcessing.syncRunnerAlarm(error.record);
       return {
         nextWakeAt: error.record.writeFence
-          ? this.runtimeProcessing.computeRuntimeProcessingOwnerWatchdogAt(
-              error.record.writeFence,
-            )
+          ? this.runtimeProcessing.computeRuntimeProcessingOwnerRecheckAt()
           : this.runtimeProcessing.computeRuntimeProcessingRetryAt(
               "stale_fence_replacement_race",
             ),
@@ -78,7 +71,7 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
       };
     }
 
-    await this.runtimeProcessing.syncWatchdogAlarm(
+    await this.runtimeProcessing.syncRunnerAlarm(
       await this.stateStore.readState(),
     );
     return await this.runtimeInvocation.invokeWithFence({
@@ -93,38 +86,31 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
   }
 
   async startStuckInvocationForTest(input: {
-    expiresInMs?: number;
     reason?: HostedWorkspaceInvocationReason;
     startedAgoMs?: number;
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult> {
     await this.stateStore.bindUser(input.userId);
     const token = await this.stateStore.beginWriteFence({
-      expiresAt: typeof input.expiresInMs === "number"
-        ? new Date(Date.now() + input.expiresInMs).toISOString()
-        : "2000-01-01T00:00:00.000Z",
-      kind: "runtime",
       reason: input.reason ?? "manual",
       runnerContainerName: input.userId,
       userId: input.userId,
     });
     const record = typeof input.startedAgoMs === "number"
       ? await this.ageActiveInvocationForHostedLocalTest({
-          expiresAt: token.expiresAt,
           startedAt: new Date(Date.now() - input.startedAgoMs).toISOString(),
         })
       : await this.stateStore.readState();
-    await this.runtimeProcessing.syncWatchdogAlarm(record);
+    await this.runtimeProcessing.syncRunnerAlarm(record);
 
     return {
       attemptId: token.attemptId,
-      nextWakeAt: readWriteFenceWatchdogAlarmAt(record),
+      nextWakeAt: readRunnerNextAlarmAt(record),
       ok: true,
     };
   }
 
   private async ageActiveInvocationForHostedLocalTest(input: {
-    expiresAt?: string;
     startedAt: string;
   }) {
     const sql = this.testState.storage.sql;
@@ -143,10 +129,9 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
     sql.exec(
       `UPDATE runner_meta
        SET active_started_at = ?,
-           active_expires_at = ?
+           active_expires_at = NULL
        WHERE singleton = 1`,
-      normalizeIsoDate(input.startedAt),
-      normalizeIsoDate(input.expiresAt ?? input.startedAt),
+      new Date(input.startedAt).toISOString(),
     );
     return await this.stateStore.readState();
   }

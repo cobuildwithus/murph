@@ -15,7 +15,6 @@ import {
   asWorkerStringEnvironment,
 } from "../../worker-contracts.ts";
 import {
-  readCachedRequestText,
   type WorkerEnvironmentSource,
   type WorkerRouteContext,
 } from "../../worker-routes/shared.ts";
@@ -30,15 +29,11 @@ import {
 } from "../routes.ts";
 import {
   DEPLOY_CONTAINER_SMOKE_BODY_LIMIT_BYTES,
-  normalizeNonEmptyString,
-  parseJsonValue,
-  requireJsonRecord,
 } from "../route-utils/json-body.ts";
 import {
   readWorkerVersionId,
 } from "../public-routes.ts";
 
-const DEPLOY_OPENAI_INTERCEPT_SMOKE_WORKSPACE_VERSION = "0";
 const DEPLOY_DIRECT_R2_PRESIGNED_PUT_SMOKE_BYTES = 160 * 1024 * 1024;
 const DEPLOY_DIRECT_R2_PRESIGNED_PUT_SMOKE_KEY_PREFIX =
   "deploy-smoke/direct-r2-presigned-put";
@@ -60,7 +55,6 @@ export const deploySmokeRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] 
 export async function handleDeployContainerSmokeRoute(
   context: WorkerRouteContext,
 ): Promise<Response> {
-  const openAiIntercept = context.url.searchParams.get("openAiIntercept") === "1";
   const directR2PresignedPut = context.url.searchParams.get("directR2PresignedPut") === "1";
   const container = context.env.RUNNER_CONTAINER_SMOKE
     .getByName(resolveDeployContainerSmokeObjectName(context.env));
@@ -71,16 +65,9 @@ export async function handleDeployContainerSmokeRoute(
   let primaryError: unknown = null;
 
   try {
-    result = openAiIntercept
-      ? await runDeployContainerOpenAiInterceptSmokeWithFence(
-          context,
-          container,
-          directR2Smoke?.containerInput,
-        )
-      : await container.smokeHealth({
-          ...(directR2Smoke ? { directR2PresignedPut: directR2Smoke.containerInput } : {}),
-          openAiIntercept,
-        });
+    result = await container.smokeHealth({
+      ...(directR2Smoke ? { directR2PresignedPut: directR2Smoke.containerInput } : {}),
+    });
 
     if (directR2Smoke) {
       await assertDeployContainerDirectR2PresignedPutSmokeObject(context, {
@@ -118,55 +105,6 @@ export async function handleDeployContainerSmokeRoute(
     runnerContainer: result,
     service: "cloudflare-hosted-runner",
   });
-}
-
-export async function runDeployContainerOpenAiInterceptSmokeWithFence(
-  context: WorkerRouteContext,
-  container: ReturnType<WorkerEnvironmentSource["RUNNER_CONTAINER_SMOKE"]["getByName"]>,
-  directR2PresignedPut?: {
-    byteLength: number;
-    presignedPutUrl: string;
-  },
-): Promise<Awaited<ReturnType<typeof container.smokeHealth>>> {
-  const userId = await readDeployContainerOpenAiInterceptSmokeUserId(context);
-  if (!userId) {
-    throw new TypeError("OpenAI intercept deploy smoke requires openAiInterceptUserId.");
-  }
-
-  const userRunner = context.env.USER_RUNNER.getByName(userId);
-  if (
-    typeof userRunner.beginDeploySmokeRuntimeWriteFence !== "function"
-    || typeof userRunner.finishDeploySmokeRuntimeWriteFence !== "function"
-  ) {
-    throw new TypeError("Hosted user runner does not support deploy-smoke write fences.");
-  }
-
-  const lease = await userRunner.beginDeploySmokeRuntimeWriteFence({
-    userId,
-    workspaceVersion: DEPLOY_OPENAI_INTERCEPT_SMOKE_WORKSPACE_VERSION,
-  });
-  if (!lease) {
-    throw new Error("OpenAI intercept deploy smoke could not acquire a hosted runner write fence.");
-  }
-  try {
-    return await container.smokeHealth({
-      ...(directR2PresignedPut ? { directR2PresignedPut } : {}),
-      openAiIntercept: true,
-      openAiInterceptAuthority: {
-        attemptId: lease.attemptId,
-        leaseGeneration: lease.generation,
-        userId,
-        workspaceVersion:
-          lease.workspaceVersion ?? DEPLOY_OPENAI_INTERCEPT_SMOKE_WORKSPACE_VERSION,
-      },
-    });
-  } finally {
-    await userRunner.finishDeploySmokeRuntimeWriteFence({
-      attemptId: lease.attemptId,
-      generation: lease.generation,
-      userId,
-    });
-  }
 }
 
 export async function createDeployContainerDirectR2PresignedPutSmoke(
@@ -244,20 +182,6 @@ export async function deleteDeployContainerDirectR2PresignedPutSmokeObject(
     throw new Error("Deploy direct R2 presigned PUT smoke requires R2 delete support.");
   }
   await context.env.BUNDLES.delete(objectKey);
-}
-
-export async function readDeployContainerOpenAiInterceptSmokeUserId(
-  context: WorkerRouteContext,
-): Promise<string | null> {
-  const payloadText = await readCachedRequestText(context);
-  if (!payloadText.trim()) {
-    return null;
-  }
-  const payload = requireJsonRecord(
-    parseJsonValue(payloadText),
-    "Deploy container smoke request",
-  );
-  return normalizeNonEmptyString(payload.openAiInterceptUserId);
 }
 
 export function resolveDeployContainerSmokeObjectName(

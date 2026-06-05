@@ -159,7 +159,6 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
     const env = resolveHostedAssistantLocalDevEnv(
       {
         HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
-        HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "12345",
         OPENAI_API_KEY: "live-openai-key",
       },
       "stub",
@@ -171,7 +170,6 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "12345",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:1234/v1",
       NODE_ENV: "test",
       OPENAI_API_KEY: "stub-local-openai-key",
@@ -196,17 +194,6 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
       expect(env[key]).toBeUndefined();
     }
     expect(env.OPENAI_API_KEY).toBe("stub-local-openai-key");
-  });
-
-  it("uses a bounded local stub runner timeout by default", () => {
-    const env = resolveHostedAssistantLocalDevEnv(
-      {},
-      "stub",
-      "http://127.0.0.1:1234/v1",
-      "Hosted local test",
-    );
-
-    expect(env.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS).toBe("600000");
   });
 
   it("clears device-sync provider env that would otherwise leak into scenarios", () => {
@@ -239,7 +226,6 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
         {
           HOSTED_ASSISTANT_MODEL: "gpt-5.5",
           HOSTED_ASSISTANT_PROVIDER: "openai",
-          HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "23456",
           [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
             "http://127.0.0.1:4567/v1",
         },
@@ -247,9 +233,7 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
         "http://127.0.0.1:1234/v1",
         "Hosted local test",
       ),
-    ).toEqual({
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "23456",
-    });
+    ).toEqual({});
   });
 });
 

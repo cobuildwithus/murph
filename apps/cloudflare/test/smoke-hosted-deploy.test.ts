@@ -343,90 +343,6 @@ describe("runSmokeHostedDeploy", () => {
     expect(headers.get("x-hosted-execution-timestamp")).toEqual(expect.any(String));
   });
 
-  it("can request the deployed runner OpenAI intercept smoke", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-openai-manifest-"));
-    const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
-    await mkdir(path.dirname(manifestPath), { recursive: true });
-    await writeFile(
-      manifestPath,
-      `${JSON.stringify({
-        buildSkipped: false,
-        bundleFingerprint: "bundle-fingerprint",
-        sourceFingerprint: "source-fingerprint",
-      }, null, 2)}\n`,
-      "utf8",
-    );
-    const fetchCalls: string[] = [];
-    const fetchImpl = async (url: RequestInfo | URL, init?: RequestInit) => {
-      fetchCalls.push(String(url));
-
-      if (String(url).endsWith("/")) {
-        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
-          status: 200,
-        });
-      }
-
-      if (String(url).endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), { status: 200 });
-      }
-
-      if (String(url).endsWith("/internal/deploy/container-smoke?openAiIntercept=1")) {
-        expect(init?.body).toBe(JSON.stringify({ openAiInterceptUserId: "member_smoke" }));
-        return new Response(JSON.stringify({
-          ok: true,
-          runnerContainer: {
-            codexShell: createCodexShellSmokeResult(),
-            ok: true,
-            openAiIntercept: {
-              client: "codex",
-              model: "gpt-5.4-mini",
-              stderrBytes: 0,
-              stdoutBytes: 256,
-            },
-            runnerBundle: {
-              buildSkipped: false,
-              bundleFingerprint: "bundle-fingerprint",
-              sourceFingerprint: "source-fingerprint",
-            },
-            service: "cloudflare-hosted-runner-node",
-          },
-        }), { status: 200 });
-      }
-
-      if (String(url).endsWith("/status")) {
-        return new Response(JSON.stringify({
-          inFlight: false,
-          lastErrorAt: null,
-          lastErrorCode: null,
-          lastInvocationAt: "2026-03-27T00:59:00.000Z",
-          mailboxLag: [],
-          userId: "member_smoke",
-          workspace: null,
-        }), { status: 200 });
-      }
-
-      throw new Error(`Unexpected smoke request: ${String(url)}`);
-    };
-
-    await runSmokeHostedDeploy({
-      fetchImpl,
-      log() {},
-      source: {
-        HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT: "true",
-        HOSTED_EXECUTION_SMOKE_OIDC_TOKEN: "vercel-oidc-token",
-        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
-        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
-        HOSTED_EXECUTION_SMOKE_USER_ID: "member_smoke",
-        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
-        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
-      },
-    });
-
-    expect(fetchCalls).toContain(
-      "https://worker.example.test/internal/deploy/container-smoke?openAiIntercept=1",
-    );
-  });
-
   it("can request the deployed runner direct R2 presigned PUT smoke", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-direct-r2-manifest-"));
     const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
@@ -496,21 +412,6 @@ describe("runSmokeHostedDeploy", () => {
     );
   });
 
-  it("requires the managed-container smoke when the OpenAI intercept smoke is enabled", async () => {
-    await expect(runSmokeHostedDeploy({
-      fetchImpl: async () => {
-        throw new Error("OpenAI intercept precondition should fail before deploy smoke requests.");
-      },
-      log() {},
-      source: {
-        HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT: "true",
-        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
-      },
-    })).rejects.toThrow(
-      "HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT requires HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true.",
-    );
-  });
-
   it("requires the managed-container smoke when the direct R2 smoke is enabled", async () => {
     await expect(runSmokeHostedDeploy({
       fetchImpl: async () => {
@@ -523,78 +424,6 @@ describe("runSmokeHostedDeploy", () => {
       },
     })).rejects.toThrow(
       "HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT requires HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true.",
-    );
-  });
-
-  it("requires a smoke user before running the OpenAI intercept smoke", async () => {
-    await expect(runSmokeHostedDeploy({
-      fetchImpl: async () => {
-        throw new Error("OpenAI intercept user precondition should fail before deploy smoke requests.");
-      },
-      log() {},
-      source: {
-        HOSTED_EXECUTION_SMOKE_OIDC_TOKEN: "vercel-oidc-token",
-        HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT: "true",
-        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
-        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
-      },
-    })).rejects.toThrow(
-      "HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT requires HOSTED_EXECUTION_SMOKE_USER_ID.",
-    );
-  });
-
-  it("requires status auth before running the OpenAI intercept smoke", async () => {
-    await expect(runSmokeHostedDeploy({
-      fetchImpl: async () => {
-        throw new Error("OpenAI intercept auth precondition should fail before deploy smoke requests.");
-      },
-      log() {},
-      source: {
-        HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT: "true",
-        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
-        HOSTED_EXECUTION_SMOKE_USER_ID: "member_smoke",
-        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
-      },
-    })).rejects.toThrow(
-      "HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT requires HOSTED_EXECUTION_SMOKE_OIDC_TOKEN or VERCEL_OIDC_TOKEN.",
-    );
-  });
-
-  it("checks authenticated status before running the OpenAI intercept smoke", async () => {
-    const fetchCalls: string[] = [];
-    const fetchImpl = async (url: RequestInfo | URL) => {
-      fetchCalls.push(String(url));
-
-      if (String(url).endsWith("/")) {
-        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
-          status: 200,
-        });
-      }
-
-      if (String(url).endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), { status: 200 });
-      }
-
-      if (String(url).endsWith("/status")) {
-        return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
-      }
-
-      throw new Error(`Unexpected smoke request: ${String(url)}`);
-    };
-
-    await expect(runSmokeHostedDeploy({
-      fetchImpl,
-      log() {},
-      source: {
-        HOSTED_EXECUTION_SMOKE_OIDC_TOKEN: "vercel-oidc-token",
-        HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT: "true",
-        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
-        HOSTED_EXECUTION_SMOKE_USER_ID: "member_smoke",
-        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
-      },
-    })).rejects.toThrow("Hosted execution status check failed with HTTP 401.");
-    expect(fetchCalls).not.toContain(
-      "https://worker.example.test/internal/deploy/container-smoke?openAiIntercept=1",
     );
   });
 

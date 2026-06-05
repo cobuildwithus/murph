@@ -7,6 +7,9 @@ import type {
 
 import type { HostedExecutionEnvironment } from "../env.js";
 import {
+  readHostedRunnerContainerIdentity,
+} from "../hosted-runner-container-identity.js";
+import {
   resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
   type RunnerContainerEnsureProcessingResult,
@@ -28,6 +31,7 @@ export async function ensureActiveRuntimeProcessing(
     commandBudget: RuntimeProcessingCommandBudget;
     env: HostedExecutionEnvironment;
     reason: HostedWorkspaceInvocationReason;
+    runnerContainerName: string | null;
     runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
     runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
   },
@@ -40,12 +44,23 @@ export async function ensureActiveRuntimeProcessing(
     return { kind: "wake-unconfirmed", reason: "missing-container-binding" };
   }
 
-  const container = input.runnerContainerNamespace.getByName(
-    resolveHostedExecutionRunnerContainerName({
-      source: input.runnerRuntimeEnvSource,
+  const runnerContainerName = readActiveRuntimeRunnerContainerName(input);
+  if (!runnerContainerName) {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        activeRuntimeAttemptIdPresent: input.activeRuntime.attemptId.length > 0,
+        runnerContainerNamePresent: Boolean(input.runnerContainerName),
+      },
+      level: "warn",
+      message: "Hosted runner active write fence container identity did not match the runtime user.",
+      phase: "scheduled",
       userId: input.activeRuntime.userId,
-    }),
-  );
+    });
+    return { kind: "wake-unconfirmed", reason: "container-rpc-error" };
+  }
+
+  const container = input.runnerContainerNamespace.getByName(runnerContainerName);
 
   const ensureProcessing = container.ensureProcessing;
   if (ensureProcessing) {
@@ -57,7 +72,7 @@ export async function ensureActiveRuntimeProcessing(
           reason: input.reason,
           userId: input.activeRuntime.userId,
         }),
-        stepTimeoutMs: input.env.runnerTimeoutMs,
+        stepTimeoutMs: input.env.webControlTimeoutMs,
       });
       if (
         result.kind === "accepted"
@@ -95,7 +110,7 @@ export async function ensureActiveRuntimeProcessing(
       await runRuntimeProcessingCommandStep({
         budget: input.commandBudget,
         operation: async () => await wakeRuntime(input.activeRuntime),
-        stepTimeoutMs: input.env.runnerTimeoutMs,
+        stepTimeoutMs: input.env.webControlTimeoutMs,
       }),
     );
     if (runtimeWake.kind === "accepted") {
@@ -159,4 +174,34 @@ function isRunnerRuntimeWakeUnknownReason(
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readActiveRuntimeRunnerContainerName(input: {
+  activeRuntime: RunnerRuntimeWakeInput;
+  runnerContainerName: string | null;
+  runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
+}): string | null {
+  if (!input.runnerContainerName) {
+    return resolveHostedExecutionRunnerContainerName({
+      source: input.runnerRuntimeEnvSource,
+      userId: input.activeRuntime.userId,
+    });
+  }
+
+  const identity = readHostedRunnerContainerIdentity({
+    containerName: input.runnerContainerName,
+    source: input.runnerRuntimeEnvSource,
+  });
+  if (identity?.userId === input.activeRuntime.userId) {
+    return identity.runnerContainerName;
+  }
+
+  const versionSuffixStart = input.runnerContainerName.lastIndexOf("--v-");
+  if (versionSuffixStart <= 0) {
+    return null;
+  }
+  const storedUserId = input.runnerContainerName.slice(0, versionSuffixStart).trim();
+  return storedUserId === input.activeRuntime.userId
+    ? input.runnerContainerName.trim()
+    : null;
 }

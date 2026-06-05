@@ -95,14 +95,13 @@ Core execution tuning:
   `local-debug`.
 - `CF_MAX_EVENT_ATTEMPTS` defaults to `3`
 - `CF_RETRY_DELAY_MS` defaults to `30000`
-- `CF_RUNNER_TIMEOUT_MS` defaults to `600000`
 - `CF_WEB_CONTROL_TIMEOUT_MS` defaults to `30000`
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000`
 - `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy; omit it or set `gradual` for normal deploys, and use `immediate` only for emergency hotfixes that may interrupt active runner containers.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `hosted-email,linq,mapbox,telegram,whatsapp`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
-- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` and controls runner container activity expiry for native shell cleanup. Dirty foreground runtime state is checkpointed by the runtime-owned idle/deadline/scheduled-wake `idle_shutdown` path before the invocation returns. RunnerContainer activity expiry only yields to active foreground work or tears down an idle warm shell; it never records pending checkpoint intent.
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` and controls runner container activity expiry for native shell cleanup. Dirty foreground runtime state is checkpointed by the runtime-owned idle/scheduled-wake `idle_shutdown` path before the invocation returns. RunnerContainer activity expiry only yields to active foreground work or tears down an idle warm shell; it never records pending checkpoint intent.
 - `HOSTED_EXECUTION_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT` defaults to `25` and recycles the native runner shell after that many clean invocations.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
 - `HOSTED_R2_PRESIGN_ENDPOINT` optionally overrides the default account-scoped
@@ -355,7 +354,6 @@ Gradual deploys leave the deployed endpoint smoke on public banner and health ch
 - `GET /health`
 - if `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`, one signed `POST /internal/deploy/container-smoke` that waits until the Cloudflare-managed runner container reports the expected runner-bundle fingerprint
 - if `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT=true`, a managed-container smoke uploads a deterministic payload through a direct R2 presigned `PUT`, verifies it through the Worker R2 binding, and deletes the object
-- if `HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT=true` is also configured, the managed-container smoke mints a short-lived write fence for `HOSTED_EXECUTION_SMOKE_USER_ID`, then runs a Codex CLI `responses` request from inside the Cloudflare container with `OPENAI_API_KEY=__cloudflare_injected__`, proving the container trusts Cloudflare's HTTPS-interception CA and the Worker injects the real OpenAI secret only under runtime authority
 - if `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, one authenticated `GET /internal/users/:userId/status`
 
 The GitHub deploy workflow enables `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER` and `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT` only when `container_rollout=immediate`. Normal gradual deploys still pass `HOSTED_EXECUTION_SMOKE_VERSION_ID` for the public Worker checks, but they do not immediately require the managed container to report the new runner-bundle fingerprint.
@@ -367,7 +365,6 @@ Optional smoke env:
 - `HOSTED_EXECUTION_SMOKE_OIDC_TOKEN` or `VERCEL_OIDC_TOKEN` for authenticated status auth
 - `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true` to run the deploy-signed managed-container health/fingerprint smoke
 - `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT=true` to extend the managed-container smoke with the direct R2 presigned upload check; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`
-- `HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT=true` to extend the managed-container smoke with the real Codex/OpenAI HTTPS-intercept probe; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`, `HOSTED_EXECUTION_SMOKE_USER_ID`, status auth for that user, and a deployed Worker `OPENAI_API_KEY` secret
 - `HOSTED_EXECUTION_SMOKE_VERSION_ID` to pin smoke requests to a version in the active deployment; the deploy workflow passes the freshly deployed version
 - `HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS` and `HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS` to override the managed-container rollout wait
 

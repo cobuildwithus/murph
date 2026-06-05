@@ -32,7 +32,6 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.retryDelayMs).toBe(30_000);
     expect(environment.runnerCommitTimeoutMs).toBe(30_000);
     expect(environment.runnerReadyTimeoutMs).toBe(20_000);
-    expect(environment.runnerTimeoutMs).toBe(600_000);
     expect(environment.webControlTimeoutMs).toBe(30_000);
     expect(environment.vercelOidcValidation.teamSlug).toBe("murph-team");
     expect(environment.hostedWebBaseUrl).toBe("https://web.example.test");
@@ -180,36 +179,13 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.vercelOidcValidation.subject).toContain(":environment:preview");
   });
 
-  it("reads the runner timeout when configured", () => {
+  it("keeps hosted-web control timeout separate from commit timeout", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "5000",
-      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "1000",
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "15000",
-    }));
-
-    expect(environment.runnerCommitTimeoutMs).toBe(1_000);
-    expect(environment.runnerTimeoutMs).toBe(15_000);
-  });
-
-  it("rejects a runner timeout that can recheck before the idle checkpoint commit budget", () => {
-    expect(() =>
-      readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "180000",
-        HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "30000",
-        HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "215000",
-      })),
-    ).toThrow(
-      /HOSTED_EXECUTION_RUNNER_TIMEOUT_MS must be greater than HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS plus HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS plus 5000ms/u,
-    );
-  });
-
-  it("keeps the hosted-web control timeout separate from the runner timeout", () => {
-    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "600000",
+      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "15000",
       HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
     }));
 
-    expect(environment.runnerTimeoutMs).toBe(600_000);
+    expect(environment.runnerCommitTimeoutMs).toBe(15_000);
     expect(environment.webControlTimeoutMs).toBe(45_000);
   });
 
@@ -241,7 +217,6 @@ describe("readHostedExecutionEnvironment", () => {
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "30000abc",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000abc",
       HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000abc",
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "600000abc",
       HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "30000abc",
     } as const;
 
