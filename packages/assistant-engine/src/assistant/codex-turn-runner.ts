@@ -365,7 +365,7 @@ async function executeAssistantCodexAttempt(input: {
     })
     const attemptEnv = {
       ...attemptPlan.routePlan.cliEnv,
-      ...executionPlan.memoryTurnEnv,
+      ...executionPlan.turnCliEnv,
     }
     usageAttribution = createAssistantProviderUsageAttribution({
       attemptPlan,

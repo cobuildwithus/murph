@@ -495,7 +495,6 @@ describe('Codex model catalog', () => {
         hosted: null,
       },
       input,
-      memoryTurnEnv: {},
       profile: {
         promptProfile: 'conversation',
         toolProfile: 'provider-turn',
@@ -507,6 +506,7 @@ describe('Codex model catalog', () => {
       },
       route,
       sharedPlan: createSharedPlan(),
+      turnCliEnv: {},
       turnId: 'turn-1',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
@@ -608,7 +608,6 @@ describe('Codex model catalog', () => {
       activeTurnSteering: null,
       executionContext: input.executionContext,
       input,
-      memoryTurnEnv: {},
       profile: {
         promptProfile: 'conversation',
         toolProfile: 'provider-turn',
@@ -620,6 +619,7 @@ describe('Codex model catalog', () => {
       },
       route,
       sharedPlan: createSharedPlan(),
+      turnCliEnv: {},
       turnId: 'turn-hosted-device-connect',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({

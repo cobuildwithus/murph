@@ -15,9 +15,9 @@ import {
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
   runHostedWorkspaceInvocation: vi.fn(),
-  snapshotExpectedHostedCodexRootProcess: vi.fn(),
+  snapshotExpectedCodexRootProcess: vi.fn(),
   stopHostedCliRuntimeBridge: vi.fn(),
-  stopHostedWarmCodexAppServer: vi.fn(),
+  stopWarmCodexAppServer: vi.fn(),
 }));
 
 vi.mock("@murphai/hosted-execution", async () => {
@@ -40,9 +40,9 @@ vi.mock("../src/hosted-workspace-invocation.js", async () => {
   };
 });
 
-vi.mock("@murphai/assistant-engine/hosted-codex-lifecycle", () => ({
-  snapshotExpectedHostedCodexRootProcess: mocks.snapshotExpectedHostedCodexRootProcess,
-  stopHostedWarmCodexAppServer: mocks.stopHostedWarmCodexAppServer,
+vi.mock("@murphai/assistant-engine/codex-lifecycle", () => ({
+  snapshotExpectedCodexRootProcess: mocks.snapshotExpectedCodexRootProcess,
+  stopWarmCodexAppServer: mocks.stopWarmCodexAppServer,
 }));
 
 vi.mock("@murphai/assistant-runtime/hosted-invocation", async () => {
@@ -72,9 +72,9 @@ beforeEach(() => {
   vi.unstubAllGlobals();
   globalThis.fetch = nativeFetch;
   mocks.runHostedWorkspaceInvocation.mockResolvedValue(buildWorkspaceRunnerResult());
-  mocks.snapshotExpectedHostedCodexRootProcess.mockResolvedValue(null);
+  mocks.snapshotExpectedCodexRootProcess.mockResolvedValue(null);
   mocks.stopHostedCliRuntimeBridge.mockResolvedValue(undefined);
-  mocks.stopHostedWarmCodexAppServer.mockResolvedValue(undefined);
+  mocks.stopWarmCodexAppServer.mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
@@ -360,7 +360,7 @@ describe("startHostedContainerEntrypoint", () => {
     servers.push(server);
 
     mocks.stopHostedCliRuntimeBridge.mockClear();
-    mocks.stopHostedWarmCodexAppServer.mockClear();
+    mocks.stopWarmCodexAppServer.mockClear();
     server.closeAllConnections?.();
     await new Promise<void>((resolve, reject) => {
       server.close((error) => {
@@ -379,8 +379,8 @@ describe("startHostedContainerEntrypoint", () => {
 
     expect(mocks.stopHostedCliRuntimeBridge).toHaveBeenCalledTimes(1);
     expect(mocks.stopHostedCliRuntimeBridge).toHaveBeenCalledWith("container-server-close");
-    expect(mocks.stopHostedWarmCodexAppServer).toHaveBeenCalledTimes(1);
-    expect(mocks.stopHostedWarmCodexAppServer).toHaveBeenCalledWith("container-server-close");
+    expect(mocks.stopWarmCodexAppServer).toHaveBeenCalledTimes(1);
+    expect(mocks.stopWarmCodexAppServer).toHaveBeenCalledWith("container-server-close");
   });
 
   it("logs metadata-only CLI runtime bridge stop failures on server close", async () => {

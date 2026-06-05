@@ -169,8 +169,8 @@ test("hosted runtime entrypoints omit legacy child process env alias", async () 
 test("hosted-runtime-contracts omits assistant-engine Codex lifecycle hooks", async () => {
   const contracts = await import("@murphai/assistant-runtime/hosted-runtime-contracts");
 
-  assert.equal("snapshotExpectedHostedCodexRootProcess" in contracts, false);
-  assert.equal("stopHostedWarmCodexAppServer" in contracts, false);
+  assert.equal("snapshotExpectedCodexRootProcess" in contracts, false);
+  assert.equal("stopWarmCodexAppServer" in contracts, false);
 });
 
 test("hosted-assistant-env subpath stays wired to the hosted env source surface", () => {

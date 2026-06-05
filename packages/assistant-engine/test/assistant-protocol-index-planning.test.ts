@@ -85,10 +85,10 @@ describe('assistant protocol index planning', () => {
       turnId: 'turn-test',
     })
     expect(
-      foregroundPlan.memoryTurnEnv[ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV],
+      foregroundPlan.turnCliEnv[ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV],
     ).toBe('linq')
     expect(
-      foregroundPlan.memoryTurnEnv[ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV],
+      foregroundPlan.turnCliEnv[ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV],
     ).toBe('linq_chat_real')
 
     const cronPlan = await buildCodexTurnExecutionPlan({
@@ -105,10 +105,10 @@ describe('assistant protocol index planning', () => {
       turnId: 'turn-test',
     })
     expect(
-      cronPlan.memoryTurnEnv[ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV],
+      cronPlan.turnCliEnv[ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV],
     ).toBeUndefined()
     expect(
-      cronPlan.memoryTurnEnv[ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV],
+      cronPlan.turnCliEnv[ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV],
     ).toBeUndefined()
   })
 

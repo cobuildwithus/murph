@@ -34,9 +34,9 @@ import {
   stopHostedCliRuntimeBridge,
 } from "@murphai/assistant-runtime/hosted-invocation";
 import {
-  snapshotExpectedHostedCodexRootProcess,
-  stopHostedWarmCodexAppServer,
-} from "@murphai/assistant-engine/hosted-codex-lifecycle";
+  snapshotExpectedCodexRootProcess,
+  stopWarmCodexAppServer,
+} from "@murphai/assistant-engine/codex-lifecycle";
 import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "./hosted-runtime-architecture.ts";
@@ -955,9 +955,9 @@ function resolveHostedContainerRuntimeDependencies(
     stopCliRuntimeBridge:
       runtime?.stopCliRuntimeBridge ?? stopHostedCliRuntimeBridge,
     snapshotExpectedCodexRootProcess:
-      runtime?.snapshotExpectedCodexRootProcess ?? snapshotExpectedHostedCodexRootProcess,
+      runtime?.snapshotExpectedCodexRootProcess ?? snapshotExpectedCodexRootProcess,
     stopWarmCodex:
-      runtime?.stopWarmCodex ?? stopHostedWarmCodexAppServer,
+      runtime?.stopWarmCodex ?? stopWarmCodexAppServer,
     runOpenAiInterceptSmoke:
       runtime?.runOpenAiInterceptSmoke ?? runHostedContainerOpenAiInterceptSmoke,
   };
@@ -2299,7 +2299,7 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof runHostedWorkspaceInvocationDirect>>> {
-  await stopHostedWarmCodexAfterCliBridgeOffInvocationViolation(runtime, options);
+  await stopWarmCodexAfterCliBridgeOffInvocationViolation(runtime, options);
 
   let processBaseline: HostedContainerProcessSnapshot | null = null;
   if (runtime.processIsolation) {
@@ -2314,7 +2314,7 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
   try {
     return await runHostedWorkspaceInvocation(input, runtime, options);
   } finally {
-    await stopHostedWarmCodexAfterCliBridgeOffInvocationViolation(runtime, options);
+    await stopWarmCodexAfterCliBridgeOffInvocationViolation(runtime, options);
     if (processBaseline) {
       try {
         const expectedCodexRoot = await runtime.snapshotExpectedCodexRootProcess();
@@ -2336,7 +2336,7 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
   }
 }
 
-async function stopHostedWarmCodexAfterCliBridgeOffInvocationViolation(
+async function stopWarmCodexAfterCliBridgeOffInvocationViolation(
   runtime: HostedContainerRuntimeDependencies,
   options?: {
     onCleanupStatus?: (status: Exclude<HostedContainerCleanupStatus, "not_run">) => void;
