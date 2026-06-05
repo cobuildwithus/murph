@@ -1555,10 +1555,9 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("replaces an old runtime write fence when active child wake cannot be confirmed", async () => {
+  it("does not replace an old runtime write fence while an active child is wake-unconfirmed", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
       async () => ({
         kind: "wake-unconfirmed" as const,
@@ -1567,7 +1566,6 @@ describe("HostedUserRunner execution coordination", () => {
     );
     const { invoke, runner, sql } = createRunnerHarness({
       ensureProcessing,
-      invocationResults: [invocationResult.promise],
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
@@ -1580,32 +1578,19 @@ describe("HostedUserRunner execution coordination", () => {
       orchestrationAttemptId: "test-orchestration-attempt-wake-replace",
       reason: "nudge",
       userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "replaced",
-      kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
-      runtimeAttemptId: expect.not.stringMatching(token.attemptId),
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:41.000Z",
     });
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: expect.not.stringMatching(token.attemptId),
+      active_attempt_id: token.attemptId,
       active_expires_at: null,
       backoff_until: null,
       wake_at: null,
     });
-
-    invocationResult.resolve({
-      nextWakeAt: null,
-      status: "idle",
-    });
-    await vi.waitFor(() =>
-      expect(readRunnerMeta(sql)).toMatchObject({
-        active_attempt_id: null,
-        last_invocation_at: expect.any(String),
-      })
-    );
   });
 
   it("returns retry_later when active child wake exceeds the caller command budget", async () => {

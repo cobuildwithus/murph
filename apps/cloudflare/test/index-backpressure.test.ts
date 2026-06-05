@@ -91,6 +91,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     });
 
     expect(lease).toMatchObject({
+      kind: "deploy_smoke",
       reason: "manual",
       userId: "member_123",
       workspaceVersion: "7",
@@ -110,7 +111,7 @@ describe("cloudflare worker queue backpressure routes", () => {
       attemptId: lease.attemptId,
       generation: lease.generation,
       userId: "member_123",
-    })).resolves.toBe(true);
+    })).resolves.toBe(false);
 
     await expect(harness.durableObject.finishDeploySmokeRuntimeWriteFence({
       attemptId: lease.attemptId,

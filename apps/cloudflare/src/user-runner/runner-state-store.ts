@@ -26,6 +26,7 @@ export interface RunnerWriteFenceToken {
   attemptId: string;
   expiresAt: string | null;
   generation: string;
+  kind: RunnerWriteFenceKind;
   leaseGeneration: string;
   providerEgressToken: string | null;
   reason: HostedWorkspaceInvocationReason;
@@ -166,11 +167,12 @@ export class RunnerStateStore {
     const startedAt = new Date().toISOString();
     const attemptId = createRuntimeWriteAttemptId();
     const providerEgressToken = createProviderEgressToken();
+    const kind = input.kind ?? "runtime";
 
     meta.active_attempt_id = attemptId;
     meta.active_expires_at = null;
     meta.active_generation = nextGeneration;
-    meta.active_kind = input.kind ?? "runtime";
+    meta.active_kind = kind;
     meta.active_provider_egress_token_hash = await hashProviderEgressToken(providerEgressToken);
     meta.active_reason = input.reason;
     meta.active_runner_container_name = requireRunnerContainerName(input.runnerContainerName);
@@ -183,6 +185,7 @@ export class RunnerStateStore {
       attemptId,
       expiresAt: null,
       generation: nextGeneration.toString(),
+      kind,
       leaseGeneration: nextGeneration.toString(),
       providerEgressToken,
       reason: input.reason,
@@ -405,6 +408,7 @@ export class RunnerStateStore {
     const token = this.readWriteFenceTokenSync(meta);
     if (
       !token
+      || token.kind !== "runtime"
       || token.attemptId !== input.attemptId
       || token.generation !== input.generation
       || token.userId !== input.userId
@@ -445,7 +449,8 @@ export class RunnerStateStore {
       };
     }
     if (
-      token.userId !== input.userId
+      token.kind !== "runtime"
+      || token.userId !== input.userId
     ) {
       return {
         owns: false,
@@ -493,7 +498,7 @@ export class RunnerStateStore {
         record: this.readStateFromMetaSync(meta),
       };
     }
-    if (token.userId !== input.userId) {
+    if (token.kind !== "runtime" || token.userId !== input.userId) {
       return {
         owns: false,
         reason: "write_fence_mismatch",
@@ -693,14 +698,16 @@ export class RunnerStateStore {
   ): boolean {
     return meta.active_attempt_id === token.attemptId
       && normalizeNonNegativeInteger(meta.active_generation).toString() === token.generation
+      && readWriteFenceKind(meta.active_kind) === token.kind
       && meta.user_id === token.userId;
   }
 
   private readWriteFenceTokenSync(meta: RunnerMetaRow): RunnerWriteFenceToken | null {
+    const kind = readWriteFenceKind(meta.active_kind);
     if (
       !meta.active_attempt_id
       || !meta.active_started_at
-      || !readWriteFenceKind(meta.active_kind)
+      || !kind
     ) {
       return null;
     }
@@ -709,6 +716,7 @@ export class RunnerStateStore {
       attemptId: meta.active_attempt_id,
       expiresAt: null,
       generation: normalizeNonNegativeInteger(meta.active_generation).toString(),
+      kind,
       leaseGeneration: normalizeNonNegativeInteger(meta.active_generation).toString(),
       providerEgressToken: null,
       reason: readHostedWorkspaceInvocationReasonOrDefault(meta.active_reason),

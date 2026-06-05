@@ -99,8 +99,9 @@ display, attachment evidence, and debugging, but hosted callers must not stage
 hidden runtime-only inbox rows to make Codex admission succeed.
 Invocation-local Worker routes such as artifact writes, browser-vault replica
 writes, provider effects, and mailbox payload decode authorize the current
-runner by runtime write-fence identity (`attemptId`, `generation`, and
-`userId`). The transport still carries the generation in the historical
+runner by runtime-kind write-fence identity (`attemptId`, `generation`, and
+`userId`). Deploy-smoke fences are control-plane smoke leases and do not satisfy
+runtime side-effect or provider-egress validators. The transport still carries the generation in the historical
 `leaseGeneration` header until the 2026-05-25 compatibility deletion.
 External provider egress must not send exact runtime authority headers to
 third-party provider origins. Runtime provider fetches instead carry the
@@ -115,7 +116,7 @@ own HTTPS calls. Tokenless intercepted OpenAI egress uses active-user-fence
 proof instead: the Worker resolves the current container Durable Object from the
 intercept context, reads that container's active invocation user, requires any
 bound-user header to match that trusted active user, and validates that
-UserRunner still has an active write fence for the user before
+UserRunner still has an active runtime-kind write fence for the user before
 injecting the Worker-owned OpenAI credential. Missing current-container user,
 missing runner state, missing write fence, stale fence, wrong user, or validator
 failure all fail closed without injecting a provider credential.
@@ -307,10 +308,10 @@ Cloudflare does not acquire a web run row and does not reconcile durable demand.
 Only Temporal decides when Cloudflare should process. The short-lived
 `ensure-processing` command asks the per-user Durable Object to make processing
 active by starting a runner, waking a ready child, recording a pending wake while
-the child is still starting, or replacing an old runtime write fence whose child
-cannot be confirmed after startup grace. The command returns `retry_later`
-instead of pretending success when Cloudflare cannot confirm fresh start or
-fresh wake acceptance. Fresh starts read the hosted workspace,
+the child is still starting, or replacing an old runtime write fence after
+startup grace only when no active child exists. The command returns
+`retry_later` instead of pretending success when Cloudflare cannot confirm fresh
+start or fresh wake acceptance. Fresh starts read the hosted workspace,
 bind the workspace version to the write fence, build runtime config/secrets, and
 construct the container job before returning accepted; failures in that
 pre-handoff path clear the fresh fence and return `retry_later`. The Temporal
@@ -321,11 +322,12 @@ workspace read/readiness steps are capped by the remaining budget. Accepted
 background invocations are registered with the Durable Object lifetime.
 Accepted starts and wakes return an owner recheck aligned to the
 expected idle checkpoint horizon rather than a short durable-lag polling loop. A
-runtime fence whose child is non-wakeable or wake-unconfirmed is replaced after
-the startup grace window when a later ensure command observes it. Deploy-smoke
-fences are control-plane fences; fresh ones make normal runtime demand retry,
-while stale ones are cleared by deploy-smoke acquisition or replaced when real
-runtime demand arrives.
+runtime fence whose child is missing is replaced after the startup grace window
+when a later ensure command observes it. A wake-unconfirmed active child is not
+replaced; the caller retries until the child finishes, becomes wakeable, or is no
+longer active. Deploy-smoke fences are control-plane fences; fresh ones make
+normal runtime demand retry, while stale ones are cleared by deploy-smoke
+acquisition or replaced when real runtime demand arrives.
 The separate signed `runtime/prewarm` command exists only for Temporal-mediated
 typing hints. It may bind the per-user Durable Object and touch the runner
 container readiness path, but it must not begin a write fence, read hosted

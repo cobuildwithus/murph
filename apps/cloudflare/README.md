@@ -163,9 +163,10 @@ replacement, ambiguous-wake, and fresh-startup retry contract is documented in
 `agent-docs/references/hosted-runtime-protocol.md`. The legacy active-invocation
 heartbeat and container-stopped RPC shims are retained only for deployed-caller
 compatibility until 2026-05-25 and return inert responses. Live runner side
-effects validate the runtime write fence by attempt, generation, and user
-identity. Tokenless OpenAI provider egress validates the trusted active user
-reported by the current container Durable Object against that user's active
+effects validate the runtime-kind write fence by attempt, generation, and user
+identity. Deploy-smoke fences are control-plane leases, not runtime authority.
+Tokenless OpenAI provider egress validates the trusted active user reported by
+the current container Durable Object against that user's active runtime-kind
 write fence rather than comparing runner container names. Workspace version
 remains a checkpoint/restore freshness guard, not generic side-effect authority.
 

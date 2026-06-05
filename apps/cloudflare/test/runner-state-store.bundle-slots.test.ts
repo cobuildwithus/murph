@@ -487,6 +487,53 @@ describe("RunnerStateStore schema guard", () => {
     });
   });
 
+  it("does not treat deploy-smoke fences as runtime authority", async () => {
+    const { store } = createRunnerStateStoreHarness();
+    const lease = await store.beginWriteFence({
+      kind: "deploy_smoke",
+      reason: "manual",
+      runnerContainerName: "user-write",
+      userId: "user-write",
+    });
+    const boundLease = await store.bindWriteFenceWorkspaceVersion({
+      token: lease,
+      workspaceVersion: "6",
+    });
+
+    await expect(store.readWriteFenceToken()).resolves.toMatchObject({
+      attemptId: boundLease.attemptId,
+      kind: "deploy_smoke",
+      providerEgressToken: null,
+    });
+    await expect(store.validateWriteFenceToken({
+      attemptId: boundLease.attemptId,
+      generation: boundLease.generation,
+      userId: boundLease.userId,
+      workspaceVersion: "6",
+    })).resolves.toMatchObject({
+      owns: false,
+      record: {
+        writeFence: {
+          kind: "deploy_smoke",
+          workspaceVersion: "6",
+        },
+      },
+    });
+    await expect(store.validateActiveWriteFence({
+      userId: "user-write",
+    })).resolves.toMatchObject({
+      owns: false,
+      reason: "write_fence_mismatch",
+    });
+    await expect(store.validateProviderEgressToken({
+      providerEgressToken: lease.providerEgressToken ?? "",
+      userId: "user-write",
+    })).resolves.toMatchObject({
+      owns: false,
+      reason: "write_fence_mismatch",
+    });
+  });
+
   it("fails closed without initializing state when active validation reaches an unbound runner", async () => {
     const { db, store } = createRunnerStateStoreHarness();
 

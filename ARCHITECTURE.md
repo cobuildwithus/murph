@@ -92,14 +92,15 @@ with typing hints. Cloudflare's signed `/runtime/prewarm` adapter may warm the
 container shell without a write fence, workspace read, mailbox import,
 assistant invocation, checkpoint, or usage accounting.
 
-Hosted runner progress reconciliation treats the write fence as the active owner
-of execution and commit authority rather than mailbox-demand truth. Exact
+Hosted runner progress reconciliation treats a runtime-kind write fence as the active
+owner of execution and commit authority rather than mailbox-demand truth. Exact
 accepted wakes may coalesce under Cloudflare's active owner; durable mailbox lag
 remains recovery truth but duplicate execution is prevented by the write fence;
 accepted processing returns an owner recheck instead of a short
-durable-lag polling loop; old runtime fences with missing or wake-unconfirmed
-children are replaced by identity after startup grace, while fresh deploy-smoke
-fences return busy and stale deploy-smoke recovery may unblock real runtime demand; alarm cleanup
+durable-lag polling loop; old runtime fences with missing children are replaced
+by identity after startup grace, wake-unconfirmed active children retry instead
+of being replaced, and fresh deploy-smoke fences return busy while stale
+deploy-smoke recovery may unblock real runtime demand; alarm cleanup
 failures are rethrown so the platform can retry instead of permanently deleting
 the alarm. New v2 foreground leases restore from durable workspace snapshots and
 legacy refs also cold-restore from durable bundles instead of trusting dirty

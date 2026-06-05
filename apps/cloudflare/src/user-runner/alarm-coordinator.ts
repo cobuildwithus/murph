@@ -24,6 +24,7 @@ export function runnerWriteFenceTokensMatch(
   return current !== null
     && current.attemptId === expected.attemptId
     && current.generation === expected.generation
+    && current.kind === expected.kind
     && current.userId === expected.userId
     && current.workspaceVersion === expected.workspaceVersion;
 }

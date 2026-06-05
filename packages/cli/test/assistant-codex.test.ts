@@ -412,6 +412,8 @@ test('executeCodexAppServerTurn fails closed on unsupported approval policies be
 })
 
 test('executeCodexAppServerTurn classifies resume RPC failures as stale provider threads', async () => {
+  const workingDirectory = await createTempDir('assistant-codex-cli-stale-')
+
   codexMocks.spawn.mockImplementation(() => {
     const child = new MockChildProcess()
 
@@ -441,7 +443,7 @@ test('executeCodexAppServerTurn classifies resume RPC failures as stale provider
     executeCodexAppServerTurn({
       prompt: 'Resume the previous turn.',
       resumeSessionId: 'stale-thread',
-      workingDirectory: '/tmp/vault',
+      workingDirectory,
     }),
     (error: unknown) => {
       assert.equal((error as { code?: string }).code, 'ASSISTANT_CODEX_RESUME_STALE')
@@ -455,6 +457,7 @@ test('executeCodexAppServerTurn classifies resume RPC failures as stale provider
 })
 
 test('executeCodexAppServerTurn interrupts the child and records the provider thread when aborted', async () => {
+  const workingDirectory = await createTempDir('assistant-codex-cli-abort-')
   const controller = new AbortController()
   let spawnedChild: MockChildProcess | null = null
 
@@ -509,7 +512,7 @@ test('executeCodexAppServerTurn interrupts the child and records the provider th
     executeCodexAppServerTurn({
       abortSignal: controller.signal,
       prompt: 'Abort the turn.',
-      workingDirectory: '/tmp/vault',
+      workingDirectory,
     }),
     (error: unknown) => {
       assert.equal((error as { code?: string }).code, 'ASSISTANT_CODEX_INTERRUPTED')

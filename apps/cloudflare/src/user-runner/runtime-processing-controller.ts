@@ -330,33 +330,10 @@ export class RuntimeProcessingController {
       });
     }
 
-    if (this.shouldPreserveStartingWriteFence(activeFence)) {
-      await this.syncRunnerAlarm(record);
-      return createRuntimeProcessingRetryLater({
-        reason: mapRunnerProcessingRetryReason(containerResult.reason),
-        userId: input.input.userId,
-      });
-    }
-
-    const cleared = await this.input.stateStore.clearWriteFenceForReplacement({
-      attemptId: activeFence.attemptId,
-      error: new Error(`active_runtime_wake_unconfirmed:${containerResult.reason}`),
-      finishedAt: new Date().toISOString(),
-      generation: String(activeFence.generation),
-      userId: record.userId,
-    });
-    await this.syncRunnerAlarm(cleared.record);
-    if (!cleared.cleared) {
-      return createRuntimeProcessingRetryLater({
-        reason: "stale_fence_replacement_race",
-        userId: input.input.userId,
-      });
-    }
-    return await this.startRuntimeProcessing({
-      action: "replaced",
-      commandBudget: input.commandBudget,
-      input: input.input,
-      runtimeWakeStartedAt: input.runtimeWakeStartedAt,
+    await this.syncRunnerAlarm(record);
+    return createRuntimeProcessingRetryLater({
+      reason: mapRunnerProcessingRetryReason(containerResult.reason),
+      userId: input.input.userId,
     });
   }
 
