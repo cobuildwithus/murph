@@ -7,7 +7,7 @@ import {
   compareSleepWindowByDateDesc,
   resolveMetric,
   resolveSleepWindowSelection,
-  withSleepFallback,
+  withMetricFallback,
 } from "../src/wearables/selection.ts";
 import {
   compareIsoDesc,
@@ -156,7 +156,7 @@ test("selection helpers cover direct, fallback, agreement, conflict, and tie-bre
     ],
     { metricFamily: "sleep" },
   );
-  const liftedFallback = withSleepFallback(
+  const liftedFallback = withMetricFallback(
     fallbackMetric,
     fallbackSource,
     "Used the selected sleep session duration because no direct total-sleep metric was available.",
@@ -164,7 +164,7 @@ test("selection helpers cover direct, fallback, agreement, conflict, and tie-bre
   assert.equal(liftedFallback.selection.resolution, "fallback");
   assert.equal(liftedFallback.selection.fallbackFromMetric, "sessionMinutes");
   assert.equal(
-    withSleepFallback(
+    withMetricFallback(
       fallbackSource,
       fallbackSource,
       "Used the selected sleep session duration because no direct total-sleep metric was available.",

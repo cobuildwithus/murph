@@ -9,6 +9,7 @@ import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import { normalizeJunctionSnapshot } from "@murphai/importers";
 
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
+import { buildMetricProjection } from "../src/metrics/projection.ts";
 import { createVaultReadModel, listEntities, readVault } from "../src/model.ts";
 import { searchVaultRuntime } from "../src/query-projection.ts";
 import { searchVault } from "../src/search.ts";
@@ -206,6 +207,83 @@ function makeVaultFromJunctionSnapshot(snapshot: Parameters<typeof normalizeJunc
 
   return makeVault([...events, ...samples]);
 }
+
+test("Junction Oura lowest sleep heart rate backs resting-heart-rate biomarker projection", () => {
+  const vault = makeVaultFromJunctionSnapshot({
+    importedAt: "2026-06-05T12:00:00.000Z",
+    summaries: {
+      sleep: [{
+        source: {
+          provider: "oura",
+          type: "ring",
+        },
+        id: "oura-sleep-without-explicit-rhr",
+        calendar_date: "2026-06-05",
+        bedtime_start: "2026-06-05T02:00:00+00:00",
+        bedtime_stop: "2026-06-05T10:00:00+00:00",
+        duration: 28800,
+        total: 25200,
+        hr_lowest: 45,
+        hr_average: 50,
+        average_hrv: 40,
+        respiratory_rate: 14,
+      }],
+    },
+  });
+
+  const latestSleep = summarizeWearableLatest(vault)?.sleep;
+  const latestRecovery = summarizeWearableLatest(vault)?.recovery;
+  const projection = buildMetricProjection(vault);
+  const restingHeartRatePoints = projection.metricPoints.filter((point) =>
+    point.metricKey === "resting-heart-rate"
+  );
+
+  assert.equal(latestSleep?.lowestHeartRate.selection.value, 45);
+  assert.equal(latestRecovery?.restingHeartRate.selection.value, 45);
+  assert.equal(latestRecovery?.restingHeartRate.selection.resolution, "fallback");
+  assert.equal(latestRecovery?.restingHeartRate.selection.fallbackFromMetric, "lowestHeartRate");
+  assert.deepEqual(restingHeartRatePoints.map((point) => point.value), [45]);
+  assert.equal(restingHeartRatePoints[0]?.source.kind, "wearable-summary");
+  assert.equal(restingHeartRatePoints[0]?.biomarkerKey, "biomarker:resting-heart-rate");
+});
+
+test("Junction Oura explicit resting heart rate takes precedence over lowest sleep heart rate", () => {
+  const vault = makeVaultFromJunctionSnapshot({
+    importedAt: "2026-06-05T12:00:00.000Z",
+    summaries: {
+      sleep: [{
+        source: {
+          provider: "oura",
+          type: "ring",
+        },
+        id: "oura-sleep-with-explicit-rhr",
+        calendar_date: "2026-06-05",
+        bedtime_start: "2026-06-05T02:00:00+00:00",
+        bedtime_stop: "2026-06-05T10:00:00+00:00",
+        duration: 28800,
+        total: 25200,
+        hr_lowest: 45,
+        hr_resting: 52,
+        hr_average: 54,
+        average_hrv: 41,
+        respiratory_rate: 14,
+      }],
+    },
+  });
+
+  const latestSleep = summarizeWearableLatest(vault)?.sleep;
+  const latestRecovery = summarizeWearableLatest(vault)?.recovery;
+  const projection = buildMetricProjection(vault);
+  const restingHeartRatePoints = projection.metricPoints.filter((point) =>
+    point.metricKey === "resting-heart-rate"
+  );
+
+  assert.equal(latestSleep?.lowestHeartRate.selection.value, 45);
+  assert.equal(latestRecovery?.restingHeartRate.selection.value, 52);
+  assert.equal(latestRecovery?.restingHeartRate.selection.resolution, "direct");
+  assert.equal(latestRecovery?.restingHeartRate.selection.fallbackFromMetric, null);
+  assert.deepEqual(restingHeartRatePoints.map((point) => point.value), [52]);
+});
 
 test("Junction raw-only timeseries stay out of default query/search and wearable summaries", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-raw-timeseries-query-"));

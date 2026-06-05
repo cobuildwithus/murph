@@ -193,7 +193,10 @@ function pullCurrentRunnerBaseImage(input: {
     if (readRunnerBaseImageFingerprint(remoteTag, input.env) !== input.fingerprint) {
       continue;
     }
-    if (!runDockerSync(["tag", remoteTag, input.imageTag], input.env).ok) {
+    if (
+      remoteTag !== input.imageTag
+      && !runDockerSync(["tag", remoteTag, input.imageTag], input.env).ok
+    ) {
       continue;
     }
     if (readRunnerBaseImageFingerprint(input.imageTag, input.env) === input.fingerprint) {

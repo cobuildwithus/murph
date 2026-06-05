@@ -17,6 +17,7 @@ import {
   shouldSkipRunnerBundle,
   shouldSkipRunnerDockerBase,
 } from "../scripts/dev-worker.ts";
+import { hostedLocalRunnerBaseImageTag } from "../scripts/runner-base-image-contract.ts";
 
 describe("cloudflare dev-worker script", () => {
   afterEach(() => {
@@ -99,7 +100,7 @@ describe("cloudflare dev-worker script", () => {
       [
         "image",
         "inspect",
-        "murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-codex0.135.0-base-en",
+        hostedLocalRunnerBaseImageTag,
       ],
       expect.any(Object),
     );

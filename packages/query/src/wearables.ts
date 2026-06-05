@@ -24,7 +24,7 @@ import { buildCandidateId, collectLatestDate, collectSortedDatesDesc, latestIsoT
 import {
   resolveMetric,
   resolveSleepWindowSelection,
-  withSleepFallback,
+  withMetricFallback,
 } from "./wearables/selection.ts";
 import {
   summarizeActivityNotes,
@@ -370,7 +370,7 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
         : resolveMetric("totalSleepMinutes", buildDerivedTotalSleepCandidates(date, dateCandidates), {
             metricFamily: "sleep",
           });
-    const timeInBedMinutes = withSleepFallback(
+    const timeInBedMinutes = withMetricFallback(
       resolveMetric("timeInBedMinutes", selectMetricCandidates(dateCandidates, "timeInBedMinutes"), {
         metricFamily: "sleep",
       }),
@@ -483,7 +483,9 @@ export function listWearableRecoveryDays(
 
 function listWearableRecoveryDaysFromDataset(dataset: WearableDataset): WearableRecoveryDay[] {
   const metricCandidatesByDate = groupMetricCandidatesByDate(
-    dataset.metricCandidates.filter((candidate) => metricSetHas(RECOVERY_METRIC_KEYS, candidate.metric)),
+    dataset.metricCandidates.filter((candidate) =>
+      metricSetHas(RECOVERY_METRIC_KEYS, candidate.metric) || candidate.metric === "lowestHeartRate"
+    ),
   );
   const dates = collectSortedDatesDesc([...metricCandidatesByDate.keys()]);
 
@@ -495,9 +497,15 @@ function listWearableRecoveryDaysFromDataset(dataset: WearableDataset): Wearable
     const readinessScore = resolveMetric("readinessScore", selectMetricCandidates(dateCandidates, "readinessScore"), {
       metricFamily: "readiness",
     });
-    const restingHeartRate = resolveMetric("restingHeartRate", selectMetricCandidates(dateCandidates, "restingHeartRate"), {
-      metricFamily: "cardio",
-    });
+    const restingHeartRate = withMetricFallback(
+      resolveMetric("restingHeartRate", selectMetricCandidates(dateCandidates, "restingHeartRate"), {
+        metricFamily: "cardio",
+      }),
+      resolveMetric("lowestHeartRate", selectMetricCandidates(dateCandidates, "lowestHeartRate"), {
+        metricFamily: "sleep",
+      }),
+      "Used lowest sleep heart rate because no explicit resting heart rate metric was available.",
+    );
     const hrv = resolveMetric("hrv", selectMetricCandidates(dateCandidates, "hrv"), {
       metricFamily: "recovery",
     });

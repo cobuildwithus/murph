@@ -134,6 +134,38 @@ describe("runner base image preparation", () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  it("uses the stable GHCR tag directly without self-retagging when it matches the source", async () => {
+    const { prepareRunnerBaseImage } = await import("../scripts/runner-base-image.ts");
+    const fingerprint = expectedFingerprint();
+    mockDockerSyncResults([
+      { status: 1, stderr: "No such image\n" },
+      { status: 1, stderr: "manifest unknown\n" },
+      { status: 0 },
+      { status: 0, stdout: `${fingerprint}\n` },
+      { status: 0, stdout: `${fingerprint}\n` },
+    ]);
+
+    const result = await prepareRunnerBaseImage();
+
+    expect(result).toEqual({
+      fingerprint,
+      imageTag: hostedLocalRunnerBaseImageTag,
+      status: "pulled",
+    });
+    expect(hostedLocalRunnerBaseImageTag).toBe(hostedRunnerBaseImageRemoteTag);
+    expect(spawnSync).toHaveBeenCalledWith(
+      "docker",
+      ["pull", "--platform", "linux/amd64", hostedRunnerBaseImageRemoteTag],
+      expect.objectContaining({ stdio: ["ignore", "ignore", "pipe"] }),
+    );
+    expect(spawnSync).not.toHaveBeenCalledWith(
+      "docker",
+      ["tag", hostedRunnerBaseImageRemoteTag, hostedLocalRunnerBaseImageTag],
+      expect.anything(),
+    );
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it("does not retag a pulled GHCR image when the remote fingerprint is stale", async () => {
     const { prepareRunnerBaseImage } = await import("../scripts/runner-base-image.ts");
     const fingerprint = expectedFingerprint();

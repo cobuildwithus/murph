@@ -286,7 +286,11 @@ Local deploys and Docker smoke checks also prepare the stable native base image:
 pnpm --dir apps/cloudflare runner:docker:base
 ```
 
-That image is tagged `murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-codex0.135.0-base-en`.
+That image is prepared in the local Docker cache under the stable GHCR tag
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-codex0.135.0-base-en`,
+which is also the final app-layer Dockerfile default. Using the pullable GHCR
+name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
+image during local Wrangler container builds.
 It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex`, `ffmpeg`, `whisper.cpp`, the default Whisper model, and PDF tooling from Poppler plus `file`, `qpdf`, and MuPDF tools, but no app bundle or worker secrets.
 `runner:docker:base` first reuses a GHCR-published base image when its source-fingerprint label matches the checked-out `Dockerfile.cloudflare-hosted-runner-base`; otherwise it rebuilds locally. Pass `-- --force` to rebuild from the checked-out Dockerfile without adopting a GHCR base image; deploy-capable production paths use that forced path so GHCR stays a CI/local cache instead of production image authority. The default Whisper model comes from the pinned `ghcr.io/cobuildwithus/murph-whisper-model` image and is still verified by SHA-256 inside the base build. Forced source rebuilds still need read access to that pinned GHCR model image, so local operators should run `docker login ghcr.io` unless the package is public. Pull-request hosted-local E2E does not authenticate to GHCR before running PR-controlled code, so the GHCR runner base and Whisper model packages must be public for fast anonymous PR cache/model pulls. `Dockerfile.cloudflare-whisper-model` is the only place that fetches the upstream Hugging Face model, and the protected-main `.github/workflows/cloudflare-runner-base-image.yml` workflow publishes that mirror image plus the full base image with `GITHUB_TOKEN`.
 The base image build runs `python3 --version`, `python --version`, `codex --version`, `codex app-server --help`, and `codex doctor --help` under the runner user, and the Docker smoke repeats the Python checks inside the final image before deploy while also proving `file`, `pdfinfo`, `pdftotext`, `pdftoppm`, `qpdf`, and `mutool` against the restored smoke PDF fixture.

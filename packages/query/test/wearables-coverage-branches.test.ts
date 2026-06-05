@@ -55,7 +55,7 @@ import {
   emptyMetricSelection,
   resolveMetric,
   resolveSleepWindowSelection,
-  withSleepFallback,
+  withMetricFallback,
 } from "../src/wearables/selection.ts";
 import {
   buildCandidateId,
@@ -484,7 +484,7 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
     [buildSleepWindowMetricCandidate(sleepWindow)],
     { metricFamily: "sleep" },
   );
-  const liftedFallback = withSleepFallback(
+  const liftedFallback = withMetricFallback(
     resolveMetric("totalSleepMinutes", [], { metricFamily: "sleep" }),
     sleepFallback,
     "Used the selected sleep session duration because no direct total-sleep metric was available.",
@@ -497,7 +497,7 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
     "Used the selected sleep session duration because no direct total-sleep metric was available.",
   );
   assert.equal(
-    withSleepFallback(lowConfidence, sleepFallback, "Used the selected sleep session duration because no direct total-sleep metric was available."),
+    withMetricFallback(lowConfidence, sleepFallback, "Used the selected sleep session duration because no direct total-sleep metric was available."),
     lowConfidence,
   );
 

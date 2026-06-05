@@ -138,7 +138,7 @@ export function resolveMetric(
   };
 }
 
-export function withSleepFallback(
+export function withMetricFallback(
   metric: WearableResolvedMetric,
   fallback: WearableResolvedMetric,
   reason: string,
