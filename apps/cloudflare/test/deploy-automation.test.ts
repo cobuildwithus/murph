@@ -727,9 +727,13 @@ describe("hosted deploy automation helpers", () => {
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
       expect(deployWorkerStep).toContain(`${name}: \${{ secrets.${name} }}`);
     }
-    expect(
-      workflow.slice(validateDeployEnvStepIndex, workflow.indexOf("- name: Prepare deploy artifacts")),
-    ).toContain("HOSTED_LOG_FINGERPRINT_SECRET: ${{ secrets.HOSTED_LOG_FINGERPRINT_SECRET }}");
+    const validateDeployEnvStep = workflow.slice(
+      validateDeployEnvStepIndex,
+      workflow.indexOf("\n      - name:", validateDeployEnvStepIndex + 1),
+    );
+    for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
+      expect(validateDeployEnvStep).toContain(`${name}: \${{ secrets.${name} }}`);
+    }
     for (const name of HOSTED_WORKER_REQUIRED_VAR_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("vars");
     }
