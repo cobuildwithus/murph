@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   issueHostedAppSession: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
   prepareHostedInvitePhoneCode: vi.fn(),
+  readHostedConsentStatus: vi.fn(),
   requirePrivyCompletionSession: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
   requirePrivyMemberAuth: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
 
 vi.mock("@/src/lib/legal/consent", () => ({
   assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
+  readHostedConsentStatus: mocks.readHostedConsentStatus,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -162,6 +164,9 @@ describe("hosted onboarding routes", () => {
       },
     });
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
+    mocks.readHostedConsentStatus.mockResolvedValue({
+      launchGranted: false,
+    });
     mocks.createHostedBillingCheckout.mockResolvedValue({
       alreadyActive: false,
       url: "https://billing.example.test/session_123",
@@ -269,6 +274,7 @@ describe("hosted onboarding routes", () => {
     await expect(response.json()).resolves.toEqual({
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
+      launchConsentGranted: false,
       messagingSetupRequired: false,
       ok: true,
       stage: "checkout",

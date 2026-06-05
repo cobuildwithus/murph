@@ -65,6 +65,7 @@ export type HostedInviteVerificationMode = "invite_email" | "invite_phone" | "ma
 export interface HostedPrivyCompletionPayload {
   inviteCode: string;
   joinUrl: string;
+  launchConsentGranted?: boolean;
   messagingSetupRequired: boolean;
   stage: HostedPostVerificationStage;
   status: HostedInviteStatusPayload;

@@ -60,7 +60,7 @@ test("completeHostedPrivyAuth sends active members to home", async () => {
       linkedAccounts: [],
     },
   });
-  expect(refreshUser).toHaveBeenCalledTimes(2);
+  expect(refreshUser).toHaveBeenCalledTimes(1);
 });
 
 test("completeHostedPrivyAuth sends checkout users back to the invite join flow", async () => {

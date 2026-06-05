@@ -12,6 +12,7 @@ import {
   type HostedAuthCompletionResult,
   type HostedPrivyClientSessionInput,
 } from "./hosted-auth-completion";
+import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 import { HostedOnboardingApiError, requestHostedOnboardingJson } from "./client-api";
 import type {
   HostedPhoneLinkPayload,
@@ -153,7 +154,7 @@ export async function finalizeHostedPrivyVerification(input: Omit<HostedPrivyCli
     return;
   }
 
-  window.location.assign(result.redirectUrl);
+  navigateHostedAuthRedirect(result.redirectUrl);
 }
 
 export async function finalizeHostedPhoneLink(input: {

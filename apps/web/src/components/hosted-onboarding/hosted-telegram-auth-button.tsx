@@ -17,6 +17,7 @@ import {
   type HostedAuthCompletionUser,
   type HostedPrivyClientSessionInput,
 } from "./hosted-auth-completion";
+import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 import { toErrorMessage } from "./hosted-auth-shared";
 import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 
@@ -67,7 +68,7 @@ export function HostedTelegramAuthButton({
         await onCompleted(result);
         return;
       }
-      window.location.assign(result.redirectUrl);
+      navigateHostedAuthRedirect(result.redirectUrl);
     } catch (error) {
       setErrorMessage(
         toErrorMessage(

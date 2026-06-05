@@ -25,6 +25,7 @@ import {
   normalizeEmailAddress,
   toErrorMessage,
 } from "./hosted-auth-shared";
+import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 import { HostedVerificationCodeStep } from "./hosted-verification-code-step";
 
@@ -180,7 +181,7 @@ export function HostedEmailAuthButton({
         await onCompleted(result);
         return;
       }
-      window.location.assign(result.redirectUrl);
+      navigateHostedAuthRedirect(result.redirectUrl);
     } catch (error) {
       setErrorMessage(
         disableSignup
