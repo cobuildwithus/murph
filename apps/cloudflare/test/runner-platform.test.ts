@@ -2483,6 +2483,85 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     ]);
   });
 
+  it("allows configured hosted-local provider fetch URLs through the runner host alias", async () => {
+    const providerFetchBaseUrlSource = {
+      HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "172.17.0.1",
+      LINQ_API_BASE_URL: "http://172.17.0.1:4011/api/partner/v3",
+      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      TELEGRAM_API_BASE_URL: "http://172.17.0.1:4012/",
+      TELEGRAM_FILE_BASE_URL: "http://172.17.0.1:4013/file",
+    };
+    const providerFetchBaseUrls = readCloudflareHostedProviderFetchBaseUrls(
+      providerFetchBaseUrlSource,
+    );
+    expect(providerFetchBaseUrls).toEqual([
+      "http://172.17.0.1:4011/api/partner/v3",
+      "http://172.17.0.1:4012/",
+      "http://172.17.0.1:4013/file",
+    ]);
+
+    expect(readCloudflareHostedProviderFetchBaseUrls({
+      LINQ_API_BASE_URL: "http://172.17.0.1:4011/api/partner/v3",
+      TELEGRAM_API_BASE_URL: "http://172.17.0.1:4012/",
+    })).toEqual([]);
+
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const hostedFetch = createCloudflareHostedProviderFetch(
+      "member_123",
+      fetchMock as typeof fetch,
+      {
+        providerFetchBaseUrlSource,
+        providerFetchBaseUrls,
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          providerEgressToken: "provider-egress-token-local",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    );
+
+    const response = await hostedFetch(
+      "http://172.17.0.1:4012/bot__cloudflare_injected__/sendMessage",
+      {
+        body: "{}",
+        method: "POST",
+      },
+    );
+
+    expect(response.status).toBe(204);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "configured hosted-local provider fetch",
+    );
+    expect(request.url).toBe("http://172.17.0.1:4012/bot__cloudflare_injected__/sendMessage");
+    expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
+      "provider-egress-token-local",
+    );
+
+    const rejectedFetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const rejectedFetch = createCloudflareHostedProviderFetch(
+      "member_123",
+      rejectedFetchMock as typeof fetch,
+      {
+        providerFetchBaseUrls: ["http://172.17.0.1:4012/"],
+      },
+    );
+    await expect(rejectedFetch(
+      "http://172.17.0.1:4012/bot__cloudflare_injected__/sendMessage",
+      {
+        body: "{}",
+        method: "POST",
+      },
+    )).rejects.toThrow(
+      "Hosted provider request for 172.17.0.1 is not routed through the hosted provider egress boundary.",
+    );
+    expect(rejectedFetchMock).not.toHaveBeenCalled();
+  });
+
   it("keeps hosted-local Linq URL rewrite and provider fetch allowlist in sync", async () => {
     const runnerEnv = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_PROVIDER: "openai",

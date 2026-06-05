@@ -123,6 +123,12 @@ Runtime-controlled provider integrations such as Linq, Telegram, WhatsApp, and
 Mapbox still use provider-egress token proof when exact runtime authority
 headers are absent. Runner container names remain lifecycle/routing handles, not
 provider-egress authority.
+Hosted-local may rewrite loopback provider bases to the configured
+`HOSTED_EXECUTION_RUNNER_HOST_ALIAS` so Linux runner containers can reach host
+stubs through the Docker bridge. The provider-fetch allowlist may accept HTTP
+for that exact alias only when hosted-local markers are present and the alias is
+a local/test host or private IPv4 address; arbitrary HTTP provider base URLs
+must still fail closed.
 `workspaceVersion` is the workspace checkpoint compare-and-swap guard and must
 stay on the checkpoint path rather than becoming generic side-effect
 authorization.
