@@ -13,6 +13,8 @@ Production upserts should use tier 1 evidence whenever possible. Tier 2 rows mus
 - Capture the date/time fetched in `label.sourceFetchedAt`.
 - Keep raw facts text, ingredient text, and source URL even when you also create structured ingredients.
 - Prefer variant-specific rows when flavors differ.
+- If static fetches cannot reach official label evidence, use Computer Use with Safari only for read-only official-page inspection: product pages, image galleries, tabs, label/PDF viewers, official downloads, and visible label text.
+- Do not use Safari to log in, create accounts, add to cart, purchase, submit forms, solve CAPTCHAs, bypass browser/security/paywall barriers, change settings, upload/transmit user data, or treat retailer facts as authoritative.
 - If a page provides multiple flavor facts, map each variant to the facts text mentioning that flavor and keep `allProductFactsText` for audit.
 - If OCR is required, record the image URL and mark the OCR as extracted text, not official page text.
 - Do not infer amounts, serving sizes, or inactive ingredients from marketing copy.

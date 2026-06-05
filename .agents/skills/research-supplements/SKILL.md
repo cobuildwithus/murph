@@ -21,6 +21,9 @@ Never print `.env`, `.env.local`, database URLs, credentials, tokens, or raw con
 2. **Collect source evidence**
    - Prefer official brand product pages, official Shopify product feeds, Supplement Facts images, PDFs, and official structured data.
    - Use search snippets only as leads. Do not treat snippets, reviews, affiliate pages, or retailer pages as authoritative unless official pages are missing and the row is clearly marked lower-confidence.
+   - If static HTTP fetches are blocked, rate-limited, or miss UI-rendered label evidence, Computer Use may be used with Safari for read-only official-page inspection.
+   - Allowed Safari actions: open official brand product pages, scroll, use product image galleries or tabs, zoom label/PDF viewers, download official label images or PDFs, and copy visible Supplement Facts, Nutrition Facts, ingredients, UPC/SKU, and source URLs.
+   - Disallowed Safari actions: logging in, creating accounts, adding to cart, purchasing, submitting forms, solving CAPTCHAs, bypassing browser/security/paywall barriers, changing settings, uploading/transmitting user data, or accepting prompts beyond ordinary cookie consent.
    - Capture variant-level data when flavors, serving sizes, UPCs, or formulas differ.
    - Classify bundles/stacks separately from standalone formulas. Do not import merch, shakers, apparel, topical products, or test products as dietary supplements.
 
@@ -65,6 +68,7 @@ Use this shape for each brand worker:
 Use $research-supplements at <skill-path> to research <brand>.
 Find official current product labels and return normalized brand_site supplement JSON rows only.
 Do not write to the database.
+If static fetches miss official label evidence, you may use Computer Use with Safari for read-only official-page inspection, label image/PDF review, and official label downloads. Do not log in, create accounts, add to cart, purchase, submit forms, solve CAPTCHAs, bypass browser/security/paywall barriers, upload or transmit user data, or use retailer facts as authoritative unless marked lower-confidence/manual-review.
 For each row include id, dataOrigin=brand_site, dataOriginId, dataOriginUrl, source, sourceId, name, brand, upc if available, label.sourceFetchedAt, label.factsText, label.ingredients or ingredientText, and label.needsManualReview.
 Report skipped products and why.
 ```
