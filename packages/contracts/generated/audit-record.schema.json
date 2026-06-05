@@ -101,7 +101,8 @@
       "type": "array",
       "items": {
         "type": "string",
-        "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+        "minLength": 1,
+        "maxLength": 255
       },
       "uniqueItems": true
     },

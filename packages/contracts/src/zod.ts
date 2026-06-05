@@ -1083,7 +1083,7 @@ export const auditRecordSchema = withContractMetadata(
       actor: z.enum(AUDIT_ACTORS),
       commandName: boundedString(1, 160),
       summary: boundedString(1, 4000),
-      targetIds: uniqueArray(patternedString(GENERIC_CONTRACT_ID_PATTERN), { uniqueItems: true }).optional(),
+      targetIds: uniqueArray(boundedString(1, 255), { uniqueItems: true }).optional(),
       errorCode: z.enum(ERROR_CODE_VALUES).optional(),
       changes: z.array(
         z

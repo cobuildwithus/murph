@@ -308,8 +308,6 @@ describe("vault layout exports", () => {
       RAW_MEALS_DIRECTORY,
       RAW_SAMPLES_DIRECTORY,
       RAW_WORKOUTS_DIRECTORY,
-      "exports",
-      EXPORT_PACKS_DIRECTORY,
     ]);
   });
 
@@ -403,9 +401,13 @@ describe("vault layout exports", () => {
     expect(REQUIRED_VAULT_DIRECTORIES).not.toContain(DERIVED_DIRECTORY);
     expect(REQUIRED_VAULT_DIRECTORIES).not.toContain(DERIVED_KNOWLEDGE_DIRECTORY);
     expect(REQUIRED_VAULT_DIRECTORIES).not.toContain(DERIVED_KNOWLEDGE_PAGES_DIRECTORY);
+    expect(REQUIRED_VAULT_DIRECTORIES).not.toContain("exports");
+    expect(REQUIRED_VAULT_DIRECTORIES).not.toContain(EXPORT_PACKS_DIRECTORY);
     expect(VAULT_LAYOUT.healthLibraryDirectory).toBe(HEALTH_LIBRARY_DIRECTORY);
     expect(VAULT_LAYOUT.derivedKnowledgeDirectory).toBe(DERIVED_KNOWLEDGE_DIRECTORY);
     expect(VAULT_LAYOUT.derivedKnowledgePagesDirectory).toBe(DERIVED_KNOWLEDGE_PAGES_DIRECTORY);
+    expect(VAULT_LAYOUT.exportsDirectory).toBe("exports");
+    expect(VAULT_LAYOUT.exportPacksDirectory).toBe(EXPORT_PACKS_DIRECTORY);
   });
 
   it("keeps the frozen vault-layout doc aligned with the exported registry", async () => {
@@ -460,7 +462,6 @@ describe("vault layout exports", () => {
       VAULT_LAYOUT.derivedKnowledgeIndex,
       VAULT_LAYOUT.derivedKnowledgeLog,
       `${VAULT_LAYOUT.derivedKnowledgePagesDirectory}/<slug>.md`,
-      `${VAULT_LAYOUT.exportPacksDirectory}/<packId>/`,
     ]);
 
     expect(extractSectionCodeSpans(document, "## Path Rules")).toEqual(

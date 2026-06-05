@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
 import { resolveRuntimePaths } from "@murphai/runtime-state/node";
 
-import { initializeVault, isVaultError, readJsonlRecords } from "@murphai/core";
+import { initializeVault, isVaultError, readJsonlRecords, validateVault } from "@murphai/core";
 import { INBOX_CAPTURE_TEXT_MAX_LENGTH } from "@murphai/contracts";
 
 import {
@@ -280,6 +280,7 @@ test("processCapture stores redacted raw evidence and one canonical document int
       },
     ],
   );
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
 
   pipeline.close();
 });

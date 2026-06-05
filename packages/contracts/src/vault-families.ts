@@ -693,6 +693,7 @@ const vaultFamilyDescriptors = [
     storageKind: "directory",
     directory: EXPORT_PACKS_DIRECTORY,
     querySource: "none",
+    requiredDirectory: false,
   },
 ] as const satisfies readonly VaultFamilyDescriptor[];
 

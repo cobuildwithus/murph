@@ -252,6 +252,30 @@ describe("schema catalog and example seam", () => {
     }
   });
 
+  it("accepts inbox capture ids as audit metadata targets", () => {
+    const capture = exampleInboxCaptureRecords[0];
+
+    expectValidExample(auditRecordContract, {
+      ...exampleAuditRecords[0],
+      action: "inbox_capture_persist",
+      commandName: "inboxd.persistCanonicalInboxCapture",
+      summary: "Persisted inbox capture.",
+      targetIds: [capture.captureId, capture.eventId],
+    });
+
+    const emptyTargetResult = safeParseContract(auditRecordContract, {
+      ...exampleAuditRecords[0],
+      targetIds: [""],
+    });
+    expect(emptyTargetResult.success).toBe(false);
+
+    const overlongTargetResult = safeParseContract(auditRecordContract, {
+      ...exampleAuditRecords[0],
+      targetIds: ["x".repeat(256)],
+    });
+    expect(overlongTargetResult.success).toBe(false);
+  });
+
   it("validates exported frontmatter object fixtures against the canonical contracts", () => {
     for (const [, contract, example] of frontmatterObjectExamples) {
       expectValidExample(contract, example);
