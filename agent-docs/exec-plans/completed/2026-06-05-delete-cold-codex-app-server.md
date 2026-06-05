@@ -21,7 +21,8 @@ Success criteria:
   exit, or failed turn cleanup poisons the warm process so the next turn starts
   fresh.
 - Clean successful turns leave the process idle instead of shutting it down.
-- Explicit shutdown still stops the process.
+- Explicit shutdown stops the process only when the warm slot is idle; active
+  turns use the turn abort/interrupt path.
 - Hosted env projection and hosted runtime config remain hosted-specific.
 - No new persisted state, daemon, process registry, or compatibility layer is
   introduced.
@@ -55,10 +56,10 @@ Planned shape:
 - Rename the private assistant-engine lifecycle export subpath from
   `./hosted-codex-lifecycle` to `./codex-lifecycle`; update repo-local call
   sites instead of adding a compatibility shim.
-- Build `commandDigest` and `identityDigest` for all turns, not only hosted
-  turns. Hosted identity keeps the projected hosted env digest; non-hosted
-  identity uses the resolved child env, command, args, Codex home config digest,
-  and working directory.
+- Build `identityDigest` for all turns, not only hosted turns. Hosted identity
+  keeps the projected hosted env digest; non-hosted identity uses the resolved
+  child env, command, args, Codex home config digest, and working directory.
+  Delete the old unused `commandDigest` state.
 - Keep prompt text, assistant session ids, and assistant turn ids out of the
   Codex child process env; they are turn request data and otherwise force
   ordinary local turns to look like process identity mismatches.
@@ -73,15 +74,17 @@ Planned shape:
   - poison and stop the process
   - clear the slot only when the stopped/poisoned process is the current slot
 - On explicit stop:
-  - stop the current process and clear the slot only after stop succeeds or the
-    process is known stopped, preserving current fail-closed behavior when
+  - fail busy when the selected process is reserved or running
+  - stop the current idle process and clear the slot only after stop succeeds or
+    the process is known stopped, preserving current fail-closed behavior when
     shutdown cannot prove exit.
 - Reserve the selected warm process while handing it to a turn, so a concurrent
   caller cannot replace or stop a just-selected process before the active turn
   binds. Overlapping direct calls fail with the existing retryable busy error
   instead of killing the in-flight turn.
 - Keep provider raw events scoped to accepted/current-turn messages. Rejected
-  stale warm-process messages still poison the process, but must not feed usage
+  stale warm-process messages, including stale usage events before the current
+  `turn/start` response, still poison the process, but must not feed usage
   extraction or failed-turn usage recording.
 
 ## Tests
@@ -96,8 +99,13 @@ Focused assistant-engine coverage:
   prompts reuse one process when process identity is stable.
 - Keep a direct overlap regression proving a concurrent local call receives a
   retryable busy error and does not replace/stop the active warm process.
+- Add an explicit-stop regression proving direct shutdown during a running turn
+  receives a retryable busy error and leaves the original turn to complete.
 - Add a provider-boundary regression proving stale usage-bearing completion
-  events rejected during the next warm turn do not surface as failed-turn usage.
+  events and untagged token-usage events rejected during the next warm turn do
+  not surface as failed-turn usage.
+- Add reused-process event-correlation coverage for alternate current-turn id
+  shapes such as `turn_id` and `data.turn_id`.
 - Add reused-process dynamic-tool request tests proving untagged unsupported
   and invalid tool calls reject/poison before Murph writes an RPC response.
 - Keep existing hosted warm tests and rename them where appropriate from
@@ -122,7 +130,13 @@ Package/app boundary coverage:
 Verification target:
 
 - `pnpm typecheck`
-- `bash scripts/workspace-verify.sh test:diff packages/assistant-engine/src/assistant-codex.ts packages/assistant-engine/src/codex-lifecycle.ts packages/assistant-engine/package.json packages/assistant-engine/test/assistant-codex-runtime.test.ts packages/assistant-engine/test/assistant-wrapper-exports.test.ts packages/assistant-runtime/test/hosted-runtime-contracts-boundary.test.ts packages/assistant-runtime/test/package-entrypoints.test.ts apps/cloudflare/src/container-entrypoint.ts apps/cloudflare/test/container-entrypoint.test.ts packages/assistant-engine/README.md packages/assistant-runtime/README.md ARCHITECTURE.md docs/contracts/00-invariants.md`
+- `bash scripts/workspace-verify.sh test:diff` with the full merge-base changed
+  file list, including the assistant-engine files, Cloudflare call sites,
+  assistant-runtime boundary tests, hosted-local-harness stub, repo boundary
+  rule files, docs, and active plan/ledger files.
+- `pnpm --dir packages/assistant-engine test`
+- `pnpm --dir packages/hosted-local-harness test`
+- `pnpm test:repo-tools`
 - Add narrower direct Vitest commands during iteration as needed.
 
 ## Completion
@@ -136,3 +150,6 @@ This is a high-risk runtime lifecycle change. Required completion passes:
 
 Use `scripts/finish-task` for the final scoped commit so this plan is archived
 and the matching ledger row is removed.
+Status: completed
+Updated: 2026-06-05
+Completed: 2026-06-05

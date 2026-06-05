@@ -906,6 +906,100 @@ describe('Codex assistant registry helpers', () => {
     },
     {
       expected: {
+        cachedInputTokens: 0,
+        inputTokens: 10,
+        outputTokens: 5,
+        reasoningTokens: 0,
+        totalTokens: 15,
+      },
+      expectedRawUsageJson: {
+        cachedInputTokens: 0,
+        inputTokens: 10,
+        outputTokens: 5,
+        reasoningOutputTokens: 0,
+        totalTokens: 15,
+      },
+      expectedSourcePath: 'thread.tokenUsage.total.delta',
+      name: 'resumed Codex token usage treats assistant message delta as current output',
+      rawEvents: [
+        {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-resume-assistant-delta-token-usage',
+            tokenUsage: {
+              last: {
+                cachedInputTokens: 0,
+                inputTokens: 100,
+                outputTokens: 50,
+                reasoningOutputTokens: 0,
+                totalTokens: 150,
+              },
+              total: {
+                cachedInputTokens: 0,
+                inputTokens: 100,
+                outputTokens: 50,
+                reasoningOutputTokens: 0,
+                totalTokens: 150,
+              },
+            },
+            turnId: 'turn-resume-assistant-delta-token-usage',
+          },
+        },
+        {
+          method: 'turn/started',
+          params: {
+            turn: {
+              id: 'turn-resume-assistant-delta-token-usage',
+            },
+          },
+        },
+        {
+          method: 'assistant.message.delta',
+          params: {
+            delta: 'OK',
+            item: {
+              id: 'assistant-resume-delta',
+              type: 'assistant_message',
+            },
+            turnId: 'turn-resume-assistant-delta-token-usage',
+          },
+        },
+        {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-resume-assistant-delta-token-usage',
+            tokenUsage: {
+              last: {
+                cachedInputTokens: 0,
+                inputTokens: 10,
+                outputTokens: 5,
+                reasoningOutputTokens: 0,
+                totalTokens: 15,
+              },
+              total: {
+                cachedInputTokens: 0,
+                inputTokens: 110,
+                outputTokens: 55,
+                reasoningOutputTokens: 0,
+                totalTokens: 165,
+              },
+            },
+            turnId: 'turn-resume-assistant-delta-token-usage',
+          },
+        },
+        {
+          params: {
+            turn: {
+              id: 'turn-resume-assistant-delta-token-usage',
+              model: 'gpt-5.4',
+            },
+          },
+          type: 'turn.completed',
+        },
+      ],
+    },
+    {
+      expected: {
         cachedInputTokens: 55,
         inputTokens: 89,
         outputTokens: 21,

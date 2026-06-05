@@ -430,11 +430,7 @@ function resolveAssistantProviderUsageSource(input: {
 
   return findAssistantCodexThreadTokenUsageSource({
     rawEvents: input.rawEvents,
-    turnId: readAssistantProviderString(
-      input.completionTurn?.id,
-      input.completionParams?.turnId,
-      input.completionRecord?.turnId,
-    ),
+    turnId: readAssistantCodexTurnIdFromCompletion(input),
   })
 }
 
@@ -533,16 +529,15 @@ function readAssistantCodexThreadTokenUsageEvents(input: {
       record?.event,
     )
 
-    if (eventType !== 'thread/tokenUsage/updated') {
+    if (!isAssistantCodexTokenUsageEventType(eventType)) {
       return []
     }
 
-    const params = readAssistantProviderRecord(record?.params)
-    if (!isAssistantCodexTokenUsageEventForTurn(params, input.turnId)) {
+    if (!isAssistantCodexTokenUsageEventForTurn(record, input.turnId)) {
       return []
     }
 
-    const tokenUsage = readAssistantProviderRecord(params?.tokenUsage)
+    const tokenUsage = readAssistantCodexTokenUsageRecord(record)
     return [
       {
         index,
@@ -630,7 +625,9 @@ function isAssistantCodexCurrentTurnOutputEvent(
   )
 
   if (
-    eventType === 'item/agentMessage/delta'
+    eventType === 'assistant.message.delta'
+    || eventType === 'agent.message.delta'
+    || eventType === 'item/agentMessage/delta'
     || eventType === 'item/plan/delta'
     || eventType === 'item/reasoning/summaryPartAdded'
     || eventType === 'item/reasoning/summaryTextDelta'
@@ -661,14 +658,14 @@ function isAssistantCodexCurrentTurnOutputEvent(
 }
 
 function isAssistantCodexTokenUsageEventForTurn(
-  params: Record<string, unknown> | null,
+  record: Record<string, unknown> | null,
   turnId: string | null,
 ): boolean {
   if (!turnId) {
     return true
   }
 
-  return readAssistantProviderString(params?.turnId, params?.turn_id) === turnId
+  return readAssistantCodexTurnIdFromRecord(record) === turnId
 }
 
 function isAssistantCodexTurnEventForTurn(
@@ -679,18 +676,65 @@ function isAssistantCodexTurnEventForTurn(
     return true
   }
 
+  return readAssistantCodexTurnIdFromRecord(record) === turnId
+}
+
+function readAssistantCodexTurnIdFromCompletion(input: {
+  completionParams: Record<string, unknown> | null
+  completionRecord: Record<string, unknown> | null
+  completionTurn: Record<string, unknown> | null
+}): string | null {
+  return (
+    readAssistantProviderString(input.completionTurn?.id) ??
+    readAssistantCodexTurnIdFromRecord(input.completionParams) ??
+    readAssistantCodexTurnIdFromRecord(input.completionRecord)
+  )
+}
+
+function isAssistantCodexTokenUsageEventType(eventType: string | null): boolean {
+  return (
+    eventType === 'thread/tokenUsage/updated' ||
+    eventType === 'thread/token_usage/updated' ||
+    eventType === 'thread.tokenUsage.updated' ||
+    eventType === 'thread.token_usage.updated'
+  )
+}
+
+function readAssistantCodexTokenUsageRecord(
+  record: Record<string, unknown> | null,
+): Record<string, unknown> | null {
   const params = readAssistantProviderRecord(record?.params)
+  const data = readAssistantProviderRecord(record?.data)
+
+  return (
+    readAssistantProviderRecord(params?.tokenUsage) ??
+    readAssistantProviderRecord(params?.token_usage) ??
+    readAssistantProviderRecord(data?.tokenUsage) ??
+    readAssistantProviderRecord(data?.token_usage) ??
+    readAssistantProviderRecord(record?.tokenUsage) ??
+    readAssistantProviderRecord(record?.token_usage)
+  )
+}
+
+function readAssistantCodexTurnIdFromRecord(
+  record: Record<string, unknown> | null,
+): string | null {
+  const params = readAssistantProviderRecord(record?.params)
+  const data = readAssistantProviderRecord(record?.data)
   const turn =
     readAssistantProviderRecord(params?.turn) ??
+    readAssistantProviderRecord(data?.turn) ??
     readAssistantProviderRecord(record?.turn)
 
   return readAssistantProviderString(
+    turn?.id,
     params?.turnId,
     params?.turn_id,
-    turn?.id,
+    data?.turnId,
+    data?.turn_id,
     record?.turnId,
     record?.turn_id,
-  ) === turnId
+  )
 }
 
 function resolveAssistantCodexThreadTokenUsageTotalDelta(
