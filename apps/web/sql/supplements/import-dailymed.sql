@@ -4,7 +4,7 @@ CREATE TEMP TABLE dailymed_import_raw (
   payload JSONB NOT NULL
 );
 
-\copy dailymed_import_raw(payload) FROM PROGRAM 'if [ -n "$DAILYMED_NDJSON_PATH" ]; then cat "$DAILYMED_NDJSON_PATH"; else echo "DAILYMED_NDJSON_PATH is required" >&2; exit 1; fi' WITH (FORMAT text);
+\copy dailymed_import_raw(payload) FROM PROGRAM 'if [ -n "$DAILYMED_NDJSON_PATH" ]; then cat "$DAILYMED_NDJSON_PATH"; else echo "DAILYMED_NDJSON_PATH is required" >&2; exit 1; fi' WITH (FORMAT csv, DELIMITER E'\t', QUOTE E'\b');
 
 WITH normalized AS (
   SELECT

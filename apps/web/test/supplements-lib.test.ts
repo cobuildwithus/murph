@@ -31,6 +31,7 @@ describe("supplements query helpers", () => {
     );
     expect(dsldImportSql).toContain("\\set ON_ERROR_STOP on");
     expect(dsldImportSql).toContain(`cat "$DSLD_NDJSON_PATH"`);
+    expect(dsldImportSql).toContain("WITH (FORMAT csv");
     expect(dsldImportSql).not.toContain(":'DSLD_NDJSON_PATH'");
 
     expect(dailymedImportSql).toContain(
@@ -38,6 +39,7 @@ describe("supplements query helpers", () => {
     );
     expect(dailymedImportSql).toContain("\\set ON_ERROR_STOP on");
     expect(dailymedImportSql).toContain(`cat "$DAILYMED_NDJSON_PATH"`);
+    expect(dailymedImportSql).toContain("WITH (FORMAT csv");
     expect(dailymedImportSql).not.toContain(":'DAILYMED_NDJSON_PATH'");
   });
 

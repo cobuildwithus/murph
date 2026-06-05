@@ -4,7 +4,7 @@ CREATE TEMP TABLE dsld_import_raw (
   label JSONB NOT NULL
 );
 
-\copy dsld_import_raw(label) FROM PROGRAM 'if [ -n "$DSLD_NDJSON_PATH" ]; then cat "$DSLD_NDJSON_PATH"; else echo "DSLD_NDJSON_PATH is required" >&2; exit 1; fi' WITH (FORMAT text);
+\copy dsld_import_raw(label) FROM PROGRAM 'if [ -n "$DSLD_NDJSON_PATH" ]; then cat "$DSLD_NDJSON_PATH"; else echo "DSLD_NDJSON_PATH is required" >&2; exit 1; fi' WITH (FORMAT csv, DELIMITER E'\t', QUOTE E'\b');
 
 WITH normalized AS (
   SELECT
