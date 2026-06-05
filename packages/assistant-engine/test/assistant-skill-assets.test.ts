@@ -233,6 +233,11 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'What should I call you? And is there anything health-wise you\'ve been curious about, working on, or dealing with lately?',
     )
+    expect(raw).toContain('## Required input affordances')
+    expect(raw).toContain(
+      'These are part of the one lightweight question, not extra questions',
+    )
+    expect(raw).toContain('Do not drop them for brevity')
     expect(raw).toContain(
       'current fitness level, activity, workout routine, and movement/training context',
     )
@@ -251,11 +256,12 @@ describe('assistant skill assets', () => {
       '- injuries, limitations, or anything they are trying to improve',
     )
     expect(raw).toContain(
-      'Ask one natural question, include the compact examples list',
+      'Movement/training: ask one natural question, include the compact examples list',
     )
     expect(raw).toContain(
       'end the visible message with exactly: "Feel free to send me a voice memo."',
     )
+    expect(raw).toContain('Follow the movement/training input affordance')
     expect(raw).not.toContain('A messy answer is perfect')
     expect(raw).not.toContain('typed or voice memo')
     expect(raw).not.toContain('messy typed list or a stream-of-consciousness voice memo')
@@ -285,8 +291,9 @@ describe('assistant skill assets', () => {
       'invite product or brand names plus roughly how long they have taken each one or since when',
     )
     expect(raw).toContain(
-      'and add a quick note that they can also send a picture of the supplement bottles or labels if that is easier',
+      'Supplements: mention that they can send a photo of supplement bottles or labels if that is easier',
     )
+    expect(raw).toContain('Follow the supplement input affordance')
     expect(raw).toContain(
       'When their supplement answer will require web searches or other product-ingredient lookups',
     )
@@ -454,10 +461,8 @@ describe('assistant skill assets', () => {
     for (const movementExample of movementExamples) {
       expect(movementSection).toContain(movementExample)
     }
-    expect(movementSection).toContain(
-      'Ask one natural question, include the compact examples list',
-    )
-    expect(movementSection).toContain(
+    expect(movementSection).toContain('Follow the movement/training input affordance')
+    expect(raw).toContain(
       'end the visible message with exactly: "Feel free to send me a voice memo."',
     )
     expect(movementSection).not.toContain('A messy answer is perfect')
@@ -485,7 +490,9 @@ describe('assistant skill assets', () => {
     )
     expect(movementSection).not.toContain('```text')
     expect(raw.slice(protocolsIndex, supplementsIndex)).not.toContain('```text')
-    expect(raw.slice(supplementsIndex, bloodTestsIndex)).not.toContain('```text')
+    const supplementSection = raw.slice(supplementsIndex, bloodTestsIndex)
+    expect(supplementSection).toContain('Follow the supplement input affordance')
+    expect(supplementSection).not.toContain('```text')
     expect(raw.slice(bloodTestsIndex, orientationIndex)).not.toContain('```text')
     expect(raw.match(/Do not use a fixed script for this turn/g)?.length).toBe(5)
     const removedFixedScripts = [
