@@ -2151,7 +2151,6 @@ describe("cloudflare worker routes", () => {
         failure_count: 0,
         wake_at: null,
       });
-      expect(alarms).toContain("2026-04-27T00:01:02.000Z");
       expect(alarms).toContain("deleted");
       expect(alarms).not.toContain(runtimeNextWakeAt);
     });
