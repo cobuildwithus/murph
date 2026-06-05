@@ -2888,7 +2888,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("runtime wakes pending after checkpoint are drained without a host checkpoint deadline", async () => {
+  test("runtime wakes pending after checkpoint are drained without a host checkpoint timer", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -2896,7 +2896,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointResponse = createDeferred<HostedWorkspaceCheckpointResponse>();
     const mailboxItems = [
       createMailboxItem({
-        id: "mailbox_item_entrypoint_checkpoint_deadline_001",
+        id: "mailbox_item_entrypoint_checkpoint_timer_001",
         laneSeq: "1",
       }),
     ];
@@ -2908,7 +2908,7 @@ describe("hosted workspace runtime entrypoint", () => {
       const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            attemptId: "attempt_synthetic_runtime_idle_checkpoint_pending_wake_deadline",
+            attemptId: "attempt_synthetic_runtime_idle_checkpoint_pending_wake_timer",
             idleCheckpointDelayMs: 1,
             leaseGeneration: "9",
             reason: "nudge",
@@ -2922,7 +2922,7 @@ describe("hosted workspace runtime entrypoint", () => {
             return {
               snapshotRef: createBundleRef({
                 hash: "7".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-pending-deadline.bundle.json",
+                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-pending-timer.bundle.json",
                 size: 640,
               }),
             };
@@ -2951,7 +2951,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 checkpointRequests.push(request);
                 if (checkpointCallCount === 1) {
                   mailboxItems.push(createMailboxItem({
-                    id: "mailbox_item_entrypoint_checkpoint_deadline_002",
+                    id: "mailbox_item_entrypoint_checkpoint_timer_002",
                     laneSeq: "2",
                   }));
                   runtimeWakeSignal.notify();
@@ -2988,8 +2988,8 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "1"]);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
-        "mailbox.importItem:mailbox_item_entrypoint_checkpoint_deadline_001",
-        "mailbox.importItem:mailbox_item_entrypoint_checkpoint_deadline_002",
+        "mailbox.importItem:mailbox_item_entrypoint_checkpoint_timer_001",
+        "mailbox.importItem:mailbox_item_entrypoint_checkpoint_timer_002",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.expectedWorkspaceVersion), [
         "4",
@@ -3325,7 +3325,7 @@ describe("hosted workspace runtime entrypoint", () => {
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            attemptId: "attempt_synthetic_runtime_idle_checkpoint_near_deadline_clear",
+            attemptId: "attempt_synthetic_runtime_idle_checkpoint_idle_timer_clear",
             idleCheckpointDelayMs: 10_000,
             leaseGeneration: "9",
             reason: "nudge",
@@ -3339,7 +3339,7 @@ describe("hosted workspace runtime entrypoint", () => {
             return {
               snapshotRef: createBundleRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-near-deadline-clear.bundle.json",
+                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-idle-timer-clear.bundle.json",
                 size: 640,
               }),
             };
@@ -3422,7 +3422,7 @@ describe("hosted workspace runtime entrypoint", () => {
       await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            attemptId: "attempt_synthetic_runtime_idle_checkpoint_deadline",
+            attemptId: "attempt_synthetic_runtime_idle_checkpoint_timer",
             idleCheckpointDelayMs: 250,
             leaseGeneration: "9",
             reason: "nudge",
@@ -3435,7 +3435,7 @@ describe("hosted workspace runtime entrypoint", () => {
             return {
               snapshotRef: createBundleRef({
                 hash: "d".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-deadline.bundle.json",
+                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-timer.bundle.json",
                 size: 640,
               }),
             };
@@ -3661,7 +3661,7 @@ describe("hosted workspace runtime entrypoint", () => {
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            attemptId: "attempt_synthetic_runtime_idle_checkpoint_deadline_before_projected_wake",
+            attemptId: "attempt_synthetic_runtime_idle_checkpoint_timer_before_projected_wake",
             idleCheckpointDelayMs: 250,
             leaseGeneration: "9",
             reason: "nudge",
@@ -3674,7 +3674,7 @@ describe("hosted workspace runtime entrypoint", () => {
             return {
               snapshotRef: createBundleRef({
                 hash: "9".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-deadline-before-wake.bundle.json",
+                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-timer-before-wake.bundle.json",
                 size: 640,
               }),
             };

@@ -30,6 +30,7 @@ const TEST_VERCEL_OIDC_PUBLIC_JWK = {
 
 describe("cloudflare worker queue backpressure routes", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -80,7 +81,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
   });
 
-  it("exposes runtime write-fence methods for deploy smoke on the user runner durable object", async () => {
+  it("exposes deploy-smoke write-fence methods on the user runner durable object", async () => {
     const harness = createUserRunnerDurableObject();
     await harness.durableObject.bindUser("member_123");
 
@@ -96,8 +97,14 @@ describe("cloudflare worker queue backpressure routes", () => {
     });
     expect(lease).not.toBeNull();
     if (!lease) {
-      throw new Error("Expected runtime write fence.");
+      throw new Error("Expected deploy-smoke write fence.");
     }
+    await expect(new RunnerStateStore(harness.storage.state).readState()).resolves.toMatchObject({
+      writeFence: {
+        kind: "deploy_smoke",
+        workspaceVersion: "7",
+      },
+    });
 
     await expect(harness.durableObject.validateRuntimeWriteFence({
       attemptId: lease.attemptId,
@@ -110,6 +117,72 @@ describe("cloudflare worker queue backpressure routes", () => {
       generation: lease.generation,
       userId: "member_123",
     })).resolves.toEqual({ completed: true });
+  });
+
+  it("replaces only stale deploy-smoke write fences", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    const harness = createUserRunnerDurableObject();
+    await harness.durableObject.bindUser("member_123");
+
+    const firstLease = await harness.durableObject.beginDeploySmokeRuntimeWriteFence({
+      userId: "member_123",
+      workspaceVersion: "7",
+    });
+    expect(firstLease).not.toBeNull();
+    await expect(harness.durableObject.beginDeploySmokeRuntimeWriteFence({
+      userId: "member_123",
+      workspaceVersion: "8",
+    })).resolves.toBeNull();
+
+    vi.setSystemTime(new Date("2026-04-27T00:10:00.000Z"));
+    const replacementLease = await harness.durableObject.beginDeploySmokeRuntimeWriteFence({
+      userId: "member_123",
+      workspaceVersion: "8",
+    });
+
+    expect(replacementLease).toMatchObject({
+      reason: "manual",
+      userId: "member_123",
+      workspaceVersion: "8",
+    });
+    expect(replacementLease?.attemptId).not.toBe(firstLease?.attemptId);
+    await expect(new RunnerStateStore(harness.storage.state).readState()).resolves.toMatchObject({
+      failureCount: 0,
+      writeFence: {
+        attemptId: replacementLease?.attemptId,
+        kind: "deploy_smoke",
+        workspaceVersion: "8",
+      },
+    });
+  });
+
+  it("does not replace normal runtime write fences for deploy smoke", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    const harness = createUserRunnerDurableObject();
+    const stateStore = new RunnerStateStore(harness.storage.state);
+    await stateStore.bindUser("member_123");
+    const runtimeLease = await stateStore.beginWriteFence({
+      kind: "runtime",
+      reason: "manual",
+      runnerContainerName: "member_123",
+      userId: "member_123",
+    });
+    vi.setSystemTime(new Date("2026-04-27T00:10:01.000Z"));
+
+    await expect(harness.durableObject.beginDeploySmokeRuntimeWriteFence({
+      userId: "member_123",
+      workspaceVersion: "7",
+    })).resolves.toBeNull();
+
+    await expect(stateStore.readState()).resolves.toMatchObject({
+      writeFence: {
+        attemptId: runtimeLease.attemptId,
+        kind: "runtime",
+        workspaceVersion: null,
+      },
+    });
   });
 
   it("keeps an active write fence in flight through the production Durable Object constructor", async () => {

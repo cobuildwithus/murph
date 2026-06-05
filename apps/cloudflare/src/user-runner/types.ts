@@ -37,7 +37,7 @@ export interface DurableObjectStateLike {
   waitUntil(promise: Promise<unknown>): void;
 }
 
-export type RunnerWriteFenceKind = "runtime";
+export type RunnerWriteFenceKind = "deploy_smoke" | "runtime";
 
 export interface RunnerWriteFenceRecord {
   attemptId: string;

@@ -62,7 +62,6 @@ interface HostedLocalTestUserRunnerStubLike extends UserRunnerDurableObjectStubL
     userId: string;
   }): Promise<HostedWorkspaceInvocationResult>;
   startStuckInvocationForTest(input: {
-    expiresInMs?: number;
     reason?: HostedWorkspaceInvocationReason;
     startedAgoMs?: number;
     userId: string;
@@ -263,12 +262,6 @@ export async function handleTestStartStuckInvocationRoute(
   if (reason === "invalid") {
     return json({ error: "Unsupported test stuck invocation reason." }, 400);
   }
-  const expiresInMs = parseTestPositiveInteger(
-    context.url.searchParams.get("expiresInMs"),
-  );
-  if (expiresInMs === "invalid") {
-    return json({ error: "Unsupported test stuck invocation expiry." }, 400);
-  }
   const startedAgoMs = parseTestPositiveInteger(
     context.url.searchParams.get("startedAgoMs"),
   );
@@ -276,7 +269,6 @@ export async function handleTestStartStuckInvocationRoute(
     return json({ error: "Unsupported test stuck invocation age." }, 400);
   }
   return json(await stub.startStuckInvocationForTest({
-    ...(expiresInMs === null ? {} : { expiresInMs }),
     ...(reason ? { reason } : {}),
     ...(startedAgoMs === null ? {} : { startedAgoMs }),
     userId,

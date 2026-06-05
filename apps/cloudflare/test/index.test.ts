@@ -1336,7 +1336,7 @@ describe("cloudflare worker routes", () => {
 
     const response = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
-        "https://runner.example.test/__test/users/member_123/stuck-invocation?expiresInMs=45000&reason=manual&startedAgoMs=35000",
+        "https://runner.example.test/__test/users/member_123/stuck-invocation?reason=manual&startedAgoMs=35000",
         {
           method: "POST",
         },
@@ -1348,7 +1348,6 @@ describe("cloudflare worker routes", () => {
 
     expect(response.status).toBe(200);
     expect(stub.startStuckInvocationForTest).toHaveBeenCalledWith({
-      expiresInMs: 45000,
       reason: "manual",
       startedAgoMs: 35000,
       userId: "member_123",
@@ -3158,7 +3157,6 @@ type WorkerTestUserRunnerStub = UserRunnerDurableObjectStubLike & {
     userId: string;
   }): Promise<HostedWorkspaceInvocationResult>;
   startStuckInvocationForTest(input: {
-    expiresInMs?: number;
     reason?: HostedWorkspaceInvocationReason;
     startedAgoMs?: number;
     userId: string;

@@ -88,7 +88,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toHaveLength(1);
   });
 
-  it("uses processing accepted owner watchdog before re-reading demand", async () => {
+  it("uses processing accepted owner recheck before re-reading demand", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({ source: "manual" }));
     runtime.executions.push(processingAcceptedWithRecheck(isoAfter(45_000)));

@@ -36,7 +36,7 @@ export function computeRuntimeProcessingRetryAt(
   return new Date(Date.now() + delayMs).toISOString();
 }
 
-export function computeRuntimeProcessingOwnerWatchdogAt(input: {
+export function computeRuntimeProcessingOwnerRecheckAt(input: {
   env: HostedExecutionEnvironment;
 }): string {
   return computeActiveRuntimeWakeRecheckAt(input.env);
@@ -67,7 +67,7 @@ export function createActiveWorkspaceWakeRetryLater(input: {
   env: HostedExecutionEnvironment;
   userId: string;
 }): HostedRuntimeEnsureProcessingResponse {
-  const retryAt = computeRuntimeProcessingOwnerWatchdogAt({
+  const retryAt = computeRuntimeProcessingOwnerRecheckAt({
     env: input.env,
   });
   emitHostedExecutionStructuredLog({

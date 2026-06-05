@@ -36,7 +36,7 @@ import {
   ensureActiveRuntimeProcessing,
 } from "./runtime-container-wake.js";
 import {
-  computeRuntimeProcessingOwnerWatchdogAt as computeRuntimeProcessingOwnerWatchdogAtValue,
+  computeRuntimeProcessingOwnerRecheckAt as computeRuntimeProcessingOwnerRecheckAtValue,
   computeRuntimeProcessingRetryAt as computeRuntimeProcessingRetryAtValue,
   createActiveWorkspaceWakeRetryLater,
   createRuntimePrewarmRetryLater,
@@ -58,9 +58,9 @@ import type {
   RunnerStateRecord,
 } from "./types.js";
 import {
-  RunnerWatchdog,
+  RunnerAlarmCoordinator,
   runnerWriteFenceTokensMatch,
-} from "./watchdog.js";
+} from "./alarm-coordinator.js";
 
 const RUNTIME_PROCESSING_STARTUP_GRACE_MS = 30_000;
 const RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS = 8_000;
@@ -84,8 +84,6 @@ function toRuntimeInvocationInput(input: RuntimeProcessingInput): RuntimeInvocat
 }
 
 export class RuntimeProcessingController {
-  private readonly runtimeExecutionTasks = new Map<string, Promise<void>>();
-
   constructor(
     private readonly input: {
       env: HostedExecutionEnvironment;
@@ -94,13 +92,13 @@ export class RuntimeProcessingController {
       runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
       state: DurableObjectStateLike;
       stateStore: RunnerStateStore;
-      watchdog: RunnerWatchdog;
+      alarmCoordinator: RunnerAlarmCoordinator;
     },
   ) {}
 
   async alarm(): Promise<void> {
     try {
-      await this.syncWatchdogAlarm(await this.input.stateStore.readState());
+      await this.syncRunnerAlarm(await this.input.stateStore.readState());
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -209,16 +207,16 @@ export class RuntimeProcessingController {
     }
   }
 
-  async syncWatchdogAlarm(record: RunnerStateRecord): Promise<void> {
-    await this.input.watchdog.sync(record);
+  async syncRunnerAlarm(record: RunnerStateRecord): Promise<void> {
+    await this.input.alarmCoordinator.sync(record);
   }
 
   computeRuntimeProcessingRetryAt(reason: RuntimeProcessingRetryReason): string {
     return computeRuntimeProcessingRetryAtValue(reason);
   }
 
-  computeRuntimeProcessingOwnerWatchdogAt(): string {
-    return computeRuntimeProcessingOwnerWatchdogAtValue({
+  computeRuntimeProcessingOwnerRecheckAt(): string {
+    return computeRuntimeProcessingOwnerRecheckAtValue({
       env: this.input.env,
     });
   }
@@ -241,7 +239,7 @@ export class RuntimeProcessingController {
 
     const activeFence = record.writeFence;
     if (input.input.source === "workspace_wake") {
-      await this.syncWatchdogAlarm(record);
+      await this.syncRunnerAlarm(record);
       return createActiveWorkspaceWakeRetryLater({
         activeFence,
         env: this.input.env,
@@ -258,12 +256,13 @@ export class RuntimeProcessingController {
       commandBudget: input.commandBudget,
       env: this.input.env,
       reason: input.input.reason,
+      runnerContainerName: activeFence.runnerContainerName,
       runnerContainerNamespace: this.input.runnerContainerNamespace,
       runnerRuntimeEnvSource: this.input.runnerRuntimeEnvSource,
     });
 
     if (containerResult.kind === "accepted") {
-      await this.syncWatchdogAlarm(record);
+      await this.syncRunnerAlarm(record);
       const action = containerResult.action === "already_running"
         ? "already_running"
         : "woken";
@@ -271,14 +270,14 @@ export class RuntimeProcessingController {
         action,
         kind: "runtime_processing_accepted",
         recommendedRecheckAt:
-          this.computeRuntimeProcessingOwnerWatchdogAt(),
+          this.computeRuntimeProcessingOwnerRecheckAt(),
         runtimeAttemptId: activeFence.attemptId,
       };
     }
 
     if (containerResult.kind === "start-required") {
       if (this.shouldPreserveStartingWriteFence(activeFence)) {
-        await this.syncWatchdogAlarm(record);
+        await this.syncRunnerAlarm(record);
         return createRuntimeProcessingRetryLater({
           reason: "container_rpc_timeout",
           userId: input.input.userId,
@@ -291,7 +290,7 @@ export class RuntimeProcessingController {
         generation: String(activeFence.generation),
         userId: record.userId,
       });
-      await this.syncWatchdogAlarm(cleared.record);
+      await this.syncRunnerAlarm(cleared.record);
       if (!cleared.cleared) {
         return createRuntimeProcessingRetryLater({
           reason: "stale_fence_replacement_race",
@@ -306,7 +305,7 @@ export class RuntimeProcessingController {
       });
     }
 
-    await this.syncWatchdogAlarm(record);
+    await this.syncRunnerAlarm(record);
     return createRuntimeProcessingRetryLater({
       reason: mapRunnerProcessingRetryReason(containerResult.reason),
       userId: input.input.userId,
@@ -362,7 +361,7 @@ export class RuntimeProcessingController {
       if (!(error instanceof RunnerWriteFenceAlreadyActiveError)) {
         throw error;
       }
-      await this.syncWatchdogAlarm(error.record);
+      await this.syncRunnerAlarm(error.record);
       return await this.ensureExistingRuntimeProcessing({
         commandBudget: input.commandBudget,
         input: input.input,
@@ -371,7 +370,7 @@ export class RuntimeProcessingController {
       });
     }
 
-    await this.syncWatchdogAlarm(await this.input.stateStore.readState());
+    await this.syncRunnerAlarm(await this.input.stateStore.readState());
 
     const executionInput = toRuntimeInvocationInput(input.input);
     let prepared: PreparedRuntimeInvocation;
@@ -420,7 +419,7 @@ export class RuntimeProcessingController {
       () => undefined,
       () => undefined,
     );
-    this.trackRuntimeExecutionTask(prepared.token.attemptId, background);
+    this.input.state.waitUntil(background);
 
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
@@ -438,7 +437,7 @@ export class RuntimeProcessingController {
     return {
       action: input.action,
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: this.computeRuntimeProcessingOwnerWatchdogAt(),
+      recommendedRecheckAt: this.computeRuntimeProcessingOwnerRecheckAt(),
       runtimeAttemptId: prepared.token.attemptId,
     };
   }
@@ -453,7 +452,7 @@ export class RuntimeProcessingController {
     }
 
     const record = await this.input.stateStore.readState();
-    await this.syncWatchdogAlarm(record);
+    await this.syncRunnerAlarm(record);
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
@@ -569,7 +568,7 @@ export class RuntimeProcessingController {
       finishedAt: new Date().toISOString(),
       token: input.token,
     });
-    await this.syncWatchdogAlarm(failed.record);
+    await this.syncRunnerAlarm(failed.record);
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
@@ -591,19 +590,6 @@ export class RuntimeProcessingController {
         userId: input.input.userId,
       }),
     };
-  }
-
-  private trackRuntimeExecutionTask(
-    attemptId: string,
-    task: Promise<void>,
-  ): void {
-    this.runtimeExecutionTasks.set(attemptId, task);
-    this.input.state.waitUntil(task);
-    void task.finally(() => {
-      if (this.runtimeExecutionTasks.get(attemptId) === task) {
-        this.runtimeExecutionTasks.delete(attemptId);
-      }
-    });
   }
 
   private shouldPreserveStartingWriteFence(

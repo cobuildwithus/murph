@@ -996,7 +996,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     let durableCheckpointWakeReason: string | null = null;
     let idleCheckpointStartByMs: number | null = null;
     let idleWakeOrdinal = 0;
-    const markIdleCheckpointDeadlineAfterDirtyWork = () => {
+    const markIdleCheckpointTimerAfterDirtyWork = () => {
       idleCheckpointStartByMs = Date.now() + idleCheckpointDelayMs;
     };
     const runDurableCheckpointEffectsBestEffort = async (): Promise<void> => {
@@ -1098,7 +1098,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       trackMailboxPostCheckpointEffects(result);
       runtimeStateDirty ||= result.runtimeStateDirty;
       if (result.runtimeStateDirty) {
-        markIdleCheckpointDeadlineAfterDirtyWork();
+        markIdleCheckpointTimerAfterDirtyWork();
       }
       let accumulatedProjection = buildHostedWorkspaceInvocationProjection({
         mailboxBudgetExhausted: mailboxBudgetExhausted(),
@@ -1126,7 +1126,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         pendingDurableCheckpointEffects.push(...result.afterDurableCheckpoint);
         trackMailboxPostCheckpointEffects(result);
         if (result.runtimeStateDirty) {
-          markIdleCheckpointDeadlineAfterDirtyWork();
+          markIdleCheckpointTimerAfterDirtyWork();
         }
         const nextProjection = buildHostedWorkspaceInvocationProjection({
           mailboxBudgetExhausted: mailboxBudgetExhausted(),
@@ -1153,7 +1153,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       while (runtimeStateDirty) {
         if (accumulatedProjection.status !== "budget_exhausted") {
           if (idleCheckpointStartByMs === null) {
-            throw new Error("Dirty hosted runtime is missing an idle checkpoint deadline.");
+            throw new Error("Dirty hosted runtime is missing an idle checkpoint timer.");
           }
           const projectedRuntimeWakeKey = buildHostedRuntimeWakeKey({
             nextWakeAt: accumulatedProjection.nextWakeAt,

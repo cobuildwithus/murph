@@ -17,7 +17,6 @@ import type {
 } from "../src/user-runner/types.js";
 
 const NOW = "2026-04-27T00:00:00.000Z";
-const LATER_WAKE = "2026-04-27T00:00:30.000Z";
 const RECONSTRUCTED_REASON_CASES: HostedWorkspaceInvocationReason[] = [
   "manual",
   "browser_vault_refresh",
@@ -37,7 +36,6 @@ describe("RunnerStateStore execution lease authority", () => {
     await store.bindUser("member_123");
 
     const token = await store.beginWriteFence({
-      expiresAt: LATER_WAKE,
       reason: "nudge",
       runnerContainerName: "member_123",
       userId: "member_123",
@@ -63,7 +61,6 @@ describe("RunnerStateStore execution lease authority", () => {
     const { store } = createHarness();
     await store.bindUser("member_123");
     const token = await store.beginWriteFence({
-      expiresAt: LATER_WAKE,
       reason: "nudge",
       runnerContainerName: "member_123",
       userId: "member_123",
@@ -93,7 +90,6 @@ describe("RunnerStateStore execution lease authority", () => {
       await store.bindUser("member_123");
 
       const token = await store.beginWriteFence({
-        expiresAt: LATER_WAKE,
         reason,
         runnerContainerName: "member_123",
         userId: "member_123",
@@ -114,7 +110,6 @@ describe("RunnerStateStore execution lease authority", () => {
     const { db, store } = createHarness();
     await store.bindUser("member_123");
     const token = await store.beginWriteFence({
-      expiresAt: LATER_WAKE,
       reason: "browser_vault_refresh",
       runnerContainerName: "member_123",
       userId: "member_123",
@@ -138,7 +133,6 @@ describe("RunnerStateStore execution lease authority", () => {
     const { store } = createHarness();
     await store.bindUser("member_123");
     const token = await store.beginWriteFence({
-      expiresAt: LATER_WAKE,
       reason: "nudge",
       runnerContainerName: "member_123",
       userId: "member_123",
@@ -172,7 +166,6 @@ describe("RunnerStateStore execution lease authority", () => {
     const { store } = createHarness();
     await store.bindUser("member_123");
     const token = await store.beginWriteFence({
-      expiresAt: LATER_WAKE,
       kind: "runtime",
       reason: "manual",
       runnerContainerName: "member_123",

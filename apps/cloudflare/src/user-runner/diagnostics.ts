@@ -8,7 +8,7 @@ import type {
   RunnerContainerEnsureProcessingResult,
 } from "../runner-container.js";
 import type { RunnerStateRecord } from "./types.js";
-import { readWriteFenceWatchdogAlarmAt } from "./watchdog.js";
+import { readRunnerNextAlarmAt } from "./alarm-coordinator.js";
 
 export type RuntimeProcessingRetryReason =
   | "active_child_rejected"
@@ -39,7 +39,7 @@ export function buildRunnerRecordTimingLogDetails(
     activeWriteFenceWorkspaceVersion: writeFence?.workspaceVersion ?? null,
     failureCount: record.failureCount,
     lastErrorCode: record.lastErrorCode,
-    watchdogAlarmAt: readWriteFenceWatchdogAlarmAt(record),
+    runnerAlarmAt: readRunnerNextAlarmAt(record),
   };
 }
 

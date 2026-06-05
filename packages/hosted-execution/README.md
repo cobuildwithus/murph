@@ -47,7 +47,7 @@ as deleted state.
   they do not send user-level runner nudges directly to Cloudflare
 - Temporal calls Cloudflare `ensure-processing`; Cloudflare returns
   `runtime_processing_accepted` or `retry_later` and owns runner start, wake,
-  watchdog, and cleanup.
+  active-fence alarm cleanup, and execution cleanup.
 - device-sync runtime snapshot/apply/token contracts stay on
   `@murphai/device-syncd/hosted-runtime`; this package only carries the outer
   hosted runtime control seam plus the shared device-sync wake-hint shape needed

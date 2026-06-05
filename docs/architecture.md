@@ -205,7 +205,7 @@ to Codex.
 - Normal webhook and app paths commit durable demand in web-owned storage and
   signal Temporal only. Temporal calls Cloudflare `ensure-processing`; Cloudflare
   responds with `runtime_processing_accepted` or `retry_later` and owns runner
-  start, wake, watchdog, and cleanup.
+  start, wake, active-fence alarm cleanup, and execution cleanup.
 
 ## Explicit Non-Goals
 

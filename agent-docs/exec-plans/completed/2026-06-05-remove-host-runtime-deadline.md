@@ -34,4 +34,7 @@ Production hosted runtime containers should not shut down solely because a host-
 
 ## Status
 
-Implementation in progress. Host deadline env and runtime behavior are removed; verification and completion audits are next.
+Implementation complete and awaiting scoped commit. Host deadline env and runtime behavior are removed. Review cleanup added deploy-smoke-specific stale fence recovery, deleted inert runtime task tracking, removed ignored write-fence expiry inputs, renamed the legacy alarm cleanup adapter, preserved stored versioned runner container names during active wake, and deleted stale hosted-local expiry plumbing. Focused Cloudflare checks, Cloudflare app verify, root typecheck, docs drift, diff hygiene, privacy scan, and diff-aware verification have passed; final local review found no new blocker.
+Status: completed
+Updated: 2026-06-05
+Completed: 2026-06-05

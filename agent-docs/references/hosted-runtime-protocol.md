@@ -115,7 +115,7 @@ own HTTPS calls. Tokenless intercepted OpenAI egress uses active-user-fence
 proof instead: the Worker resolves the current container Durable Object from the
 intercept context, reads that container's active invocation user, requires any
 bound-user header to match that trusted active user, and validates that
-UserRunner still has an unexpired active write fence for the user before
+UserRunner still has an active write fence for the user before
 injecting the Worker-owned OpenAI credential. Missing current-container user,
 missing runner state, missing write fence, stale fence, wrong user, or validator
 failure all fail closed without injecting a provider credential.
@@ -142,8 +142,8 @@ checkpoint request before snapshot creation, direct snapshot upload, and web
 checkpoint publication.
 Legacy active-invocation heartbeat and container-stopped methods are inert
 compatibility shims, not lifecycle policy, and must be deleted after
-2026-05-25. Live lifecycle control is the runtime write fence plus the Durable
-Object alarm and hard timeout path.
+2026-05-25. Live lifecycle control is the runtime write fence plus explicit
+execution cleanup.
 
 ## Current Protocol
 
@@ -306,7 +306,7 @@ drain remains a receipt retry fallback for due Stripe rows.
 Cloudflare does not acquire a web run row and does not reconcile durable demand.
 Only Temporal decides when Cloudflare should process. The short-lived
 `ensure-processing` command asks the per-user Durable Object to make processing
-active by starting a runner, replacing an expired write fence, waking a ready
+active by starting a runner, replacing a non-wakeable startup write fence, waking a ready
 child, or recording a pending wake while the child is still starting. The
 command returns `retry_later` instead of pretending success when Cloudflare
 cannot confirm start or wake acceptance. Fresh starts read the hosted workspace,
@@ -318,7 +318,7 @@ Cloudflare treats that value as an operational hint only: the foreground
 pre-accept budget is clamped by Cloudflare's configured web-control timeout, and
 workspace read/readiness steps are capped by the remaining budget. Accepted
 background invocations are registered with the Durable Object lifetime.
-Accepted starts and wakes return an owner-watchdog recheck aligned to the
+Accepted starts and wakes return an owner recheck aligned to the
 expected idle checkpoint horizon rather than a short durable-lag polling loop. A
 confirmed non-wakeable child is replaced after the startup grace window when a
 later ensure command observes it.
@@ -338,16 +338,16 @@ recovery truth. When a write-fenced invocation exists, the write fence is commit
 authority and active ownership truth for orchestration; useful runtime progress
 is still proven only by the later durable checkpoint. Local Durable Object
 promises are allowed to coalesce work, but they are not durable demand truth. The
-alarm remains the active write-fence watchdog, not semantic wake or mailbox-demand
+alarm path only syncs/clears write-fence alarm state; it is not semantic wake or mailbox-demand
 scheduling. Durable mailbox lag is durable recovery truth; when it is observed
 while Cloudflare still owns an active write fence, Cloudflare may coalesce it
 into the active runner instead of starting duplicate execution. The hosted
 runtime owns the foreground
 conversation-mailbox import loop, imports late rows through the same mailbox
 state/input-store path as the initial import, and then notifies the
-assistant-engine active-turn controller. The alarm remains the durable backstop
-if the foreground wake path does not consume or commit the appended mailbox
-rows.
+assistant-engine active-turn controller. If the foreground wake path does not
+consume or commit appended mailbox rows, Temporal/web demand rechecks are the
+durable recovery path rather than Cloudflare alarm demand inference.
 
 The runtime reads `HostedWorkspace`, validates workspace version/user metadata,
 then restores the encrypted local workspace before fetching mailbox rows. A new

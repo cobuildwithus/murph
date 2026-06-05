@@ -57,7 +57,7 @@ import type { RunnerWriteFenceToken } from "./runner-state-store.js";
 import { RunnerStateStore } from "./runner-state-store.js";
 import type { RunnerStateRecord } from "./types.js";
 import { RunnerStoreCache } from "./runner-store-cache.js";
-import type { RunnerWatchdog } from "./watchdog.js";
+import type { RunnerAlarmCoordinator } from "./alarm-coordinator.js";
 
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_CONTEXT =
   "murph.hosted.workspace-snapshot-path-hash.v1";
@@ -93,7 +93,7 @@ export class RuntimeInvocationService {
         userId: string,
         input?: { timeoutMs?: number },
       ): Promise<HostedWorkspaceReadResponse>;
-      watchdog: RunnerWatchdog;
+      alarmCoordinator: RunnerAlarmCoordinator;
     },
   ) {}
 
@@ -155,7 +155,7 @@ export class RuntimeInvocationService {
         finishedAt: new Date().toISOString(),
         token: input.token,
       });
-      await this.input.watchdog.sync(failed.record);
+      await this.input.alarmCoordinator.sync(failed.record);
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
@@ -204,7 +204,7 @@ export class RuntimeInvocationService {
             token,
             workspaceVersion,
           });
-          await this.syncWatchdogAlarmAfterCompletion({
+          await this.syncRunnerAlarmAfterCompletion({
             executionInput,
             record: completion.record,
             token,
@@ -233,7 +233,7 @@ export class RuntimeInvocationService {
         finishedAt: new Date().toISOString(),
         token,
       });
-      await this.input.watchdog.sync(failed.record);
+      await this.input.alarmCoordinator.sync(failed.record);
       if (input.acceptedProcessingAttempt && failed.failed) {
         await this.recordAcceptedRuntimeAttemptFailureBestEffort({
           error,
@@ -265,7 +265,7 @@ export class RuntimeInvocationService {
       token,
       workspaceVersion,
     });
-    await this.syncWatchdogAlarmAfterCompletion({
+    await this.syncRunnerAlarmAfterCompletion({
       executionInput,
       record: completion.record,
       token,
@@ -411,7 +411,7 @@ export class RuntimeInvocationService {
     }
   }
 
-  private async syncWatchdogAlarmAfterCompletion(input: {
+  private async syncRunnerAlarmAfterCompletion(input: {
     executionInput: RuntimeInvocationInput;
     record: RunnerStateRecord | null;
     token: RunnerWriteFenceToken;
@@ -422,7 +422,7 @@ export class RuntimeInvocationService {
     }
 
     try {
-      await this.input.watchdog.sync(input.record);
+      await this.input.alarmCoordinator.sync(input.record);
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -435,7 +435,7 @@ export class RuntimeInvocationService {
           workspaceVersion: input.workspaceVersion,
         },
         level: "warn",
-        message: "Hosted runner runtime execution completed but watchdog alarm cleanup failed.",
+        message: "Hosted runner runtime execution completed but alarm cleanup failed.",
         phase: "checkpoint",
         userId: input.executionInput.userId,
       });

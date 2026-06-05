@@ -52,7 +52,6 @@ export class HostedLocalTestUserRunnerDurableObject extends UserRunnerDurableObj
   }
 
   async startStuckInvocationForTest(input: {
-    expiresInMs?: number;
     reason?: HostedWorkspaceInvocationReason;
     startedAgoMs?: number;
     userId: string;

@@ -1230,7 +1230,7 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("uses the active write fence watchdog for accepted processing wakes", async () => {
+  it("uses the active write fence alarmCoordinator for accepted processing wakes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
@@ -1635,7 +1635,7 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms.at(-1)).toBe("deleted");
   });
 
-  it("rethrows watchdog alarm maintenance failures so Cloudflare can retry", async () => {
+  it("rethrows alarm cleanup failures so Cloudflare can retry", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const { alarms, runner, sql } = createRunnerHarness({

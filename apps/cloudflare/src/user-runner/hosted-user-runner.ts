@@ -35,6 +35,7 @@ import {
 } from "./runner-state-store.js";
 import type {
   DurableObjectStateLike,
+  RunnerStateRecord,
 } from "./types.js";
 import {
   type HostedWorkspaceSnapshotOrphanCandidate,
@@ -44,9 +45,9 @@ import {
   buildRunnerWriteFenceValidationRejectedDetails,
 } from "./diagnostics.js";
 import {
-  RunnerWatchdog,
-  readWriteFenceWatchdogAlarmAt,
-} from "./watchdog.js";
+  RunnerAlarmCoordinator,
+  readRunnerNextAlarmAt,
+} from "./alarm-coordinator.js";
 import {
   createWorkspaceSnapshotSessionService,
   type WorkspaceSnapshotSessionService,
@@ -68,6 +69,8 @@ import {
 import {
   readRunnerWriteFenceAlreadyActiveRecord,
 } from "./write-fence-errors.js";
+
+const DEPLOY_SMOKE_WRITE_FENCE_STALE_MS = 10 * 60_000;
 
 export type { DurableObjectStateLike } from "./types.js";
 
@@ -96,7 +99,7 @@ export class HostedUserRunner {
       env,
       runnerRuntimeEnvSource,
     });
-    const watchdog = new RunnerWatchdog(state);
+    const alarmCoordinator = new RunnerAlarmCoordinator(state);
     const runtimeInvocation = new RuntimeInvocationService({
       env,
       runnerContainerNamespace,
@@ -109,7 +112,7 @@ export class HostedUserRunner {
       readHostedRuntimeStatusFromWeb: async (userId) => await this.readHostedRuntimeStatusFromWeb(userId),
       readHostedWebControlBaseUrl: () => this.readHostedWebControlBaseUrl(),
       readHostedWorkspaceFromWeb: async (userId, input) => await this.readHostedWorkspaceFromWeb(userId, input),
-      watchdog,
+      alarmCoordinator,
     });
     this.runtimeInvocation = runtimeInvocation;
     const runtimeProcessing = new RuntimeProcessingController({
@@ -119,7 +122,7 @@ export class HostedUserRunner {
       runnerRuntimeEnvSource,
       state,
       stateStore: this.stateStore,
-      watchdog,
+      alarmCoordinator,
     });
     this.runtimeProcessing = runtimeProcessing;
     this.userDataDeletionInput = {
@@ -171,7 +174,7 @@ export class HostedUserRunner {
       ...(record.lastErrorAt ? { lastErrorAt: record.lastErrorAt } : {}),
       ...(record.lastErrorCode ? { lastErrorCode: record.lastErrorCode } : {}),
       ...(record.lastInvocationAt ? { lastInvocationAt: record.lastInvocationAt } : {}),
-      nextAlarmAt: readWriteFenceWatchdogAlarmAt(record),
+      nextAlarmAt: readRunnerNextAlarmAt(record),
       mailboxLag: webStatus.mailboxLag,
       userId: record.userId,
       workspace: webStatus.workspace,
@@ -323,36 +326,40 @@ export class HostedUserRunner {
     workspaceVersion: string;
   }): Promise<RunnerWriteFenceToken | null> {
     await this.stateStore.bindUser(input.userId);
-    const existing = await this.stateStore.readState();
-    if (existing.writeFence) {
-      await this.runtimeProcessing.syncWatchdogAlarm(existing);
-      return null;
-    }
 
-    let token: RunnerWriteFenceToken;
-    try {
-      token = await this.stateStore.beginWriteFence({
-        kind: "runtime",
-        reason: "manual",
-        runnerContainerName: input.userId,
-        userId: input.userId,
-      });
-    } catch (error) {
-      const activeRecord = readRunnerWriteFenceAlreadyActiveRecord(error);
-      if (!activeRecord) {
-        throw error;
+    for (let acquisitionAttempt = 0; acquisitionAttempt < 2; acquisitionAttempt += 1) {
+      const existing = await this.stateStore.readState();
+      if (!await this.clearStaleDeploySmokeWriteFenceIfSafe(existing)) {
+        return null;
       }
-      await this.runtimeProcessing.syncWatchdogAlarm(activeRecord);
-      return null;
+
+      try {
+        const token = await this.stateStore.beginWriteFence({
+          kind: "deploy_smoke",
+          reason: "manual",
+          runnerContainerName: input.userId,
+          userId: input.userId,
+        });
+        const bound = await this.stateStore.bindWriteFenceWorkspaceVersion({
+          token,
+          workspaceVersion: input.workspaceVersion,
+        });
+        await this.runtimeProcessing.syncRunnerAlarm(
+          await this.stateStore.readState(),
+        );
+        return bound;
+      } catch (error) {
+        const activeRecord = readRunnerWriteFenceAlreadyActiveRecord(error);
+        if (!activeRecord) {
+          throw error;
+        }
+        if (await this.clearStaleDeploySmokeWriteFenceIfSafe(activeRecord)) {
+          continue;
+        }
+        return null;
+      }
     }
-    const bound = await this.stateStore.bindWriteFenceWorkspaceVersion({
-      token,
-      workspaceVersion: input.workspaceVersion,
-    });
-    await this.runtimeProcessing.syncWatchdogAlarm(
-      await this.stateStore.readState(),
-    );
-    return bound;
+    return null;
   }
 
   async finishDeploySmokeRuntimeWriteFence(input: {
@@ -367,11 +374,33 @@ export class HostedUserRunner {
       userId: input.userId,
     });
     if (result.completed) {
-      await this.runtimeProcessing.syncWatchdogAlarm(
+      await this.runtimeProcessing.syncRunnerAlarm(
         await this.stateStore.readState(),
       );
     }
     return { completed: result.completed };
+  }
+
+  private async clearStaleDeploySmokeWriteFenceIfSafe(
+    record: RunnerStateRecord,
+  ): Promise<boolean> {
+    const fence = record.writeFence;
+    if (!fence) {
+      return true;
+    }
+    if (fence.kind !== "deploy_smoke" || !isDeploySmokeWriteFenceStale(fence)) {
+      await this.runtimeProcessing.syncRunnerAlarm(record);
+      return false;
+    }
+
+    const cleared = await this.stateStore.clearWriteFenceForReplacement({
+      attemptId: fence.attemptId,
+      finishedAt: new Date().toISOString(),
+      generation: String(fence.generation),
+      userId: record.userId,
+    });
+    await this.runtimeProcessing.syncRunnerAlarm(cleared.record);
+    return cleared.cleared;
   }
 
   private async readHostedRuntimeStatusFromWeb(
@@ -438,4 +467,12 @@ export class HostedUserRunner {
   private readHostedWebControlBaseUrl(): string {
     return this.env.hostedWebBaseUrl;
   }
+}
+
+function isDeploySmokeWriteFenceStale(
+  fence: NonNullable<RunnerStateRecord["writeFence"]>,
+): boolean {
+  const startedAtMs = Date.parse(fence.startedAt);
+  return !Number.isFinite(startedAtMs)
+    || Date.now() - startedAtMs >= DEPLOY_SMOKE_WRITE_FENCE_STALE_MS;
 }

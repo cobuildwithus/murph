@@ -1,25 +1,20 @@
 import type { RunnerWriteFenceToken } from "./runner-state-store.js";
 import type { DurableObjectStateLike, RunnerStateRecord } from "./types.js";
 
-export class RunnerWatchdog {
+export class RunnerAlarmCoordinator {
   constructor(private readonly state: DurableObjectStateLike) {}
 
-  async sync(record: RunnerStateRecord): Promise<void> {
-    await this.syncAlarmAt(record.writeFence?.expiresAt ?? null);
+  async sync(_record: RunnerStateRecord): Promise<void> {
+    await this.clearAlarm();
   }
 
-  async syncAlarmAt(nextAlarmAt: string | null): Promise<void> {
-    if (!nextAlarmAt) {
-      await this.state.storage.deleteAlarm?.();
-      return;
-    }
-
-    await this.state.storage.setAlarm(new Date(nextAlarmAt));
+  async clearAlarm(): Promise<void> {
+    await this.state.storage.deleteAlarm?.();
   }
 }
 
-export function readWriteFenceWatchdogAlarmAt(record: RunnerStateRecord): string | null {
-  return record.writeFence?.expiresAt ?? null;
+export function readRunnerNextAlarmAt(_record: RunnerStateRecord): string | null {
+  return null;
 }
 
 export function runnerWriteFenceTokensMatch(

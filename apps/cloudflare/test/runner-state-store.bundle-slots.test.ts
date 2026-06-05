@@ -309,7 +309,6 @@ describe("RunnerStateStore schema guard", () => {
   it("blocks duplicate write fences and validates workspace versions when requested", async () => {
     const { store } = createRunnerStateStoreHarness();
     const lease = await store.beginWriteFence({
-      expiresAt: "2030-04-27T00:30:00.000Z",
       reason: "nudge",
       runnerContainerName: "user-write",
       userId: "user-write",
@@ -380,7 +379,6 @@ describe("RunnerStateStore schema guard", () => {
   it("validates provider egress tokens without storing the raw token", async () => {
     const { store } = createRunnerStateStoreHarness();
     const lease = await store.beginWriteFence({
-      expiresAt: "2030-04-27T00:30:00.000Z",
       reason: "nudge",
       runnerContainerName: "user-write",
       userId: "user-write",
@@ -430,7 +428,6 @@ describe("RunnerStateStore schema guard", () => {
   it("validates active write fences by active user and returns runtime metadata", async () => {
     const { store } = createRunnerStateStoreHarness();
     const lease = await store.beginWriteFence({
-      expiresAt: "2030-04-27T00:30:00.000Z",
       reason: "nudge",
       runnerContainerName: "user-write--v-worker-current",
       userId: "user-write",
@@ -484,7 +481,6 @@ describe("RunnerStateStore schema guard", () => {
   it("validates active fences without requiring runner container state", async () => {
     const { db, store } = createRunnerStateStoreHarness();
     await store.beginWriteFence({
-      expiresAt: "2030-04-27T00:30:00.000Z",
       reason: "nudge",
       runnerContainerName: "user-legacy",
       userId: "user-legacy",
@@ -504,14 +500,15 @@ describe("RunnerStateStore schema guard", () => {
     });
   });
 
-  it("treats legacy write-fence expiry timestamps as inert during exact ownership validation", async () => {
+  it("treats legacy active_expires_at rows as inert during exact ownership validation", async () => {
     const { db, store } = createRunnerStateStoreHarness();
     const lease = await store.beginWriteFence({
-      expiresAt: "2000-04-27T00:30:00.000Z",
       reason: "nudge",
       runnerContainerName: "user-write",
       userId: "user-write",
     });
+    db.prepare("UPDATE runner_meta SET active_expires_at = ? WHERE singleton = 1")
+      .run("2000-04-27T00:30:00.000Z");
 
     await expect(store.validateWriteFenceToken({
       attemptId: lease.attemptId,
@@ -534,14 +531,15 @@ describe("RunnerStateStore schema guard", () => {
     expect(readActiveRunnerContainerName(db)).toBe("user-write");
   });
 
-  it("treats legacy write-fence expiry timestamps as inert during active-user validation", async () => {
+  it("treats legacy active_expires_at rows as inert during active-user validation", async () => {
     const { db, store } = createRunnerStateStoreHarness();
     const lease = await store.beginWriteFence({
-      expiresAt: "2000-04-27T00:30:00.000Z",
       reason: "nudge",
       runnerContainerName: "user-active",
       userId: "user-active",
     });
+    db.prepare("UPDATE runner_meta SET active_expires_at = ? WHERE singleton = 1")
+      .run("2000-04-27T00:30:00.000Z");
 
     await expect(store.validateActiveWriteFence({
       userId: "user-active",
@@ -562,14 +560,15 @@ describe("RunnerStateStore schema guard", () => {
     expect(readActiveRunnerContainerName(db)).toBe("user-active");
   });
 
-  it("projects legacy write-fence expiry timestamps as null", async () => {
+  it("projects legacy active_expires_at rows as null", async () => {
     const { db, store } = createRunnerStateStoreHarness();
     await store.beginWriteFence({
-      expiresAt: "2030-04-27T00:00:05.000Z",
       reason: "nudge",
       runnerContainerName: "user-expired",
       userId: "user-expired",
     });
+    db.prepare("UPDATE runner_meta SET active_expires_at = ? WHERE singleton = 1")
+      .run("2030-04-27T00:00:05.000Z");
 
     await expect(store.readState()).resolves.toMatchObject({
       backoffUntil: null,

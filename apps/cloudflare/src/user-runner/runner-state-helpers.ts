@@ -206,6 +206,6 @@ export function resolveRunnerNextWakeAt(record: RunnerStateRecord | {
     ?? null;
 }
 
-function readWriteFenceKind(value: string | null): RunnerWriteFenceKind | null {
-  return value === "runtime" ? value : null;
+export function readWriteFenceKind(value: string | null): RunnerWriteFenceKind | null {
+  return value === "deploy_smoke" || value === "runtime" ? value : null;
 }

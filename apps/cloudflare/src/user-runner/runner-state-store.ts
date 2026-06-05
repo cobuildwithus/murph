@@ -13,6 +13,7 @@ import {
   normalizeIsoDateOrNull,
   normalizeNonNegativeInteger,
   projectRunnerStateRecord,
+  readWriteFenceKind,
   type RunnerMetaRow,
 } from "./runner-state-helpers.js";
 import {
@@ -93,10 +94,6 @@ export type RunnerProviderEgressTokenValidationResult =
       workspaceVersion: string | null;
     };
 
-export function resolveActiveInvocationRecoveryDecision(_input?: unknown): { action: "none" } {
-  return { action: "none" };
-}
-
 export class RunnerStateStore {
   private userId: string | null = null;
 
@@ -157,7 +154,6 @@ export class RunnerStateStore {
     reason: HostedWorkspaceInvocationReason;
     runnerContainerName: string;
     userId: string;
-    expiresAt?: string | null;
   }): Promise<RunnerWriteFenceToken> {
     await this.bindUser(input.userId);
 
@@ -168,12 +164,11 @@ export class RunnerStateStore {
 
     const nextGeneration = normalizeNonNegativeInteger(meta.active_generation) + 1;
     const startedAt = new Date().toISOString();
-    const expiresAt = null;
     const attemptId = createRuntimeWriteAttemptId();
     const providerEgressToken = createProviderEgressToken();
 
     meta.active_attempt_id = attemptId;
-    meta.active_expires_at = expiresAt;
+    meta.active_expires_at = null;
     meta.active_generation = nextGeneration;
     meta.active_kind = input.kind ?? "runtime";
     meta.active_provider_egress_token_hash = await hashProviderEgressToken(providerEgressToken);
@@ -181,14 +176,12 @@ export class RunnerStateStore {
     meta.active_runner_container_name = requireRunnerContainerName(input.runnerContainerName);
     meta.active_started_at = startedAt;
     meta.active_workspace_version = null;
-    if (meta.active_kind === "runtime") {
-      meta.wake_at = null;
-    }
+    meta.wake_at = null;
     this.writeMetaRowSync(meta);
 
     return {
       attemptId,
-      expiresAt,
+      expiresAt: null,
       generation: nextGeneration.toString(),
       leaseGeneration: nextGeneration.toString(),
       providerEgressToken,
@@ -688,7 +681,7 @@ export class RunnerStateStore {
     if (
       !meta.active_attempt_id
       || !meta.active_started_at
-      || meta.active_kind !== "runtime"
+      || !readWriteFenceKind(meta.active_kind)
     ) {
       return null;
     }

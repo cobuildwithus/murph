@@ -14,8 +14,8 @@ import type {
   DurableObjectStateLike,
 } from "./types.js";
 import {
-  readWriteFenceWatchdogAlarmAt,
-} from "./watchdog.js";
+  readRunnerNextAlarmAt,
+} from "./alarm-coordinator.js";
 
 export interface HostedRunnerStuckInvocationTestResult {
   attemptId: string;
@@ -38,10 +38,10 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
     await this.stateStore.bindUser(input.userId);
     const record = await this.stateStore.readState();
     if (record.writeFence) {
-      await this.runtimeProcessing.syncWatchdogAlarm(record);
+      await this.runtimeProcessing.syncRunnerAlarm(record);
       return {
         nextWakeAt:
-          this.runtimeProcessing.computeRuntimeProcessingOwnerWatchdogAt(),
+          this.runtimeProcessing.computeRuntimeProcessingOwnerRecheckAt(),
         status: "scheduled",
       };
     }
@@ -61,10 +61,10 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
       if (!(error instanceof RunnerWriteFenceAlreadyActiveError)) {
         throw error;
       }
-      await this.runtimeProcessing.syncWatchdogAlarm(error.record);
+      await this.runtimeProcessing.syncRunnerAlarm(error.record);
       return {
         nextWakeAt: error.record.writeFence
-          ? this.runtimeProcessing.computeRuntimeProcessingOwnerWatchdogAt()
+          ? this.runtimeProcessing.computeRuntimeProcessingOwnerRecheckAt()
           : this.runtimeProcessing.computeRuntimeProcessingRetryAt(
               "stale_fence_replacement_race",
             ),
@@ -72,7 +72,7 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
       };
     }
 
-    await this.runtimeProcessing.syncWatchdogAlarm(
+    await this.runtimeProcessing.syncRunnerAlarm(
       await this.stateStore.readState(),
     );
     return await this.runtimeInvocation.invokeWithFence({
@@ -103,11 +103,11 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
           startedAt: new Date(Date.now() - input.startedAgoMs).toISOString(),
         })
       : await this.stateStore.readState();
-    await this.runtimeProcessing.syncWatchdogAlarm(record);
+    await this.runtimeProcessing.syncRunnerAlarm(record);
 
     return {
       attemptId: token.attemptId,
-      nextWakeAt: readWriteFenceWatchdogAlarmAt(record),
+      nextWakeAt: readRunnerNextAlarmAt(record),
       ok: true,
     };
   }
