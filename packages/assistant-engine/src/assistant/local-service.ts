@@ -678,10 +678,6 @@ export async function sendAssistantMessageLocal(
           sessionId: providerResult.session.sessionId,
         })
 
-        if (!providerResult) {
-          throw new Error('Assistant provider turn did not produce a result.')
-        }
-
         turnInputController.close()
         await runtimeState.turns.acceptedInputs.updateAdmissionState({
           admissionState: 'commit-started',
