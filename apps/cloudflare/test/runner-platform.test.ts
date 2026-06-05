@@ -3542,6 +3542,75 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
+  it("acks hosted device-sync dirty state with staged batch overlays through the signed web callback seam", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      await expect(request.clone().json()).resolves.toEqual({
+        connectionId: "dsc_current",
+        processedDirtyPayloadIds: ["dsp_current"],
+        processedRevision: "21",
+        stagedDirtyAcks: [
+          {
+            connectionId: "dsc_next",
+            processedDirtyPayloadIds: ["dsp_next"],
+            processedRevision: "22",
+          },
+        ],
+        userId: "member_123",
+      });
+
+      return new Response(JSON.stringify({
+        connectionId: "dsc_current",
+        dirtyRevision: "21",
+        nextWakeAt: null,
+        processedRevision: "21",
+        recorded: true,
+        stillDirty: false,
+        userId: "member_123",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    const ack = await platform.deviceSyncPort!.ackDirtyStateProcessed({
+      connectionId: "dsc_current",
+      processedDirtyPayloadIds: ["dsp_current"],
+      processedRevision: "21",
+      stagedDirtyAcks: [
+        {
+          connectionId: "dsc_next",
+          processedDirtyPayloadIds: ["dsp_next"],
+          processedRevision: "22",
+        },
+      ],
+    });
+
+    expect(ack.recorded).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "device-sync dirty ack",
+    );
+    expect(request.url).toBe("https://web.example.test/api/internal/device-sync/runtime/dirty-ack");
+    expect(request.method).toBe("POST");
+    const headers = request.headers;
+    expect(headers.get("content-type")).toBe("application/json");
+    expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
   it("forces hosted device-sync connect-link creation through the signed POST callback route", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       authorizationUrl: "https://sync.example.test/oauth",

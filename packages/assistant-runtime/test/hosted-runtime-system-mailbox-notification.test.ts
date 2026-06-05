@@ -410,6 +410,13 @@ describe("hosted system mailbox notification execution context", () => {
         connectionId: "dsc_dirty_batch_1",
         processedDirtyPayloadIds: ["dsp_payload_21"],
         processedRevision: "21",
+        stagedDirtyAcks: [
+          {
+            connectionId: "dsc_dirty_batch_2",
+            processedDirtyPayloadIds: ["dsp_payload_22", "dsp_payload_23"],
+            processedRevision: "22",
+          },
+        ],
       });
       expect(ackDirtyStateProcessed).toHaveBeenNthCalledWith(2, {
         connectionId: "dsc_dirty_batch_2",

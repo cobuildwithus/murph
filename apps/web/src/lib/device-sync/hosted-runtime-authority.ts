@@ -13,6 +13,7 @@ import {
   type HostedExecutionDeviceSyncRuntimeApplyResponse,
   type HostedExecutionDeviceSyncDirtyAckResponse,
   type HostedExecutionDeviceSyncDirtyPendingResponse,
+  type HostedExecutionDeviceSyncStagedDirtyAck,
   type HostedExecutionDeviceSyncDirtyStateResponse,
   type HostedExecutionDeviceSyncRuntimeConnectionUpdate,
   type HostedExecutionDeviceSyncRuntimeCredentialSnapshot,
@@ -51,6 +52,7 @@ import {
   startHostedDeviceSyncReconnectNoticeWorkflowBestEffort,
 } from "./reconnect-notice";
 import { normalizeNullableString } from "./shared";
+import { signalHostedDeviceSyncBackgroundMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
 import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
 
 type HostedRuntimeConnectionSnapshot = HostedExecutionDeviceSyncRuntimeConnectionSnapshot;
@@ -61,6 +63,8 @@ type HostedRuntimeSnapshotWireResponse = Omit<
 > & {
   connections: HostedRuntimeConnectionSnapshot[];
 };
+
+const HOSTED_DEVICE_SYNC_DIRTY_ACK_RECOVERY_SIGNAL_TIMEOUT_MS = 5_000;
 
 export async function readHostedDeviceSyncRuntimeState(input: {
   request: Request;
@@ -482,7 +486,15 @@ export async function ackHostedDeviceSyncDirtyStateProcessed(input: {
   });
   const stillDirty = dirty?.stillDirty ?? false;
   const hasPendingDirty = stillDirty
-    || await controlPlane.store.hasPendingDirtyConnectionForUser(input.trustedUserId);
+    || await hasPendingHostedDeviceSyncDirtyWorkAfterStagedAcks({
+      stagedDirtyAcks: parsed.stagedDirtyAcks ?? [],
+      store: controlPlane.store,
+      userId: input.trustedUserId,
+    });
+
+  if (hasPendingDirty) {
+    await signalHostedDeviceSyncDirtyAckRecovery(input.trustedUserId);
+  }
 
   return {
     connectionId: parsed.connectionId,
@@ -493,6 +505,57 @@ export async function ackHostedDeviceSyncDirtyStateProcessed(input: {
     stillDirty,
     userId: input.trustedUserId,
   };
+}
+
+async function hasPendingHostedDeviceSyncDirtyWorkAfterStagedAcks(input: {
+  stagedDirtyAcks: readonly HostedExecutionDeviceSyncStagedDirtyAck[];
+  store: ReturnType<typeof createHostedDeviceSyncControlPlane>["store"];
+  userId: string;
+}): Promise<boolean> {
+  if (input.stagedDirtyAcks.length === 0) {
+    return await input.store.hasPendingDirtyConnectionForUser(input.userId);
+  }
+
+  const pending = await input.store.listPendingDirtyConnectionsForUser({
+    limit: 1,
+    stagedDirtyAcks: input.stagedDirtyAcks,
+    userId: input.userId,
+  });
+  return pending.items.length > 0 || pending.hasMore;
+}
+
+async function signalHostedDeviceSyncDirtyAckRecovery(userId: string): Promise<void> {
+  const signalPromise = signalHostedDeviceSyncBackgroundMaintenanceRuntime({ userId });
+  void signalPromise.catch(() => undefined);
+  await withHostedDeviceSyncDirtyAckRecoverySignalTimeout(signalPromise);
+}
+
+async function withHostedDeviceSyncDirtyAckRecoverySignalTimeout<T>(
+  signalPromise: Promise<T>,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      signalPromise,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(createHostedDeviceSyncDirtyAckRecoverySignalTimeoutError());
+        }, HOSTED_DEVICE_SYNC_DIRTY_ACK_RECOVERY_SIGNAL_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeout !== null) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+function createHostedDeviceSyncDirtyAckRecoverySignalTimeoutError(): Error {
+  const error = new Error(
+    `Hosted device-sync dirty ack recovery signal timed out after ${HOSTED_DEVICE_SYNC_DIRTY_ACK_RECOVERY_SIGNAL_TIMEOUT_MS}ms.`,
+  );
+  error.name = "TimeoutError";
+  return error;
 }
 
 function mapHostedDeviceSyncDirtyStateResponse(
