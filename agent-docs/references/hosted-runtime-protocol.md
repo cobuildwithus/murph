@@ -129,6 +129,10 @@ stubs through the Docker bridge. The provider-fetch allowlist may accept HTTP
 for that exact alias only when hosted-local markers are present and the alias is
 a local/test host or private IPv4 address; arbitrary HTTP provider base URLs
 must still fail closed.
+Hosted-local direct-R2 MinIO keeps host control checks on loopback but publishes
+the Docker-facing sidecar port on a container-reachable bind address, because
+runner containers reach the sidecar through their host alias rather than the
+host process loopback socket.
 `workspaceVersion` is the workspace checkpoint compare-and-swap guard and must
 stay on the checkpoint path rather than becoming generic side-effect
 authorization.
