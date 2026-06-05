@@ -149,9 +149,6 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
     const activeInvocationStartedAt = columns.includes("active_invocation_started_at")
       ? "active_invocation_started_at"
       : "NULL";
-    const activeInvocationExpiresAt = columns.includes("active_invocation_expires_at")
-      ? "active_invocation_expires_at"
-      : "NULL";
     const activeInvocationReason = columns.includes("active_invocation_reason")
       ? "active_invocation_reason"
       : "NULL";
@@ -168,11 +165,15 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
           ELSE NULL
         END,
         active_reason = COALESCE(active_reason, ${activeInvocationReason}),
-        active_started_at = COALESCE(active_started_at, ${activeInvocationStartedAt}),
-        active_expires_at = COALESCE(active_expires_at, ${activeInvocationExpiresAt})
+        active_started_at = COALESCE(active_started_at, ${activeInvocationStartedAt})
       WHERE singleton = 1
     `);
   }
+  sql.exec(`
+    UPDATE runner_meta
+    SET active_expires_at = NULL
+    WHERE active_expires_at IS NOT NULL
+  `);
   if (columns.includes("lease_generation")) {
     sql.exec(`
       UPDATE runner_meta
