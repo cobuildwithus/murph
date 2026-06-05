@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
@@ -106,6 +107,14 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
       "linq-typing-prewarm",
     );
+  });
+
+  test("keeps registered hosted-local E2E scenario files present", () => {
+    const missingScenarios = listHostedLocalE2eScenarios()
+      .filter((scenario) => !existsSync(path.join(repoRoot, scenario.file)))
+      .map((scenario) => `${scenario.name}: ${scenario.file}`);
+
+    expect(missingScenarios).toEqual([]);
   });
 
   test("keeps diagnostic hosted-local E2E scenarios opt-in", () => {
