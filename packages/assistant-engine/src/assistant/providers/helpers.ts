@@ -696,6 +696,7 @@ function isAssistantCodexTokenUsageEventType(eventType: string | null): boolean 
     eventType === 'thread/tokenUsage/updated' ||
     eventType === 'thread/token_usage/updated' ||
     eventType === 'thread.tokenUsage.updated' ||
+    eventType === 'thread.token.usage.updated' ||
     eventType === 'thread.token_usage.updated'
   )
 }

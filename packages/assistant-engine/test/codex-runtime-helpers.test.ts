@@ -555,6 +555,58 @@ describe('Codex assistant registry helpers', () => {
     },
     {
       expected: {
+        cachedInputTokens: 3,
+        inputTokens: 21,
+        outputTokens: 8,
+        reasoningTokens: 2,
+        totalTokens: 31,
+      },
+      expectedRawUsageJson: {
+        cachedInputTokens: 3,
+        inputTokens: 21,
+        outputTokens: 8,
+        reasoningOutputTokens: 2,
+        totalTokens: 31,
+      },
+      expectedSourcePath: 'thread.tokenUsage.total.delta',
+      name: 'Codex normalized dotted thread token usage notification',
+      rawEvents: [
+        {
+          params: {
+            threadId: 'thread-normalized-dotted-token-usage',
+            tokenUsage: {
+              last: {
+                cachedInputTokens: 3,
+                inputTokens: 21,
+                outputTokens: 8,
+                reasoningOutputTokens: 2,
+                totalTokens: 31,
+              },
+              total: {
+                cachedInputTokens: 3,
+                inputTokens: 21,
+                outputTokens: 8,
+                reasoningOutputTokens: 2,
+                totalTokens: 31,
+              },
+            },
+            turnId: 'turn-normalized-dotted-token-usage',
+          },
+          type: 'thread.token.usage.updated',
+        },
+        {
+          params: {
+            turn: {
+              id: 'turn-normalized-dotted-token-usage',
+              model: 'gpt-5.4',
+            },
+          },
+          type: 'turn.completed',
+        },
+      ],
+    },
+    {
+      expected: {
         cachedInputTokens: 41216,
         inputTokens: 67969,
         outputTokens: 185,

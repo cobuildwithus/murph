@@ -1395,6 +1395,251 @@ describe('assistant codex runtime', () => {
     })
   })
 
+  it('answers pre-start warm server requests without waiting for the turn/start response', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-local-prestart-request-work-')
+    const codexHome = await createTempDir('assistant-codex-local-prestart-request-home-')
+    const progressUpdates: string[] = []
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 25_925 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-local-prestart-request-1',
+            turnId: 'turn-local-prestart-request-1',
+          })
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-local-prestart-request-1',
+                status: 'completed',
+              },
+            },
+          }))
+
+          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondThread.id,
+            result: {
+              thread: {
+                id: 'thread-local-prestart-request-2',
+              },
+            },
+          }))
+          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+          child.stdout.write(jsonLine({
+            id: 99,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                text: 'Starting early work',
+              },
+              namespace: 'murph',
+              tool: 'send_progress_update',
+              turnId: 'turn-local-prestart-request-2',
+            },
+          }))
+
+          const response = await waitForRpcResponse(child, 99)
+          expect(response).toMatchObject({
+            id: 99,
+            result: {
+              success: true,
+            },
+          })
+
+          child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: {
+              turn: {
+                id: 'turn-local-prestart-request-2',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'assistant.message.delta',
+            params: {
+              item: {
+                id: 'assistant-local-prestart-request-2',
+                type: 'assistant_message',
+              },
+              delta: 'Pre-start request completed',
+              turnId: 'turn-local-prestart-request-2',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-local-prestart-request-2',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const stableInput = {
+      approvalPolicy: 'never',
+      codexHome,
+      env: {
+        PATH: '/custom/bin',
+      },
+      progressDelivery: {
+        send: vi.fn(async (text: string) => {
+          progressUpdates.push(text)
+          return { kind: 'sent' as const, source: 'model' as const }
+        }),
+      },
+      sandbox: 'workspace-write' as const,
+      workingDirectory,
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        prompt: 'first local turn before prestart server request',
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-local-prestart-request-1',
+      turnId: 'turn-local-prestart-request-1',
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        prompt: 'second local turn with prestart server request',
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Pre-start request completed',
+      sessionId: 'thread-local-prestart-request-2',
+      turnId: 'turn-local-prestart-request-2',
+    })
+    expect(progressUpdates).toEqual(['Starting early work'])
+  })
+
+  it('completes reused warm turns from dotted lifecycle event names', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-local-dotted-events-work-')
+    const codexHome = await createTempDir('assistant-codex-local-dotted-events-home-')
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 25_940 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-local-dotted-events-1',
+            turnId: 'turn-local-dotted-events-1',
+          })
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-local-dotted-events-1',
+                status: 'completed',
+              },
+            },
+          }))
+
+          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondThread.id,
+            result: {
+              thread: {
+                id: 'thread-local-dotted-events-2',
+              },
+            },
+          }))
+          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: {
+              turn: {
+                id: 'turn-local-dotted-events-2',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            data: {
+              turn_id: 'turn-local-dotted-events-2',
+            },
+            params: {
+              item: {
+                id: 'assistant-local-dotted-events-2',
+                type: 'assistant_message',
+              },
+              delta: 'Dotted lifecycle completed',
+            },
+            type: 'assistant.message.delta',
+          }))
+          child.stdout.write(jsonLine({
+            data: {
+              status: 'completed',
+              turn_id: 'turn-local-dotted-events-2',
+            },
+            type: 'turn.completed',
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const stableInput = {
+      approvalPolicy: 'never',
+      codexHome,
+      env: {
+        PATH: '/custom/bin',
+      },
+      sandbox: 'workspace-write' as const,
+      workingDirectory,
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        prompt: 'first local turn before dotted events',
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-local-dotted-events-1',
+      turnId: 'turn-local-dotted-events-1',
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        prompt: 'second local turn with dotted events',
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Dotted lifecycle completed',
+      sessionId: 'thread-local-dotted-events-2',
+      turnId: 'turn-local-dotted-events-2',
+    })
+  })
+
   it('rejects failed turn/completed status carried in data fields', async () => {
     const workingDirectory = await createTempDir('assistant-codex-data-failed-work-')
     const codexHome = await createTempDir('assistant-codex-data-failed-home-')
@@ -7886,6 +8131,23 @@ async function waitForRpcMessages(
   }
 
   throw new Error(`Expected at least ${count} RPC messages from Murph.`)
+}
+
+async function waitForRpcResponse(
+  child: MockChildProcess,
+  id: number,
+): Promise<Record<string, unknown>> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const message = readWrittenRpcMessages(child).find(
+      (candidate) => candidate.id === id,
+    )
+    if (message) {
+      return message
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+
+  throw new Error(`Expected RPC response ${id} from Murph.`)
 }
 
 async function waitForRpcMethod(

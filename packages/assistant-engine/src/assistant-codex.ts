@@ -1180,7 +1180,9 @@ function readCodexEventMethod(message: CodexRpcMessage): string | null {
     ? message.method
     : typeof message.type === 'string'
       ? message.type
-      : null
+      : typeof message.event === 'string'
+        ? message.event
+        : null
 }
 
 function codexEventMethodRequiresTurnCorrelation(method: string | null): boolean {
@@ -1195,6 +1197,7 @@ function codexEventMethodRequiresTurnCorrelation(method: string | null): boolean
     normalizedMethod === 'thread/tokenUsage/updated' ||
     normalizedMethod === 'thread/token_usage/updated' ||
     normalizedMethod === 'thread.tokenUsage.updated' ||
+    normalizedMethod === 'thread.token.usage.updated' ||
     normalizedMethod === 'thread.token_usage.updated' ||
     normalizedMethod.startsWith('turn/') ||
     normalizedMethod.startsWith('item/') ||
@@ -1211,6 +1214,14 @@ function codexEventMethodRequiresTurnCorrelation(method: string | null): boolean
     normalizedMethod.includes('assistant.message.delta') ||
     normalizedMethod.includes('agent.message.delta')
   )
+}
+
+function isCodexTurnStartedMethod(method: string | null): boolean {
+  return method === 'turn/started' || method === 'turn.started'
+}
+
+function isCodexTurnCompletedMethod(method: string | null): boolean {
+  return method === 'turn/completed' || method === 'turn.completed'
 }
 
 function stableCodexIdentityStringify(value: unknown): string {
@@ -1621,6 +1632,9 @@ async function runCodexAppServerTurnOnProcess(
   const validateWarmTurnEventCorrelation = (
     message: CodexRpcMessage,
     eventMethod: string | null,
+    options: {
+      bindPreStartCandidate?: boolean
+    } = {},
   ): VaultCliError | null => {
     const eventTurnId = extractCodexTurnIdFromMessage(message)
     if (
@@ -1629,7 +1643,9 @@ async function runCodexAppServerTurnOnProcess(
       codexEventMethodRequiresTurnCorrelation(eventMethod)
     ) {
       if (eventTurnId) {
-        return null
+        return options.bindPreStartCandidate
+          ? bindExpectedTurnId(eventTurnId, eventMethod)
+          : null
       }
 
       return buildStaleTurnEventError({
@@ -1770,7 +1786,7 @@ async function runCodexAppServerTurnOnProcess(
     acceptJsonEvent(message)
     codexThreadId = codexThreadId ?? extractCodexSessionId(message)
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
-    if (method === 'turn/started') {
+    if (isCodexTurnStartedMethod(method)) {
       turnId = extractCodexTurnIdFromMessage(message) ?? turnId
     }
 
@@ -1819,12 +1835,12 @@ async function runCodexAppServerTurnOnProcess(
       input.onProgress?.(progressEvent)
     }
 
-    if (method === 'turn/started') {
+    if (isCodexTurnStartedMethod(method)) {
       notifyProviderRequestStarted()
       registerLiveTurn()
     }
 
-    if (method !== 'turn/completed') {
+    if (!isCodexTurnCompletedMethod(method)) {
       return
     }
 
@@ -1915,16 +1931,13 @@ async function runCodexAppServerTurnOnProcess(
     const requestId = readCodexRpcServerRequestId(message)
     if (requestId !== null) {
       const requestMethod = typeof message.method === 'string' ? message.method : null
-      if (shouldBufferPreStartWarmMessage(message, requestMethod)) {
-        pendingPreStartMessages.push({
-          kind: 'server_request',
-          message,
-          method: requestMethod,
-        })
-        return
-      }
-
-      const correlationError = validateWarmTurnEventCorrelation(message, requestMethod)
+      const correlationError = validateWarmTurnEventCorrelation(
+        message,
+        requestMethod,
+        {
+          bindPreStartCandidate: true,
+        },
+      )
       if (correlationError) {
         rejectOnce(correlationError)
         return

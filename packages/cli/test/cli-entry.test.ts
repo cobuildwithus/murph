@@ -32,12 +32,14 @@ const mockedCliEntryModules = [
   "../src/vault-cli-schema-index.js",
   "../src/vault-cli-shell.js",
   "../src/vault-cli-vault-context.js",
+  "@murphai/assistant-engine/codex-lifecycle",
   "@murphai/operator-config/operator-config",
   "@murphai/setup-cli/setup-cli",
   "@murphai/operator-config/setup-runtime-env",
 ] as const;
 
 function mockCliActionModules(input: {
+  codexLifecycleModule?: Record<string, unknown>;
   cli: {
     serve: ReturnType<typeof vi.fn>;
   };
@@ -75,6 +77,10 @@ function mockCliActionModules(input: {
         input.onInstallVaultCliVaultContext?.(context);
       },
     ),
+  }));
+  vi.doMock("@murphai/assistant-engine/codex-lifecycle", () => ({
+    stopWarmCodexAppServer: vi.fn(async () => undefined),
+    ...input.codexLifecycleModule,
   }));
   vi.doMock("@murphai/operator-config/operator-config", () => ({
     resolveConfiguredDefaultVault: vi.fn(async () => null),
@@ -636,6 +642,7 @@ test("runMurphCliAction still allows murph init to target an explicit vault", as
 
 test("runMurphCliEntrypoint installs env loading and sqlite warning filtering before dispatching the action path", async () => {
   const serve = vi.fn(async () => undefined);
+  const stopWarmCodexAppServer = vi.fn(async () => undefined);
   const loadEnvFileCalls: string[] = [];
   const originalEmitWarning = process.emitWarning;
   const originalHome = process.env.HOME;
@@ -654,6 +661,9 @@ test("runMurphCliEntrypoint installs env loading and sqlite warning filtering be
     });
 
   mockCliActionModules({
+    codexLifecycleModule: {
+      stopWarmCodexAppServer,
+    },
     cli: { serve },
     operatorConfigModule: {
       expandConfiguredVaultPath: vi.fn(),
@@ -688,6 +698,7 @@ test("runMurphCliEntrypoint installs env loading and sqlite warning filtering be
         },
       ],
     ]);
+    assert.deepEqual(stopWarmCodexAppServer.mock.calls, [["cli-entrypoint-exit"]]);
   } finally {
     process.emitWarning = originalEmitWarning;
     if (originalHome === undefined) {

@@ -31,7 +31,11 @@ export async function runMurphCliEntrypoint(
   installBrokenPipeHandler()
   installSqliteExperimentalWarningFilter()
   loadCliEnvFiles()
-  await runMurphCliAction(argv, options)
+  try {
+    await runMurphCliAction(argv, options)
+  } finally {
+    await stopWarmCodexAppServerForCliExit()
+  }
 }
 
 let brokenPipeHandlerInstalled = false
@@ -350,6 +354,11 @@ export function createCliServeOptions(
     env: process.env,
     ...(exit ? { exit: (code: number) => exit(code) } : {}),
   }
+}
+
+async function stopWarmCodexAppServerForCliExit(): Promise<void> {
+  const { stopWarmCodexAppServer } = await import('@murphai/assistant-engine/codex-lifecycle')
+  await stopWarmCodexAppServer('cli-entrypoint-exit')
 }
 
 function resolvePublishedCliBinPath(): string {
