@@ -52,7 +52,7 @@ beforeEach(() => {
 })
 
 test('murph launcher keeps the primary command name on the shared CLI surface', async () => {
-  await runMurphCliAction(['status'], {
+  await runMurphCliAction(['model'], {
     argv0: '/usr/local/bin/murph',
   })
 
@@ -63,7 +63,7 @@ test('murph launcher keeps the primary command name on the shared CLI surface', 
     }),
   })
   expect(serve).toHaveBeenCalledWith(
-    ['status'],
+    ['model'],
     expect.objectContaining({
       env: process.env,
     }),
@@ -71,7 +71,7 @@ test('murph launcher keeps the primary command name on the shared CLI surface', 
 })
 
 test('vault-cli launcher keeps the secondary alias on the shared CLI surface', async () => {
-  await runMurphCliAction(['status'], {
+  await runMurphCliAction(['model'], {
     argv0: '/usr/local/bin/vault-cli',
   })
 
@@ -86,7 +86,7 @@ test('vault-cli launcher keeps the secondary alias on the shared CLI surface', a
 test('vault-cli launcher lets the command context report a missing vault at execution time', async () => {
   resolveDefaultVault.mockResolvedValueOnce(null)
 
-  await runMurphCliAction(['status'], {
+  await runMurphCliAction(['model'], {
     argv0: '/usr/local/bin/vault-cli',
   })
 
@@ -97,7 +97,7 @@ test('vault-cli launcher lets the command context report a missing vault at exec
     }),
   })
   expect(serve).toHaveBeenCalledWith(
-    ['status'],
+    ['model'],
     expect.objectContaining({
       env: process.env,
     }),
@@ -107,7 +107,7 @@ test('vault-cli launcher lets the command context report a missing vault at exec
 test('vault-cli launcher honors explicit vaults without a default vault', async () => {
   resolveDefaultVault.mockResolvedValueOnce(null)
 
-  await runMurphCliAction(['status', '--vault', '/vaults/explicit'], {
+  await runMurphCliAction(['model', '--vault', '/vaults/explicit'], {
     argv0: '/usr/local/bin/vault-cli',
   })
 
@@ -118,7 +118,7 @@ test('vault-cli launcher honors explicit vaults without a default vault', async 
     }),
   })
   expect(serve).toHaveBeenCalledWith(
-    ['status'],
+    ['model'],
     expect.objectContaining({
       env: process.env,
     }),

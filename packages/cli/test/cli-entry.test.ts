@@ -404,7 +404,7 @@ test("runMurphCliAction injects the resolved default vault for non-setup invocat
     },
   });
 
-  await runMurphCliAction(["chat"]);
+  await runMurphCliAction(["model"]);
 
   assert.deepEqual(resolveDefaultVault.mock.calls, [["/operator-home"]]);
   assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, []);
@@ -412,7 +412,7 @@ test("runMurphCliAction injects the resolved default vault for non-setup invocat
   assert.equal(vaultContextRef.value.current, "/vaults/default");
   assert.deepEqual(serve.mock.calls, [
     [
-      ["chat"],
+      ["model"],
       {
         env: process.env,
       },

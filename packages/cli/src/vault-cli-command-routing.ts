@@ -7,7 +7,12 @@ export async function registerScopedVaultCliCommand(input: {
   root: KnownLazyRootCommand
 }): Promise<void> {
   switch (input.root) {
-    case 'assistant': {
+    case 'assistant':
+    case 'chat':
+    case 'doctor':
+    case 'run':
+    case 'status':
+    case 'stop': {
       const [
         { registerAssistantCommands },
         services,

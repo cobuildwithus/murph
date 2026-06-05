@@ -12,6 +12,8 @@ test('classifier scopes obvious lazy roots without parsing nested command args',
     'assistant',
     'automation',
     'blood-test',
+    'chat',
+    'doctor',
     'goal',
     'list',
     'measurement',
@@ -19,8 +21,11 @@ test('classifier scopes obvious lazy roots without parsing nested command args',
     'protocol',
     'query',
     'regimen',
+    'run',
     'search',
     'show',
+    'status',
+    'stop',
     'supplement',
     'timeline',
     'wearables',
@@ -72,12 +77,6 @@ test('classifier falls back to the full graph for ambiguous leading syntax', () 
     kind: 'full',
     reason: 'unknown-root',
   })
-  for (const root of ['chat', 'run', 'status', 'doctor', 'stop'] as const) {
-    assert.deepEqual(classifyVaultCliInvocation([root]), {
-      kind: 'full',
-      reason: 'unknown-root',
-    })
-  }
   assert.deepEqual(
     classifyVaultCliInvocation(['device', 'account', 'list'], {
       env: {

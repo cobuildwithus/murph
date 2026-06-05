@@ -172,7 +172,7 @@ assert(
     packageJson.scripts?.['test:source:coverage'] ===
       'pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage' &&
     packageJson.scripts?.['verify:prepared-runtime'] ===
-      'pnpm --dir ../.. build:test-runtime:prepared' &&
+      'pnpm --dir ../.. health-commons:generate && pnpm --dir ../.. build:test-runtime:prepared' &&
     packageJson.scripts?.build ===
       'node ../../scripts/rm-paths.mjs dist .tsbuildinfo && tsc -b tsconfig.build.json' &&
     packageJson.scripts?.['verify:package-shape'] ===
