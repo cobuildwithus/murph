@@ -6,6 +6,8 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_DATA_API_RUNTIME_BASE_URL,
+  HOSTED_DATA_API_SUPPLEMENTS_PATH,
   HOSTED_RUNTIME_LOG_PATH,
 } from "@murphai/hosted-execution/routes";
 
@@ -63,12 +65,14 @@ const DEFAULT_MAPBOX_API_BASE_URL = "https://api.mapbox.com";
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const DEFAULT_TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file";
 const DEFAULT_WHATSAPP_API_BASE_URL = "https://graph.facebook.com";
-const HOSTED_DATA_API_SUPPLEMENTS_PATHNAME = "/api/supplements";
+const HOSTED_DATA_API_RUNTIME_HOST =
+  new URL(HOSTED_DATA_API_RUNTIME_BASE_URL).hostname;
 const HOSTED_DATA_API_MAX_POST_BODY_BYTES = 8 * 1024;
 
 export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   artifactStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore,
   browserVaultReplicaStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore,
+  dataApi: HOSTED_DATA_API_RUNTIME_HOST,
   effectsPort: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort,
   linq: "api.linqapp.com",
   mapbox: "api.mapbox.com",
@@ -303,6 +307,7 @@ export type HostedRunnerDiagnosticJson = Record<
 export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutboundHandler> = {
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.artifactStore]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.browserVaultReplicaStore]: handleHostedRunnerInternalOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.dataApi]: handleHostedRunnerOpenInternetOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.linq]: handleHostedRunnerLinqOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.mapbox]: handleHostedRunnerMapboxOutbound,
@@ -549,20 +554,18 @@ async function maybeHandleHostedDataApiRequest(input: {
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
-  const providerBase = readHostedWebApiBaseConfig(input.env);
-  if (!providerBase) {
+  if (normalizeProviderHostname(input.url.hostname) !== HOSTED_DATA_API_RUNTIME_HOST) {
     return null;
   }
-
-  const pathMatch = readProviderPathMatch(input.url, providerBase);
-  if (!pathMatch) {
-    return null;
-  }
-  if (pathMatch.pathnameSuffix !== HOSTED_DATA_API_SUPPLEMENTS_PATHNAME) {
-    return null;
+  if (input.url.pathname !== HOSTED_DATA_API_SUPPLEMENTS_PATH) {
+    return disallowedProviderEgress();
   }
   if (!["GET", "POST"].includes(input.request.method.toUpperCase())) {
     return disallowedProviderEgress();
+  }
+  const upstreamBaseUrl = readHostedDataApiUpstreamBaseUrl(input.env);
+  if (!upstreamBaseUrl) {
+    return new Response("Hosted data API upstream is not configured.", { status: 500 });
   }
 
   const startedAt = Date.now();
@@ -599,7 +602,7 @@ async function maybeHandleHostedDataApiRequest(input: {
     startedAt,
     upstreamRequest: await createHostedRunnerUpstreamRequest(
       input.request,
-      createProviderUpstreamUrl(input.url, pathMatch),
+      createHostedDataApiUpstreamUrl(input.url, upstreamBaseUrl),
       headers,
       {
         body: upstreamBody,
@@ -2862,6 +2865,49 @@ function disallowedProviderEgress(): Response {
   return new Response("Forbidden", { status: 403 });
 }
 
+function readHostedDataApiUpstreamBaseUrl(
+  env: RunnerOutboundEnvironmentSource,
+): URL | null {
+  const rawValue = typeof env.HOSTED_WEB_BASE_URL === "string"
+    ? env.HOSTED_WEB_BASE_URL.trim()
+    : "";
+  if (!rawValue) {
+    return null;
+  }
+
+  try {
+    const url = new URL(rawValue);
+    if (!isAllowedProviderBaseUrl(url, env)) {
+      return null;
+    }
+    return createHostedLocalDataApiUpstreamBaseUrl(url, env) ?? url;
+  } catch {
+    return null;
+  }
+}
+
+function createHostedDataApiUpstreamUrl(sourceUrl: URL, upstreamBaseUrl: URL): URL {
+  const upstreamUrl = new URL(upstreamBaseUrl.toString());
+  upstreamUrl.pathname = `${normalizedProviderBasePath(upstreamBaseUrl)}${sourceUrl.pathname}`;
+  upstreamUrl.search = sourceUrl.search;
+  upstreamUrl.hash = sourceUrl.hash;
+  return upstreamUrl;
+}
+
+function createHostedLocalDataApiUpstreamBaseUrl(
+  baseUrl: URL,
+  env: RunnerOutboundEnvironmentSource,
+): URL | null {
+  const alias = readLocalProviderHostAlias(env);
+  if (!alias || !isContainerAliasableProviderHost(baseUrl.hostname)) {
+    return null;
+  }
+
+  const aliasUrl = new URL(baseUrl.toString());
+  aliasUrl.hostname = alias;
+  return aliasUrl.origin === baseUrl.origin ? null : aliasUrl;
+}
+
 function readProviderBaseConfig(
   value: unknown,
   fallback: string,
@@ -2912,33 +2958,6 @@ function readProviderBaseConfig(
       knownHosts: fallbackHosts,
       routes: fallbackRoutes,
     };
-  }
-}
-
-function readHostedWebApiBaseConfig(
-  env: RunnerOutboundEnvironmentSource,
-): ProviderBaseConfig | null {
-  const rawValue = typeof env.HOSTED_WEB_BASE_URL === "string"
-    ? env.HOSTED_WEB_BASE_URL.trim()
-    : "";
-  if (!rawValue) {
-    return null;
-  }
-
-  try {
-    const url = new URL(rawValue);
-    if (!isAllowedProviderBaseUrl(url, env)) {
-      return null;
-    }
-    const routes = uniqueProviderBaseRoutes(...createConfiguredProviderBaseRoutes(url, env));
-    return {
-      knownHosts: uniqueProviderHosts(
-        ...routes.map((route) => route.acceptedBaseUrl.hostname),
-      ),
-      routes,
-    };
-  } catch {
-    return null;
   }
 }
 

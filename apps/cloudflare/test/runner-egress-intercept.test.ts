@@ -147,6 +147,8 @@ describe("hostedRunnerIntercept", () => {
       .toBe(handleHostedRunnerOpenAiOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.mapbox])
       .toBe(handleHostedRunnerMapboxOutbound);
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.dataApi])
+      .toBe(handleHostedRunnerOpenInternetOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.linq])
       .toBe(handleHostedRunnerLinqOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.telegram])
@@ -362,7 +364,7 @@ describe("hostedRunnerIntercept", () => {
     }) => createActiveRuntimeWriteFenceValidationResult(input));
 
     const response = await hostedRunnerIntercept(
-      new Request("https://web.example.test/api/supplements?q=creatine&limit=3", {
+      new Request("http://murph-data-api.worker/api/supplements?q=creatine&limit=3", {
         headers: {
           authorization: "Bearer user-supplied-token",
           cookie: "session=user-supplied-cookie",
@@ -394,7 +396,7 @@ describe("hostedRunnerIntercept", () => {
       expect.objectContaining({
         component: "runner",
         details: expect.objectContaining({
-          host: "web.example.test",
+          host: "murph-data-api.worker",
           providerKind: "murph_data_api",
           providerRequestAuthorized: true,
           writeFenceValidationMode: "active_user_fence",
@@ -419,7 +421,7 @@ describe("hostedRunnerIntercept", () => {
     }) => createActiveRuntimeWriteFenceValidationResult(input));
 
     const response = await hostedRunnerIntercept(
-      new Request("https://web.example.test/api/supplements", {
+      new Request("http://murph-data-api.worker/api/supplements", {
         body: JSON.stringify({
           queries: ["creatine", "magnesium"],
           limit: 3,
@@ -471,7 +473,7 @@ describe("hostedRunnerIntercept", () => {
     }) => createActiveRuntimeWriteFenceValidationResult(input));
 
     const response = await hostedRunnerIntercept(
-      new Request("https://web.example.test/api/supplements", {
+      new Request("http://murph-data-api.worker/api/supplements", {
         body: JSON.stringify({
           queries: ["a".repeat(9 * 1024)],
         }),
@@ -544,7 +546,7 @@ describe("hostedRunnerIntercept", () => {
     }) => createActiveRuntimeWriteFenceValidationResult(input));
 
     const response = await hostedRunnerIntercept(
-      new Request("https://web.example.test/api/supplements?q=creatine", {
+      new Request("http://murph-data-api.worker/api/supplements?q=creatine", {
         method: "GET",
       }),
       createInterceptEnv({
@@ -561,7 +563,7 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("matches hosted supplement label lookups through the local runner host alias", async () => {
+  it("forwards internal supplement label lookups to the local hosted web alias", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       items: [],
     }), {
@@ -576,7 +578,7 @@ describe("hostedRunnerIntercept", () => {
     }) => createActiveRuntimeWriteFenceValidationResult(input));
 
     const response = await hostedRunnerIntercept(
-      new Request("http://host.docker.internal:3000/api/supplements?q=magnesium", {
+      new Request("http://murph-data-api.worker/api/supplements?q=magnesium", {
         method: "GET",
       }),
       createInterceptEnv({
@@ -601,7 +603,7 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await hostedRunnerIntercept(
-      new Request("https://web.example.test/api/supplements", {
+      new Request("http://murph-data-api.worker/api/supplements", {
         method: "DELETE",
       }),
       createInterceptEnv({

@@ -7,23 +7,7 @@ import {
 } from '../src/supplement-labels.js'
 
 describe('searchSupplementLabels', () => {
-  it('requires the hosted web base URL', async () => {
-    await expect(
-      searchSupplementLabels(
-        {
-          q: 'creatine',
-        },
-        {
-          env: {},
-          fetchImpl: async () => new Response('unexpected'),
-        },
-      ),
-    ).rejects.toMatchObject({
-      code: 'supplement_labels_api_unconfigured',
-    })
-  })
-
-  it('calls the hosted supplements API without local authorization headers', async () => {
+  it('calls the internal supplements API without local authorization headers or hosted web config', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       items: [
         {
@@ -50,9 +34,7 @@ describe('searchSupplementLabels', () => {
         includeOffMarket: true,
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: {},
         fetchImpl: fetchMock,
       },
     )
@@ -75,7 +57,7 @@ describe('searchSupplementLabels', () => {
       ],
     })
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
-    assert.equal(requestUrl.origin, 'https://web.example.test')
+    assert.equal(requestUrl.origin, 'http://murph-data-api.worker')
     assert.equal(requestUrl.pathname, '/api/supplements')
     assert.equal(requestUrl.searchParams.get('q'), 'creatine')
     assert.equal(requestUrl.searchParams.get('limit'), '2')
@@ -422,23 +404,7 @@ describe('searchSupplementLabels', () => {
 })
 
 describe('searchSupplementLabelsBatch', () => {
-  it('requires the hosted web base URL', async () => {
-    await expect(
-      searchSupplementLabelsBatch(
-        {
-          queries: ['creatine'],
-        },
-        {
-          env: {},
-          fetchImpl: async () => new Response('unexpected'),
-        },
-      ),
-    ).rejects.toMatchObject({
-      code: 'supplement_labels_api_unconfigured',
-    })
-  })
-
-  it('posts multiple hosted supplement label queries without local authorization headers', async () => {
+  it('posts multiple hosted supplement label queries through the internal data API', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       results: [
         {
@@ -530,7 +496,7 @@ describe('searchSupplementLabelsBatch', () => {
 
     assert.equal(fetchMock.mock.calls.length, 1)
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
-    assert.equal(requestUrl.origin, 'https://web.example.test')
+    assert.equal(requestUrl.origin, 'http://murph-data-api.worker')
     assert.equal(requestUrl.pathname, '/api/supplements')
     assert.equal(requestUrl.search, '')
     const init = fetchMock.mock.calls[0]?.[1]

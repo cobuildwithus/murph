@@ -1,6 +1,10 @@
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { z } from 'zod'
+import {
+  HOSTED_DATA_API_RUNTIME_BASE_URL,
+  HOSTED_DATA_API_SUPPLEMENTS_PATH,
+} from '@murphai/hosted-execution/routes'
 
 const DEFAULT_SUPPLEMENT_LABEL_LIMIT = 10
 const MAX_SUPPLEMENT_LABEL_LIMIT = 50
@@ -86,7 +90,7 @@ export async function searchSupplementLabels(
   dependencies: SupplementLabelsDependencies = {},
 ): Promise<SupplementLabelSearchResult> {
   const input = supplementLabelSearchInputSchema.parse(rawInput)
-  const { env, fetchImpl, hostedWebBaseUrl } = resolveSupplementLabelsClient(dependencies)
+  const { env, fetchImpl, supplementLabelsApiBaseUrl } = resolveSupplementLabelsClient(dependencies)
 
   const limit = input.limit ?? DEFAULT_SUPPLEMENT_LABEL_LIMIT
   const includeOffMarket = input.includeOffMarket ?? false
@@ -94,7 +98,7 @@ export async function searchSupplementLabels(
   const payload = await fetchSupplementLabelsPayload({
     env,
     fetchImpl,
-    hostedWebBaseUrl,
+    supplementLabelsApiBaseUrl,
     includeOffMarket,
     limit,
     lookupParams,
@@ -114,11 +118,11 @@ export async function searchSupplementLabelsBatch(
   dependencies: SupplementLabelsDependencies = {},
 ): Promise<SupplementLabelBatchSearchResult> {
   const input = supplementLabelBatchSearchInputSchema.parse(rawInput)
-  const { env, fetchImpl, hostedWebBaseUrl } = resolveSupplementLabelsClient(dependencies)
+  const { env, fetchImpl, supplementLabelsApiBaseUrl } = resolveSupplementLabelsClient(dependencies)
 
   const limit = input.limit ?? DEFAULT_SUPPLEMENT_LABEL_LIMIT
   const includeOffMarket = input.includeOffMarket ?? false
-  const url = new URL('/api/supplements', hostedWebBaseUrl)
+  const url = new URL(HOSTED_DATA_API_SUPPLEMENTS_PATH, supplementLabelsApiBaseUrl)
   const response = await fetchSupplementLabelsApi(fetchImpl, url, env, {
     body: JSON.stringify({
       queries: input.queries,
@@ -144,23 +148,15 @@ export async function searchSupplementLabelsBatch(
 function resolveSupplementLabelsClient(dependencies: SupplementLabelsDependencies): {
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
-  hostedWebBaseUrl: URL
+  supplementLabelsApiBaseUrl: URL
 } {
   const env = dependencies.env ?? process.env
   const fetchImpl = dependencies.fetchImpl ?? fetch
-  const hostedWebBaseUrl = readHostedWebBaseUrl(env)
-
-  if (!hostedWebBaseUrl) {
-    throw new VaultCliError(
-      'supplement_labels_api_unconfigured',
-      'Supplement label search is not configured. Set HOSTED_WEB_BASE_URL before using this command.',
-    )
-  }
 
   return {
     env,
     fetchImpl,
-    hostedWebBaseUrl,
+    supplementLabelsApiBaseUrl: new URL(HOSTED_DATA_API_RUNTIME_BASE_URL),
   }
 }
 
@@ -183,22 +179,6 @@ function resolveSupplementLabelLookupParams(q: string): SupplementLabelLookupPar
   }
 
   return [{ key: 'q', value: trimmed }]
-}
-
-function readHostedWebBaseUrl(env: NodeJS.ProcessEnv): URL | null {
-  const raw = normalizeNullableString(env.HOSTED_WEB_BASE_URL)
-  if (!raw) {
-    return null
-  }
-
-  try {
-    return new URL(raw)
-  } catch {
-    throw new VaultCliError(
-      'supplement_labels_api_invalid_base_url',
-      'Supplement label search is misconfigured. HOSTED_WEB_BASE_URL must be an absolute URL.',
-    )
-  }
 }
 
 async function fetchSupplementLabelsApi(
@@ -247,13 +227,13 @@ async function fetchSupplementLabelsApi(
 async function fetchSupplementLabelsPayload(input: {
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
-  hostedWebBaseUrl: URL
+  supplementLabelsApiBaseUrl: URL
   includeOffMarket: boolean
   limit: number
   lookupParams: SupplementLabelLookupParam[]
 }): Promise<{ items: z.infer<typeof supplementLabelSearchItemSchema>[] }> {
   for (const lookup of input.lookupParams) {
-    const url = new URL('/api/supplements', input.hostedWebBaseUrl)
+    const url = new URL(HOSTED_DATA_API_SUPPLEMENTS_PATH, input.supplementLabelsApiBaseUrl)
     url.searchParams.set(lookup.key, lookup.value)
     url.searchParams.set('limit', String(input.limit))
     if (input.includeOffMarket) {

@@ -123,20 +123,6 @@ export function buildHostedRunnerChannelPlatformEnv(
   return channelEnv;
 }
 
-export function buildHostedRunnerDataApiPlatformEnv(
-  source: Readonly<Record<string, unknown>>,
-  options: {
-    rewriteLoopbackUrlsForContainer?: boolean;
-  } = {},
-): Record<string, string> {
-  const platformEnv = buildHostedRunnerPlatformEnv(source, options);
-  const dataApiEnv: Record<string, string> = {};
-
-  copyHostedPlatformEnv(platformEnv, dataApiEnv, "HOSTED_WEB_BASE_URL");
-
-  return dataApiEnv;
-}
-
 export function buildHostedRunnerContainerPlatformEnv(
   source: Readonly<Record<string, unknown>>,
   options: {
@@ -146,7 +132,6 @@ export function buildHostedRunnerContainerPlatformEnv(
   return {
     ...buildHostedRunnerLegacyDeviceSyncPlatformEnv(source, options),
     ...buildHostedRunnerChannelPlatformEnv(source, options),
-    ...buildHostedRunnerDataApiPlatformEnv(source, options),
   };
 }
 
