@@ -385,6 +385,7 @@ describe("hostedRunnerIntercept", () => {
     });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://web.example.test/api/supplements?q=creatine&limit=3");
+    expect(forwarded.redirect).toBe("manual");
     expect(forwarded.headers.get("authorization")).toBe("Bearer data-api-worker-secret");
     expect(forwarded.headers.has("cookie")).toBe(false);
     expect(forwarded.headers.has("x-api-key")).toBe(false);

@@ -86,7 +86,10 @@ export async function GET(request: Request): Promise<Response> {
 
   try {
     if (id) {
-      const item = await getSupplementById(id);
+      const item = await getSupplementById({
+        id,
+        includeOffMarket,
+      });
 
       if (!item) {
         return json({ error: "not_found" }, { status: 404 });
@@ -96,7 +99,10 @@ export async function GET(request: Request): Promise<Response> {
     }
 
     if (upc) {
-      const item = await getSupplementByUpc(upc);
+      const item = await getSupplementByUpc({
+        upc,
+        includeOffMarket,
+      });
 
       if (!item) {
         return json({ error: "not_found" }, { status: 404 });

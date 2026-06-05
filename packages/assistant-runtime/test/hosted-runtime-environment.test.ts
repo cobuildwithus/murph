@@ -660,6 +660,34 @@ test("hosted platform-backed env keeps platform Telegram values when forwarded e
   );
 });
 
+test("hosted runtime config keeps hosted web base URL platform-owned", () => {
+  const platform = createHostedRuntimePlatformStub();
+
+  const normalized = normalizeHostedAssistantRuntimeConfig(
+    {
+      platformEnv: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      userEnv: {
+        HOSTED_WEB_BASE_URL: "https://evil-web.example.test",
+      },
+    },
+    platform,
+  );
+  const runtimeEnv = {
+    ...buildHostedRuntimeDataApiEnv({
+      platformEnv: normalized.platformEnv,
+    }),
+    ...normalized.userEnv,
+  };
+
+  assert.deepEqual(normalized.platformEnv, {
+    HOSTED_WEB_BASE_URL: "https://web.example.test",
+  });
+  assert.deepEqual(normalized.userEnv, {});
+  assert.equal(runtimeEnv.HOSTED_WEB_BASE_URL, "https://web.example.test");
+});
+
 test("hosted runtime config strips ingress-only secrets from forwarded env", () => {
   const platform = createHostedRuntimePlatformStub();
 
@@ -824,6 +852,7 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
         HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
         HOSTED_ASSISTANT_BASE_URL: "https://user-legacy-provider.example.test/v1",
         HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_WEB_BASE_URL: "https://evil-web.example.test",
         NODE_OPTIONS: "--require /tmp/user-injected.js",
         PATH: "/tmp/user-bin",
         PDFTOTEXT_COMMAND: "/tmp/user-pdftotext",

@@ -52,14 +52,17 @@ describe("supplements query helpers", () => {
       },
     });
 
-    await expect(queries.getSupplementById("abc")).resolves.toBeNull();
+    await expect(queries.getSupplementById({
+      id: "abc",
+      includeOffMarket: false,
+    })).resolves.toBeNull();
   });
 
-  it("normalizes UPC digits before querying", async () => {
-    const calls: unknown[][] = [];
+  it("filters exact ids by off-market status", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
     const queries = createSupplementsQueries({
-      async query<T>(_text: string, values: unknown[]) {
-        calls.push(values);
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
         return {
           rows: [
             {
@@ -75,7 +78,10 @@ describe("supplements query helpers", () => {
       },
     });
 
-    await expect(queries.getSupplementByUpc("123-456 789012")).resolves.toEqual({
+    await expect(queries.getSupplementById({
+      id: "82118",
+      includeOffMarket: false,
+    })).resolves.toEqual({
       id: "82118",
       name: "Creatine Monohydrate",
       brand: "Example",
@@ -83,6 +89,48 @@ describe("supplements query helpers", () => {
       offMarket: false,
       label: {},
     });
-    expect(calls).toEqual([["123456789012"]]);
+    expect(calls[0]?.text).toContain("off_market = false");
+    expect(calls[0]?.values).toEqual(["82118", false]);
+  });
+
+  it("normalizes UPC digits, checks leading-zero variants, and orders matches deterministically", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        return {
+          rows: [
+            {
+              id: "82118",
+              name: "Creatine Monohydrate",
+              brand: "Example",
+              upc: "123456789012",
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(queries.getSupplementByUpc({
+      upc: "00123-456 789012",
+      includeOffMarket: false,
+    })).resolves.toEqual({
+      id: "82118",
+      name: "Creatine Monohydrate",
+      brand: "Example",
+      upc: "123456789012",
+      offMarket: false,
+      label: {},
+    });
+    expect(calls[0]?.text).toContain("off_market = false");
+    expect(calls[0]?.text).toContain("upc = ANY($1::text[])");
+    expect(calls[0]?.text).toContain("array_position($1::text[], upc) ASC");
+    expect(calls[0]?.text).toContain("dsld_id ASC");
+    expect(calls[0]?.values).toEqual([
+      ["00123456789012", "123456789012", "0123456789012"],
+      false,
+    ]);
   });
 });

@@ -119,7 +119,7 @@ describe("supplements API route", () => {
     });
 
     const response = await supplementsRoute.GET(
-      new Request("https://web.example.test/api/supplements?id=82118&q=ignored", {
+      new Request("https://web.example.test/api/supplements?id=82118&q=ignored&includeOffMarket=true", {
         headers: {
           authorization: "Bearer test-data-api-key",
         },
@@ -127,7 +127,10 @@ describe("supplements API route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.getSupplementById).toHaveBeenCalledWith("82118");
+    expect(mocks.getSupplementById).toHaveBeenCalledWith({
+      id: "82118",
+      includeOffMarket: true,
+    });
     expect(mocks.searchSupplements).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       item: {
@@ -153,7 +156,10 @@ describe("supplements API route", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(mocks.getSupplementByUpc).toHaveBeenCalledWith("123-456");
+    expect(mocks.getSupplementByUpc).toHaveBeenCalledWith({
+      upc: "123-456",
+      includeOffMarket: false,
+    });
     await expect(response.json()).resolves.toEqual({ error: "not_found" });
   });
 

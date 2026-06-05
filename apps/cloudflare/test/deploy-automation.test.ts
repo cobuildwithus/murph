@@ -979,6 +979,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      MURPH_DATA_API_KEY: "data-api-key",
       OPENAI_API_KEY: "openai-key",
     });
 
@@ -996,6 +997,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      MURPH_DATA_API_KEY: "data-api-key",
       OPENAI_API_KEY: "openai-key",
     });
     expect(providerSecretsPayload).toMatchObject({
@@ -1013,6 +1015,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      MURPH_DATA_API_KEY: "data-api-key",
       OPENAI_API_KEY: "openai-key",
     });
     expect(platformSecretsPayload).toMatchObject({
@@ -1029,6 +1032,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      MURPH_DATA_API_KEY: "data-api-key",
       OPENAI_API_KEY: "openai-key",
       OPENAI_ENTERPRISE_API_KEY: "enterprise-openai-key",
     }).OPENAI_ENTERPRISE_API_KEY).toBeUndefined();

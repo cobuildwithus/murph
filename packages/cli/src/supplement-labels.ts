@@ -6,6 +6,7 @@ const DEFAULT_SUPPLEMENT_LABEL_LIMIT = 10
 const MAX_SUPPLEMENT_LABEL_LIMIT = 50
 const DEFAULT_SUPPLEMENT_LABEL_TIMEOUT_MS = 10_000
 const MAX_SUPPLEMENT_LABEL_TIMEOUT_MS = 30_000
+const GTIN_LENGTHS = new Set([8, 12, 13, 14])
 
 export const supplementLabelSearchInputSchema = z.object({
   q: z.string().trim().min(1),
@@ -32,9 +33,19 @@ export const supplementLabelSearchResultSchema = z.object({
 const supplementLabelsApiResponseSchema = z.object({
   items: z.array(supplementLabelSearchItemSchema),
 })
+const supplementLabelsApiItemResponseSchema = z.object({
+  item: supplementLabelSearchItemSchema.extend({
+    label: z.unknown().optional(),
+  }),
+})
 
 export type SupplementLabelSearchInput = z.infer<typeof supplementLabelSearchInputSchema>
 export type SupplementLabelSearchResult = z.infer<typeof supplementLabelSearchResultSchema>
+
+type SupplementLabelLookupParam =
+  | { key: 'id'; value: string }
+  | { key: 'q'; value: string }
+  | { key: 'upc'; value: string }
 
 export async function searchSupplementLabels(
   rawInput: SupplementLabelSearchInput,
@@ -57,15 +68,15 @@ export async function searchSupplementLabels(
 
   const limit = input.limit ?? DEFAULT_SUPPLEMENT_LABEL_LIMIT
   const includeOffMarket = input.includeOffMarket ?? false
-  const url = new URL('/api/supplements', hostedWebBaseUrl)
-  url.searchParams.set('q', input.q)
-  url.searchParams.set('limit', String(limit))
-  if (includeOffMarket) {
-    url.searchParams.set('includeOffMarket', 'true')
-  }
-
-  const response = await fetchSupplementLabelsApi(fetchImpl, url, env)
-  const payload = supplementLabelsApiResponseSchema.parse(await response.json())
+  const lookupParams = resolveSupplementLabelLookupParams(input.q)
+  const payload = await fetchSupplementLabelsPayload({
+    env,
+    fetchImpl,
+    hostedWebBaseUrl,
+    includeOffMarket,
+    limit,
+    lookupParams,
+  })
 
   return supplementLabelSearchResultSchema.parse({
     source: 'murph-data-api',
@@ -74,6 +85,23 @@ export async function searchSupplementLabels(
     includeOffMarket,
     items: payload.items,
   })
+}
+
+function resolveSupplementLabelLookupParams(q: string): SupplementLabelLookupParam[] {
+  const trimmed = q.trim()
+  const digits = trimmed.replace(/\D/gu, '')
+
+  if (/^\d+$/u.test(trimmed)) {
+    return GTIN_LENGTHS.has(digits.length)
+      ? [{ key: 'id', value: digits }, { key: 'upc', value: digits }]
+      : [{ key: 'id', value: digits }]
+  }
+
+  if (/^[\d\s().-]+$/u.test(trimmed) && GTIN_LENGTHS.has(digits.length)) {
+    return [{ key: 'upc', value: digits }]
+  }
+
+  return [{ key: 'q', value: trimmed }]
 }
 
 function readHostedWebBaseUrl(env: NodeJS.ProcessEnv): URL | null {
@@ -96,6 +124,9 @@ async function fetchSupplementLabelsApi(
   fetchImpl: typeof fetch,
   url: URL,
   env: NodeJS.ProcessEnv,
+  options: {
+    allowNotFound?: boolean
+  } = {},
 ): Promise<Response> {
   let response: Response
 
@@ -113,6 +144,10 @@ async function fetchSupplementLabelsApi(
     )
   }
 
+  if (response.status === 404 && options.allowNotFound === true) {
+    return response
+  }
+
   if (!response.ok) {
     throw new VaultCliError(
       'supplement_labels_api_response_failed',
@@ -121,6 +156,52 @@ async function fetchSupplementLabelsApi(
   }
 
   return response
+}
+
+async function fetchSupplementLabelsPayload(input: {
+  env: NodeJS.ProcessEnv
+  fetchImpl: typeof fetch
+  hostedWebBaseUrl: URL
+  includeOffMarket: boolean
+  limit: number
+  lookupParams: SupplementLabelLookupParam[]
+}): Promise<{ items: z.infer<typeof supplementLabelSearchItemSchema>[] }> {
+  for (const lookup of input.lookupParams) {
+    const url = new URL('/api/supplements', input.hostedWebBaseUrl)
+    url.searchParams.set(lookup.key, lookup.value)
+    url.searchParams.set('limit', String(input.limit))
+    if (input.includeOffMarket) {
+      url.searchParams.set('includeOffMarket', 'true')
+    }
+
+    const response = await fetchSupplementLabelsApi(input.fetchImpl, url, input.env, {
+      allowNotFound: lookup.key !== 'q',
+    })
+    if (response.status === 404) {
+      continue
+    }
+
+    return await parseSupplementLabelsApiPayload(response)
+  }
+
+  return { items: [] }
+}
+
+async function parseSupplementLabelsApiPayload(
+  response: Response,
+): Promise<{ items: z.infer<typeof supplementLabelSearchItemSchema>[] }> {
+  const payload: unknown = await response.json()
+  const search = supplementLabelsApiResponseSchema.safeParse(payload)
+  if (search.success) {
+    return search.data
+  }
+
+  const detail = supplementLabelsApiItemResponseSchema.parse(payload)
+  const { label: _label, ...item } = detail.item
+
+  return {
+    items: [item],
+  }
 }
 
 function resolveSupplementLabelTimeoutMs(env: NodeJS.ProcessEnv): number {

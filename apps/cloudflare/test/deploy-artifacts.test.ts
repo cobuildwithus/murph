@@ -1237,6 +1237,7 @@ function createDeployArtifactFixtureSource(): Record<string, string> {
     HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "r2-access-fixture",
     HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "r2-signing-fixture",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "{\"kty\":\"EC\"}",
+    MURPH_DATA_API_KEY: "data-api-key",
     OPENAI_API_KEY: "openai-key",
   };
 }

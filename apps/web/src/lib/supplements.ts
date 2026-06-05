@@ -26,8 +26,14 @@ export type SupplementDetail = SupplementSearchItem & {
 };
 
 export function createSupplementsQueries(client: SupplementsQueryClient): {
-  getSupplementById: (id: string) => Promise<SupplementDetail | null>;
-  getSupplementByUpc: (upc: string) => Promise<SupplementDetail | null>;
+  getSupplementById: (input: {
+    id: string;
+    includeOffMarket: boolean;
+  }) => Promise<SupplementDetail | null>;
+  getSupplementByUpc: (input: {
+    includeOffMarket: boolean;
+    upc: string;
+  }) => Promise<SupplementDetail | null>;
   searchSupplements: (input: {
     includeOffMarket: boolean;
     limit: number;
@@ -35,7 +41,8 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
   }) => Promise<SupplementSearchItem[]>;
 } {
   return {
-    async getSupplementById(id) {
+    async getSupplementById(input) {
+      const { id } = input;
       if (!/^\d+$/u.test(id)) {
         return null;
       }
@@ -50,19 +57,22 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
           off_market AS "offMarket",
           label
         FROM supplements
-        WHERE dsld_id = $1
+        WHERE
+          dsld_id = $1
+          AND ($2::boolean OR off_market = false)
         LIMIT 1
         `,
-        [id],
+        [id, input.includeOffMarket],
       );
 
       return rows[0] ?? null;
     },
 
-    async getSupplementByUpc(upc) {
-      const normalizedUpc = upc.replace(/\D/gu, "");
+    async getSupplementByUpc(input) {
+      const normalizedUpc = input.upc.replace(/\D/gu, "");
+      const upcVariants = buildUpcLookupVariants(normalizedUpc);
 
-      if (!normalizedUpc) {
+      if (upcVariants.length === 0) {
         return null;
       }
 
@@ -76,10 +86,16 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
           off_market AS "offMarket",
           label
         FROM supplements
-        WHERE upc = $1
+        WHERE
+          upc = ANY($1::text[])
+          AND ($2::boolean OR off_market = false)
+        ORDER BY
+          off_market ASC,
+          array_position($1::text[], upc) ASC,
+          dsld_id ASC
         LIMIT 1
         `,
-        [normalizedUpc],
+        [upcVariants, input.includeOffMarket],
       );
 
       return rows[0] ?? null;
@@ -120,6 +136,24 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
   };
 }
 
+function buildUpcLookupVariants(upc: string): string[] {
+  if (!upc) {
+    return [];
+  }
+
+  const variants = [upc];
+
+  if (/^\d{12}$/u.test(upc)) {
+    variants.push(`0${upc}`, `00${upc}`);
+  } else if (/^0\d{12}$/u.test(upc)) {
+    variants.push(upc.slice(1), `0${upc}`);
+  } else if (/^00\d{12}$/u.test(upc)) {
+    variants.push(upc.slice(2), upc.slice(1));
+  }
+
+  return [...new Set(variants)];
+}
+
 export async function searchSupplements(input: {
   q: string;
   limit: number;
@@ -128,12 +162,18 @@ export async function searchSupplements(input: {
   return await defaultQueries().searchSupplements(input);
 }
 
-export async function getSupplementById(id: string): Promise<SupplementDetail | null> {
-  return await defaultQueries().getSupplementById(id);
+export async function getSupplementById(input: {
+  id: string;
+  includeOffMarket: boolean;
+}): Promise<SupplementDetail | null> {
+  return await defaultQueries().getSupplementById(input);
 }
 
-export async function getSupplementByUpc(upc: string): Promise<SupplementDetail | null> {
-  return await defaultQueries().getSupplementByUpc(upc);
+export async function getSupplementByUpc(input: {
+  includeOffMarket: boolean;
+  upc: string;
+}): Promise<SupplementDetail | null> {
+  return await defaultQueries().getSupplementByUpc(input);
 }
 
 function defaultQueries(): ReturnType<typeof createSupplementsQueries> {

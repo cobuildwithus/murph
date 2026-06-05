@@ -595,6 +595,7 @@ async function maybeHandleHostedDataApiRequest(input: {
       input.request,
       createProviderUpstreamUrl(input.url, pathMatch),
       headers,
+      { redirect: "manual" },
     ),
     url: input.url,
   });
@@ -2773,6 +2774,9 @@ async function createHostedRunnerUpstreamRequest(
   source: Request,
   url: URL,
   headers: Headers,
+  options: {
+    redirect?: RequestRedirect;
+  } = {},
 ): Promise<Request> {
   return new Request(url, {
     body: source.method === "GET" || source.method === "HEAD"
@@ -2780,7 +2784,7 @@ async function createHostedRunnerUpstreamRequest(
       : await source.arrayBuffer(),
     headers,
     method: source.method,
-    redirect: source.redirect,
+    redirect: options.redirect ?? source.redirect,
     signal: source.signal,
   });
 }
