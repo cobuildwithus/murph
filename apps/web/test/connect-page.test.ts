@@ -67,6 +67,7 @@ const mocks = vi.hoisted(() => ({
   authDialogProps: null as { open?: boolean } | null,
   buildHostedDeviceSyncSettingsResponse: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
+  resolveHostedMurphContactOption: vi.fn(),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
@@ -88,6 +89,10 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
+vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
+  resolveHostedMurphContactOption: mocks.resolveHostedMurphContactOption,
+}));
+
 beforeEach(() => {
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValue({
     generatedAt: "2026-05-01T00:00:00.000Z",
@@ -107,6 +112,7 @@ beforeEach(() => {
     memberLookup: null,
     session: null,
   });
+  mocks.resolveHostedMurphContactOption.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -1278,6 +1284,113 @@ test("ConnectSourcesGrid redeems an initial device connect intent through the ap
     method: "POST",
     keepalive: false,
   });
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid shows a recovery dialog when a device connect intent is unavailable", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  const fetch = vi.fn(async () =>
+    Response.json({
+      error: {
+        code: "HOSTED_DEVICE_CONNECT_INTENT_MISSING",
+        message: "This connection link could not be found. Ask Murph for a new one.",
+        retryable: false,
+      },
+    }, { status: 410 }));
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    deviceConnectRecoveryContactAction: {
+      href: "sms:+15550100001?body=Can%20you%20send%20me%20a%20fresh%20device%20connection%20link%3F",
+      kind: "text",
+      label: "Messages",
+    },
+    sources: [
+      {
+        description: "Recovery, strain, sleep, and heart rate.",
+        id: "whoop",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 15,
+          src: "/brand-logos/connect/whoop.svg",
+          width: 96,
+        },
+        name: "Whoop",
+      },
+    ],
+  }), {
+    location: {
+      hash: `#deviceConnectIntent=${claim}&connectSource=whoop`,
+      href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop`,
+    },
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 1);
+    assert.match(rendered.container.textContent ?? "", /Connection link unavailable/);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /This connection link could not be found\. Ask Murph for a new one\./,
+    );
+  });
+
+  const contactLink = rendered.container.querySelector("a[href^='sms:']");
+  assert.ok(contactLink instanceof rendered.window.HTMLAnchorElement);
+  assert.equal(contactLink.textContent, "Text Murph");
+  assert.match(
+    contactLink.getAttribute("aria-label") ?? "",
+    /fresh Whoop connection link/,
+  );
+  assert.equal(rendered.assign.mock.calls.length, 0);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid falls back to email when no preferred recovery contact action is available", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  const fetch = vi.fn(async () =>
+    Response.json({
+      error: {
+        code: "HOSTED_DEVICE_CONNECT_INTENT_EXPIRED",
+        message: "This connection link has expired. Ask Murph for a new one.",
+        retryable: false,
+      },
+    }, { status: 410 }));
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    sources: [
+      {
+        description: "Recovery, strain, sleep, and heart rate.",
+        id: "whoop",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 15,
+          src: "/brand-logos/connect/whoop.svg",
+          width: 96,
+        },
+        name: "Whoop",
+      },
+    ],
+  }), {
+    location: {
+      hash: `#deviceConnectIntent=${claim}&connectSource=whoop`,
+      href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop`,
+    },
+  });
+
+  await vi.waitFor(() => {
+    assert.match(rendered.container.textContent ?? "", /Connection link unavailable/);
+  });
+
+  const contactLink = rendered.container.querySelector("a[href^='mailto:']");
+  assert.ok(contactLink instanceof rendered.window.HTMLAnchorElement);
+  assert.equal(contactLink.textContent, "Email Murph");
+  assert.match(contactLink.href, /Fresh%20device%20connection%20link/);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Set up contact/);
 
   await rendered.cleanup();
 });
