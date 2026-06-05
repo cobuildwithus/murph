@@ -590,10 +590,13 @@ export class RunnerStateStore {
       WHERE singleton = 1`,
     ).toArray()[0] ?? null;
 
-    if (row) {
-      this.userId = row.user_id;
+    if (!row) {
+      return null;
     }
-
+    if (this.clearExpiredLegacyWriteFenceMetaSync(row)) {
+      this.writeMetaRowSync(row);
+    }
+    this.userId = row.user_id;
     return row;
   }
 
@@ -666,6 +669,22 @@ export class RunnerStateStore {
     meta.active_runner_container_name = null;
     meta.active_started_at = null;
     meta.active_workspace_version = null;
+  }
+
+  private clearExpiredLegacyWriteFenceMetaSync(meta: RunnerMetaRow): boolean {
+    if (!meta.active_attempt_id || !meta.active_expires_at) {
+      return false;
+    }
+    const expiresAtMs = Date.parse(meta.active_expires_at);
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs > Date.now()) {
+      return false;
+    }
+
+    this.clearActiveRunMetaSync(meta);
+    meta.failure_count = normalizeNonNegativeInteger(meta.failure_count) + 1;
+    meta.last_error_at = new Date().toISOString();
+    meta.last_error_code = "expired_legacy_write_fence";
+    return true;
   }
 
   private hasWriteFenceTokenSync(

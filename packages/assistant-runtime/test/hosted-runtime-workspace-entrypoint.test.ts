@@ -7271,6 +7271,17 @@ describe("hosted workspace runtime entrypoint", () => {
       parseHostedAssistantWorkspaceRuntimeJobInput({
         request: {
           ...createWorkspaceRunRequest(),
+          deadlineAt: "2026-04-27T00:10:00.000Z",
+        },
+      })
+    ).toThrow(
+      "Hosted assistant workspace runtime job request.deadlineAt is no longer supported.",
+    );
+
+    expect(() =>
+      parseHostedAssistantWorkspaceRuntimeJobInput({
+        request: {
+          ...createWorkspaceRunRequest(),
           runDrain: {},
         },
       })

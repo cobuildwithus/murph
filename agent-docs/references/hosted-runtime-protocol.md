@@ -306,10 +306,11 @@ drain remains a receipt retry fallback for due Stripe rows.
 Cloudflare does not acquire a web run row and does not reconcile durable demand.
 Only Temporal decides when Cloudflare should process. The short-lived
 `ensure-processing` command asks the per-user Durable Object to make processing
-active by starting a runner, replacing a non-wakeable startup write fence, waking a ready
-child, or recording a pending wake while the child is still starting. The
-command returns `retry_later` instead of pretending success when Cloudflare
-cannot confirm start or wake acceptance. Fresh starts read the hosted workspace,
+active by starting a runner, waking a ready child, recording a pending wake while
+the child is still starting, or replacing an old runtime write fence whose child
+cannot be confirmed after startup grace. The command returns `retry_later`
+instead of pretending success when Cloudflare cannot confirm fresh start or
+fresh wake acceptance. Fresh starts read the hosted workspace,
 bind the workspace version to the write fence, build runtime config/secrets, and
 construct the container job before returning accepted; failures in that
 pre-handoff path clear the fresh fence and return `retry_later`. The Temporal
@@ -320,8 +321,11 @@ workspace read/readiness steps are capped by the remaining budget. Accepted
 background invocations are registered with the Durable Object lifetime.
 Accepted starts and wakes return an owner recheck aligned to the
 expected idle checkpoint horizon rather than a short durable-lag polling loop. A
-confirmed non-wakeable child is replaced after the startup grace window when a
-later ensure command observes it.
+runtime fence whose child is non-wakeable or wake-unconfirmed is replaced after
+the startup grace window when a later ensure command observes it. Deploy-smoke
+fences are control-plane fences; fresh ones make normal runtime demand retry,
+while stale ones are cleared by deploy-smoke acquisition or replaced when real
+runtime demand arrives.
 The separate signed `runtime/prewarm` command exists only for Temporal-mediated
 typing hints. It may bind the per-user Durable Object and touch the runner
 container readiness path, but it must not begin a write fence, read hosted

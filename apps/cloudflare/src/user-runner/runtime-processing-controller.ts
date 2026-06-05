@@ -38,7 +38,6 @@ import {
 import {
   computeRuntimeProcessingOwnerRecheckAt as computeRuntimeProcessingOwnerRecheckAtValue,
   computeRuntimeProcessingRetryAt as computeRuntimeProcessingRetryAtValue,
-  createActiveWorkspaceWakeRetryLater,
   createRuntimePrewarmRetryLater,
   createRuntimeProcessingRetryLater,
   recordRuntimePrewarmAccepted,
@@ -61,6 +60,9 @@ import {
   RunnerAlarmCoordinator,
   runnerWriteFenceTokensMatch,
 } from "./alarm-coordinator.js";
+import {
+  isDeploySmokeWriteFenceStale,
+} from "./runner-state-helpers.js";
 
 const RUNTIME_PROCESSING_STARTUP_GRACE_MS = 30_000;
 const RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS = 8_000;
@@ -238,11 +240,34 @@ export class RuntimeProcessingController {
     }
 
     const activeFence = record.writeFence;
-    if (input.input.source === "workspace_wake") {
+    if (activeFence.kind !== "runtime") {
+      if (
+        activeFence.kind === "deploy_smoke"
+        && isDeploySmokeWriteFenceStale(activeFence)
+      ) {
+        const cleared = await this.input.stateStore.clearWriteFenceForReplacement({
+          attemptId: activeFence.attemptId,
+          finishedAt: new Date().toISOString(),
+          generation: String(activeFence.generation),
+          userId: record.userId,
+        });
+        await this.syncRunnerAlarm(cleared.record);
+        if (cleared.cleared) {
+          return await this.startRuntimeProcessing({
+            action: "replaced",
+            commandBudget: input.commandBudget,
+            input: input.input,
+            runtimeWakeStartedAt: input.runtimeWakeStartedAt,
+          });
+        }
+        return createRuntimeProcessingRetryLater({
+          reason: "stale_fence_replacement_race",
+          userId: input.input.userId,
+        });
+      }
       await this.syncRunnerAlarm(record);
-      return createActiveWorkspaceWakeRetryLater({
-        activeFence,
-        env: this.input.env,
+      return createRuntimeProcessingRetryLater({
+        reason: "container_busy",
         userId: input.input.userId,
       });
     }
@@ -305,10 +330,33 @@ export class RuntimeProcessingController {
       });
     }
 
-    await this.syncRunnerAlarm(record);
-    return createRuntimeProcessingRetryLater({
-      reason: mapRunnerProcessingRetryReason(containerResult.reason),
-      userId: input.input.userId,
+    if (this.shouldPreserveStartingWriteFence(activeFence)) {
+      await this.syncRunnerAlarm(record);
+      return createRuntimeProcessingRetryLater({
+        reason: mapRunnerProcessingRetryReason(containerResult.reason),
+        userId: input.input.userId,
+      });
+    }
+
+    const cleared = await this.input.stateStore.clearWriteFenceForReplacement({
+      attemptId: activeFence.attemptId,
+      error: new Error(`active_runtime_wake_unconfirmed:${containerResult.reason}`),
+      finishedAt: new Date().toISOString(),
+      generation: String(activeFence.generation),
+      userId: record.userId,
+    });
+    await this.syncRunnerAlarm(cleared.record);
+    if (!cleared.cleared) {
+      return createRuntimeProcessingRetryLater({
+        reason: "stale_fence_replacement_race",
+        userId: input.input.userId,
+      });
+    }
+    return await this.startRuntimeProcessing({
+      action: "replaced",
+      commandBudget: input.commandBudget,
+      input: input.input,
+      runtimeWakeStartedAt: input.runtimeWakeStartedAt,
     });
   }
 

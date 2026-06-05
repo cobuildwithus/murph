@@ -97,8 +97,9 @@ of execution and commit authority rather than mailbox-demand truth. Exact
 accepted wakes may coalesce under Cloudflare's active owner; durable mailbox lag
 remains recovery truth but duplicate execution is prevented by the write fence;
 accepted processing returns an owner recheck instead of a short
-durable-lag polling loop; a confirmed non-wakeable child is replaced by identity;
-ambiguous wake failures return `retry_later`; alarm cleanup
+durable-lag polling loop; old runtime fences with missing or wake-unconfirmed
+children are replaced by identity after startup grace, while fresh deploy-smoke
+fences return busy and stale deploy-smoke recovery may unblock real runtime demand; alarm cleanup
 failures are rethrown so the platform can retry instead of permanently deleting
 the alarm. New v2 foreground leases restore from durable workspace snapshots and
 legacy refs also cold-restore from durable bundles instead of trusting dirty

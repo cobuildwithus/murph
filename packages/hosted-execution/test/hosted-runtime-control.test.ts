@@ -257,6 +257,7 @@ describe("hosted runtime control contracts", () => {
     );
     for (const field of [
       "committedSeq",
+      "deadlineAt",
       "events",
       "finalizeRequired",
       "inputCommittedSeq",

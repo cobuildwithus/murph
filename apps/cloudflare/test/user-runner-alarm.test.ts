@@ -1149,8 +1149,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    const token = await runner.beginDeploySmokeRuntimeWriteFence({
-      userId: TEST_USER_ID,
+    const token = writeRuntimeFenceForTest(sql, {
       workspaceVersion: "7",
     });
 
@@ -1162,13 +1161,13 @@ describe("HostedUserRunner execution coordination", () => {
       action: "woken",
       kind: "runtime_processing_accepted",
       recommendedRecheckAt: expect.any(String),
-      runtimeAttemptId: token?.attemptId,
+      runtimeAttemptId: token.attemptId,
     });
 
     expect(ensureProcessing).toHaveBeenCalledWith({
       activeRuntime: {
-        attemptId: token?.attemptId,
-        leaseGeneration: token?.generation,
+        attemptId: token.attemptId,
+        leaseGeneration: String(token.generation),
         userId: TEST_USER_ID,
       },
       reason: "nudge",
@@ -1176,14 +1175,14 @@ describe("HostedUserRunner execution coordination", () => {
     });
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: token?.attemptId,
+      active_attempt_id: token.attemptId,
       active_expires_at: null,
       backoff_until: null,
       wake_at: null,
     });
   });
 
-  it("defers workspace wakes behind an active write fence without poking the runner", async () => {
+  it("probes workspace wakes behind an active runtime write fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
@@ -1197,8 +1196,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    const token = await runner.beginDeploySmokeRuntimeWriteFence({
-      userId: TEST_USER_ID,
+    const token = writeRuntimeFenceForTest(sql, {
       workspaceVersion: "7",
     });
 
@@ -1207,27 +1205,21 @@ describe("HostedUserRunner execution coordination", () => {
       reason: "nudge",
       source: "workspace_wake",
       userId: TEST_USER_ID,
-    })).resolves.toEqual({
-      kind: "retry_later",
-      retryAt: ACTIVE_RUNTIME_RECHECK_AT,
+    })).resolves.toMatchObject({
+      action: "woken",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: ACTIVE_RUNTIME_RECHECK_AT,
+      runtimeAttemptId: token.attemptId,
     });
 
-    expect(ensureProcessing).not.toHaveBeenCalled();
+    expect(ensureProcessing).toHaveBeenCalledOnce();
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: token?.attemptId,
+      active_attempt_id: token.attemptId,
       active_expires_at: null,
       backoff_until: null,
       wake_at: null,
     });
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: expect.objectContaining({
-          runtimeProcessingRetryReason: "active_runtime_workspace_wake",
-        }),
-        message: "Hosted runner deferred workspace wake while runtime processing is already active.",
-      }),
-    );
   });
 
   it("uses the active write fence alarmCoordinator for accepted processing wakes", async () => {
@@ -1239,13 +1231,12 @@ describe("HostedUserRunner execution coordination", () => {
         kind: "accepted" as const,
       }),
     );
-    const { invoke, runner } = createRunnerHarness({
+    const { invoke, runner, sql } = createRunnerHarness({
       ensureProcessing,
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    const token = await runner.beginDeploySmokeRuntimeWriteFence({
-      userId: TEST_USER_ID,
+    const token = writeRuntimeFenceForTest(sql, {
       workspaceVersion: "7",
     });
 
@@ -1257,7 +1248,7 @@ describe("HostedUserRunner execution coordination", () => {
       action: "woken",
       kind: "runtime_processing_accepted",
       recommendedRecheckAt: ACTIVE_RUNTIME_RECHECK_AT,
-      runtimeAttemptId: token?.attemptId,
+      runtimeAttemptId: token.attemptId,
     });
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
@@ -1278,8 +1269,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    const token = await runner.beginDeploySmokeRuntimeWriteFence({
-      userId: TEST_USER_ID,
+    const token = writeRuntimeFenceForTest(sql, {
       workspaceVersion: "7",
     });
     vi.setSystemTime(new Date("2026-04-27T00:01:03.000Z"));
@@ -1292,13 +1282,13 @@ describe("HostedUserRunner execution coordination", () => {
       action: "woken",
       kind: "runtime_processing_accepted",
       recommendedRecheckAt: "2026-04-27T00:02:03.000Z",
-      runtimeAttemptId: token?.attemptId,
+      runtimeAttemptId: token.attemptId,
     });
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: token?.attemptId,
+      active_attempt_id: token.attemptId,
       active_expires_at: null,
       failure_count: 0,
       wake_at: null,
@@ -1319,8 +1309,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    const token = await runner.beginDeploySmokeRuntimeWriteFence({
-      userId: TEST_USER_ID,
+    const token = writeRuntimeFenceForTest(sql, {
       workspaceVersion: "7",
     });
 
@@ -1336,14 +1325,53 @@ describe("HostedUserRunner execution coordination", () => {
     expect(ensureProcessing).toHaveBeenCalledOnce();
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: token?.attemptId,
+      active_attempt_id: token.attemptId,
       active_expires_at: null,
       backoff_until: null,
       wake_at: null,
     });
   });
 
-  it("replaces a non-wakeable write fence after startup grace elapses", async () => {
+  it("does not replace deploy-smoke write fences through normal runtime ensure", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = await runner.beginDeploySmokeRuntimeWriteFence({
+      userId: TEST_USER_ID,
+      workspaceVersion: "7",
+    });
+    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-smoke-busy",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:36.000Z",
+    });
+
+    expect(ensureProcessing).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token?.attemptId,
+      active_expires_at: null,
+      failure_count: 0,
+      wake_at: null,
+    });
+  });
+
+  it("replaces stale deploy-smoke write fences when normal runtime demand arrives", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
@@ -1363,6 +1391,59 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
       workspaceVersion: "7",
     });
+    vi.setSystemTime(new Date("2026-04-27T00:10:01.000Z"));
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-smoke-replace",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "replaced",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-04-27T00:11:01.000Z",
+      runtimeAttemptId: expect.not.stringMatching(token?.attemptId ?? ""),
+    });
+
+    expect(ensureProcessing).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: expect.not.stringMatching(token?.attemptId ?? ""),
+      active_expires_at: null,
+      backoff_until: null,
+      wake_at: null,
+    });
+
+    invocationResult.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await vi.waitFor(() =>
+      expect(readRunnerMeta(sql)).toMatchObject({
+        active_attempt_id: null,
+        last_invocation_at: expect.any(String),
+      })
+    );
+  });
+
+  it("replaces a non-wakeable write fence after startup grace elapses", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      invocationResults: [invocationResult.promise],
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      workspaceVersion: "7",
+    });
     vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
 
     await expect(runner.ensureRuntimeProcessingForUser({
@@ -1373,13 +1454,13 @@ describe("HostedUserRunner execution coordination", () => {
       action: "replaced",
       kind: "runtime_processing_accepted",
       recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
-      runtimeAttemptId: expect.not.stringMatching(token?.attemptId ?? ""),
+      runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: expect.not.stringMatching(token?.attemptId ?? ""),
+      active_attempt_id: expect.not.stringMatching(token.attemptId),
       active_expires_at: null,
       backoff_until: null,
       wake_at: null,
@@ -1414,8 +1495,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    await runner.beginDeploySmokeRuntimeWriteFence({
-      userId: TEST_USER_ID,
+    writeRuntimeFenceForTest(sql, {
       workspaceVersion: "7",
     });
     vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
@@ -1452,8 +1532,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    const token = await runner.beginDeploySmokeRuntimeWriteFence({
-      userId: TEST_USER_ID,
+    const token = writeRuntimeFenceForTest(sql, {
       workspaceVersion: "7",
     });
 
@@ -1469,11 +1548,64 @@ describe("HostedUserRunner execution coordination", () => {
     expect(ensureProcessing).toHaveBeenCalledOnce();
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: token?.attemptId,
+      active_attempt_id: token.attemptId,
       active_expires_at: null,
       backoff_until: null,
       wake_at: null,
     });
+  });
+
+  it("replaces an old runtime write fence when active child wake cannot be confirmed", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "wake-unconfirmed" as const,
+        reason: "container-rpc-timeout" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      invocationResults: [invocationResult.promise],
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      workspaceVersion: "7",
+    });
+    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-wake-replace",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "replaced",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
+      runtimeAttemptId: expect.not.stringMatching(token.attemptId),
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: expect.not.stringMatching(token.attemptId),
+      active_expires_at: null,
+      backoff_until: null,
+      wake_at: null,
+    });
+
+    invocationResult.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await vi.waitFor(() =>
+      expect(readRunnerMeta(sql)).toMatchObject({
+        active_attempt_id: null,
+        last_invocation_at: expect.any(String),
+      })
+    );
   });
 
   it("returns retry_later when active child wake exceeds the caller command budget", async () => {
@@ -1493,8 +1625,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    const token = await runner.beginDeploySmokeRuntimeWriteFence({
-      userId: TEST_USER_ID,
+    const token = writeRuntimeFenceForTest(sql, {
       workspaceVersion: "7",
     });
 
@@ -1513,7 +1644,7 @@ describe("HostedUserRunner execution coordination", () => {
     expect(ensureProcessing).toHaveBeenCalledOnce();
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: token?.attemptId,
+      active_attempt_id: token.attemptId,
       active_expires_at: null,
       wake_at: null,
     });
@@ -2440,6 +2571,42 @@ async function expectFreshRuntimeRetryAndCleared(input: {
     failure_count: 1,
     wake_at: null,
   });
+}
+
+function writeRuntimeFenceForTest(
+  sql: TestSqlStorageLike,
+  input: {
+    attemptId?: string;
+    generation?: number;
+    startedAt?: string;
+    workspaceVersion?: string;
+  } = {},
+): {
+  attemptId: string;
+  generation: number;
+} {
+  const attemptId = input.attemptId ?? "attempt_runtime_active";
+  const generation = input.generation ?? 2;
+  sql.exec(
+    `UPDATE runner_meta
+     SET active_attempt_id = ?,
+         active_generation = ?,
+         active_kind = ?,
+         active_reason = ?,
+         active_started_at = ?,
+         active_workspace_version = ?
+     WHERE singleton = 1`,
+    attemptId,
+    generation,
+    "runtime",
+    "nudge",
+    input.startedAt ?? FIXED_NOW,
+    input.workspaceVersion ?? "7",
+  );
+  return {
+    attemptId,
+    generation,
+  };
 }
 
 function readRunnerMeta(sql: TestSqlStorageLike): {

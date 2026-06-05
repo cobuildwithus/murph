@@ -329,8 +329,9 @@ Response summary:
 
 - `runtime_processing_accepted`: Cloudflare accepted responsibility for making
   the runtime process now or soon. `action` explains whether the command started
-  a new attempt, replaced a non-wakeable startup fence, woke a ready child, or
-  recorded that the current attempt is already running/startup-pending. For fresh starts,
+  a new attempt, replaced an old runtime fence whose child could not be
+  confirmed, woke a ready child, or recorded that the current attempt is already
+  running/startup-pending. For fresh starts,
   Cloudflare has already read the workspace, bound the workspace version to the
   write fence, built runtime config/secrets, constructed the job, and confirmed
   container readiness before returning this response.

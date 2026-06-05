@@ -52,6 +52,11 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
   );
   rejectRemovedHostedAssistantRuntimeField(
     record,
+    "deadlineAt",
+    "Hosted assistant workspace runtime job request",
+  );
+  rejectRemovedHostedAssistantRuntimeField(
+    record,
     "run",
     "Hosted assistant workspace runtime job request",
   );

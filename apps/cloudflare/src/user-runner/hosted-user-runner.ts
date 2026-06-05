@@ -69,8 +69,9 @@ import {
 import {
   readRunnerWriteFenceAlreadyActiveRecord,
 } from "./write-fence-errors.js";
-
-const DEPLOY_SMOKE_WRITE_FENCE_STALE_MS = 10 * 60_000;
+import {
+  isDeploySmokeWriteFenceStale,
+} from "./runner-state-helpers.js";
 
 export type { DurableObjectStateLike } from "./types.js";
 
@@ -467,12 +468,4 @@ export class HostedUserRunner {
   private readHostedWebControlBaseUrl(): string {
     return this.env.hostedWebBaseUrl;
   }
-}
-
-function isDeploySmokeWriteFenceStale(
-  fence: NonNullable<RunnerStateRecord["writeFence"]>,
-): boolean {
-  const startedAtMs = Date.parse(fence.startedAt);
-  return !Number.isFinite(startedAtMs)
-    || Date.now() - startedAtMs >= DEPLOY_SMOKE_WRITE_FENCE_STALE_MS;
 }

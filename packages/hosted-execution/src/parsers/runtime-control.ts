@@ -260,6 +260,7 @@ const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONE_KEYS = new Set([
 const HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS = [
   "checkpointNextWakeAt",
   "committedSeq",
+  "deadlineAt",
   "events",
   "finalizeRequired",
   "inputCommittedSeq",

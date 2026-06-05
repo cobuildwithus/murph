@@ -123,74 +123,82 @@ export async function runHostedWorkspaceInvocation(
     runtime,
   };
   const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+  let acceptingRuntimeWakes = true;
   options.onRuntimeWakeReady?.(() => {
+    if (!acceptingRuntimeWakes) {
+      return false;
+    }
     runtimeWakeSignal.notify();
     return true;
   });
 
-  emitHostedExecutionStructuredLog({
-    component: "container",
-    details: buildHostedDirectRuntimeDiagnostics(job),
-    message: "Hosted container prepared direct workspace invocation.",
-    phase: "runtime.starting",
-    userId: readHostedExecutionRunnerJobUserId(job),
-  });
+  try {
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      details: buildHostedDirectRuntimeDiagnostics(job),
+      message: "Hosted container prepared direct workspace invocation.",
+      phase: "runtime.starting",
+      userId: readHostedExecutionRunnerJobUserId(job),
+    });
 
-  let currentLease = createHostedWorkspaceInvocationLease(job);
-  const boundUserId = readHostedExecutionRunnerJobUserId(job);
-  const providerFetchBaseUrlSource = {
-    ...options.supervisorEnv,
-    ...(job.runtime?.forwardedEnv ?? {}),
-    ...(job.runtime?.platformEnv ?? {}),
-  };
-  const providerFetchBaseUrls = readCloudflareHostedProviderFetchBaseUrls(
-    providerFetchBaseUrlSource,
-  );
-  const platform = buildHostedExecutionRuntimePlatform({
-    boundUserId,
-    commitTimeoutMs: job.runtime?.commitTimeoutMs ?? null,
-    providerFetchBaseUrlSource,
-    providerFetchBaseUrls,
-    proxyBoundUserIdHeader: true,
-    workspaceCheckpointBridge: {
-      readCurrentLease: () => currentLease,
-      recordCheckpoint: ({ workspaceVersion }) => {
-        currentLease = {
-          ...currentLease,
-          workspaceVersion,
-        };
+    let currentLease = createHostedWorkspaceInvocationLease(job);
+    const boundUserId = readHostedExecutionRunnerJobUserId(job);
+    const providerFetchBaseUrlSource = {
+      ...options.supervisorEnv,
+      ...(job.runtime?.forwardedEnv ?? {}),
+      ...(job.runtime?.platformEnv ?? {}),
+    };
+    const providerFetchBaseUrls = readCloudflareHostedProviderFetchBaseUrls(
+      providerFetchBaseUrlSource,
+    );
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId,
+      commitTimeoutMs: job.runtime?.commitTimeoutMs ?? null,
+      providerFetchBaseUrlSource,
+      providerFetchBaseUrls,
+      proxyBoundUserIdHeader: true,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => currentLease,
+        recordCheckpoint: ({ workspaceVersion }) => {
+          currentLease = {
+            ...currentLease,
+            workspaceVersion,
+          };
+        },
       },
-    },
-  });
-  const webControlFetch = createCloudflareHostedTrustedInternalFetch(
-    boundUserId,
-    fetch,
-    {
-      injectBoundUserIdHeader: true,
-    },
-  );
-  const decodeMailboxPayload = createCloudflareHostedMailboxPayloadDecoder({
-    fetchImpl: webControlFetch,
-    readCurrentLease: () => currentLease,
-    timeoutMs: readHostedRunnerCommitTimeoutMs(job.runtime?.commitTimeoutMs ?? null),
-  });
+    });
+    const webControlFetch = createCloudflareHostedTrustedInternalFetch(
+      boundUserId,
+      fetch,
+      {
+        injectBoundUserIdHeader: true,
+      },
+    );
+    const decodeMailboxPayload = createCloudflareHostedMailboxPayloadDecoder({
+      fetchImpl: webControlFetch,
+      readCurrentLease: () => currentLease,
+      timeoutMs: readHostedRunnerCommitTimeoutMs(job.runtime?.commitTimeoutMs ?? null),
+    });
 
-  const result = await runPackageHostedWorkspaceInvocation({
-    job,
-    ...(options.runnerJobAcceptedAt
-      ? { latencyMilestones: { runnerJobAcceptedAt: options.runnerJobAcceptedAt } }
-      : {}),
-    mailboxPayloadDecoder: decodeMailboxPayload,
-    platform,
-    readCurrentLease: () => currentLease,
-    runtimeWakeSignal,
-    snapshotArchiveBuilder: createCloudflareHostedWorkspaceSnapshotArchiveBuilder(),
-    snapshotDiagnosticsHashSecret:
-      job.diagnostics?.workspaceSnapshotPathHashSecret ?? null,
-    signal: options.signal ?? null,
-    vaultRoot: path.join(warmRoot, "durable", "vault"),
-  });
-  return assertHostedExecutionRunnerJobResult(result, job);
+    const result = await runPackageHostedWorkspaceInvocation({
+      job,
+      ...(options.runnerJobAcceptedAt
+        ? { latencyMilestones: { runnerJobAcceptedAt: options.runnerJobAcceptedAt } }
+        : {}),
+      mailboxPayloadDecoder: decodeMailboxPayload,
+      platform,
+      readCurrentLease: () => currentLease,
+      runtimeWakeSignal,
+      snapshotArchiveBuilder: createCloudflareHostedWorkspaceSnapshotArchiveBuilder(),
+      snapshotDiagnosticsHashSecret:
+        job.diagnostics?.workspaceSnapshotPathHashSecret ?? null,
+      signal: options.signal ?? null,
+      vaultRoot: path.join(warmRoot, "durable", "vault"),
+    });
+    return assertHostedExecutionRunnerJobResult(result, job);
+  } finally {
+    acceptingRuntimeWakes = false;
+  }
 }
 
 export async function clearHostedRunnerWarmLauncherRootsForTests(): Promise<void> {

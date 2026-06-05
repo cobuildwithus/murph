@@ -13,6 +13,8 @@ import type {
   RunnerStateRecord,
 } from "./types.js";
 
+export const DEPLOY_SMOKE_WRITE_FENCE_STALE_MS = 10 * 60_000;
+
 export interface RunnerMetaRow {
   [key: string]: DurableObjectSqlValue;
   active_attempt_id: string | null;
@@ -208,4 +210,12 @@ export function resolveRunnerNextWakeAt(record: RunnerStateRecord | {
 
 export function readWriteFenceKind(value: string | null): RunnerWriteFenceKind | null {
   return value === "deploy_smoke" || value === "runtime" ? value : null;
+}
+
+export function isDeploySmokeWriteFenceStale(
+  fence: NonNullable<RunnerStateRecord["writeFence"]>,
+): boolean {
+  const startedAtMs = Date.parse(fence.startedAt);
+  return !Number.isFinite(startedAtMs)
+    || Date.now() - startedAtMs >= DEPLOY_SMOKE_WRITE_FENCE_STALE_MS;
 }

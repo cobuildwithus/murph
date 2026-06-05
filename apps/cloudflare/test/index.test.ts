@@ -2163,11 +2163,12 @@ describe("cloudflare worker routes", () => {
           kind: "accepted" as const,
         })),
       });
-      const token = await runner.beginDeploySmokeRuntimeWriteFence({
+      const token = await writeRuntimeControlFenceForTest({
+        runner,
+        sql,
         userId: "test-user",
         workspaceVersion: "7",
       });
-      expect(token).not.toBeNull();
 
       const response = await runner.ensureRuntimeProcessingForUser({
         orchestrationAttemptId: "orchestration-attempt-test",
@@ -2179,12 +2180,12 @@ describe("cloudflare worker routes", () => {
         action: "woken",
         kind: "runtime_processing_accepted",
         recommendedRecheckAt: "2026-04-27T00:01:00.000Z",
-        runtimeAttemptId: token?.attemptId,
+        runtimeAttemptId: token.attemptId,
       });
       expect(ensureProcessing).toHaveBeenCalledWith({
         activeRuntime: {
-          attemptId: token?.attemptId,
-          leaseGeneration: token?.generation,
+          attemptId: token.attemptId,
+          leaseGeneration: token.generation,
           userId: "test-user",
         },
         reason: "nudge",
@@ -2192,7 +2193,7 @@ describe("cloudflare worker routes", () => {
       });
       expect(invoke).not.toHaveBeenCalled();
       expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
-        active_attempt_id: token?.attemptId,
+        active_attempt_id: token.attemptId,
         backoff_until: null,
         wake_at: null,
       });
@@ -2208,11 +2209,12 @@ describe("cloudflare worker routes", () => {
         })),
         invocationResults: [{ nextWakeAt: null, status: "idle" }],
       });
-      const oldToken = await runner.beginDeploySmokeRuntimeWriteFence({
+      const oldToken = await writeRuntimeControlFenceForTest({
+        runner,
+        sql,
         userId: "test-user",
         workspaceVersion: "7",
       });
-      expect(oldToken).not.toBeNull();
 
       const response = await runner.ensureRuntimeProcessingForUser({
         orchestrationAttemptId: "orchestration-attempt-test",
@@ -2227,8 +2229,8 @@ describe("cloudflare worker routes", () => {
       expect(ensureProcessing).toHaveBeenCalledOnce();
       expect(ensureProcessing).toHaveBeenCalledWith({
         activeRuntime: {
-          attemptId: oldToken?.attemptId,
-          leaseGeneration: oldToken?.generation,
+          attemptId: oldToken.attemptId,
+          leaseGeneration: oldToken.generation,
           userId: "test-user",
         },
         reason: "nudge",
@@ -2236,7 +2238,7 @@ describe("cloudflare worker routes", () => {
       });
       expect(invoke).not.toHaveBeenCalled();
       expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
-        active_attempt_id: oldToken?.attemptId,
+        active_attempt_id: oldToken.attemptId,
         backoff_until: null,
         wake_at: null,
       });
@@ -2251,11 +2253,12 @@ describe("cloudflare worker routes", () => {
           reason: "container-rpc-timeout" as const,
         })),
       });
-      const token = await runner.beginDeploySmokeRuntimeWriteFence({
+      const token = await writeRuntimeControlFenceForTest({
+        runner,
+        sql,
         userId: "test-user",
         workspaceVersion: "7",
       });
-      expect(token).not.toBeNull();
 
       await expect(runner.ensureRuntimeProcessingForUser({
         orchestrationAttemptId: "orchestration-attempt-test",
@@ -2268,7 +2271,7 @@ describe("cloudflare worker routes", () => {
 
       expect(invoke).not.toHaveBeenCalled();
       expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
-        active_attempt_id: token?.attemptId,
+        active_attempt_id: token.attemptId,
         backoff_until: null,
         wake_at: null,
       });
@@ -2917,6 +2920,42 @@ function readRunnerMetaForRuntimeControl(
      FROM runner_meta
      WHERE singleton = 1`,
   ).one();
+}
+
+async function writeRuntimeControlFenceForTest(input: {
+  runner: HostedUserRunner;
+  sql: ReturnType<typeof createTestSqlStorage>;
+  userId: string;
+  workspaceVersion: string;
+}): Promise<{
+  attemptId: string;
+  generation: string;
+}> {
+  await input.runner.bindUser(input.userId);
+  const attemptId = "attempt_runtime_control_active";
+  const generation = 2;
+  input.sql.exec(
+    `UPDATE runner_meta
+     SET active_attempt_id = ?,
+         active_generation = ?,
+         active_kind = ?,
+         active_reason = ?,
+         active_runner_container_name = ?,
+         active_started_at = ?,
+         active_workspace_version = ?
+     WHERE singleton = 1`,
+    attemptId,
+    generation,
+    "runtime",
+    "nudge",
+    input.userId,
+    "2026-04-27T00:00:00.000Z",
+    input.workspaceVersion,
+  );
+  return {
+    attemptId,
+    generation: String(generation),
+  };
 }
 
 function createRunnerContainerNamespace(): WorkerEnvironmentSource["RUNNER_CONTAINER"] {
