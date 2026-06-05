@@ -2163,55 +2163,6 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "search": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "text": {
-                          "description": "Named search text alias for machine-oriented calls.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "type": {
-                          "description": "Optional Health Commons entity type filter. Repeat --type for multiple values: mission, domain, biomarker, measurement_method, goal_template, experiment_family, protocol_variant, source_person, source_artifact, disambiguation.",
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "minLength": 1
-                          }
-                        },
-                        "limit": {
-                          "default": 5,
-                          "description": "Maximum number of catalog hits to return.",
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 200
-                        }
-                      }
-                    }
-                  }
-                },
-                "get": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "type": {
-                          "description": "Optional Health Commons entity type disambiguator: mission, domain, biomarker, measurement_method, goal_template, experiment_family, protocol_variant, source_person, source_artifact, disambiguation.",
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      }
-                    }
-                  }
-                },
                 "protocol": {
                   "type": "object",
                   "additionalProperties": false,
@@ -2275,57 +2226,6 @@
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 100
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                "source": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "commands": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "list": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "query": {
-                                  "description": "Optional text filter over source title, summary, citation, and body.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "kind": {
-                                  "description": "Optional source kind filter: journal_article, review, guideline, book, podcast, external_protocol, web_page, other. Use * for all.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "protocol": {
-                                  "description": "Optional public Health Commons protocol key, slug, or route id to list only sources backing that protocol.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "status": {
-                                  "description": "Optional Health Commons page status filter: draft, field-testing, reviewed, deprecated, community. Use * for all.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "limit": {
-                                  "default": 50,
-                                  "description": "Maximum number of source pages to return.",
-                                  "type": "integer",
-                                  "exclusiveMinimum": 0,
-                                  "maximum": 500
                                 }
                               }
                             }

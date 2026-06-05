@@ -26,12 +26,9 @@ import {
   registerCaptureCommands,
 } from './commands/capture.js'
 import {
-  commonsGetResultSchema,
   commonsProtocolExploreResultSchema,
   commonsProtocolListResultSchema,
   commonsProtocolShowResultSchema,
-  commonsSearchResultSchema,
-  commonsSourceListResultSchema,
   registerCommonsCommands,
 } from './commands/commons.js'
 import { registerDeviceCommands } from './commands/device.js'
@@ -532,18 +529,6 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['commons'],
     leafCommands: [
       {
-        path: ['commons', 'search'],
-        description:
-          'Search the public Health Commons catalog without reading or writing private vault protocols.',
-        output: commonsSearchResultSchema,
-      },
-      {
-        path: ['commons', 'get'],
-        description:
-          'Show one public Health Commons entity by key, slug, or route id, including measurement-method and protocol measurement-plan fields when present.',
-        output: commonsGetResultSchema,
-      },
-      {
         path: ['commons', 'protocol', 'list'],
         description:
           'List public Health Commons protocol variants with optional text, status, and category filters.',
@@ -560,12 +545,6 @@ export const vaultCliCommandDescriptors = [
         description:
           'Explore candidate public Health Commons protocol variants for a broad or fuzzy protocol request.',
         output: commonsProtocolExploreResultSchema,
-      },
-      {
-        path: ['commons', 'source', 'list'],
-        description:
-          'List public Health Commons source artifacts with optional text, kind, and status filters.',
-        output: commonsSourceListResultSchema,
       },
     ],
     register({ cli }) {
