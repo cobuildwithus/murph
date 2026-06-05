@@ -22,7 +22,6 @@ const validHostedRunnerSmokeResult = {
   codexVersion: "codex-cli 0.125.0",
   healthCommonsCatalogHash: "sha256:catalog",
   healthCommonsCliProtocolListBytes: 768,
-  healthCommonsCliSearchBytes: 512,
   healthCommonsFinnishDrySaunaTitle: "Finnish Dry Sauna",
   healthCommonsRuntimeProtocolHitKeys: [
     "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
@@ -95,7 +94,7 @@ describe("parseHostedRunnerSmokeResult", () => {
       pythonVersion: "Python 3.11.2",
       schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
       healthCommonsCatalogHash: "sha256:catalog",
-      healthCommonsCliSearchBytes: 512,
+      healthCommonsCliProtocolListBytes: 768,
       healthCommonsFinnishDrySaunaTitle: "Finnish Dry Sauna",
       reportedVaultIdMatchesExpected: true,
       healthCommonsRuntimeSearchHitKeys: [

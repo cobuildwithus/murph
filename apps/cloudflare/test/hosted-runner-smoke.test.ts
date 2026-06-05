@@ -96,7 +96,6 @@ describe("runHostedRunnerSmokeDetailed", () => {
             codexVersion: "codex-cli 0.125.0",
             healthCommonsCatalogHash: "sha256:catalog",
             healthCommonsCliProtocolListBytes: 768,
-            healthCommonsCliSearchBytes: 512,
             healthCommonsFinnishDrySaunaTitle: "Finnish Dry Sauna",
             healthCommonsRuntimeProtocolHitKeys: [
               "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",

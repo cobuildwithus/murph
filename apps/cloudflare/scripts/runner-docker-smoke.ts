@@ -80,7 +80,6 @@ async function main(): Promise<void> {
     console.log(`vaultShowBytes=${result.vaultShowBytes}`);
     console.log(`healthCommonsCatalogHash=${result.healthCommonsCatalogHash}`);
     console.log(`healthCommonsFinnishDrySaunaTitle=${result.healthCommonsFinnishDrySaunaTitle}`);
-    console.log(`healthCommonsCliSearchBytes=${result.healthCommonsCliSearchBytes}`);
     console.log(`healthCommonsCliProtocolListBytes=${result.healthCommonsCliProtocolListBytes}`);
     console.log(`healthCommonsRuntimeSearchHitKeys=${result.healthCommonsRuntimeSearchHitKeys.join(",")}`);
     console.log(`healthCommonsRuntimeProtocolHitKeys=${result.healthCommonsRuntimeProtocolHitKeys.join(",")}`);
