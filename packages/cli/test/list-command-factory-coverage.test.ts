@@ -42,7 +42,7 @@ function createListSliceCli() {
   const services = createIntegratedVaultServices()
   registerVaultCommands(cli, services)
   registerCaptureCommands(cli, services)
-  registerMeasurementCommands(cli, services)
+  registerMeasurementCommands(cli)
   registerWorkoutCommands(cli, services)
 
   return cli

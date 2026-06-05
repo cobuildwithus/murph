@@ -19,10 +19,7 @@ import {
   type HealthCommonsExpectedSignalDescription,
   type HealthCommonsTestPlan,
 } from '@murphai/contracts'
-import {
-  getGeneratedHealthCommonsProtocolRunSpecReader,
-  type HealthCommonsProtocolRunSpec,
-} from '@murphai/health-commons/runtime'
+import type { HealthCommonsProtocolRunSpec } from '@murphai/health-commons/runtime'
 import { Cli, z } from 'incur'
 import {
   requestIdFromOptions,
@@ -249,11 +246,14 @@ function normalizeProtocolVariantKey(value: string, optionName = 'protocol-key')
   return trimmed
 }
 
-function resolveProtocolVariantEntity(
+async function resolveProtocolVariantEntity(
   lookup: string,
   optionName = 'from-protocol',
-): ProtocolVariantEntity {
+): Promise<ProtocolVariantEntity> {
   const trimmed = lookup.trim()
+  const { getGeneratedHealthCommonsProtocolRunSpecReader } = await import(
+    '@murphai/health-commons/runtime'
+  )
   const reader = getGeneratedHealthCommonsProtocolRunSpecReader()
   const entity = reader.findByLookup(
     trimmed.startsWith('protocol_variant:')
@@ -461,7 +461,7 @@ function resolveStartWindows(input: {
   }
 }
 
-function buildExperimentPlanPayloadFromTypedOptions(input: {
+async function buildExperimentPlanPayloadFromTypedOptions(input: {
   slug: string
   options: {
     title?: string
@@ -559,7 +559,7 @@ function buildExperimentPlanPayloadFromTypedOptions(input: {
   const protocol =
     fromProtocol === undefined
       ? undefined
-      : resolveProtocolVariantEntity(fromProtocol, 'from-protocol')
+      : await resolveProtocolVariantEntity(fromProtocol, 'from-protocol')
   const testPlan = protocol
     ? resolveProtocolTestPlan({
         entity: protocol,
@@ -771,7 +771,7 @@ async function hydrateExperimentProtocolDefaults(input: {
     )
   }
 
-  const payload = buildExperimentPlanPayloadFromTypedOptions({
+  const payload = await buildExperimentPlanPayloadFromTypedOptions({
     slug: current.slug,
     options: {
       fromProtocol: protocolKey,
@@ -1287,7 +1287,7 @@ export function registerExperimentCommands(
     }),
     output: experimentStartResultSchema,
     async run({ args, options }) {
-      const payload = buildExperimentPlanPayloadFromTypedOptions({
+      const payload = await buildExperimentPlanPayloadFromTypedOptions({
         slug: args.slug,
         options: {
           ...options,

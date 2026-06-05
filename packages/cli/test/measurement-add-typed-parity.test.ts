@@ -117,7 +117,7 @@ function createMeasurementCli() {
 
   const services = createIntegratedVaultServices()
   registerVaultCommands(cli, services)
-  registerMeasurementCommands(cli, services)
+  registerMeasurementCommands(cli)
 
   return cli
 }

@@ -13,7 +13,6 @@ import {
   normalizeRepeatableEnumFlagOption,
   normalizeRepeatableFlagOption,
 } from '@murphai/vault-usecases'
-import type { VaultServices } from '@murphai/vault-usecases'
 
 const recordTypeValues = ALL_QUERY_ENTITY_FAMILIES
 const recordTypeDescription =
@@ -148,10 +147,7 @@ function normalizeSearchQueryInput(input: {
   return text
 }
 
-export function registerSearchCommands(
-  cli: Cli.Cli,
-  _services: VaultServices,
-) {
+export function registerSearchCommands(cli: Cli.Cli) {
   const search = Cli.create('search', {
     description:
       'Search commands for the shared local query projection over canonical vault records.',

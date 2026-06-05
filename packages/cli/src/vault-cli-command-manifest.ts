@@ -768,8 +768,8 @@ export const vaultCliCommandDescriptors = [
         description: measurementCommandDescriptions.manifest,
       },
     ],
-    register({ cli, services }) {
-      registerMeasurementCommands(cli, services)
+    register({ cli }) {
+      registerMeasurementCommands(cli)
     },
   },
   {
@@ -1337,8 +1337,8 @@ export const vaultCliCommandDescriptors = [
           'Build a descending cross-record timeline when the question is about what changed, what happened over a window, or what stood out over time.',
       },
     ],
-    register({ cli, services }) {
-      registerSearchCommands(cli, services)
+    register({ cli }) {
+      registerSearchCommands(cli)
     },
   },
   {
