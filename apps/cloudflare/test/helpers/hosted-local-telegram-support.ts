@@ -24,6 +24,7 @@ export interface HostedLocalTelegramStub {
   createTypingMatcher(userId: string): ObservedTelegramRequestMatcher;
   observedRequests: ObservedTelegramRequest[];
   parseObservedJson(body: string): Record<string, unknown> | null;
+  runnerBaseUrl: string;
   stop(): Promise<void>;
   waitForRequest(input: {
     expectedPath: string;
@@ -52,6 +53,8 @@ export const HOSTED_TELEGRAM_ROCKET_MAN_ASSISTANT_REPLY_TEXT =
   "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?";
 export const HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT =
   "What should I call you? And out of those, which ones matter most to you right now?";
+
+const hostedLocalRunnerProviderHost = "host.docker.internal";
 
 export async function startHostedLocalTelegramStub(input: {
   botToken: string;
@@ -170,8 +173,10 @@ export async function startHostedLocalTelegramStub(input: {
     );
   };
 
+  const tcpPort = requireBoundTcpPort(activeServer, "Telegram stub");
+
   return {
-    baseUrl: `http://127.0.0.1:${requireBoundTcpPort(activeServer, "Telegram stub")}`,
+    baseUrl: `http://127.0.0.1:${tcpPort}`,
     countObservedRequests: (expectedPath, matchRequest) =>
       observedRequests.filter((request) =>
         isMatchingObservedTelegramRequest(request, expectedPath, matchRequest)
@@ -180,6 +185,7 @@ export async function startHostedLocalTelegramStub(input: {
     createTypingMatcher: createTelegramTypingRequestMatcher,
     observedRequests,
     parseObservedJson: parseObservedTelegramJson,
+    runnerBaseUrl: `http://${hostedLocalRunnerProviderHost}:${tcpPort}`,
     stop: async () => {
       await stopHttpStubServer(activeServer);
       server = null;
