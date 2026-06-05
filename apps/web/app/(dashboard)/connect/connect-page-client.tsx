@@ -10,6 +10,7 @@ import {
   HostedOnboardingApiError,
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
+import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import {
   describeDeviceSyncCallbackError,
@@ -118,7 +119,9 @@ export function ConnectSourcesGrid({
     initialConnectIntent ? null : readDeviceConnectIntentFromCurrentLocation()
   ));
   const [initialConnectIntentDismissed, setInitialConnectIntentDismissed] = useState(false);
+  const initialConnectIntentAuthOpenedRef = useRef(false);
   const initialConnectIntentAttemptedRef = useRef(false);
+  const { openAuthDialog } = useAuth();
   const callbackConnectedSourceId = initialCallback?.status === "connected"
     ? resolveCallbackSourceId(initialCallback, sources)
     : null;
@@ -157,6 +160,24 @@ export function ConnectSourcesGrid({
       stripConnectCallbackParams();
     }
   }, [hasInitialCallback]);
+
+  useEffect(() => {
+    if (
+      authenticated
+      || initialConnectIntentAuthOpenedRef.current
+      || !activeConnectIntent?.claim
+    ) {
+      return;
+    }
+
+    const source = resolveConnectIntentStartSource(activeConnectIntent, displaySources);
+    if (!source) {
+      return;
+    }
+
+    initialConnectIntentAuthOpenedRef.current = true;
+    openAuthDialog();
+  }, [activeConnectIntent, authenticated, displaySources, openAuthDialog]);
 
   const startConnection = useCallback(async (
     source: ConnectSource,
@@ -827,6 +848,13 @@ function resolveConnectIntentRedirectSource(
     return null;
   }
 
+  return resolveConnectIntentStartSource(intent, sources);
+}
+
+function resolveConnectIntentStartSource(
+  intent: InitialDeviceConnectIntent,
+  sources: readonly ConnectSource[],
+): ConnectSource | null {
   const source = findInitialConnectIntentSource(intent, sources);
   if (!source || !source.connectTarget || (source.connected && !source.requiresReconnect)) {
     return null;
