@@ -170,6 +170,15 @@ interface ResetExecutionTargetSummary {
   temporalNamespaceFingerprint: string | null;
 }
 
+export interface ResetOutputEvent {
+  member?: string;
+  schema: typeof RESET_SCRIPT_SCHEMA;
+  step: string;
+  [key: string]: unknown;
+}
+
+type ResetOutputEmitter = (event: ResetOutputEvent) => void;
+
 const RESET_DOMAINS = ["device", "ingress", "runtime"] as const;
 const RESET_SCRIPT_SCHEMA = "murph.hosted-member-runtime-reset-script.v1";
 const DEFAULT_RESET_ENVIRONMENT = "production";
@@ -180,8 +189,19 @@ export const RESET_TRANSACTION_OPTIONS = {
 } as const;
 const TEMPORAL_TERMINATION_TIMEOUT_MS = 10_000;
 
-async function main(): Promise<void> {
-  const options = parseResetOptions(process.argv.slice(2));
+export async function runResetHostedMemberRuntimeCommand(
+  args: readonly string[],
+  emitEvent?: ResetOutputEmitter,
+): Promise<ResetOutputEvent[]> {
+  const events: ResetOutputEvent[] = [];
+  const emit = (event: ResetOutputEvent) => {
+    events.push(event);
+    emitEvent?.(event);
+  };
+  const printJson = (step: string, memberFingerprint: string, extra: object) => {
+    emit(buildResetOutputEvent(step, memberFingerprint, extra));
+  };
+  const options = parseResetOptions(args);
   const mode: ResetMode = options.execute ? "execute" : "dry-run";
   const memberFingerprint = fingerprintIdentifier(options.memberId);
   const targets = readResetExecutionTargetSummary();
@@ -189,14 +209,14 @@ async function main(): Promise<void> {
   const prisma = createPrismaFromEnvironment();
 
   try {
-    console.log(JSON.stringify({
+    emit({
       environment: options.environmentLabel,
       member: memberFingerprint,
       mode,
       schema: RESET_SCRIPT_SCHEMA,
       step: "start",
       targets,
-    }));
+    });
 
     const preflight = await readResetPreflight({
       memberId: options.memberId,
@@ -224,7 +244,7 @@ async function main(): Promise<void> {
       printJson("dry-run-complete", memberFingerprint, {
         note: "No rows were mutated. Re-run with --execute, --confirm-member-id, --confirm-environment, and --confirm-target-fingerprint to reset this member.",
       });
-      return;
+      return events;
     }
 
     if (options.resumeSuspendedReset) {
@@ -344,6 +364,14 @@ async function main(): Promise<void> {
   } finally {
     await prisma.$disconnect();
   }
+
+  return events;
+}
+
+async function main(): Promise<void> {
+  await runResetHostedMemberRuntimeCommand(process.argv.slice(2), (event) => {
+    console.log(JSON.stringify(event));
+  });
 }
 
 export function parseResetOptions(args: readonly string[]): ResetOptions {
@@ -1589,12 +1617,20 @@ function withTimeout<T>(operation: Promise<T>, timeoutMs: number, message: strin
 }
 
 function printJson(step: string, memberFingerprint: string, extra: object): void {
-  console.log(JSON.stringify({
+  console.log(JSON.stringify(buildResetOutputEvent(step, memberFingerprint, extra)));
+}
+
+function buildResetOutputEvent(
+  step: string,
+  memberFingerprint: string,
+  extra: object,
+): ResetOutputEvent {
+  return {
     member: memberFingerprint,
     schema: RESET_SCRIPT_SCHEMA,
     step,
     ...extra,
-  }));
+  };
 }
 
 function readResetExecutionTargetSummary(): ResetExecutionTargetSummary {
