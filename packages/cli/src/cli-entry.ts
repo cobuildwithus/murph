@@ -358,7 +358,17 @@ export function createCliServeOptions(
 
 async function stopWarmCodexAppServerForCliExit(): Promise<void> {
   const { stopWarmCodexAppServer } = await import('@murphai/assistant-engine/codex-lifecycle')
-  await stopWarmCodexAppServer('cli-entrypoint-exit')
+  try {
+    await stopWarmCodexAppServer('cli-entrypoint-exit')
+  } catch (error) {
+    if (
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_CODEX_APP_SERVER_BUSY'
+    ) {
+      return
+    }
+    throw error
+  }
 }
 
 function resolvePublishedCliBinPath(): string {

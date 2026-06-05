@@ -1395,7 +1395,7 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('answers pre-start warm server requests without waiting for the turn/start response', async () => {
+  it('buffers tagged pre-start warm server requests until the turn/start response confirms the turn', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-prestart-request-work-')
     const codexHome = await createTempDir('assistant-codex-local-prestart-request-home-')
     const progressUpdates: string[] = []
@@ -1451,13 +1451,10 @@ describe('assistant codex runtime', () => {
             },
           }))
 
-          const response = await waitForRpcResponse(child, 99)
-          expect(response).toMatchObject({
-            id: 99,
-            result: {
-              success: true,
-            },
-          })
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          expect(
+            readWrittenRpcMessages(child).some((message) => message.id === 99),
+          ).toBe(false)
 
           child.stdout.write(jsonLine({
             id: secondTurn.id,
@@ -1467,6 +1464,14 @@ describe('assistant codex runtime', () => {
               },
             },
           }))
+          const response = await waitForRpcResponse(child, 99)
+          expect(response).toMatchObject({
+            id: 99,
+            result: {
+              success: true,
+            },
+          })
+
           child.stdout.write(jsonLine({
             method: 'assistant.message.delta',
             params: {
@@ -1530,6 +1535,97 @@ describe('assistant codex runtime', () => {
       turnId: 'turn-local-prestart-request-2',
     })
     expect(progressUpdates).toEqual(['Starting early work'])
+  })
+
+  it('preserves reused turn/start JSON-RPC errors instead of reporting missing turn ids', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-local-turn-start-error-work-')
+    const codexHome = await createTempDir('assistant-codex-local-turn-start-error-home-')
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 25_935 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-local-turn-start-error-1',
+            turnId: 'turn-local-turn-start-error-1',
+          })
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-local-turn-start-error-1',
+                status: 'completed',
+              },
+            },
+          }))
+
+          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondThread.id,
+            result: {
+              thread: {
+                id: 'thread-local-turn-start-error-2',
+              },
+            },
+          }))
+          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            error: {
+              message: 'turn/start failed before a turn id was allocated',
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const stableInput = {
+      approvalPolicy: 'never',
+      codexHome,
+      env: {
+        PATH: '/custom/bin',
+      },
+      sandbox: 'workspace-write' as const,
+      workingDirectory,
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        prompt: 'first local turn before turn/start error',
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-local-turn-start-error-1',
+      turnId: 'turn-local-turn-start-error-1',
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        prompt: 'second local turn with turn/start error',
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APP_SERVER_RPC_FAILED',
+      context: {
+        method: 'turn/start',
+        retryable: false,
+        staleResume: false,
+      },
+      message: 'turn/start failed before a turn id was allocated',
+    })
+    expect(process.kill).toHaveBeenCalledWith(-25_935, 'SIGTERM')
   })
 
   it('completes reused warm turns from dotted lifecycle event names', async () => {

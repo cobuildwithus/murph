@@ -945,8 +945,20 @@ async function evaluateAssistantAutoReplyGroup(input: {
     )
   }
 
+  const deliveryTarget = readAutoReplyDeliveryTarget(input.group)
+  if (
+    input.executionContext?.hosted &&
+    primaryReplyInput.source === 'telegram' &&
+    deliveryTarget === null &&
+    shouldSuppressHostedTelegramAutoReplyMissingDeliveryTarget(input.group)
+  ) {
+    return createAdvancingSkipDecision(
+      'hosted Telegram auto-reply is missing a provider delivery target',
+    )
+  }
+
   return {
-    deliveryTarget: readAutoReplyDeliveryTarget(input.group),
+    deliveryTarget,
     deliveryReplyToMessageId: readAutoReplyDeliveryReplyToMessageId({
       inputs: promptInputs,
       context: input.group,
@@ -1367,6 +1379,10 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
         candidates: lateInputs.inputs,
         expectedChannel: context.firstItem.summary.source,
       })
+    const acceptedInputDeliveryTarget = readLatestAssistantInputDeliveryTarget({
+      candidates: lateInputs.inputs,
+      expectedChannel: context.firstItem.summary.source,
+    })
     const lateItems = [
       ...nextContext.items,
       ...lateCapturelessCandidates.map(
@@ -1417,9 +1433,12 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       acceptedInputs,
       deliveryIdempotencyKey: createHostedAutoReplyDeliveryIdempotencyKey({
         context: finalContext,
-        deliveryTarget: input.deliveryTarget,
+        deliveryTarget: acceptedInputDeliveryTarget ?? input.deliveryTarget,
         executionContext: input.executionContext,
       }),
+      ...(acceptedInputDeliveryTarget !== null
+        ? { deliveryTarget: acceptedInputDeliveryTarget }
+        : {}),
       deliveryReplyToMessageId:
         acceptedInputReplyToMessageId ??
         readAutoReplyDeliveryReplyToMessageId({
@@ -2050,6 +2069,31 @@ function readAutoReplyDeliveryTarget(
     expectedChannel: context.firstItem.summary.source,
   })
   return readAssistantInputReplyTargetDeliveryTarget(replyTarget)
+}
+
+function shouldSuppressHostedTelegramAutoReplyMissingDeliveryTarget(
+  context: AssistantAutoReplyGroupContext,
+): boolean {
+  if (normalizeNullableString(context.firstItem.summary.source) !== 'telegram') {
+    return false
+  }
+
+  const candidates = autoReplyInputCandidatesFromContext(context)
+  const hasTelegramReplyTarget = candidates.some((candidate) => {
+    const replyTarget = candidate.event.replyTarget
+    return Boolean(
+      replyTarget &&
+      normalizeNullableString(replyTarget.channel) === 'telegram' &&
+      readAssistantInputCandidateChannel(candidate) === 'telegram',
+    )
+  })
+  if (hasTelegramReplyTarget) {
+    return true
+  }
+
+  return readProviderRouteScalar(
+    context.firstItem.summary.conversation.threadId,
+  ) === null
 }
 
 function readLatestAssistantInputDeliveryTarget(input: {

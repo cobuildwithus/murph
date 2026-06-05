@@ -26,6 +26,7 @@ import { normalizeAssistantExecutionContext } from './execution-context.js'
 import {
   serializeAssistantConversationForPersistence,
 } from './conversation-persistence.js'
+import { normalizeNullableString } from './shared.js'
 
 export function buildResolveAssistantSessionInput(
   input: AssistantSessionResolutionFields,
@@ -124,7 +125,14 @@ function readAssistantSessionResolutionField(
   },
 ): string | null | undefined {
   if (input.conversation && input.field in input.conversation) {
-    return input.conversation[input.field]
+    const conversationValue = input.conversation[input.field]
+    if (normalizeNullableString(conversationValue) !== null) {
+      return conversationValue
+    }
+    if (input.field in input.input) {
+      return input.input[input.field]
+    }
+    return conversationValue
   }
   if (input.field in input.input) {
     return input.input[input.field]

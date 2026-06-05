@@ -331,6 +331,20 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
+      if (hostedContainerPoisoned) {
+        discardUnreadRequestBody(request);
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          level: "warn",
+          message: "Hosted container entrypoint rejected an invocation after the container was poisoned.",
+          phase: "failed",
+        });
+        writeJsonResponse(response, 503, {
+          error: "Hosted runner container is poisoned.",
+        });
+        return;
+      }
+
       if (request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_RUNTIME_WAKE_PATH) {
         discardUnreadRequestBody(request);
         const wake = activeRuntimeWake;

@@ -689,6 +689,12 @@ class CodexAppServerProcess {
     }
   }
 
+  releaseReservation(): void {
+    if (this.state === 'reserved' && !this.activeTurn) {
+      this.state = 'idle'
+    }
+  }
+
   buildBusyError(
     message = 'Codex app-server process is not idle.',
   ): VaultCliError {
@@ -1632,9 +1638,6 @@ async function runCodexAppServerTurnOnProcess(
   const validateWarmTurnEventCorrelation = (
     message: CodexRpcMessage,
     eventMethod: string | null,
-    options: {
-      bindPreStartCandidate?: boolean
-    } = {},
   ): VaultCliError | null => {
     const eventTurnId = extractCodexTurnIdFromMessage(message)
     if (
@@ -1643,9 +1646,7 @@ async function runCodexAppServerTurnOnProcess(
       codexEventMethodRequiresTurnCorrelation(eventMethod)
     ) {
       if (eventTurnId) {
-        return options.bindPreStartCandidate
-          ? bindExpectedTurnId(eventTurnId, eventMethod)
-          : null
+        return null
       }
 
       return buildStaleTurnEventError({
@@ -1675,6 +1676,11 @@ async function runCodexAppServerTurnOnProcess(
       codexProcess.requiresCompleteTurnCorrelation &&
       expectedTurnId === null &&
       codexEventMethodRequiresTurnCorrelation(eventMethod) &&
+      extractCodexTurnIdFromMessage(message) !== null
+    ) || (
+      codexProcess.requiresCompleteTurnCorrelation &&
+      expectedTurnId === null &&
+      readCodexRpcServerRequestId(message) !== null &&
       extractCodexTurnIdFromMessage(message) !== null
     )
   }
@@ -1891,22 +1897,6 @@ async function runCodexAppServerTurnOnProcess(
     const responseId = readCodexRpcResponseId(message)
     if (responseId !== null) {
       const pending = codexProcess.pendingRequests.get(responseId)
-      if (pending?.method === 'thread/start' || pending?.method === 'thread/resume') {
-        codexThreadId = extractCodexThreadIdFromResult(message.result) ?? codexThreadId
-      }
-      if (pending?.method === 'turn/start') {
-        const resultTurnId = extractCodexTurnIdFromResult(message.result)
-        if (codexProcess.requiresCompleteTurnCorrelation && !resultTurnId) {
-          rejectOnce(buildMissingReusedTurnIdError())
-          return
-        }
-        const correlationError = bindExpectedTurnId(resultTurnId, 'turn/start')
-        if (correlationError) {
-          rejectOnce(correlationError)
-          return
-        }
-        turnId = resultTurnId ?? turnId
-      }
       const resolveResult = resolvePendingCodexRpcRequest({
         message,
         pendingRequests: codexProcess.pendingRequests,
@@ -1921,6 +1911,25 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (resolveResult !== 'unknown_response_id') {
         acceptJsonEvent(message)
+        if (message.error) {
+          return
+        }
+        if (pending?.method === 'thread/start' || pending?.method === 'thread/resume') {
+          codexThreadId = extractCodexThreadIdFromResult(message.result) ?? codexThreadId
+        }
+        if (pending?.method === 'turn/start') {
+          const resultTurnId = extractCodexTurnIdFromResult(message.result)
+          if (codexProcess.requiresCompleteTurnCorrelation && !resultTurnId) {
+            rejectOnce(buildMissingReusedTurnIdError())
+            return
+          }
+          const correlationError = bindExpectedTurnId(resultTurnId, 'turn/start')
+          if (correlationError) {
+            rejectOnce(correlationError)
+            return
+          }
+          turnId = resultTurnId ?? turnId
+        }
         if (pending?.method === 'turn/start' && !flushPendingPreStartMessages()) {
           return
         }
@@ -1931,12 +1940,17 @@ async function runCodexAppServerTurnOnProcess(
     const requestId = readCodexRpcServerRequestId(message)
     if (requestId !== null) {
       const requestMethod = typeof message.method === 'string' ? message.method : null
+      if (shouldBufferPreStartWarmMessage(message, requestMethod)) {
+        pendingPreStartMessages.push({
+          kind: 'server_request',
+          message,
+          method: requestMethod,
+        })
+        return
+      }
       const correlationError = validateWarmTurnEventCorrelation(
         message,
         requestMethod,
-        {
-          bindPreStartCandidate: true,
-        },
       )
       if (correlationError) {
         rejectOnce(correlationError)
@@ -2117,9 +2131,9 @@ async function runCodexAppServerTurnOnProcess(
       stdout += text
     },
   }
-  codexProcess.bindTurn(activeTurnBinding)
 
   try {
+    codexProcess.bindTurn(activeTurnBinding)
     if (!codexProcess.initializedForRpc) {
       lifecycleStage = 'spawn_wait'
       await codexProcess.waitForSpawn()
@@ -2215,6 +2229,7 @@ async function runCodexAppServerTurnOnProcess(
     closeLiveTurn()
     cleanupAbortListener()
     codexProcess.releaseTurn(activeTurnBinding)
+    codexProcess.releaseReservation()
   }
 
   const finalMessage =

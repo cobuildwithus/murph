@@ -170,6 +170,41 @@ describe('assistant product small seams', () => {
       threadIsDirect: false,
     })
 
+    const messageChannelFallback = resolveAssistantConversationPolicy({
+      message: {
+        channel: 'telegram',
+        conversation: {
+          channel: null,
+          directness: 'direct',
+          threadId: 'telegram-thread',
+        },
+        deliverResponse: true,
+        deliveryReplyToMessageId: null,
+        deliveryTarget: 'telegram-thread',
+        operatorAuthority: 'direct-operator',
+        threadId: null,
+        threadIsDirect: null,
+      },
+      session: {
+        binding: {
+          actorId: null,
+          channel: null,
+          conversationKey: null,
+          delivery: null,
+          identityId: null,
+          threadId: null,
+          threadIsDirect: null,
+        },
+      },
+    })
+    expect(messageChannelFallback.audience).toMatchObject({
+      channel: 'telegram',
+      deliveryPolicy: 'explicit-target-override',
+      explicitTarget: 'telegram-thread',
+      threadId: 'telegram-thread',
+      threadIsDirect: true,
+    })
+
     const bindingTargetOnly = resolveAssistantConversationPolicy({
       message: {
         deliverResponse: true,
