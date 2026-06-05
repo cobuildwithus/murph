@@ -684,7 +684,7 @@ Updated: 2026-04-24
     expect(webVerify).toContain('MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED')
     expect(workspaceVerify).toContain('MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED=1')
     expect(workspaceVerify).toContain(
-      'skip Health Commons generated catalog; root acceptance typecheck already prepared it',
+      'skip Health Commons generated artifacts; root acceptance typecheck already prepared them',
     )
     expect(workspaceVerify).toContain(
       'run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts "$acceptance_typechecked"',

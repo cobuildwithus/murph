@@ -58,6 +58,54 @@ const finnishDrySaunaProtocol = {
   ],
   title: "Finnish Dry Sauna",
 } as const;
+const drySaunaFamily = {
+  aliases: ["sauna"],
+  categories: ["recovery", "passive-heat"],
+  entityType: "experiment_family",
+  key: "experiment_family:dry-sauna",
+  relativePath: "families/dry-sauna.md",
+  revision: {
+    pageRevisionId: "sha256:test-family-page",
+    recipeHash: null,
+    runSpecRevisionId: null,
+  },
+  routeId: "dry-sauna",
+  routeIds: ["dry-sauna", "families/dry-sauna"],
+  slug: "families/dry-sauna",
+  status: "field-testing",
+  summary: "Dry sauna family.",
+  title: "Dry Sauna",
+} as const;
+const finnishDrySaunaProtocolSummary = {
+  aliases: ["finnish sauna"],
+  categories: ["recovery", "passive-heat", "murph-canonical"],
+  entityType: "protocol_variant",
+  key: finnishDrySaunaProtocol.key,
+  relativePath: finnishDrySaunaProtocol.relativePath,
+  revision: finnishDrySaunaProtocol.revision,
+  routeId: "finnish-sauna",
+  routeIds: [
+    "finnish-sauna",
+    finnishDrySaunaProtocol.slug,
+    "dry-sauna/murph-finnish-standard-3x-week",
+  ],
+  slug: finnishDrySaunaProtocol.slug,
+  status: "field-testing",
+  summary: "Finnish Dry Sauna summary.",
+  title: finnishDrySaunaProtocol.title,
+  traits: {
+    cautionLevel: finnishDrySaunaProtocol.safety.cautionLevel,
+    externalProtocol: false,
+    highCaution: false,
+    murphCanonical: true,
+    sourceAttributed: false,
+  },
+} as const;
+const healthCommonsRuntimeArtifactNames = [
+  "protocol-index.json",
+  "protocol-run-specs.json",
+  "protocol-family-graph.json",
+] as const;
 const requiredHostedCryptoWorkerVars = {
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
     "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
@@ -128,7 +176,7 @@ describe("deploy artifact validation", () => {
     );
   });
 
-  it("rejects a runner bundle with a stale Health Commons catalog", async () => {
+  it("rejects a runner bundle with a stale Health Commons protocol index", async () => {
     const fixture = await createDeployArtifactFixture();
 
     await writeFile(
@@ -138,31 +186,24 @@ describe("deploy artifact validation", () => {
         "@murphai",
         "health-commons",
         "generated",
-        "catalog.json",
+        "protocol-index.json",
       ),
       `${JSON.stringify({
-        artifactManifests: [],
         catalogHash: "sha256:stale",
-        changes: [],
-        entities: [],
-        redirects: [],
-        schemaVersion: "murph.commons.catalog.v1",
+        protocols: [],
+        schemaVersion: "murph.commons.protocol-index.v1",
       }, null, 2)}\n`,
       "utf8",
     );
     await rewriteRunnerBundleManifest(fixture);
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
-      "Runner Health Commons generated catalog is stale or missing Finnish Dry Sauna",
+      "Runner Health Commons protocol index is stale or missing Finnish Dry Sauna",
     );
   });
 
-  it("rejects a runner bundle with a schema-invalid Health Commons catalog", async () => {
+  it("rejects a runner bundle with stale Health Commons protocol run specs", async () => {
     const fixture = await createDeployArtifactFixture();
-    const schemaInvalidProtocol: Record<string, unknown> = {
-      ...finnishDrySaunaProtocol,
-    };
-    delete schemaInvalidProtocol.protocol;
 
     await writeFile(
       path.join(
@@ -171,26 +212,33 @@ describe("deploy artifact validation", () => {
         "@murphai",
         "health-commons",
         "generated",
-        "catalog.json",
+        "protocol-run-specs.json",
       ),
       `${JSON.stringify({
-        artifactManifests: [],
         catalogHash: "sha256:invalid",
-        changes: [],
-        entities: [schemaInvalidProtocol],
-        redirects: [],
-        schemaVersion: "murph.commons.catalog.v1",
+        protocols: [
+          {
+            ...finnishDrySaunaProtocolSummary,
+            expectedSignalDescriptions: [],
+            experimentOnboarding: null,
+            protocol: null,
+            safety: finnishDrySaunaProtocol.safety,
+            testPlans: finnishDrySaunaProtocol.testPlans,
+            whyItWorks: [],
+          },
+        ],
+        schemaVersion: "murph.commons.protocol-run-specs.v1",
       }, null, 2)}\n`,
       "utf8",
     );
     await rewriteRunnerBundleManifest(fixture);
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
-      "Runner Health Commons generated catalog is invalid",
+      "Runner Health Commons protocol run specs are stale or missing Finnish Dry Sauna",
     );
   });
 
-  it("rejects a runner bundle missing the Health Commons generated catalog", async () => {
+  it("rejects a runner bundle missing a Health Commons runtime generated artifact", async () => {
     const fixture = await createDeployArtifactFixture();
 
     await rm(
@@ -200,16 +248,16 @@ describe("deploy artifact validation", () => {
         "@murphai",
         "health-commons",
         "generated",
-        "catalog.json",
+        "protocol-run-specs.json",
       ),
     );
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
-      "Missing Health Commons generated catalog.",
+      "Missing Health Commons protocol run specs.",
     );
   });
 
-  it("rejects a runner bundle with a schema-invalid Health Commons catalog", async () => {
+  it("rejects a runner bundle with a stale Health Commons protocol family graph", async () => {
     const fixture = await createDeployArtifactFixture();
 
     await writeFile(
@@ -219,18 +267,21 @@ describe("deploy artifact validation", () => {
         "@murphai",
         "health-commons",
         "generated",
-        "catalog.json",
+        "protocol-family-graph.json",
       ),
       `${JSON.stringify({
         catalogHash: "sha256:test",
-        entities: [finnishDrySaunaProtocol],
+        edges: [],
+        families: [drySaunaFamily],
+        protocols: [finnishDrySaunaProtocolSummary],
+        schemaVersion: "murph.commons.protocol-family-graph.v1",
       }, null, 2)}\n`,
       "utf8",
     );
     await rewriteRunnerBundleManifest(fixture);
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
-      "Runner Health Commons generated catalog is invalid",
+      "Runner Health Commons protocol family graph is stale or missing Finnish Dry Sauna",
     );
   });
 
@@ -312,7 +363,7 @@ describe("deploy artifact validation", () => {
 
 writeFileSync(${JSON.stringify(markerPath)}, "executed");
 
-export function loadGeneratedHealthCommonsCatalog() {
+export function getGeneratedHealthCommonsProtocolIndexReader() {
   return {};
 }
 `,
@@ -327,7 +378,7 @@ export function loadGeneratedHealthCommonsCatalog() {
     });
   });
 
-  it("validates the Health Commons catalog without executing bundled runtime code", async () => {
+  it("validates Health Commons compact protocol artifacts without executing bundled runtime code", async () => {
     const fixture = await createDeployArtifactFixture();
     const markerPath = path.join(fixture.runnerBundleDir, "runtime-import-marker");
 
@@ -344,7 +395,7 @@ export function loadGeneratedHealthCommonsCatalog() {
 
 writeFileSync(${JSON.stringify(markerPath)}, "executed");
 
-export function loadGeneratedHealthCommonsCatalog() {
+export function getGeneratedHealthCommonsProtocolIndexReader() {
   return {};
 }
 `,
@@ -387,24 +438,13 @@ export function loadGeneratedHealthCommonsCatalog() {
 
 writeFileSync(${JSON.stringify(markerPath)}, "executed");
 
-export function loadGeneratedHealthCommonsCatalog() {
+export function getGeneratedHealthCommonsProtocolIndexReader() {
   return {};
 }
 `,
       "utf8",
     );
-    await writeFile(
-      path.join(externalPackageDir, "generated", "catalog.json"),
-      `${JSON.stringify({
-        artifactManifests: [],
-        catalogHash: "sha256:test",
-        changes: [],
-        entities: [finnishDrySaunaProtocol],
-        redirects: [],
-        schemaVersion: "murph.commons.catalog.v1",
-      }, null, 2)}\n`,
-      "utf8",
-    );
+    await writeHealthCommonsRuntimeArtifacts(path.join(externalPackageDir, "generated"));
     await symlink(externalPackageDir, packageDir, "dir");
     await rewriteRunnerBundleManifest(fixture);
 
@@ -436,7 +476,7 @@ export function loadGeneratedHealthCommonsCatalog() {
 
 writeFileSync(${JSON.stringify(markerPath)}, "executed");
 
-export function loadGeneratedHealthCommonsCatalog() {
+export function getGeneratedHealthCommonsProtocolIndexReader() {
   return {};
 }
 `,
@@ -454,37 +494,30 @@ export function loadGeneratedHealthCommonsCatalog() {
     });
   });
 
-  it("rejects Health Commons catalog file symlink escapes", async () => {
+  it("rejects Health Commons compact artifact file symlink escapes", async () => {
     const fixture = await createDeployArtifactFixture();
-    const externalRoot = await mkdtemp(path.join(os.tmpdir(), "health-commons-catalog-escape-"));
-    const externalCatalogPath = path.join(externalRoot, "catalog.json");
-    const catalogPath = path.join(
+    const externalRoot = await mkdtemp(path.join(os.tmpdir(), "health-commons-protocol-index-escape-"));
+    const externalArtifactPath = path.join(externalRoot, "protocol-index.json");
+    const artifactPath = path.join(
       fixture.runnerBundleDir,
       "node_modules",
       "@murphai",
       "health-commons",
       "generated",
-      "catalog.json",
+      "protocol-index.json",
     );
 
     await writeFile(
-      externalCatalogPath,
-      `${JSON.stringify({
-        artifactManifests: [],
-        catalogHash: "sha256:test",
-        changes: [],
-        entities: [finnishDrySaunaProtocol],
-        redirects: [],
-        schemaVersion: "murph.commons.catalog.v1",
-      }, null, 2)}\n`,
+      externalArtifactPath,
+      `${JSON.stringify(createHealthCommonsRuntimeArtifacts().protocolIndex, null, 2)}\n`,
       "utf8",
     );
-    await rm(catalogPath);
-    await symlink(externalCatalogPath, catalogPath);
+    await rm(artifactPath);
+    await symlink(externalArtifactPath, artifactPath);
     await rewriteRunnerBundleManifest(fixture);
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
-      "Health Commons generated catalog must not be a symlink.",
+      "Health Commons protocol index must not be a symlink.",
     );
   });
 
@@ -553,7 +586,7 @@ export function loadGeneratedHealthCommonsCatalog() {
 
     await mkdir(path.join(packageDir, "generated"), { recursive: true });
     await writeFile(
-      path.join(packageDir, "generated", "catalog.json"),
+      path.join(packageDir, "generated", "protocol-index.json"),
       "{\"generated\":true}\n",
       "utf8",
     );
@@ -882,58 +915,85 @@ async function writeWorkspacePackageManifest(packageDir: string, packageName: st
     await mkdir(path.join(packageDir, "generated"), { recursive: true });
     await writeFile(
       path.join(packageDir, "dist", "runtime.js"),
-      `import { readFileSync } from "node:fs";
-
-export function loadGeneratedHealthCommonsCatalog(options = {}) {
-  const catalog = JSON.parse(readFileSync(options.catalogPath, "utf8"));
-
-  if (!catalog || typeof catalog !== "object" || Array.isArray(catalog)) {
-    throw new Error("Invalid Health Commons catalog.");
+      "export {};\n",
+      "utf8",
+    );
+    await writeHealthCommonsRuntimeArtifacts(path.join(packageDir, "generated"));
   }
-
-  if (
-    catalog.schemaVersion !== "murph.commons.catalog.v1" ||
-    typeof catalog.catalogHash !== "string" ||
-    !catalog.catalogHash.startsWith("sha256:") ||
-    !Array.isArray(catalog.entities) ||
-    !Array.isArray(catalog.redirects) ||
-    !Array.isArray(catalog.changes) ||
-    !Array.isArray(catalog.artifactManifests)
-  ) {
-    throw new Error("Invalid Health Commons catalog.");
-  }
-
-  for (const entity of catalog.entities) {
-    if (
-      !entity ||
-      typeof entity !== "object" ||
-      typeof entity.body !== "string" ||
-      typeof entity.relativePath !== "string" ||
-      !entity.revision ||
-      typeof entity.revision !== "object"
-    ) {
-      throw new Error("Invalid Health Commons catalog entity.");
-    }
-  }
-
-  return catalog;
 }
-`,
-      "utf8",
-    );
-    await writeFile(
-      path.join(packageDir, "generated", "catalog.json"),
-      `${JSON.stringify({
-        artifactManifests: [],
-        catalogHash: "sha256:test",
-        changes: [],
-        entities: [finnishDrySaunaProtocol],
-        redirects: [],
-        schemaVersion: "murph.commons.catalog.v1",
-      }, null, 2)}\n`,
-      "utf8",
-    );
-  }
+
+async function writeHealthCommonsRuntimeArtifacts(
+  generatedDir: string,
+  input: {
+    familyGraph?: Record<string, unknown>;
+    protocolIndex?: Record<string, unknown>;
+    protocolRunSpecs?: Record<string, unknown>;
+  } = {},
+): Promise<void> {
+  const artifacts = createHealthCommonsRuntimeArtifacts(input);
+
+  await mkdir(generatedDir, { recursive: true });
+  await writeFile(
+    path.join(generatedDir, "protocol-index.json"),
+    `${JSON.stringify(artifacts.protocolIndex, null, 2)}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(generatedDir, "protocol-run-specs.json"),
+    `${JSON.stringify(artifacts.protocolRunSpecs, null, 2)}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(generatedDir, "protocol-family-graph.json"),
+    `${JSON.stringify(artifacts.familyGraph, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+function createHealthCommonsRuntimeArtifacts(input: {
+  familyGraph?: Record<string, unknown>;
+  protocolIndex?: Record<string, unknown>;
+  protocolRunSpecs?: Record<string, unknown>;
+} = {}) {
+  const protocolIndex = input.protocolIndex ?? {
+    catalogHash: "sha256:test",
+    protocols: [finnishDrySaunaProtocolSummary],
+    schemaVersion: "murph.commons.protocol-index.v1",
+  };
+  const protocolRunSpecs = input.protocolRunSpecs ?? {
+    catalogHash: "sha256:test",
+    protocols: [
+      {
+        ...finnishDrySaunaProtocolSummary,
+        expectedSignalDescriptions: [],
+        experimentOnboarding: null,
+        protocol: finnishDrySaunaProtocol.protocol,
+        safety: finnishDrySaunaProtocol.safety,
+        testPlans: finnishDrySaunaProtocol.testPlans,
+        whyItWorks: [],
+      },
+    ],
+    schemaVersion: "murph.commons.protocol-run-specs.v1",
+  };
+  const familyGraph = input.familyGraph ?? {
+    catalogHash: "sha256:test",
+    edges: [
+      {
+        sourceKey: finnishDrySaunaProtocol.key,
+        targetKey: drySaunaFamily.key,
+        type: "parent_family",
+      },
+    ],
+    families: [drySaunaFamily],
+    protocols: [finnishDrySaunaProtocolSummary],
+    schemaVersion: "murph.commons.protocol-family-graph.v1",
+  };
+
+  return {
+    familyGraph,
+    protocolIndex,
+    protocolRunSpecs,
+  };
 }
 
 function selectRunnerDependencyPackageName(packageNames: readonly string[]): string {

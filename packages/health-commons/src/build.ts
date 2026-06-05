@@ -9,6 +9,7 @@ import {
   buildHealthCommonsSourceIndex,
 } from "./catalog.ts";
 import { stablePrettyJson } from "./normalize.ts";
+import { buildHealthCommonsProtocolGeneratedArtifacts } from "./protocol-artifacts.ts";
 import { buildHealthCommonsWebGeneratedArtifacts } from "./web-artifacts.ts";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -101,14 +102,19 @@ function buildGeneratedFiles(
   const sourceIndex = buildHealthCommonsSourceIndex(catalog);
   const sourceArtifactIndex = buildHealthCommonsSourceArtifactIndex(catalog);
   const webArtifacts = buildHealthCommonsWebGeneratedArtifacts(catalog);
+  const protocolArtifacts = buildHealthCommonsProtocolGeneratedArtifacts({
+    catalog,
+    routeIndex: webArtifacts.routeIndex,
+  });
   const files = new Map<string, string>([
-    ["catalog.json", stablePrettyJson(catalog)],
     ["catalog.hash", `${catalog.catalogHash}\n`],
-    ["entities.ndjson", catalog.entities.map((entity) => JSON.stringify(entity)).join("\n") + "\n"],
     ["redirects.json", stablePrettyJson({ redirects: catalog.redirects })],
     ["recent-changes.json", stablePrettyJson({ changes: catalog.changes })],
     ["artifact-manifests.json", stablePrettyJson({ artifactManifests: catalog.artifactManifests })],
     ["evidence-appraisals.json", stablePrettyJson({ evidenceAppraisals: catalog.evidenceAppraisals })],
+    ["protocol-index.json", stablePrettyJson(protocolArtifacts.index)],
+    ["protocol-run-specs.json", stablePrettyJson(protocolArtifacts.runSpecs)],
+    ["protocol-family-graph.json", stablePrettyJson(protocolArtifacts.familyGraph)],
     ["source-index.json", stablePrettyJson(sourceIndex)],
     ["source-identities.ndjson", sourceIndex.identityLookup.map((entry) => JSON.stringify(entry)).join("\n") + "\n"],
     ["source-artifact-index.json", stablePrettyJson(sourceArtifactIndex)],

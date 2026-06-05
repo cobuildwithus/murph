@@ -69,13 +69,19 @@ Generated entities carry:
 - `pageRevisionId` for the whole page.
 - `runSpecRevisionId` for performable protocol fields, experiment-onboarding setup policy, and test plans.
 - `recipeHash` for duplicate-protocol detection.
-- `catalogHash` for the generated catalog release.
+- `catalogHash` for the build-time catalog release and generated artifact cohort.
+
+The full catalog is a build-time generator structure, not a runtime artifact.
+Runtime surfaces should consume scoped generated artifacts instead of a monolith:
+web route bundles/projections for public pages, compact protocol index/run-spec/
+family-graph artifacts for CLI and hosted protocol reads, and separate source
+indexes only for tools that explicitly need source lookup.
 
 Private runs, outcome cards, and future contributions should store commons references by key and revision instead of copying protocol prose. Future aggregate community summaries must be traceable back to the exact protocol revisions they summarize.
 
 ## Artifact Storage
 
-Research artifacts are represented by `murph.commons.artifact-manifest.v1` JSON manifests. A manifest entry can point to a Cloudflare R2 object key, local staging path, content type, byte size, hash, rights status, and redistributability flag. Source pages may also declare small snapshot pointers in their own `artifacts` block; generated catalogs must collect those into a synthetic artifact manifest so Cloudflare/R2 sync sees every declared artifact.
+Research artifacts are represented by `murph.commons.artifact-manifest.v1` JSON manifests. A manifest entry can point to a Cloudflare R2 object key, local staging path, content type, byte size, hash, rights status, and redistributability flag. Source pages may also declare small snapshot pointers in their own `artifacts` block; generated artifact manifests must collect those into a synthetic artifact manifest so Cloudflare/R2 sync sees every declared artifact.
 
 The upload script must refuse unknown, permission-required, or non-redistributable artifacts by default. Operators may only override that after legal review. Journal PDFs should not be committed directly to Git.
 
@@ -83,7 +89,7 @@ The upload script must refuse unknown, permission-required, or non-redistributab
 
 1. A new biomarker, source, or protocol page can be added as one Markdown file plus optional manifests.
 2. Multiple protocol variants remain distinct by key, lineage, attribution, modality, and recipe hash.
-3. Generated catalog output is deterministic and checkable in CI.
+3. Generated artifacts are deterministic and checkable in CI.
 4. Artifact manifests make Cloudflare/R2 storage possible without storing large copyrighted files in the repo.
 5. User experiment results can later reference exact commons revisions and contribute aggregate outcomes without rewriting literature truth.
 6. Public pages can later show community outcome summaries without exposing raw personal data or confusing aggregate outcomes with source-backed claims.

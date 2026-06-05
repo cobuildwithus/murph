@@ -377,8 +377,8 @@ run_test_runtime_artifact_build_with_retry() {
   run_command_with_retry "build:test-runtime:prepared" env NODE_OPTIONS="$filtered_node_options" pnpm build:test-runtime:prepared
 }
 
-generate_health_commons_catalog_with_retry() {
-  run_command_with_retry "health-commons generated catalog" pnpm health-commons:generate
+generate_health_commons_artifacts_with_retry() {
+  run_command_with_retry "health-commons generated artifacts" pnpm health-commons:generate
 }
 
 run_package_command_with_retry() {
@@ -522,9 +522,9 @@ prepare_repo_vitest_runtime_artifacts() {
 
   run_test_runtime_artifact_build_with_retry
   if [[ "$health_commons_generated_prepared" == "1" ]]; then
-    verify_log "skip Health Commons generated catalog; root acceptance typecheck already prepared it"
+    verify_log "skip Health Commons generated artifacts; root acceptance typecheck already prepared them"
   else
-    run_timed_step "Health Commons generated catalog" generate_health_commons_catalog_with_retry
+    run_timed_step "Health Commons generated artifacts" generate_health_commons_artifacts_with_retry
   fi
   run_timed_step "CLI package shape verification" pnpm exec tsx "packages/cli/scripts/verify-package-shape.ts"
 }
@@ -1031,7 +1031,7 @@ run_test_packages_coverage_after_hygiene() {
     run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts "$health_commons_generated_prepared"
     artifacts_prepared="1"
   else
-    verify_log "skip Health Commons generated catalog; prepared runtime artifacts already covered it"
+    verify_log "skip Health Commons generated artifacts; prepared runtime artifacts already covered them"
   fi
   run_timed_step "All package coverage" run_all_package_coverage "$contracts_artifacts_prepared" || return $?
   run_package_boundary_verification "$artifacts_prepared"

@@ -12,11 +12,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  healthCommonsCatalogSchema,
-  type HealthCommonsCatalog,
-} from "@murphai/contracts";
-
-import {
   buildHostedWorkerSecretsPayload,
   buildHostedWranglerDeployConfig,
   readHostedDeployAutomationEnvironment,
@@ -42,6 +37,20 @@ const healthCommonsFinnishDrySaunaProtocol = {
   slug: "protocols/dry-sauna/murph-finnish-standard-3x-week",
   title: "Finnish Dry Sauna",
 } as const;
+const healthCommonsRuntimeGeneratedArtifacts = [
+  {
+    label: "Health Commons protocol index",
+    relativePath: path.join("generated", "protocol-index.json"),
+  },
+  {
+    label: "Health Commons protocol run specs",
+    relativePath: path.join("generated", "protocol-run-specs.json"),
+  },
+  {
+    label: "Health Commons protocol family graph",
+    relativePath: path.join("generated", "protocol-family-graph.json"),
+  },
+] as const;
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -224,7 +233,7 @@ export async function assertPreparedRunnerBundle(input: {
     throw new Error("Prepared runner bundle changed after assembly; rebuild deploy artifacts before deploying.");
   }
 
-  await assertRunnerBundleHealthCommonsCatalog(input.runnerBundleDir);
+  await assertRunnerBundleHealthCommonsProtocolArtifacts(input.runnerBundleDir);
 
   return manifest;
 }
@@ -545,16 +554,18 @@ async function assertRunnerBundleHealthCommonsPackageFiles(bundleDir: string): P
       packageName: healthCommonsPackageName,
       rootDir: bundleDir,
     });
-    await resolveContainedRunnerDependencyFile({
-      filePath: path.join(packageDir, "generated", "catalog.json"),
-      label: "Health Commons generated catalog",
-      packageName: healthCommonsPackageName,
-      rootDir: bundleDir,
-    });
+    for (const artifact of healthCommonsRuntimeGeneratedArtifacts) {
+      await resolveContainedRunnerDependencyFile({
+        filePath: path.join(packageDir, artifact.relativePath),
+        label: artifact.label,
+        packageName: healthCommonsPackageName,
+        rootDir: bundleDir,
+      });
+    }
   }
 }
 
-async function assertRunnerBundleHealthCommonsCatalog(bundleDir: string): Promise<void> {
+async function assertRunnerBundleHealthCommonsProtocolArtifacts(bundleDir: string): Promise<void> {
   const packageDirs = await findInstalledPackageDirectories(
     path.join(bundleDir, "node_modules"),
     healthCommonsPackageName,
@@ -571,19 +582,23 @@ async function assertRunnerBundleHealthCommonsCatalog(bundleDir: string): Promis
       packageName: healthCommonsPackageName,
       rootDir: bundleDir,
     });
-    const catalogPath = await resolveContainedRunnerDependencyFile({
-      filePath: path.join(packageDir, "generated", "catalog.json"),
-      label: "Health Commons generated catalog",
-      packageName: healthCommonsPackageName,
-      rootDir: bundleDir,
-    });
-    const catalog = await readJsonObjectFile(
-      catalogPath,
-      "Runner Health Commons generated catalog",
+    const [protocolIndex, protocolRunSpecs, protocolFamilyGraph] = await Promise.all(
+      healthCommonsRuntimeGeneratedArtifacts.map(async (artifact) => {
+        const artifactPath = await resolveContainedRunnerDependencyFile({
+          filePath: path.join(packageDir, artifact.relativePath),
+          label: artifact.label,
+          packageName: healthCommonsPackageName,
+          rootDir: bundleDir,
+        });
+        return await readJsonObjectFile(
+          artifactPath,
+          `Runner ${artifact.label}`,
+        );
+      }),
     );
-    assertHealthCommonsCatalogIncludesFinnishDrySauna(
-      parseRunnerHealthCommonsCatalog(catalog),
-    );
+    assertHealthCommonsProtocolIndexIncludesFinnishDrySauna(protocolIndex);
+    assertHealthCommonsProtocolRunSpecsIncludeFinnishDrySauna(protocolRunSpecs);
+    assertHealthCommonsProtocolFamilyGraphIncludesFinnishDrySauna(protocolFamilyGraph);
   }
 }
 
@@ -766,44 +781,92 @@ function isPackageDirectory(
     && tail.every((part, index) => part === packageParts[index]);
 }
 
-function parseRunnerHealthCommonsCatalog(
-  catalog: Record<string, unknown>,
-): HealthCommonsCatalog {
-  const result = healthCommonsCatalogSchema.safeParse(catalog);
-  if (!result.success) {
-    throw new Error(
-      "Runner Health Commons generated catalog is invalid; rebuild deploy artifacts before deploying.",
-    );
-  }
-
-  return result.data;
-}
-
-function assertHealthCommonsCatalogIncludesFinnishDrySauna(
-  catalog: HealthCommonsCatalog,
-): void {
-  const protocol = catalog.entities.find((entity) =>
-    entity.key === healthCommonsFinnishDrySaunaProtocol.key
-  );
-
-  if (
-    !protocol ||
-    protocol.entityType !== "protocol_variant" ||
-    protocol.slug !== healthCommonsFinnishDrySaunaProtocol.slug ||
-    protocol.title !== healthCommonsFinnishDrySaunaProtocol.title
-  ) {
-    throw new Error(
-      "Runner Health Commons generated catalog is stale or missing Finnish Dry Sauna; rebuild deploy artifacts before deploying.",
-    );
-  }
-}
-
 function isRecordObject(value: unknown): value is Record<string, unknown> {
   return Boolean(
     value &&
       typeof value === "object" &&
       !Array.isArray(value),
   );
+}
+
+function assertHealthCommonsProtocolIndexIncludesFinnishDrySauna(
+  artifact: Record<string, unknown>,
+): void {
+  const protocol = findProtocolArtifactEntry(artifact, "protocols");
+
+  if (!protocol) {
+    throw new Error(
+      "Runner Health Commons protocol index is stale or missing Finnish Dry Sauna; rebuild deploy artifacts before deploying.",
+    );
+  }
+}
+
+function assertHealthCommonsProtocolRunSpecsIncludeFinnishDrySauna(
+  artifact: Record<string, unknown>,
+): void {
+  const protocol = findProtocolArtifactEntry(artifact, "protocols");
+
+  if (
+    !protocol ||
+    !isRecordObject(protocol.protocol) ||
+    !Array.isArray(protocol.testPlans) ||
+    protocol.testPlans.length === 0
+  ) {
+    throw new Error(
+      "Runner Health Commons protocol run specs are stale or missing Finnish Dry Sauna; rebuild deploy artifacts before deploying.",
+    );
+  }
+}
+
+function assertHealthCommonsProtocolFamilyGraphIncludesFinnishDrySauna(
+  artifact: Record<string, unknown>,
+): void {
+  const protocol = findProtocolArtifactEntry(artifact, "protocols");
+  const families = Array.isArray(artifact.families) ? artifact.families : [];
+  const drySaunaFamily = families.find((entry) =>
+    isRecordObject(entry) && entry.key === "experiment_family:dry-sauna"
+  );
+  const edges = Array.isArray(artifact.edges) ? artifact.edges : [];
+  const hasParentFamilyEdge = edges.some((entry) =>
+    isRecordObject(entry) &&
+    entry.sourceKey === healthCommonsFinnishDrySaunaProtocol.key &&
+    entry.targetKey === "experiment_family:dry-sauna" &&
+    entry.type === "parent_family"
+  );
+
+  if (!protocol || !drySaunaFamily || !hasParentFamilyEdge) {
+    throw new Error(
+      "Runner Health Commons protocol family graph is stale or missing Finnish Dry Sauna; rebuild deploy artifacts before deploying.",
+    );
+  }
+}
+
+function findProtocolArtifactEntry(
+  artifact: Record<string, unknown>,
+  collectionKey: "protocols",
+): Record<string, unknown> | null {
+  if (
+    typeof artifact.catalogHash !== "string" ||
+    !Array.isArray(artifact[collectionKey])
+  ) {
+    return null;
+  }
+
+  const protocol = artifact[collectionKey].find((entry) =>
+    isRecordObject(entry) &&
+    entry.key === healthCommonsFinnishDrySaunaProtocol.key
+  );
+
+  if (
+    !isRecordObject(protocol) ||
+    protocol.entityType !== "protocol_variant" ||
+    protocol.slug !== healthCommonsFinnishDrySaunaProtocol.slug ||
+    protocol.title !== healthCommonsFinnishDrySaunaProtocol.title
+  ) {
+    return null;
+  }
+
+  return protocol;
 }
 
 async function hasPnpmVirtualPackageManifest(
