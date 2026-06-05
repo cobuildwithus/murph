@@ -45,7 +45,7 @@ function createWorkoutSliceCli() {
 
   const services = createIntegratedVaultServices()
   registerVaultCommands(cli, services)
-  registerMeasurementCommands(cli, services)
+  registerMeasurementCommands(cli)
   registerWorkoutCommands(cli, services)
 
   return cli

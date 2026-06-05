@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import { Cli } from 'incur'
 import { afterEach, test as baseTest, vi } from 'vitest'
 
-import { createUnwiredVaultServices } from '@murphai/vault-usecases'
 import type {
   QueryRuntimeModule,
   QueryVaultReadModel,
@@ -179,7 +178,7 @@ function createSearchSliceCli() {
   })
 
   cli.use(incurErrorBridge)
-  registerSearchCommands(cli, createUnwiredVaultServices())
+  registerSearchCommands(cli)
 
   return cli
 }

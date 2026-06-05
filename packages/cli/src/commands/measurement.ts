@@ -27,7 +27,6 @@ import {
   showMeasurementManifest,
   showMeasurementRecord,
 } from '@murphai/vault-usecases/measurements'
-import type { VaultServices } from '@murphai/vault-usecases'
 import {
   occurredAtOptionSchema,
   slugSchema,
@@ -234,10 +233,7 @@ export const measurementCommandDescriptions = {
   manifest: 'Show the immutable raw import manifest for one imported measurement event.',
 } as const
 
-export function registerMeasurementCommands(
-  cli: Cli.Cli,
-  _services: VaultServices,
-) {
+export function registerMeasurementCommands(cli: Cli.Cli) {
   const measurement = Cli.create('measurement', {
     description: measurementCommandDescriptions.root,
   })

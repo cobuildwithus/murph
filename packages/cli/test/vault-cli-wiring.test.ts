@@ -17,6 +17,7 @@ afterEach(async () => {
   vi.doUnmock('@murphai/inbox-services')
   vi.doUnmock('../src/vault-cli-bootstrap.js')
   vi.doUnmock('../src/vault-cli-command-manifest.js')
+  vi.doUnmock('../src/vault-cli-inbox-services.js')
 })
 
 test('createVaultCli uses the default integrated inbox services wiring', async () => {

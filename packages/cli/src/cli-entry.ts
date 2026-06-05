@@ -6,9 +6,6 @@ import { installSqliteExperimentalWarningFilterWithOptions } from '@murphai/runt
 import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
-  getVaultCliPackageVersion,
-} from './vault-cli-package.js'
-import {
   detectCliProgramName,
   planVaultCliInvocation,
   type CliInvocationPlan,
@@ -92,11 +89,6 @@ export async function runMurphCliAction(
     programName,
   })
   const serveOptions = createCliServeOptions(options.exit)
-
-  if (plannedInvocation.plan.kind === 'version') {
-    process.stdout.write(`${getVaultCliPackageVersion()}\n`)
-    return
-  }
 
   if (plannedInvocation.plan.kind === 'setup') {
     await runSetupInvocation({

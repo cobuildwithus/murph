@@ -209,26 +209,41 @@ test("installSqliteExperimentalWarningFilter is idempotent", () => {
   assert.equal(process.emitWarning, wrappedEmitWarning);
 });
 
-test("runMurphCliAction prints --version without importing command graphs", async () => {
-  const stdoutWrites: string[] = [];
-  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
-    stdoutWrites.push(String(chunk));
-    return true;
-  });
-  vi.doMock("../src/vault-cli.js", () => {
-    throw new Error("vault CLI graph should not be imported for --version");
-  });
-  vi.doMock("@murphai/setup-cli/setup-cli", () => {
-    throw new Error("setup CLI should not be imported for --version");
-  });
-  vi.doMock("@murphai/operator-config/operator-config", () => {
-    throw new Error("operator config should not be imported for --version");
+test("runMurphCliAction lets Incur handle --version on the full CLI", async () => {
+  const serve = vi.fn(async () => undefined);
+  let createdFullCli = false;
+
+  mockCliActionModules({
+    cli: { serve },
+    onCreateVaultCliWithOptions: () => {
+      createdFullCli = true;
+    },
+    operatorConfigModule: {
+      expandConfiguredVaultPath: vi.fn(),
+      resolveDefaultVault: vi.fn(async () => "/vaults/default"),
+      resolveEffectiveTopLevelToken: vi.fn(() => null),
+      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
+    },
+    setupCliModule: {
+      createSetupCli: vi.fn(),
+      formatSetupWearableLabel: vi.fn((value: string) => value),
+      listSetupPendingWearables: vi.fn(() => []),
+      listSetupReadyWearables: vi.fn(() => []),
+      resolveSetupPostLaunchAction: vi.fn(() => null),
+    },
   });
 
   await runMurphCliAction(["--version"]);
 
-  assert.match(stdoutWrites.join(""), /^\d+\.\d+\.\d+/u);
-  stdoutSpy.mockRestore();
+  assert.equal(createdFullCli, true);
+  assert.deepEqual(serve.mock.calls, [
+    [
+      ["--version"],
+      {
+        env: process.env,
+      },
+    ],
+  ]);
 });
 
 test("runMurphCliAction scopes known root commands without creating the full CLI", async () => {
@@ -389,7 +404,7 @@ test("runMurphCliAction injects the resolved default vault for non-setup invocat
     },
   });
 
-  await runMurphCliAction(["assistant", "chat"]);
+  await runMurphCliAction(["chat"]);
 
   assert.deepEqual(resolveDefaultVault.mock.calls, [["/operator-home"]]);
   assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, []);
@@ -397,7 +412,7 @@ test("runMurphCliAction injects the resolved default vault for non-setup invocat
   assert.equal(vaultContextRef.value.current, "/vaults/default");
   assert.deepEqual(serve.mock.calls, [
     [
-      ["assistant", "chat"],
+      ["chat"],
       {
         env: process.env,
       },

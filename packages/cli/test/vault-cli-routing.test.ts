@@ -8,6 +8,28 @@ import {
 } from '../src/vault-cli-routing.ts'
 
 test('classifier scopes obvious lazy roots without parsing nested command args', () => {
+  for (const root of [
+    'assistant',
+    'automation',
+    'blood-test',
+    'goal',
+    'list',
+    'measurement',
+    'memory',
+    'protocol',
+    'query',
+    'regimen',
+    'search',
+    'show',
+    'supplement',
+    'timeline',
+    'wearables',
+  ] as const) {
+    assert.deepEqual(classifyVaultCliInvocation([root, '--weird-command-flag']), {
+      kind: 'scoped',
+      root,
+    })
+  }
   assert.deepEqual(classifyVaultCliInvocation(['device', 'account', 'list']), {
     kind: 'scoped',
     root: 'device',
@@ -40,7 +62,7 @@ test('classifier falls back to the full graph for ambiguous leading syntax', () 
   })
   assert.deepEqual(classifyVaultCliInvocation(['--version', 'device']), {
     kind: 'full',
-    reason: 'version-before-root',
+    reason: 'unknown-leading-flag',
   })
   assert.deepEqual(classifyVaultCliInvocation(['--', 'device']), {
     kind: 'full',
@@ -50,6 +72,12 @@ test('classifier falls back to the full graph for ambiguous leading syntax', () 
     kind: 'full',
     reason: 'unknown-root',
   })
+  for (const root of ['chat', 'run', 'status', 'doctor', 'stop'] as const) {
+    assert.deepEqual(classifyVaultCliInvocation([root]), {
+      kind: 'full',
+      reason: 'unknown-root',
+    })
+  }
   assert.deepEqual(
     classifyVaultCliInvocation(['device', 'account', 'list'], {
       env: {
@@ -87,7 +115,8 @@ test('classifier falls back to the full graph for ambiguous leading syntax', () 
 
 test('classifier preserves version and setup routing before command imports', () => {
   assert.deepEqual(classifyVaultCliInvocation(['--version']), {
-    kind: 'version',
+    kind: 'full',
+    reason: 'unknown-leading-flag',
   })
   assert.deepEqual(classifyVaultCliInvocation(['onboard']), {
     kind: 'setup',

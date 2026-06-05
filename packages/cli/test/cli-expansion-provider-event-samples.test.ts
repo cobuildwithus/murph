@@ -39,7 +39,7 @@ function createSliceCli() {
 
   registerVaultCommands(cli, services)
   registerReadCommands(cli, services)
-  registerSearchCommands(cli, services)
+  registerSearchCommands(cli)
   registerProviderCommands(cli, services)
   registerFoodCommands(cli, services)
   registerRecipeCommands(cli, services)

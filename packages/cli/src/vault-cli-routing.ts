@@ -8,19 +8,33 @@ import {
 export type VaultCliProgramName = 'murph' | 'vault-cli'
 
 const lazyRootCommands = [
+  'assistant',
+  'automation',
+  'blood-test',
   'commons',
   'device',
   'experiment',
+  'goal',
   'init',
+  'list',
+  'measurement',
+  'memory',
+  'protocol',
+  'query',
+  'regimen',
+  'search',
+  'show',
+  'supplement',
+  'timeline',
   'validate',
   'vault',
+  'wearables',
 ] as const
 const lazyRootCommandSet = new Set<string>(lazyRootCommands)
 
 export type KnownLazyRootCommand = (typeof lazyRootCommands)[number]
 
 export type CliInvocationPlan =
-  | { kind: 'version' }
   | { kind: 'setup' }
   | { kind: 'scoped'; root: KnownLazyRootCommand }
   | { kind: 'full'; reason: string }
@@ -100,7 +114,6 @@ export function classifyVaultCliInvocation(
   }
 
   const programName = input.programName ?? 'vault-cli'
-  let sawVersion = false
   let sawRootDiscovery = false
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -114,11 +127,6 @@ export function classifyVaultCliInvocation(
         kind: 'full',
         reason: 'argument-terminator-before-root',
       }
-    }
-
-    if (token === '--version') {
-      sawVersion = true
-      continue
     }
 
     if (rootDiscoveryFlags.has(token)) {
@@ -144,13 +152,6 @@ export function classifyVaultCliInvocation(
       }
     }
 
-    if (sawVersion) {
-      return {
-        kind: 'full',
-        reason: 'version-before-root',
-      }
-    }
-
     if (sawRootDiscovery) {
       return {
         kind: 'full',
@@ -166,10 +167,6 @@ export function classifyVaultCliInvocation(
       kind: 'full',
       reason: 'root-discovery',
     }
-  }
-
-  if (sawVersion) {
-    return { kind: 'version' }
   }
 
   if (programName === 'murph') {
