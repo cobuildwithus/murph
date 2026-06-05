@@ -5,7 +5,10 @@ ARG WHISPER_CPP_SHA256=b7c6b05635e5fda85cbcc5a012d29b3a4ca1cc22d9fa54d5b6c33e4ac
 ARG WHISPER_CPP_BUILD_JOBS=1
 ARG WHISPER_MODEL_FILE=ggml-base.en.bin
 ARG WHISPER_MODEL_SHA256=a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002
+ARG WHISPER_MODEL_IMAGE=ghcr.io/cobuildwithus/murph-whisper-model:ggml-base-en-sha256-a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002
 ARG CODEX_CLI_VERSION=0.135.0
+
+FROM ${WHISPER_MODEL_IMAGE} AS whisper-model
 
 FROM node:${NODE_VERSION}-bookworm-slim@${NODE_IMAGE_DIGEST} AS whisper-builder
 
@@ -45,11 +48,11 @@ RUN curl -fsSL --retry 5 --retry-delay 2 \
   && install -Dm755 build/bin/whisper-cli /opt/whisper/bin/whisper-cli \
   && cp -a build/bin/libggml-cpu*.so /opt/whisper/bin/ \
   && cp -a build/src/libwhisper.so* /opt/whisper/lib/ \
-  && cp -a build/ggml/src/libggml*.so* /opt/whisper/lib/ \
-  && curl -fsSL --retry 5 --retry-delay 2 \
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${WHISPER_MODEL_FILE}" \
-    -o "/opt/whisper/${WHISPER_MODEL_FILE}" \
-  && printf '%s  %s\n' "${WHISPER_MODEL_SHA256}" "/opt/whisper/${WHISPER_MODEL_FILE}" | sha256sum -c -
+  && cp -a build/ggml/src/libggml*.so* /opt/whisper/lib/
+
+COPY --from=whisper-model /model.bin /opt/whisper/${WHISPER_MODEL_FILE}
+
+RUN printf '%s  %s\n' "${WHISPER_MODEL_SHA256}" "/opt/whisper/${WHISPER_MODEL_FILE}" | sha256sum -c -
 
 FROM node:${NODE_VERSION}-bookworm-slim@${NODE_IMAGE_DIGEST}
 

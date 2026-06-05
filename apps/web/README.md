@@ -170,10 +170,23 @@ Optional but recommended:
 - `DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER`
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`
 - `HOSTED_WEB_BASE_URL`
+- `MURPH_SUPPLEMENT_DB_URL` for the separate supplements label Postgres database read by `/api/supplements`
+- `MURPH_DATA_API_KEY` for server-to-server data API auth on `/api/supplements`; hosted Cloudflare owns the same secret for Worker-side injection and the key must not be exposed to browsers or runner env
 - `CRON_SECRET`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON`
+
+## Supplements label database
+
+`/api/supplements` reads the separate supplements Postgres database configured
+by `MURPH_SUPPLEMENT_DB_URL`. Apply `sql/supplements/schema.sql`, import DSLD,
+then import source extensions such as DailyMed before deploying web code that
+depends on those tables. Runtime credentials should be read-only after import.
+
+The current search path uses built-in Postgres full-text search only. No
+extensions such as `pg_trgm`, `pgvector`, or vector indexes are required for
+this v1 label lookup.
 
 Provider-owned webhook-admin settings:
 

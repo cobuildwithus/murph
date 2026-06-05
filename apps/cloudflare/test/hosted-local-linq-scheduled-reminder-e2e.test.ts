@@ -28,10 +28,10 @@ import {
 const userId = `member_local_linq_scheduled_reminder_${Date.now()}`;
 const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
-const setupReplyText = "Done - I will remind you here in about five minutes.";
-const setupRequestText = "Remind me here in about five minutes to go to sleep.";
-const scheduledReminderLeadMs = 300_000;
-const scheduledReminderMinimumRunwayMs = 45_000;
+const setupReplyText = "Done - I will remind you here in about one minute.";
+const setupRequestText = "Remind me here in about one minute to go to sleep.";
+const scheduledReminderLeadMs = 60_000;
+const scheduledReminderMinimumRunwayMs = 10_000;
 const scheduledReminderSendWaitMs = 120_000;
 const productionLikeAssistantModel = "gpt-5.5";
 
@@ -57,7 +57,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
   }, 600_000);
 
   it("creates a reminder from the hosted assistant turn, wakes from the scheduled alarm, and sends it", async () => {
-    const scheduledReminderTimes = resolveScheduledReminderTimes();
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
@@ -98,6 +97,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     const scheduledChatId = requireLinqStub().requireObservedChatId(userId);
     const reminderPath = `/chats/${encodeURIComponent(scheduledChatId)}/messages`;
     const setupReplyBaselineCount = requireLinqStub().countObservedSends(reminderPath);
+    const scheduledReminderTimes = resolveScheduledReminderTimes();
     requireScenario().queueAssistantResponses([
       buildHostedAssistantAutomationSaveDirectiveResponse({
         dueAtIso: scheduledReminderTimes.dueAtIso,
@@ -161,6 +161,7 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "30000",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,

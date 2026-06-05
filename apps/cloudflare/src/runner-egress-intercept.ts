@@ -63,6 +63,8 @@ const DEFAULT_MAPBOX_API_BASE_URL = "https://api.mapbox.com";
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const DEFAULT_TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file";
 const DEFAULT_WHATSAPP_API_BASE_URL = "https://graph.facebook.com";
+const HOSTED_DATA_API_SUPPLEMENTS_PATHNAME = "/api/supplements";
+const HOSTED_DATA_API_MAX_POST_BODY_BYTES = 8 * 1024;
 
 export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   artifactStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore,
@@ -328,7 +330,8 @@ export async function handleHostedRunnerOpenInternetOutbound(
   }
 
   const handled =
-    await maybeHandleOpenAiRequest({ ctx, env, request, url, userId })
+    await maybeHandleHostedDataApiRequest({ ctx, env, request, url, userId })
+    ?? await maybeHandleOpenAiRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleMapboxRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleLinqRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleTelegramRequest({ ctx, env, request, url, userId })
@@ -537,6 +540,74 @@ export async function handleHostedRunnerWhatsAppOutbound(
 
 async function requireHandledProviderEgress(response: Response | null): Promise<Response> {
   return response ?? disallowedProviderEgress();
+}
+
+async function maybeHandleHostedDataApiRequest(input: {
+  ctx?: HostedRunnerOutboundContext;
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  url: URL;
+  userId: string | null;
+}): Promise<Response | null> {
+  const providerBase = readHostedWebApiBaseConfig(input.env);
+  if (!providerBase) {
+    return null;
+  }
+
+  const pathMatch = readProviderPathMatch(input.url, providerBase);
+  if (!pathMatch) {
+    return null;
+  }
+  if (pathMatch.pathnameSuffix !== HOSTED_DATA_API_SUPPLEMENTS_PATHNAME) {
+    return null;
+  }
+  if (!["GET", "POST"].includes(input.request.method.toUpperCase())) {
+    return disallowedProviderEgress();
+  }
+
+  const startedAt = Date.now();
+  const authorization = await authorizeHostedProviderEgress({
+    ...input,
+    allowActiveUserFenceWithoutToken: true,
+    providerKind: "murph_data_api",
+  });
+  if (!authorization.authorized) {
+    return unauthorizedProviderEgress({
+      authorization,
+      providerKind: "murph_data_api",
+      request: input.request,
+      startedAt,
+      url: input.url,
+    });
+  }
+
+  const upstreamBody = input.request.method.toUpperCase() === "POST"
+    ? await readBoundedRequestBody(input.request, HOSTED_DATA_API_MAX_POST_BODY_BYTES)
+    : undefined;
+  if (upstreamBody === null) {
+    return new Response("Payload Too Large", { status: 413 });
+  }
+
+  const token = readRequiredInterceptSecret(input.env.MURPH_DATA_API_KEY, "MURPH_DATA_API_KEY");
+  const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
+  headers.set("authorization", `Bearer ${token}`);
+
+  return await fetchAuthorizedProviderUpstream({
+    authorization,
+    providerKind: "murph_data_api",
+    request: input.request,
+    startedAt,
+    upstreamRequest: await createHostedRunnerUpstreamRequest(
+      input.request,
+      createProviderUpstreamUrl(input.url, pathMatch),
+      headers,
+      {
+        body: upstreamBody,
+        redirect: "manual",
+      },
+    ),
+    url: input.url,
+  });
 }
 
 async function maybeHandleOpenAiRequest(input: {
@@ -2066,6 +2137,7 @@ function isAllowedTelegramOperation(operation: string): boolean {
 }
 
 async function authorizeHostedProviderEgress(input: {
+  allowActiveUserFenceWithoutToken?: boolean;
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
   providerKind: string;
@@ -2127,7 +2199,7 @@ async function authorizeHostedProviderEgress(input: {
     });
   }
 
-  if (input.providerKind !== "openai") {
+  if (input.providerKind !== "openai" && input.allowActiveUserFenceWithoutToken !== true) {
     if (!input.userId) {
       return {
         activeContainerIdentitySource: null,
@@ -2686,6 +2758,8 @@ function stripHostedProviderUpstreamHeaders(headers: Headers): Headers {
   stripped.delete("cookie");
   stripped.delete("proxy-authorization");
   stripped.delete("x-api-key");
+  stripped.delete("x-murph-api-key");
+  stripped.delete("x-murph-data-api-key");
   stripped.delete("openai-organization");
   stripped.delete("openai-project");
   return stripped;
@@ -2711,16 +2785,69 @@ async function createHostedRunnerUpstreamRequest(
   source: Request,
   url: URL,
   headers: Headers,
+  options: {
+    body?: BodyInit | null;
+    redirect?: RequestRedirect;
+  } = {},
 ): Promise<Request> {
   return new Request(url, {
     body: source.method === "GET" || source.method === "HEAD"
       ? null
-      : await source.arrayBuffer(),
+      : options.body ?? await source.arrayBuffer(),
     headers,
     method: source.method,
-    redirect: source.redirect,
+    redirect: options.redirect ?? source.redirect,
     signal: source.signal,
   });
+}
+
+async function readBoundedRequestBody(
+  request: Request,
+  maxBytes: number,
+): Promise<ArrayBuffer | null> {
+  const contentLengthHeader = request.headers.get("content-length");
+  if (contentLengthHeader) {
+    const contentLength = Number(contentLengthHeader);
+    if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+      return null;
+    }
+  }
+
+  if (!request.body) {
+    return new ArrayBuffer(0);
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        return null;
+      }
+
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return body.buffer;
 }
 
 function readRequiredInterceptSecret(value: unknown, label: string): string {
@@ -2785,6 +2912,33 @@ function readProviderBaseConfig(
       knownHosts: fallbackHosts,
       routes: fallbackRoutes,
     };
+  }
+}
+
+function readHostedWebApiBaseConfig(
+  env: RunnerOutboundEnvironmentSource,
+): ProviderBaseConfig | null {
+  const rawValue = typeof env.HOSTED_WEB_BASE_URL === "string"
+    ? env.HOSTED_WEB_BASE_URL.trim()
+    : "";
+  if (!rawValue) {
+    return null;
+  }
+
+  try {
+    const url = new URL(rawValue);
+    if (!isAllowedProviderBaseUrl(url, env)) {
+      return null;
+    }
+    const routes = uniqueProviderBaseRoutes(...createConfiguredProviderBaseRoutes(url, env));
+    return {
+      knownHosts: uniqueProviderHosts(
+        ...routes.map((route) => route.acceptedBaseUrl.hostname),
+      ),
+      routes,
+    };
+  } catch {
+    return null;
   }
 }
 

@@ -14,16 +14,21 @@ import {
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import {
-  ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV,
-  ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV,
-} from "@murphai/operator-config/assistant/current-delivery-route";
-import {
   automationRecordSchema,
   automationScaffoldResultSchema,
   createAutomationScaffoldPayload,
   registerAutomationCommands,
 } from "../src/commands/automation.js";
 import { createTempVaultContext, runInProcessJsonCli } from "./cli-test-helpers.js";
+
+const LEGACY_ROUTE_CHANNEL_ENV_NAME = [
+  "MURPH_ASSISTANT_CURRENT",
+  "DELIVERY_ROUTE_CHANNEL",
+].join("_");
+const LEGACY_ROUTE_TARGET_ENV_NAME = [
+  "MURPH_ASSISTANT_CURRENT",
+  "DELIVERY_ROUTE_TARGET",
+].join("_");
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -478,63 +483,7 @@ test("automation save injects a hosted current messaging route without target fl
   }
 });
 
-test("automation save keeps local current route env support outside hosted runtime", async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-local-route-");
-
-  try {
-    const cli = Cli.create("vault-cli", {
-      description: "automation test cli",
-      version: "0.0.0-test",
-    });
-    registerAutomationCommands(cli);
-    vi.stubEnv(ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV, "linq");
-    vi.stubEnv(ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV, "linq_chat_real");
-
-    const saved = await runInProcessJsonCli(cli, [
-      "automation",
-      "save",
-      "Local route reminder",
-      "--slug",
-      "local-route-reminder",
-      "--instructions",
-      "Send the reminder.",
-      "--schedule-kind",
-      "at",
-      "--schedule-at",
-      "2026-12-06T12:00:00.000Z",
-      "--channel",
-      "linq",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(saved.exitCode, null);
-    assert.equal(saved.envelope.ok, true);
-
-    const shown = await runInProcessJsonCli<{
-      automation: {
-        route: {
-          deliveryTarget: string | null;
-          threadId: string | null;
-        };
-      } | null;
-      vault: string;
-    }>(cli, [
-      "automation",
-      "show",
-      "local-route-reminder",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(shown.exitCode, null);
-    assert.equal(shown.envelope.ok, true);
-    assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "linq_chat_real");
-    assert.equal(shown.envelope.data?.automation?.route.threadId, null);
-  } finally {
-    await rm(parentRoot, { recursive: true, force: true });
-  }
-});
-
-test("automation save rejects iMessage routes without a deliverable target", async () => {
+test("automation save rejects routes without a deliverable target", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-route-required-");
 
   try {
@@ -543,6 +492,8 @@ test("automation save rejects iMessage routes without a deliverable target", asy
       version: "0.0.0-test",
     });
     registerAutomationCommands(cli);
+    vi.stubEnv(LEGACY_ROUTE_CHANNEL_ENV_NAME, "linq");
+    vi.stubEnv(LEGACY_ROUTE_TARGET_ENV_NAME, "linq_chat_real");
 
     const saved = await runInProcessJsonCli(cli, [
       "automation",
@@ -587,6 +538,46 @@ test("automation save rejects iMessage routes without a deliverable target", asy
     ]);
     assert.equal(realThreadFallback.exitCode, 1);
     assert.equal(realThreadFallback.envelope.ok, false);
+
+    const missingTelegramTarget = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Broken telegram route reminder",
+      "--slug",
+      "broken-telegram-route-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2026-12-06T12:00:00.000Z",
+      "--channel",
+      "telegram",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(missingTelegramTarget.exitCode, 1);
+    assert.equal(missingTelegramTarget.envelope.ok, false);
+
+    const missingChannel = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Broken missing channel reminder",
+      "--slug",
+      "broken-missing-channel-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2026-12-06T12:00:00.000Z",
+      "--delivery-target",
+      "telegram_thread_real",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(missingChannel.exitCode, 1);
+    assert.equal(missingChannel.envelope.ok, false);
   } finally {
     await rm(parentRoot, { recursive: true, force: true });
   }
@@ -669,7 +660,7 @@ test("automation commands round-trip save, import-json, show, and list through t
       },
       route: {
         channel: "email",
-        deliveryTarget: null,
+        deliveryTarget: "weekly-planning@example.invalid",
         identityId: null,
         participantId: null,
         threadId: null,
@@ -820,6 +811,8 @@ test("automation save maps each flattened schedule discriminator", async () => {
         ...scheduleArgs,
         "--channel",
         "telegram",
+        "--delivery-target",
+        `telegram-thread-${slug}`,
         "--vault",
         vaultRoot,
       ]);

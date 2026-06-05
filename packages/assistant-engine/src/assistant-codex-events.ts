@@ -116,7 +116,9 @@ export function normalizeCodexEvent(event: unknown): CodexNormalizedEvent {
       ? record.type
       : typeof record.method === 'string'
         ? record.method
-        : null,
+        : typeof record.event === 'string'
+          ? record.event
+          : null,
   )
 
   const errorText = extractCodexErrorMessage(event)

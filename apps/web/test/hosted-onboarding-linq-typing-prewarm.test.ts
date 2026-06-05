@@ -62,10 +62,12 @@ describe("handleHostedOnboardingLinqWebhook typing prewarm", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
   it("signals Temporal prewarm for an active existing Linq route without mailbox work", async () => {
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
     const { handleHostedOnboardingLinqWebhook } = await import(
       "@/src/lib/hosted-onboarding/webhook-service"
     );
@@ -99,6 +101,18 @@ describe("handleHostedOnboardingLinqWebhook typing prewarm", () => {
       source: "linq.imessage.typing",
       userId: "member_typing",
     });
+    expect(consoleInfo).toHaveBeenCalledWith(
+      "Hosted onboarding diagnostic: linq.typing-prewarm-decision.",
+      expect.objectContaining({
+        decision: "signaled",
+        eventIdSuffix: "ng_123",
+        memberActive: true,
+        responseReason: "typing-prewarm-signaled",
+        routeFound: true,
+        temporalSignalAttempted: true,
+        userIdSuffix: "typing",
+      }),
+    );
     expect(mocks.planHostedOnboardingLinqWebhook).not.toHaveBeenCalled();
     expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
     expect(mocks.maybeHandoffHostedExecutionWebhookWake).not.toHaveBeenCalled();
@@ -134,6 +148,47 @@ describe("handleHostedOnboardingLinqWebhook typing prewarm", () => {
     expect(response.reason).toBe("typing-prewarm-coalesced");
     expect(mocks.signalHostedRuntimePrewarm).toHaveBeenCalledTimes(1);
     expect(mocks.planHostedOnboardingLinqWebhook).not.toHaveBeenCalled();
+  });
+
+  it("emits a searchable decision diagnostic when no active route is found", async () => {
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+    const { handleHostedOnboardingLinqWebhook } = await import(
+      "@/src/lib/hosted-onboarding/webhook-service"
+    );
+    mocks.lookupHostedMemberRoutingByHomeLinqChatId.mockResolvedValueOnce(null);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma: {} as never,
+      rawBody: buildTypingWebhookBody({ eventId: "evt_typing_missing_route_123456" }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toEqual({
+      ignored: true,
+      ok: true,
+      reason: "typing-prewarm-ignored-no-active-route",
+    });
+    expect(mocks.lookupHostedMemberRoutingByHomeLinqChatId).toHaveBeenCalledWith({
+      linqChatId: "chat_typing_123",
+      prisma: {},
+    });
+    expect(mocks.signalHostedRuntimePrewarm).not.toHaveBeenCalled();
+    expect(consoleInfo).toHaveBeenCalledWith(
+      "Hosted onboarding diagnostic: linq.typing-prewarm-decision.",
+      expect.objectContaining({
+        decision: "ignored-no-active-route",
+        eventIdSuffix: "123456",
+        responseReason: "typing-prewarm-ignored-no-active-route",
+        routeFound: false,
+      }),
+    );
+    const diagnosticCall = consoleInfo.mock.calls.find(
+      ([message]) =>
+        message === "Hosted onboarding diagnostic: linq.typing-prewarm-decision.",
+    );
+    expect(diagnosticCall?.[1]).not.toHaveProperty("chatId");
+    expect(diagnosticCall?.[1]).not.toHaveProperty("userIdSuffix");
   });
 
   it("ignores non-iMessage typing services before active route lookup", async () => {

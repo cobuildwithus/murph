@@ -127,6 +127,10 @@ Optional execution vars and secrets:
 - `HOSTED_AI_USAGE_REPORTING_SECRET` is an optional Worker-owned platform
   secret. It must not be forwarded into the hosted runtime env; usage
   attribution is added at the Worker/web-control boundary when configured.
+- `MURPH_DATA_API_KEY` lets the Worker inject server-to-server auth for
+  exact hosted runner `${HOSTED_WEB_BASE_URL}/api/supplements` `GET` lookups
+  and bounded batch-search `POST` lookups. The key must stay Worker-owned and
+  must not be forwarded into the hosted runtime env.
 - `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_LOCAL_PART`, optional `HOSTED_EMAIL_FROM_ADDRESS`, `HOSTED_EMAIL_DEFAULT_SUBJECT`, and `HOSTED_EMAIL_SIGNING_SECRET` for hosted email routing
 - opt-in runtime integrations such as `LINQ_*`, `TELEGRAM_*`, `WHATSAPP_*`, and `MAPBOX_ACCESS_TOKEN`; provider credentials for intercepted integrations stay Worker-owned and are represented in the hosted runtime by sentinel placeholders, while native parser binaries and the Whisper model are image-owned by the runner container and rebound from the image instead of being serialized through Worker runtime envelopes
 

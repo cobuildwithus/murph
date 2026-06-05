@@ -216,19 +216,19 @@ import /* keep */ {
     expect(failure).toContain("explicit hosted invocation capabilities");
   });
 
-  it("allows Cloudflare to import hosted Codex process hooks from the assistant-engine owner", () => {
+  it("allows Cloudflare to import Codex process hooks from the assistant-engine owner", () => {
     const filePath = path.join(repoRoot, "apps/cloudflare/src/container-entrypoint.ts");
     const failure = verifyWorkspaceImportPolicy({
       filePath,
       source: `
 import path from "node:path";
 import {
-  snapshotExpectedHostedCodexRootProcess,
-  stopHostedWarmCodexAppServer,
-} from "@murphai/assistant-engine/hosted-codex-lifecycle";
+  snapshotExpectedCodexRootProcess,
+  stopWarmCodexAppServer,
+} from "@murphai/assistant-engine/codex-lifecycle";
       `,
       sourceMember: "apps/cloudflare",
-      specifier: "@murphai/assistant-engine/hosted-codex-lifecycle",
+      specifier: "@murphai/assistant-engine/codex-lifecycle",
     });
 
     expect(failure).toBeNull();
@@ -239,58 +239,58 @@ import {
       "extra named imports",
       `
 import {
-  snapshotExpectedHostedCodexRootProcess,
-  stopHostedWarmCodexAppServer,
-  debugHostedCodexLifecycle,
-} from "@murphai/assistant-engine/hosted-codex-lifecycle";
+  snapshotExpectedCodexRootProcess,
+  stopWarmCodexAppServer,
+  debugCodexLifecycle,
+} from "@murphai/assistant-engine/codex-lifecycle";
       `,
     ],
     [
       "default imports",
-      'import hostedCodexLifecycle from "@murphai/assistant-engine/hosted-codex-lifecycle";',
+      'import codexLifecycle from "@murphai/assistant-engine/codex-lifecycle";',
     ],
     [
       "namespace imports",
-      'import * as hostedCodexLifecycle from "@murphai/assistant-engine/hosted-codex-lifecycle";',
+      'import * as codexLifecycle from "@murphai/assistant-engine/codex-lifecycle";',
     ],
     [
       "dynamic imports",
-      'const hostedCodexLifecycle = await import("@murphai/assistant-engine/hosted-codex-lifecycle");',
+      'const codexLifecycle = await import("@murphai/assistant-engine/codex-lifecycle");',
     ],
     [
       "mixed allowed imports and re-exports",
       `
 import {
-  snapshotExpectedHostedCodexRootProcess,
-  stopHostedWarmCodexAppServer,
-} from "@murphai/assistant-engine/hosted-codex-lifecycle";
-export { debugHostedCodexLifecycle } from "@murphai/assistant-engine/hosted-codex-lifecycle";
+  snapshotExpectedCodexRootProcess,
+  stopWarmCodexAppServer,
+} from "@murphai/assistant-engine/codex-lifecycle";
+export { debugCodexLifecycle } from "@murphai/assistant-engine/codex-lifecycle";
       `,
     ],
-  ])("rejects Cloudflare %s from hosted Codex lifecycle", (_label, source) => {
+  ])("rejects Cloudflare %s from Codex lifecycle", (_label, source) => {
     const filePath = path.join(repoRoot, "apps/cloudflare/src/container-entrypoint.ts");
     const failure = verifyWorkspaceImportPolicy({
       filePath,
       source,
       sourceMember: "apps/cloudflare",
-      specifier: "@murphai/assistant-engine/hosted-codex-lifecycle",
+      specifier: "@murphai/assistant-engine/codex-lifecycle",
     });
 
     expect(failure).toContain("apps/cloudflare must depend on @murphai/assistant-runtime");
   });
 
-  it("rejects Cloudflare hosted Codex process hook imports outside the container entrypoint", () => {
+  it("rejects Cloudflare Codex process hook imports outside the container entrypoint", () => {
     const filePath = path.join(repoRoot, "apps/cloudflare/src/runner-container.ts");
     const failure = verifyWorkspaceImportPolicy({
       filePath,
       source: `
 import {
-  snapshotExpectedHostedCodexRootProcess,
-  stopHostedWarmCodexAppServer,
-} from "@murphai/assistant-engine/hosted-codex-lifecycle";
+  snapshotExpectedCodexRootProcess,
+  stopWarmCodexAppServer,
+} from "@murphai/assistant-engine/codex-lifecycle";
       `,
       sourceMember: "apps/cloudflare",
-      specifier: "@murphai/assistant-engine/hosted-codex-lifecycle",
+      specifier: "@murphai/assistant-engine/codex-lifecycle",
     });
 
     expect(failure).toContain("apps/cloudflare must depend on @murphai/assistant-runtime");
@@ -300,22 +300,22 @@ import {
     [
       "hosted-runtime-contracts.ts",
       "aliased lifecycle re-exports",
-      'export { snapshotExpectedHostedCodexRootProcess as snapshotHostedCodexRoot } from "@murphai/assistant-engine/hosted-codex-lifecycle";',
+      'export { snapshotExpectedCodexRootProcess as snapshotCodexRoot } from "@murphai/assistant-engine/codex-lifecycle";',
     ],
     [
       "hosted-runtime-contracts.ts",
       "type-only lifecycle re-exports",
-      'export type { HostedExpectedCodexRootProcess } from "@murphai/assistant-engine/hosted-codex-lifecycle";',
+      'export type { HostedExpectedCodexRootProcess } from "@murphai/assistant-engine/codex-lifecycle";',
     ],
     [
       "hosted-runtime-worker-contracts.ts",
       "aliased lifecycle re-exports",
-      'export { stopHostedWarmCodexAppServer as stopWarmCodex } from "@murphai/assistant-engine/hosted-codex-lifecycle";',
+      'export { stopWarmCodexAppServer as stopWarmCodex } from "@murphai/assistant-engine/codex-lifecycle";',
     ],
     [
       "hosted-runtime-worker-contracts.ts",
       "type-only lifecycle re-exports",
-      'export type { HostedExpectedCodexRootProcess } from "@murphai/assistant-engine/hosted-codex-lifecycle";',
+      'export type { HostedExpectedCodexRootProcess } from "@murphai/assistant-engine/codex-lifecycle";',
     ],
   ])("rejects assistant-runtime %s %s", (contractFileName, _label, source) => {
     const filePath = path.join(
@@ -327,19 +327,19 @@ import {
       filePath,
       source,
       sourceMember: "packages/assistant-runtime",
-      specifier: "@murphai/assistant-engine/hosted-codex-lifecycle",
+      specifier: "@murphai/assistant-engine/codex-lifecycle",
     });
 
     expect(failure).toContain("contract entrypoints must not route");
   });
 
-  it("rejects assistant-runtime source imports of hosted Codex lifecycle ownership", () => {
+  it("rejects assistant-runtime source imports of Codex lifecycle ownership", () => {
     const filePath = path.join(repoRoot, "packages/assistant-runtime/src/hosted-runtime.ts");
     const failure = verifyWorkspaceImportPolicy({
       filePath,
-      source: 'export { stopHostedWarmCodexAppServer } from "@murphai/assistant-engine/hosted-codex-lifecycle";',
+      source: 'export { stopWarmCodexAppServer } from "@murphai/assistant-engine/codex-lifecycle";',
       sourceMember: "packages/assistant-runtime",
-      specifier: "@murphai/assistant-engine/hosted-codex-lifecycle",
+      specifier: "@murphai/assistant-engine/codex-lifecycle",
     });
 
     expect(failure).toContain("assistant-runtime must not route");

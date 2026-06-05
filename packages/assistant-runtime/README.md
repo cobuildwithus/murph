@@ -56,7 +56,7 @@ Hosted runtime env/config helpers that Cloudflare needs at the app boundary expo
 `@murphai/assistant-runtime/hosted-assistant-env` and
 `@murphai/assistant-runtime/hosted-runtime-contracts`, so hosted apps do not need
 to reach into lower owner packages for runtime launch/profile contracts. Concrete
-Codex app-server process lifecycle hooks remain owned by `@murphai/assistant-engine/hosted-codex-lifecycle`.
+Codex app-server process lifecycle hooks remain owned by `@murphai/assistant-engine/codex-lifecycle`.
 Host apps may still decide which env profiles are enabled and how
 transport-specific URL rewriting works, but the profile key sets and runtime
 manifest shape come from this package.

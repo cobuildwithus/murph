@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -13,6 +13,9 @@ import {
 import type {
   HostedExpectedCodexRootProcess,
 } from '@murphai/hosted-execution/runtime-control'
+import {
+  ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS,
+} from '@murphai/operator-config/assistant/target-runtime'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -125,8 +128,13 @@ const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   'murph.assistant-codex-app-server-timing.v1'
 const CODEX_APP_SERVER_TIMING_TRACE_TYPE =
   'assistant.codex.app_server_timing'
-const HOSTED_CODEX_APP_SERVER_STABLE_IDENTITY_ENV_NAMES = [
+const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
+const CODEX_APP_SERVER_PROVIDER_IDENTITY_ENV_NAMES =
+  ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS.map((config) => config.envKey)
+const CODEX_APP_SERVER_PROCESS_IDENTITY_ENV_NAMES = [
   'ALL_PROXY',
+  'CODEX_ACCESS_TOKEN',
+  'CODEX_API_KEY',
   'CODEX_CA_CERTIFICATE',
   'CODEX_HOME',
   'CURL_CA_BUNDLE',
@@ -146,7 +154,6 @@ const HOSTED_CODEX_APP_SERVER_STABLE_IDENTITY_ENV_NAMES = [
   'NO_PROXY',
   'NODE_ENV',
   'NODE_EXTRA_CA_CERTS',
-  'OPENAI_API_KEY',
   'PATH',
   'REQUESTS_CA_BUNDLE',
   'SSL_CERT_DIR',
@@ -156,6 +163,7 @@ const HOSTED_CODEX_APP_SERVER_STABLE_IDENTITY_ENV_NAMES = [
   'TMPDIR',
   'TZ',
   'VAULT',
+  ...CODEX_APP_SERVER_PROVIDER_IDENTITY_ENV_NAMES,
 ] as const
 const HOSTED_CODEX_APP_SERVER_REJECTED_CHILD_ENV_NAMES = [
   'MURPH_HOSTED_CODEX_BOUND_USER_ID',
@@ -166,6 +174,7 @@ const HOSTED_CODEX_APP_SERVER_REJECTED_CHILD_ENV_NAMES = [
 
 type CodexAppServerProcessState =
   | 'idle'
+  | 'reserved'
   | 'running'
   | 'stopped'
   | 'stopping'
@@ -173,7 +182,6 @@ type CodexAppServerProcessState =
 type CodexAppServerProcessInput = {
   args: readonly string[]
   codexCommand: string
-  commandDigest: string | null
   env: NodeJS.ProcessEnv
   identityDigest: string | null
   workingDirectory: string
@@ -182,7 +190,6 @@ type CodexAppServerProcessInput = {
 type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
   args: readonly string[]
   codexCommand: string
-  commandDigest: string | null
   env: NodeJS.ProcessEnv
   hostedRuntimeProcess: boolean
   identityDigest: string | null
@@ -200,6 +207,39 @@ type CodexAppServerActiveTurnBinding = {
   onStderrText(text: string): void
   onStdinError(error: unknown): VaultCliError | null
   onStdoutText(text: string): void
+}
+
+function buildCodexAppServerNotFoundError(codexCommand: string): VaultCliError {
+  return new VaultCliError(
+    'ASSISTANT_CODEX_NOT_FOUND',
+    `Codex app-server executable "${codexCommand}" was not found. Install @openai/codex or pass --codexCommand.`,
+  )
+}
+
+function normalizeCodexStartupFailure(input: {
+  codexCommand: string
+  error: unknown
+}): Error {
+  if (readNodeErrorCode(input.error) === 'ENOENT') {
+    return buildCodexAppServerNotFoundError(input.codexCommand)
+  }
+
+  return input.error instanceof Error
+    ? input.error
+    : new VaultCliError(
+        'ASSISTANT_CODEX_FAILED',
+        'Codex app-server failed during startup.',
+        {
+          retryable: false,
+        },
+      )
+}
+
+function appendCodexStartupStderr(previous: string, next: string): string {
+  const combined = `${previous}${next}`
+  return combined.length > CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH
+    ? combined.slice(-CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH)
+    : combined
 }
 
 function resolveCodexAppServerProgressDelivery(
@@ -415,6 +455,7 @@ export async function executeCodexAppServerTurn(
   const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(input.approvalPolicy)
   const hostedRuntimeProcess = isHostedCodexAppServerRuntime(input.env)
   const workingDirectory = path.resolve(input.workingDirectory)
+  await assertCodexAppServerWorkingDirectory(workingDirectory)
   const resolvedChildEnv = await resolveCodexChildEnv({
     codexHome: resolveCodexAppServerCodexHome({
       codexHome: input.codexHome,
@@ -440,49 +481,64 @@ export async function executeCodexAppServerTurn(
     approvalPolicy,
   }
   const args = buildCodexAppServerArgs(normalizedInput)
+  const processIdentity = await buildCodexAppServerProcessIdentity({
+    args,
+    codexCommand,
+    env: childEnv,
+    hostedRuntimeProcess,
+    workingDirectory,
+  })
   const preparedInput: CodexAppServerPreparedTurnInput = {
     ...normalizedInput,
     args,
     codexCommand,
-    commandDigest: null,
     env: childEnv,
     hostedRuntimeProcess,
-    identityDigest: null,
+    identityDigest: processIdentity.identityDigest,
     imagePaths,
     tempRoot,
     workingDirectory,
   }
 
   try {
-    if (hostedRuntimeProcess) {
-      const processIdentity = await buildCodexAppServerProcessIdentity({
-        args,
-        codexCommand,
-        env: childEnv,
-        hostedRuntimeProcess,
-        workingDirectory,
-      })
-      const hostedPreparedInput: CodexAppServerPreparedTurnInput = {
-        ...preparedInput,
-        commandDigest: processIdentity.commandDigest,
-        identityDigest: processIdentity.identityDigest,
-      }
-      const processInstance = await getOrStartHostedWarmCodexProcess(hostedPreparedInput)
-      try {
-        return await runCodexAppServerTurnOnProcess(processInstance, hostedPreparedInput, {
-          keepProcessWarm: true,
-        })
-      } finally {
-        clearHostedWarmCodexProcessIfUnusable(processInstance)
-      }
+    const processInstance = await getOrStartWarmCodexProcess(preparedInput)
+    try {
+      return await runCodexAppServerTurnOnProcess(processInstance, preparedInput)
+    } finally {
+      clearWarmCodexProcessIfUnusable(processInstance)
     }
-
-    return await runCodexAppServerTurn(preparedInput)
   } finally {
     await rm(tempRoot, {
       recursive: true,
       force: true,
     })
+  }
+}
+
+async function assertCodexAppServerWorkingDirectory(
+  workingDirectory: string,
+): Promise<void> {
+  let stats: Awaited<ReturnType<typeof stat>>
+  try {
+    stats = await stat(workingDirectory)
+  } catch {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_WORKING_DIRECTORY_MISSING',
+      'Codex app-server working directory does not exist.',
+      {
+        retryable: false,
+      },
+    )
+  }
+
+  if (!stats.isDirectory()) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_WORKING_DIRECTORY_INVALID',
+      'Codex app-server working directory is not a directory.',
+      {
+        retryable: false,
+      },
+    )
   }
 }
 
@@ -548,10 +604,10 @@ function projectHostedCodexAppServerChildEnv(env: NodeJS.ProcessEnv): NodeJS.Pro
   }
 }
 
-function projectHostedCodexAppServerIdentityEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+function projectCodexAppServerProcessIdentityEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const projected: NodeJS.ProcessEnv = {}
 
-  for (const key of HOSTED_CODEX_APP_SERVER_STABLE_IDENTITY_ENV_NAMES) {
+  for (const key of CODEX_APP_SERVER_PROCESS_IDENTITY_ENV_NAMES) {
     const value = env[key]
     if (typeof value === 'string') {
       projected[key] = value
@@ -594,7 +650,6 @@ export function buildCodexAppServerArgs(
 
 class CodexAppServerProcess {
   readonly child: ChildProcessWithoutNullStreams
-  readonly commandDigest: string | null
   readonly identityDigest: string | null
   readonly pendingRequests = new Map<CodexRpcId, PendingCodexRpcRequest>()
   readonly processGroupPid: number | null
@@ -602,6 +657,8 @@ class CodexAppServerProcess {
 
   private activeTurn: CodexAppServerActiveTurnBinding | null = null
   private cleanupProcessExitListener: () => void
+  private completedTurnCount = 0
+  private readonly codexCommand: string
   private ignoredResponseIds = new Set<CodexRpcId>()
   private initialized = false
   private nextRequestId = 1
@@ -610,11 +667,13 @@ class CodexAppServerProcess {
   private stopCompleted = false
   private state: CodexAppServerProcessState = 'idle'
   private stderrBuffer = ''
+  private startupStderr = ''
+  private startupFailure: Error | null = null
   private stdinFailure: VaultCliError | null = null
   private stdoutBuffer = ''
 
   constructor(input: CodexAppServerProcessInput) {
-    this.commandDigest = input.commandDigest
+    this.codexCommand = input.codexCommand
     this.identityDigest = input.identityDigest
 
     const useProcessGroup = process.platform !== 'win32'
@@ -654,7 +713,15 @@ class CodexAppServerProcess {
     return Math.max(0, Date.now() - this.startedAt)
   }
 
-  bindTurn(binding: CodexAppServerActiveTurnBinding): void {
+  get requiresCompleteTurnCorrelation(): boolean {
+    return this.completedTurnCount > 0
+  }
+
+  get hasInFlightTurn(): boolean {
+    return this.state === 'reserved' || this.state === 'running'
+  }
+
+  reserveTurn(): void {
     if (
       this.state !== 'idle' ||
       this.activeTurn ||
@@ -662,14 +729,22 @@ class CodexAppServerProcess {
       this.child.exitCode !== null ||
       this.child.signalCode !== null
     ) {
-      throw new VaultCliError(
-        'ASSISTANT_CODEX_APP_SERVER_BUSY',
-        'Codex app-server process is not idle.',
-        {
-          retryable: true,
-          state: this.state,
-        },
-      )
+      throw this.buildBusyError()
+    }
+
+    this.state = 'reserved'
+  }
+
+  bindTurn(binding: CodexAppServerActiveTurnBinding): void {
+    this.throwStartupFailure()
+    if (
+      (this.state !== 'idle' && this.state !== 'reserved') ||
+      this.activeTurn ||
+      this.poisoned ||
+      this.child.exitCode !== null ||
+      this.child.signalCode !== null
+    ) {
+      throw this.buildBusyError()
     }
 
     this.activeTurn = binding
@@ -684,11 +759,41 @@ class CodexAppServerProcess {
     this.activeTurn = null
     if (this.state === 'running') {
       this.state = 'idle'
+      this.completedTurnCount += 1
     }
   }
 
+  releaseReservation(): void {
+    if (this.state === 'reserved' && !this.activeTurn) {
+      this.state = 'idle'
+    }
+  }
+
+  buildBusyError(
+    message = 'Codex app-server process is not idle.',
+  ): VaultCliError {
+    return new VaultCliError(
+      'ASSISTANT_CODEX_APP_SERVER_BUSY',
+      message,
+      {
+        retryable: true,
+        state: this.state,
+      },
+    )
+  }
+
   async waitForSpawn(): Promise<void> {
-    await waitForCodexSpawn(this.child)
+    this.throwStartupFailure()
+    try {
+      await waitForCodexSpawn(this.child)
+    } catch (error) {
+      const failure =
+        this.startupFailure ??
+        this.buildSpawnWaitFailure(error)
+      this.startupFailure ??= failure
+      throw failure
+    }
+    this.throwStartupFailure()
   }
 
   async initialize(): Promise<void> {
@@ -711,6 +816,7 @@ class CodexAppServerProcess {
       'initialize',
     )
     this.initialized = true
+    this.startupStderr = ''
     this.sendNotification('initialized', {})
   }
 
@@ -891,29 +997,45 @@ class CodexAppServerProcess {
     const failure =
       this.stdinFailure ??
       this.activeTurn?.onStdinError(error) ??
-      new VaultCliError(
-        'ASSISTANT_CODEX_FAILED',
-        'Codex app-server stdin failed.',
-        {
-          retryable: false,
-        },
-      )
+      buildCodexProcessExitError({
+        abortRequested: false,
+        code: this.child.exitCode,
+        diagnostics: this.buildStartupProcessDiagnostics(),
+        fallback: buildCodexStdinFailureFallback({
+          error,
+          lastEventError: null,
+          stderr: this.startupStderr,
+        }),
+        providerActionCount: 0,
+        codexThreadId: null,
+        signal: this.child.signalCode ?? null,
+        stderr: this.startupStderr,
+      })
     this.stdinFailure = failure
     this.poisoned = true
+    if (!this.initialized) {
+      this.startupFailure ??= failure
+    }
     if (!this.activeTurn) {
+      this.startupFailure ??= failure
       this.rejectPending(failure)
     }
     return failure
   }
 
   private handleProcessError(error: Error): void {
+    const failure = normalizeCodexStartupFailure({
+      codexCommand: this.codexCommand,
+      error,
+    })
     this.poisoned = true
     if (this.activeTurn) {
-      this.activeTurn.onError(error)
+      this.activeTurn.onError(failure)
       return
     }
 
-    this.rejectPending(error)
+    this.startupFailure ??= failure
+    this.rejectPending(failure)
   }
 
   private handleStdoutData(text: string): void {
@@ -925,6 +1047,9 @@ class CodexAppServerProcess {
   }
 
   private handleStderrData(text: string): void {
+    if (!this.initialized) {
+      this.startupStderr = appendCodexStartupStderr(this.startupStderr, text)
+    }
     this.activeTurn?.onStderrText(text)
     this.stderrBuffer += text
     this.stderrBuffer = consumeCompleteLines(this.stderrBuffer, (line) => {
@@ -982,27 +1107,81 @@ class CodexAppServerProcess {
       return
     }
 
-    this.rejectPending(
-      new VaultCliError(
-        'ASSISTANT_CODEX_FAILED',
-        'Codex app-server process exited unexpectedly.',
-        {
-          retryable: false,
-        },
-      ),
-    )
+    const failure = buildCodexProcessExitError({
+      abortRequested: false,
+      code,
+      diagnostics: this.buildStartupProcessDiagnostics(),
+      fallback: null,
+      providerActionCount: 0,
+      codexThreadId: null,
+      signal,
+      stderr: this.startupStderr,
+    })
+    this.startupFailure ??= failure
+    this.rejectPending(failure)
+  }
+
+  private buildStartupProcessDiagnostics(): CodexProcessExitDiagnostics {
+    return {
+      abortRequested: false,
+      jsonEventCount: 0,
+      lifecycleStage: 'startup',
+      liveTurnOpen: false,
+      pendingRpcCount: this.pendingRequests.size,
+      pendingRpcMethod: this.readPendingRpcMethod(),
+      processGroupPresent: this.processGroupPid !== null,
+      processLifetimeMs: this.processLifetimeMs,
+      providerRequestStarted: false,
+      shutdownRequested: this.normalShutdown,
+      stderrBytes: Buffer.byteLength(this.startupStderr, 'utf8'),
+      terminationSignalSent: null,
+    }
+  }
+
+  private buildSpawnWaitFailure(error: unknown): Error {
+    const normalized = normalizeCodexStartupFailure({
+      codexCommand: this.codexCommand,
+      error,
+    })
+    const spawnClosedBeforeReady =
+      normalized instanceof VaultCliError &&
+      normalized.context?.codexSpawnClosedBeforeReady === true
+
+    if (
+      spawnClosedBeforeReady &&
+      (this.child.exitCode !== null || this.child.signalCode !== null)
+    ) {
+      return buildCodexProcessExitError({
+        abortRequested: false,
+        code: this.child.exitCode,
+        diagnostics: this.buildStartupProcessDiagnostics(),
+        fallback: null,
+        providerActionCount: 0,
+        codexThreadId: null,
+        signal: this.child.signalCode ?? null,
+        stderr: this.startupStderr,
+      })
+    }
+
+    return normalized
+  }
+
+  private throwStartupFailure(): void {
+    if (this.startupFailure) {
+      throw this.startupFailure
+    }
   }
 }
 
-let hostedWarmCodexProcess: CodexAppServerProcess | null = null
-let hostedWarmCodexSlotLock: Promise<void> = Promise.resolve()
+let warmCodexProcess: CodexAppServerProcess | null = null
+let warmCodexSlotLock: Promise<void> = Promise.resolve()
 
-async function withHostedWarmCodexSlotLock<T>(
+async function withWarmCodexSlotLock<T>(
   operation: () => Promise<T>,
 ): Promise<T> {
-  const previous = hostedWarmCodexSlotLock
+  const previous = warmCodexSlotLock
   let release!: () => void
-  hostedWarmCodexSlotLock = new Promise<void>((resolve) => {
+  warmCodexSlotLock = new Promise<void>((resolve) => {
     release = resolve
   })
   await previous
@@ -1013,69 +1192,82 @@ async function withHostedWarmCodexSlotLock<T>(
   }
 }
 
-async function getOrStartHostedWarmCodexProcess(
+async function getOrStartWarmCodexProcess(
   input: CodexAppServerProcessInput,
 ): Promise<CodexAppServerProcess> {
   const identityDigest = input.identityDigest
   if (!identityDigest) {
     throw new VaultCliError(
       'ASSISTANT_CODEX_APP_SERVER_IDENTITY_MISSING',
-      'Hosted Codex app-server process identity is missing.',
+      'Codex app-server process identity is missing.',
       {
         retryable: false,
       },
     )
   }
 
-  return await withHostedWarmCodexSlotLock(async () => {
-    if (hostedWarmCodexProcess?.isReusableFor(identityDigest)) {
-      return hostedWarmCodexProcess
+  return await withWarmCodexSlotLock(async () => {
+    if (warmCodexProcess?.isReusableFor(identityDigest)) {
+      warmCodexProcess.reserveTurn()
+      return warmCodexProcess
     }
 
-    if (hostedWarmCodexProcess) {
-      await hostedWarmCodexProcess.stop('identity-or-health-mismatch')
-      hostedWarmCodexProcess = null
+    if (warmCodexProcess) {
+      if (warmCodexProcess.hasInFlightTurn) {
+        throw warmCodexProcess.buildBusyError(
+          'Codex app-server process is already serving a turn.',
+        )
+      }
+      await warmCodexProcess.stop('identity-or-health-mismatch')
+      warmCodexProcess = null
     }
 
-    hostedWarmCodexProcess = new CodexAppServerProcess(input)
-    return hostedWarmCodexProcess
+    warmCodexProcess = new CodexAppServerProcess(input)
+    warmCodexProcess.reserveTurn()
+    return warmCodexProcess
   })
 }
 
-function clearHostedWarmCodexProcessIfUnusable(
+function clearWarmCodexProcessIfUnusable(
   processInstance: CodexAppServerProcess,
 ): void {
   const identityDigest = processInstance.identityDigest
   if (
-    hostedWarmCodexProcess === processInstance &&
+    warmCodexProcess === processInstance &&
     (!identityDigest || !processInstance.isReusableFor(identityDigest)) &&
     (processInstance.child.exitCode !== null || processInstance.child.signalCode !== null)
   ) {
-    hostedWarmCodexProcess = null
+    warmCodexProcess = null
   }
 }
 
-export async function stopHostedWarmCodexAppServer(
+export async function stopWarmCodexAppServer(
   reason = 'external-stop',
 ): Promise<void> {
-  await withHostedWarmCodexSlotLock(async () => {
-    const processInstance = hostedWarmCodexProcess
+  await withWarmCodexSlotLock(async () => {
+    const processInstance = warmCodexProcess
     if (!processInstance) {
       return
     }
 
+    if (processInstance.hasInFlightTurn) {
+      throw processInstance.buildBusyError(
+        'Codex app-server process is serving a turn and cannot be stopped directly.',
+      )
+    }
+
     await processInstance.stop(reason)
-    if (hostedWarmCodexProcess === processInstance) {
-      hostedWarmCodexProcess = null
+    if (warmCodexProcess === processInstance) {
+      warmCodexProcess = null
     }
   })
 }
 
-export async function snapshotExpectedHostedCodexRootProcess(): Promise<
+export async function snapshotExpectedCodexRootProcess(): Promise<
   HostedExpectedCodexRootProcess | null
 > {
-  return await withHostedWarmCodexSlotLock(async () => {
-    const processInstance = hostedWarmCodexProcess
+  return await withWarmCodexSlotLock(async () => {
+    const processInstance = warmCodexProcess
     const identityDigest = processInstance?.identityDigest
     if (!identityDigest || !processInstance?.isReusableFor(identityDigest)) {
       return null
@@ -1092,7 +1284,6 @@ async function buildCodexAppServerProcessIdentity(input: {
   hostedRuntimeProcess: boolean
   workingDirectory: string
 }): Promise<{
-  commandDigest: string
   identityDigest: string
 }> {
   const commandIdentity = {
@@ -1100,9 +1291,7 @@ async function buildCodexAppServerProcessIdentity(input: {
     codexCommand: input.codexCommand,
   }
   const configTomlDigest = await readCodexConfigTomlDigest(input.env.CODEX_HOME)
-  const identityEnv = input.hostedRuntimeProcess
-    ? projectHostedCodexAppServerIdentityEnv(input.env)
-    : input.env
+  const identityEnv = projectCodexAppServerProcessIdentityEnv(input.env)
   const identity = {
     ...commandIdentity,
     codexHome: normalizeNullableString(input.env.CODEX_HOME),
@@ -1115,7 +1304,6 @@ async function buildCodexAppServerProcessIdentity(input: {
   }
 
   return {
-    commandDigest: hashStableCodexIdentity(commandIdentity),
     identityDigest: hashStableCodexIdentity(identity),
   }
 }
@@ -1154,7 +1342,9 @@ function readCodexEventMethod(message: CodexRpcMessage): string | null {
     ? message.method
     : typeof message.type === 'string'
       ? message.type
-      : null
+      : typeof message.event === 'string'
+        ? message.event
+        : null
 }
 
 function codexEventMethodRequiresTurnCorrelation(method: string | null): boolean {
@@ -1166,6 +1356,11 @@ function codexEventMethodRequiresTurnCorrelation(method: string | null): boolean
   return (
     normalizedMethod === 'error' ||
     normalizedMethod === 'thread/compacted' ||
+    normalizedMethod === 'thread/tokenUsage/updated' ||
+    normalizedMethod === 'thread/token_usage/updated' ||
+    normalizedMethod === 'thread.tokenUsage.updated' ||
+    normalizedMethod === 'thread.token.usage.updated' ||
+    normalizedMethod === 'thread.token_usage.updated' ||
     normalizedMethod.startsWith('turn/') ||
     normalizedMethod.startsWith('item/') ||
     normalizedMethod.startsWith('rawResponseItem/') ||
@@ -1181,6 +1376,14 @@ function codexEventMethodRequiresTurnCorrelation(method: string | null): boolean
     normalizedMethod.includes('assistant.message.delta') ||
     normalizedMethod.includes('agent.message.delta')
   )
+}
+
+function isCodexTurnStartedMethod(method: string | null): boolean {
+  return method === 'turn/started' || method === 'turn.started'
+}
+
+function isCodexTurnCompletedMethod(method: string | null): boolean {
+  return method === 'turn/completed' || method === 'turn.completed'
 }
 
 function stableCodexIdentityStringify(value: unknown): string {
@@ -1242,21 +1445,9 @@ function readCodexProcUid(status: string): number | null {
   return Number.isInteger(uid) && uid >= 0 ? uid : null
 }
 
-async function runCodexAppServerTurn(
-  input: CodexAppServerPreparedTurnInput,
-): Promise<CodexAppServerTurnResult> {
-  const processInstance = new CodexAppServerProcess(input)
-  return await runCodexAppServerTurnOnProcess(processInstance, input, {
-    keepProcessWarm: false,
-  })
-}
-
 async function runCodexAppServerTurnOnProcess(
   codexProcess: CodexAppServerProcess,
   input: CodexAppServerPreparedTurnInput,
-  options: {
-    keepProcessWarm: boolean
-  },
 ): Promise<CodexAppServerTurnResult> {
   let stdout = ''
   let stderr = ''
@@ -1290,6 +1481,11 @@ async function runCodexAppServerTurnOnProcess(
   let contextCompactionProgressNotified = false
   let releaseLiveTurn = () => {}
   const pendingProgressDeliveries = new Set<Promise<void>>()
+  const pendingPreStartMessages: Array<{
+    kind: 'event' | 'server_request'
+    message: CodexRpcMessage
+    method: string | null
+  }> = []
   const turnCompleted = new Promise<void>((resolve, reject) => {
     completeTurn = resolve
     failTurn = reject
@@ -1563,6 +1759,15 @@ async function runCodexAppServerTurnOnProcess(
       },
     )
 
+  const buildMissingReusedTurnIdError = (): VaultCliError =>
+    new VaultCliError(
+      'ASSISTANT_CODEX_APP_SERVER_TURN_ID_MISSING',
+      'Codex app-server turn/start response is missing a turn id on a reused warm process.',
+      {
+        retryable: true,
+      },
+    )
+
   const bindExpectedTurnId = (
     candidateTurnId: string | null,
     eventMethod: string | null,
@@ -1590,16 +1795,28 @@ async function runCodexAppServerTurnOnProcess(
     message: CodexRpcMessage,
     eventMethod: string | null,
   ): VaultCliError | null => {
-    if (!options.keepProcessWarm) {
-      return null
+    const eventTurnId = extractCodexTurnIdFromMessage(message)
+    if (
+      codexProcess.requiresCompleteTurnCorrelation &&
+      expectedTurnId === null &&
+      codexEventMethodRequiresTurnCorrelation(eventMethod)
+    ) {
+      if (eventTurnId) {
+        return null
+      }
+
+      return buildStaleTurnEventError({
+        eventMethod,
+        eventTurnId,
+      })
     }
 
-    const eventTurnId = extractCodexTurnIdFromMessage(message)
     if (eventTurnId) {
       return bindExpectedTurnId(eventTurnId, eventMethod)
     }
 
-    return codexEventMethodRequiresTurnCorrelation(eventMethod)
+    return codexProcess.requiresCompleteTurnCorrelation &&
+      codexEventMethodRequiresTurnCorrelation(eventMethod)
       ? buildStaleTurnEventError({
         eventMethod,
         eventTurnId: null,
@@ -1607,76 +1824,107 @@ async function runCodexAppServerTurnOnProcess(
       : null
   }
 
-  const handleParsedMessage = (message: CodexRpcMessage) => {
+  const shouldBufferPreStartWarmMessage = (
+    message: CodexRpcMessage,
+    eventMethod: string | null,
+  ): boolean => {
+    return (
+      codexProcess.requiresCompleteTurnCorrelation &&
+      expectedTurnId === null &&
+      codexEventMethodRequiresTurnCorrelation(eventMethod) &&
+      extractCodexTurnIdFromMessage(message) !== null
+    ) || (
+      codexProcess.requiresCompleteTurnCorrelation &&
+      expectedTurnId === null &&
+      readCodexRpcServerRequestId(message) !== null &&
+      extractCodexTurnIdFromMessage(message) !== null
+    )
+  }
+
+  const acceptJsonEvent = (message: CodexRpcMessage): void => {
     jsonEvents.push(message)
+  }
 
-    const responseId = readCodexRpcResponseId(message)
-    if (responseId !== null) {
-      const pending = codexProcess.pendingRequests.get(responseId)
-      if (pending?.method === 'thread/start' || pending?.method === 'thread/resume') {
-        codexThreadId = extractCodexThreadIdFromResult(message.result) ?? codexThreadId
-      }
-      if (pending?.method === 'turn/start') {
-        const resultTurnId = extractCodexTurnIdFromResult(message.result)
-        const correlationError = bindExpectedTurnId(resultTurnId, 'turn/start')
-        if (correlationError) {
-          rejectOnce(correlationError)
-          return
-        }
-        turnId = resultTurnId ?? turnId
-      }
-      const resolveResult = resolvePendingCodexRpcRequest({
+  const handleAcceptedServerRequest = (
+    message: CodexRpcMessage,
+    requestId: CodexRpcId,
+  ): void => {
+    acceptJsonEvent(message)
+
+    const dynamicToolRequest = readMurphDynamicToolRequest(message)
+    if (!dynamicToolRequest) {
+      denyUnsupportedCodexServerRequest({
         message,
-        pendingRequests: codexProcess.pendingRequests,
-        responseId,
+        requestId,
+        writeRpcMessage: (payload) => {
+          void tryWriteRpcMessage(payload)
+        },
       })
-      if (
-        resolveResult === 'unknown_response_id' &&
-        !codexProcess.consumeIgnoredResponseId(responseId)
-      ) {
-        if (options.keepProcessWarm) {
-          rejectOnce(buildUnknownRpcResponseError())
-        }
-      }
       return
     }
 
-    const requestId = readCodexRpcServerRequestId(message)
-    if (requestId !== null) {
-      const requestMethod = typeof message.method === 'string' ? message.method : null
-      const requestTurnId = extractCodexTurnIdFromMessage(message)
-      if (requestTurnId) {
-        const correlationError = validateWarmTurnEventCorrelation(message, requestMethod)
-        if (correlationError) {
-          rejectOnce(correlationError)
-          return
-        }
-      }
+    if (dynamicToolRequest.kind === 'unsupported-dynamic-tool') {
+      void tryWriteRpcMessage({
+        id: requestId,
+        error: {
+          code: -32000,
+          message: `Unsupported dynamic tool ${dynamicToolRequest.namespace ?? ''}.${dynamicToolRequest.tool ?? 'unknown'}`,
+        },
+      })
+      return
+    }
 
-      const dynamicToolRequest = readMurphDynamicToolRequest(message)
-      if (!dynamicToolRequest) {
-        denyUnsupportedCodexServerRequest({
-          message,
-          requestId,
-          writeRpcMessage: (payload) => {
-            void tryWriteRpcMessage(payload)
-          },
-        })
-        return
-      }
+    if (dynamicToolRequest.kind === 'invalid-progress-arguments') {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'invalid progress update arguments',
+            },
+          ],
+        },
+      })
+      return
+    }
 
-      if (dynamicToolRequest.kind === 'unsupported-dynamic-tool') {
+    const progressDelivery = resolveCodexAppServerProgressDelivery(input)
+    if (!progressDelivery) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'progress updates are not available for this turn',
+            },
+          ],
+        },
+      })
+      return
+    }
+
+    const progressToolResponse = progressDelivery
+      .send(dynamicToolRequest.text, { source: 'model' })
+      .then((progressResult) => {
+        const toolResult = resolveCodexProgressToolResultText(progressResult)
         void tryWriteRpcMessage({
           id: requestId,
-          error: {
-            code: -32000,
-            message: `Unsupported dynamic tool ${dynamicToolRequest.namespace ?? ''}.${dynamicToolRequest.tool ?? 'unknown'}`,
+          result: {
+            success: toolResult.success,
+            contentItems: [
+              {
+                type: 'inputText',
+                text: toolResult.text,
+              },
+            ],
           },
         })
-        return
-      }
-
-      if (dynamicToolRequest.kind === 'invalid-progress-arguments') {
+      })
+      .catch(() => {
         void tryWriteRpcMessage({
           id: requestId,
           result: {
@@ -1684,83 +1932,23 @@ async function runCodexAppServerTurnOnProcess(
             contentItems: [
               {
                 type: 'inputText',
-                text: 'invalid progress update arguments',
+                text: 'progress update failed during best-effort delivery',
               },
             ],
           },
         })
-        return
-      }
+      })
+    trackProgressDelivery(progressToolResponse)
+  }
 
-      const correlationError = requestTurnId
-        ? null
-        : validateWarmTurnEventCorrelation(message, requestMethod)
-      if (correlationError) {
-        rejectOnce(correlationError)
-        return
-      }
-
-      const progressDelivery = resolveCodexAppServerProgressDelivery(input)
-      if (!progressDelivery) {
-        void tryWriteRpcMessage({
-          id: requestId,
-          result: {
-            success: false,
-            contentItems: [
-              {
-                type: 'inputText',
-                text: 'progress updates are not available for this turn',
-              },
-            ],
-          },
-        })
-        return
-      }
-
-      const progressToolResponse = progressDelivery
-        .send(dynamicToolRequest.text, { source: 'model' })
-        .then((progressResult) => {
-          const toolResult = resolveCodexProgressToolResultText(progressResult)
-          void tryWriteRpcMessage({
-            id: requestId,
-            result: {
-              success: toolResult.success,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: toolResult.text,
-                },
-              ],
-            },
-          })
-        })
-        .catch(() => {
-          void tryWriteRpcMessage({
-            id: requestId,
-            result: {
-              success: false,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'progress update failed during best-effort delivery',
-                },
-              ],
-            },
-          })
-        })
-      trackProgressDelivery(progressToolResponse)
-      return
-    }
-
+  const handleAcceptedEvent = (
+    message: CodexRpcMessage,
+    method: string | null,
+  ): void => {
+    acceptJsonEvent(message)
     codexThreadId = codexThreadId ?? extractCodexSessionId(message)
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
-    const method = readCodexEventMethod(message)
-    const correlationError = validateWarmTurnEventCorrelation(message, method)
-    if (correlationError) {
-      rejectOnce(correlationError)
-      return
-    }
-    if (method === 'turn/started') {
+    if (isCodexTurnStartedMethod(method)) {
       turnId = extractCodexTurnIdFromMessage(message) ?? turnId
     }
 
@@ -1809,12 +1997,12 @@ async function runCodexAppServerTurnOnProcess(
       input.onProgress?.(progressEvent)
     }
 
-    if (method === 'turn/started') {
+    if (isCodexTurnStartedMethod(method)) {
       notifyProviderRequestStarted()
       registerLiveTurn()
     }
 
-    if (method !== 'turn/completed') {
+    if (!isCodexTurnCompletedMethod(method)) {
       return
     }
 
@@ -1832,6 +2020,118 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     completeTurn?.()
+  }
+
+  const flushPendingPreStartMessages = (): boolean => {
+    while (pendingPreStartMessages.length > 0) {
+      const pending = pendingPreStartMessages.shift()!
+      const correlationError = validateWarmTurnEventCorrelation(
+        pending.message,
+        pending.method,
+      )
+      if (correlationError) {
+        rejectOnce(correlationError)
+        return false
+      }
+
+      if (pending.kind === 'server_request') {
+        const requestId = readCodexRpcServerRequestId(pending.message)
+        if (requestId === null) {
+          rejectOnce(buildUnknownRpcResponseError())
+          return false
+        }
+        handleAcceptedServerRequest(pending.message, requestId)
+      } else {
+        handleAcceptedEvent(pending.message, pending.method)
+      }
+    }
+
+    return true
+  }
+
+  const handleParsedMessage = (message: CodexRpcMessage) => {
+    const responseId = readCodexRpcResponseId(message)
+    if (responseId !== null) {
+      const pending = codexProcess.pendingRequests.get(responseId)
+      const resolveResult = resolvePendingCodexRpcRequest({
+        message,
+        pendingRequests: codexProcess.pendingRequests,
+        responseId,
+      })
+      if (
+        resolveResult === 'unknown_response_id' &&
+        !codexProcess.consumeIgnoredResponseId(responseId)
+      ) {
+        rejectOnce(buildUnknownRpcResponseError())
+        return
+      }
+      if (resolveResult !== 'unknown_response_id') {
+        acceptJsonEvent(message)
+        if (message.error) {
+          return
+        }
+        if (pending?.method === 'thread/start' || pending?.method === 'thread/resume') {
+          codexThreadId = extractCodexThreadIdFromResult(message.result) ?? codexThreadId
+        }
+        if (pending?.method === 'turn/start') {
+          const resultTurnId = extractCodexTurnIdFromResult(message.result)
+          if (codexProcess.requiresCompleteTurnCorrelation && !resultTurnId) {
+            rejectOnce(buildMissingReusedTurnIdError())
+            return
+          }
+          const correlationError = bindExpectedTurnId(resultTurnId, 'turn/start')
+          if (correlationError) {
+            rejectOnce(correlationError)
+            return
+          }
+          turnId = resultTurnId ?? turnId
+        }
+        if (pending?.method === 'turn/start' && !flushPendingPreStartMessages()) {
+          return
+        }
+      }
+      return
+    }
+
+    const requestId = readCodexRpcServerRequestId(message)
+    if (requestId !== null) {
+      const requestMethod = typeof message.method === 'string' ? message.method : null
+      if (shouldBufferPreStartWarmMessage(message, requestMethod)) {
+        pendingPreStartMessages.push({
+          kind: 'server_request',
+          message,
+          method: requestMethod,
+        })
+        return
+      }
+      const correlationError = validateWarmTurnEventCorrelation(
+        message,
+        requestMethod,
+      )
+      if (correlationError) {
+        rejectOnce(correlationError)
+        return
+      }
+      handleAcceptedServerRequest(message, requestId)
+      return
+    }
+
+    const method = readCodexEventMethod(message)
+    if (shouldBufferPreStartWarmMessage(message, method)) {
+      pendingPreStartMessages.push({
+        kind: 'event',
+        message,
+        method,
+      })
+      return
+    }
+
+    const correlationError = validateWarmTurnEventCorrelation(message, method)
+    if (correlationError) {
+      rejectOnce(correlationError)
+      return
+    }
+    handleAcceptedEvent(message, method)
   }
 
   const emitActionDiagnosticsTrace = () => {
@@ -1949,17 +2249,12 @@ async function runCodexAppServerTurnOnProcess(
       )
     },
     onError(error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        rejectOnce(
-          new VaultCliError(
-            'ASSISTANT_CODEX_NOT_FOUND',
-            `Codex app-server executable "${input.codexCommand}" was not found. Install @openai/codex or pass --codexCommand.`,
-          ),
-        )
-        return
-      }
-
-      rejectOnce(error)
+      rejectOnce(
+        normalizeCodexStartupFailure({
+          codexCommand: input.codexCommand,
+          error,
+        }),
+      )
     },
     onFramingError() {
       rejectOnce(
@@ -1987,9 +2282,9 @@ async function runCodexAppServerTurnOnProcess(
       stdout += text
     },
   }
-  codexProcess.bindTurn(activeTurnBinding)
 
   try {
+    codexProcess.bindTurn(activeTurnBinding)
     if (!codexProcess.initializedForRpc) {
       lifecycleStage = 'spawn_wait'
       await codexProcess.waitForSpawn()
@@ -2059,24 +2354,16 @@ async function runCodexAppServerTurnOnProcess(
     lifecycleStage = 'turn_completed'
     emitAppServerTimingTrace('turn-completed')
     closeLiveTurn()
-    if (options.keepProcessWarm) {
-      if (abortRequested || terminationSignalSent) {
-        normalShutdown = true
-        lifecycleStage = 'abort_cleanup'
-        await codexProcess.poison('turn-completed-after-abort')
-        lifecycleStage = 'shutdown_complete'
-        emitAppServerTimingTrace('warm-abort-poisoned')
-      } else {
-        lifecycleStage = 'idle'
-        codexProcess.releaseTurn(activeTurnBinding)
-        emitAppServerTimingTrace('warm-idle')
-      }
-    } else {
+    if (abortRequested || terminationSignalSent) {
       normalShutdown = true
-      lifecycleStage = 'shutdown'
-      await codexProcess.stop('turn-completed')
+      lifecycleStage = 'abort_cleanup'
+      await codexProcess.poison('turn-completed-after-abort')
       lifecycleStage = 'shutdown_complete'
-      emitAppServerTimingTrace('shutdown')
+      emitAppServerTimingTrace('warm-abort-poisoned')
+    } else {
+      lifecycleStage = 'idle'
+      codexProcess.releaseTurn(activeTurnBinding)
+      emitAppServerTimingTrace('warm-idle')
     }
     if (stdinFailure) {
       throw stdinFailure
@@ -2087,15 +2374,13 @@ async function runCodexAppServerTurnOnProcess(
     closeLiveTurn()
     normalShutdown = true
     lifecycleStage = 'error_cleanup'
-    await (options.keepProcessWarm
-      ? codexProcess.poison('turn-failure')
-      : codexProcess.stop('turn-failure')
-    ).catch(() => undefined)
+    await codexProcess.poison('turn-failure').catch(() => undefined)
     throw error
   } finally {
     closeLiveTurn()
     cleanupAbortListener()
     codexProcess.releaseTurn(activeTurnBinding)
+    codexProcess.releaseReservation()
   }
 
   const finalMessage =

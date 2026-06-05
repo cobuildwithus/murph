@@ -89,7 +89,7 @@ Treat partial answers as enough to continue. Ask follow-up questions about proto
 
 8. Supplements. Ask a natural optional question about current supplements after current protocol/experiment context unless they already supplied supplement context, declined onboarding, or moved into concrete help. Do not use a fixed script for this turn. When relevant, invite product or brand names plus roughly how long they have taken each one or since when. Follow the supplement input affordance. Keep the question lightweight.
 
-When their supplement answer will require web searches or other product-ingredient lookups, call `send_progress_update` once before the first search or lookup so the user knows you are checking ingredient lists. Do not use it for a quick memory save or a single follow-up question.
+When their supplement answer will require ingredient lookup, call `send_progress_update` once before the first lookup so the user knows you are checking ingredient lists. Default to `vault-cli supplement search-labels` for one supplement or `vault-cli supplement search-labels-batch` for several; the label database covers many supplements but is not exhaustive, so fall back to web search for products or ingredients it misses. Do not use a progress update for a quick memory save or a single follow-up question.
 
 Treat partial answers as enough to continue. Ask follow-up questions about dosage only when the user asks to set up a specific experiment where that detail materially affects safety or measurement.
 

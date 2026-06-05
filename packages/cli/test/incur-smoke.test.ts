@@ -957,6 +957,59 @@ test('route estimate schema exposes the Mapbox-backed routing inputs', async () 
   )
 })
 
+test('supplement search-labels schema exposes hosted label lookup inputs', async () => {
+  const schema = JSON.parse(
+    await runSourceCliRaw(['supplement', 'search-labels', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, { description?: string }>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, { description?: string }>
+    }
+  }
+
+  assert.deepEqual(schema.args.required, ['query'])
+  assert.match(
+    String(schema.args.properties.query?.description ?? ''),
+    /Supplement product, brand, ingredient, DSLD id, or UPC/u,
+  )
+  assert.match(
+    String(schema.options.properties.limit?.description ?? ''),
+    /Maximum label matches/u,
+  )
+})
+
+test('supplement search-labels-batch schema exposes hosted batch lookup inputs', async () => {
+  const schema = JSON.parse(
+    await runSourceCliRaw(['supplement', 'search-labels-batch', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, { description?: string }>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, {
+        description?: string
+        items?: unknown
+        maxItems?: number
+        type?: string
+      }>
+      required?: string[]
+    }
+  }
+
+  assert.deepEqual(schema.args.required ?? [], [])
+  assert.deepEqual(schema.options.required, ['query'])
+  assert.equal(schema.options.properties.query?.type, 'array')
+  assert.equal(schema.options.properties.query?.maxItems, 10)
+  assert.match(
+    String(schema.options.properties.query?.description ?? ''),
+    /Repeat --query/u,
+  )
+})
+
 test('model schema explains preset-gated non-interactive updates', async () => {
   const schema = JSON.parse(
     await runSourceCliRaw(['model', '--schema', '--format', 'json']),

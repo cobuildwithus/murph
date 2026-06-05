@@ -381,9 +381,9 @@ export function verifyWorkspaceImportPolicy({
   if (
     sourceMember === "packages/assistant-runtime"
     && filePath.includes(`${path.sep}packages${path.sep}assistant-runtime${path.sep}src${path.sep}`)
-    && specifier === "@murphai/assistant-engine/hosted-codex-lifecycle"
+    && specifier === "@murphai/assistant-engine/codex-lifecycle"
   ) {
-    return `${path.relative(repoRoot, filePath)} imports hosted Codex lifecycle ownership from ${JSON.stringify(specifier)}; assistant-runtime must not route concrete assistant-engine lifecycle hooks.`;
+    return `${path.relative(repoRoot, filePath)} imports Codex lifecycle ownership from ${JSON.stringify(specifier)}; assistant-runtime must not route concrete assistant-engine lifecycle hooks.`;
   }
 
   if (
@@ -806,10 +806,10 @@ function isAllowedCloudflareAssistantEngineOwnerImport({
 
   return (
     relativeFilePath === "apps/cloudflare/src/container-entrypoint.ts"
-    && specifier === "@murphai/assistant-engine/hosted-codex-lifecycle"
+    && specifier === "@murphai/assistant-engine/codex-lifecycle"
     && importsOnlyNamedBindingsFromSpecifier(source, specifier, [
-      "snapshotExpectedHostedCodexRootProcess",
-      "stopHostedWarmCodexAppServer",
+      "snapshotExpectedCodexRootProcess",
+      "stopWarmCodexAppServer",
     ])
   );
 }

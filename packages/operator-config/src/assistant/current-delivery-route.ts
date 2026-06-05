@@ -1,8 +1,3 @@
-export const ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV =
-  'MURPH_ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL'
-export const ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV =
-  'MURPH_ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET'
-
 export interface AssistantDeliveryRouteFields {
   channel?: string | null
   deliveryTarget?: string | null
@@ -22,52 +17,6 @@ export interface NormalizedAssistantDeliveryRouteFields {
 export interface AssistantCurrentDeliveryRoute {
   channel: string
   deliveryTarget: string
-}
-
-export function createAssistantCurrentDeliveryRouteEnv(
-  input: AssistantDeliveryRouteFields,
-): NodeJS.ProcessEnv {
-  const channel = normalizeAssistantRouteString(input.channel)
-  const deliveryTarget = normalizeAssistantRouteString(input.deliveryTarget)
-
-  if (!channel || !deliveryTarget) {
-    return {}
-  }
-
-  return {
-    [ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV]: channel,
-    [ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV]: deliveryTarget,
-  }
-}
-
-export function readAssistantCurrentDeliveryRouteEnv(
-  env: NodeJS.ProcessEnv = process.env,
-): AssistantCurrentDeliveryRoute | null {
-  const channel = normalizeAssistantRouteString(
-    env[ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV],
-  )
-  const deliveryTarget = normalizeAssistantRouteString(
-    env[ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV],
-  )
-
-  if (!channel || !deliveryTarget) {
-    return null
-  }
-
-  return {
-    channel,
-    deliveryTarget,
-  }
-}
-
-export function resolveAssistantDeliveryRouteWithCurrentDefaults(
-  input: AssistantDeliveryRouteFields,
-  env: NodeJS.ProcessEnv = process.env,
-): NormalizedAssistantDeliveryRouteFields {
-  return resolveAssistantDeliveryRouteWithCurrentRoute(
-    input,
-    readAssistantCurrentDeliveryRouteEnv(env),
-  )
 }
 
 export function resolveAssistantDeliveryRouteWithCurrentRoute(

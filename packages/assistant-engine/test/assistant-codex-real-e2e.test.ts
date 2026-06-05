@@ -91,6 +91,69 @@ interface ResumeCacheProbeSummary {
 
 describeRealCodex('real Codex app-server cache usage e2e', () => {
   it(
+    'returns the resumed turn id in the real turn/start result contract',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-codex-turn-start-contract-e2e-'),
+      )
+
+      try {
+        const commonInput = {
+          approvalPolicy: 'never',
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          env: config.env,
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const first = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Reply exactly TURN_START_CONTRACT_ONE_OK.',
+          refreshThreadInstructions: true,
+        })
+        const secondTraceEvents: unknown[] = []
+        const second = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          onTraceEvent: (event) => {
+            secondTraceEvents.push(event)
+          },
+          prompt: 'Reply exactly TURN_START_CONTRACT_TWO_OK.',
+          refreshThreadInstructions: false,
+          resumeSessionId: first.sessionId,
+        })
+        const turnStartResultTurnIds = readCodexTurnStartResultTurnIds(
+          second.jsonEvents,
+        )
+        const turnStartedEventTurnIds = readCodexTurnStartedEventTurnIds(
+          second.jsonEvents,
+        )
+        const secondTurnId = second.turnId
+
+        expect(second.finalMessage).toContain('TURN_START_CONTRACT_TWO_OK')
+        expect(secondTurnId).not.toBeNull()
+        if (!secondTurnId) {
+          throw new Error('Real Codex resumed turn did not expose a turn id.')
+        }
+        expect(hasCodexTimingStage(secondTraceEvents, 'warm-reused')).toBe(true)
+        expect(turnStartResultTurnIds).toContain(secondTurnId)
+        expect(turnStartedEventTurnIds).toContain(secondTurnId)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'uses current-turn total delta usage from a real tool-using Codex turn',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -263,6 +326,71 @@ describe('real Codex app-server cache usage e2e harness', () => {
     expect(message).not.toContain('Quota')
     expect(message).not.toContain('req_sensitive')
     expect(message).not.toContain('thread_sensitive')
+  })
+
+  it('distinguishes turn/start result ids from turn/started event ids', () => {
+    const events = [
+      {
+        id: 1,
+        result: {},
+      },
+      {
+        method: 'turn/started',
+        params: {
+          turn: {
+            id: 'turn-event-only',
+          },
+        },
+      },
+      {
+        id: 2,
+        result: {
+          turn: {
+            id: 'turn-result',
+          },
+        },
+      },
+      {
+        id: 3,
+        result: {
+          turnId: 'turn-result-flat',
+        },
+      },
+      {
+        id: 4,
+        result: {
+          turn_id: 'turn-result-snake',
+        },
+      },
+      {
+        method: 'turn/started',
+        data: {
+          turn: {
+            id: 'turn-data-event',
+          },
+        },
+        result: {
+          turn: {
+            id: 'ignored-result-on-event',
+          },
+        },
+      },
+      {
+        type: 'turn.started',
+        turn_id: 'turn-record-snake-event',
+      },
+    ]
+
+    expect(readCodexTurnStartResultTurnIds(events)).toEqual([
+      'turn-result',
+      'turn-result-flat',
+      'turn-result-snake',
+    ])
+    expect(readCodexTurnStartedEventTurnIds(events)).toEqual([
+      'turn-event-only',
+      'turn-data-event',
+      'turn-record-snake-event',
+    ])
   })
 })
 
@@ -609,6 +737,65 @@ function readFinalCodexPostStartTokenUsageEvent(input: {
       : input.events
 
   return readCodexTokenUsageEvents(eligibleEvents).at(-1) ?? null
+}
+
+function readCodexTurnStartResultTurnIds(
+  events: readonly unknown[],
+): string[] {
+  return events.flatMap((event) => {
+    const record = readRecord(event)
+    if (!record || readString(record.method, record.type, record.event)) {
+      return []
+    }
+
+    const result = readRecord(record.result)
+    const turn = readRecord(result?.turn)
+    const turnId = readString(
+      turn?.id,
+      result?.turnId,
+      result?.turn_id,
+    )
+    return turnId ? [turnId] : []
+  })
+}
+
+function readCodexTurnStartedEventTurnIds(
+  events: readonly unknown[],
+): string[] {
+  return events.flatMap((event) => {
+    const record = readRecord(event)
+    const eventType = readString(record?.method, record?.type, record?.event)
+    if (eventType !== 'turn/started' && eventType !== 'turn.started') {
+      return []
+    }
+
+    const params = readRecord(record?.params)
+    const data = readRecord(record?.data)
+    const turn =
+      readRecord(params?.turn)
+      ?? readRecord(data?.turn)
+      ?? readRecord(record?.turn)
+    const turnId = readString(
+      params?.turnId,
+      params?.turn_id,
+      turn?.id,
+      data?.turnId,
+      data?.turn_id,
+      record?.turnId,
+      record?.turn_id,
+    )
+    return turnId ? [turnId] : []
+  })
+}
+
+function hasCodexTimingStage(
+  events: readonly unknown[],
+  stage: string,
+): boolean {
+  return events.some((event) => {
+    const rawEvent = readRecord(readRecord(event)?.rawEvent)
+    return rawEvent?.codexTimingStage === stage
+  })
 }
 
 function summarizeCodexEventSequence(

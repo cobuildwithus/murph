@@ -10,9 +10,9 @@ const assistantRuntimeEntrypoints: ReadonlyArray<[string, object]> = [
   ["@murphai/assistant-runtime/hosted-runtime-worker-contracts", hostedRuntimeWorkerContracts],
 ];
 
-const hostedCodexLifecycleHookNames = [
-  "snapshotExpectedHostedCodexRootProcess",
-  "stopHostedWarmCodexAppServer",
+const codexLifecycleHookNames = [
+  "snapshotExpectedCodexRootProcess",
+  "stopWarmCodexAppServer",
 ] as const;
 
 // @ts-expect-error HostedExpectedCodexRootProcess must stay on @murphai/hosted-execution/runtime-control.
@@ -28,9 +28,9 @@ test("HostedExpectedCodexRootProcess stays off assistant-runtime entrypoints", (
   // The architecture assertion is enforced by the @ts-expect-error sentinels above.
 });
 
-test("hosted Codex lifecycle hooks stay off assistant-runtime entrypoints", () => {
+test("Codex lifecycle hooks stay off assistant-runtime entrypoints", () => {
   for (const [entrypointName, entrypoint] of assistantRuntimeEntrypoints) {
-    for (const hookName of hostedCodexLifecycleHookNames) {
+    for (const hookName of codexLifecycleHookNames) {
       expect(Object.hasOwn(entrypoint, hookName), `${entrypointName} must not export ${hookName}`)
         .toBe(false);
     }

@@ -16,6 +16,7 @@ import { resolveAssistantStatePaths, type AssistantStatePaths } from './store/pa
 import {
   redactAssistantStateString,
   redactAssistantStateStructuredValue,
+  sanitizeAssistantPortableStateString,
 } from './redaction.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import {
@@ -89,7 +90,7 @@ export async function recordAssistantDiagnosticEvent(input: {
       level: input.level ?? 'info',
       component: input.component,
       kind: input.kind,
-      message: redactAssistantStateString(input.message),
+      message: sanitizeAssistantPortableStateString(input.message),
       code: input.code ?? null,
       sessionId: input.sessionId ?? null,
       turnId: input.turnId ?? null,

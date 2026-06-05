@@ -8,6 +8,7 @@ import type { HostedAssistantDeliveryRecord } from "@murphai/hosted-execution/si
 
 import type { HostedRuntimePlatform } from "../src/hosted-runtime/platform.ts";
 import {
+  buildHostedRuntimeDataApiEnv,
   buildHostedRunnerExecutablePath,
   buildHostedPlatformBackedRuntimeEnv,
   HOSTED_RUNNER_EXECUTABLE_PATH,
@@ -241,6 +242,7 @@ test("hosted runtime process env does not project typed parser toolchain into pr
       MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW: "1",
       NODE_ENV: "production",
       OPENAI_API_KEY: "worker-openai-secret",
+      HOSTED_WEB_BASE_URL: "https://evil-web.example.test",
       HTTP_PROXY: "http://forwarded-proxy.example.test:8080",
       HTTPS_PROXY: "http://forwarded-proxy.example.test:8080",
       WHISPER_COMMAND: "/stale/whisper-cli",
@@ -274,6 +276,7 @@ test("hosted runtime process env does not project typed parser toolchain into pr
   });
   assert.equal("FFMPEG_COMMAND" in childEnv, false);
   assert.equal("HOME" in childEnv, false);
+  assert.equal("HOSTED_WEB_BASE_URL" in childEnv, false);
   assert.equal("PDFINFO_COMMAND" in childEnv, false);
   assert.equal("PDFTOTEXT_COMMAND" in childEnv, false);
   assert.equal("WHISPER_COMMAND" in childEnv, false);
@@ -361,6 +364,21 @@ test("hosted runtime launch spec derives platform env from forwarded env only wh
   assert.deepEqual(spec.runtime.platformEnv, {
     TELEGRAM_BOT_TOKEN: "telegram-token",
   });
+});
+
+test("hosted runtime data API env exposes only the hosted web origin", () => {
+  assert.deepEqual(
+    buildHostedRuntimeDataApiEnv({
+      platformEnv: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
+        MURPH_DATA_API_KEY: "data-api-key",
+      },
+    }),
+    {
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    },
+  );
 });
 
 test("hosted runtime launch spec rejects parserToolchain:null", () => {
@@ -642,6 +660,34 @@ test("hosted platform-backed env keeps platform Telegram values when forwarded e
   );
 });
 
+test("hosted runtime config keeps hosted web base URL platform-owned", () => {
+  const platform = createHostedRuntimePlatformStub();
+
+  const normalized = normalizeHostedAssistantRuntimeConfig(
+    {
+      platformEnv: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      userEnv: {
+        HOSTED_WEB_BASE_URL: "https://evil-web.example.test",
+      },
+    },
+    platform,
+  );
+  const runtimeEnv = {
+    ...buildHostedRuntimeDataApiEnv({
+      platformEnv: normalized.platformEnv,
+    }),
+    ...normalized.userEnv,
+  };
+
+  assert.deepEqual(normalized.platformEnv, {
+    HOSTED_WEB_BASE_URL: "https://web.example.test",
+  });
+  assert.deepEqual(normalized.userEnv, {});
+  assert.equal(runtimeEnv.HOSTED_WEB_BASE_URL, "https://web.example.test");
+});
+
 test("hosted runtime config strips ingress-only secrets from forwarded env", () => {
   const platform = createHostedRuntimePlatformStub();
 
@@ -806,6 +852,7 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
         HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
         HOSTED_ASSISTANT_BASE_URL: "https://user-legacy-provider.example.test/v1",
         HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_WEB_BASE_URL: "https://evil-web.example.test",
         NODE_OPTIONS: "--require /tmp/user-injected.js",
         PATH: "/tmp/user-bin",
         PDFTOTEXT_COMMAND: "/tmp/user-pdftotext",

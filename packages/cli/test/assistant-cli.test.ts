@@ -43,23 +43,12 @@ import {
 const cleanupPaths: string[] = []
 const ASSISTANT_CLI_TIMEOUT_MS = 60_000
 type AssistantRunEvent = Parameters<typeof formatAssistantRunEventForTerminal>[0]
-const assistantMemoryTurnEnvKeys = [
-  VAULT_ENV,
-  'ASSISTANT_MEMORY_BOUND_VAULT',
-  'ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT',
-  'ASSISTANT_MEMORY_BOUND_SESSION_ID',
-  'ASSISTANT_MEMORY_BOUND_TURN_ID',
-] as const
 
-function isolateAssistantMemoryEnv(
+function isolateVaultEnv(
   env: NodeJS.ProcessEnv = {},
 ): NodeJS.ProcessEnv {
-  const clearedKeys = Object.fromEntries(
-    assistantMemoryTurnEnvKeys.map((key) => [key, undefined]),
-  ) as NodeJS.ProcessEnv
-
   return {
-    ...clearedKeys,
+    [VAULT_ENV]: undefined,
     ...env,
   }
 }
@@ -434,7 +423,7 @@ test.sequential(
             sessionId: string
           }>
         }>(['assistant', 'session', 'list'], {
-          env: isolateAssistantMemoryEnv(),
+          env: isolateVaultEnv(),
         }),
       )
       assert.equal(defaultListed.vault, path.join('~', 'default-vault'))
@@ -448,7 +437,7 @@ test.sequential(
             sessionId: string
           }>
         }>(['assistant', 'session', 'list', '--vault', overrideVaultRoot], {
-          env: isolateAssistantMemoryEnv(),
+          env: isolateVaultEnv(),
         }),
       )
       assert.equal(overrideListed.vault, path.join('~', 'override-vault'))

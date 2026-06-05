@@ -37,6 +37,7 @@ export function extractCodexTurnIdFromResult(result: unknown): string | null {
   return (
     normalizeNullableString(asString(turn?.id)) ??
     normalizeNullableString(asString(record?.turnId)) ??
+    normalizeNullableString(asString(record?.turn_id)) ??
     null
   )
 }
@@ -45,10 +46,19 @@ export function extractCodexTurnIdFromMessage(
   message: CodexTurnMessage,
 ): string | null {
   const params = asRecord(message.params)
-  const turn = asRecord(params?.turn)
+  const data = asRecord(message.data)
+  const turn =
+    asRecord(params?.turn) ??
+    asRecord(data?.turn) ??
+    asRecord(message.turn)
   return (
     normalizeNullableString(asString(turn?.id)) ??
     normalizeNullableString(asString(params?.turnId)) ??
+    normalizeNullableString(asString(params?.turn_id)) ??
+    normalizeNullableString(asString(data?.turnId)) ??
+    normalizeNullableString(asString(data?.turn_id)) ??
+    normalizeNullableString(asString(message.turnId)) ??
+    normalizeNullableString(asString(message.turn_id)) ??
     null
   )
 }
@@ -57,20 +67,43 @@ export function extractCodexTurnStatus(
   message: CodexTurnMessage,
 ): string | null {
   const params = asRecord(message.params)
-  const turn = asRecord(params?.turn)
-  return normalizeNullableString(asString(turn?.status) ?? asString(params?.status))
+  const data = asRecord(message.data)
+  const paramsTurn = asRecord(params?.turn)
+  const dataTurn = asRecord(data?.turn)
+  const messageTurn = asRecord(message.turn)
+  return normalizeNullableString(
+    asString(paramsTurn?.status) ??
+      asString(params?.status) ??
+      asString(dataTurn?.status) ??
+      asString(data?.status) ??
+      asString(messageTurn?.status) ??
+      asString(message.status),
+  )
 }
 
 export function extractCodexTurnErrorMessage(
   message: CodexTurnMessage,
 ): string | null {
   const params = asRecord(message.params)
-  const turn = asRecord(params?.turn)
-  const error = asRecord(turn?.error) ?? asRecord(params?.error)
+  const data = asRecord(message.data)
+  const paramsTurn = asRecord(params?.turn)
+  const dataTurn = asRecord(data?.turn)
+  const messageTurn = asRecord(message.turn)
+  const error =
+    asRecord(paramsTurn?.error) ??
+    asRecord(params?.error) ??
+    asRecord(dataTurn?.error) ??
+    asRecord(data?.error) ??
+    asRecord(messageTurn?.error) ??
+    asRecord(message.error)
   return normalizeStatusText(
     asString(error?.message) ??
-      asString(turn?.error) ??
+      asString(paramsTurn?.error) ??
       asString(params?.error) ??
+      asString(dataTurn?.error) ??
+      asString(data?.error) ??
+      asString(messageTurn?.error) ??
+      asString(message.error) ??
       null,
   )
 }

@@ -495,7 +495,6 @@ describe('Codex model catalog', () => {
         hosted: null,
       },
       input,
-      memoryTurnEnv: {},
       profile: {
         promptProfile: 'conversation',
         toolProfile: 'provider-turn',
@@ -608,7 +607,6 @@ describe('Codex model catalog', () => {
       activeTurnSteering: null,
       executionContext: input.executionContext,
       input,
-      memoryTurnEnv: {},
       profile: {
         promptProfile: 'conversation',
         toolProfile: 'provider-turn',

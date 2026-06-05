@@ -363,10 +363,7 @@ async function executeAssistantCodexAttempt(input: {
       fault: 'provider',
       message: 'Injected assistant provider failure.',
     })
-    const attemptEnv = {
-      ...attemptPlan.routePlan.cliEnv,
-      ...executionPlan.memoryTurnEnv,
-    }
+    const attemptEnv = attemptPlan.routePlan.cliEnv
     usageAttribution = createAssistantProviderUsageAttribution({
       attemptPlan,
       env: attemptEnv,

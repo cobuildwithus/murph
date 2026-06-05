@@ -385,6 +385,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
   const initialResultPromise = sendAssistantMessageLocal({
     activeTurnCheckpoint,
     deliverResponse: true,
+    deliveryTarget: 'initial-thread',
     prompt: 'Initial prompt',
     vault: '/vaults/test',
   })

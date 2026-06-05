@@ -124,15 +124,39 @@ export async function waitForCodexSpawn(
   }
 
   await new Promise<void>((resolve, reject) => {
-    const handleSpawn = () => {
+    const cleanup = () => {
+      child.off('close', handleClose)
       child.off('error', handleError)
+      child.off('spawn', handleSpawn)
+    }
+    const handleSpawn = () => {
+      cleanup()
       resolve()
     }
     const handleError = (error: Error) => {
-      child.off('spawn', handleSpawn)
+      cleanup()
       reject(error)
     }
+    const handleClose = (
+      code: number | null,
+      signal: NodeJS.Signals | null,
+    ) => {
+      cleanup()
+      reject(
+        new VaultCliError(
+          'ASSISTANT_CODEX_FAILED',
+          'Codex app-server process exited before it finished spawning.',
+          {
+            codexSpawnClosedBeforeReady: true,
+            ...(typeof code === 'number' ? { codexExitCode: code } : {}),
+            ...(signal ? { codexExitSignal: signal } : {}),
+            retryable: false,
+          },
+        ),
+      )
+    }
 
+    child.once('close', handleClose)
     child.once('spawn', handleSpawn)
     child.once('error', handleError)
   })

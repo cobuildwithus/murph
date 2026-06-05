@@ -1,0 +1,4 @@
+interface:
+  display_name: "Research Supplements"
+  short_description: "Research and import supplement labels"
+  default_prompt: "Use $research-supplements to research Momentous supplements and prepare duplicate-aware brand_site supplement rows for Murph."

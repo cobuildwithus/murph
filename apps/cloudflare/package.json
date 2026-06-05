@@ -41,7 +41,7 @@
     "images:cleanup": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/cleanup-container-images.ts",
     "r2:lifecycle:apply": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/apply-r2-lifecycle.ts",
     "deploy:worker:apply": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/deploy-worker-version.ts",
-    "deploy:worker": "pnpm deploy:artifacts && pnpm runner:docker:base && pnpm deploy:worker:apply",
+    "deploy:worker": "pnpm deploy:artifacts && pnpm runner:docker:base -- --force && pnpm deploy:worker:apply",
     "deploy:secrets:render": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/render-worker-secrets.ts",
     "deploy:smoke": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.json apps/cloudflare/scripts/smoke-hosted-deploy.ts",
     "runner:bundle": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts",

@@ -108,19 +108,33 @@ export function buildHostedRunnerChannelPlatformEnv(
   const channelEnv: Record<string, string> = {};
 
   if (platformEnv.TELEGRAM_BOT_TOKEN) {
-    copyHostedChannelPlatformEnv(platformEnv, channelEnv, "TELEGRAM_API_BASE_URL");
+    copyHostedPlatformEnv(platformEnv, channelEnv, "TELEGRAM_API_BASE_URL");
     channelEnv.TELEGRAM_BOT_TOKEN = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
-    copyHostedChannelPlatformEnv(platformEnv, channelEnv, "TELEGRAM_FILE_BASE_URL");
+    copyHostedPlatformEnv(platformEnv, channelEnv, "TELEGRAM_FILE_BASE_URL");
   }
 
   if (platformEnv.WHATSAPP_ACCESS_TOKEN && platformEnv.WHATSAPP_PHONE_NUMBER_ID) {
     channelEnv.WHATSAPP_ACCESS_TOKEN = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
-    copyHostedChannelPlatformEnv(platformEnv, channelEnv, "WHATSAPP_API_BASE_URL");
+    copyHostedPlatformEnv(platformEnv, channelEnv, "WHATSAPP_API_BASE_URL");
     channelEnv.WHATSAPP_PHONE_NUMBER_ID = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
-    copyHostedChannelPlatformEnv(platformEnv, channelEnv, "WHATSAPP_GRAPH_VERSION");
+    copyHostedPlatformEnv(platformEnv, channelEnv, "WHATSAPP_GRAPH_VERSION");
   }
 
   return channelEnv;
+}
+
+export function buildHostedRunnerDataApiPlatformEnv(
+  source: Readonly<Record<string, unknown>>,
+  options: {
+    rewriteLoopbackUrlsForContainer?: boolean;
+  } = {},
+): Record<string, string> {
+  const platformEnv = buildHostedRunnerPlatformEnv(source, options);
+  const dataApiEnv: Record<string, string> = {};
+
+  copyHostedPlatformEnv(platformEnv, dataApiEnv, "HOSTED_WEB_BASE_URL");
+
+  return dataApiEnv;
 }
 
 export function buildHostedRunnerContainerPlatformEnv(
@@ -132,6 +146,7 @@ export function buildHostedRunnerContainerPlatformEnv(
   return {
     ...buildHostedRunnerLegacyDeviceSyncPlatformEnv(source, options),
     ...buildHostedRunnerChannelPlatformEnv(source, options),
+    ...buildHostedRunnerDataApiPlatformEnv(source, options),
   };
 }
 
@@ -143,7 +158,7 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
   runnerSecrets: Readonly<Record<string, string>>;
 }): HostedAssistantRuntimeConfig {
   const configSource = input.configSource ?? input.forwardedEnv;
-  const platformEnv = buildHostedRunnerContainerPlatformEnv(configSource, {
+  const platformEnv = buildHostedRunnerContainerPlatformEnv(input.configSource ?? {}, {
     rewriteLoopbackUrlsForContainer: input.rewritePlatformUrlsForContainer === true,
   });
   const localE2eParserToolchain =
@@ -198,7 +213,7 @@ function readHostedRunnerParserToolchain(
   return parserToolchain;
 }
 
-function copyHostedChannelPlatformEnv(
+function copyHostedPlatformEnv(
   source: Readonly<Record<string, string>>,
   target: Record<string, string>,
   key: string,

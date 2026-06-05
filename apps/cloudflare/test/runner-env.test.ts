@@ -14,6 +14,7 @@ import {
   buildHostedRunnerJobRuntimeConfig,
   buildHostedRunnerContainerEnv,
   buildHostedRunnerChannelPlatformEnv,
+  buildHostedRunnerDataApiPlatformEnv,
   buildHostedRunnerLegacyDeviceSyncPlatformEnv,
   buildHostedRunnerPlatformEnv,
   filterHostedRunnerSecrets,
@@ -416,6 +417,8 @@ describe("buildHostedRunnerContainerEnv", () => {
       {
         LINQ_API_TOKEN: "linq-user",
         MAPBOX_ACCESS_TOKEN: "mapbox-user",
+        MURPH_DATA_API_KEY: "data-api-user",
+        HOSTED_WEB_BASE_URL: "https://evil.example.test",
         OPENAI_API_KEY: "openai-user",
         TELEGRAM_BOT_TOKEN: "telegram-user",
         WHATSAPP_ACCESS_TOKEN: "whatsapp-user",
@@ -425,6 +428,8 @@ describe("buildHostedRunnerContainerEnv", () => {
         HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
           "LINQ_API_TOKEN",
           "MAPBOX_ACCESS_TOKEN",
+          "MURPH_DATA_API_KEY",
+          "HOSTED_WEB_BASE_URL",
           "OPENAI_API_KEY",
           "TELEGRAM_BOT_TOKEN",
           "WHATSAPP_ACCESS_TOKEN",
@@ -793,7 +798,9 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
           "user-callback-private-jwk",
       },
     });
-    expect(runtime.platformEnv).toBeUndefined();
+    expect(runtime.platformEnv).toEqual({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    });
     expect(runtime.forwardedEnv?.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK).toBeUndefined();
     expect(runtime.forwardedEnv?.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
     expect(runtime.userEnv?.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK).toBeUndefined();
@@ -837,12 +844,50 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     expect(runtime).toMatchObject({
       forwardedEnv: {},
       platformEnv: {
+        HOSTED_WEB_BASE_URL: "http://host.docker.internal:3000/",
         TELEGRAM_API_BASE_URL: "http://host.docker.internal:4012/",
         TELEGRAM_BOT_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         TELEGRAM_FILE_BASE_URL: "http://host.docker.internal:4013/",
       },
       userEnv: {},
     });
+  });
+
+  it("serializes only the hosted web base URL for data API runtime lookups", () => {
+    expect(buildHostedRunnerDataApiPlatformEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+      MURPH_DATA_API_KEY: "data-api-worker-secret",
+    })).toEqual({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    });
+
+    const runtime = buildHostedRunnerJobRuntimeConfig({
+      configSource: {
+        HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "MURPH_DATA_API_KEY,HOSTED_WEB_BASE_URL",
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
+        HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
+        MURPH_DATA_API_KEY: "data-api-worker-secret",
+      },
+      forwardedEnv: {},
+      rewritePlatformUrlsForContainer: true,
+      runnerSecrets: {
+        HOSTED_WEB_BASE_URL: "https://evil.example.test",
+        MURPH_DATA_API_KEY: "data-api-user-secret",
+      },
+    });
+
+    expect(runtime).toMatchObject({
+      forwardedEnv: {},
+      platformEnv: {
+        HOSTED_WEB_BASE_URL: "http://host.docker.internal:3000/",
+      },
+      userEnv: {},
+    });
+    expect(runtime.platformEnv).not.toHaveProperty("MURPH_DATA_API_KEY");
+    expect(runtime.forwardedEnv).not.toHaveProperty("HOSTED_WEB_BASE_URL");
+    expect(runtime.forwardedEnv).not.toHaveProperty("MURPH_DATA_API_KEY");
+    expect(runtime.userEnv).not.toHaveProperty("HOSTED_WEB_BASE_URL");
+    expect(runtime.userEnv).not.toHaveProperty("MURPH_DATA_API_KEY");
   });
 
   it("keeps Telegram platform env out of runner secrets even when operators try to allowlist it", () => {
@@ -1124,7 +1169,9 @@ describe("hosted deploy automation device-sync surface", () => {
         "WHATSAPP_PHONE_NUMBER_ID",
       ]),
     );
-    expect(HOSTED_WORKER_REQUIRED_SECRET_NAMES).toContain("OPENAI_API_KEY");
+    expect(HOSTED_WORKER_REQUIRED_SECRET_NAMES).toEqual(
+      expect.arrayContaining(["MURPH_DATA_API_KEY", "OPENAI_API_KEY"]),
+    );
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toEqual(
       expect.arrayContaining([
         "HOSTED_ASSISTANT_PROVIDER",

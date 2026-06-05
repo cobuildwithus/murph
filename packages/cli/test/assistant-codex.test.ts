@@ -27,6 +27,7 @@ import {
   executeCodexAppServerTurn,
   extractCodexTraceUpdates,
   resolveCodexDisplayOptions,
+  stopWarmCodexAppServer,
 } from '@murphai/assistant-engine/assistant-codex'
 
 const cleanupPaths: string[] = []
@@ -35,9 +36,10 @@ beforeEach(() => {
   codexMocks.spawn.mockReset()
 })
 
-afterEach(() => {
+afterEach(async () => {
+  await stopWarmCodexAppServer('test-cleanup')
   vi.restoreAllMocks()
-  return Promise.all(
+  await Promise.all(
     cleanupPaths.splice(0).map((target) =>
       rm(target, {
         recursive: true,
@@ -286,8 +288,6 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
             },
           }),
         )
-        child.emit('exit', 0, null)
-        child.emit('close', 0, null)
       })()
     })
 

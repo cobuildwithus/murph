@@ -25,11 +25,6 @@ import {
   resolveAssistantFirstContactStateDocIds,
 } from '../src/assistant/first-contact.ts'
 import {
-  assertAssistantMemoryTurnContextVault,
-  createAssistantMemoryTurnContextEnv,
-  resolveAssistantMemoryTurnContext,
-} from '../src/assistant/memory/turn-context.ts'
-import {
   ASSISTANT_OPERATOR_AUTHORITY_VALUES,
   isAssistantOperatorAuthority,
   resolveAssistantOperatorAuthority,
@@ -173,6 +168,41 @@ describe('assistant product small seams', () => {
       effectiveThreadIsDirect: false,
       threadId: 'group-thread',
       threadIsDirect: false,
+    })
+
+    const messageChannelFallback = resolveAssistantConversationPolicy({
+      message: {
+        channel: 'telegram',
+        conversation: {
+          channel: null,
+          directness: 'direct',
+          threadId: 'telegram-thread',
+        },
+        deliverResponse: true,
+        deliveryReplyToMessageId: null,
+        deliveryTarget: 'telegram-thread',
+        operatorAuthority: 'direct-operator',
+        threadId: null,
+        threadIsDirect: null,
+      },
+      session: {
+        binding: {
+          actorId: null,
+          channel: null,
+          conversationKey: null,
+          delivery: null,
+          identityId: null,
+          threadId: null,
+          threadIsDirect: null,
+        },
+      },
+    })
+    expect(messageChannelFallback.audience).toMatchObject({
+      channel: 'telegram',
+      deliveryPolicy: 'explicit-target-override',
+      explicitTarget: 'telegram-thread',
+      threadId: 'telegram-thread',
+      threadIsDirect: true,
     })
 
     const bindingTargetOnly = resolveAssistantConversationPolicy({
@@ -354,47 +384,6 @@ describe('assistant product small seams', () => {
         vault: vaultRoot,
       }),
     ).toBe(false)
-  })
-
-  it('creates and resolves memory turn env bindings and rejects vault mismatches', async () => {
-    const { parentRoot, vaultRoot } = await createTempVaultContext(
-      'assistant-memory-turn-context-',
-    )
-    tempRoots.push(parentRoot)
-
-    const env = createAssistantMemoryTurnContextEnv({
-      sessionId: 'session-1',
-      sourcePrompt: 'How am I doing?',
-      turnId: 'turn-1',
-      vault: path.join(vaultRoot, '..', 'vault'),
-    })
-
-    expect(resolveAssistantMemoryTurnContext(env)).toEqual({
-      provenance: {
-        sessionId: 'session-1',
-        turnId: 'turn-1',
-        writtenBy: 'assistant',
-      },
-      sourcePrompt: 'How am I doing?',
-      vault: vaultRoot,
-    })
-    expect(
-      resolveAssistantMemoryTurnContext({
-        ...env,
-        ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT: '   ',
-      }),
-    ).toBeNull()
-
-    expect(() =>
-      assertAssistantMemoryTurnContextVault(
-        resolveAssistantMemoryTurnContext(env)!,
-        path.join(parentRoot, 'other-vault'),
-      ),
-    ).toThrowError(
-      expect.objectContaining({
-        code: 'ASSISTANT_MEMORY_TURN_VAULT_MISMATCH',
-      }),
-    )
   })
 
   it('normalizes assistant operator authority values', () => {
