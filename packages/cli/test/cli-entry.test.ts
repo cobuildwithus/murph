@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, test, vi } from "vitest";
 
 import { formatStructuredErrorMessage } from "@murphai/operator-config/text/shared";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
   formatMurphCliError,
   installSqliteExperimentalWarningFilter,
@@ -32,12 +33,14 @@ const mockedCliEntryModules = [
   "../src/vault-cli-schema-index.js",
   "../src/vault-cli-shell.js",
   "../src/vault-cli-vault-context.js",
+  "@murphai/assistant-engine/codex-lifecycle",
   "@murphai/operator-config/operator-config",
   "@murphai/setup-cli/setup-cli",
   "@murphai/operator-config/setup-runtime-env",
 ] as const;
 
 function mockCliActionModules(input: {
+  codexLifecycleModule?: Record<string, unknown>;
   cli: {
     serve: ReturnType<typeof vi.fn>;
   };
@@ -75,6 +78,10 @@ function mockCliActionModules(input: {
         input.onInstallVaultCliVaultContext?.(context);
       },
     ),
+  }));
+  vi.doMock("@murphai/assistant-engine/codex-lifecycle", () => ({
+    stopWarmCodexAppServer: vi.fn(async () => undefined),
+    ...input.codexLifecycleModule,
   }));
   vi.doMock("@murphai/operator-config/operator-config", () => ({
     resolveConfiguredDefaultVault: vi.fn(async () => null),
@@ -636,6 +643,7 @@ test("runMurphCliAction still allows murph init to target an explicit vault", as
 
 test("runMurphCliEntrypoint installs env loading and sqlite warning filtering before dispatching the action path", async () => {
   const serve = vi.fn(async () => undefined);
+  const stopWarmCodexAppServer = vi.fn(async () => undefined);
   const loadEnvFileCalls: string[] = [];
   const originalEmitWarning = process.emitWarning;
   const originalHome = process.env.HOME;
@@ -654,6 +662,9 @@ test("runMurphCliEntrypoint installs env loading and sqlite warning filtering be
     });
 
   mockCliActionModules({
+    codexLifecycleModule: {
+      stopWarmCodexAppServer,
+    },
     cli: { serve },
     operatorConfigModule: {
       expandConfiguredVaultPath: vi.fn(),
@@ -688,6 +699,7 @@ test("runMurphCliEntrypoint installs env loading and sqlite warning filtering be
         },
       ],
     ]);
+    assert.deepEqual(stopWarmCodexAppServer.mock.calls, [["cli-entrypoint-exit"]]);
   } finally {
     process.emitWarning = originalEmitWarning;
     if (originalHome === undefined) {
@@ -696,6 +708,54 @@ test("runMurphCliEntrypoint installs env loading and sqlite warning filtering be
       process.env.HOME = originalHome;
     }
   }
+});
+
+test("runMurphCliEntrypoint does not mask command failure when warm Codex shutdown is busy", async () => {
+  const primaryError = new Error("assistant command failed");
+  const serve = vi.fn(async () => {
+    throw primaryError;
+  });
+  const stopWarmCodexAppServer = vi.fn(async () => {
+    throw new VaultCliError(
+      "ASSISTANT_CODEX_APP_SERVER_BUSY",
+      "Codex app-server process is serving a turn and cannot be stopped directly.",
+      {
+        retryable: true,
+      },
+    );
+  });
+
+  mockCliActionModules({
+    codexLifecycleModule: {
+      stopWarmCodexAppServer,
+    },
+    cli: { serve },
+    operatorConfigModule: {
+      expandConfiguredVaultPath: vi.fn(),
+      resolveConfiguredDefaultVault: vi.fn(async () => null),
+      resolveDefaultVault: vi.fn(async () => "/vaults/default"),
+      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
+    },
+    setupCliModule: {
+      createSetupCli: vi.fn(),
+      detectSetupProgramName: vi.fn(() => "murph-setup"),
+      formatSetupWearableLabel: vi.fn((value: string) => value),
+      isSetupInvocation: vi.fn(() => false),
+      listSetupPendingWearables: vi.fn(() => []),
+      listSetupReadyWearables: vi.fn(() => []),
+      resolveSetupPostLaunchAction: vi.fn(() => null),
+    },
+  });
+
+  let caughtError: unknown = null;
+  try {
+    await runMurphCliEntrypoint(["assistant", "chat"]);
+  } catch (error) {
+    caughtError = error;
+  }
+
+  assert.equal(caughtError, primaryError);
+  assert.deepEqual(stopWarmCodexAppServer.mock.calls, [["cli-entrypoint-exit"]]);
 });
 
 test("runMurphCliAction reuses setup results for wearable launches and assistant chat handoff", async () => {

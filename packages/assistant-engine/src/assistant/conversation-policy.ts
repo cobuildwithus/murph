@@ -37,6 +37,7 @@ export function resolveAssistantConversationPolicy(input: {
   message: Pick<
     AssistantMessageInput,
     | 'conversation'
+    | 'channel'
     | 'deliverResponse'
     | 'deliveryReplyToMessageId'
     | 'deliveryTarget'
@@ -64,6 +65,7 @@ export function resolveAssistantConversationAudience(input: {
   message: Pick<
     AssistantMessageInput,
     | 'conversation'
+    | 'channel'
     | 'deliverResponse'
     | 'deliveryReplyToMessageId'
     | 'deliveryTarget'
@@ -80,7 +82,8 @@ export function resolveAssistantConversationAudience(input: {
       : null
   const channel =
     normalizeNullableString(binding.channel) ??
-    normalizeNullableString(conversation?.channel)
+    normalizeNullableString(conversation?.channel) ??
+    normalizeNullableString(input.message.channel)
   const identityId =
     normalizeNullableString(binding.identityId) ??
     normalizeNullableString(conversation?.identityId)

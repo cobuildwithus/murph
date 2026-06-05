@@ -945,8 +945,20 @@ async function evaluateAssistantAutoReplyGroup(input: {
     )
   }
 
+  const deliveryTarget = readAutoReplyDeliveryTarget(input.group)
+  if (
+    input.executionContext?.hosted &&
+    primaryReplyInput.source === 'telegram' &&
+    deliveryTarget === null &&
+    shouldSuppressHostedTelegramAutoReplyMissingDeliveryTarget(input.group)
+  ) {
+    return createAdvancingSkipDecision(
+      'hosted Telegram auto-reply is missing a provider delivery target',
+    )
+  }
+
   return {
-    deliveryTarget: readAutoReplyDeliveryTarget(input.group),
+    deliveryTarget,
     deliveryReplyToMessageId: readAutoReplyDeliveryReplyToMessageId({
       inputs: promptInputs,
       context: input.group,
@@ -1152,6 +1164,7 @@ async function executeAssistantAutoReply(input: {
       acceptedTurnInput: {
         initialInputs: input.acceptedTurnInputInitialInputs ?? null,
       },
+      channel: input.source,
       conversation,
       activeTurnCheckpoint: input.activeTurnCheckpoint,
       activeTurnInput: input.activeTurnInput,
@@ -1366,6 +1379,10 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
         candidates: lateInputs.inputs,
         expectedChannel: context.firstItem.summary.source,
       })
+    const acceptedInputDeliveryTarget = readLatestAssistantInputDeliveryTarget({
+      candidates: lateInputs.inputs,
+      expectedChannel: context.firstItem.summary.source,
+    })
     const lateItems = [
       ...nextContext.items,
       ...lateCapturelessCandidates.map(
@@ -1416,9 +1433,12 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       acceptedInputs,
       deliveryIdempotencyKey: createHostedAutoReplyDeliveryIdempotencyKey({
         context: finalContext,
-        deliveryTarget: input.deliveryTarget,
+        deliveryTarget: acceptedInputDeliveryTarget ?? input.deliveryTarget,
         executionContext: input.executionContext,
       }),
+      ...(acceptedInputDeliveryTarget !== null
+        ? { deliveryTarget: acceptedInputDeliveryTarget }
+        : {}),
       deliveryReplyToMessageId:
         acceptedInputReplyToMessageId ??
         readAutoReplyDeliveryReplyToMessageId({
@@ -1492,8 +1512,10 @@ async function listAutoReplyActiveTurnInputs(input: {
     signal: input.signal,
     sourceId: expectedChannel,
   })
+  const knownInputIds = new Set(input.knownInputIds)
   const knownProjectionCaptureIds = new Set(input.knownProjectionCaptureIds)
   const routeInputs = routeListed.inputs
+    .filter((candidate) => !knownInputIds.has(candidate.event.inputId))
     .filter((candidate) =>
       candidate.projection.captureId
         ? !knownProjectionCaptureIds.has(candidate.projection.captureId)
@@ -1706,17 +1728,22 @@ function admitCapturelessAssistantInputs(input: {
     candidates: input.lateInputs,
     expectedChannel: queuedContext.firstItem.summary.source,
   })
+  const deliveryTarget = readLatestAssistantInputDeliveryTarget({
+    candidates: input.lateInputs,
+    expectedChannel: queuedContext.firstItem.summary.source,
+  })
 
   return {
     acceptedInputs,
     deliveryIdempotencyKey: createHostedAutoReplyDeliveryIdempotencyKey({
       context: nextContext,
-      deliveryTarget: input.deliveryTarget,
+      deliveryTarget: deliveryTarget ?? input.deliveryTarget,
       executionContext: input.executionContext,
     }),
     ...(deliveryReplyToMessageId !== undefined
       ? { deliveryReplyToMessageId }
       : {}),
+    ...(deliveryTarget !== null ? { deliveryTarget } : {}),
     kind: 'accepted',
     prompt,
     receiptMetadata: {
@@ -2041,6 +2068,46 @@ function readAutoReplyDeliveryTarget(
     candidates: autoReplyInputCandidatesFromContext(context),
     expectedChannel: context.firstItem.summary.source,
   })
+  return readAssistantInputReplyTargetDeliveryTarget(replyTarget)
+}
+
+function shouldSuppressHostedTelegramAutoReplyMissingDeliveryTarget(
+  context: AssistantAutoReplyGroupContext,
+): boolean {
+  if (normalizeNullableString(context.firstItem.summary.source) !== 'telegram') {
+    return false
+  }
+
+  const candidates = autoReplyInputCandidatesFromContext(context)
+  const hasTelegramReplyTarget = candidates.some((candidate) => {
+    const replyTarget = candidate.event.replyTarget
+    return Boolean(
+      replyTarget &&
+      normalizeNullableString(replyTarget.channel) === 'telegram' &&
+      readAssistantInputCandidateChannel(candidate) === 'telegram',
+    )
+  })
+  if (hasTelegramReplyTarget) {
+    return true
+  }
+
+  return readProviderRouteScalar(
+    context.firstItem.summary.conversation.threadId,
+  ) === null
+}
+
+function readLatestAssistantInputDeliveryTarget(input: {
+  candidates: readonly AssistantInputCandidate[]
+  expectedChannel: string | null
+}): string | null {
+  return readAssistantInputReplyTargetDeliveryTarget(
+    readLatestAssistantInputReplyTarget(input),
+  )
+}
+
+function readAssistantInputReplyTargetDeliveryTarget(
+  replyTarget: AssistantInputCandidate['event']['replyTarget'],
+): string | null {
   if (!replyTargetUsesThreadAsExplicitDeliveryTarget(replyTarget)) {
     return null
   }

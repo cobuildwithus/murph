@@ -74,10 +74,10 @@ describe("prepareAssistantDirectCliEnv", () => {
       [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: "1",
       AGENTMAIL_API_KEY: "agentmail-secret",
       AMBIENT_SECRET: "ambient-secret",
-      ASSISTANT_MEMORY_BOUND_SESSION_ID: "asst_123",
-      ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT: "hello",
-      ASSISTANT_MEMORY_BOUND_TURN_ID: "turn_123",
-      ASSISTANT_MEMORY_BOUND_VAULT: "/tmp/murph-vault",
+      ASSISTANT_MEMORY_BOUND_SESSION_ID: "stale-session",
+      ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT: "stale prompt",
+      ASSISTANT_MEMORY_BOUND_TURN_ID: "stale-turn",
+      ASSISTANT_MEMORY_BOUND_VAULT: "/tmp/stale-vault",
       ALL_PROXY: "http://platform-all-proxy.example.test:8080",
       CODEX_CA_CERTIFICATE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       CODEX_HOME: "/tmp/murph-home/.codex-hosted",
@@ -135,8 +135,10 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID).toBeUndefined();
     expect(env.MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION).toBeUndefined();
     expect(env.MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION).toBeUndefined();
-    expect(env.ASSISTANT_MEMORY_BOUND_SESSION_ID).toBe("asst_123");
-    expect(env.ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT).toBe("hello");
+    expect(env.ASSISTANT_MEMORY_BOUND_SESSION_ID).toBeUndefined();
+    expect(env.ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT).toBeUndefined();
+    expect(env.ASSISTANT_MEMORY_BOUND_TURN_ID).toBeUndefined();
+    expect(env.ASSISTANT_MEMORY_BOUND_VAULT).toBeUndefined();
     expect(pathEntries[0]).toBe(path.join("/tmp/murph-home", ".codex-hosted", "bin"));
     expect(pathEntries[1]).toBe(path.join("/tmp/murph-home", ".local", "bin"));
     expect(pathEntries).toContain("/usr/bin");

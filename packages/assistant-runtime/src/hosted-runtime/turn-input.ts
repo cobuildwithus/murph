@@ -229,7 +229,8 @@ async function listPreferredAssistantInputCandidates(input: {
   const candidates: AssistantInputCandidate[] = [];
 
   for (const inputId of input.preferredInputIds) {
-    if (knownInputIds.has(inputId)) {
+    const isBoundaryCandidate = includeBoundaryInputIds?.has(inputId) === true;
+    if (knownInputIds.has(inputId) && !isBoundaryCandidate) {
       continue;
     }
     const event = await readAssistantInputEvent({

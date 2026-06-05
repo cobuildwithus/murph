@@ -34,7 +34,6 @@ import {
   resolveAssistantDiagnosticsPolicy,
   type AssistantDiagnosticsPolicy,
 } from '../issue-reporting.js'
-import { createAssistantMemoryTurnContextEnv } from '../memory/turn-context.js'
 import { resolveAssistantModelBehaviorProfile } from '../model-behavior.js'
 import {
   resolveAssistantCodexResumeThreadId,
@@ -221,12 +220,12 @@ export interface AssistantCodexTurnExecutionPlan {
   activeTurnSteering: AssistantActiveTurnLiveProviderSteering | null
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext>
   input: AssistantMessageInput
-  memoryTurnEnv: NodeJS.ProcessEnv
   profile: AssistantCodexTurnResolvedExecutionProfile
   promptTimeContext: AssistantPromptTimeContext
   route: CodexThreadIdentity
   sharedPlan: AssistantTurnSharedPlan
   progressDelivery?: AssistantProgressDelivery | null
+  turnCliEnv: NodeJS.ProcessEnv
   turnId: string
 }
 
@@ -311,20 +310,12 @@ export async function buildCodexTurnExecutionPlan(input: {
   turnId: string
 }): Promise<AssistantCodexTurnExecutionPlan> {
   const executionContext = normalizeAssistantExecutionContext(input.input.executionContext)
-  const memoryTurnEnv = {
-    ...createAssistantMemoryTurnContextEnv({
-      sessionId: input.resolvedSession.sessionId,
-      sourcePrompt: input.input.prompt,
-      turnId: `${input.resolvedSession.sessionId}:${input.turnCreatedAt}`,
-      vault: input.input.vault,
-    }),
-    ...(input.input.turnTrigger === 'automation-cron'
-      ? {}
-      : createAssistantCurrentDeliveryRouteEnv({
-          channel: input.input.channel,
-          deliveryTarget: input.input.deliveryTarget,
-        })),
-  }
+  const turnCliEnv = input.input.turnTrigger === 'automation-cron'
+    ? {}
+    : createAssistantCurrentDeliveryRouteEnv({
+        channel: input.input.channel,
+        deliveryTarget: input.input.deliveryTarget,
+      })
   const profile = resolveAssistantCodexTurnExecutionProfile({
     profile: input.profile,
     turnTrigger: input.input.turnTrigger,
@@ -335,12 +326,12 @@ export async function buildCodexTurnExecutionPlan(input: {
     activeTurnSteering: input.activeTurnSteering ?? null,
     executionContext,
     input: input.input,
-    memoryTurnEnv,
     profile,
     promptTimeContext,
     route: input.route,
     sharedPlan: input.plan,
     progressDelivery: input.progressDelivery ?? null,
+    turnCliEnv,
     turnId: input.turnId,
   }
 }

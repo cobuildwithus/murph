@@ -42,6 +42,8 @@
 ## Hosted Runner Boundary
 
 - Cloudflare must remain a thin execution runner over the same Murph runtime used locally. It may own platform coordination, workspace restore/checkpoint transport, write fences, secret injection, and process cleanup, but assistant business logic, vault semantics, Codex orchestration policy, and product state belong to the Murph runtime and hosted web owners.
+- Assistant-engine owns one reusable Codex App Server slot per Node runtime/container for the current stable process identity. A turn is an RPC into that process; clean successful turns leave it idle, while overlapping direct turns fail busy instead of creating a process map. Identity/config mismatch, abort cleanup, malformed output, off-turn output, process failure, or idle explicit shutdown stops or poisons it before a later turn can reuse it.
+- Codex App Server process env is for process authority/configuration. Prompt text, session ids, and assistant turn ids are turn request data and must not be smuggled into process env in a way that makes ordinary turns restart the warm process.
 - Hosted execution should reuse warm in-container runtime infrastructure across messages while the same container remains alive and the authority/configuration identity still matches. That includes the Node process, restored workspace root, and Codex App Server process where cleanup proof and write-fence validity make reuse safe.
 - Warm container reuse is only an optimization. Each message still enters through the assistant input spine, validates current user/write-fence/config authority, uses invocation-local cache/temp state, and falls back to cold restore or process restart when safe reuse cannot be proven.
 

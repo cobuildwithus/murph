@@ -35,6 +35,7 @@ export async function resolveAssistantTurnSharedPlan(
   )
   const conversationPolicy = resolveAssistantConversationPolicy({
     message: {
+      channel: input.channel,
       conversation: input.conversation,
       deliverResponse: input.deliverResponse,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,

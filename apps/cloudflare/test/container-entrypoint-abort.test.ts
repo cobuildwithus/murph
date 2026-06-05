@@ -213,6 +213,22 @@ describe("container entrypoint abort boundary", () => {
         poisoned: true,
       });
     });
+
+    const rejectedAfterPoison = await fetch(
+      `http://127.0.0.1:${address.port}/internal/workspace-invocation`,
+      {
+        body: JSON.stringify(buildWorkspaceJobBody({ eventId: "evt_after_poisoned_container" })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      },
+    );
+    expect(rejectedAfterPoison.status).toBe(503);
+    await expect(rejectedAfterPoison.json()).resolves.toMatchObject({
+      error: "Hosted runner container is poisoned.",
+    });
+    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the warm container when an aborted workspace request returns safely and cleanup passes", async () => {

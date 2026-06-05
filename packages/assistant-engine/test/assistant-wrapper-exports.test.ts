@@ -15,7 +15,7 @@ import * as assistantService from '../src/assistant-service.ts'
 import * as assistantState from '../src/assistant-state.ts'
 import * as assistantStatus from '../src/assistant-status.ts'
 import * as assistantStore from '../src/assistant-store.ts'
-import * as hostedCodexLifecycle from '../src/hosted-codex-lifecycle.ts'
+import * as codexLifecycle from '../src/codex-lifecycle.ts'
 import * as knowledge from '../src/knowledge.ts'
 
 const wrapperCases = [
@@ -140,11 +140,11 @@ const wrapperCases = [
     ],
   ],
   [
-    'hosted-codex-lifecycle',
-    hostedCodexLifecycle,
+    'codex-lifecycle',
+    codexLifecycle,
     [
-      'snapshotExpectedHostedCodexRootProcess',
-      'stopHostedWarmCodexAppServer',
+      'snapshotExpectedCodexRootProcess',
+      'stopWarmCodexAppServer',
     ],
   ],
   [

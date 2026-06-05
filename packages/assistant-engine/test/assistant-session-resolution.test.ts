@@ -253,6 +253,31 @@ describe('assistant session resolution', () => {
     })
   })
 
+  it('falls back to message channel when normalized conversation channel is empty', () => {
+    const result = buildResolveAssistantSessionInput(
+      createResolutionInput({
+        bindingDeliveryTarget: 'telegram-thread-1',
+        channel: 'telegram',
+        conversation: {
+          channel: null,
+          directness: 'direct',
+          threadId: 'telegram-thread-1',
+        },
+        provider: 'codex-cli',
+      }),
+      createOperatorDefaults({
+        backend: createCodexTarget(),
+      }),
+    )
+
+    expect(result).toMatchObject({
+      bindingDeliveryTarget: 'telegram-thread-1',
+      channel: 'telegram',
+      threadId: 'telegram-thread-1',
+      threadIsDirect: true,
+    })
+  })
+
   it('keeps binding delivery target separate from message explicit target', () => {
     const result = buildResolveAssistantSessionInput(
       createResolutionInput({

@@ -534,7 +534,6 @@ function normalizeE2EVaultCliCommand(value) {
 function redactE2ECommandOutput(value) {
   let output = typeof value === "string" ? value : String(value ?? "");
   const sensitivePathValues = [
-    process.env.ASSISTANT_MEMORY_BOUND_VAULT,
     process.env.CODEX_HOME,
     process.env.HOME,
     process.env.VAULT,
