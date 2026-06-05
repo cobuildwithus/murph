@@ -1152,6 +1152,7 @@ async function executeAssistantAutoReply(input: {
       acceptedTurnInput: {
         initialInputs: input.acceptedTurnInputInitialInputs ?? null,
       },
+      channel: input.source,
       conversation,
       activeTurnCheckpoint: input.activeTurnCheckpoint,
       activeTurnInput: input.activeTurnInput,
@@ -1492,8 +1493,10 @@ async function listAutoReplyActiveTurnInputs(input: {
     signal: input.signal,
     sourceId: expectedChannel,
   })
+  const knownInputIds = new Set(input.knownInputIds)
   const knownProjectionCaptureIds = new Set(input.knownProjectionCaptureIds)
   const routeInputs = routeListed.inputs
+    .filter((candidate) => !knownInputIds.has(candidate.event.inputId))
     .filter((candidate) =>
       candidate.projection.captureId
         ? !knownProjectionCaptureIds.has(candidate.projection.captureId)
