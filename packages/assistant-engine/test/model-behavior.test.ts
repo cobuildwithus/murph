@@ -303,6 +303,12 @@ describe('assistant consumption lookup guidance', () => {
       'if it misses the product or brand, or lacks needed ingredients, fall back to web lookup',
     )
     expect(prompt).toContain(
+      'preserve the full active ingredient panel with repeated `vault-cli supplement save --ingredient` JSON-object flags',
+    )
+    expect(prompt).toContain(
+      'Do not collapse multi-ingredient labels to one primary ingredient',
+    )
+    expect(prompt).toContain(
       'For any product lookup, prefer official labels, manufacturer pages, restaurant/menu nutrition pages, or other primary sources',
     )
     expect(prompt).toContain(
@@ -560,7 +566,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '86ebdff65a5fb69bfbba0c3ae3a6c91109618147c0fc6e1b3d54a158aaea532f',
+      '8ce94eed0d349342b94e3a4e746cfa958d871b30748a42b722bf26a462076e3a',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

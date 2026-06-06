@@ -6,6 +6,7 @@ import { Cli } from 'incur'
 import { test } from 'vitest'
 
 import { parseFrontmatterDocument } from '@murphai/core'
+import { SUPPLEMENT_INGREDIENTS_MAX_ITEMS } from '@murphai/contracts'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 
 import { registerSupplementCommands } from '../src/commands/supplement.js'
@@ -115,7 +116,7 @@ function requireSavedPath(result: SupplementSaveResult): string {
   return result.path
 }
 
-test('supplement save schema exposes typed top-level dose fields and ingredient active', async () => {
+test('supplement save schema exposes typed top-level dose fields and repeatable ingredients', async () => {
   const schema = await readCommandSchema(createSupplementCli(), ['supplement', 'save'])
 
   assert.deepEqual(schema.args.required, ['title'])
@@ -129,17 +130,24 @@ test('supplement save schema exposes typed top-level dose fields and ingredient 
     'substance',
     'dose',
     'doseUnit',
+    'ingredient',
+  ]) {
+    assert.equal(field in schema.options.properties, true, field)
+  }
+
+  for (const staleField of [
     'compound',
     'ingredientLabel',
     'amount',
     'unit',
     'ingredientActive',
+    'note',
   ]) {
-    assert.equal(field in schema.options.properties, true, field)
+    assert.equal(staleField in schema.options.properties, false, staleField)
   }
 })
 
-test('supplement save persists top-level dose fields and one typed ingredient active flag', async () => {
+test('supplement save persists top-level dose fields and repeated typed ingredients', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-cli-supplement-save-parity-',
   )
@@ -180,15 +188,10 @@ test('supplement save persists top-level dose fields and one typed ingredient ac
       'Test Maker',
       '--serving-size',
       '2 capsules',
-      '--compound',
-      'Magnesium',
-      '--ingredient-label',
-      'Magnesium glycinate',
-      '--amount',
-      '200',
-      '--unit',
-      'mg',
-      '--no-ingredient-active',
+      '--ingredient',
+      '{"compound":"Magnesium","label":"Magnesium glycinate","amount":200,"unit":"mg","active":false}',
+      '--ingredient',
+      '{"compound":"Glycine","amount":1800,"unit":"mg","note":"Approximate remainder of 2 capsule serving."}',
       '--related-goal-id',
       'goal_01JNY0B2W4VG5C2A0G9S8M7R6R',
       '--related-condition-id',
@@ -240,6 +243,12 @@ test('supplement save persists top-level dose fields and one typed ingredient ac
         unit: 'mg',
         active: false,
       },
+      {
+        compound: 'Glycine',
+        amount: 1800,
+        unit: 'mg',
+        note: 'Approximate remainder of 2 capsule serving.',
+      },
     ])
 
     const markdown = await readFile(path.join(vaultRoot, relativePath), 'utf8')
@@ -262,6 +271,12 @@ test('supplement save persists top-level dose fields and one typed ingredient ac
         amount: 200,
         unit: 'mg',
         active: false,
+      },
+      {
+        compound: 'Glycine',
+        amount: 1800,
+        unit: 'mg',
+        note: 'Approximate remainder of 2 capsule serving.',
       },
     ])
   } finally {
@@ -305,14 +320,8 @@ test('supplement save update returns compact entity and preserves omitted produc
       'Test Maker',
       '--serving-size',
       '2 capsules',
-      '--compound',
-      'Magnesium',
-      '--ingredient-label',
-      'Magnesium glycinate',
-      '--amount',
-      '200',
-      '--unit',
-      'mg',
+      '--ingredient',
+      '{"compound":"Magnesium","label":"Magnesium glycinate","amount":200,"unit":"mg"}',
       '--vault',
       vaultRoot,
     ])
@@ -366,9 +375,9 @@ test('supplement save update returns compact entity and preserves omitted produc
   }
 })
 
-test('supplement save rejects conflicting top-level and ingredient dose units', async () => {
+test('supplement save rejects ingredient array payloads', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-cli-supplement-save-conflict-',
+    'murph-cli-supplement-save-array-',
   )
 
   try {
@@ -385,18 +394,8 @@ test('supplement save rejects conflicting top-level and ingredient dose units', 
       'supplement',
       'save',
       'Vitamin D3',
-      '--substance',
-      'Vitamin D3',
-      '--dose',
-      '1000',
-      '--dose-unit',
-      'IU',
-      '--compound',
-      'Vitamin D3',
-      '--amount',
-      '1000',
-      '--unit',
-      'mcg',
+      '--ingredient',
+      '[{"compound":"Vitamin D3","amount":50,"unit":"mcg"}]',
       '--vault',
       vaultRoot,
     ])
@@ -405,7 +404,109 @@ test('supplement save rejects conflicting top-level and ingredient dose units', 
     assert.equal(saveResult.envelope.ok, false)
     if (!saveResult.envelope.ok) {
       assert.equal(saveResult.envelope.error.code, 'invalid_option')
-      assert.match(saveResult.envelope.error.message ?? '', /--dose-unit and --unit/u)
+      assert.match(saveResult.envelope.error.message ?? '', /one object per ingredient/u)
+    }
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    })
+  }
+})
+
+test('supplement save rejects malformed and schema-invalid ingredient objects without echoing payload contents', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-cli-supplement-save-invalid-',
+  )
+
+  try {
+    const cli = createSupplementCli()
+    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
+      'init',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(initResult.exitCode, null)
+    assert.equal(requireData(initResult.envelope).created, true)
+
+    const malformed = await runInProcessJsonCli<SupplementSaveResult>(cli, [
+      'supplement',
+      'save',
+      'Vitamin D3',
+      '--ingredient',
+      '{"compound":"Vitamin D3"',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(malformed.exitCode, 1)
+    assert.equal(malformed.envelope.ok, false)
+    if (!malformed.envelope.ok) {
+      const serialized = JSON.stringify(malformed.envelope)
+      assert.equal(serialized.includes('Vitamin D3'), false)
+      assert.match(malformed.envelope.error.message ?? '', /valid JSON object/u)
+    }
+
+    const schemaInvalid = await runInProcessJsonCli<SupplementSaveResult>(cli, [
+      'supplement',
+      'save',
+      'Vitamin D3',
+      '--ingredient',
+      '{"compound":"Do Not Echo Label","amount":-1}',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(schemaInvalid.exitCode, 1)
+    assert.equal(schemaInvalid.envelope.ok, false)
+    if (!schemaInvalid.envelope.ok) {
+      const serialized = JSON.stringify(schemaInvalid.envelope)
+      assert.equal(serialized.includes('Do Not Echo Label'), false)
+      assert.match(schemaInvalid.envelope.error.message ?? '', /failed validation/u)
+    }
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    })
+  }
+})
+
+test('supplement save rejects more than the canonical ingredient limit', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-cli-supplement-save-limit-',
+  )
+
+  try {
+    const cli = createSupplementCli()
+    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
+      'init',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(initResult.exitCode, null)
+    assert.equal(requireData(initResult.envelope).created, true)
+
+    const ingredientArgs = Array.from(
+      { length: SUPPLEMENT_INGREDIENTS_MAX_ITEMS + 1 },
+      (_, index) => [
+        '--ingredient',
+        `{"compound":"Ingredient ${index + 1}","amount":${index + 1},"unit":"mg"}`,
+      ],
+    ).flat()
+
+    const saveResult = await runInProcessJsonCli<SupplementSaveResult>(cli, [
+      'supplement',
+      'save',
+      'Large panel',
+      ...ingredientArgs,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(saveResult.exitCode, 1)
+    assert.equal(saveResult.envelope.ok, false)
+    if (!saveResult.envelope.ok) {
+      assert.equal(saveResult.envelope.error.code, 'VALIDATION_ERROR')
+      assert.match(saveResult.envelope.error.message ?? '', /<=64 items/u)
     }
   } finally {
     await rm(parentRoot, {

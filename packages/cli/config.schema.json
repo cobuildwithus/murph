@@ -12347,38 +12347,14 @@
                           "minLength": 1,
                           "maxLength": 160
                         },
-                        "compound": {
-                          "description": "Optional primary ingredient or compound name.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 160
-                        },
-                        "ingredientLabel": {
-                          "description": "Optional ingredient label as it appears on the product.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 160
-                        },
-                        "amount": {
-                          "description": "Optional amount for the primary compound.",
-                          "type": "number",
-                          "minimum": 0
-                        },
-                        "unit": {
-                          "description": "Optional unit for the primary compound amount.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 40
-                        },
-                        "ingredientActive": {
-                          "description": "Optional active flag for the primary compound ingredient.",
-                          "type": "boolean"
-                        },
-                        "note": {
-                          "description": "Optional note for the primary compound. Requires --compound.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 4000
+                        "ingredient": {
+                          "description": "Optional supplement ingredient JSON object. Repeat --ingredient for up to 64 ingredients.",
+                          "maxItems": 64,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
                         },
                         "relatedGoalId": {
                           "description": "Optional related goal id. Repeat --related-goal-id for multiple values.",

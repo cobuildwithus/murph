@@ -1,7 +1,9 @@
 import {
   healthEntityDefinitionByKind,
   safeParseContract,
+  supplementIngredientPayloadSchema,
   type JsonObject,
+  type RegimenUpsertPayload,
 } from "@murphai/contracts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import type {
@@ -291,14 +293,7 @@ function buildEventLedgerUpsertResult(
   };
 }
 
-interface SupplementIngredientRecord {
-  compound: string;
-  label?: string;
-  amount?: number;
-  unit?: string;
-  active?: boolean;
-  note?: string;
-}
+type SupplementIngredientRecord = NonNullable<RegimenUpsertPayload["ingredients"]>[number];
 
 interface SingleIngredientInput {
   compound?: string;
@@ -363,68 +358,58 @@ function buildRegimenIngredient(options: {
   );
 }
 
-function buildSupplementIngredient(options: {
-  amount?: number;
-  compound?: string;
-  ingredientActive?: boolean;
-  ingredientLabel?: string;
-  note?: string;
-  unit?: string;
-}): SupplementIngredientRecord[] | undefined {
-  return buildSingleIngredient(
-    {
-      active: options.ingredientActive,
-      amount: options.amount,
-      compound: options.compound,
-      label: options.ingredientLabel,
-      note: options.note,
-      unit: options.unit,
-    },
-    "--compound is required when ingredient fields are provided.",
-  );
-}
-
-function normalizeComparableText(value: string | undefined): string | undefined {
-  const normalized = value?.trim().toLowerCase();
-  return normalized && normalized.length > 0 ? normalized : undefined;
-}
-
-function namesCouldReferToSameDose(input: {
-  compound?: string;
-  substance?: string;
-}): boolean {
-  const substance = normalizeComparableText(input.substance);
-  const compound = normalizeComparableText(input.compound);
-
-  return substance === undefined || compound === undefined || substance === compound;
-}
-
 function validateSupplementSaveInput(input: {
-  amount?: number;
-  compound?: string;
   dose?: number;
   doseUnit?: string;
-  substance?: string;
-  unit?: string;
 }) {
   if (input.doseUnit !== undefined && input.dose === undefined) {
     throw new VaultCliError("invalid_option", "--dose-unit requires --dose.");
   }
+}
 
-  if (
-    input.dose !== undefined &&
-    input.amount !== undefined &&
-    input.dose === input.amount &&
-    input.doseUnit !== undefined &&
-    input.unit !== undefined &&
-    normalizeComparableText(input.doseUnit) !== normalizeComparableText(input.unit) &&
-    namesCouldReferToSameDose(input)
-  ) {
+function parseSupplementIngredient(spec: string): SupplementIngredientRecord {
+  const trimmed = spec.trim();
+
+  if (trimmed.startsWith("[")) {
     throw new VaultCliError(
       "invalid_option",
-      "--dose-unit and --unit describe the same numeric dose but use different units. Use --dose-unit for the top-level dose and --unit for the ingredient amount.",
+      "Expected --ingredient JSON input to be one object per ingredient, not an array. Repeat --ingredient for each ingredient or use regimen import-json for a full payload.",
     );
   }
+
+  if (!trimmed.startsWith("{")) {
+    throw new VaultCliError(
+      "invalid_option",
+      'Expected --ingredient to be a JSON object like {"compound":"Vitamin D","amount":50,"unit":"mcg","active":true}.',
+    );
+  }
+
+  let value: unknown;
+  try {
+    value = JSON.parse(trimmed);
+  } catch {
+    throw new VaultCliError(
+      "invalid_option",
+      "Expected --ingredient to be valid JSON object input.",
+    );
+  }
+
+  const result = safeParseContract(supplementIngredientPayloadSchema, value);
+  if (!result.success) {
+    throw new VaultCliError("invalid_option", "--ingredient failed validation.", {
+      issues: result.errors,
+    });
+  }
+
+  return result.data;
+}
+
+function parseSupplementIngredients(specs: string[] | undefined): SupplementIngredientRecord[] | undefined {
+  if (!specs || specs.length === 0) {
+    return undefined;
+  }
+
+  return specs.map((spec) => parseSupplementIngredient(spec));
 }
 
 function buildRegimenSavePayload(input: RegimenSaveInput): { vaultRoot: string } & JsonObject {
@@ -484,7 +469,7 @@ function buildSupplementSavePayload(
     brand: input.brand,
     manufacturer: input.manufacturer,
     servingSize: input.servingSize,
-    ingredients: buildSupplementIngredient(input),
+    ingredients: parseSupplementIngredients(input.ingredient),
     relatedGoalIds: normalizeRepeatableFlagOption(input.relatedGoalId, "related-goal-id"),
     relatedConditionIds: normalizeRepeatableFlagOption(
       input.relatedConditionId,

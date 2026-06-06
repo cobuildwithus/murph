@@ -178,7 +178,7 @@ vault-cli regimen list --vault <path> [--status <status>] [--limit <n>] [--reque
 vault-cli protocol import-json --vault <path> --input @file.json [--request-id <id>]
 vault-cli protocol show <id> --vault <path> [--request-id <id>]
 vault-cli protocol list --vault <path> [--commons-protocol <key-or-slug>] [--status <status>] [--limit <n>] [--request-id <id>]
-vault-cli supplement save <title> --vault <path> [--id <regimenId>] [--slug <slug>] [--status <status>] [--started-on <date>] [--stopped-on <date>] [--schedule <text>] [--group <text>] [--substance <text>] [--dose <number>] [--dose-unit <unit>] [--brand <text>] [--manufacturer <text>] [--serving-size <text>] [--compound <text>] [--ingredient-label <text>] [--amount <number>] [--unit <unit>] [--ingredient-active] [--note <text>] [--related-goal-id <id> ...] [--related-condition-id <id> ...] [--related-regimen-id <id> ...] [--request-id <id>]
+vault-cli supplement save <title> --vault <path> [--id <regimenId>] [--slug <slug>] [--status <status>] [--started-on <date>] [--stopped-on <date>] [--schedule <text>] [--group <text>] [--substance <text>] [--dose <number>] [--dose-unit <unit>] [--brand <text>] [--manufacturer <text>] [--serving-size <text>] [--ingredient <json> ...] [--related-goal-id <id> ...] [--related-condition-id <id> ...] [--related-regimen-id <id> ...] [--request-id <id>]
 vault-cli supplement show <id> --vault <path> [--request-id <id>]
 vault-cli supplement list --vault <path> [--status <status>] [--limit <n>] [--request-id <id>]
 vault-cli supplement stop <regimenId> --vault <path> [--stopped-on <date>] [--request-id <id>]

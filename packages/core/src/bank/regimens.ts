@@ -1,5 +1,6 @@
 import {
   extractHealthEntityRegistryLinks,
+  SUPPLEMENT_INGREDIENTS_MAX_ITEMS,
 } from "@murphai/contracts";
 
 import { VaultError } from "../errors.ts";
@@ -97,6 +98,13 @@ function normalizeSupplementIngredients(
 
   if (!Array.isArray(value)) {
     throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must be an array of ingredient objects.`);
+  }
+
+  if (value.length > SUPPLEMENT_INGREDIENTS_MAX_ITEMS) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      `${fieldName} must contain at most ${SUPPLEMENT_INGREDIENTS_MAX_ITEMS} ingredients.`,
+    );
   }
 
   const ingredients = value.map((entry, index) => {
