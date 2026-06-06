@@ -44,8 +44,7 @@ export function BiomarkersPageClient({ biomarkers }: BiomarkersPageClientProps) 
 
 function BiomarkersPageContent({ biomarkers }: BiomarkersPageClientProps) {
   const [category, setCategory] = useState("All");
-  const { client, refreshPending, status } = useBrowserVault();
-  const privateValueSyncing = status === "loading" || refreshPending;
+  const { client, deviceSyncImportPending, status } = useBrowserVault();
 
   const cards = useMemo(
     () =>
@@ -116,7 +115,7 @@ function BiomarkersPageContent({ biomarkers }: BiomarkersPageClientProps) {
                 unit={card.unit}
                 summary={card.summary}
                 privateValue={resolvePrivateBiomarkerValue({ biomarkerKey: card.key, client, status })}
-                privateValueSyncing={privateValueSyncing}
+                privateValueSyncing={deviceSyncImportPending}
               />
             ))}
           </div>

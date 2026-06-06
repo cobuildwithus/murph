@@ -46,6 +46,8 @@ import PitchPage, { metadata as pitchMetadata } from "../app/pitch/page";
 beforeEach(() => {
   mocks.useBrowserVault.mockReturnValue({
     client: null,
+    deviceSyncImportPending: false,
+    refreshPending: false,
     status: "ready",
   });
   mocks.getGeneratedHealthCommonsWebBiomarkerIndex.mockReturnValue({
@@ -146,4 +148,30 @@ test("BiomarkersPage metadata and route entrypoint filter generated biomarkers",
   assert.doesNotMatch(markup, /Internal Hidden Marker/);
   assert.doesNotMatch(markup, /Hidden Marker/);
   assert.doesNotMatch(markup, /Draft Marker/);
+});
+
+test("BiomarkersPage does not show card syncing text when no device import is pending", () => {
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    deviceSyncImportPending: false,
+    refreshPending: false,
+    status: "loading",
+  });
+
+  const markup = renderToStaticMarkup(createElement(BiomarkersPage));
+
+  assert.doesNotMatch(markup, /Syncing\.\.\./);
+});
+
+test("BiomarkersPage shows card syncing text when a device import is pending", () => {
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    deviceSyncImportPending: true,
+    refreshPending: true,
+    status: "empty",
+  });
+
+  const markup = renderToStaticMarkup(createElement(BiomarkersPage));
+
+  assert.match(markup, /Syncing\.\.\./);
 });
