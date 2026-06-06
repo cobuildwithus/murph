@@ -88,9 +88,11 @@ describe("Junction wearable fixture testing helpers", () => {
       const fixture = buildSafeFixture({ recordCount: 1 });
       fixture.rawArtifacts.push({
         content: [{
+          calendar_date: "2026-04-01",
           date: "2026-04-01",
+          resource: "activity",
           sourceProviderSlug: "oura",
-          value: 58,
+          steps: 58,
         }],
         relativePath: "hosted-smoke/oura/02-junction-timeseries-heartrate.json",
       });
