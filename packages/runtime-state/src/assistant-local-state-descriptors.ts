@@ -140,7 +140,7 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
   ),
   definePortableAssistantFile(
     ".runtime/operations/assistant/state/onboarding/conversation.json",
-    "Assistant conversation-onboarding lifecycle state that must move with hosted resume.",
+    "Assistant Murph onboarding lifecycle state that must move with hosted resume.",
   ),
   definePortableAssistantSubtree(
     ".runtime/operations/assistant/state/onboarding/first-contact",

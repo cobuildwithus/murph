@@ -1032,13 +1032,13 @@ export function registerAssistantCommands(
   const registerOnboardingCommands = () => {
     const onboarding = Cli.create('onboarding', {
       description:
-        'Inspect or update the local assistant conversation-onboarding lifecycle state shared across user-facing channels for this vault.',
+        'Inspect or update the local assistant Murph onboarding lifecycle state shared across user-facing channels for this vault.',
     })
 
     onboarding.command('status', {
       args: emptyArgsSchema,
       description:
-        'Show whether assistant conversational onboarding is still open or has already been completed for this vault.',
+        'Show whether assistant Murph onboarding is still open or has already been completed for this vault.',
       options: withBaseOptions(),
       output: assistantOnboardingResultSchema,
       async run(context) {
@@ -1052,7 +1052,7 @@ export function registerAssistantCommands(
     onboarding.command('complete', {
       args: emptyArgsSchema,
       description:
-        'Mark assistant conversational onboarding complete for this vault so the onboarding prompt policy stops being injected on future turns.',
+        'Mark assistant Murph onboarding complete for this vault so the onboarding prompt policy stops being injected on future turns.',
       options: withBaseOptions({
         reason: z
           .enum(assistantOnboardingCompletionReasonValues)
@@ -1075,7 +1075,7 @@ export function registerAssistantCommands(
     onboarding.command('reopen', {
       args: emptyArgsSchema,
       description:
-        'Reopen assistant conversational onboarding for this vault so onboarding guidance is injected again until it is completed later.',
+        'Reopen assistant Murph onboarding for this vault so onboarding guidance is injected again until it is completed later.',
       options: withBaseOptions(),
       output: assistantOnboardingResultSchema,
       async run(context) {

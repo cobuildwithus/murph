@@ -489,9 +489,9 @@ describe("hosted local Linq first-contact e2e", () => {
     const firstInboundPromptText = readAssistantProviderRequestText(
       assistantProviderResponseRequests[0]!,
     );
-    expect(firstInboundPromptText).toContain("Conversation onboarding:");
+    expect(firstInboundPromptText).toContain("Murph onboarding:");
     expect(firstInboundPromptText).toContain(
-      "$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md",
+      "$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md",
     );
     expect(firstInboundPromptText).toContain("User message:\nSource: linq");
     expect(firstInboundPromptText).toContain("Message text:\nHey mate yea");
