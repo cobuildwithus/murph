@@ -98,6 +98,12 @@ describe("supplements query helpers", () => {
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.text).toContain("websearch_to_tsquery");
+    expect(calls[0]?.text).toContain("$1::text AS raw_q");
+    expect(calls[0]?.text).toContain("strict_word_similarity(name, query.raw_q)");
+    expect(calls[0]?.text).toContain("name % query.raw_q");
+    expect(calls[0]?.text).toContain("name_phrase_match DESC");
+    expect(calls[0]?.text).toContain("name_phrase_length DESC");
+    expect(calls[0]?.text).toContain("name_similarity DESC");
     expect(calls[0]?.text).toContain("FROM supplements, query");
     expect(calls[0]?.text).toContain("PARTITION BY canonical_key");
     expect(calls[0]?.text).toContain("dedupe_rank = 1");

@@ -13,7 +13,7 @@ const DATA_API_KEY_ENV = "MURPH_DATA_API_KEY";
 const DEFAULT_SUPPLEMENTS_LIMIT = 1;
 const MAX_SUPPLEMENTS_LIMIT = 50;
 const MAX_BATCH_QUERIES = 10;
-const MAX_BATCH_QUERY_LENGTH = 256;
+const MAX_SEARCH_QUERY_LENGTH = 256;
 const MAX_BATCH_BODY_BYTES = 8 * 1024;
 
 function json(data: unknown, init: ResponseInit = {}): Response {
@@ -100,7 +100,7 @@ function parseBatchQueries(value: unknown): string[] | null {
     }
 
     const query = item.trim();
-    if (!query || query.length > MAX_BATCH_QUERY_LENGTH) {
+    if (!query || query.length > MAX_SEARCH_QUERY_LENGTH) {
       return null;
     }
 
@@ -199,6 +199,10 @@ export async function GET(request: Request): Promise<Response> {
 
     if (!q) {
       return json({ items: [] });
+    }
+
+    if (q.length > MAX_SEARCH_QUERY_LENGTH) {
+      return json({ error: "invalid_query" }, { status: 400 });
     }
 
     const items = await searchSupplements({

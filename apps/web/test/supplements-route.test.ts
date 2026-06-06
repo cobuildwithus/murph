@@ -144,6 +144,20 @@ describe("supplements API route", () => {
     expect(mocks.searchSupplements).not.toHaveBeenCalled();
   });
 
+  it("rejects oversized GET search strings before querying", async () => {
+    const response = await supplementsRoute.GET(
+      new Request(`https://web.example.test/api/supplements?q=${"a".repeat(257)}`, {
+        headers: {
+          authorization: "Bearer test-data-api-key",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "invalid_query" });
+    expect(mocks.searchSupplements).not.toHaveBeenCalled();
+  });
+
   it("fetches a label by DSLD id before search parameters", async () => {
     mocks.getSupplementById.mockResolvedValue({
       id: "82118",

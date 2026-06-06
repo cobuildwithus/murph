@@ -119,7 +119,9 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
       const { rows } = await client.query<SupplementSearchItem>(
         `
         WITH query AS (
-          SELECT websearch_to_tsquery('simple', $1) AS tsq
+          SELECT
+            $1::text AS raw_q,
+            websearch_to_tsquery('simple', $1) AS tsq
         ),
         ranked AS (
           SELECT
@@ -132,10 +134,28 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
             off_market AS "offMarket",
             label,
             ts_rank_cd(to_tsvector('simple', search_text), query.tsq) AS search_rank,
+            strict_word_similarity(name, query.raw_q) AS name_similarity,
+            CASE
+              WHEN strpos(lower(query.raw_q), lower(name)) > 0 THEN 1
+              ELSE 0
+            END AS name_phrase_match,
+            CASE
+              WHEN strpos(lower(query.raw_q), lower(name)) > 0 THEN char_length(name)
+              ELSE 0
+            END AS name_phrase_length,
             data_origin_priority,
             row_number() OVER (
               PARTITION BY canonical_key
               ORDER BY
+                CASE
+                  WHEN strpos(lower(query.raw_q), lower(name)) > 0 THEN 1
+                  ELSE 0
+                END DESC,
+                CASE
+                  WHEN strpos(lower(query.raw_q), lower(name)) > 0 THEN char_length(name)
+                  ELSE 0
+                END DESC,
+                strict_word_similarity(name, query.raw_q) DESC,
                 ts_rank_cd(to_tsvector('simple', search_text), query.tsq) DESC,
                 off_market ASC,
                 data_origin_priority ASC,
@@ -144,7 +164,10 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
             ) AS dedupe_rank
           FROM supplements, query
           WHERE
-            to_tsvector('simple', search_text) @@ query.tsq
+            (
+              to_tsvector('simple', search_text) @@ query.tsq
+              OR name % query.raw_q
+            )
             AND ($2::boolean OR off_market = false)
         )
         SELECT
@@ -159,6 +182,9 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
         FROM ranked
         WHERE dedupe_rank = 1
         ORDER BY
+          name_phrase_match DESC,
+          name_phrase_length DESC,
+          name_similarity DESC,
           search_rank DESC,
           data_origin_priority ASC,
           name ASC
