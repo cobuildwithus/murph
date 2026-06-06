@@ -55,7 +55,7 @@ const PULSE_FEATURES = [
 
 const EDGE_FEATURES = [
   "Everything in Pulse and:",
-  "More usage on latest OpenAI, Claude, Gemini models",
+  "More usage on frontier AI models",
   "Longer experiment context",
   "Deeper outcome analysis",
   "Detailed biomarker deltas",
