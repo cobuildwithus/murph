@@ -1,6 +1,13 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { getGeneratedHealthCommonsWebBiomarkerIndex } from "@murphai/health-commons/runtime";
 
+import {
+  UploadLabsActionFallback,
+  UploadLabsMurphContactAction,
+} from "@/src/components/home/upload-labs-action";
+import { shouldShowHomeDeviceSyncStep } from "@/src/lib/device-sync/home-onboarding";
+import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import {
@@ -14,7 +21,7 @@ export const metadata: Metadata = createMurphPageMetadata({
     "Browse the biomarker library. Track and understand the signals that move your health, then run experiments to see what changes.",
 });
 
-export default function BiomarkersPage() {
+export default async function BiomarkersPage() {
   const index = getGeneratedHealthCommonsWebBiomarkerIndex();
   const biomarkers: BiomarkerBrowseEntry[] = index.biomarkers
     .filter((entry) => entry.published && !entry.hidden)
@@ -30,5 +37,20 @@ export default function BiomarkersPage() {
     }))
     .sort((a, b) => a.title.localeCompare(b.title));
 
-  return <BiomarkersPageClient biomarkers={biomarkers} />;
+  const auth = await getHostedPageAuthSnapshot();
+  const showDeviceStep = await shouldShowHomeDeviceSyncStep({
+    member: auth.authenticatedMember,
+  });
+
+  return (
+    <BiomarkersPageClient
+      biomarkers={biomarkers}
+      showDeviceStep={showDeviceStep}
+      uploadLabsAction={
+        <Suspense fallback={<UploadLabsActionFallback />}>
+          <UploadLabsMurphContactAction />
+        </Suspense>
+      }
+    />
+  );
 }

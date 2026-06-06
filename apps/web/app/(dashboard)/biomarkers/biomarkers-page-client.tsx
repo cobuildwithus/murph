@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type {
   BrowserVaultMetricSelectionRow,
   BrowserVaultQueryClient,
@@ -11,6 +11,7 @@ import {
   type BiomarkerBrowsePrivateValue,
 } from "@/src/components/biomarkers/biomarker-browse-card";
 import { CategoryFilter } from "@/src/components/experiments/category-filter";
+import { OnboardingSteps } from "@/src/components/home/onboarding-steps";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { PageHeader } from "@/src/components/ui/page-header";
 import {
@@ -32,17 +33,35 @@ export interface BiomarkerBrowseEntry {
 
 interface BiomarkersPageClientProps {
   biomarkers: BiomarkerBrowseEntry[];
+  showDeviceStep?: boolean;
+  uploadLabsAction?: ReactNode;
 }
 
-export function BiomarkersPageClient({ biomarkers }: BiomarkersPageClientProps) {
+export function BiomarkersPageClient({
+  biomarkers,
+  showDeviceStep = false,
+  uploadLabsAction = null,
+}: BiomarkersPageClientProps) {
   return (
     <BrowserVaultProvider>
-      <BiomarkersPageContent biomarkers={biomarkers} />
+      <BiomarkersPageContent
+        biomarkers={biomarkers}
+        showDeviceStep={showDeviceStep}
+        uploadLabsAction={uploadLabsAction}
+      />
     </BrowserVaultProvider>
   );
 }
 
-function BiomarkersPageContent({ biomarkers }: BiomarkersPageClientProps) {
+function BiomarkersPageContent({
+  biomarkers,
+  showDeviceStep,
+  uploadLabsAction,
+}: {
+  biomarkers: BiomarkerBrowseEntry[];
+  showDeviceStep: boolean;
+  uploadLabsAction: ReactNode;
+}) {
   const [category, setCategory] = useState("All");
   const { client, deviceSyncImportPending, status } = useBrowserVault();
 
@@ -79,6 +98,14 @@ function BiomarkersPageContent({ biomarkers }: BiomarkersPageClientProps) {
         title="Biomarkers"
         description="Track and understand the signals that move your health, then run experiments to see what changes."
       />
+
+      {showDeviceStep ? (
+        <OnboardingSteps
+          showDeviceStep
+          hideExperimentStep
+          uploadLabsAction={uploadLabsAction}
+        />
+      ) : null}
 
       <section className="flex flex-col gap-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">

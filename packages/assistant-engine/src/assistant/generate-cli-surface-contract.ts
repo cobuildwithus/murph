@@ -9,7 +9,7 @@ import {
   hashAssistantCliSurfaceManifest,
   type AssistantCliSurfacePrebuiltArtifact,
 } from './cli-surface-bootstrap.js'
-import { readAssistantCliLlmsManifest } from './cli-surface-manifest.js'
+import { readAssistantCliLlmsFullManifest } from './cli-surface-manifest.js'
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url))
 const workspaceRoot = path.resolve(moduleDirectory, '../../../..')
@@ -18,7 +18,7 @@ const artifactPath = path.join(
   assistantCliSurfacePrebuiltArtifactFileName,
 )
 
-const manifest = await readAssistantCliLlmsManifest({
+const manifest = await readAssistantCliLlmsFullManifest({
   workingDirectory: workspaceRoot,
 })
 const contract = buildAssistantCliSurfaceContract(manifest)

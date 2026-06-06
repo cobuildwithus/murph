@@ -18,9 +18,8 @@ const assistantCliSurfaceBootstrapSchemaVersion =
 export const assistantCliSurfacePrebuiltSchemaVersion =
   'murph.assistant-cli-surface-prebuilt.v2'
 const assistantCliSurfaceBootstrapRenderPolicyVersion =
-  'murph.assistant-cli-surface-render-policy.v1'
+  'murph.assistant-cli-surface-render-policy.v2'
 const assistantCliSurfaceBootstrapContractCharBudget = 40_000
-const assistantCliSurfaceBootstrapDetailedModeCommandLimit = 120
 export const assistantCliSurfacePrebuiltArtifactFileName =
   'cli-surface-contract.generated.json'
 const assistantCliSurfaceBootstrapIgnoredOptionNames = new Set([
@@ -204,10 +203,11 @@ export function buildAssistantCliSurfaceContract(
     return null
   }
 
-  const fallbackModes: readonly AssistantCliContractRenderMode[] =
-    commands.length > assistantCliSurfaceBootstrapDetailedModeCommandLimit
-      ? ['description-only']
-      : ['required-only', 'description-only']
+  const fallbackModes: readonly AssistantCliContractRenderMode[] = [
+    'all-options',
+    'required-only',
+    'description-only',
+  ]
 
   for (const mode of fallbackModes) {
     const contract = renderAssistantCliSurfaceContract(commands, mode)
@@ -468,6 +468,7 @@ function normalizeAssistantCliManifestCommands(
 }
 
 type AssistantCliContractRenderMode =
+  | 'all-options'
   | 'description-only'
   | 'required-only'
 
@@ -488,7 +489,8 @@ function renderAssistantCliSurfaceContract(
   const lines = [
     'Murph CLI Contract:',
     'Use `vault-cli` directly from the current runtime process. Command names below are the tokens after `vault-cli`.',
-    'This block is compiled automatically from `vault-cli --llms --format json`.',
+    'This block is compiled automatically from `vault-cli --llms` / `--llms-full` manifest data.',
+    'Detailed entries include enough args/options to run directly.',
     'Use this contract first. Only fall back to `--schema --format json` or `--help` when a needed detail is missing here.',
     'Bare command-name entries are low-frequency routes; inspect `vault-cli <command> --schema --format json` or `vault-cli <command> --help` before executing one.',
   ]
@@ -545,20 +547,28 @@ function renderAssistantCliContractCommandLine(
   const parts = [`- \`${command.name}\`${normalizedDescription ? `: ${normalizedDescription}` : ''}`]
   const argsSchema = command.schema?.args
   const optionsSchema = command.schema?.options
-  const requiredArgs = readAssistantCliRequiredSchemaPropertyNames(argsSchema).map(
-    (name) => `<${name}>`,
-  )
-  const requiredOptions = readAssistantCliRequiredSchemaPropertyNames(optionsSchema)
+  const argNames =
+    mode === 'all-options'
+      ? readAssistantCliSchemaPropertyNames(argsSchema)
+      : readAssistantCliRequiredSchemaPropertyNames(argsSchema)
+  const optionNames =
+    mode === 'all-options'
+      ? readAssistantCliSchemaPropertyNames(optionsSchema)
+      : readAssistantCliRequiredSchemaPropertyNames(optionsSchema)
+  const args = argNames.map((name) => `<${name}>`)
+  const options = optionNames
     .filter((name) => !assistantCliSurfaceBootstrapIgnoredOptionNames.has(name))
     .map((name) => renderAssistantCliOptionSignature(name, optionsSchema?.properties?.[name]))
 
-  if (mode === 'required-only') {
-    if (requiredArgs.length > 0) {
-      parts.push(`args ${requiredArgs.join(' ')}`)
+  if (mode === 'all-options' || mode === 'required-only') {
+    if (args.length > 0) {
+      parts.push(`args ${args.join(' ')}`)
     }
 
-    if (requiredOptions.length > 0) {
-      parts.push(`required ${requiredOptions.join(', ')}`)
+    if (options.length > 0) {
+      parts.push(
+        `${mode === 'all-options' ? 'options' : 'required'} ${options.join(', ')}`,
+      )
     }
   }
 
@@ -584,9 +594,15 @@ function readAssistantCliRequiredSchemaPropertyNames(
   schema: AssistantCliLlmsManifestSchemaNode | undefined,
 ): string[] {
   const requiredNames = new Set(schema?.required ?? [])
-  const propertyNames = Object.keys(schema?.properties ?? {})
+  const propertyNames = readAssistantCliSchemaPropertyNames(schema)
 
   return propertyNames.filter((name) => requiredNames.has(name))
+}
+
+function readAssistantCliSchemaPropertyNames(
+  schema: AssistantCliLlmsManifestSchemaNode | undefined,
+): string[] {
+  return Object.keys(schema?.properties ?? {})
 }
 
 function renderAssistantCliOptionSignature(

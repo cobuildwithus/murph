@@ -186,7 +186,7 @@ test('readPrebuiltAssistantCliSurfaceContract rejects malformed generated artifa
   )
 })
 
-test('buildAssistantCliSurfaceContract normalizes commands and renders family, args, and required option summaries', async () => {
+test('buildAssistantCliSurfaceContract normalizes commands and renders detailed option signatures', async () => {
   const {
     buildAssistantCliSurfaceContract,
   } = await import('../src/assistant/cli-surface-bootstrap.ts')
@@ -300,6 +300,7 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders family, a
   assert.ok(contract)
   assert.match(contract, /^Murph CLI Contract:/u)
   assert.match(contract, /Use `vault-cli` directly from the current runtime process/u)
+  assert.match(contract, /Detailed entries include enough args\/options to run directly/u)
   assert.match(contract, /Bare command-name entries are low-frequency routes/u)
   assert.doesNotMatch(contract, /Family Index:/u)
   assert.doesNotMatch(contract, /- search \(1\): docs/u)
@@ -311,16 +312,13 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders family, a
   assert.doesNotMatch(contract, /^age:/mu)
   assert.match(
     contract,
-    /- `search docs`: Search the indexed documents for matching records\.; args <query>; required --format=json\|text\./u,
+    /- `search docs`: Search the indexed documents for matching records\.; args <query>; options --format=json\|text, --limit=integer, repeat --tags=value, --verbose\./u,
   )
   assert.match(contract, /- `search`: Root command help\./u)
   assert.match(contract, /- `assistant onboarding complete`: Mark onboarding complete\./u)
   assert.match(contract, /- `document import`\./u)
   assert.doesNotMatch(contract, /Import a document into the vault/u)
   assert.doesNotMatch(contract, /requestId/u)
-  assert.doesNotMatch(contract, /--limit/u)
-  assert.doesNotMatch(contract, /--tags/u)
-  assert.doesNotMatch(contract, /--verbose/u)
   assert.doesNotMatch(contract, /--vault/u)
   assert.doesNotMatch(contract, /Duplicate name/u)
   assert.doesNotMatch(contract, /`assistant run`/u)
@@ -447,6 +445,78 @@ test('readAssistantCliLlmsManifest launches workspace CLI source with base tscon
   assert.equal(spawnCall.cwd, path.join(path.sep, 'tmp', 'murph-workspace'))
 })
 
+test('readAssistantCliLlmsFullManifest launches the full schema-bearing manifest', async () => {
+  vi.resetModules()
+
+  const fakeTsxBinary = path.join(path.sep, 'tmp', 'murph-test-bin', 'tsx')
+  const spawnCalls: Array<{
+    args: string[]
+    command: string
+  }> = []
+
+  vi.doMock('node:fs/promises', async () => {
+    const actual =
+      await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    return {
+      ...actual,
+      access: vi.fn(async (targetPath: string) => {
+        if (
+          targetPath === fakeTsxBinary ||
+          targetPath.endsWith('tsconfig.base.json') ||
+          targetPath.endsWith(path.join('packages', 'cli', 'src', 'bin.ts'))
+        ) {
+          return
+        }
+
+        throw new Error(`missing test executable: ${targetPath}`)
+      }),
+    }
+  })
+  vi.doMock('node:child_process', () => ({
+    spawn: vi.fn((command: string, args: string[]) => {
+      spawnCalls.push({
+        args: [...args],
+        command,
+      })
+
+      return createManifestCommandChildProcess({
+        commands: [
+          {
+            name: 'goal save',
+            schema: {
+              args: {
+                properties: {
+                  title: {
+                    type: 'string',
+                  },
+                },
+              },
+            },
+          },
+        ],
+      })
+    }),
+  }))
+
+  const {
+    readAssistantCliLlmsFullManifest,
+  } = await import('../src/assistant/cli-surface-manifest.ts')
+
+  const manifest = await readAssistantCliLlmsFullManifest({
+    cliEnv: {
+      PATH: path.dirname(fakeTsxBinary),
+    },
+  })
+
+  assert.equal(manifest.commands[0]?.name, 'goal save')
+  assert.equal(spawnCalls.length, 1)
+
+  const spawnCall = spawnCalls[0]
+  assert.ok(spawnCall)
+  assert.equal(spawnCall.command, fakeTsxBinary)
+  assert.deepEqual(spawnCall.args.slice(3), ['--llms-full', '--format', 'json'])
+})
+
 test('readAssistantCliLlmsManifest skips workspace CLI source when base tsconfig is missing', async () => {
   vi.resetModules()
 
@@ -512,7 +582,7 @@ test('readAssistantCliLlmsManifest skips workspace CLI source when base tsconfig
   assert.deepEqual(spawnCall.args, ['--llms', '--format', 'json'])
 })
 
-test('buildAssistantCliSurfaceContract renders required string option signatures when the schema provides them', async () => {
+test('buildAssistantCliSurfaceContract renders optional string option signatures when the schema provides them', async () => {
   const {
     buildAssistantCliSurfaceContract,
   } = await import('../src/assistant/cli-surface-bootstrap.ts')
@@ -538,11 +608,10 @@ test('buildAssistantCliSurfaceContract renders required string option signatures
   })
 
   assert.ok(contract)
-  assert.match(contract, /required --label=string\./u)
-  assert.doesNotMatch(contract, /--freeform/u)
+  assert.match(contract, /options --freeform, --label=string\./u)
 })
 
-test('buildAssistantCliSurfaceContract renders required array options as repeated flags with hints', async () => {
+test('buildAssistantCliSurfaceContract renders array options as repeated flags with hints', async () => {
   const {
     buildAssistantCliSurfaceContract,
   } = await import('../src/assistant/cli-surface-bootstrap.ts')
@@ -573,7 +642,7 @@ test('buildAssistantCliSurfaceContract renders required array options as repeate
   assert.ok(contract)
   assert.match(
     contract,
-    /required repeat --query=string; hint Repeat --query for each supplement\./u,
+    /options repeat --query=string; hint Repeat --query for each supplement\./u,
   )
   assert.doesNotMatch(contract, /supplement\.\./u)
   assert.doesNotMatch(contract, /--query=list/u)
@@ -655,8 +724,65 @@ test('buildAssistantCliSurfaceContract renders low-frequency families as bare co
   }
   assert.match(
     contract,
-    /- `event inspect`: Event detail route; args <target>; required --format=json\|text\./u,
+    /- `event inspect`: Event detail route; args <target>; options --format=json\|text\./u,
   )
+})
+
+test('buildAssistantCliSurfaceContract exposes optional enum fields for detailed save commands', async () => {
+  const {
+    buildAssistantCliSurfaceContract,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  const contract = buildAssistantCliSurfaceContract({
+    commands: [
+      {
+        description: 'Create or update one goal from typed command fields.',
+        name: 'goal save',
+        schema: {
+          args: {
+            properties: {
+              title: {
+                type: 'string',
+              },
+            },
+            required: ['title'],
+          },
+          options: {
+            properties: {
+              domain: {
+                items: {
+                  type: 'string',
+                },
+                type: 'array',
+              },
+              horizon: {
+                enum: ['short_term', 'medium_term', 'long_term', 'ongoing'],
+                type: 'string',
+              },
+              requestId: {
+                type: 'string',
+              },
+              status: {
+                enum: ['active', 'paused', 'completed', 'abandoned'],
+                type: 'string',
+              },
+              vault: {
+                type: 'string',
+              },
+            },
+          },
+        },
+      },
+    ],
+  })
+
+  assert.ok(contract)
+  assert.match(
+    contract,
+    /- `goal save`: Create or update one goal from typed command fields\.; args <title>; options repeat --domain=string, --horizon=short_term\|medium_term\|long_term\|ongoing, --status=active\|paused\|completed\|abandoned\./u,
+  )
+  assert.doesNotMatch(contract, /requestId/u)
+  assert.doesNotMatch(contract, /--vault/u)
 })
 
 test('buildAssistantCliSurfaceContract falls back to a truncated description-only contract for oversized manifests', async () => {
@@ -1016,7 +1142,7 @@ test('resolveAssistantCliSurfaceBootstrapContext uses compact manifests when no 
   assert.ok(compactContract)
   assert.match(
     compactContract,
-    /compiled automatically from `vault-cli --llms --format json`/u,
+    /compiled automatically from `vault-cli --llms` \/ `--llms-full` manifest data/u,
   )
   assert.deepEqual(
     readAssistantCliLlmsManifest.mock.calls,
@@ -1335,7 +1461,7 @@ test('resolveAssistantCliSurfaceBootstrapContext keys the in-memory cache by man
 
 function createAssistantCliSurfaceManifestFingerprint(manifest: unknown): string {
   return createHash('sha256')
-    .update('murph.assistant-cli-surface-render-policy.v1')
+    .update('murph.assistant-cli-surface-render-policy.v2')
     .update('\0')
     .update(JSON.stringify(manifest))
     .digest('hex')

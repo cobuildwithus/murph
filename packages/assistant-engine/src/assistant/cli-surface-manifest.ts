@@ -49,6 +49,7 @@ interface AssistantCliLauncher {
 
 const assistantCliManifestTimeoutMs = 60_000
 const assistantCliManifestMaxOutputChars = 80_000
+const assistantCliFullManifestMaxOutputChars = 8_000_000
 
 const assistantCliManifestAllowedEnvKeys = new Set<string>([
   'APPDATA',
@@ -106,6 +107,32 @@ export async function readAssistantCliLlmsManifest(input: {
   return result.json
 }
 
+export async function readAssistantCliLlmsFullManifest(input: {
+  cliEnv?: NodeJS.ProcessEnv
+  executionContext?: AssistantExecutionContext | null
+  workingDirectory?: string | null
+}): Promise<AssistantCliLlmsManifest> {
+  const result = await executeAssistantCliManifestCommand({
+    args: ['--llms-full', '--format', 'json'],
+    cliEnv: input.cliEnv,
+    executionContext: input.executionContext,
+    maxOutputChars: assistantCliFullManifestMaxOutputChars,
+    workingDirectory: input.workingDirectory,
+  })
+
+  if (!isAssistantCliLlmsManifest(result.json)) {
+    throw new VaultCliError(
+      'ASSISTANT_CLI_COMMAND_FAILED',
+      'vault-cli --llms-full --format json returned an unexpected manifest shape.',
+      {
+        argv: result.argv,
+      },
+    )
+  }
+
+  return result.json
+}
+
 export function buildAssistantCliProcessEnv(input: {
   ambientEnv?: NodeJS.ProcessEnv
   cliEnv?: NodeJS.ProcessEnv
@@ -127,6 +154,7 @@ async function executeAssistantCliManifestCommand(input: {
   args: readonly string[]
   cliEnv?: NodeJS.ProcessEnv
   executionContext?: AssistantExecutionContext | null
+  maxOutputChars?: number
   workingDirectory?: string | null
 }): Promise<{
   argv: string[]
@@ -202,11 +230,19 @@ async function executeAssistantCliManifestCommand(input: {
     })
 
     child.stdout.on('data', (chunk) => {
-      stdout = appendAssistantCliManifestOutputChunk(stdout, String(chunk))
+      stdout = appendAssistantCliManifestOutputChunk(
+        stdout,
+        String(chunk),
+        input.maxOutputChars ?? assistantCliManifestMaxOutputChars,
+      )
     })
 
     child.stderr.on('data', (chunk) => {
-      stderr = appendAssistantCliManifestOutputChunk(stderr, String(chunk))
+      stderr = appendAssistantCliManifestOutputChunk(
+        stderr,
+        String(chunk),
+        assistantCliManifestMaxOutputChars,
+      )
     })
 
     child.stdin.on('error', () => {
@@ -441,12 +477,13 @@ async function isKnownStaleSetupCliShim(candidatePath: string): Promise<boolean>
 function appendAssistantCliManifestOutputChunk(
   existing: string,
   chunk: string,
+  maxOutputChars: number,
 ): string {
-  if (existing.length >= assistantCliManifestMaxOutputChars) {
+  if (existing.length >= maxOutputChars) {
     return existing
   }
 
-  const remainingChars = assistantCliManifestMaxOutputChars - existing.length
+  const remainingChars = maxOutputChars - existing.length
   if (chunk.length <= remainingChars) {
     return existing + chunk
   }

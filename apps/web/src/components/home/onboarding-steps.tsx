@@ -52,17 +52,23 @@ export function getOnboardingStepActionClass(isPrimary: boolean): string {
 
 export function OnboardingSteps({
   showDeviceStep = true,
+  hideExperimentStep = false,
   uploadLabsAction = null,
 }: {
   showDeviceStep?: boolean;
+  hideExperimentStep?: boolean;
   uploadLabsAction?: ReactNode;
 }) {
-  const visibleSteps = showDeviceStep
-    ? steps
-    : steps.filter((step) => step.id !== "devices");
+  const visibleSteps = steps.filter((step) => {
+    if (step.id === "devices" && !showDeviceStep) return false;
+    if (step.id === "experiments" && hideExperimentStep) return false;
+    return true;
+  });
+  const gridColsClass =
+    visibleSteps.length >= 3 ? "sm:grid-cols-2 xl:grid-cols-3" : "sm:grid-cols-2";
 
   return (
-    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+    <div className={`grid gap-5 ${gridColsClass}`}>
       {visibleSteps.map((step, i) => {
         const Icon = step.icon;
         const isPrimary = step.id === "devices";
