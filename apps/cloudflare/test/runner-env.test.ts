@@ -14,7 +14,6 @@ import {
   buildHostedRunnerJobRuntimeConfig,
   buildHostedRunnerContainerEnv,
   buildHostedRunnerChannelPlatformEnv,
-  buildHostedRunnerDataApiPlatformEnv,
   buildHostedRunnerLegacyDeviceSyncPlatformEnv,
   buildHostedRunnerPlatformEnv,
   filterHostedRunnerSecrets,
@@ -249,7 +248,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       [LEGACY_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: "http://127.0.0.1:4222/v1",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
-      HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
       LINQ_API_BASE_URL: "http://localhost:4011",
       TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
       TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
@@ -798,9 +796,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
           "user-callback-private-jwk",
       },
     });
-    expect(runtime.platformEnv).toEqual({
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-    });
+    expect(runtime.platformEnv).toBeUndefined();
     expect(runtime.forwardedEnv?.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK).toBeUndefined();
     expect(runtime.forwardedEnv?.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
     expect(runtime.userEnv?.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK).toBeUndefined();
@@ -831,7 +827,6 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     const runtime = buildHostedRunnerJobRuntimeConfig({
       configSource: {
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
-        HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
         TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
         TELEGRAM_BOT_TOKEN: "telegram-token",
         TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
@@ -844,50 +839,12 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     expect(runtime).toMatchObject({
       forwardedEnv: {},
       platformEnv: {
-        HOSTED_WEB_BASE_URL: "http://host.docker.internal:3000/",
         TELEGRAM_API_BASE_URL: "http://host.docker.internal:4012/",
         TELEGRAM_BOT_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         TELEGRAM_FILE_BASE_URL: "http://host.docker.internal:4013/",
       },
       userEnv: {},
     });
-  });
-
-  it("serializes only the hosted web base URL for data API runtime lookups", () => {
-    expect(buildHostedRunnerDataApiPlatformEnv({
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-      MURPH_DATA_API_KEY: "data-api-worker-secret",
-    })).toEqual({
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-    });
-
-    const runtime = buildHostedRunnerJobRuntimeConfig({
-      configSource: {
-        HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "MURPH_DATA_API_KEY,HOSTED_WEB_BASE_URL",
-        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
-        HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
-        MURPH_DATA_API_KEY: "data-api-worker-secret",
-      },
-      forwardedEnv: {},
-      rewritePlatformUrlsForContainer: true,
-      runnerSecrets: {
-        HOSTED_WEB_BASE_URL: "https://evil.example.test",
-        MURPH_DATA_API_KEY: "data-api-user-secret",
-      },
-    });
-
-    expect(runtime).toMatchObject({
-      forwardedEnv: {},
-      platformEnv: {
-        HOSTED_WEB_BASE_URL: "http://host.docker.internal:3000/",
-      },
-      userEnv: {},
-    });
-    expect(runtime.platformEnv).not.toHaveProperty("MURPH_DATA_API_KEY");
-    expect(runtime.forwardedEnv).not.toHaveProperty("HOSTED_WEB_BASE_URL");
-    expect(runtime.forwardedEnv).not.toHaveProperty("MURPH_DATA_API_KEY");
-    expect(runtime.userEnv).not.toHaveProperty("HOSTED_WEB_BASE_URL");
-    expect(runtime.userEnv).not.toHaveProperty("MURPH_DATA_API_KEY");
   });
 
   it("keeps Telegram platform env out of runner secrets even when operators try to allowlist it", () => {

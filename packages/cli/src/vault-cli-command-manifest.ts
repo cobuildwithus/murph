@@ -1435,12 +1435,12 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['supplement', 'search-labels'],
-        description: 'Search the hosted supplement label database without writing records.',
+        description: 'Search the hosted supplement label database from hosted assistant runtime without writing records.',
         output: supplementLabelSearchResultSchema,
       },
       {
         path: ['supplement', 'search-labels-batch'],
-        description: 'Search multiple hosted supplement label queries without writing records.',
+        description: 'Search multiple hosted supplement label queries from hosted assistant runtime without writing records.',
         output: supplementLabelBatchSearchResultSchema,
       },
       {

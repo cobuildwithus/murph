@@ -1,5 +1,6 @@
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
+import { HOSTED_RUNTIME_PROCESS_ENV } from '@murphai/hosted-execution/cli-runtime-bridge'
 import { z } from 'zod'
 
 const DEFAULT_SUPPLEMENT_LABEL_LIMIT = 10
@@ -8,6 +9,8 @@ const MAX_SUPPLEMENT_LABEL_BATCH_QUERIES = 10
 const MAX_SUPPLEMENT_LABEL_BATCH_QUERY_LENGTH = 256
 const DEFAULT_SUPPLEMENT_LABEL_TIMEOUT_MS = 10_000
 const MAX_SUPPLEMENT_LABEL_TIMEOUT_MS = 30_000
+const SUPPLEMENT_LABELS_API_BASE_URL = 'http://murph-data-api.worker'
+const SUPPLEMENT_LABELS_API_PATH = '/api/supplements'
 const GTIN_LENGTHS = new Set([8, 12, 13, 14])
 
 export const supplementLabelSearchInputSchema = z.object({
@@ -86,7 +89,7 @@ export async function searchSupplementLabels(
   dependencies: SupplementLabelsDependencies = {},
 ): Promise<SupplementLabelSearchResult> {
   const input = supplementLabelSearchInputSchema.parse(rawInput)
-  const { env, fetchImpl, hostedWebBaseUrl } = resolveSupplementLabelsClient(dependencies)
+  const { env, fetchImpl, supplementLabelsApiBaseUrl } = resolveSupplementLabelsClient(dependencies)
 
   const limit = input.limit ?? DEFAULT_SUPPLEMENT_LABEL_LIMIT
   const includeOffMarket = input.includeOffMarket ?? false
@@ -94,7 +97,7 @@ export async function searchSupplementLabels(
   const payload = await fetchSupplementLabelsPayload({
     env,
     fetchImpl,
-    hostedWebBaseUrl,
+    supplementLabelsApiBaseUrl,
     includeOffMarket,
     limit,
     lookupParams,
@@ -114,11 +117,11 @@ export async function searchSupplementLabelsBatch(
   dependencies: SupplementLabelsDependencies = {},
 ): Promise<SupplementLabelBatchSearchResult> {
   const input = supplementLabelBatchSearchInputSchema.parse(rawInput)
-  const { env, fetchImpl, hostedWebBaseUrl } = resolveSupplementLabelsClient(dependencies)
+  const { env, fetchImpl, supplementLabelsApiBaseUrl } = resolveSupplementLabelsClient(dependencies)
 
   const limit = input.limit ?? DEFAULT_SUPPLEMENT_LABEL_LIMIT
   const includeOffMarket = input.includeOffMarket ?? false
-  const url = new URL('/api/supplements', hostedWebBaseUrl)
+  const url = new URL(SUPPLEMENT_LABELS_API_PATH, supplementLabelsApiBaseUrl)
   const response = await fetchSupplementLabelsApi(fetchImpl, url, env, {
     body: JSON.stringify({
       queries: input.queries,
@@ -144,24 +147,28 @@ export async function searchSupplementLabelsBatch(
 function resolveSupplementLabelsClient(dependencies: SupplementLabelsDependencies): {
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
-  hostedWebBaseUrl: URL
+  supplementLabelsApiBaseUrl: URL
 } {
   const env = dependencies.env ?? process.env
   const fetchImpl = dependencies.fetchImpl ?? fetch
-  const hostedWebBaseUrl = readHostedWebBaseUrl(env)
-
-  if (!hostedWebBaseUrl) {
-    throw new VaultCliError(
-      'supplement_labels_api_unconfigured',
-      'Supplement label search is not configured. Set HOSTED_WEB_BASE_URL before using this command.',
-    )
-  }
+  assertHostedRuntime(env)
 
   return {
     env,
     fetchImpl,
-    hostedWebBaseUrl,
+    supplementLabelsApiBaseUrl: new URL(SUPPLEMENT_LABELS_API_BASE_URL),
   }
+}
+
+function assertHostedRuntime(env: NodeJS.ProcessEnv): void {
+  if (env[HOSTED_RUNTIME_PROCESS_ENV] === '1') {
+    return
+  }
+
+  throw new VaultCliError(
+    'supplement_labels_api_hosted_only',
+    'Supplement label search runs through the hosted Murph data API and is only available inside hosted assistant runtime.',
+  )
 }
 
 function resolveSupplementLabelLookupParams(q: string): SupplementLabelLookupParam[] {
@@ -183,22 +190,6 @@ function resolveSupplementLabelLookupParams(q: string): SupplementLabelLookupPar
   }
 
   return [{ key: 'q', value: trimmed }]
-}
-
-function readHostedWebBaseUrl(env: NodeJS.ProcessEnv): URL | null {
-  const raw = normalizeNullableString(env.HOSTED_WEB_BASE_URL)
-  if (!raw) {
-    return null
-  }
-
-  try {
-    return new URL(raw)
-  } catch {
-    throw new VaultCliError(
-      'supplement_labels_api_invalid_base_url',
-      'Supplement label search is misconfigured. HOSTED_WEB_BASE_URL must be an absolute URL.',
-    )
-  }
 }
 
 async function fetchSupplementLabelsApi(
@@ -247,13 +238,13 @@ async function fetchSupplementLabelsApi(
 async function fetchSupplementLabelsPayload(input: {
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
-  hostedWebBaseUrl: URL
+  supplementLabelsApiBaseUrl: URL
   includeOffMarket: boolean
   limit: number
   lookupParams: SupplementLabelLookupParam[]
 }): Promise<{ items: z.infer<typeof supplementLabelSearchItemSchema>[] }> {
   for (const lookup of input.lookupParams) {
-    const url = new URL('/api/supplements', input.hostedWebBaseUrl)
+    const url = new URL(SUPPLEMENT_LABELS_API_PATH, input.supplementLabelsApiBaseUrl)
     url.searchParams.set(lookup.key, lookup.value)
     url.searchParams.set('limit', String(input.limit))
     if (input.includeOffMarket) {

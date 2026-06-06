@@ -147,6 +147,8 @@ describe("hostedRunnerIntercept", () => {
       .toBe(handleHostedRunnerOpenAiOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.mapbox])
       .toBe(handleHostedRunnerMapboxOutbound);
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.dataApi])
+      .toBe(handleHostedRunnerOpenInternetOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.linq])
       .toBe(handleHostedRunnerLinqOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.telegram])
@@ -362,7 +364,7 @@ describe("hostedRunnerIntercept", () => {
     }) => createActiveRuntimeWriteFenceValidationResult(input));
 
     const response = await hostedRunnerIntercept(
-      new Request("https://web.example.test/api/supplements?q=creatine&limit=3", {
+      new Request("http://murph-data-api.worker/api/supplements?q=creatine&limit=3", {
         headers: {
           authorization: "Bearer user-supplied-token",
           cookie: "session=user-supplied-cookie",
@@ -394,7 +396,7 @@ describe("hostedRunnerIntercept", () => {
       expect.objectContaining({
         component: "runner",
         details: expect.objectContaining({
-          host: "web.example.test",
+          host: "murph-data-api.worker",
           providerKind: "murph_data_api",
           providerRequestAuthorized: true,
           writeFenceValidationMode: "active_user_fence",
@@ -402,6 +404,58 @@ describe("hostedRunnerIntercept", () => {
         message: "Hosted runner provider egress completed.",
       }),
     );
+  });
+
+  it("rejects non-supplement data API paths before upstream fetch", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      userId: string;
+    }) => createActiveRuntimeWriteFenceValidationResult(input));
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://murph-data-api.worker/api/other", {
+        method: "GET",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        MURPH_DATA_API_KEY: "data-api-worker-secret",
+        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        validateActiveRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when data API upstream configuration is missing", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      userId: string;
+    }) => createActiveRuntimeWriteFenceValidationResult(input));
+    const env = createInterceptEnv({
+      MURPH_DATA_API_KEY: "data-api-worker-secret",
+      readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+      validateActiveRuntimeWriteFence,
+    });
+    delete env.HOSTED_WEB_BASE_URL;
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://murph-data-api.worker/api/supplements?q=creatine", {
+        method: "GET",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.text()).toBe("Hosted data API upstream is not configured.");
+    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("injects data API authorization for hosted supplement batch lookups", async () => {
@@ -419,7 +473,7 @@ describe("hostedRunnerIntercept", () => {
     }) => createActiveRuntimeWriteFenceValidationResult(input));
 
     const response = await hostedRunnerIntercept(
-      new Request("https://web.example.test/api/supplements", {
+      new Request("http://murph-data-api.worker/api/supplements", {
         body: JSON.stringify({
           queries: ["creatine", "magnesium"],
           limit: 3,
@@ -471,7 +525,7 @@ describe("hostedRunnerIntercept", () => {
     }) => createActiveRuntimeWriteFenceValidationResult(input));
 
     const response = await hostedRunnerIntercept(
-      new Request("https://web.example.test/api/supplements", {
+      new Request("http://murph-data-api.worker/api/supplements", {
         body: JSON.stringify({
           queries: ["a".repeat(9 * 1024)],
         }),
@@ -544,7 +598,7 @@ describe("hostedRunnerIntercept", () => {
     }) => createActiveRuntimeWriteFenceValidationResult(input));
 
     const response = await hostedRunnerIntercept(
-      new Request("https://web.example.test/api/supplements?q=creatine", {
+      new Request("http://murph-data-api.worker/api/supplements?q=creatine", {
         method: "GET",
       }),
       createInterceptEnv({
@@ -561,7 +615,7 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("matches hosted supplement label lookups through the local runner host alias", async () => {
+  it("forwards internal supplement label lookups to the local hosted web alias", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       items: [],
     }), {
@@ -576,7 +630,7 @@ describe("hostedRunnerIntercept", () => {
     }) => createActiveRuntimeWriteFenceValidationResult(input));
 
     const response = await hostedRunnerIntercept(
-      new Request("http://host.docker.internal:3000/api/supplements?q=magnesium", {
+      new Request("http://murph-data-api.worker/api/supplements?q=magnesium", {
         method: "GET",
       }),
       createInterceptEnv({
@@ -601,7 +655,7 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await hostedRunnerIntercept(
-      new Request("https://web.example.test/api/supplements", {
+      new Request("http://murph-data-api.worker/api/supplements", {
         method: "DELETE",
       }),
       createInterceptEnv({

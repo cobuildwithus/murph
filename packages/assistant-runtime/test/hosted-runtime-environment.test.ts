@@ -8,7 +8,6 @@ import type { HostedAssistantDeliveryRecord } from "@murphai/hosted-execution/si
 
 import type { HostedRuntimePlatform } from "../src/hosted-runtime/platform.ts";
 import {
-  buildHostedRuntimeDataApiEnv,
   buildHostedRunnerExecutablePath,
   buildHostedPlatformBackedRuntimeEnv,
   HOSTED_RUNNER_EXECUTABLE_PATH,
@@ -366,21 +365,6 @@ test("hosted runtime launch spec derives platform env from forwarded env only wh
   });
 });
 
-test("hosted runtime data API env exposes only the hosted web origin", () => {
-  assert.deepEqual(
-    buildHostedRuntimeDataApiEnv({
-      platformEnv: {
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
-        MURPH_DATA_API_KEY: "data-api-key",
-      },
-    }),
-    {
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-    },
-  );
-});
-
 test("hosted runtime launch spec rejects parserToolchain:null", () => {
   assert.throws(
     () =>
@@ -564,7 +548,6 @@ test("hosted runtime platform env selector and timeout parser are reusable outsi
       WHATSAPP_PHONE_NUMBER_ID: "whatsapp-phone-number-id",
     }),
     {
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       JUNCTION_API_KEY: "junction-api-key",
       JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
@@ -660,32 +643,25 @@ test("hosted platform-backed env keeps platform Telegram values when forwarded e
   );
 });
 
-test("hosted runtime config keeps hosted web base URL platform-owned", () => {
+test("hosted runtime config strips hosted data API config from runtime env", () => {
   const platform = createHostedRuntimePlatformStub();
 
   const normalized = normalizeHostedAssistantRuntimeConfig(
     {
       platformEnv: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
+        MURPH_DATA_API_KEY: "data-api-secret",
       },
       userEnv: {
         HOSTED_WEB_BASE_URL: "https://evil-web.example.test",
+        MURPH_DATA_API_KEY: "evil-data-api-secret",
       },
     },
     platform,
   );
-  const runtimeEnv = {
-    ...buildHostedRuntimeDataApiEnv({
-      platformEnv: normalized.platformEnv,
-    }),
-    ...normalized.userEnv,
-  };
 
-  assert.deepEqual(normalized.platformEnv, {
-    HOSTED_WEB_BASE_URL: "https://web.example.test",
-  });
+  assert.deepEqual(normalized.platformEnv, {});
   assert.deepEqual(normalized.userEnv, {});
-  assert.equal(runtimeEnv.HOSTED_WEB_BASE_URL, "https://web.example.test");
 });
 
 test("hosted runtime config strips ingress-only secrets from forwarded env", () => {

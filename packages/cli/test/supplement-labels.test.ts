@@ -6,24 +6,12 @@ import {
   searchSupplementLabelsBatch,
 } from '../src/supplement-labels.js'
 
-describe('searchSupplementLabels', () => {
-  it('requires the hosted web base URL', async () => {
-    await expect(
-      searchSupplementLabels(
-        {
-          q: 'creatine',
-        },
-        {
-          env: {},
-          fetchImpl: async () => new Response('unexpected'),
-        },
-      ),
-    ).rejects.toMatchObject({
-      code: 'supplement_labels_api_unconfigured',
-    })
-  })
+const hostedRuntimeEnv = {
+  MURPH_HOSTED_RUNTIME_PROCESS: '1',
+}
 
-  it('calls the hosted supplements API without local authorization headers', async () => {
+describe('searchSupplementLabels', () => {
+  it('calls the internal supplements API without local authorization headers or hosted web config', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       items: [
         {
@@ -50,9 +38,7 @@ describe('searchSupplementLabels', () => {
         includeOffMarket: true,
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -75,7 +61,7 @@ describe('searchSupplementLabels', () => {
       ],
     })
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
-    assert.equal(requestUrl.origin, 'https://web.example.test')
+    assert.equal(requestUrl.origin, 'http://murph-data-api.worker')
     assert.equal(requestUrl.pathname, '/api/supplements')
     assert.equal(requestUrl.searchParams.get('q'), 'creatine')
     assert.equal(requestUrl.searchParams.get('limit'), '2')
@@ -118,9 +104,7 @@ describe('searchSupplementLabels', () => {
         q: '82118',
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -172,9 +156,7 @@ describe('searchSupplementLabels', () => {
         includeOffMarket: true,
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -207,9 +189,7 @@ describe('searchSupplementLabels', () => {
         q: 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64',
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -259,9 +239,7 @@ describe('searchSupplementLabels', () => {
         q: 'dailymed:missing',
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -293,9 +271,7 @@ describe('searchSupplementLabels', () => {
         q: 'brand: creatine',
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -328,9 +304,7 @@ describe('searchSupplementLabels', () => {
         q: '123-456-789012',
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -376,9 +350,7 @@ describe('searchSupplementLabels', () => {
         q: '123456789012',
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -410,35 +382,37 @@ describe('searchSupplementLabels', () => {
         q: '82118',
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
 
     assert.deepEqual(result.items, [])
   })
-})
 
-describe('searchSupplementLabelsBatch', () => {
-  it('requires the hosted web base URL', async () => {
+  it('fails explicitly outside hosted assistant runtime', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('unexpected'))
+
     await expect(
-      searchSupplementLabelsBatch(
+      searchSupplementLabels(
         {
-          queries: ['creatine'],
+          q: 'creatine',
         },
         {
           env: {},
-          fetchImpl: async () => new Response('unexpected'),
+          fetchImpl: fetchMock,
         },
       ),
     ).rejects.toMatchObject({
-      code: 'supplement_labels_api_unconfigured',
+      code: 'supplement_labels_api_hosted_only',
+      message: 'Supplement label search runs through the hosted Murph data API and is only available inside hosted assistant runtime.',
     })
+    assert.equal(fetchMock.mock.calls.length, 0)
   })
+})
 
-  it('posts multiple hosted supplement label queries without local authorization headers', async () => {
+describe('searchSupplementLabelsBatch', () => {
+  it('posts multiple hosted supplement label queries through the internal data API', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       results: [
         {
@@ -484,9 +458,7 @@ describe('searchSupplementLabelsBatch', () => {
         includeOffMarket: true,
       },
       {
-        env: {
-          HOSTED_WEB_BASE_URL: 'https://web.example.test',
-        },
+        env: hostedRuntimeEnv,
         fetchImpl: fetchMock,
       },
     )
@@ -530,7 +502,7 @@ describe('searchSupplementLabelsBatch', () => {
 
     assert.equal(fetchMock.mock.calls.length, 1)
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
-    assert.equal(requestUrl.origin, 'https://web.example.test')
+    assert.equal(requestUrl.origin, 'http://murph-data-api.worker')
     assert.equal(requestUrl.pathname, '/api/supplements')
     assert.equal(requestUrl.search, '')
     const init = fetchMock.mock.calls[0]?.[1]
@@ -566,14 +538,32 @@ describe('searchSupplementLabelsBatch', () => {
           queries: ['a'.repeat(257)],
         },
         {
-          env: {
-            HOSTED_WEB_BASE_URL: 'https://web.example.test',
-          },
+          env: hostedRuntimeEnv,
           fetchImpl: fetchMock,
         },
       ),
     ).rejects.toMatchObject({
       name: 'ZodError',
+    })
+    assert.equal(fetchMock.mock.calls.length, 0)
+  })
+
+  it('fails explicitly outside hosted assistant runtime', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('unexpected'))
+
+    await expect(
+      searchSupplementLabelsBatch(
+        {
+          queries: ['creatine'],
+        },
+        {
+          env: {},
+          fetchImpl: fetchMock,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'supplement_labels_api_hosted_only',
+      message: 'Supplement label search runs through the hosted Murph data API and is only available inside hosted assistant runtime.',
     })
     assert.equal(fetchMock.mock.calls.length, 0)
   })

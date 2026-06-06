@@ -260,16 +260,6 @@ export function buildHostedPlatformBackedRuntimeEnv(input: {
   };
 }
 
-export function buildHostedRuntimeDataApiEnv(input: {
-  platformEnv?: Readonly<Record<string, string>>;
-}): Record<string, string> {
-  const hostedWebBaseUrl = normalizeHostedRuntimeString(
-    input.platformEnv?.HOSTED_WEB_BASE_URL,
-  );
-
-  return hostedWebBaseUrl ? { HOSTED_WEB_BASE_URL: hostedWebBaseUrl } : {};
-}
-
 export function projectHostedRuntimeProcessEnv(input: {
   ambientEnv: Readonly<Record<string, string | undefined>>;
   forwardedEnv: Readonly<Record<string, string>>;

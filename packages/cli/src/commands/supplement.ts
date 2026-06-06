@@ -179,7 +179,7 @@ export function registerSupplementCommands(
         .min(1)
         .describe('Supplement product, brand, ingredient, DSLD id, or UPC search text.'),
     }),
-    description: 'Search the hosted supplement label database without writing records.',
+    description: 'Search the hosted supplement label database from hosted assistant runtime without writing records.',
     examples: [
       {
         args: {
@@ -191,7 +191,7 @@ export function registerSupplementCommands(
         },
       },
     ],
-    hint: 'Hosted Murph authorizes this lookup through the Worker data API intercept.',
+    hint: 'Hosted assistant runtime authorizes this lookup through the Worker data API intercept.',
     options: z.object({
       limit: z
         .number()
@@ -217,7 +217,7 @@ export function registerSupplementCommands(
 
   supplement.command('search-labels-batch', {
     args: z.object({}),
-    description: 'Search multiple hosted supplement label queries without writing records.',
+    description: 'Search multiple hosted supplement label queries from hosted assistant runtime without writing records.',
     examples: [
       {
         description: 'Search labels for several supplement names in one hosted API call.',
@@ -227,7 +227,7 @@ export function registerSupplementCommands(
         },
       },
     ],
-    hint: 'Repeat --query for each supplement. Hosted Murph authorizes this lookup through the Worker data API intercept.',
+    hint: 'Repeat --query for each supplement. Hosted assistant runtime authorizes this lookup through the Worker data API intercept.',
     options: z.object({
       query: z
         .array(z.string().min(1).max(256))

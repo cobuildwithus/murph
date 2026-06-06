@@ -292,8 +292,8 @@ test('supplement list handler exercises the default limit fallback directly', as
 })
 
 test('supplement search-labels calls the hosted data API without local credentials', async () => {
-  const previousHostedWebBaseUrl = process.env.HOSTED_WEB_BASE_URL
-  process.env.HOSTED_WEB_BASE_URL = 'https://web.example.test'
+  const previousHostedRuntimeProcess = process.env.MURPH_HOSTED_RUNTIME_PROCESS
+  process.env.MURPH_HOSTED_RUNTIME_PROCESS = '1'
   const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
     items: [
       {
@@ -331,21 +331,21 @@ test('supplement search-labels calls the hosted data API without local credentia
     assert.equal(requireData(result.envelope).source, 'murph-data-api')
     assert.equal(requireData(result.envelope).items[0]?.id, '82118')
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
-    assert.equal(requestUrl.href, 'https://web.example.test/api/supplements?q=creatine&limit=1')
+    assert.equal(requestUrl.href, 'http://murph-data-api.worker/api/supplements?q=creatine&limit=1')
     const init = fetchMock.mock.calls[0]?.[1]
     assert.equal(init?.headers && 'authorization' in init.headers, false)
   } finally {
-    if (previousHostedWebBaseUrl === undefined) {
-      delete process.env.HOSTED_WEB_BASE_URL
+    if (previousHostedRuntimeProcess === undefined) {
+      delete process.env.MURPH_HOSTED_RUNTIME_PROCESS
     } else {
-      process.env.HOSTED_WEB_BASE_URL = previousHostedWebBaseUrl
+      process.env.MURPH_HOSTED_RUNTIME_PROCESS = previousHostedRuntimeProcess
     }
   }
 })
 
 test('supplement search-labels-batch calls the hosted data API without local credentials', async () => {
-  const previousHostedWebBaseUrl = process.env.HOSTED_WEB_BASE_URL
-  process.env.HOSTED_WEB_BASE_URL = 'https://web.example.test'
+  const previousHostedRuntimeProcess = process.env.MURPH_HOSTED_RUNTIME_PROCESS
+  process.env.MURPH_HOSTED_RUNTIME_PROCESS = '1'
   const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
     results: [
       {
@@ -395,7 +395,7 @@ test('supplement search-labels-batch calls the hosted data API without local cre
     assert.equal(requireData(result.envelope).source, 'murph-data-api')
     assert.equal(requireData(result.envelope).results[0]?.items[0]?.id, '82118')
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
-    assert.equal(requestUrl.href, 'https://web.example.test/api/supplements')
+    assert.equal(requestUrl.href, 'http://murph-data-api.worker/api/supplements')
     const init = fetchMock.mock.calls[0]?.[1]
     assert.equal(init?.method, 'POST')
     assert.deepEqual(JSON.parse(String(init?.body)), {
@@ -405,10 +405,10 @@ test('supplement search-labels-batch calls the hosted data API without local cre
     })
     assert.equal(init?.headers && 'authorization' in init.headers, false)
   } finally {
-    if (previousHostedWebBaseUrl === undefined) {
-      delete process.env.HOSTED_WEB_BASE_URL
+    if (previousHostedRuntimeProcess === undefined) {
+      delete process.env.MURPH_HOSTED_RUNTIME_PROCESS
     } else {
-      process.env.HOSTED_WEB_BASE_URL = previousHostedWebBaseUrl
+      process.env.MURPH_HOSTED_RUNTIME_PROCESS = previousHostedRuntimeProcess
     }
   }
 })
