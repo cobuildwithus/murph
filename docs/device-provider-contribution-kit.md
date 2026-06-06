@@ -212,7 +212,8 @@ Strong recommendations:
 - Reuse `makeNormalizedDeviceBatch()` and the helpers in `shared-normalization.ts`.
 - Retain unsupported-but-useful upstream sections as `snapshot-section:*` raw artifacts instead of silently discarding them.
 - Prefer existing event kinds such as `observation`, `sleep_session`, and `activity_session`.
-- Do not retain high-frequency provider timeseries as full raw sample arrays by default. Fetch only product-needed timeseries, reduce them to compact facts in memory, and persist only tiny evidence artifacts unless an explicit debug/deep-inspection feature proves the need for raw retention.
+- Do not retain high-frequency provider timeseries as full raw sample arrays by default. Fetch only product-needed timeseries, reduce them to compact facts in memory, and persist only tiny evidence artifacts unless an explicit debug/deep-inspection feature proves the need for raw retention. Core rejects oversized provider sample batches; do the reduction in the adapter before canonical import.
+- Do not set `queryVisibility`, `visibility`, or `canonicalFact` from provider adapter fields. Device imports keep provider observations out of default query/search promotion unless a separate read/projector path intentionally promotes a derived product fact.
 - If you need a new metric family or raw/debug stream, update the compatibility matrix in the same patch.
 
 ### 5. Wire config, defaults, exports, and tests
@@ -239,7 +240,7 @@ also prove at least one representative snapshot through the real
 `importDeviceProviderSnapshot(..., { corePort: coreRuntime })` path. Adapter or
 normalizer-only assertions are useful, but they are not enough: the fixture must
 round-trip through `core.importDeviceBatch` so invalid observation grains,
-unsupported fields, dense sample leakage, and other core-contract drift fail in
+query promotion fields, unsupported fields, oversized sample batches, and other core-contract drift fail in
 tests. High-frequency provider timeseries should be dropped, treated as freshness
 hints, or reduced to compact summary/derived facts before persistence; full raw
 retention needs an explicit product/debug policy and matching tests.

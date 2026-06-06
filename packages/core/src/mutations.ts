@@ -34,7 +34,6 @@ import {
   EVENT_SOURCES,
   FRONTMATTER_SCHEMA_VERSIONS,
   ID_PREFIXES,
-  OBSERVATION_GRAINS,
   SAMPLE_QUALITIES,
   SAMPLE_SCHEMA_VERSION,
   SAMPLE_SOURCES,
@@ -102,6 +101,9 @@ const RESERVED_DEVICE_EVENT_FIELD_NAMES = new Set([
   "dataOrigin",
   "lifecycle",
   "attachments",
+  "canonicalFact",
+  "queryVisibility",
+  "visibility",
 ]);
 
 interface EnsureJournalDayInput {
@@ -261,13 +263,6 @@ interface DeviceSampleInput extends LooseRecord {
   sample?: unknown;
 }
 
-interface DenseDeviceTelemetryPolicyInput extends LooseRecord {
-  allowDenseDebugTelemetry?: boolean;
-  /** @deprecated Use allowDenseDebugTelemetry. */
-  allowDenseDebugSamples?: boolean;
-  retention?: string;
-}
-
 interface ImportDeviceBatchInput {
   vaultRoot: string;
   provider: string;
@@ -277,9 +272,6 @@ interface ImportDeviceBatchInput {
   events?: readonly DeviceEventInput[];
   samples?: readonly DeviceSampleInput[];
   rawArtifacts?: readonly DeviceRawArtifactInput[];
-  denseTelemetryPolicy?: DenseDeviceTelemetryPolicyInput;
-  /** @deprecated Use denseTelemetryPolicy. */
-  denseSamplePolicy?: DenseDeviceTelemetryPolicyInput;
   provenance?: Record<string, unknown>;
 }
 
@@ -448,7 +440,6 @@ interface NormalizedSampleSeed {
 
 const EVENT_KIND_SET = new Set<EventKind>(BASELINE_EVENT_KINDS as readonly EventKind[]);
 const EVENT_SOURCE_SET = new Set<EventSource>(EVENT_SOURCES as readonly EventSource[]);
-const OBSERVATION_GRAIN_SET = new Set<string>(OBSERVATION_GRAINS);
 const SAMPLE_STREAM_SET = new Set<SampleStream>(BASELINE_SAMPLE_STREAMS as readonly SampleStream[]);
 const SAMPLE_SOURCE_SET = new Set<SampleSource>(SAMPLE_SOURCES as readonly SampleSource[]);
 const SAMPLE_QUALITY_SET = new Set<SampleQuality>(SAMPLE_QUALITIES as readonly SampleQuality[]);
@@ -2068,15 +2059,9 @@ export async function importDeviceBatch({
   events = [],
   samples = [],
   rawArtifacts = [],
-  denseTelemetryPolicy,
-  denseSamplePolicy,
   provenance,
 }: ImportDeviceBatchInput): Promise<ImportDeviceBatchResult> {
-  assertDenseDeviceTelemetryPolicy({
-    observationEventCount: countDenseDeviceObservationEvents(events),
-    policy: denseTelemetryPolicy ?? denseSamplePolicy,
-    sampleCount: Array.isArray(samples) ? samples.length : 0,
-  });
+  assertDeviceSampleRowLimit(Array.isArray(samples) ? samples.length : 0);
   const vault = await loadVault({ vaultRoot });
   const deviceBatchPlan = prepareDeviceBatchPlan({
     provider,
@@ -2185,20 +2170,8 @@ export async function importDeviceBatch({
   });
 }
 
-function assertDenseDeviceTelemetryPolicy(input: {
-  observationEventCount: number;
-  policy?: DenseDeviceTelemetryPolicyInput;
-  sampleCount: number;
-}): void {
-  if (
-    input.sampleCount <= MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT &&
-    input.observationEventCount <= MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT
-  ) {
-    return;
-  }
-  const allowDenseDebugTelemetry =
-    input.policy?.allowDenseDebugTelemetry ?? input.policy?.allowDenseDebugSamples;
-  if (allowDenseDebugTelemetry === true && input.policy?.retention === "debug_temporary") {
+function assertDeviceSampleRowLimit(sampleCount: number): void {
+  if (sampleCount <= MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT) {
     return;
   }
 
@@ -2209,48 +2182,7 @@ function assertDenseDeviceTelemetryPolicy(input: {
       codeAliases: [DENSE_DEVICE_SAMPLES_NOT_ALLOWED_LEGACY_CODE],
       legacyCode: DENSE_DEVICE_SAMPLES_NOT_ALLOWED_LEGACY_CODE,
       maxAllowed: MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT,
-      observationEventCount: input.observationEventCount,
-      sampleCount: input.sampleCount,
+      sampleCount,
     },
   );
-}
-
-function countDenseDeviceObservationEvents(events: readonly DeviceEventInput[] | undefined): number {
-  if (!Array.isArray(events)) {
-    return 0;
-  }
-
-  return events.filter(isDenseDeviceObservationInput).length;
-}
-
-function isDenseDeviceObservationInput(event: DeviceEventInput): boolean {
-  if (String(event.kind ?? "").trim() !== "observation") {
-    return false;
-  }
-
-  const observationGrain = normalizedDeviceObservationString(readPersistedDeviceObservationField(event, "observationGrain"));
-  if (observationGrain && OBSERVATION_GRAIN_SET.has(observationGrain) && observationGrain !== "sample") {
-    return false;
-  }
-
-  const metric = readPersistedDeviceObservationField(event, "metric");
-  const value = readPersistedDeviceObservationField(event, "value");
-
-  return (
-    typeof metric === "string" &&
-    typeof value === "number" &&
-    Number.isFinite(value)
-  );
-}
-
-function readPersistedDeviceObservationField(event: DeviceEventInput, key: string): unknown {
-  const fields = event.fields && typeof event.fields === "object" && !Array.isArray(event.fields)
-    ? event.fields as Record<string, unknown>
-    : {};
-
-  return fields[key];
-}
-
-function normalizedDeviceObservationString(value: unknown): string | null {
-  return typeof value === "string" ? value.trim().toLowerCase() : null;
 }

@@ -62,7 +62,7 @@ When adding a provider, prefer these existing shapes before inventing new ones.
 - `steps`
 - `temperature`
 
-These streams are reserved for explicit CSV/import/debug sample ledgers. Provider adapters should prefer raw artifacts plus compact observation metrics and should not emit high-frequency wearable telemetry as normal canonical samples.
+These streams are reserved for explicit CSV/import/debug sample ledgers. Provider adapters should prefer raw artifacts plus compact observation metrics and should not emit high-frequency wearable telemetry as normal canonical samples; core rejects oversized device-provider sample batches. Provider adapters also must not mark observations with `queryVisibility`, `visibility`, or `canonicalFact`; display promotion belongs in deliberate projection code.
 
 Junction timeseries are the concrete model for this boundary. Normal sync may fetch only compact product-needed timeseries, currently blood oxygen and stress level, and must aggregate them before persistence. The vault may keep tiny aggregate evidence such as `junction-timeseries-daily-*`, but it must not persist full `junction-timeseries-*` sample arrays or generic provider snapshots for dropped dense resources. Dense/debug streams such as steps, distance, heart rate, HRV, respiratory rate, and sparse resources such as weight stay out of default sync unless a current product observation needs them. Provider workout/session metrics belong under `activity_session.workout.metrics` unless an explicit projector promotes derived daily facts. Wearable summaries require compact display-grade facts such as daily activity, sleep, or body observations.
 

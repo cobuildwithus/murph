@@ -178,6 +178,22 @@ test("importDeviceBatch rejects dense provider sample firehoses by default", asy
   );
 });
 
+test("importDeviceBatch allows sample batches at the provider row limit", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-sample-limit");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "wearable-provider",
+    accountId: "acct-test",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    samples: buildDenseHeartRateSamples(1000),
+  });
+
+  assert.equal(result.samples.length, 1000);
+  assert.equal(result.events.length, 0);
+});
+
 test("importDeviceBatch dense sample guard does not trust caller-provided source", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-dense-samples");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -195,29 +211,10 @@ test("importDeviceBatch dense sample guard does not trust caller-provided source
   );
 });
 
-test("importDeviceBatch rejects dense provider observation events by default", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-import-dense-events");
+test("importDeviceBatch allows large numeric observation batches", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-observation-events");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-
-  await assert.rejects(
-    importDeviceBatch({
-      vaultRoot,
-      provider: "wearable-provider",
-      accountId: "acct-test",
-      importedAt: "2026-03-16T09:30:00.000Z",
-      events: buildDenseHeartRateObservations(1001),
-    }),
-    (error) =>
-      isDenseTelemetryPolicyError(error)
-      && error.details.observationEventCount === 1001
-      && !JSON.stringify(error).includes("bpm"),
-  );
-});
-
-test("importDeviceBatch rejects explicit sample-grain observation events by default", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-import-dense-sample-events");
-  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-  const events = buildDenseHeartRateObservations(1001).map((event) => ({
+  const events = buildDenseHeartRateObservations(1001).map(({ externalRef: _externalRef, ...event }) => ({
     ...event,
     fields: {
       ...event.fields,
@@ -225,110 +222,56 @@ test("importDeviceBatch rejects explicit sample-grain observation events by defa
     },
   }));
 
-  await assert.rejects(
-    importDeviceBatch({
-      vaultRoot,
-      provider: "wearable-provider",
-      accountId: "acct-test",
-      importedAt: "2026-03-16T09:30:00.000Z",
-      events,
-    }),
-    (error) =>
-      isDenseTelemetryPolicyError(error)
-      && error.details.observationEventCount === 1001,
-  );
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "wearable-provider",
+    accountId: "acct-test",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    events,
+  });
+
+  assert.equal(result.events.length, 1001);
+  assert.equal(result.samples.length, 0);
+  assert.equal(result.events.every((event) => event.kind === "observation" && event.observationGrain === "sample"), true);
+  assert.equal(result.events.some((event) => event.kind === "observation" && event.queryVisibility === "default"), false);
+  assert.equal(result.events.some((event) => event.kind === "observation" && event.canonicalFact === true), false);
 });
 
-test("importDeviceBatch dense observation guard ignores non-persisted top-level grain", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-import-dense-top-level-grain");
-  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-  const events = buildDenseHeartRateObservations(1001).map((event) => ({
-    ...event,
-    observationGrain: "summary",
-  }));
+test("importDeviceBatch rejects device event query promotion fields", async () => {
+  const promotionCases = [
+    { field: "queryVisibility", value: "default" },
+    { field: "visibility", value: "display" },
+    { field: "canonicalFact", value: true },
+  ] as const;
 
-  await assert.rejects(
-    importDeviceBatch({
-      vaultRoot,
-      provider: "wearable-provider",
-      accountId: "acct-test",
-      importedAt: "2026-03-16T09:30:00.000Z",
-      events,
-    }),
-    (error) =>
-      isDenseTelemetryPolicyError(error)
-      && error.details.observationEventCount === 1001,
-  );
-});
+  for (const promotionCase of promotionCases) {
+    const vaultRoot = await makeTempDirectory(`murph-device-import-promotion-${promotionCase.field}`);
+    await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+    const event = buildDenseHeartRateObservations(1)[0];
+    assert.ok(event);
 
-test("importDeviceBatch treats numeric device observations without provenance as dense by default", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-import-dense-events");
-  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-  const events = buildDenseHeartRateObservations(1001).map(({ externalRef: _externalRef, ...event }) => event);
-
-  await assert.rejects(
-    importDeviceBatch({
-      vaultRoot,
-      provider: "wearable-provider",
-      accountId: "acct-test",
-      importedAt: "2026-03-16T09:30:00.000Z",
-      events,
-    }),
-    (error) =>
-      isDenseTelemetryPolicyError(error)
-      && error.details.observationEventCount === 1001,
-  );
-});
-
-test("importDeviceBatch still rejects missing-grain observations with display visibility", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-import-display-events");
-  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-  const events = buildDenseHeartRateObservations(1001).map((event) => ({
-    ...event,
-    fields: {
-      ...event.fields,
-      queryVisibility: "default",
-    },
-  }));
-
-  await assert.rejects(
-    importDeviceBatch({
-      vaultRoot,
-      provider: "wearable-provider",
-      accountId: "acct-test",
-      importedAt: "2026-03-16T09:30:00.000Z",
-      events,
-    }),
-    (error) =>
-      isDenseTelemetryPolicyError(error)
-      && error.details.observationEventCount === 1001,
-  );
-});
-
-test("importDeviceBatch still rejects sample-grain observations with display visibility", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-import-sample-display-events");
-  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-  const events = buildDenseHeartRateObservations(1001).map((event) => ({
-    ...event,
-    fields: {
-      ...event.fields,
-      observationGrain: "sample" as const,
-      queryVisibility: "default",
-    },
-  }));
-
-  await assert.rejects(
-    importDeviceBatch({
-      vaultRoot,
-      provider: "wearable-provider",
-      accountId: "acct-test",
-      importedAt: "2026-03-16T09:30:00.000Z",
-      events,
-    }),
-    (error) =>
-      isDenseTelemetryPolicyError(error)
-      && error.details.observationEventCount === 1001,
-  );
+    await assert.rejects(
+      importDeviceBatch({
+        vaultRoot,
+        provider: "wearable-provider",
+        accountId: "acct-test",
+        importedAt: "2026-03-16T09:30:00.000Z",
+        events: [
+          {
+            ...event,
+            fields: {
+              ...event.fields,
+              [promotionCase.field]: promotionCase.value,
+            },
+          },
+        ],
+      }),
+      (error) =>
+        error instanceof VaultError &&
+        error.code === "VAULT_INVALID_EVENT_FIELDS" &&
+        error.details.field === promotionCase.field,
+    );
+  }
 });
 
 test("importDeviceBatch allows compact summary observations without display visibility", async () => {
@@ -415,108 +358,6 @@ test("importDeviceBatch allows compact derived fact observations without display
   assert.equal(result.events.every((event) => event.kind === "observation" && event.observationGrain === "derived_fact"), true);
   assert.equal(result.events.some((event) => event.kind === "observation" && event.queryVisibility === "default"), false);
   assert.equal(result.events.some((event) => event.kind === "observation" && event.canonicalFact === true), false);
-});
-
-test("importDeviceBatch dense telemetry escape hatch requires temporary debug retention", async () => {
-  const missingRetentionVault = await makeTempDirectory("murph-device-import-dense-samples");
-  await initializeVault({ vaultRoot: missingRetentionVault, createdAt: "2026-03-12T12:00:00.000Z" });
-
-  await assert.rejects(
-    importDeviceBatch({
-      vaultRoot: missingRetentionVault,
-      provider: "wearable-provider",
-      accountId: "acct-test",
-      importedAt: "2026-03-16T09:30:00.000Z",
-      samples: buildDenseHeartRateSamples(1001),
-      denseTelemetryPolicy: {
-        allowDenseDebugTelemetry: true,
-      },
-    }),
-    isDenseTelemetryPolicyError,
-  );
-
-  const allowedVault = await makeTempDirectory("murph-device-import-dense-samples");
-  await initializeVault({ vaultRoot: allowedVault, createdAt: "2026-03-12T12:00:00.000Z" });
-  const result = await importDeviceBatch({
-    vaultRoot: allowedVault,
-    provider: "wearable-provider",
-    accountId: "acct-test",
-    importedAt: "2026-03-16T09:30:00.000Z",
-    samples: buildDenseHeartRateSamples(1001),
-    denseTelemetryPolicy: {
-      allowDenseDebugTelemetry: true,
-      retention: "debug_temporary",
-    },
-  });
-
-  assert.equal(result.samples.length, 1001);
-});
-
-test("importDeviceBatch dense telemetry policy allows debug observation events", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-import-dense-events-policy");
-  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-
-  const result = await importDeviceBatch({
-    vaultRoot,
-    provider: "wearable-provider",
-    accountId: "acct-test",
-    importedAt: "2026-03-16T09:30:00.000Z",
-    events: buildDenseHeartRateObservations(1001),
-    denseTelemetryPolicy: {
-      allowDenseDebugTelemetry: true,
-      retention: "debug_temporary",
-    },
-  });
-
-  assert.equal(result.events.length, 1001);
-});
-
-test("importDeviceBatch keeps dense sample policy aliases compatible", async () => {
-  const policyCases = [
-    {
-      name: "current outer policy accepts deprecated inner flag",
-      policy: {
-        denseTelemetryPolicy: {
-          allowDenseDebugSamples: true,
-          retention: "debug_temporary",
-        },
-      },
-    },
-    {
-      name: "deprecated outer policy accepts current inner flag",
-      policy: {
-        denseSamplePolicy: {
-          allowDenseDebugTelemetry: true,
-          retention: "debug_temporary",
-        },
-      },
-    },
-    {
-      name: "deprecated outer policy accepts deprecated inner flag",
-      policy: {
-        denseSamplePolicy: {
-          allowDenseDebugSamples: true,
-          retention: "debug_temporary",
-        },
-      },
-    },
-  ] as const;
-
-  for (const [index, policyCase] of policyCases.entries()) {
-    const vaultRoot = await makeTempDirectory(`murph-device-import-dense-samples-alias-${index}`);
-    await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-
-    const result = await importDeviceBatch({
-      vaultRoot,
-      provider: "wearable-provider",
-      accountId: "acct-test",
-      importedAt: "2026-03-16T09:30:00.000Z",
-      samples: buildDenseHeartRateSamples(1001),
-      ...policyCase.policy,
-    });
-
-    assert.equal(result.samples.length, 1001, policyCase.name);
-  }
 });
 
 test("importDeviceBatch writes inline raw integration payloads and compact records", async () => {

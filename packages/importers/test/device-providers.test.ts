@@ -2283,19 +2283,10 @@ test("importDeviceProviderSnapshot does not let adapters bypass the dense sample
           };
         },
       );
-      const normalized: NormalizedDeviceBatch & {
-        denseTelemetryPolicy: {
-          allowDenseDebugTelemetry: true;
-          retention: "debug_temporary";
-        };
-      } = {
+      const normalized: NormalizedDeviceBatch = {
         provider: "polar",
         source: "device",
         samples,
-        denseTelemetryPolicy: {
-          allowDenseDebugTelemetry: true,
-          retention: "debug_temporary",
-        },
       };
       return normalized;
     },
