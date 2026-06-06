@@ -130,7 +130,7 @@ describe("hosted local Linq typing prewarm e2e", () => {
     expect(prewarmState.latestMailboxPointer).toBeNull();
     expect(prewarmState.manualRunRequested).toBe(false);
     expect(prewarmState.browserVaultRefreshRequested).toBe(false);
-    expect(prewarmState.deviceSyncRecoveryRequested).toBe(false);
+    expect(prewarmState).not.toHaveProperty("deviceSyncRecoveryRequested");
     expect(prewarmState.lagRecoveryObserved).toBe(false);
     expect(prewarmState.lastDemandKind).toBe("idle");
     expect(prewarmState.lastDemandSource).toBeNull();

@@ -462,8 +462,6 @@ function emitHostedRuntimeDemandDecision(decision: {
     demandKind: decision.demand.kind,
     demandReason: decision.demand.kind === "run" ? decision.demand.reason : null,
     demandSource: decision.demand.kind === "run" ? decision.demand.source : null,
-    deviceSyncRecoveryRequested:
-      decision.request.deviceSyncRecoveryRequested === true,
     lagRecoveryObserved: decision.request.lagRecoveryObserved === true,
     mailboxLagLaneCount: decision.demand.mailboxLag.length,
     manualRunRequested: decision.request.manualRunRequested === true,

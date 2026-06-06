@@ -349,7 +349,7 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
       reason: "nudge",
-      source: "device_sync_recovery",
+      source: "workspace_wake",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
@@ -364,7 +364,7 @@ describe("HostedUserRunner execution coordination", () => {
       waitUntilSettled = true;
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-    expect(invoke.mock.calls[0]?.[0].job.request.source).toBe("device_sync_recovery");
+    expect(invoke.mock.calls[0]?.[0].job.request.source).toBe("workspace_wake");
     await Promise.resolve();
     expect(waitUntilSettled).toBe(false);
     expect(readRunnerMeta(sql)).toMatchObject({
@@ -414,7 +414,7 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
       reason: "nudge",
-      source: "device_sync_recovery",
+      source: "workspace_wake",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",

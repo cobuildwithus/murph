@@ -11,6 +11,8 @@ type HostedDeviceSyncRecoverySweepLogger = Pick<Console, "warn">;
 type HostedDeviceSyncDueReconcileSweepRunner =
   typeof runHostedDeviceSyncDueReconcileSweeper;
 
+// The route/API name is legacy compatibility. The current behavior is a bounded
+// scheduled-reconcile mailbox wake sweep, not recovery-signal production.
 export async function runHostedDeviceSyncRecoverySweep(input: {
   logger?: HostedDeviceSyncRecoverySweepLogger;
   runDueReconcileSweeper?: HostedDeviceSyncDueReconcileSweepRunner;

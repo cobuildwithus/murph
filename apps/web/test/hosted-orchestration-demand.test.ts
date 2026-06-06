@@ -159,7 +159,6 @@ describe("hosted orchestration demand", () => {
         demandKind: "run",
         demandReason: "manual",
         demandSource: "manual",
-        deviceSyncRecoveryRequested: false,
         lagRecoveryObserved: false,
         mailboxLagLaneCount: 2,
         manualRunRequested: true,
@@ -383,7 +382,6 @@ describe("hosted orchestration demand", () => {
         demandKind: "blocked",
         demandReason: null,
         demandSource: null,
-        deviceSyncRecoveryRequested: false,
         lagRecoveryObserved: false,
         mailboxLagLaneCount: 0,
         manualRunRequested: true,
@@ -521,7 +519,7 @@ describe("hosted orchestration demand", () => {
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
   });
 
-  it("ignores legacy device-sync recovery flags when selecting run demand", async () => {
+  it("ignores removed device-sync recovery query flags when selecting run demand", async () => {
     const response = await demandRoute.GET(
       requestForDemand(
         "?deviceSyncRecoveryRequested=1&lagRecoveryObserved=1",

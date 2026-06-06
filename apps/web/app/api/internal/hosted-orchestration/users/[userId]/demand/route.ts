@@ -39,10 +39,6 @@ export const GET = withJsonError(async (
       request,
       "browserVaultRefreshRequested",
     ),
-    deviceSyncRecoveryRequested: readHostedOrchestrationQueryFlag(
-      request,
-      "deviceSyncRecoveryRequested",
-    ),
     lagRecoveryObserved: readHostedOrchestrationQueryFlag(
       request,
       "lagRecoveryObserved",

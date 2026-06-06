@@ -549,6 +549,32 @@ describe("appendHostedDeviceSyncWake", () => {
     });
   });
 
+  it("does not accept lifecycle wake dedupe conflicts as successful handoffs", async () => {
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
+      dedupeConflict: true,
+      duplicate: true,
+      inserted: false,
+      item: {
+        id: "mailbox_existing",
+        userId: "user-123",
+      },
+    });
+
+    await expect(appendHostedDeviceSyncWake({
+      connectionId: "dsc_123",
+      eventId: "device-sync:manual-conflict",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      provider: "oura",
+      source: "connection-established",
+      userId: "user-123",
+    })).resolves.toEqual({
+      reason: "dedupe_conflict",
+      wakeAppended: false,
+    });
+
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
   it("uses explicit scheduled wake identity and created time for inserted due-reconcile signals", async () => {
     await appendHostedDeviceSyncScheduledReconcileWake({
       connectionId: "dsc_123",
@@ -686,7 +712,7 @@ describe("appendHostedDeviceSyncWake", () => {
       expect.objectContaining({
         envelope: expect.objectContaining({
           connectionId: "dsc_123",
-          eventId: "device-sync:dirty:v1:dsc_123:1",
+          eventId: "device-sync:dirty:v1:user-123:oura:dsc_123:1",
           hint: expect.objectContaining({
             eventType: "sleep.updated",
             occurredAt: "2026-03-26T11:59:00.000Z",
@@ -1722,7 +1748,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
         envelope: expect.objectContaining({
-          eventId: "device-sync:dirty:v1:dsc_123:1",
+          eventId: "device-sync:dirty:v1:user-123:oura:dsc_123:1",
           kind: "device-sync.wake",
           reason: "webhook_hint",
           userId: "user-123",
@@ -1754,7 +1780,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
         envelope: expect.objectContaining({
-          eventId: "device-sync:dirty:v1:dsc_123:1",
+          eventId: "device-sync:dirty:v1:user-123:oura:dsc_123:1",
           kind: "device-sync.wake",
         }),
         tx: mocks.prismaTx,
@@ -2325,7 +2351,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(expect.objectContaining({
       envelope: expect.objectContaining({
-        eventId: "device-sync:dirty:v1:dsc_123:1",
+        eventId: "device-sync:dirty:v1:user-123:oura:dsc_123:1",
         kind: "device-sync.wake",
       }),
     }));

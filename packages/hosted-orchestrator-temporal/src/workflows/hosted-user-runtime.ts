@@ -49,8 +49,6 @@ const HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH =
   "hosted-user-runtime-non-retryable-failure-signal-wait-v1";
 const HOSTED_USER_RUNTIME_ENSURE_PROCESSING_PATCH =
   "hosted-user-runtime-ensure-runtime-processing-v1";
-const HOSTED_USER_RUNTIME_SAME_RUNTIME_WAKE_COUNT_PATCH =
-  "hosted-user-runtime-same-runtime-wake-count-v1";
 const HOSTED_USER_RUNTIME_RECHECK_SIGNAL_PATCH =
   "hosted-user-runtime-recheck-signal-v1";
 const HOSTED_USER_RUNTIME_PREWARM_SIGNAL_PATCH =
@@ -61,9 +59,14 @@ const HOSTED_USER_RUNTIME_COALESCED_PENDING_SIGNAL_PATCH =
   "hosted-user-runtime-coalesced-pending-signal-v1";
 const HOSTED_USER_RUNTIME_ENSURE_PROCESSING_SOURCE_PATCH =
   "hosted-user-runtime-ensure-processing-source-v1";
-export const HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT = 3;
 
-export const runtimeSignal = defineSignal<[HostedRuntimeSignal]>(
+type HostedUserRuntimeSignal =
+  | HostedRuntimeSignal
+  | {
+      kind: "device_sync_recovery_requested";
+    };
+
+export const runtimeSignal = defineSignal<[HostedUserRuntimeSignal]>(
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
 );
 
@@ -151,8 +154,6 @@ export async function hostedUserRuntimeWorkflow(
       patched(HOSTED_USER_RUNTIME_ENSURE_PROCESSING_PATCH),
     useRuntimePrewarmSignalPatch: () =>
       patched(HOSTED_USER_RUNTIME_PREWARM_SIGNAL_PATCH),
-    useSameRuntimeWakeAcceptedCountPatch: () =>
-      patched(HOSTED_USER_RUNTIME_SAME_RUNTIME_WAKE_COUNT_PATCH),
     useRuntimeRecheckSignalPatch: () =>
       patched(HOSTED_USER_RUNTIME_RECHECK_SIGNAL_PATCH),
     useCoalescedPendingSignalPatch: () =>
@@ -202,7 +203,6 @@ export interface HostedUserRuntimeWorkflowRuntime {
   useRuntimeRecheckSignalPatch(): boolean;
   useCoalescedPendingSignalPatch(): boolean;
   useEnsureRuntimeProcessingSourcePatch(): boolean;
-  useSameRuntimeWakeAcceptedCountPatch(): boolean;
   useSignalOnlyWaitForNonRetryableFailure(): boolean;
   uuid(): string;
   waitForSignalOrTimeout(
@@ -261,7 +261,7 @@ export function createHostedUserRuntimeWorkflowMachine(
   };
 
   const applySignal = (rawSignal: unknown): void => {
-    let signal: HostedRuntimeSignal;
+    let signal: HostedUserRuntimeSignal;
     try {
       signal = parseHostedRuntimeSignal(rawSignal);
     } catch (error) {
@@ -324,16 +324,6 @@ export function createHostedUserRuntimeWorkflowMachine(
         break;
       }
       case "device_sync_recovery_requested": {
-        if (
-          runtime.useCoalescedPendingSignalPatch() &&
-          state.deviceSyncRecoveryRequested
-        ) {
-          wakeSignalOnlyWaitForCoalescedDemandSignal();
-          break;
-        }
-        state.signalVersion += 1;
-        demandSignalVersion += 1;
-        state.deviceSyncRecoveryRequested = true;
         break;
       }
       case "mailbox_lag_observed": {
@@ -375,7 +365,6 @@ export function createHostedUserRuntimeWorkflowMachine(
       try {
         demand = await runtime.readRuntimeDemand({
           browserVaultRefreshRequested: state.browserVaultRefreshRequested,
-          deviceSyncRecoveryRequested: state.deviceSyncRecoveryRequested,
           lagRecoveryObserved: state.lagRecoveryObserved,
           manualRunRequested: state.manualRunRequested,
           userId: input.userId,
@@ -458,8 +447,7 @@ export function createHostedUserRuntimeWorkflowMachine(
       try {
         runtime.useEnsureRuntimeProcessingPatch();
         const forwardDemandSource =
-          runtime.useEnsureRuntimeProcessingSourcePatch()
-          || demand.source === "device_sync_recovery";
+          runtime.useEnsureRuntimeProcessingSourcePatch();
         execution = await runtime.ensureRuntimeProcessing({
           orchestrationAttemptId,
           reason: demand.reason,
@@ -472,7 +460,6 @@ export function createHostedUserRuntimeWorkflowMachine(
         state.lastExecutionKind = "failed";
         state.lastRuntimeAttemptId = null;
         state.lastRuntimeStatus = null;
-        state.sameRuntimeWakeAcceptedCount = 0;
         if (demandSignalVersion !== demandVersionBeforeExecution) {
           continue;
         }
@@ -500,17 +487,11 @@ export function createHostedUserRuntimeWorkflowMachine(
         demandSignalVersion !== demandVersionBeforeExecution;
 
       if (execution.kind === "runtime_processing_accepted") {
-        const sameRuntimeWakeCountPatchEnabled =
-          runtime.useSameRuntimeWakeAcceptedCountPatch();
-        recordRuntimeProcessingAccepted(state, execution, {
-          countFirstAcceptedWake: sameRuntimeWakeCountPatchEnabled,
-        });
+        recordRuntimeProcessingAccepted(state, execution);
         if (demandSignalArrivedDuringExecution) {
           continue;
         }
-        clearConsumedFlagsAfterRun(state, demand.source, execution, {
-          deviceSyncRecoveryWakeLimitEnabled: sameRuntimeWakeCountPatchEnabled,
-        });
+        clearConsumedFlagsAfterRun(state, demand.source);
         if (signalArrivedDuringExecution) {
           continue;
         }
@@ -528,7 +509,6 @@ export function createHostedUserRuntimeWorkflowMachine(
       if (execution.kind === "retry_later") {
         state.lastRuntimeAttemptId = null;
         state.lastRuntimeStatus = "retry_later";
-        state.sameRuntimeWakeAcceptedCount = 0;
         if (demandSignalArrivedDuringExecution) {
           continue;
         }
@@ -628,63 +608,9 @@ function recordRuntimeProcessingAccepted(
     HostedRuntimeEnsureProcessingResponse,
     { kind: "runtime_processing_accepted" }
   >,
-  options: {
-    countFirstAcceptedWake: boolean;
-  },
 ): void {
-  const wakeAccepted = isRuntimeWakeAcceptedAction(execution.action);
-  const sameRuntimeWake =
-    state.lastRuntimeAttemptId === execution.runtimeAttemptId
-    && wakeAccepted;
-
   state.lastRuntimeAttemptId = execution.runtimeAttemptId;
   state.lastRuntimeStatus = "scheduled";
-  if (!wakeAccepted) {
-    state.sameRuntimeWakeAcceptedCount = 0;
-    return;
-  }
-
-  if (sameRuntimeWake) {
-    state.sameRuntimeWakeAcceptedCount += 1;
-    return;
-  }
-
-  state.sameRuntimeWakeAcceptedCount = options.countFirstAcceptedWake ? 1 : 0;
-}
-
-function shouldKeepDeviceSyncRecoveryRequest(input: {
-  currentRequested: boolean;
-  execution: Extract<
-    HostedRuntimeEnsureProcessingResponse,
-    { kind: "runtime_processing_accepted" }
-  >;
-  source: HostedRuntimeRunDemand["source"];
-  wakeCount: number;
-  wakeLimitEnabled: boolean;
-}): boolean {
-  if (
-    !input.currentRequested
-    || input.source !== "device_sync_recovery"
-    || !isRuntimeWakeAcceptedAction(input.execution.action)
-  ) {
-    return false;
-  }
-
-  if (!input.wakeLimitEnabled) {
-    return true;
-  }
-
-  return input.wakeCount
-    < HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT;
-}
-
-function isRuntimeWakeAcceptedAction(
-  action: Extract<
-    HostedRuntimeEnsureProcessingResponse,
-    { kind: "runtime_processing_accepted" }
-  >["action"],
-): boolean {
-  return action === "woken" || action === "already_running";
 }
 
 function createInitialWorkflowState(
@@ -696,8 +622,6 @@ function createInitialWorkflowState(
       carryForward?.browserVaultRefreshRequested ?? false,
     currentWaitReason: null,
     currentWaitUntil: null,
-    deviceSyncRecoveryRequested:
-      carryForward?.deviceSyncRecoveryRequested ?? false,
     invalidSignalCount: carryForward?.invalidSignalCount ?? 0,
     lagRecoveryObserved: carryForward?.lagRecoveryObserved ?? false,
     lastOrchestrationAttemptId: carryForward?.lastOrchestrationAttemptId ?? null,
@@ -720,8 +644,6 @@ function createInitialWorkflowState(
     lastPrewarmResult: carryForward?.lastPrewarmResult ?? null,
     prewarmRequested: carryForward?.prewarmRequested ?? false,
     prewarmSignalCount: carryForward?.prewarmSignalCount ?? 0,
-    sameRuntimeWakeAcceptedCount:
-      carryForward?.sameRuntimeWakeAcceptedCount ?? 0,
     signalVersion: carryForward?.signalVersion ?? 0,
     userId,
   };
@@ -854,7 +776,6 @@ function clearSatisfiedFlags(
   }
 
   state.browserVaultRefreshRequested = false;
-  state.deviceSyncRecoveryRequested = false;
   state.lagRecoveryObserved = false;
   state.latestMailboxPointer = null;
   state.mailboxSignalCount = 0;
@@ -864,11 +785,6 @@ function clearSatisfiedFlags(
 function clearConsumedFlagsAfterRun(
   state: HostedRuntimeWorkflowState,
   source: HostedRuntimeRunDemand["source"],
-  execution: Extract<
-    HostedRuntimeEnsureProcessingResponse,
-    { kind: "runtime_processing_accepted" }
-  >,
-  options: { deviceSyncRecoveryWakeLimitEnabled: boolean },
 ): void {
   switch (source) {
     case "mailbox_backlog": {
@@ -882,16 +798,6 @@ function clearConsumedFlagsAfterRun(
     }
     case "browser_vault_refresh": {
       state.browserVaultRefreshRequested = false;
-      return;
-    }
-    case "device_sync_recovery": {
-      state.deviceSyncRecoveryRequested = shouldKeepDeviceSyncRecoveryRequest({
-        currentRequested: state.deviceSyncRecoveryRequested,
-        execution,
-        source,
-        wakeCount: state.sameRuntimeWakeAcceptedCount,
-        wakeLimitEnabled: options.deviceSyncRecoveryWakeLimitEnabled,
-      });
       return;
     }
     case "lag_recovery": {
@@ -1032,7 +938,7 @@ function isSafeErrorCode(value: string): boolean {
   return value.length > 0 && value.length <= 96 && /^[A-Za-z0-9._:-]+$/u.test(value);
 }
 
-function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
+function parseHostedRuntimeSignal(value: unknown): HostedUserRuntimeSignal {
   const record = requireSignalRecord(value, "Hosted runtime signal");
   const kind = requireString(record.kind, "Hosted runtime signal kind");
 

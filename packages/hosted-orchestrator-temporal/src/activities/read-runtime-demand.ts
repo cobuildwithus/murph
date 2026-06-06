@@ -58,9 +58,6 @@ function buildHostedRuntimeDemandSearch(
   if (request.browserVaultRefreshRequested === true) {
     params.set("browserVaultRefreshRequested", "1");
   }
-  if (request.deviceSyncRecoveryRequested === true) {
-    params.set("deviceSyncRecoveryRequested", "1");
-  }
   if (request.lagRecoveryObserved === true) {
     params.set("lagRecoveryObserved", "1");
   }

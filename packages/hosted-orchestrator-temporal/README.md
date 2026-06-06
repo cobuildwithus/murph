@@ -131,7 +131,7 @@ mailbox handoffs, and returns count-only summaries.
 
 Dirty state is not a scheduler. Webhook clean-to-dirty transitions may still
 append one bounded mailbox handoff, and runtime maintenance drains pending dirty
-state when device-sync work runs, but the global recovery sweep must not wake
+state when device-sync work runs, but the scheduled wake sweep must not wake
 runtimes only because dirty rows remain unacknowledged. Do not move dirty
 resources, provider tokens, external
 account state, or canonical dirty/reconcile facts into Temporal Workflow state.

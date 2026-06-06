@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-06-05
-Updated: 2026-06-05
+Updated: 2026-06-06
 
 ## Goal
 
@@ -18,6 +18,8 @@ Updated: 2026-06-05
   already dirty.
 - Scheduled reconcile uses the normal mailbox handoff path, not
   `device_sync_recovery_requested`.
+- Shared contracts, web demand, and Temporal workflow state no longer carry
+  `deviceSyncRecoveryRequested` or `device_sync_recovery` as live semantics.
 - Docs describe durable dirty rows plus bounded mailbox handoff as the current
   path.
 - Focused tests and required verification/audits pass or have a documented
@@ -30,13 +32,13 @@ Updated: 2026-06-05
     handoff code.
   - Shared public-ingress setup completion behavior.
   - Regression tests for wake coalescing and scheduled reconcile handoff.
+  - Deletion of live Temporal recovery state/source machinery while keeping
+    legacy signal parsing inert for deploy-history compatibility.
   - Durable architecture docs that currently describe recovery nudges as the
     correctness path.
 - Out of scope:
   - Adding a new mailbox lane.
   - Adding a device-sync-specific sweeper or queue.
-  - Deleting Temporal recovery parser compatibility or workflow state in this
-    milestone.
   - Changing Cloudflare runner topology.
 
 ## Constraints
@@ -57,8 +59,8 @@ Updated: 2026-06-05
    Mitigation: preserve dirty rows as the work source and keep scheduled
    reconcile handoff durable.
 3. Risk: deploy skew with existing recovery signals.
-   Mitigation: stop new recovery production in this milestone while leaving
-   compatibility parsing/state removal for a later milestone.
+   Mitigation: leave legacy recovery signal parsing in the workflow, but make it
+   inert so it cannot set a demand flag or source.
 
 ## Tasks
 

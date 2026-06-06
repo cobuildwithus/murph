@@ -177,6 +177,14 @@ describe("hosted runtime Temporal signaling", () => {
   });
 
   it("signals device-sync mailbox wakes as normal mailbox demand", async () => {
+    mocks.readHostedMailboxItemCheckpointById.mockResolvedValueOnce({
+      id: "mailbox_123",
+      lane: "system",
+      laneSeq: "42",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      userId: "member_123",
+    });
+
     await signalHostedDeviceSyncMailboxRuntime({
       client: buildClient(),
       mailboxItemId: "mailbox_123",
@@ -188,7 +196,7 @@ describe("hosted runtime Temporal signaling", () => {
       expect.objectContaining({
         signalArgs: [{
           kind: "mailbox_appended",
-          lane: "conversation",
+          lane: "system",
           laneSeq: "42",
           mailboxItemId: "mailbox_123",
           source: "device-sync",
@@ -424,6 +432,14 @@ describe("hosted runtime Temporal signaling", () => {
   });
 
   it("ensures workspace before device-sync mailbox pointer signals", async () => {
+    mocks.readHostedMailboxItemCheckpointById.mockResolvedValueOnce({
+      id: "mailbox_123",
+      lane: "system",
+      laneSeq: "42",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      userId: "member_123",
+    });
+
     await signalHostedDeviceSyncMailboxRuntime({
       client: buildClient(),
       mailboxItemId: "mailbox_123",
@@ -434,7 +450,7 @@ describe("hosted runtime Temporal signaling", () => {
       expect.objectContaining({
         signalArgs: [{
           kind: "mailbox_appended",
-          lane: "conversation",
+          lane: "system",
           laneSeq: "42",
           mailboxItemId: "mailbox_123",
           source: "device-sync",

@@ -7242,13 +7242,13 @@ describe("hosted workspace runtime entrypoint", () => {
     });
     assert.equal(browserVaultRefreshParsed.request.reason, "browser_vault_refresh");
 
-    const deviceSyncRecoveryParsed = parseHostedAssistantWorkspaceRuntimeJobInput({
+    const workspaceWakeParsed = parseHostedAssistantWorkspaceRuntimeJobInput({
       request: {
         ...createWorkspaceRunRequest(),
-        source: "device_sync_recovery",
+        source: "workspace_wake",
       },
     });
-    assert.equal(deviceSyncRecoveryParsed.request.source, "device_sync_recovery");
+    assert.equal(workspaceWakeParsed.request.source, "workspace_wake");
 
     expect(() =>
       parseHostedAssistantWorkspaceRuntimeJobInput({

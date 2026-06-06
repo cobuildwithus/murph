@@ -629,6 +629,32 @@ describe("hosted Prisma baseline migration", () => {
     expect(schema).not.toContain("enum HostedRevnetIssuanceStatus");
   });
 
+  it("makes eligible stuck device connections due even when their reconcile is scheduled in the future", () => {
+    const sourceConfirmedBackfillMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026060501_device_sync_source_confirmed_backfill/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(sourceConfirmedBackfillMigrationSql).toContain(
+      '"next_reconcile_at" = LEAST(COALESCE("connection"."next_reconcile_at", NOW()), NOW())',
+    );
+    expect(sourceConfirmedBackfillMigrationSql).toContain(
+      '"connection"."last_sync_started_at" IS NULL',
+    );
+    expect(sourceConfirmedBackfillMigrationSql).toContain(
+      '"connection"."credential_kind" = \'oauth_tokens\'\n      AND "connection"."access_token_encrypted" IS NOT NULL',
+    );
+    expect(sourceConfirmedBackfillMigrationSql).toContain(
+      '"connection"."credential_kind" = \'provider_config\'\n      AND "connection"."provider_config_key" IS NOT NULL',
+    );
+    expect(sourceConfirmedBackfillMigrationSql).toContain(
+      '"connection"."credential_kind" = \'none\'\n      AND "connection"."access_token_encrypted" IS NULL\n      AND "connection"."provider_config_key" IS NULL',
+    );
+  });
+
   it("keeps hosted-member models on the reviewed owner-table set", () => {
     const schema = readFileSync(
       new URL("../prisma/schema.prisma", import.meta.url),

@@ -12,14 +12,24 @@ SET
 WHERE "status" = 'active'
   AND "setup_phase" IN ('pending_link', 'link_returned')
   AND (
-    "credential_kind" IN ('provider_config', 'none')
-    OR "access_token_encrypted" IS NOT NULL
-    OR "provider_config_key" IS NOT NULL
+    (
+      "credential_kind" = 'oauth_tokens'
+      AND "access_token_encrypted" IS NOT NULL
+    )
+    OR (
+      "credential_kind" = 'provider_config'
+      AND "provider_config_key" IS NOT NULL
+    )
+    OR (
+      "credential_kind" = 'none'
+      AND "access_token_encrypted" IS NULL
+      AND "provider_config_key" IS NULL
+    )
   );
 
 UPDATE "device_connection" AS "connection"
 SET
-  "next_reconcile_at" = COALESCE("connection"."next_reconcile_at", NOW()),
+  "next_reconcile_at" = LEAST(COALESCE("connection"."next_reconcile_at", NOW()), NOW()),
   "updated_at" = NOW()
 WHERE "connection"."status" = 'active'
   AND (
@@ -40,7 +50,17 @@ WHERE "connection"."status" = 'active'
     )
   )
   AND (
-    "connection"."credential_kind" IN ('provider_config', 'none')
-    OR "connection"."access_token_encrypted" IS NOT NULL
-    OR "connection"."provider_config_key" IS NOT NULL
+    (
+      "connection"."credential_kind" = 'oauth_tokens'
+      AND "connection"."access_token_encrypted" IS NOT NULL
+    )
+    OR (
+      "connection"."credential_kind" = 'provider_config'
+      AND "connection"."provider_config_key" IS NOT NULL
+    )
+    OR (
+      "connection"."credential_kind" = 'none'
+      AND "connection"."access_token_encrypted" IS NULL
+      AND "connection"."provider_config_key" IS NULL
+    )
   );

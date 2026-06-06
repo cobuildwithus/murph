@@ -261,13 +261,13 @@ Temporal Activity worker capacity, or Cloudflare container lifecycle locks.
 Non-conversation control wakes follow the same durable-demand rule where they
 own durable product/control facts. Manual runs and browser-vault refreshes
 append system-mailbox control rows before Temporal is signaled. Device-sync
-recovery splits by fact owner: due-reconcile recovery is selected from
-`DeviceConnection.nextReconcileAt` by the signed recovery sweep, while dirty
-webhook freshness is persisted dirty state plus a best-effort clean-to-dirty
-Temporal nudge. Dirty rows are durable runtime work input, not periodic
-scheduler input. Historical `runtime.mailbox-lag-observed` control rows remain
-importable for deploy-skew and drain compatibility, but there is no active
-Vercel producer for them.
+uses the same mailbox handoff shape: due-reconcile work is selected from
+`DeviceConnection.nextReconcileAt` by the signed scheduled-wake sweep, and
+dirty webhook freshness is persisted dirty state plus one clean-to-dirty
+`device-sync.wake` handoff. Dirty rows are durable runtime work input, not
+periodic scheduler input. Historical `runtime.mailbox-lag-observed` and
+`runtime.device-sync-recovery-requested` control rows remain importable for
+deploy-skew and drain compatibility, but there is no active producer for them.
 
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse
@@ -278,12 +278,14 @@ the bounded handoff to the normal Temporal wake path and must not carry provider
 payloads or become the device-sync queue. The assistant runtime runs system-lane
 device sync only when no fresh conversation input is pending, and reschedules a short
 `device-sync.reconcile` wake if foreground work preempts that background pass.
-The recovery sweep is the bounded backstop for active connections whose
+The scheduled-wake sweep is the bounded backstop for active connections whose
 canonical `nextReconcileAt` is due. Temporal owns that cadence through a global
-scheduled reconciler workflow, but web owns the signed recovery command that
+scheduled reconciler workflow, but web owns the signed legacy-named command that
 selects due-reconcile facts, records due-reconcile signals, appends bounded
-`device-sync.wake` handoffs, and keeps retries idempotent. Dirty rows are
-excluded from the global sweep. The runtime must support dirty-pending and dirty-ack
+`device-sync.wake` handoffs, and keeps retries idempotent. Dirty rows are not
+independently swept; due-reconcile candidates may include dirty or stuck rows
+when canonical `nextReconcileAt` is due. Dirty state remains the work source,
+not a scheduler queue. The runtime must support dirty-pending and dirty-ack
 callbacks; dirty ack means the dirty revision was handed off into the
 checkpointed local device-sync job store, not that upstream provider sync
 succeeded. Connection-established and disconnect lifecycle commands may still

@@ -89,15 +89,6 @@ export function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
         kind,
       };
     }
-    case "device_sync_recovery_requested": {
-      assertExactKeys(record, "Hosted runtime device-sync recovery signal", [
-        "kind",
-      ]);
-
-      return {
-        kind,
-      };
-    }
     case "mailbox_lag_observed": {
       assertExactKeys(record, "Hosted runtime mailbox-lag signal", [
         "kind",
@@ -153,7 +144,6 @@ export function parseHostedRuntimeDemandRequest(
   const record = requireObject(value, "Hosted runtime demand request");
   assertExactKeys(record, "Hosted runtime demand request", [
     "browserVaultRefreshRequested",
-    "deviceSyncRecoveryRequested",
     "lagRecoveryObserved",
     "manualRunRequested",
     "userId",
@@ -166,14 +156,6 @@ export function parseHostedRuntimeDemandRequest(
           browserVaultRefreshRequested: requireBoolean(
             record.browserVaultRefreshRequested,
             "Hosted runtime demand request browserVaultRefreshRequested",
-          ),
-        }),
-    ...(record.deviceSyncRecoveryRequested === undefined
-      ? {}
-      : {
-          deviceSyncRecoveryRequested: requireBoolean(
-            record.deviceSyncRecoveryRequested,
-            "Hosted runtime demand request deviceSyncRecoveryRequested",
           ),
         }),
     ...(record.lagRecoveryObserved === undefined

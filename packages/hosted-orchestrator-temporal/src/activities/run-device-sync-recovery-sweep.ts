@@ -23,6 +23,8 @@ export interface HostedDeviceSyncDueReconcileSweeperResult {
   wakeNotAccepted: number;
 }
 
+// The route/activity name is legacy compatibility. The current behavior asks
+// web to append bounded scheduled-reconcile mailbox wakes.
 export async function runHostedDeviceSyncRecoverySweep(): Promise<
   HostedDeviceSyncRecoverySweepResult
 > {

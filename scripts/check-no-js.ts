@@ -30,6 +30,7 @@ const blockedTrackedArtifactDirectoryNames = new Set([
   ".test-dist",
 ]);
 const execFileAsync = promisify(execFile);
+const gitListMaxBuffer = 16 * 1024 * 1024;
 const nextEnvCommonLines = [
   '/// <reference types="next" />',
   '/// <reference types="next/image-types/global" />',
@@ -265,6 +266,7 @@ function normalizeDeclarationArtifactContents(contents: string): string {
 async function findBlockedTrackedArtifacts(): Promise<string[]> {
   const { stdout } = await execFileAsync("git", ["ls-files"], {
     cwd: repoRoot,
+    maxBuffer: gitListMaxBuffer,
   });
   const trackedFiles = stdout
     .split("\n")

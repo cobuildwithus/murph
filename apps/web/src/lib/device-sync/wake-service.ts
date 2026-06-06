@@ -492,9 +492,12 @@ export async function appendHostedDeviceSyncWake(input: {
     store,
     persist: persistSignal,
   });
+  const wakeAccepted = appendResult.inserted
+    || (appendResult.duplicate && !appendResult.dedupeConflict);
 
   return {
-    wakeAppended: appendResult.inserted || appendResult.duplicate,
+    ...(appendResult.dedupeConflict ? { reason: "dedupe_conflict" } : {}),
+    wakeAppended: wakeAccepted,
   };
 }
 
@@ -720,6 +723,8 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
           eventId: buildHostedDeviceSyncDirtyTransitionWakeEventId({
             connectionId: input.connectionId,
             dirtyRevision: dirtyUpdate.dirty.dirtyRevision,
+            provider: input.provider,
+            userId: input.userId,
           }),
           hint: buildHostedDeviceSyncSignalPayload({
             hint: {
@@ -779,11 +784,15 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
 function buildHostedDeviceSyncDirtyTransitionWakeEventId(input: {
   connectionId: string;
   dirtyRevision: bigint;
+  provider: string;
+  userId: string;
 }): string {
   return [
     "device-sync",
     "dirty",
     HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA,
+    input.userId,
+    input.provider,
     input.connectionId,
     input.dirtyRevision.toString(),
   ].join(":");

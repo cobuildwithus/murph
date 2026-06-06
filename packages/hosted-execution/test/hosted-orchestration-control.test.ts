@@ -66,9 +66,6 @@ describe("hosted orchestration control contracts", () => {
         kind: "browser_vault_refresh_requested",
       },
       {
-        kind: "device_sync_recovery_requested",
-      },
-      {
         kind: "mailbox_lag_observed",
       },
       {
@@ -146,6 +143,10 @@ describe("hosted orchestration control contracts", () => {
     })).toThrow(/safe source string/u);
 
     expect(() => parseHostedRuntimeSignal({
+      kind: "device_sync_recovery_requested",
+    })).toThrow("Hosted runtime signal kind is not supported.");
+
+    expect(() => parseHostedRuntimeSignal({
       eventId: "runtime-prewarm:event-test",
       kind: "runtime_prewarm_requested",
       occurredAt: "2026-05-20T12:00:00.000Z",
@@ -157,7 +158,6 @@ describe("hosted orchestration control contracts", () => {
   it("parses demand requests and demand responses", () => {
     const demandRequest = {
       browserVaultRefreshRequested: true,
-      deviceSyncRecoveryRequested: true,
       lagRecoveryObserved: false,
       manualRunRequested: true,
       userId: "user_test",
@@ -274,11 +274,11 @@ describe("hosted orchestration control contracts", () => {
     expect(parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "manual",
-      source: "device_sync_recovery",
+      source: "workspace_wake",
     })).toEqual({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "manual",
-      source: "device_sync_recovery",
+      source: "workspace_wake",
     });
 
     for (const action of [

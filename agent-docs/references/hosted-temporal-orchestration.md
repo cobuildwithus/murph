@@ -114,10 +114,10 @@ Allowed Temporal state is tiny and pointer-only:
 - Signal counters and booleans.
 - Latest opaque mailbox pointer fields, such as mailbox item pointer, lane, lane
   sequence, and coarse source label.
-- Explicit wake flags for manual run, browser-vault refresh, device-sync
-  recovery, or lag recovery. Current web producers represent manual,
-  browser-vault refresh, and device-sync mailbox handoff requests as durable
-  system-mailbox control rows and use Temporal signals only as wake hints.
+- Explicit wake flags for manual run, browser-vault refresh, lag recovery, and
+  mailbox pointers. Current web producers represent manual, browser-vault
+  refresh, and device-sync requests as durable system-mailbox rows and use
+  Temporal signals only as wake hints.
 - Global device-sync scheduled-wake Schedule id, interval, Workflow start options, and
   count-only due-reconcile sweep results. The reconciler may remember that a
   sweep ran and how many due-reconcile rows/wakes it touched; it must not
@@ -153,17 +153,18 @@ Murph decides what demand means.
 
 Manual, browser-vault refresh, and due-reconcile device-sync demand is durable
 web-owned demand. Manual and browser-vault refresh append system-mailbox control
-rows before signaling Temporal with the resulting mailbox pointer. Due-reconcile
-recovery is selected by the signed recovery sweep after the owning marker is
-durable, then represented as a bounded `device-sync.wake` mailbox handoff keyed
-by connection and reconcile timestamp. Dirty webhook freshness is separate: web
-persists dirty state and appends one deterministic `device-sync.wake` handoff on
-clean-to-dirty transitions, but dirty rows are not selected by a global recovery
-sweep. Historical `runtime.mailbox-lag-observed`
-rows remain valid runtime-control rows for drain compatibility, but web no
-longer produces them from a Vercel lag-recovery cron. The legacy kind-only
-signals remain deploy-skew wake hints only; they carry no event id, source
-label, device reason, or dedupe key. Future command surfaces that need
+rows before signaling Temporal with the resulting mailbox pointer.
+Due-reconcile work is selected by the signed scheduled-wake sweep after the
+owning marker is durable, then represented as a bounded `device-sync.wake`
+mailbox handoff keyed by connection and reconcile timestamp. Dirty webhook
+freshness is separate: web persists dirty state and appends one deterministic
+`device-sync.wake` handoff on clean-to-dirty transitions, but dirty rows are not
+selected by a global scheduled sweep. Historical `runtime.mailbox-lag-observed`
+and `runtime.device-sync-recovery-requested` rows remain valid runtime-control
+rows for drain compatibility, but web no longer produces them. Legacy
+kind-only signals are parser-accepted deploy-skew inputs only; they carry no
+event id, source label, device reason, dedupe key, or live demand flag. Future
+command surfaces that need
 accepted/duplicate/rejected response semantics should use a durable web command
 ledger or Temporal Updates instead of expanding wake signals.
 
