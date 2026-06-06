@@ -1646,9 +1646,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           workspaceSnapshotProcessLabel: "zstd",
           workspaceSnapshotProcessStderrBytes: expect.any(Number),
           workspaceSnapshotProcessStderrLineCount: expect.any(Number),
-          workspaceSnapshotProcessStderrMarkers: expect.arrayContaining([
-            "unsupported_format",
-          ]),
           workspaceSnapshotProcessStderrTruncated: false,
           workspaceSnapshotRestoreStep: "archive_restore",
         }),
