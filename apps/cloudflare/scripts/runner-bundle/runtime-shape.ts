@@ -218,6 +218,7 @@ export async function rewriteRuntimeBinWrappers(
         path.relative(binDir, path.join(packageDir, targetPath)),
       );
 
+      await rm(wrapperPath, { force: true });
       await writeFile(
         wrapperPath,
         buildPortableNodeBinWrapper(relativeTargetPath),

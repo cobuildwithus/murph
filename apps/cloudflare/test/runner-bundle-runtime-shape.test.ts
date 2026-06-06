@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -120,5 +120,40 @@ describe("runner bundle runtime manifest rewriting", () => {
     expect(
       await readFile(path.join(bundleDir, "node_modules", ".bin", "vault-cli"), "utf8"),
     ).toContain("../@murphai/murph/dist/bin.js");
+  });
+
+  it("replaces existing pnpm bin symlinks with portable wrappers", async () => {
+    const bundleDir = await mkdtemp(path.join(tmpdir(), "murph-runner-runtime-shape-"));
+    const binPath = path.join(bundleDir, "node_modules", ".bin", "vault-cli");
+
+    temporaryDirectories.push(bundleDir);
+    await mkdir(
+      path.join(bundleDir, "node_modules", "@murphai", "murph", "dist"),
+      { recursive: true },
+    );
+    await mkdir(path.dirname(binPath), { recursive: true });
+    await writeFile(
+      path.join(bundleDir, "node_modules", "@murphai", "murph", "package.json"),
+      JSON.stringify({
+        bin: {
+          "vault-cli": "./dist/bin.js",
+        },
+        name: "@murphai/murph",
+      }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(bundleDir, "node_modules", "@murphai", "murph", "dist", "bin.js"),
+      "console.log('ok');\n",
+      "utf8",
+    );
+    await symlink("/host/path/that/must/not-survive", binPath);
+
+    await rewriteRuntimeBinWrappers(bundleDir);
+
+    expect((await lstat(binPath)).isSymbolicLink()).toBe(false);
+    expect(await readFile(binPath, "utf8")).toContain(
+      "../@murphai/murph/dist/bin.js",
+    );
   });
 });
