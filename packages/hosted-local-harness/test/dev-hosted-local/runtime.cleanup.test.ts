@@ -609,18 +609,19 @@ describe("cleanupHostedRunnerImages", () => {
     vi.doUnmock("node:child_process");
   });
 
-  it("removes repo-owned runner images for the current hosted-local build id", async () => {
+  it("removes repo-owned and Wrangler runner images for the current hosted-local build id", async () => {
     const { cleanupHostedRunnerImages, spawn } = await importRuntimeWithSpawnSequence([
       {
         exitCode: 0,
         stdout: [
-          "cloudflare-dev/runnercontainer:abc123",
-          "cloudflare-dev/deploysmokerunnercontainer:abc123",
-          "murph-cloudflare-runner:latest",
-          "postgres:15",
-          "cloudflare-dev/runnercontainer:<none>",
+          "cloudflare-dev/runnercontainer:abc123\timg-runner",
+          "cloudflare-dev/deploysmokerunnercontainer:abc123\timg-smoke",
+          "murph-cloudflare-runner:latest\timg-final",
+          "postgres:15\timg-postgres",
+          "cloudflare-dev/runnercontainer:<none>\timg-dangling",
         ].join("\n"),
       },
+      { exitCode: 0, stdout: "" },
       { exitCode: 0, stdout: "" },
     ]);
 
@@ -632,33 +633,45 @@ describe("cleanupHostedRunnerImages", () => {
       timeoutMs: 200,
     })).resolves.toBeUndefined();
 
-    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(spawn).toHaveBeenCalledTimes(3);
     expect(spawn.mock.calls[0]?.[1]).toEqual([
       "images",
       "--format",
-      "{{.Repository}}:{{.Tag}}",
+      "{{.Repository}}:{{.Tag}}\t{{.ID}}",
       "--filter",
       expect.stringMatching(
         /^label=murph\.hosted\.local-build-id=sha256-[a-f0-9]{24}$/u,
       ),
     ]);
     expect(spawn.mock.calls[1]?.[1]).toEqual([
+      "ps",
+      "--format",
+      "{{.Image}}",
+    ]);
+    expect(spawn.mock.calls[2]?.[1]).toEqual([
       "image",
       "rm",
       "-f",
+      "cloudflare-dev/runnercontainer:abc123",
+      "cloudflare-dev/deploysmokerunnercontainer:abc123",
       "murph-cloudflare-runner:latest",
     ]);
   });
 
-  it("does not remove Cloudflare-managed runner images", async () => {
+  it("keeps all tags for image ids used by running runner containers", async () => {
     const { cleanupHostedRunnerImages, spawn } = await importRuntimeWithSpawnSequence([
       {
         exitCode: 0,
         stdout: [
-          "cloudflare-dev/runnercontainer:abc123",
-          "cloudflare-dev/deploysmokerunnercontainer:def456",
+          "cloudflare-dev/runnercontainer:active\timg-active",
+          "cloudflare-dev/deploysmokerunnercontainer:active\timg-active",
+          "cloudflare-dev/runnercontainer:old\timg-old",
+          "murph-hosted-e2e-build-runnercontainer:old\timg-e2e",
+          "murph-hosted-e2e-build-deploysmokerunnercontainer:old\timg-e2e-smoke",
         ].join("\n"),
       },
+      { exitCode: 0, stdout: "cloudflare-dev/runnercontainer:active\n" },
+      { exitCode: 0, stdout: "" },
     ]);
 
     await expect(cleanupHostedRunnerImages({
@@ -669,7 +682,15 @@ describe("cleanupHostedRunnerImages", () => {
       timeoutMs: 200,
     })).resolves.toBeUndefined();
 
-    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledTimes(3);
+    expect(spawn.mock.calls[2]?.[1]).toEqual([
+      "image",
+      "rm",
+      "-f",
+      "cloudflare-dev/runnercontainer:old",
+      "murph-hosted-e2e-build-runnercontainer:old",
+      "murph-hosted-e2e-build-deploysmokerunnercontainer:old",
+    ]);
   });
 
   it("does not remove all runner images when current-build cleanup has no build id", async () => {
@@ -699,8 +720,9 @@ describe("cleanupHostedRunnerImages", () => {
     const { cleanupHostedRunnerImages, spawn } = await importRuntimeWithSpawnSequence([
       {
         exitCode: 0,
-        stdout: "cloudflare-dev/runnercontainer:old\nmurph-cloudflare-runner:latest\n",
+        stdout: "cloudflare-dev/runnercontainer:old\timg-old\nmurph-cloudflare-runner:latest\timg-final\n",
       },
+      { exitCode: 0, stdout: "" },
       { exitCode: 0, stdout: "" },
     ]);
 
@@ -713,14 +735,20 @@ describe("cleanupHostedRunnerImages", () => {
     expect(spawn.mock.calls[0]?.[1]).toEqual([
       "images",
       "--format",
-      "{{.Repository}}:{{.Tag}}",
+      "{{.Repository}}:{{.Tag}}\t{{.ID}}",
       "--filter",
       "label=murph.hosted.local-build-id",
     ]);
     expect(spawn.mock.calls[1]?.[1]).toEqual([
+      "ps",
+      "--format",
+      "{{.Image}}",
+    ]);
+    expect(spawn.mock.calls[2]?.[1]).toEqual([
       "image",
       "rm",
       "-f",
+      "cloudflare-dev/runnercontainer:old",
       "murph-cloudflare-runner:latest",
     ]);
   });

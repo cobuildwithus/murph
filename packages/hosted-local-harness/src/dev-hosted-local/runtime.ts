@@ -53,9 +53,9 @@ interface BoundedCommandResult {
 }
 
 const HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL = "murph.hosted.local-build-id";
-// Only clean repo-owned images here. Wrangler's cloudflare-dev/* runner images
-// can be referenced by another live local stack even when Docker labels match.
 const HOSTED_RUNNER_LOCAL_IMAGE_REPOSITORIES = [
+  "cloudflare-dev/deploysmokerunnercontainer",
+  "cloudflare-dev/runnercontainer",
   "murph-cloudflare-runner",
 ] as const;
 const HOSTED_RUNNER_IMAGE_RM_BATCH_SIZE = 40;
@@ -987,13 +987,75 @@ async function listHostedRunnerImageRefs(input: {
     args: [
       "images",
       "--format",
-      "{{.Repository}}:{{.Tag}}",
+      "{{.Repository}}:{{.Tag}}\t{{.ID}}",
       ...(localBuildId
         ? [
           "--filter",
           `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}=${localBuildId}`,
         ]
         : ["--filter", `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}`]),
+    ],
+    command: "docker",
+    cwd: input.cwd,
+    env: input.env,
+    timeoutMs: input.timeoutMs,
+  });
+
+  if (result.timedOut || result.exitCode !== 0) {
+    return {
+      imageRefs: [],
+      result,
+    };
+  }
+
+  const rows = parseHostedRunnerImageRows(result.stdout)
+    .filter((row) => isHostedRunnerLocalImageRef(row.ref));
+  if (rows.length === 0) {
+    return {
+      imageRefs: [],
+      result,
+    };
+  }
+
+  const running = await listRunningHostedRunnerImageRefs({
+    cwd: input.cwd,
+    env: input.env,
+    timeoutMs: input.timeoutMs,
+  });
+  if (running.result.timedOut || running.result.exitCode !== 0) {
+    return {
+      imageRefs: [],
+      result: running.result,
+    };
+  }
+
+  const runningImageIds = new Set(
+    rows
+      .filter((row) => running.imageRefs.includes(row.ref))
+      .map((row) => row.id),
+  );
+
+  return {
+    imageRefs: uniqueStrings(rows
+      .filter((row) => !runningImageIds.has(row.id))
+      .map((row) => row.ref)),
+    result,
+  };
+}
+
+async function listRunningHostedRunnerImageRefs(input: {
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  timeoutMs: number;
+}): Promise<{
+  imageRefs: string[];
+  result: BoundedCommandResult;
+}> {
+  const result = await runBoundedCommand({
+    args: [
+      "ps",
+      "--format",
+      "{{.Image}}",
     ],
     command: "docker",
     cwd: input.cwd,
@@ -1324,9 +1386,37 @@ function isHostedLocalE2eRunnerProxyContainerName(name: string): boolean {
 }
 
 function isHostedRunnerLocalImageRef(value: string): boolean {
-  return HOSTED_RUNNER_LOCAL_IMAGE_REPOSITORIES.some((repository) =>
-    value.startsWith(`${repository}:`)
-  ) && !value.endsWith(":<none>");
+  if (value.endsWith(":<none>")) {
+    return false;
+  }
+
+  const separatorIndex = value.lastIndexOf(":");
+  if (separatorIndex <= 0) {
+    return false;
+  }
+
+  const repository = value.slice(0, separatorIndex);
+  if (HOSTED_RUNNER_LOCAL_IMAGE_REPOSITORIES.some((candidate) => candidate === repository)) {
+    return true;
+  }
+
+  return repository.startsWith("murph-hosted-e2e-")
+    && (
+      repository.endsWith("-deploysmokerunnercontainer")
+      || repository.endsWith("-runnercontainer")
+    );
+}
+
+function parseHostedRunnerImageRows(stdout: string): Array<{ id: string; ref: string }> {
+  const rows: Array<{ id: string; ref: string }> = [];
+  for (const line of stdout.split("\n")) {
+    const [ref, id] = line.trim().split(/\t/u, 2);
+    if (!ref || !id) {
+      continue;
+    }
+    rows.push({ id, ref });
+  }
+  return rows;
 }
 
 function uniqueStrings(values: string[]): string[] {
