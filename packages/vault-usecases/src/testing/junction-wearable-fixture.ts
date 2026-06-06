@@ -147,6 +147,8 @@ const SENSITIVE_KEY_PATTERN =
 const HOSTED_REPLAY_WEBHOOK_DATA_JSON_MAX_BYTES = 64_000;
 const DEFAULT_HOSTED_REPLAY_RECORD_LIMIT_PER_PROVIDER_RESOURCE = 24;
 
+export type JunctionWearableHostedReplaySize = "smoke" | "full";
+
 type RiskPatternName =
   | "accessTokenKeyword"
   | "bearerLike"
@@ -163,9 +165,11 @@ export interface JunctionWearableFixtureE2eInput {
 }
 
 export interface JunctionWearableHostedReplayPlanInput {
+  allowDroppedRecords?: boolean;
   env?: NodeJS.ProcessEnv;
   fixturePath?: string;
   maxRecordsPerProviderResource?: number | null;
+  replaySize?: JunctionWearableHostedReplaySize;
 }
 
 export interface JunctionWearableBiomarkerPanelExpectation {
@@ -297,8 +301,19 @@ export interface JunctionWearableHostedReplayPlan {
   generatedAt: string;
   privacyScan: JunctionWearableFixturePrivacyScan;
   providerCoverage: JunctionWearableProviderFixtureCoverage[];
+  replay: {
+    droppedRecordCount: number;
+    mode: "directDirtyResource";
+    recordLimitPerProviderResource: number | null;
+    size: JunctionWearableHostedReplaySize;
+  };
   resources: JunctionWearableHostedReplayResourceSummary[];
   sources: JunctionWearableHostedReplaySource[];
+}
+
+export interface JunctionWearableBrowserVaultSummaryExpectationInput {
+  biomarkerExpectations?: readonly JunctionWearableBiomarkerPanelExpectation[];
+  metricExpectations?: readonly JunctionWearableMetricRowExpectation[];
 }
 
 export function summarizeJunctionWearableBrowserVaultReplica(input: {
@@ -376,9 +391,7 @@ export async function resolveJunctionWearableHostedReplayFixturePath(input: {
   const explicitPath =
     input.fixturePath?.trim()
     || input.env?.[JUNCTION_WEARABLE_HOSTED_REPLAY_FIXTURE_PATH_ENV]?.trim()
-    || process.env[JUNCTION_WEARABLE_HOSTED_REPLAY_FIXTURE_PATH_ENV]?.trim()
-    || input.env?.[JUNCTION_WEARABLE_FIXTURE_PATH_ENV]?.trim()
-    || process.env[JUNCTION_WEARABLE_FIXTURE_PATH_ENV]?.trim();
+    || process.env[JUNCTION_WEARABLE_HOSTED_REPLAY_FIXTURE_PATH_ENV]?.trim();
   const repoRoot = await findRepoRoot(process.cwd());
   return resolveRepoRelativePath(
     repoRoot,
@@ -467,8 +480,12 @@ export async function runJunctionWearableFixtureE2e(
 export async function buildJunctionWearableHostedReplayPlan(
   input: JunctionWearableHostedReplayPlanInput = {},
 ): Promise<JunctionWearableHostedReplayPlan> {
+  const replayOptions = normalizeHostedReplayOptions(input);
   const fixturePath = await resolveJunctionWearableHostedReplayFixturePath(input);
-  const fixtureText = await readFixtureText(fixturePath);
+  const fixtureText = await readFixtureText(
+    fixturePath,
+    JUNCTION_WEARABLE_HOSTED_REPLAY_FIXTURE_PATH_ENV,
+  );
   const fixture = parseFixture(fixtureText);
   const privacyScan = scanFixturePrivacy(fixture);
   assertFixturePrivacySafe(privacyScan);
@@ -478,9 +495,10 @@ export async function buildJunctionWearableHostedReplayPlan(
   const sourceBundleHash = createHash("sha256").update(fixtureText).digest("hex");
   const groups = buildHostedReplayRecordGroups(
     fixture,
-    input.maxRecordsPerProviderResource ?? DEFAULT_HOSTED_REPLAY_RECORD_LIMIT_PER_PROVIDER_RESOURCE,
+    replayOptions.recordLimitPerProviderResource,
   );
   const replay = buildHostedReplayDirtyResources(groups, generatedAt);
+  assertHostedReplayDroppedRecordsAllowed(replay.resources, replayOptions.allowDroppedRecords);
 
   return {
     connection: {
@@ -496,22 +514,219 @@ export async function buildJunctionWearableHostedReplayPlan(
     generatedAt,
     privacyScan,
     providerCoverage,
+    replay: {
+      droppedRecordCount: sumDroppedHostedReplayRecords(replay.resources),
+      mode: "directDirtyResource",
+      recordLimitPerProviderResource: replayOptions.recordLimitPerProviderResource,
+      size: replayOptions.size,
+    },
     resources: replay.resources,
     sources: buildHostedReplaySources(providerCoverage, groups),
   };
 }
 
-async function readFixtureText(fixturePath: string): Promise<string> {
+export function promoteWearableCaptureToJunctionHostedSmokeFixture(
+  capture: unknown,
+  input: { sourceExportHash?: string } = {},
+): Record<string, unknown> {
+  const record = readRecord(capture);
+  if (!record) {
+    throw new Error("Wearable capture fixture must be a JSON object.");
+  }
+  if (readString(record.schema) !== "murph.wearable-fixture-capture.v1") {
+    throw new Error("Wearable capture fixture must declare the capture schema.");
+  }
+
+  const sourceExportHash =
+    input.sourceExportHash
+    ?? createHash("sha256").update(JSON.stringify(record)).digest("hex");
+  if (!/^[0-9a-f]{64}$/iu.test(sourceExportHash)) {
+    throw new Error("Hosted-smoke fixture promotion requires a SHA-256 source export hash.");
+  }
+
+  const hostedSmokeRecord = { ...record };
+  delete hostedSmokeRecord.eventLedgers;
+  delete hostedSmokeRecord.metricSampleLedgers;
+
+  return {
+    ...hostedSmokeRecord,
+    fixtureKind: "hosted-smoke",
+    schema: "murph.junction-wearables-sanitized-fixture.v1",
+    sourceExportHash,
+  };
+}
+
+export function normalizeJunctionProviderSlugForComparison(provider: string): string {
+  return provider
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
+}
+
+export function collectJunctionWearableBrowserVaultSummaryFailures(
+  summary: JunctionWearableBrowserVaultReplicaSummary,
+  input: JunctionWearableBrowserVaultSummaryExpectationInput = {},
+): string[] {
+  const metricExpectations =
+    input.metricExpectations ?? JUNCTION_WEARABLE_BROWSER_VAULT_METRIC_EXPECTATIONS;
+  const biomarkerExpectations =
+    input.biomarkerExpectations ?? JUNCTION_WEARABLE_BROWSER_VAULT_BIOMARKER_EXPECTATIONS;
+  const failures: string[] = [];
+
+  for (const expectation of metricExpectations) {
+    const rowCount = summary.metrics.metricRowsByKey[expectation.metricKey] ?? 0;
+    if (rowCount < expectation.minimumRows) {
+      failures.push(
+        `metric ${expectation.metricKey} rows ${rowCount} < ${expectation.minimumRows}`,
+      );
+    }
+  }
+
+  const selectedMetricKeys = new Set(summary.metrics.selectedMetricKeys);
+  for (const expectation of metricExpectations) {
+    if (!selectedMetricKeys.has(expectation.metricKey)) {
+      failures.push(`metric ${expectation.metricKey} is not selected`);
+    }
+  }
+
+  for (const expectation of biomarkerExpectations) {
+    const panel = summary.biomarkerPanels[expectation.biomarkerKey];
+    if (!panel) {
+      failures.push(`biomarker ${expectation.biomarkerKey} panel missing`);
+      continue;
+    }
+    if (panel.metricKey !== expectation.metricKey) {
+      failures.push(
+        `biomarker ${expectation.biomarkerKey} metric ${String(panel.metricKey)} != ${expectation.metricKey}`,
+      );
+    }
+    if (panel.status !== "ready") {
+      failures.push(`biomarker ${expectation.biomarkerKey} status ${panel.status}`);
+    }
+    if (!panel.latestPresent) {
+      failures.push(`biomarker ${expectation.biomarkerKey} latest missing`);
+    }
+    if (panel.sampleCount < expectation.minimumRows) {
+      failures.push(
+        `biomarker ${expectation.biomarkerKey} samples ${panel.sampleCount} < ${expectation.minimumRows}`,
+      );
+    }
+    if (panel.seriesCount < expectation.minimumRows) {
+      failures.push(
+        `biomarker ${expectation.biomarkerKey} series ${panel.seriesCount} < ${expectation.minimumRows}`,
+      );
+    }
+  }
+
+  return failures;
+}
+
+export function assertJunctionWearableBrowserVaultSummary(
+  summary: JunctionWearableBrowserVaultReplicaSummary,
+  input: JunctionWearableBrowserVaultSummaryExpectationInput = {},
+): void {
+  const failures = collectJunctionWearableBrowserVaultSummaryFailures(summary, input);
+  if (failures.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    [
+      "Junction wearable browser-vault summary did not satisfy expected biomarker contract.",
+      ...failures,
+      `summary=${JSON.stringify({
+        biomarkerPanels: summary.biomarkerPanels,
+        metricRowsByKey: summary.metrics.metricRowsByKey,
+        selectedMetricKeys: summary.metrics.selectedMetricKeys,
+        sourceHealth: summary.sourceHealth,
+      })}`,
+    ].join("\n"),
+  );
+}
+
+async function readFixtureText(
+  fixturePath: string,
+  pathEnvName: string = JUNCTION_WEARABLE_FIXTURE_PATH_ENV,
+): Promise<string> {
   try {
     return await readFile(fixturePath, "utf8");
   } catch {
     throw new Error(
       [
         "Unable to read the Junction wearable fixture.",
-        `Set ${JUNCTION_WEARABLE_FIXTURE_PATH_ENV} to a sanitized fixture export or run the local capture helper first.`,
+        `Set ${pathEnvName} to a sanitized fixture export or run the local capture helper first.`,
       ].join(" "),
     );
   }
+}
+
+function normalizeHostedReplayOptions(
+  input: JunctionWearableHostedReplayPlanInput,
+): {
+  allowDroppedRecords: boolean;
+  recordLimitPerProviderResource: number | null;
+  size: JunctionWearableHostedReplaySize;
+} {
+  const size = input.replaySize ?? "smoke";
+  if (size !== "smoke" && size !== "full") {
+    throw new TypeError("replaySize must be smoke or full.");
+  }
+
+  const recordLimitPerProviderResource = normalizeHostedReplayRecordLimit(
+    input.maxRecordsPerProviderResource,
+    size,
+  );
+  return {
+    allowDroppedRecords: input.allowDroppedRecords === true,
+    recordLimitPerProviderResource,
+    size: recordLimitPerProviderResource === null ? "full" : "smoke",
+  };
+}
+
+function normalizeHostedReplayRecordLimit(
+  value: number | null | undefined,
+  size: JunctionWearableHostedReplaySize,
+): number | null {
+  if (value === null) {
+    return null;
+  }
+  if (value === undefined) {
+    return size === "full" ? null : DEFAULT_HOSTED_REPLAY_RECORD_LIMIT_PER_PROVIDER_RESOURCE;
+  }
+  if (!Number.isInteger(value) || value < 1) {
+    throw new TypeError("maxRecordsPerProviderResource must be a positive integer or null.");
+  }
+  return value;
+}
+
+function assertHostedReplayDroppedRecordsAllowed(
+  resources: readonly JunctionWearableHostedReplayResourceSummary[],
+  allowDroppedRecords: boolean,
+): void {
+  const dropped = resources.filter((resource) => resource.droppedRecordCount > 0);
+  if (dropped.length === 0 || allowDroppedRecords) {
+    return;
+  }
+
+  throw new Error(
+    [
+      "Hosted Junction replay fixture dropped oversized record(s).",
+      "Pass allowDroppedRecords only for an explicitly partial replay.",
+      `dropped=${JSON.stringify(dropped.map((resource) => ({
+        provider: resource.provider,
+        resource: resource.resource,
+        resourceCategory: resource.resourceCategory,
+        droppedRecordCount: resource.droppedRecordCount,
+      })))}`,
+    ].join(" "),
+  );
+}
+
+function sumDroppedHostedReplayRecords(
+  resources: readonly JunctionWearableHostedReplayResourceSummary[],
+): number {
+  return resources.reduce((total, resource) => total + resource.droppedRecordCount, 0);
 }
 
 function parseFixture(fixtureText: string): ParsedFixture {
@@ -657,7 +872,7 @@ function buildHostedReplayDirtyResources(
         count: 1,
         jobKind: "resource",
         payload: {
-          eventType: "junction.fixture.resource",
+          eventType: buildHostedReplayJunctionDataEventType(group.resource),
           objectId: `fixture-${stableRecordHash(record).slice(0, 24)}`,
           occurredAt: windowEnd,
           resource: group.resource,
@@ -687,6 +902,20 @@ function buildHostedReplayDirtyResources(
   }
 
   return { dirtyResources, resources };
+}
+
+function buildHostedReplayJunctionDataEventType(resource: string): string {
+  const eventResource = (() => {
+    switch (resource) {
+      case "heartrate":
+        return "heart_rate";
+      case "weight":
+        return "body_weight";
+      default:
+        return resource;
+    }
+  })();
+  return `daily.data.${eventResource}.created`;
 }
 
 function buildHostedReplaySources(

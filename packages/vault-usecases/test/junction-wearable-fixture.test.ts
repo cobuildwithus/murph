@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildJunctionWearableHostedReplayPlan,
+  promoteWearableCaptureToJunctionHostedSmokeFixture,
   runJunctionWearableFixtureE2e,
 } from "../src/testing.ts";
 
@@ -27,7 +28,103 @@ describe("Junction wearable fixture testing helpers", () => {
       await rm(tempRoot, { force: true, recursive: true });
     }
   });
+
+  it("promotes capture exports into hosted-smoke fixtures", () => {
+    const promoted = promoteWearableCaptureToJunctionHostedSmokeFixture({
+      ...buildCaptureFixture(),
+      eventLedgers: [{ ignored: true }],
+      metricSampleLedgers: [{ ignored: true }],
+    }, {
+      sourceExportHash: "b".repeat(64),
+    });
+
+    expect(promoted.schema).toBe("murph.junction-wearables-sanitized-fixture.v1");
+    expect(promoted.fixtureKind).toBe("hosted-smoke");
+    expect(promoted.sourceExportHash).toBe("b".repeat(64));
+    expect(promoted).not.toHaveProperty("eventLedgers");
+    expect(promoted).not.toHaveProperty("metricSampleLedgers");
+  });
+
+  it("makes hosted replay sizing explicit and emits production-shaped Junction event types", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-fixture-"));
+    const fixturePath = path.join(tempRoot, "junction-wearables-hosted-smoke.json");
+
+    try {
+      await writeFile(fixturePath, JSON.stringify(buildSafeFixture({ recordCount: 30 })), "utf8");
+
+      const smoke = await buildJunctionWearableHostedReplayPlan({ fixturePath });
+      expect(smoke.replay).toEqual({
+        droppedRecordCount: 0,
+        mode: "directDirtyResource",
+        recordLimitPerProviderResource: 24,
+        size: "smoke",
+      });
+      expect(smoke.dirtyResources).toHaveLength(24);
+      expect(smoke.dirtyResources.every((resource) =>
+        resource.payload.eventType === "daily.data.activity.created"
+      )).toBe(true);
+
+      const full = await buildJunctionWearableHostedReplayPlan({
+        fixturePath,
+        replaySize: "full",
+      });
+      expect(full.replay).toEqual({
+        droppedRecordCount: 0,
+        mode: "directDirtyResource",
+        recordLimitPerProviderResource: null,
+        size: "full",
+      });
+      expect(full.dirtyResources).toHaveLength(30);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects invalid hosted replay record limits", async () => {
+    await expect(buildJunctionWearableHostedReplayPlan({
+      fixturePath: "unused.json",
+      maxRecordsPerProviderResource: 0,
+    })).rejects.toThrow(/positive integer/u);
+    await expect(buildJunctionWearableHostedReplayPlan({
+      fixturePath: "unused.json",
+      maxRecordsPerProviderResource: Number.NaN,
+    })).rejects.toThrow(/positive integer/u);
+  });
+
+  it("fails closed when hosted replay records would be dropped", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-fixture-"));
+    const fixturePath = path.join(tempRoot, "junction-wearables-hosted-smoke.json");
+
+    try {
+      await writeFile(
+        fixturePath,
+        JSON.stringify(buildSafeFixture({
+          recordCount: 1,
+          oversizedRecord: true,
+        })),
+        "utf8",
+      );
+
+      await expect(buildJunctionWearableHostedReplayPlan({ fixturePath }))
+        .rejects.toThrow(/dropped oversized record/u);
+      const partial = await buildJunctionWearableHostedReplayPlan({
+        allowDroppedRecords: true,
+        fixturePath,
+      });
+      expect(partial.replay.droppedRecordCount).toBe(1);
+      expect(partial.dirtyResources).toHaveLength(0);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
 });
+
+function buildCaptureFixture() {
+  return {
+    ...buildSafeFixture({ recordCount: 1 }),
+    schema: "murph.wearable-fixture-capture.v1",
+  };
+}
 
 function buildUnsafeFixture() {
   return {
@@ -44,6 +141,46 @@ function buildUnsafeFixture() {
             title: "unsafe-freeform-title",
           },
         ],
+        relativePath: "hosted-smoke/garmin/01-junction-summary-activity.json",
+      },
+    ],
+    redactionReport: {
+      droppedKeys: 1,
+      includedJsonFiles: 1,
+      includedJsonlRecords: 0,
+      pseudonymizedValues: 1,
+      scannedFiles: 1,
+      shiftedDates: 1,
+    },
+    schema: "murph.junction-wearables-sanitized-fixture.v1",
+    sourceExportHash: "a".repeat(64),
+    targets: [
+      {
+        id: "garmin",
+        label: "Garmin",
+        sourceProviderSlug: "garmin",
+      },
+    ],
+  };
+}
+
+function buildSafeFixture(input: {
+  oversizedRecord?: boolean;
+  recordCount: number;
+}) {
+  return {
+    fixtureKind: "hosted-smoke",
+    generatedAt: "2026-04-30T12:00:00.000Z",
+    rawArtifacts: [
+      {
+        content: Array.from({ length: input.recordCount }, (_, index) => ({
+          calendar_date: `2026-04-${String(index + 1).padStart(2, "0")}`,
+          date: `2026-04-${String(index + 1).padStart(2, "0")}`,
+          resource: "activity",
+          sourceProviderSlug: "garmin",
+          steps: index + 1,
+          ...(input.oversizedRecord ? { sampleMemo: "x".repeat(70_000) } : {}),
+        })),
         relativePath: "hosted-smoke/garmin/01-junction-summary-activity.json",
       },
     ],

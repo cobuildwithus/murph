@@ -33,7 +33,7 @@ export type HostedLocalE2eScenarioName =
   | "codex-long-thread"
   | "container-continuity"
   | "device-connect"
-  | "device-sync-junction-wearable-fixture"
+  | "device-sync-junction-wearable-direct-resource-replay"
   | "device-sync-wake"
   | "direct-r2-presigned-put"
   | "idle-checkpoint-deferred-progress"
@@ -101,9 +101,9 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     name: "device-sync-wake",
   },
   {
-    file: "apps/cloudflare/test/hosted-local-device-sync-junction-wearable-fixture-e2e.test.ts",
+    file: "apps/cloudflare/test/hosted-local-device-sync-junction-wearable-direct-resource-replay-e2e.test.ts",
     manualOnly: true,
-    name: "device-sync-junction-wearable-fixture",
+    name: "device-sync-junction-wearable-direct-resource-replay",
     processIsolation: true,
   },
   {

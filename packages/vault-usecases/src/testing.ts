@@ -2,12 +2,16 @@ export { createExplicitHealthCoreServices, createExplicitHealthQueryServices } f
 export { appendJournalText, checkpointExperimentRecord } from './usecases/experiment-journal-vault.js'
 export { applyRecordPatch } from './usecases/record-mutations.js'
 export {
+  assertJunctionWearableBrowserVaultSummary,
   buildJunctionWearableHostedReplayPlan,
+  collectJunctionWearableBrowserVaultSummaryFailures,
   DEFAULT_JUNCTION_WEARABLE_HOSTED_REPLAY_FIXTURE_RELATIVE_PATH,
   JUNCTION_WEARABLE_BROWSER_VAULT_BIOMARKER_EXPECTATIONS,
   JUNCTION_WEARABLE_BROWSER_VAULT_METRIC_EXPECTATIONS,
   JUNCTION_WEARABLE_FIXTURE_SUMMARY_RESOURCES,
   JUNCTION_WEARABLE_FIXTURE_TIMESERIES_RESOURCES,
+  normalizeJunctionProviderSlugForComparison,
+  promoteWearableCaptureToJunctionHostedSmokeFixture,
   resolveJunctionWearableFixturePath,
   resolveJunctionWearableHostedReplayFixturePath,
   runJunctionWearableFixtureE2e,
@@ -26,6 +30,7 @@ export type {
   JunctionWearableHostedReplayPlan,
   JunctionWearableHostedReplayPlanInput,
   JunctionWearableHostedReplayResourceSummary,
+  JunctionWearableHostedReplaySize,
   JunctionWearableHostedReplaySource,
   JunctionWearableMetricRowExpectation,
   JunctionWearableProviderFixtureCoverage,

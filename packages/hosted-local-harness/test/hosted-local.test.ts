@@ -127,9 +127,9 @@ describe("hosted-local harness", () => {
       (match) => match[1],
     );
 
-    expect(workflowScenarios).toEqual(["device-sync-junction-wearable-fixture"]);
-    expect(resolveHostedLocalE2eScenarios("device-sync-junction-wearable-fixture")[0]?.file).toBe(
-      "apps/cloudflare/test/hosted-local-device-sync-junction-wearable-fixture-e2e.test.ts",
+    expect(workflowScenarios).toEqual(["device-sync-junction-wearable-direct-resource-replay"]);
+    expect(resolveHostedLocalE2eScenarios("device-sync-junction-wearable-direct-resource-replay")[0]?.file).toBe(
+      "apps/cloudflare/test/hosted-local-device-sync-junction-wearable-direct-resource-replay-e2e.test.ts",
     );
     expect(workflow).toContain(
       "HOSTED_DEVICE_ROUTING_INDEX_KEY: 0101010101010101010101010101010101010101010101010101010101010101",
@@ -176,8 +176,8 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("device-sync-wake")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-device-sync-wake-e2e.test.ts",
     );
-    expect(resolveHostedLocalE2eScenarios("device-sync-junction-wearable-fixture")[0]?.file).toBe(
-      "apps/cloudflare/test/hosted-local-device-sync-junction-wearable-fixture-e2e.test.ts",
+    expect(resolveHostedLocalE2eScenarios("device-sync-junction-wearable-direct-resource-replay")[0]?.file).toBe(
+      "apps/cloudflare/test/hosted-local-device-sync-junction-wearable-direct-resource-replay-e2e.test.ts",
     );
     expect(resolveHostedLocalE2eScenarios("stuck-invocation-recovery")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-stuck-invocation-recovery-e2e.test.ts",
@@ -198,7 +198,7 @@ describe("hosted-local harness", () => {
       "device-sync-wake",
     );
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).not.toContain(
-      "device-sync-junction-wearable-fixture",
+      "device-sync-junction-wearable-direct-resource-replay",
     );
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).not.toContain(
       "stuck-invocation-recovery",
@@ -219,7 +219,7 @@ describe("hosted-local harness", () => {
       "device-sync-wake",
     );
     expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
-      "device-sync-junction-wearable-fixture",
+      "device-sync-junction-wearable-direct-resource-replay",
     );
     expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
       "stuck-invocation-recovery",

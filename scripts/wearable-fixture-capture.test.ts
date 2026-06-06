@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  assertDeviceSyncJobsReadyForFixtureExport,
   buildCaptureDeviceSyncEnv,
   buildSanitizedWearableFixtureCandidate,
   checkCaptureRequestHost,
@@ -244,6 +245,40 @@ describe("parseDeviceSyncJobSummary", () => {
     expect(() => parseDeviceSyncJobSummary({ summary: { jobsQueued: -1, jobsRunning: 0, jobsDead: 0 } }))
       .toThrow(/jobsQueued/u);
     expect(() => parseDeviceSyncJobSummary({ ok: true })).toThrow(/summary/u);
+  });
+});
+
+describe("assertDeviceSyncJobsReadyForFixtureExport", () => {
+  it("allows exports only after jobs are idle and healthy", () => {
+    expect(() => assertDeviceSyncJobsReadyForFixtureExport({
+      idle: true,
+      timedOut: false,
+      summary: {
+        jobsDead: 0,
+        jobsQueued: 0,
+        jobsRunning: 0,
+      },
+    })).not.toThrow();
+
+    expect(() => assertDeviceSyncJobsReadyForFixtureExport({
+      idle: false,
+      timedOut: true,
+      summary: {
+        jobsDead: 0,
+        jobsQueued: 1,
+        jobsRunning: 0,
+      },
+    })).toThrow(/incomplete or dead/u);
+
+    expect(() => assertDeviceSyncJobsReadyForFixtureExport({
+      idle: true,
+      timedOut: false,
+      summary: {
+        jobsDead: 1,
+        jobsQueued: 0,
+        jobsRunning: 0,
+      },
+    })).toThrow(/dead=1/u);
   });
 });
 

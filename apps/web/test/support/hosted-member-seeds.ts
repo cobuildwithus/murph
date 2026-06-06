@@ -87,10 +87,35 @@ export interface HostedJunctionDeviceSyncReplaySeedInput {
   sources: readonly HostedJunctionDeviceSyncReplaySource[];
 }
 
+export interface HostedJunctionDeviceSyncConnectionSeedInput {
+  connectedAt: string;
+  displayName: string;
+  environment?: NodeJS.ProcessEnv;
+  externalAccountId: string;
+  memberId: string;
+  sources: readonly HostedJunctionDeviceSyncReplaySource[];
+}
+
+export interface HostedJunctionDeviceSyncConnectionSeedResult {
+  connectionId: string;
+  sourceCount: number;
+}
+
 export interface HostedJunctionDeviceSyncReplaySeedResult {
   connectionId: string;
   dirtyResourceCount: number;
   sourceCount: number;
+}
+
+export interface HostedJunctionDeviceSyncReplayDrainStatusInput {
+  connectionId: string;
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+}
+
+export interface HostedJunctionDeviceSyncReplayDrainStatus {
+  hasPendingDirtyConnection: boolean;
+  hasPendingDirtyConnectionForUser: boolean;
 }
 
 interface HostedMemberSeedPrismaClient {
@@ -209,6 +234,8 @@ interface HostedDeviceSyncControlPlaneStore {
     traceId?: string | null;
     userId: string;
   }): Promise<unknown>;
+  hasPendingDirtyConnection(connectionId: string): Promise<boolean>;
+  hasPendingDirtyConnectionForUser(userId: string): Promise<boolean>;
 }
 
 interface HostedDeviceSyncPrismaStoreModule {
@@ -247,37 +274,38 @@ export async function seedHostedActiveMember(
     throw new Error("Hosted member seed requires MURPH_E2E_MEMBER_ID.");
   }
 
-  const environment = applyHostedMemberSeedEnvironment(input.environment);
-  const modules = await loadHostedMemberSeedModules(environment);
-  const prisma = createHostedMemberSeedPrisma({
-    environment,
-    modules,
-  });
-
-  try {
-    await prisma.$transaction(async (tx) => {
-      await modules.createHostedMember({
-        billingStatus: "active",
-        memberId: input.memberId,
-        prisma: tx,
-      });
-      await modules.provisionHostedCryptoDomainRootsForUserTx({
-        reason: "hosted-member.test-seed",
-        tx,
-        userId: input.memberId,
-      });
-      await seedHostedMemberBillingRefTx({
-        billingPlanCode: input.billingPlanCode,
-        memberId: input.memberId,
-        modules,
-        stripeCustomerId: input.stripeCustomerId,
-        stripeSubscriptionId: input.stripeSubscriptionId,
-        tx,
-      });
+  await withHostedMemberSeedEnvironment(input.environment, async (environment) => {
+    const modules = await loadHostedMemberSeedModules(environment);
+    const prisma = createHostedMemberSeedPrisma({
+      environment,
+      modules,
     });
-  } finally {
-    await prisma.$disconnect();
-  }
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        await modules.createHostedMember({
+          billingStatus: "active",
+          memberId: input.memberId,
+          prisma: tx,
+        });
+        await modules.provisionHostedCryptoDomainRootsForUserTx({
+          reason: "hosted-member.test-seed",
+          tx,
+          userId: input.memberId,
+        });
+        await seedHostedMemberBillingRefTx({
+          billingPlanCode: input.billingPlanCode,
+          memberId: input.memberId,
+          modules,
+          stripeCustomerId: input.stripeCustomerId,
+          stripeSubscriptionId: input.stripeSubscriptionId,
+          tx,
+        });
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
 }
 
 export async function seedHostedActiveLinqMember(
@@ -287,65 +315,66 @@ export async function seedHostedActiveLinqMember(
     throw new Error("Hosted Linq member seed requires member id, member phone, and home phone.");
   }
 
-  const environment = applyHostedMemberSeedEnvironment(input.environment);
-  const modules = await loadHostedMemberSeedModules(environment);
-  const phoneLookupKey = modules.createHostedPhoneLookupKey(input.memberPhone);
-  if (!phoneLookupKey) {
-    throw new Error("Hosted Linq member seed requires a valid member phone.");
-  }
+  await withHostedMemberSeedEnvironment(input.environment, async (environment) => {
+    const modules = await loadHostedMemberSeedModules(environment);
+    const phoneLookupKey = modules.createHostedPhoneLookupKey(input.memberPhone);
+    if (!phoneLookupKey) {
+      throw new Error("Hosted Linq member seed requires a valid member phone.");
+    }
 
-  const prisma = createHostedMemberSeedPrisma({
-    environment,
-    modules,
-  });
-
-  try {
-    await prisma.$transaction(async (tx) => {
-      await modules.createHostedMember({
-        billingStatus: "active",
-        memberId: input.memberId,
-        prisma: tx,
-      });
-      await modules.provisionHostedCryptoDomainRootsForUserTx({
-        reason: "hosted-member.test-seed",
-        tx,
-        userId: input.memberId,
-      });
-      await seedHostedMemberBillingRefTx({
-        billingPlanCode: input.billingPlanCode,
-        memberId: input.memberId,
-        modules,
-        stripeCustomerId: input.stripeCustomerId,
-        stripeSubscriptionId: input.stripeSubscriptionId,
-        tx,
-      });
-      await modules.upsertHostedMemberIdentity({
-        maskedPhoneNumberHint: modules.readHostedPhoneHint(input.memberPhone),
-        memberId: input.memberId,
-        phoneLookupKey,
-        phoneNumber: input.memberPhone,
-        phoneNumberVerifiedAt: new Date(),
-        prisma: tx,
-        privyUserId: input.privyUserId ?? null,
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
-        signupPhoneNumber: input.memberPhone,
-        walletAddress: input.walletAddress ?? null,
-        walletChainType: input.walletAddress ? "ethereum" : null,
-        walletCreatedAt: input.walletAddress ? new Date() : null,
-        walletProvider: input.walletAddress ? "privy" : null,
-      });
-      await modules.upsertHostedMemberHomeLinqRecipientPhoneTx({
-        clearPending: true,
-        memberId: input.memberId,
-        prisma: tx,
-        recipientPhone: input.homePhone,
-      });
+    const prisma = createHostedMemberSeedPrisma({
+      environment,
+      modules,
     });
-  } finally {
-    await prisma.$disconnect();
-  }
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        await modules.createHostedMember({
+          billingStatus: "active",
+          memberId: input.memberId,
+          prisma: tx,
+        });
+        await modules.provisionHostedCryptoDomainRootsForUserTx({
+          reason: "hosted-member.test-seed",
+          tx,
+          userId: input.memberId,
+        });
+        await seedHostedMemberBillingRefTx({
+          billingPlanCode: input.billingPlanCode,
+          memberId: input.memberId,
+          modules,
+          stripeCustomerId: input.stripeCustomerId,
+          stripeSubscriptionId: input.stripeSubscriptionId,
+          tx,
+        });
+        await modules.upsertHostedMemberIdentity({
+          maskedPhoneNumberHint: modules.readHostedPhoneHint(input.memberPhone),
+          memberId: input.memberId,
+          phoneLookupKey,
+          phoneNumber: input.memberPhone,
+          phoneNumberVerifiedAt: new Date(),
+          prisma: tx,
+          privyUserId: input.privyUserId ?? null,
+          signupPhoneCodeSendAttemptId: null,
+          signupPhoneCodeSendAttemptStartedAt: null,
+          signupPhoneCodeSentAt: null,
+          signupPhoneNumber: input.memberPhone,
+          walletAddress: input.walletAddress ?? null,
+          walletChainType: input.walletAddress ? "ethereum" : null,
+          walletCreatedAt: input.walletAddress ? new Date() : null,
+          walletProvider: input.walletAddress ? "privy" : null,
+        });
+        await modules.upsertHostedMemberHomeLinqRecipientPhoneTx({
+          clearPending: true,
+          memberId: input.memberId,
+          prisma: tx,
+          recipientPhone: input.homePhone,
+        });
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
 }
 
 export async function bindHostedActiveLinqHomeChat(input: {
@@ -360,26 +389,59 @@ export async function bindHostedActiveLinqHomeChat(input: {
     );
   }
 
-  const environment = applyHostedMemberSeedEnvironment(input.environment);
-  const modules = await loadHostedMemberSeedModules(environment);
-  const prisma = createHostedMemberSeedPrisma({
-    environment,
-    modules,
-  });
-
-  try {
-    await prisma.$transaction(async (tx) => {
-      await modules.upsertHostedMemberHomeLinqBindingTx({
-        clearPending: true,
-        linqChatId: input.chatId,
-        memberId: input.memberId,
-        prisma: tx,
-        recipientPhone: input.recipientPhone,
-      });
+  await withHostedMemberSeedEnvironment(input.environment, async (environment) => {
+    const modules = await loadHostedMemberSeedModules(environment);
+    const prisma = createHostedMemberSeedPrisma({
+      environment,
+      modules,
     });
-  } finally {
-    await prisma.$disconnect();
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        await modules.upsertHostedMemberHomeLinqBindingTx({
+          clearPending: true,
+          linqChatId: input.chatId,
+          memberId: input.memberId,
+          prisma: tx,
+          recipientPhone: input.recipientPhone,
+        });
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+}
+
+export async function seedHostedJunctionDeviceSyncConnection(
+  input: HostedJunctionDeviceSyncConnectionSeedInput,
+): Promise<HostedJunctionDeviceSyncConnectionSeedResult> {
+  if (!input.memberId.trim() || !input.externalAccountId.trim()) {
+    throw new Error("Hosted Junction connection seed requires member id and external account id.");
   }
+  if (input.sources.length === 0) {
+    throw new Error("Hosted Junction connection seed requires source records.");
+  }
+
+  return await withHostedMemberSeedEnvironment(input.environment, async (environment) => {
+    const modules = await loadHostedJunctionDeviceSyncReplaySeedModules(environment);
+    const prisma = createHostedMemberSeedPrisma({
+      environment,
+      modules,
+    });
+    const store = new modules.PrismaDeviceSyncControlPlaneStore({
+      prisma,
+      providerAccountBlindIndexKey: readHostedJunctionReplayProviderAccountBlindIndexKey(environment),
+    });
+
+    try {
+      return await seedHostedJunctionDeviceSyncConnectionWithStore({
+        input,
+        store,
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
 }
 
 export async function seedHostedJunctionDeviceSyncReplay(
@@ -392,81 +454,154 @@ export async function seedHostedJunctionDeviceSyncReplay(
     throw new Error("Hosted Junction replay seed requires dirty resources.");
   }
 
-  const environment = applyHostedMemberSeedEnvironment(input.environment);
-  const modules = await loadHostedJunctionDeviceSyncReplaySeedModules(environment);
-  const prisma = createHostedMemberSeedPrisma({
-    environment,
-    modules,
-  });
-  const store = new modules.PrismaDeviceSyncControlPlaneStore({
-    prisma,
-    providerAccountBlindIndexKey: readHostedJunctionReplayProviderAccountBlindIndexKey(environment),
-  });
-
-  try {
-    const connection = await store.upsertConnection({
-      connectedAt: input.connectedAt,
-      credential: {
-        kind: "provider_config",
-        providerConfigKey: "junction",
-      },
-      displayName: input.displayName,
-      externalAccountId: input.externalAccountId,
-      metadata: {
-        fixture: "junction-wearable-hosted-replay",
-      },
-      nextReconcileAt: null,
-      ownerId: input.memberId,
-      provider: "junction",
-      scopes: [],
-      setupPhase: "source_confirmed",
-      status: "active",
+  return await withHostedMemberSeedEnvironment(input.environment, async (environment) => {
+    const modules = await loadHostedJunctionDeviceSyncReplaySeedModules(environment);
+    const prisma = createHostedMemberSeedPrisma({
+      environment,
+      modules,
+    });
+    const store = new modules.PrismaDeviceSyncControlPlaneStore({
+      prisma,
+      providerAccountBlindIndexKey: readHostedJunctionReplayProviderAccountBlindIndexKey(environment),
     });
 
-    for (const source of input.sources) {
-      const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-        connectionId: connection.id,
-        sourceProviderSlug: source.sourceProviderSlug,
+    try {
+      const connection = await seedHostedJunctionDeviceSyncConnectionWithStore({
+        input,
+        store,
       });
-      if (!sourceInstanceKey) {
-        throw new Error("Hosted Junction replay seed could not build a source instance key.");
-      }
 
-      await store.upsertConnectionSource({
-        connectionId: connection.id,
-        displayName: source.displayName,
-        firstSeenAt: input.connectedAt,
-        lastSeenAt: input.connectedAt,
-        sourceInstanceKey,
-        sourceProviderSlug: source.sourceProviderSlug,
-        status: "connected",
+      await store.upsertDirtyConnection({
+        connectionId: connection.connectionId,
+        dirtyAt: input.dirtyAt ?? input.connectedAt,
+        eventType: "junction.fixture.replay",
+        provider: "junction",
+        resources: input.dirtyResources,
+        traceId: `junction-fixture-${connection.connectionId}`,
+        userId: input.memberId,
       });
+
+      return {
+        connectionId: connection.connectionId,
+        dirtyResourceCount: input.dirtyResources.length,
+        sourceCount: connection.sourceCount,
+      };
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+}
+
+export async function readHostedJunctionDeviceSyncReplayDrainStatus(
+  input: HostedJunctionDeviceSyncReplayDrainStatusInput,
+): Promise<HostedJunctionDeviceSyncReplayDrainStatus> {
+  if (!input.memberId.trim() || !input.connectionId.trim()) {
+    throw new Error("Hosted Junction replay drain status requires member id and connection id.");
+  }
+
+  return await withHostedMemberSeedEnvironment(input.environment, async (environment) => {
+    const modules = await loadHostedJunctionDeviceSyncReplaySeedModules(environment);
+    const prisma = createHostedMemberSeedPrisma({
+      environment,
+      modules,
+    });
+    const store = new modules.PrismaDeviceSyncControlPlaneStore({
+      prisma,
+      providerAccountBlindIndexKey: readHostedJunctionReplayProviderAccountBlindIndexKey(environment),
+    });
+
+    try {
+      const [
+        hasPendingDirtyConnection,
+        hasPendingDirtyConnectionForUser,
+      ] = await Promise.all([
+        store.hasPendingDirtyConnection(input.connectionId),
+        store.hasPendingDirtyConnectionForUser(input.memberId),
+      ]);
+
+      return {
+        hasPendingDirtyConnection,
+        hasPendingDirtyConnectionForUser,
+      };
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+}
+
+async function seedHostedJunctionDeviceSyncConnectionWithStore(input: {
+  input: HostedJunctionDeviceSyncConnectionSeedInput;
+  store: HostedDeviceSyncControlPlaneStore;
+}): Promise<HostedJunctionDeviceSyncConnectionSeedResult> {
+  const connection = await input.store.upsertConnection({
+    connectedAt: input.input.connectedAt,
+    credential: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    displayName: input.input.displayName,
+    externalAccountId: input.input.externalAccountId,
+    metadata: {
+      fixture: "junction-wearable-hosted-replay",
+    },
+    nextReconcileAt: null,
+    ownerId: input.input.memberId,
+    provider: "junction",
+    scopes: [],
+    setupPhase: "source_confirmed",
+    status: "active",
+  });
+
+  for (const source of input.input.sources) {
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: connection.id,
+      sourceProviderSlug: source.sourceProviderSlug,
+    });
+    if (!sourceInstanceKey) {
+      throw new Error("Hosted Junction connection seed could not build a source instance key.");
     }
 
-    await store.upsertDirtyConnection({
+    await input.store.upsertConnectionSource({
       connectionId: connection.id,
-      dirtyAt: input.dirtyAt ?? input.connectedAt,
-      eventType: "junction.fixture.replay",
-      provider: "junction",
-      resources: input.dirtyResources,
-      traceId: `junction-fixture-${connection.id}`,
-      userId: input.memberId,
+      displayName: source.displayName,
+      firstSeenAt: input.input.connectedAt,
+      lastSeenAt: input.input.connectedAt,
+      sourceInstanceKey,
+      sourceProviderSlug: source.sourceProviderSlug,
+      status: "connected",
     });
+  }
 
-    return {
-      connectionId: connection.id,
-      dirtyResourceCount: input.dirtyResources.length,
-      sourceCount: input.sources.length,
-    };
+  return {
+    connectionId: connection.id,
+    sourceCount: input.input.sources.length,
+  };
+}
+
+async function withHostedMemberSeedEnvironment<T>(
+  source: NodeJS.ProcessEnv | undefined,
+  operation: (environment: NodeJS.ProcessEnv) => Promise<T>,
+): Promise<T> {
+  const scope = applyHostedMemberSeedEnvironment(source);
+  try {
+    return await operation(scope.environment);
   } finally {
-    await prisma.$disconnect();
+    scope.restore();
   }
 }
 
 function applyHostedMemberSeedEnvironment(
   source: NodeJS.ProcessEnv = process.env,
-): NodeJS.ProcessEnv {
+): { environment: NodeJS.ProcessEnv; restore(): void } {
   const runtimeEnv = createHostedWebSmokeEnvironment(source);
+  const keysToRestore = new Set([
+    ...Object.keys(runtimeEnv),
+    ...Object.keys(hostedMemberSeedHostOnlyEnv),
+  ]);
+  const previousValues = new Map(
+    [...keysToRestore].map((key) => [key, process.env[key]] as const),
+  );
+
   for (const [key, value] of Object.entries(runtimeEnv)) {
     if (value === undefined) {
       delete process.env[key];
@@ -476,7 +611,19 @@ function applyHostedMemberSeedEnvironment(
   }
   restoreHostedMemberSeedHostOnlyEnv();
   clearHostedMemberSeedGlobals();
-  return runtimeEnv;
+  return {
+    environment: runtimeEnv,
+    restore: () => {
+      for (const [key, value] of previousValues) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+      clearHostedMemberSeedGlobals();
+    },
+  };
 }
 
 function restoreHostedMemberSeedHostOnlyEnv(): void {

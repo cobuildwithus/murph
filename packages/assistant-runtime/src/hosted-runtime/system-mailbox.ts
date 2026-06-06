@@ -27,6 +27,9 @@ import {
 import {
   executeHostedMailboxEvent,
 } from "./events.ts";
+import {
+  readHostedRuntimeSafeErrorText,
+} from "./diagnostic-redaction.ts";
 import type {
   HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,
@@ -854,13 +857,13 @@ function normalizeHostedSystemMailboxError(error: unknown): {
       : "HOSTED_SYSTEM_MAILBOX_AMBIGUOUS";
     return {
       code,
-      message: error.message,
+      message: readHostedRuntimeSafeErrorText(error) ?? "Hosted system mailbox effect failed.",
     };
   }
 
   return {
     code: "HOSTED_SYSTEM_MAILBOX_AMBIGUOUS",
-    message: "Hosted system mailbox effect failed after checkpoint.",
+    message: readHostedRuntimeSafeErrorText(error) ?? "Hosted system mailbox effect failed.",
   };
 }
 

@@ -890,6 +890,7 @@ function isFreshSyncTimestamp(
 async function exportSanitizedFixture(state: CaptureServerState): Promise<Record<string, unknown>> {
   const client = await ensureCaptureClient(state);
   const jobIdleResult = await waitForDeviceSyncJobIdle(state);
+  assertDeviceSyncJobsReadyForFixtureExport(jobIdleResult);
   const accounts = (await client.listAccounts({ provider: junctionProvider })).accounts;
   const candidate = await buildSanitizedWearableFixtureCandidate({
     vaultRoot: state.options.vaultRoot,
@@ -912,6 +913,24 @@ async function exportSanitizedFixture(state: CaptureServerState): Promise<Record
     jobIdleTimedOut: jobIdleResult.timedOut,
     jobs: jobIdleResult.summary,
   };
+}
+
+export function assertDeviceSyncJobsReadyForFixtureExport(input: {
+  idle: boolean;
+  timedOut: boolean;
+  summary: DeviceSyncJobSummary;
+}): void {
+  if (!input.idle || input.timedOut || input.summary.jobsDead > 0) {
+    throw new Error(
+      [
+        "Refusing to export wearable fixture while device-sync jobs are incomplete or dead.",
+        `queued=${input.summary.jobsQueued}`,
+        `running=${input.summary.jobsRunning}`,
+        `dead=${input.summary.jobsDead}`,
+        `timedOut=${input.timedOut}`,
+      ].join(" "),
+    );
+  }
 }
 
 async function waitForDeviceSyncJobIdle(state: CaptureServerState): Promise<{

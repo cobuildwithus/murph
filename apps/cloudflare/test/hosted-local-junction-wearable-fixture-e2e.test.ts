@@ -1,9 +1,10 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 import {
+  assertJunctionWearableBrowserVaultSummary,
   DEFAULT_JUNCTION_WEARABLE_HOSTED_REPLAY_FIXTURE_RELATIVE_PATH,
   JUNCTION_WEARABLE_BROWSER_VAULT_BIOMARKER_EXPECTATIONS,
-  JUNCTION_WEARABLE_BROWSER_VAULT_METRIC_EXPECTATIONS,
+  normalizeJunctionProviderSlugForComparison,
   runJunctionWearableFixtureE2e,
   type JunctionWearableFixtureE2eResult,
 } from "@murphai/vault-usecases/testing";
@@ -91,24 +92,11 @@ describe("hosted local Junction wearable fixture e2e", () => {
   it("projects imported wearable data into the /biomarkers browser-vault contract", () => {
     const e2e = requireResult();
 
-    for (const expectation of JUNCTION_WEARABLE_BROWSER_VAULT_METRIC_EXPECTATIONS) {
-      expect(e2e.metrics.metricRowsByKey[expectation.metricKey] ?? 0)
-        .toBeGreaterThanOrEqual(expectation.minimumRows);
-    }
-    expect(e2e.metrics.selectedMetricKeys).toEqual(expect.arrayContaining(
-      JUNCTION_WEARABLE_BROWSER_VAULT_METRIC_EXPECTATIONS.map(
-        (expectation) => expectation.metricKey,
-      ),
-    ));
-    for (const expectation of JUNCTION_WEARABLE_BROWSER_VAULT_BIOMARKER_EXPECTATIONS) {
-      const panel = requireBiomarkerPanel(expectation.biomarkerKey);
-
-      expect(panel.metricKey).toBe(expectation.metricKey);
-      expect(panel.status).toBe("ready");
-      expect(panel.latestPresent).toBe(true);
-      expect(panel.sampleCount).toBeGreaterThanOrEqual(expectation.minimumRows);
-      expect(panel.seriesCount).toBeGreaterThanOrEqual(expectation.minimumRows);
-    }
+    assertJunctionWearableBrowserVaultSummary({
+      biomarkerPanels: e2e.biomarkerPanels,
+      metrics: e2e.metrics,
+      sourceHealth: e2e.sourceHealth,
+    });
   });
 
   it("uses the production Health Commons biomarker panel inputs", async () => {
@@ -135,7 +123,9 @@ function requireProviderCoverage(provider: string) {
 
 function findSourceHealth(provider: string) {
   return requireResult().sourceHealth.find(
-    (entry) => normalizeProviderSlug(entry.provider) === normalizeProviderSlug(provider),
+    (entry) =>
+      normalizeJunctionProviderSlugForComparison(entry.provider)
+        === normalizeJunctionProviderSlugForComparison(provider),
   );
 }
 
@@ -145,16 +135,4 @@ function requireSourceHealth(provider: string) {
     throw new Error(`Expected browser-vault source health for ${provider}.`);
   }
   return sourceHealth;
-}
-
-function requireBiomarkerPanel(biomarkerKey: string) {
-  const panel = requireResult().biomarkerPanels[biomarkerKey];
-  if (!panel) {
-    throw new Error(`Expected browser-vault biomarker panel for ${biomarkerKey}.`);
-  }
-  return panel;
-}
-
-function normalizeProviderSlug(provider: string): string {
-  return provider.replaceAll("_", "-");
 }

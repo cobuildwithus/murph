@@ -59,8 +59,8 @@ env:
   PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key
 
 jobs:
-  junction-wearable-fixture:
-    name: Junction wearable fixture E2E
+  junction-wearable-direct-resource-replay:
+    name: Junction wearable direct-resource replay E2E
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     services:
@@ -99,20 +99,20 @@ jobs:
       - name: Install/check Temporal CLI
         run: pnpm temporal:cli:setup
 
-      - name: Run Junction wearable fixture hosted E2E
+      - name: Run Junction wearable direct-resource replay hosted E2E
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .artifacts/cloudflare-hosted-device-sync-e2e
-          pnpm hosted-local e2e device-sync-junction-wearable-fixture 2>&1 \
-            | tee .artifacts/cloudflare-hosted-device-sync-e2e/junction-wearable-fixture.log
+          pnpm hosted-local e2e device-sync-junction-wearable-direct-resource-replay 2>&1 \
+            | tee .artifacts/cloudflare-hosted-device-sync-e2e/junction-wearable-direct-resource-replay.log
 
-      - name: Upload Junction wearable fixture E2E logs
+      - name: Upload Junction wearable direct-resource replay E2E logs
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: cloudflare-hosted-device-sync-e2e-junction-wearable-fixture-logs
+          name: cloudflare-hosted-device-sync-e2e-junction-wearable-direct-resource-replay-logs
           path: |
-            .artifacts/cloudflare-hosted-device-sync-e2e/junction-wearable-fixture.log
+            .artifacts/cloudflare-hosted-device-sync-e2e/junction-wearable-direct-resource-replay.log
             .artifacts/hosted-local/**/state.json
           if-no-files-found: warn

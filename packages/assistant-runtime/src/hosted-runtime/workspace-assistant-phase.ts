@@ -1463,6 +1463,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       : {
           attemptCount: null,
           errorCode: systemMailboxPreparation.errorCode,
+          errorMessage: systemMailboxPreparation.errorMessage,
           routeAction: null,
           wakeKind: null,
         }),
@@ -2368,6 +2369,7 @@ function shouldRescheduleSkippedDeviceSyncWake(
 async function writeHostedSystemMailboxRuntimeLog(input: {
   attemptCount: number | null;
   errorCode?: string | null;
+  errorMessage?: string | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   nextWakeAt: string | null;
   recorded: number | null;
@@ -2396,6 +2398,7 @@ async function writeHostedSystemMailboxRuntimeLog(input: {
         recordFailed: input.recordFailed,
         recorded: input.recorded,
         routeAction: input.routeAction,
+        ...(input.errorMessage ? { safeErrorMessage: input.errorMessage } : {}),
         status: input.status,
         wakeKind: input.wakeKind,
       },
