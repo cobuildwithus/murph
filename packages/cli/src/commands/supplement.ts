@@ -411,7 +411,7 @@ export function registerSupplementCommands(
         .max(SUPPLEMENT_INGREDIENTS_MAX_ITEMS)
         .optional()
         .describe(
-          `Optional ingredient as one shell-quoted JSON object; repeat once per ingredient for up to ${SUPPLEMENT_INGREDIENTS_MAX_ITEMS}. Fields: compound required; label, amount, unit, active, note optional. Do not pass an array.`,
+          `Optional ingredient as one shell-quoted JSON object; repeat once per ingredient for up to ${SUPPLEMENT_INGREDIENTS_MAX_ITEMS}. Fields: compound required; label, amount, unit, active, note optional. On update, omit to preserve saved ingredients; supplying --ingredient replaces the saved ingredient list. Keep unit as a compact token like "mcg"; put qualifiers such as "DFE" in note. Do not pass an array.`,
         ),
       relatedGoalId: repeatedRelationOptionSchema(
         'Optional related goal id. Repeat --related-goal-id for multiple values.',

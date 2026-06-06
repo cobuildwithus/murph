@@ -160,6 +160,10 @@ test('supplement save compact guidance teaches shell-safe ingredient JSON object
     assert.match(rendered, /one shell-quoted JSON object/u)
     assert.match(rendered, /compound required/u)
     assert.match(rendered, /label, amount, unit, active, note optional/u)
+    assert.match(rendered, /omit to preserve saved ingredients/u)
+    assert.match(rendered, /supplying --ingredient replaces the saved ingredient list/u)
+    assert.match(rendered, /unit as a compact token like "mcg"/u)
+    assert.match(rendered, /qualifiers such as "DFE" in note/u)
     assert.match(rendered, /Do not pass an array/u)
   }
 
