@@ -286,7 +286,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'whether they are already trying any health protocols or experiments',
     )
-    expect(raw).toContain('outside supplements')
+    expect(raw).not.toContain('outside supplements')
     expect(raw).toContain('mostly starting fresh')
     expect(raw).toContain(
       'Keep supplement intake, supplement examples, dosage, and label questions entirely for the next supplement step',
@@ -505,6 +505,9 @@ describe('assistant skill assets', () => {
     const protocolsSection = raw.slice(protocolsIndex, supplementsIndex)
     expect(protocolsSection).toContain(
       'Keep supplement intake, supplement examples, dosage, and label questions entirely for the next supplement step',
+    )
+    expect(protocolsSection).toContain(
+      'do not mention excluding supplements unless the user has already brought supplements into this part of the conversation',
     )
     expect(protocolsSection).toContain('cold exposure')
     expect(protocolsSection).toContain('sauna')
