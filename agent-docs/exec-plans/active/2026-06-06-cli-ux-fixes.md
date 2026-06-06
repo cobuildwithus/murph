@@ -6,348 +6,261 @@ Updated: 2026-06-06
 
 ## Goal
 
-- Fix the confusing CLI UX issues found in the assistant-facing command audit,
-  excluding the broad agent-facing discovery-manifest work.
-- Keep the work simple: improve command semantics, error messages, examples,
-  and focused tests at the existing owner boundaries instead of adding a new
-  CLI abstraction.
+- Fix only the assistant-facing CLI UX issues that are supported by current
+  code evidence.
+- Keep the implementation small and owner-local: command copy in
+  `packages/cli`, command-shaped normalization in `packages/vault-usecases`,
+  canonical mutation semantics in `packages/core`, and read-side behavior in
+  `packages/query` only when the read model is the source of the issue.
+- Delete speculative work from the plan instead of preserving it as future
+  process.
 
 ## Success criteria
 
-- Murph can call the high-value CLI commands without avoidable trial and error.
-- Repeated structured inputs identify the failing field and item without
-  echoing raw payloads.
-- Generated help and LLM examples are copy-safe for multi-word values,
-  repeatable flags, and boolean flags.
-- Update commands clearly distinguish preserve, replace, and clear semantics.
-- Device/wearable commands no longer invite Murph to use plumbing provider
-  names as user-facing connect or read targets.
-- Experiment setup/logging help closes the most likely assistant traps around
-  protocol fallback, local session dates, and public/private protocol routing.
+- Murph gets precise, privacy-safe errors for failed repeated structured
+  inputs.
+- Typed update commands do not silently erase or reset existing data because an
+  omitted field was interpreted as a replacement value.
+- Generated examples that remain in scope are shell-copyable.
+- The implementation adds no new CLI framework, no new dependency, no new
+  state, and no broad compatibility layer.
 
-## Explicit non-goal
+## Explicit non-goals
 
-- Do not fix the compact assistant CLI discovery manifest in this plan.
-  If Murph is missing command details, it can run targeted `--help`, `--schema`,
-  or `--llms-full` commands. This plan only fixes the command surfaces and
-  command behavior those lookups reveal.
+- Do not fix the compact assistant discovery manifest. Murph can run targeted
+  `--help`, `--schema`, and `--llms-full` commands when it needs details.
+- Do not redesign command topology, replace incur rendering, or add a command
+  adapter layer.
+- Do not change tested product semantics such as capture label lookup resolving
+  to the latest matching capture unless a separate product decision asks for
+  that behavior change.
+- Do not pursue device, experiment, or automation changes that current source
+  and tests already handle.
 
-## Scope
+## Code evidence checked
 
-- In scope:
-  - Supplement/regimen validation, stop lookup, compound lookup ambiguity, and
-    regimen save guidance.
-  - Food/meal/recipe/capture edit conflicts, validation paths, comma handling,
-    and record-choice guidance.
-  - Device/wearable provider naming and connect-target guidance.
-  - Experiment/protocol setup and logging traps that can mislead assistant
-    writes.
-  - Assistant runtime/automation help and explicit route precedence where the
-    behavior is confirmed.
-  - Generated example copy-safety for representative commands.
-  - Focused tests for each changed behavior or help contract.
-- Out of scope:
-  - Rebuilding the CLI framework or replacing incur rendering.
-  - Broad assistant prompt rewrites beyond short routing/guidance corrections.
-  - Hosted runtime topology, device-sync architecture, or assistant daemon
-    lifecycle redesign.
-  - Fixing every weak output schema. Only fix schemas that directly block the
-    command UX changes in this plan.
-
-## Constraints
-
-- Preserve existing package ownership:
-  - CLI command definitions stay in `packages/cli`.
-  - Command-shaped orchestration and option validation stay in
-    `packages/vault-usecases`.
-  - Canonical mutations stay in `packages/core`.
-  - Read-side ambiguity fixes stay in `packages/query` when the ambiguity is a
-    query lookup issue.
-  - Assistant-facing prompt/contract changes stay in `packages/assistant-engine`
-    or `packages/assistant-cli` as appropriate.
-- Keep privacy-safe errors:
-  - Include option name, repeated item index, and field path.
-  - Do not echo raw user payloads, supplement labels, notes, file paths, or
-    direct identifiers in validation errors unless they are already canonical
-    ids meant for the command surface.
-- Prefer small hard failures over silent surprising writes.
-- Do not add compatibility aliases for every mistaken form. Fix guidance and
-  validation first.
+- `packages/vault-usecases/src/usecases/explicit-health-family-services.ts`
+  still throws the generic message `--ingredient failed validation.` for
+  schema-invalid `supplement save --ingredient` JSON.
+- `packages/cli/test/supplement-save-typed-parity.test.ts` currently asserts
+  only the generic validation wording and non-echo behavior, so a narrower
+  error-path improvement is unblocked.
+- `packages/vault-usecases/src/usecases/record-mutations.ts` applies `set`
+  entries and then `clear` entries without rejecting same-field conflicts.
+- `packages/cli/src/commands/food.ts`, `packages/cli/src/commands/recipe.ts`,
+  and `packages/cli/src/commands/meal.ts` build typed edit commands through the
+  shared set/clear patch path, so one shared conflict guard is enough.
+- `packages/cli/src/commands/food.ts` builds `food save` payloads with
+  `status: input.status ?? 'active'`, which means a typed update can reset an
+  archived food to active unless the caller resends status.
+- `packages/cli/src/commands/recipe.ts` does not force the default status in
+  the typed save builder, and the recipe usecase/core path already preserves an
+  existing status when the option is omitted.
+- `packages/vault-usecases/src/option-utils.ts` already has
+  `normalizeRepeatableTextFlagOption`, and
+  `packages/vault-usecases/test/option-utils.test.ts` proves it preserves
+  commas in prose values.
+- `packages/vault-usecases/test/capture.test.ts` explicitly tests stable labels
+  resolving to the latest capture for `show` and `manifest`; that is current
+  product behavior, not an accidental UX bug.
+- `packages/cli/src/commands/device.ts` already rejects `device connect
+  junction` and distinguishes connect targets from live provider keys.
+- `packages/cli/test/device-cli.test.ts` already covers `device connect
+  junction` rejection and provider/filter distinctions.
+- `packages/cli/src/commands/experiment.ts` already requires explicit
+  `--from-protocol` or `--custom --no-public-protocol` and rejects custom
+  starts with protocol-only revision options.
+- `packages/cli/test/cli-expansion-experiment-journal-vault-phase2.test.ts`
+  already covers those experiment source and fallback guards.
+- `packages/cli/src/commands/automation.ts` requires deliverable routes,
+  rejects private placeholders, and current tests assert shell-copyable
+  examples for `automation save`.
+- `packages/core/src/automation.ts` already preserves existing schedule, route,
+  summary, tags, status, and continuity policy on update when the core input
+  omits them; the typed CLI path still requires instructions and schedule, so
+  any automation update change should be a separate focused design decision.
 
 ## Workstreams
 
-### 1. Copy-safe generated examples
+### 1. Improve supplement ingredient validation
 
-Problem:
-- Several help and `--llms-full` examples render multi-word positional text
-  without shell quotes or render camelCase flags while the visible CLI help uses
-  kebab-case flags.
-- Verified example: `intervention add` renders `vault-cli intervention add 20
-  min sauna after lifting.`, which passes only `20` as the text and fails type
-  inference.
+Confirmed problem:
+- `supplement save --ingredient` reports a generic validation message when one
+  repeated JSON object fails schema validation.
+- Murph needs to know which repeated item and safe field path failed, without
+  echoing the raw supplement label or payload.
 
-Tasks:
-1. Add a focused test that renders examples for representative commands and
-   asserts:
-   - multi-word positional args are shell-quoted;
-   - repeatable arrays render as repeated flags, not comma-joined values;
-   - boolean flags render as bare kebab-case flags when true;
-   - option names use canonical CLI kebab-case in shell examples.
-2. Fix example data or renderer behavior for at least:
-   - `intervention add`
-   - `automation save`
-   - `assistant run` or another assistant command with booleans
-   - `search` or `capture` repeatable examples
-   - one recipe or meal example with multi-word values
-3. Run the focused CLI example tests plus `pnpm test:diff` for touched CLI
-   files.
+Minimal fix:
+1. Change the supplement ingredient parser to include the repeated item index
+   in validation failures, for example `--ingredient #2 failed validation`.
+2. Include safe schema issue paths such as `unit` or `amount`, not raw payload
+   text.
+3. Add a special hint when the failing issue is on `unit`: keep units compact
+   such as `mcg`; put qualifiers such as `DFE` in `note`.
+4. Keep malformed JSON and array-shape errors as they are unless the new helper
+   can improve them without broadening scope.
 
-Preferred implementation:
-- Start by fixing example metadata where only a few examples are wrong.
-- If the same renderer bug affects many commands, fix the renderer once and
-  keep command-specific changes minimal.
+Tests:
+- Update the existing supplement invalid-ingredient test to assert item index,
+  field path, unit hint, and no raw payload echo.
+- Keep the existing array and malformed JSON coverage.
 
-### 2. Repeated input validation and set/clear conflicts
+Owner boundary:
+- Prefer a small local helper beside `parseSupplementIngredients`.
+- Do not introduce a generic validation framework unless another touched
+  repeated JSON parser has the same confirmed problem.
 
-Problem:
-- Some repeated structured inputs report generic validation failures.
-- Some edit commands allow setting and clearing the same field in one call,
-  where clear can silently win.
+### 2. Reject same-field set/clear edit conflicts once
 
-Tasks:
-1. Improve `supplement save --ingredient` validation:
-   - report `--ingredient #N` and the safe field path;
-   - special-case unit-space failures with guidance to use compact units like
-     `mcg` and put qualifiers like `DFE` in `note`;
-   - keep raw JSON payloads out of the error envelope.
-2. Apply the same error-shaping helper to food/recipe payload validation where
-   repeated item paths are currently collapsed.
-3. Add a shared or owner-local guard that rejects same-field set/clear
-   conflicts for edit commands.
-4. Cover at least meal, food, and recipe set/clear conflicts with tests.
+Confirmed problem:
+- The shared record patch path applies `set` before `clear`.
+- A typed command can set `ingredients` and clear `ingredients` in the same
+  invocation; the clear wins silently.
 
-Preferred implementation:
-- Add a small helper only if it removes repeated code across owners.
-- Avoid widening public APIs for tests only.
+Minimal fix:
+1. Add a conflict guard in `applyRecordPatch` before applying file, set, or
+   clear mutations.
+2. Reject exact conflicts such as `ingredients=value` plus
+   `--clear-ingredients`.
+3. Also reject parent/child conflicts such as `nutrition.perServing.calories`
+   plus `--clear-nutrition`, because clear currently deletes the parent after
+   the child is set.
+4. Return a concise error naming the conflicting paths and options.
 
-### 3. Supplement and regimen semantics
+Tests:
+- Add focused usecase tests for `applyRecordPatch`.
+- Add one CLI-level regression through a representative typed edit command,
+  preferably `meal edit` or `food edit`, to prove the generated typed path
+  reaches the shared guard.
 
-Problem:
-- `supplement stop` examples imply slug lookup, but the path may pass the raw
-  value as a regimen id.
-- `supplement compound show` may match labels/product titles broadly enough to
-  return the wrong compound.
-- `regimen save` is less clear than `supplement save` about update semantics.
-- `regimen save --unit` lacks the `--dose` guard that `supplement save
-  --dose-unit` has.
+Owner boundary:
+- Put the invariant in `packages/vault-usecases/src/usecases/record-mutations.ts`.
+- Do not copy guards into every command builder.
 
-Tasks:
-1. Verify `supplement stop <slug>` against a fixture.
-   - If it fails or attaches to the wrong lookup path, resolve through the same
-     supplement lookup path as `supplement show` before stopping.
-2. Add an ambiguity test for `supplement compound show` using a multi-ingredient
-   product.
-   - Prefer returning an ambiguity error with candidate compounds.
-   - If product-title matching is not needed, restrict lookup to compound name
-     and lookup id.
-3. Add `regimen save` validation: `--unit requires --dose`.
-4. Mirror supplement update wording on regimen ingredient/relation guidance:
-   omitted fields preserve, supplied repeated fields replace the saved list.
-5. Add focused tests for regimen unit validation and update help text.
+### 3. Preserve food status on typed food updates
 
-### 4. Food, meal, recipe, and capture routing clarity
+Confirmed problem:
+- `buildFoodSavePayload` defaults status to `active` before it knows whether
+  this is a create or update.
+- `packages/core` can preserve existing status when status is omitted, but the
+  CLI never omits it on typed `food save`.
 
-Problem:
-- Murph needs a simple rule for choosing `meal add`, `food save`,
-  `recipe save`, and `capture`.
-- Recipe ingredients and steps naturally contain commas, but some typed flags
-  reject commas as if they were comma-delimited lists.
-- Capture label lookup may resolve to the newest match when labels are reused.
-- Some save/update paths may default or replace status/list fields in surprising
-  ways.
+Minimal fix:
+1. Change `buildFoodSavePayload` so `status` is only supplied when the caller
+   passed `--status`.
+2. Ensure create behavior still defaults to active through the core food
+   upsert path.
+3. Add/update help wording only if needed: omitted scalar fields preserve on
+   update, and create defaults still apply on create.
 
-Tasks:
-1. Add a short assistant-facing rule:
-   - `meal add` for consumed events;
-   - `food save` for reusable products or remembered foods;
-   - `recipe save` for reusable preparation instructions;
-   - `capture` for raw evidence, usually alongside a structured record.
-2. Let recipe ingredient and step text contain ordinary commas while retaining
-   comma rejection for tags, ids, and link-like repeated fields.
-3. Verify capture label lookup ambiguity.
-   - If duplicate labels choose newest silently, change lookup to fail with
-     candidate ids or require an explicit latest-style option.
-4. Verify sparse `food save` / `recipe save` update behavior on archived or
-   saved records.
-   - If omitted status resets on update, preserve existing status and apply
-     defaults only on create.
-5. Add tests for comma-containing recipe text and capture label ambiguity if
-   the behavior is confirmed.
+Tests:
+- Add a focused food typed-save test:
+  - create or import an archived food;
+  - update it with `food save --id ...` while omitting `--status`;
+  - assert the status remains archived.
+- Keep existing create tests proving new foods default to active.
 
-### 5. Device and wearable command traps
+Owner boundary:
+- This is a `packages/cli/src/commands/food.ts` payload-builder fix.
+- Do not change `packages/core` unless a failing test proves core cannot
+  preserve omitted status.
 
-Problem:
-- `device provider list` can make `junction` look like a connect target, but
-  `device connect junction` is not valid user-facing behavior.
-- Hosted connect guidance can include Fitbit, while read-side `wearables
-  --provider fitbit` may reject it.
-- `device account list` help may hide the distinction between runtime provider
-  and upstream source provider.
+### 4. Keep generated examples copy-safe only where unproven gaps remain
 
-Tasks:
-1. Change `device connect` arg/help to avoid saying every provider-list entry is
-   a connect target.
-2. Add explicit connect targets to provider-list output, or add a separate
-   connect-target list surface if that is simpler.
-3. Hide or label `junction` as plumbing in provider-list output and examples.
-4. Align wearable provider filters with public upstream sources where query
-   projections support them.
-   - If Fitbit read filters cannot be supported yet, document that Fitbit data
-     should be read without `--provider fitbit` until the read filter exists.
-5. Fix `device account list --provider` and `--source-provider` help so the
-   distinction appears in `--help` and `--llms-full`.
-6. Add tests for `device connect junction` guidance and account-list option
-   descriptions.
+Current evidence:
+- `automation save` already has a test asserting quoted multi-word args and
+  instructions.
+- Several command descriptions already tell Murph to shell-quote repeatable
+  prose values.
+- The earlier `intervention add` concern still needs source-first proof in this
+  worktree because the built CLI artifact is not present.
 
-### 6. Experiment and protocol assistant traps
+Minimal fix:
+1. Add a source-first test for `intervention add --llms-full` if no existing
+   test already covers the rendered example.
+2. If the example is unquoted, fix the command example metadata directly.
+3. Do not add a broad renderer contract test unless two or more commands prove
+   the same renderer bug.
 
-Problem:
-- Some experiment/protocol options are advanced enough to produce misleading
-  records if Murph uses them casually.
-- Session logging has both local experiment day and occurrence timestamp fields.
-- Private protocol commands can be mistaken for public Health Commons lookup.
+Tests:
+- A single focused CLI metadata test for `intervention add` is enough unless
+  another copied example is proven broken.
 
-Tasks:
-1. Verify whether `experiment start` can persist mismatched Health Commons
-   `pageRevisionId` / `runSpecRevisionId`.
-   - If yes, reject mismatched overrides or remove those overrides from the
-     assistant-facing surface.
-2. Clarify public/custom fallback:
-   - hide internal `publicProtocol` from assistant-facing schemas if practical,
-     or expose a clear `noPublicProtocol` option;
-   - make help explicitly teach `--custom --no-public-protocol` for custom
-     fallback.
-3. Clarify `experiment session log` date behavior:
-   - describe `--date` as the local/scheduled experiment day;
-   - describe `--occurred-at` as the actual timestamp;
-   - add an after-midnight example;
-   - reject or warn when both are present and disagree in a way that changes the
-     local day.
-4. Improve private `protocol show` not-found messaging:
-   - state that `protocol` is for private adaptations;
-   - suggest `commons protocol show` or `commons protocol explore` for public
-     Health Commons protocols.
-5. Add focused tests for the confirmed behaviors.
+Owner boundary:
+- Keep this in `packages/cli` command metadata/tests.
+- Do not modify incur or add a command-rendering abstraction from one bad
+  example.
 
-### 7. Assistant runtime and automation UX
+## Deleted from the original plan after code review
 
-Problem:
-- Murph is told to inspect some runtime facts, but some read-only commands may
-  be absent from the assistant-facing CLI contract.
-- Delivery route precedence may be surprising if saved self-targets override
-  explicit flags.
-- `automation save` appears patch-like but may behave like a full rewrite.
-- Automation execution depends on `assistant run`, but that dependency is easy
-  to miss.
-
-Tasks:
-1. Verify the assistant CLI contract exposure for safe read-only commands:
-   - `assistant self-target list/show`
-   - `assistant status`
-   - `assistant doctor`
-   - model/config inspection if already safe
-2. If missing, expose read-only inspection commands while keeping recursive or
-   send-capable commands hidden.
-3. Verify delivery route precedence.
-   - Prefer explicit flags over saved self-target defaults.
-   - If the current behavior is intentionally saved-target-first, document the
-     exact precedence in help and tests.
-4. Verify `automation save` update semantics.
-   - If it is a full rewrite, either make that explicit in help or preserve
-     omitted existing fields on update.
-   - Avoid automatic route retargeting on update unless the route flags are
-     explicitly supplied.
-5. Add help text explaining that saved automations execute while
-   `assistant run` is active.
-6. Add focused tests for command exposure, route precedence, and automation
-   update semantics.
-
-## Decisions
-
-- Skip the broad compact discovery-manifest fix for now.
-- Treat nested subagent reports as leads, not proof. Every behavior-changing
-  fix needs a local focused test or direct command reproduction first.
-- Prioritize issues that can cause silent wrong writes over issues that only
-  make help text less polished.
-- Prefer fail-fast ambiguity errors over guessing when multiple records or
-  meanings match.
+- Capture label ambiguity: current tests intentionally resolve duplicate
+  labels to the latest capture.
+- Device connect/provider redesign: current code and tests already reject
+  `junction` as a connect target and distinguish provider key classes.
+- Wearables Fitbit read-filter work: current provider filter set intentionally
+  comes from `wearablePreferenceProviderValues`, which excludes Fitbit. This is
+  a product/provider support decision, not a CLI UX cleanup.
+- Experiment custom/public fallback redesign: current code and tests already
+  require explicit fallback flags and reject protocol-only options on custom
+  starts.
+- Broad assistant runtime command exposure: status, doctor, stop, run, and
+  self-target commands are already present in the assistant command surface.
+- Automation sparse-update redesign: core already supports preserving omitted
+  fields, while the typed CLI save path is intentionally create-shaped today.
+  Change it only under a separate focused task if the desired UX is sparse
+  automation editing.
+- Regimen update semantics broadening: `regimen save` currently exposes a
+  single primary ingredient field set rather than the repeated supplement JSON
+  list. Do not force it to mirror `supplement save` unless a concrete user path
+  needs that behavior.
 
 ## Proposed implementation order
 
-1. Fix copy-safe example rendering and add regression tests.
-2. Fix repeated input validation paths and set/clear conflict rejection.
-3. Fix supplement/regimen sharp edges.
-4. Fix device/wearable connect-target guidance.
-5. Fix food/recipe/capture routing and ambiguity.
-6. Verify and fix experiment/protocol issues.
-7. Verify and fix assistant runtime/automation issues.
+1. Supplement ingredient validation message and tests.
+2. Shared set/clear conflict guard and tests.
+3. Food status preservation on typed update and tests.
+4. `intervention add` example proof/fix if the focused metadata test fails.
 
 ## Verification plan
 
-- For each workstream:
-  - Add focused tests for the exact confirmed behavior.
-  - Run `pnpm test:diff <touched paths>`.
+- For each implemented code change:
+  - Run the focused package tests for the changed command/usecase.
+  - Run `pnpm test:diff <touched paths>` when it truthfully covers the touched
+    owners.
   - Run `pnpm typecheck` before handoff.
-- For CLI help/schema/example changes:
-  - Run targeted `--help`, `--llms-full`, and `--schema --format json`
-    commands for the touched commands.
-  - Add tests that inspect generated help/LLM text where the UX contract
-    matters.
-- For mutation semantics:
-  - Use temp-vault integration tests that prove the persisted record state.
-  - Read back the record through the public show/list surface.
-- For assistant runtime or device work:
-  - Avoid live provider sends/OAuth in tests.
-  - Use existing mocks/fixtures and command schemas.
+- For this Markdown-only plan update:
+  - Read back the plan.
+  - Run `git diff --check` on the docs diff.
 
 ## Completion reviews
 
-- Required:
-  - `coverage-write` after focused coverage-bearing checks for changed package
-    owners.
-  - `task-finish-review` before final handoff.
-- Add `security-privacy-review` for any changes that expose runtime status,
-  self-targets, delivery routing, provider identities, or device account
-  surfaces.
-- Add `deep-review` only if a fix crosses owner boundaries or changes
-  persisted-state semantics beyond the narrow command behavior.
+- For future code implementation:
+  - Run coverage-write if code/test changes touch package owners.
+  - Run task-finish-review before final handoff.
+  - Add security-privacy-review only if the implementation touches runtime
+    status, self-targets, delivery routing, provider identities, or device
+    account surfaces.
+- For this plan-only PR update:
+  - No completion-review subagent is required by the docs-only fast path.
 
 ## Open questions
 
-- Should `supplement compound show` support product-title lookup at all, or only
-  canonical compound names and lookup ids?
-- Should capture labels be unique by design, or should duplicate labels be
-  allowed but require explicit disambiguation?
-- Should Fitbit be a first-class wearable read filter now, or should current
-  hosted guidance avoid provider-filtered Fitbit reads until query projection
-  support is complete?
-- Are experiment protocol revision overrides intended for any assistant path, or
-  are they maintainer-only escape hatches that should be hidden?
-- Should `automation save` become sparse-update semantics, or should it remain
-  full-rewrite with stronger help text?
+- Should `automation save` remain create-shaped, or should a separate
+  `automation edit`/sparse-update command exist?
+- Should capture label lookup continue to mean latest-by-label? Current tests
+  say yes; changing it needs a product decision.
+- Should Fitbit become a first-class wearable provider filter? Current
+  contracts say no.
 
 ## Working set
 
-- Likely files:
-  - `packages/cli/src/commands/**`
-  - `packages/cli/test/**`
-  - `packages/vault-usecases/src/usecases/**`
+- Likely implementation files:
+  - `packages/vault-usecases/src/usecases/explicit-health-family-services.ts`
+  - `packages/vault-usecases/src/usecases/record-mutations.ts`
+  - `packages/cli/src/commands/food.ts`
+  - `packages/cli/src/commands/intervention.ts`
+- Likely tests:
+  - `packages/cli/test/supplement-save-typed-parity.test.ts`
   - `packages/vault-usecases/test/**`
-  - `packages/query/src/health/**`
-  - `packages/query/test/**`
-  - `packages/assistant-engine/src/assistant/**`
-  - `packages/assistant-engine/test/**`
-  - `packages/assistant-cli/src/**`
-  - `packages/assistant-cli/test/**`
-  - `docs/contracts/03-command-surface.md` if command contracts materially
-    change
+  - `packages/cli/test/food-save-typed-parity.test.ts`
+  - `packages/cli/test/cli-expansion-intervention.test.ts`
