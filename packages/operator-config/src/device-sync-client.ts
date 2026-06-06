@@ -114,6 +114,7 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
       returnTo?: string
       open?: boolean
       sourceProviderSlug?: string | null
+      ownerId?: string | null
     }): Promise<{
       provider: string
       state: string
@@ -129,6 +130,7 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
         },
         body: JSON.stringify({
           ...(input.returnTo ? { returnTo: input.returnTo } : {}),
+          ...(input.ownerId ? { ownerId: input.ownerId } : {}),
           ...(input.sourceProviderSlug
             ? { sourceProviderSlug: input.sourceProviderSlug }
             : {}),

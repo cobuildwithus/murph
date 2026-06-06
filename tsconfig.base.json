@@ -313,6 +313,12 @@
       "@murphai/operator-config/whatsapp-runtime": [
         "packages/operator-config/src/whatsapp-runtime.ts"
       ],
+      "@murphai/operator-config/device-daemon": [
+        "packages/operator-config/src/device-daemon.ts"
+      ],
+      "@murphai/operator-config/device-sync-client": [
+        "packages/operator-config/src/device-sync-client.ts"
+      ],
       "@murphai/operator-config/*": [
         "packages/operator-config/src/*"
       ],

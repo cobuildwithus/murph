@@ -911,6 +911,45 @@ test("device sync http handler validates request bodies and payload limits", asy
   });
 });
 
+test("device sync http handler forwards owner and source provider on connection starts", async () => {
+  const observedInputs: Array<Parameters<DeviceSyncService["startConnection"]>[0]> = [];
+  const response = await invokeHandler({
+    service: createStubService({
+      async startConnection(input) {
+        observedInputs.push(input);
+        return {
+          provider: "junction",
+          state: "state_demo_01",
+          expiresAt: "2026-03-17T12:30:00.000Z",
+          authorizationUrl: "https://provider.test/oauth?state=state_demo_01",
+        };
+      },
+    }),
+    method: "POST",
+    url: "/device-sync/providers/junction/connect",
+    surface: "combined",
+    headers: {
+      authorization: CONTROL_AUTHORIZATION,
+      "content-type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify({
+      returnTo: "/connected",
+      ownerId: "capture-owner-test",
+      sourceProviderSlug: "whoop_v2",
+    }),
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(observedInputs, [
+    {
+      provider: "junction",
+      returnTo: "/connected",
+      ownerId: "capture-owner-test",
+      sourceProviderSlug: "whoop_v2",
+    },
+  ]);
+});
+
 test("device sync http handler maps URI errors from callback handling to BAD_REQUEST", async () => {
   const response = await invokeHandler({
     service: createStubService({

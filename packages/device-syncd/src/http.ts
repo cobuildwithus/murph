@@ -258,6 +258,7 @@ const DEVICE_SYNC_HTTP_ROUTES = [
       const result = await service.startConnection({
         provider: params.provider ?? "",
         returnTo: readStringField(body, "returnTo"),
+        ownerId: readStringField(body, "ownerId"),
         sourceProviderSlug: readStringField(body, "sourceProviderSlug"),
       });
       sendJson(response, 200, result);

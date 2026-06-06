@@ -30,6 +30,42 @@ test("createDeviceSyncClient sends bearer auth to control-plane routes", async (
   ]);
 });
 
+test("createDeviceSyncClient forwards owner and source provider for connection starts", async () => {
+  let observedPath: string | null = null;
+  let observedBody: unknown = null;
+  const client = createDeviceSyncClient({
+    baseUrl: "http://127.0.0.1:8788",
+    fetchImpl: async (input, init) => {
+      observedPath = String(input);
+      observedBody = JSON.parse(typeof init?.body === "string" ? init.body : "{}");
+
+      return new Response(
+        JSON.stringify({
+          provider: "junction",
+          state: "state_01",
+          expiresAt: "2026-04-23T12:00:00.000Z",
+          authorizationUrl: "https://junction.test/link",
+        }),
+        { status: 200 },
+      );
+    },
+  });
+
+  await client.beginConnection({
+    provider: "junction",
+    returnTo: "/connected",
+    ownerId: "capture-owner-test",
+    sourceProviderSlug: "whoop_v2",
+  });
+
+  assert.equal(observedPath, "http://127.0.0.1:8788/providers/junction/connect");
+  assert.deepEqual(observedBody, {
+    returnTo: "/connected",
+    ownerId: "capture-owner-test",
+    sourceProviderSlug: "whoop_v2",
+  });
+});
+
 test("createDeviceSyncClient explains missing control-plane auth", async () => {
   const client = createDeviceSyncClient({
     baseUrl: "http://127.0.0.1:8788",

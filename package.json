@@ -17,6 +17,7 @@
     "temporal:dev": "bash scripts/temporal-dev-server.sh",
     "temporal:worker": "pnpm --dir packages/hosted-orchestrator-temporal temporal:worker",
     "hosted-orchestration:smoke": "pnpm exec tsx --tsconfig tsconfig.base.json scripts/hosted-orchestration-smoke.ts",
+    "wearable:capture": "pnpm exec tsx --tsconfig tsconfig.base.json scripts/wearable-fixture-capture.ts",
     "test:e2e:hosted-local": "pnpm hosted-local e2e",
     "build": "pnpm -r --sort --workspace-concurrency=${MURPH_BUILD_WORKSPACE_CONCURRENCY:-4} --filter './packages/**' build",
     "clean:build:workspace": "node scripts/clean-build-artifacts.mjs workspace",
