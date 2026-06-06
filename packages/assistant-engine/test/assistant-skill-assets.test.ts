@@ -511,8 +511,27 @@ describe('assistant skill assets', () => {
     expect(protocolsSection).toContain('a new workout plan')
     expect(protocolsSection).toContain('a diet pattern change')
     expect(protocolsSection).toContain('a sleep routine change')
+    expect(protocolsSection).toContain('a recovery practice')
+    expect(protocolsSection).toContain('caffeine/alcohol timing')
+    const normalizedProtocolsSection = protocolsSection.toLowerCase()
+    const supplementExamplesExcludedFromProtocolStep = [
+      'magnesium',
+      'creatine',
+      'vitamin d',
+      'fish oil',
+      'omega-3',
+      'ashwagandha',
+      'protein powder',
+      'multivitamin',
+    ]
+    for (const supplementExample of supplementExamplesExcludedFromProtocolStep) {
+      expect(normalizedProtocolsSection).not.toContain(supplementExample)
+    }
     expect(protocolsSection).not.toContain('```text')
     const supplementSection = raw.slice(supplementsIndex, bloodTestsIndex)
+    expect(supplementSection).toContain(
+      'When relevant, invite product or brand names plus roughly how long they have taken each one or since when',
+    )
     expect(supplementSection).toContain('Follow the supplement input affordance')
     expect(supplementSection).toContain(
       'The default lookup returns one match per query; pass an explicit higher limit only when the first result is ambiguous, generic, or missing likely product variants',
