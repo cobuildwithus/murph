@@ -356,6 +356,7 @@ async function writeRunnerBundlePnpmInstallConfigFromPolicy(
 ): Promise<void> {
   const npmrcLines = [
     ...policy.npmrcLines,
+    "node-linker=hoisted",
   ];
   appendMinimumReleaseAgeExclusionLines(
     npmrcLines,

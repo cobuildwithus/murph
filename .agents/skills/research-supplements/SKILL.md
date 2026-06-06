@@ -25,17 +25,22 @@ Never print `.env`, `.env.local`, database URLs, credentials, tokens, or raw con
    - Allowed Safari actions: open official brand product pages, scroll, use product image galleries or tabs, zoom label/PDF viewers, download official label images or PDFs, and copy visible Supplement Facts, Nutrition Facts, ingredients, UPC/SKU, and source URLs.
    - Disallowed Safari actions: logging in, creating accounts, adding to cart, purchasing, submitting forms, solving CAPTCHAs, bypassing browser/security/paywall barriers, changing settings, uploading/transmitting user data, or accepting prompts beyond ordinary cookie consent.
    - Capture variant-level data when flavors, serving sizes, UPCs, or formulas differ.
-   - Classify bundles/stacks separately from standalone formulas. Do not import merch, shakers, apparel, topical products, or test products as dietary supplements.
+   - Store exactly one standalone supplement product/label per row. Do not import bundles, kits, stacks that combine multiple products, regimens/plans, variety packs, multi-bottle pack duplicates, samples, promos, merch, shakers, apparel, topical products, or test products as dietary supplements.
 
 3. **Normalize rows**
-   - Emit JSON rows with: `id`, `dataOrigin`, `dataOriginId`, `dataOriginUrl`, `source`, `sourceId`, `name`, `brand`, optional `upc`, `offMarket`, `searchText`, and `label`.
+   - Emit JSON rows with: `id`, `dataOrigin`, `dataOriginId`, `dataOriginUrl`, `source`, `sourceId`, `name`, `brand`, optional `upc`, `offMarket`, and `label`. Do not provide custom `searchText`; the DB helper derives compact search text from normalized product fields.
    - `dataOrigin` must be `brand_site`. Use `dataOriginId = <brand-slug>:<sourceId>` and `id = dataOriginId`.
    - `sourceId` must be stable within the brand. Use the product handle for one-formula products and `handle--variant-slug` for variant-specific rows.
-   - `label` must include `schemaVersion`, `sourceFetchedAt`, `sourceUrl`, raw facts text, ingredient text, variants, and evidence status. If full facts are missing, mark `needsManualReview: true` and do not include the row in a production upsert unless the user accepts incomplete rows.
+   - Production rows must include normalized `label.ingredientRows` and `label.servingSizes`. Raw `factsText` and `ingredientText` are allowed as source evidence, but they are not a substitute for normalized rows.
+   - `label` must include `schemaVersion`, `sourceFetchedAt`, `sourceUrl`, normalized facts, raw facts evidence, full active and other ingredient text, variant metadata when relevant, and evidence status.
+   - Do not store full page bodies, FAQ text, reviews, marketing sections, or nearby product copy in `label`. If a short product description is useful, store it as a concise `descriptionText` excerpt; keep page-body extraction as local scratch data only.
+   - If full facts or normalized rows are missing, mark `needsManualReview: true` and do not include the row in a production upsert.
 
 4. **Dry-run against the DB**
    - Read `.agents/skills/research-supplements/references/database-contract.md` before writing.
    - Always run `supplement-db-brand-site-labels.mjs dry-run` before `upsert`.
+   - Treat dry-run `productionBlockedRows` as blockers. The helper blocks production upserts for missing `ingredientRows`, missing `servingSizes`, manual-review rows, obvious non-standalone products, oversized page-body text, raw page text, or oversized search text.
+   - For existing-row cleanup, run `supplement-db-brand-site-repair-preview.mjs` first. It is read-only and writes review artifacts showing proposed compact search text, parser coverage, normalized row additions, and superfluous field candidates. Do not write repair updates until the preview has been reviewed.
    - Duplicate prevention is by `id` plus `(data_origin, data_origin_id)`. UPCs are used to point `canonical_key` at an existing DSLD row when an exact UPC match exists.
    - Treat duplicate input rows for the same `(dataOrigin, dataOriginId)` as a batch error. Resolve them before writing.
 
@@ -48,17 +53,16 @@ Never print `.env`, `.env.local`, database URLs, credentials, tokens, or raw con
    - Report rows inserted/updated, UPC-matched rows, no-UPC rows, skipped products, and products needing manual OCR or review.
    - For 20-brand batches, return a per-brand checklist before the final bulk upsert.
 
-## Momentous Quick Start
+## Brand Batch Flow
 
-Momentous is a Shopify storefront. Use the bundled extractor first:
+Create a normalized JSON batch from official current label evidence, then use the DB helper for the database dry run and upsert:
 
 ```bash
-node .agents/skills/research-supplements/scripts/momentous-shopify-labels.mjs --require-facts > /tmp/momentous-labels.json
-node .agents/skills/research-supplements/scripts/supplement-db-brand-site-labels.mjs dry-run --input /tmp/momentous-labels.json
-node .agents/skills/research-supplements/scripts/supplement-db-brand-site-labels.mjs upsert --input /tmp/momentous-labels.json --delete-origin momentous
+node .agents/skills/research-supplements/scripts/supplement-db-brand-site-labels.mjs dry-run --input /tmp/brand-labels.json
+node .agents/skills/research-supplements/scripts/supplement-db-brand-site-labels.mjs upsert --input /tmp/brand-labels.json
 ```
 
-Use `--include-stacks` only when the user wants bundles/stacks. Use `--handle <handle>` for focused retries. If Momentous returns HTTP 429, rerun later or increase `--delay-ms`. `--delete-origin` is only for replacing a stale per-brand origin that exactly matches the single input brand source after `_` normalization; it rejects core origins such as `brand_site`, `dsld`, and `dailymed`.
+Use temporary brand-specific extraction scripts only as scratch tooling outside the committed skill. Do not add brand-specific import helpers to this skill unless the format is reusable across brands. If replacing stale per-brand legacy origins, `--delete-origin` must match the single input source after `_` normalization; it rejects core origins such as `brand_site`, `dsld`, and `dailymed`.
 
 ## Subagent Prompt
 
@@ -69,13 +73,13 @@ Use $research-supplements at <skill-path> to research <brand>.
 Find official current product labels and return normalized brand_site supplement JSON rows only.
 Do not write to the database.
 If static fetches miss official label evidence, you may use Computer Use with Safari for read-only official-page inspection, label image/PDF review, and official label downloads. Do not log in, create accounts, add to cart, purchase, submit forms, solve CAPTCHAs, bypass browser/security/paywall barriers, upload or transmit user data, or use retailer facts as authoritative unless marked lower-confidence/manual-review.
-For each row include id, dataOrigin=brand_site, dataOriginId, dataOriginUrl, source, sourceId, name, brand, upc if available, label.sourceFetchedAt, label.factsText, label.ingredients or ingredientText, and label.needsManualReview.
+For each row include id, dataOrigin=brand_site, dataOriginId, dataOriginUrl, source, sourceId, name, brand, upc if available, label.sourceFetchedAt, label.ingredientRows, label.servingSizes, label.factsText, label.ingredients or ingredientText, and label.needsManualReview.
 Report skipped products and why.
 ```
 
 ## Resources
 
-- `scripts/momentous-shopify-labels.mjs`: Momentous-specific Shopify/page extractor.
 - `scripts/supplement-db-brand-site-labels.mjs`: DB schema inspect, dry-run, and upsert helper for `supplements` rows where `data_origin = 'brand_site'`.
+- `scripts/supplement-db-brand-site-repair-preview.mjs`: read-only existing-row repair preview for compact search text and normalized facts parsing.
 - `references/database-contract.md`: current supplement DB table contract and write rules.
-- `references/source-quality.md`: source hierarchy, extraction quality rules, and Momentous rehearsal notes.
+- `references/source-quality.md`: source hierarchy and extraction quality rules.

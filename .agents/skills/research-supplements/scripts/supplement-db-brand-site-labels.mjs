@@ -4,10 +4,14 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 
 const BRAND_SITE_ORIGIN = "brand_site";
 const BRAND_SITE_PRIORITY = 5;
 const RESERVED_DATA_ORIGINS = new Set([BRAND_SITE_ORIGIN, "dailymed", "dsld"]);
+const SEARCH_TEXT_MAX_LENGTH = 6000;
+const BODY_TEXT_MAX_LENGTH = 1200;
+const INGREDIENT_TEXT_MAX_LENGTH = 1200;
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -279,7 +283,7 @@ function normalizeItem(item) {
   const upc = nullableUpc(item.upc);
   const dataOriginUrl = nullableString(item.dataOriginUrl ?? item.data_origin_url ?? item.sourceUrl ?? item.source_url ?? label.sourceUrl ?? label.source_url);
   const offMarket = Boolean(item.offMarket ?? item.off_market ?? false);
-  const searchText = nullableString(item.searchText ?? item.search_text) ?? buildSearchText({
+  const searchText = buildSearchText({
     source,
     sourceId,
     dataOrigin,
@@ -288,6 +292,14 @@ function normalizeItem(item) {
     brand,
     upc,
     dataOriginUrl,
+    label,
+  });
+  const reviewIssues = findProductionReviewIssues({
+    sourceId,
+    dataOriginId,
+    dataOriginUrl,
+    name,
+    searchText,
     label,
   });
 
@@ -305,6 +317,7 @@ function normalizeItem(item) {
     searchText,
     label,
     dataOriginUrl,
+    reviewIssues,
   };
 }
 
@@ -329,17 +342,132 @@ function nullableUpc(value) {
 }
 
 function buildSearchText(item) {
-  return [
-    item.source,
+  const parts = [];
+  appendSearchValue(parts, item.source);
+  appendSearchValue(parts, item.sourceId);
+  appendSearchValue(parts, item.dataOrigin);
+  appendSearchValue(parts, item.dataOriginId);
+  appendSearchValue(parts, item.name);
+  appendSearchValue(parts, item.brand);
+  appendSearchValue(parts, item.upc);
+  appendSearchValue(parts, item.dataOriginUrl);
+
+  const label = item.label && typeof item.label === "object" ? item.label : {};
+  appendSearchValue(parts, label.productType);
+  appendSearchValue(parts, label.netContents);
+  appendSearchValue(parts, label.servingSizes);
+  appendSearchValue(parts, label.servingSize);
+  appendIngredientRows(parts, label.ingredientRows);
+  appendSearchValue(parts, label.activeIngredients);
+  appendSearchValue(parts, label.otherIngredients);
+  appendSearchValue(parts, label.ingredientText ?? label.ingredients, INGREDIENT_TEXT_MAX_LENGTH);
+  appendVariantSummary(parts, label.variant);
+
+  return compactSearchText(parts.join(" "));
+}
+
+function compactSearchText(value) {
+  return String(value)
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, SEARCH_TEXT_MAX_LENGTH);
+}
+
+function appendSearchValue(parts, value, maxLength = 240) {
+  if (value === null || value === undefined) return;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    const text = String(value).trim();
+    if (text) parts.push(text.slice(0, maxLength));
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value.slice(0, 80)) {
+      appendSearchValue(parts, entry, maxLength);
+    }
+    return;
+  }
+  if (typeof value === "object") {
+    for (const key of [
+      "name",
+      "ingredient",
+      "title",
+      "amount",
+      "quantity",
+      "unit",
+      "dailyValue",
+      "dv",
+      "servingSize",
+      "servingsPerContainer",
+      "count",
+      "form",
+      "sku",
+      "barcode",
+    ]) {
+      appendSearchValue(parts, value[key], maxLength);
+    }
+  }
+}
+
+function appendIngredientRows(parts, rows) {
+  if (!Array.isArray(rows)) return;
+  for (const row of rows.slice(0, 120)) {
+    appendSearchValue(parts, row);
+  }
+}
+
+function appendVariantSummary(parts, variant) {
+  if (!variant || typeof variant !== "object" || Array.isArray(variant)) return;
+  for (const key of ["title", "name", "sku", "barcode", "upc"]) {
+    appendSearchValue(parts, variant[key]);
+  }
+}
+
+function findProductionReviewIssues(item) {
+  const issues = [];
+  const label = item.label && typeof item.label === "object" ? item.label : {};
+  if (!hasNonEmptyArray(label.ingredientRows)) issues.push("missing_ingredient_rows");
+  if (!hasNonEmptyArray(label.servingSizes)) issues.push("missing_serving_sizes");
+  if (label.needsManualReview === true) issues.push("needs_manual_review");
+  if (isLikelyNonStandaloneProduct(item, label)) issues.push("non_standalone_product");
+  if (typeof label.bodyText === "string" && label.bodyText.trim().length > BODY_TEXT_MAX_LENGTH) {
+    issues.push("page_body_text_too_large");
+  }
+  if (typeof label.rawPageText === "string" && label.rawPageText.trim().length > 0) {
+    issues.push("raw_page_text_present");
+  }
+  if (item.searchText.length > SEARCH_TEXT_MAX_LENGTH) issues.push("search_text_too_large");
+  return issues;
+}
+
+function hasNonEmptyArray(value) {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function isLikelyNonStandaloneProduct(item, label) {
+  const haystack = [
     item.sourceId,
-    item.dataOrigin,
     item.dataOriginId,
-    item.name,
-    item.brand,
-    item.upc,
     item.dataOriginUrl,
-    JSON.stringify(item.label),
-  ].filter(Boolean).join(" ").replace(/\s+/gu, " ").slice(0, 20000);
+    item.name,
+    label.productType,
+    label.productKind,
+    label.classification,
+    label.itemType,
+    Array.isArray(label.tags) ? label.tags.join(" ") : label.tags,
+  ].filter(Boolean).join(" ").toLowerCase();
+  return /\b(bundle|kit|regimen|combo pack|variety pack|support plan|supplement plan)\b/u.test(haystack)
+    || /\b(sample|promo)\b/u.test(haystack)
+    || /\b[2-9]\s*[- ]?\s*pack\b/u.test(haystack);
+}
+
+function assertProductionReady(items) {
+  const blocked = items.filter((item) => item.reviewIssues.length > 0);
+  if (blocked.length === 0) return;
+  const preview = blocked.slice(0, 12)
+    .map((item) => `${item.dataOriginId} [${item.reviewIssues.join(", ")}]`)
+    .join("; ");
+  const suffix = blocked.length > 12 ? `; ... ${blocked.length - 12} more` : "";
+  throw new Error(`Production upsert blocked for ${blocked.length} brand_site row(s): ${preview}${suffix}`);
 }
 
 function copyField(value) {
@@ -364,6 +492,7 @@ function copyRows(items) {
     item.offMarket ? "true" : "false",
     item.searchText,
     JSON.stringify(item.label),
+    JSON.stringify(item.reviewIssues),
   ].map(copyField).join("\t")).join("\n");
 }
 
@@ -379,7 +508,8 @@ function loadInputSql(items) {
   upc text,
   off_market boolean not null,
   search_text text not null,
-  label jsonb not null
+  label jsonb not null,
+  review_issues jsonb not null
 );
 copy input_labels from stdin;
 ${copyRows(items)}
@@ -453,11 +583,19 @@ select jsonb_pretty(jsonb_build_object(
   'newRows', count(*) filter (where not existing),
   'dsldCanonicalMatchedRows', count(*) filter (where dsld_canonical_key is not null),
   'missingUpcRows', count(*) filter (where upc is null),
-  'duplicateInputRows', count(*) - count(distinct (data_origin, data_origin_id))
+  'duplicateInputRows', count(*) - count(distinct (data_origin, data_origin_id)),
+  'productionBlockedRows', count(*) filter (where jsonb_array_length(review_issues) > 0),
+  'missingIngredientRows', count(*) filter (where review_issues ? 'missing_ingredient_rows'),
+  'missingServingSizes', count(*) filter (where review_issues ? 'missing_serving_sizes'),
+  'nonStandaloneRows', count(*) filter (where review_issues ? 'non_standalone_product'),
+  'pageBodyRows', count(*) filter (where review_issues ? 'page_body_text_too_large' or review_issues ? 'raw_page_text_present'),
+  'manualReviewRows', count(*) filter (where review_issues ? 'needs_manual_review'),
+  'oversizedSearchTextRows', count(*) filter (where review_issues ? 'search_text_too_large')
 )) as summary
 from prepared_labels;
 
 select data_origin, data_origin_id, name, coalesce(upc, '') as upc, canonical_key,
+  review_issues::text as review_issues,
   case when existing then 'update' else 'insert' end as action
 from prepared_labels
 order by data_origin, data_origin_id
@@ -532,7 +670,7 @@ commit;
 `;
 }
 
-try {
+function main() {
   const { command, options } = parseArgs(process.argv.slice(2));
   const dbUrl = getDbUrl();
   if (command === "inspect") {
@@ -541,11 +679,32 @@ try {
     const items = readJsonInput(options.input);
     if (items.length === 0) throw new Error("Input contains no label rows.");
     assertUniqueOriginRows(items);
-    if (command === "upsert") validateDeleteOrigin(options.deleteOrigin, items);
+    if (command === "upsert") {
+      validateDeleteOrigin(options.deleteOrigin, items);
+      assertProductionReady(items);
+    }
     const sql = command === "dry-run" ? dryRunSql(items, options.limit) : upsertSql(items, options.deleteOrigin);
     process.stdout.write(runPsql(dbUrl, sql));
   }
-} catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
 }
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    main();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+}
+
+export {
+  BODY_TEXT_MAX_LENGTH,
+  INGREDIENT_TEXT_MAX_LENGTH,
+  SEARCH_TEXT_MAX_LENGTH,
+  assertProductionReady,
+  buildSearchText,
+  findProductionReviewIssues,
+  getDbUrl,
+  normalizeItem,
+  runPsql,
+};

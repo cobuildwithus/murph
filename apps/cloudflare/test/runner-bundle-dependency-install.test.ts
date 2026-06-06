@@ -201,6 +201,7 @@ describe("runner bundle pnpm install config", () => {
       [
         "minimum-release-age=1440",
         "minimum-release-age-exclude[]=incur@0.4.4",
+        "node-linker=hoisted",
         "minimum-release-age-exclude[]=@murphai/assistant-runtime@1.2.3",
         "minimum-release-age-exclude[]=@murphai/runtime-state@2.3.4",
         "",
@@ -301,6 +302,7 @@ describe("runner bundle pnpm install config", () => {
         "save-prefix=",
         "trust-policy=no-downgrade",
         "trust-policy-ignore-after=259200",
+        "node-linker=hoisted",
         "",
       ].join("\n"),
     );
@@ -337,6 +339,7 @@ describe("runner bundle pnpm install config", () => {
       [
         "minimum-release-age=1440",
         "minimum-release-age-exclude[]=incur@0.4.4",
+        "node-linker=hoisted",
         "minimum-release-age-exclude[]=@murphai/assistant-runtime@1.0.0",
         "minimum-release-age-exclude[]=@murphai/runtime-state@1.0.0",
         "",

@@ -64,7 +64,7 @@ When a brand-site row's UPC exactly matches a DSLD row in `supplements`, set `ca
 2. Reject duplicate `(data_origin, data_origin_id)` rows before writing.
 3. Upsert brand-site rows with `ON CONFLICT (id) DO UPDATE`.
 4. Overwrite existing brand-site rows when the source is current official brand evidence.
-5. If stale per-brand origins already exist, delete them in the same transaction as the replacement `brand_site` upsert. For Momentous, use `--delete-origin momentous`. The cleanup flag rejects core origins such as `brand_site`, `dsld`, and `dailymed`, and it must match the single input source after hyphens are normalized to underscores.
+5. If stale per-brand origins already exist, delete them in the same transaction as the replacement `brand_site` upsert. The cleanup flag rejects core origins such as `brand_site`, `dsld`, and `dailymed`, and it must match the single input source after hyphens are normalized to underscores.
 6. Preserve provenance inside top-level columns and `label`:
    - `data_origin`
    - `data_origin_id`
