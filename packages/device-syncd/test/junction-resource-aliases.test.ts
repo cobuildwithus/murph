@@ -137,6 +137,7 @@ test("Junction webhooks canonicalize resource aliases before category inference"
 
   const cases = [
     ["daily.data.heart_rate.created", "heartrate", "timeseries"],
+    ["daily.data.steps.created", "steps", "timeseries"],
     ["daily.data.body_weight.created", "weight", "timeseries"],
     ["daily.data.stress_level.created", "stress_level", "timeseries"],
     ["daily.data.sleep_cycle.created", "sleep_cycle", "summary"],

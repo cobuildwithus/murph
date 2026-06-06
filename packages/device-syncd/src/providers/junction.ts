@@ -1278,6 +1278,7 @@ export function createJunctionDeviceSyncProvider(
       eventType,
       externalAccountId: externalAccountSelection.userId,
       resource,
+      summaryResources,
       sourceProviderSlug,
     });
     const jobs = buildJunctionWebhookJobs({
@@ -4247,13 +4248,14 @@ function buildJunctionWebhookDataJobJsons(input: {
   eventType: string;
   externalAccountId: string;
   resource: { name: string; category: "summary" | "timeseries" } | null;
+  summaryResources: readonly string[];
   sourceProviderSlug: string | null;
 }): string[] {
   if (!input.data || !input.resource || !isJunctionDataEvent(input.eventType)) {
     return [];
   }
 
-  if (input.resource.category === "timeseries") {
+  if (input.resource.category !== "summary" || !input.summaryResources.includes(input.resource.name)) {
     return [];
   }
 

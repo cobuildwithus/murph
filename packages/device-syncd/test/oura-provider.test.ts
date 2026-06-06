@@ -1949,6 +1949,23 @@ test("Oura provider exposes the connect URL, forwards webhook verification throu
     false,
   );
 
+  const staleScopeProvider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    scopes: ["personal", "daily", "heartrate", "workout"],
+  });
+  const staleConfiguredScopes = staleScopeProvider.descriptor.oauth?.defaultScopes ?? [];
+  assert.deepEqual(staleConfiguredScopes, ["personal", "daily", "workout", "session", "spo2"]);
+  assert.equal(
+    staleScopeProvider.oauthAdapter.buildConnectUrl({
+      callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
+      scopes: staleConfiguredScopes,
+      state: "state-stale-scope-connect",
+      now: "2026-03-16T10:00:00.000Z",
+    }).includes("heartrate"),
+    false,
+  );
+
   assert.equal(
     provider.oauthAdapter.buildConnectUrl({
       callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",

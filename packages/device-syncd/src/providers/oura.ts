@@ -165,7 +165,11 @@ export interface OuraDeviceSyncProviderConfig {
 
 function buildOuraScopes(input: string[] | undefined): string[] {
   const requested = [...OURA_DEFAULT_SCOPES, ...(input ?? [])];
-  return [...new Set(requested.map((scope) => scope.trim()).filter(Boolean))];
+  return [...new Set(
+    requested
+      .map((scope) => scope.trim())
+      .filter((scope) => scope && scope !== "heartrate"),
+  )];
 }
 
 function hasOuraScope(account: DeviceSyncAccount, scope: string): boolean {
