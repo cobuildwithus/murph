@@ -63,6 +63,12 @@ describe("supplements API route", () => {
         brand: "Example Brand",
         upc: "123456789012",
         offMarket: false,
+        label: {
+          ingredients: ["Creatine Monohydrate"],
+          supplementFacts: {
+            servingSize: "1 scoop",
+          },
+        },
       },
     ]);
 
@@ -93,9 +99,35 @@ describe("supplements API route", () => {
           brand: "Example Brand",
           upc: "123456789012",
           offMarket: false,
+          label: {
+            ingredients: ["Creatine Monohydrate"],
+            supplementFacts: {
+              servingSize: "1 scoop",
+            },
+          },
         },
       ],
     });
+  });
+
+  it("uses five search results by default", async () => {
+    mocks.searchSupplements.mockResolvedValue([]);
+
+    const response = await supplementsRoute.GET(
+      new Request("https://web.example.test/api/supplements?q=creatine", {
+        headers: {
+          authorization: "Bearer test-data-api-key",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.searchSupplements).toHaveBeenCalledWith({
+      q: "creatine",
+      limit: 5,
+      includeOffMarket: false,
+    });
+    await expect(response.json()).resolves.toEqual({ items: [] });
   });
 
   it("returns an empty search without touching the database when q is blank", async () => {
@@ -202,6 +234,14 @@ describe("supplements API route", () => {
         brand: null,
         upc: null,
         offMarket: false,
+        label: {
+          ingredients: [
+            input.q === "creatine" ? "Creatine Monohydrate" : "Magnesium Glycinate",
+          ],
+          supplementFacts: {
+            servingSize: input.q === "creatine" ? "1 scoop" : "2 capsules",
+          },
+        },
       },
     ]);
 
@@ -248,6 +288,12 @@ describe("supplements API route", () => {
               brand: null,
               upc: null,
               offMarket: false,
+              label: {
+                ingredients: ["Creatine Monohydrate"],
+                supplementFacts: {
+                  servingSize: "1 scoop",
+                },
+              },
             },
           ],
         },
@@ -262,8 +308,48 @@ describe("supplements API route", () => {
               brand: null,
               upc: null,
               offMarket: false,
+              label: {
+                ingredients: ["Magnesium Glycinate"],
+                supplementFacts: {
+                  servingSize: "2 capsules",
+                },
+              },
             },
           ],
+        },
+      ],
+    });
+  });
+
+  it("uses five matches per batch query by default", async () => {
+    mocks.searchSupplements.mockResolvedValue([]);
+
+    const response = await supplementsRoute.POST(
+      new Request("https://web.example.test/api/supplements", {
+        body: JSON.stringify({
+          queries: ["creatine"],
+        }),
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.searchSupplements).toHaveBeenCalledWith({
+      q: "creatine",
+      limit: 5,
+      includeOffMarket: false,
+    });
+    await expect(response.json()).resolves.toEqual({
+      includeOffMarket: false,
+      limit: 5,
+      results: [
+        {
+          query: "creatine",
+          items: [],
         },
       ],
     });

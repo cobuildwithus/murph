@@ -10,6 +10,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const DATA_API_KEY_ENV = "MURPH_DATA_API_KEY";
+const DEFAULT_SUPPLEMENTS_LIMIT = 5;
+const MAX_SUPPLEMENTS_LIMIT = 50;
 const MAX_BATCH_QUERIES = 10;
 const MAX_BATCH_QUERY_LENGTH = 256;
 const MAX_BATCH_BODY_BYTES = 8 * 1024;
@@ -73,13 +75,13 @@ function supplementsApiFailed(error: unknown): Response {
 }
 
 function parseLimit(value: string | number | null | undefined): number {
-  const parsed = Number(value ?? 20);
+  const parsed = Number(value ?? DEFAULT_SUPPLEMENTS_LIMIT);
 
   if (!Number.isFinite(parsed)) {
-    return 20;
+    return DEFAULT_SUPPLEMENTS_LIMIT;
   }
 
-  return Math.min(Math.max(Math.floor(parsed), 1), 50);
+  return Math.min(Math.max(Math.floor(parsed), 1), MAX_SUPPLEMENTS_LIMIT);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

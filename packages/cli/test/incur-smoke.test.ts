@@ -977,7 +977,7 @@ test('supplement search-labels schema exposes hosted label lookup inputs', async
   )
   assert.match(
     String(schema.options.properties.limit?.description ?? ''),
-    /Maximum label matches/u,
+    /Maximum label matches to return\. Defaults to 5/u,
   )
 })
 
@@ -1007,6 +1007,10 @@ test('supplement search-labels-batch schema exposes hosted batch lookup inputs',
   assert.match(
     String(schema.options.properties.query?.description ?? ''),
     /Repeat --query/u,
+  )
+  assert.match(
+    String(schema.options.properties.limit?.description ?? ''),
+    /Maximum label matches to return per query\. Defaults to 5/u,
   )
 })
 

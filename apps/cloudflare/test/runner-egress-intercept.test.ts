@@ -458,6 +458,34 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("fails closed when the data API Worker secret is missing or still a placeholder", async () => {
+    for (const dataApiKey of [undefined, HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL]) {
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+      vi.stubGlobal("fetch", fetchMock);
+      const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+        userId: string;
+      }) => createActiveRuntimeWriteFenceValidationResult(input));
+
+      await expect(hostedRunnerIntercept(
+        new Request("http://murph-data-api.worker/api/supplements?q=creatine", {
+          method: "GET",
+        }),
+        createInterceptEnv({
+          HOSTED_WEB_BASE_URL: "https://web.example.test",
+          MURPH_DATA_API_KEY: dataApiKey,
+          readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+          validateActiveRuntimeWriteFence,
+        }),
+        { containerId: "opaque-container-id" },
+      )).rejects.toThrow("Hosted runner intercept requires Worker secret MURPH_DATA_API_KEY.");
+
+      expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+        userId: "member_123",
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  });
+
   it("injects data API authorization for hosted supplement batch lookups", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       results: [],
@@ -615,7 +643,7 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("forwards internal supplement label lookups to the local hosted web alias", async () => {
+  it("forwards internal supplement label lookups to the Worker-local hosted web origin", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       items: [],
     }), {
@@ -635,7 +663,7 @@ describe("hostedRunnerIntercept", () => {
       }),
       createInterceptEnv({
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
-        HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
+        HOSTED_WEB_BASE_URL: "http://localhost:3000",
         MURPH_DATA_API_KEY: "data-api-worker-secret",
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
         readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
@@ -646,7 +674,7 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(200);
     const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("http://host.docker.internal:3000/api/supplements?q=magnesium");
+    expect(forwarded.url).toBe("http://localhost:3000/api/supplements?q=magnesium");
     expect(forwarded.headers.get("authorization")).toBe("Bearer data-api-worker-secret");
   });
 

@@ -187,7 +187,7 @@ export function registerSupplementCommands(
         },
         description: 'Search supplement labels by product or ingredient text.',
         options: {
-          limit: 10,
+          limit: 5,
         },
       },
     ],
@@ -199,7 +199,7 @@ export function registerSupplementCommands(
         .positive()
         .max(50)
         .optional()
-        .describe('Maximum label matches to return. Defaults to 10.'),
+        .describe('Maximum label matches to return. Defaults to 5.'),
       includeOffMarket: z
         .boolean()
         .optional()
@@ -240,7 +240,7 @@ export function registerSupplementCommands(
         .positive()
         .max(50)
         .optional()
-        .describe('Maximum label matches to return per query. Defaults to 10.'),
+        .describe('Maximum label matches to return per query. Defaults to 5.'),
       includeOffMarket: z
         .boolean()
         .optional()

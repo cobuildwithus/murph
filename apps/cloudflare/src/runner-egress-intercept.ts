@@ -2880,7 +2880,7 @@ function readHostedDataApiUpstreamBaseUrl(
     if (!isAllowedProviderBaseUrl(url, env)) {
       return null;
     }
-    return createHostedLocalDataApiUpstreamBaseUrl(url, env) ?? url;
+    return url;
   } catch {
     return null;
   }
@@ -2892,20 +2892,6 @@ function createHostedDataApiUpstreamUrl(sourceUrl: URL, upstreamBaseUrl: URL): U
   upstreamUrl.search = sourceUrl.search;
   upstreamUrl.hash = sourceUrl.hash;
   return upstreamUrl;
-}
-
-function createHostedLocalDataApiUpstreamBaseUrl(
-  baseUrl: URL,
-  env: RunnerOutboundEnvironmentSource,
-): URL | null {
-  const alias = readLocalProviderHostAlias(env);
-  if (!alias || !isContainerAliasableProviderHost(baseUrl.hostname)) {
-    return null;
-  }
-
-  const aliasUrl = new URL(baseUrl.toString());
-  aliasUrl.hostname = alias;
-  return aliasUrl.origin === baseUrl.origin ? null : aliasUrl;
 }
 
 function readProviderBaseConfig(

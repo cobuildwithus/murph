@@ -12187,7 +12187,7 @@
                       "additionalProperties": false,
                       "properties": {
                         "limit": {
-                          "description": "Maximum label matches to return. Defaults to 10.",
+                          "description": "Maximum label matches to return. Defaults to 5.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 50
@@ -12220,7 +12220,7 @@
                           "description": "Supplement product, brand, or ingredient search text. Repeat --query for multiple values."
                         },
                         "limit": {
-                          "description": "Maximum label matches to return per query. Defaults to 10.",
+                          "description": "Maximum label matches to return per query. Defaults to 5.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 50

@@ -71,6 +71,12 @@ describe("supplements query helpers", () => {
               brand: null,
               upc: null,
               offMarket: false,
+              label: {
+                ingredients: ["Creatine Monohydrate"],
+                supplementFacts: {
+                  servingSize: "1 scoop",
+                },
+              },
             },
           ] as T[],
         };
@@ -84,12 +90,19 @@ describe("supplements query helpers", () => {
     });
 
     expect(rows).toHaveLength(1);
+    expect(rows[0]?.label).toEqual({
+      ingredients: ["Creatine Monohydrate"],
+      supplementFacts: {
+        servingSize: "1 scoop",
+      },
+    });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.text).toContain("websearch_to_tsquery");
     expect(calls[0]?.text).toContain("FROM supplements, query");
     expect(calls[0]?.text).toContain("PARTITION BY canonical_key");
     expect(calls[0]?.text).toContain("dedupe_rank = 1");
     expect(calls[0]?.text).toContain("data_origin_priority ASC");
+    expect(calls[0]?.text).toContain("label");
     expect(calls[0]?.text).not.toContain("supplement_external_labels");
     expect(calls[0]?.text).not.toContain("matched_dsld_id");
     expect(calls[0]?.values).toEqual(["creatine", false, 5]);

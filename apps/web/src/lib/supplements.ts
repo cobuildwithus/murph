@@ -21,11 +21,10 @@ export type SupplementSearchItem = {
   brand: string | null;
   upc: string | null;
   offMarket: boolean;
-};
-
-export type SupplementDetail = SupplementSearchItem & {
   label: unknown;
 };
+
+export type SupplementDetail = SupplementSearchItem;
 
 export function createSupplementsQueries(client: SupplementsQueryClient): {
   getSupplementById: (input: {
@@ -131,6 +130,7 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
             brand,
             upc,
             off_market AS "offMarket",
+            label,
             ts_rank_cd(to_tsvector('simple', search_text), query.tsq) AS search_rank,
             data_origin_priority,
             row_number() OVER (
@@ -154,7 +154,8 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
           name,
           brand,
           upc,
-          "offMarket"
+          "offMarket",
+          label
         FROM ranked
         WHERE dedupe_rank = 1
         ORDER BY

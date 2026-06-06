@@ -304,6 +304,12 @@ test('supplement search-labels calls the hosted data API without local credentia
         brand: null,
         upc: null,
         offMarket: false,
+        label: {
+          ingredients: ['Creatine Monohydrate'],
+          supplementFacts: {
+            servingSize: '1 scoop',
+          },
+        },
       },
     ],
   }), {
@@ -359,6 +365,12 @@ test('supplement search-labels-batch calls the hosted data API without local cre
             brand: null,
             upc: null,
             offMarket: false,
+            label: {
+              ingredients: ['Creatine Monohydrate'],
+              supplementFacts: {
+                servingSize: '1 scoop',
+              },
+            },
           },
         ],
       },

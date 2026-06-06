@@ -1216,9 +1216,15 @@ describe("buildWranglerEnvFileText", () => {
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
         HOSTED_ASSISTANT_PROVIDER: "openai",
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
+        MURPH_DATA_API_KEY: "local-data-api-key",
         OPENAI_API_KEY: "local-openai-key",
       }),
     ).toContain('OPENAI_API_KEY="local-openai-key"');
+    expect(
+      buildWranglerEnvFileText({
+        MURPH_DATA_API_KEY: "local-data-api-key",
+      }),
+    ).toContain('MURPH_DATA_API_KEY="local-data-api-key"');
     expect(
       buildWranglerEnvFileText({
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
@@ -1438,20 +1444,23 @@ describe("buildWranglerLocalDevConfig", () => {
     });
   });
 
-  it("declares OpenAI credentials as local worker secrets", () => {
+  it("declares Worker-owned data API and OpenAI credentials as local worker secrets", () => {
     const config = buildWranglerLocalDevConfig({
       HOSTED_ASSISTANT_PROVIDER: "openai",
+      MURPH_DATA_API_KEY: "local-data-api-key",
       OPENAI_API_KEY: "local-openai-key",
     });
 
     expect(config.secrets).toEqual({
       required: expect.arrayContaining([
+        "MURPH_DATA_API_KEY",
         "OPENAI_API_KEY",
       ]),
     });
     expect(config.vars).toMatchObject({
       HOSTED_ASSISTANT_PROVIDER: "openai",
     });
+    expect(config.vars).not.toHaveProperty("MURPH_DATA_API_KEY");
     expect(config.vars).not.toHaveProperty("OPENAI_API_KEY");
   });
 

@@ -10,6 +10,22 @@ const hostedRuntimeEnv = {
   MURPH_HOSTED_RUNTIME_PROCESS: '1',
 }
 
+const creatineLabel = {
+  ingredients: ['Creatine Monohydrate'],
+  supplementFacts: {
+    servingSize: '1 scoop',
+  },
+}
+
+const dailymedLabel = {
+  otherIngredients: {
+    ingredients: ['Milk Protein'],
+  },
+  supplementFacts: {
+    servingSize: '1 bottle',
+  },
+}
+
 describe('searchSupplementLabels', () => {
   it('calls the internal supplements API without local authorization headers or hosted web config', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
@@ -22,6 +38,7 @@ describe('searchSupplementLabels', () => {
           brand: 'Advanced Pharmaceutical Services',
           upc: null,
           offMarket: false,
+          label: dailymedLabel,
         },
       ],
     }), {
@@ -57,6 +74,7 @@ describe('searchSupplementLabels', () => {
           brand: 'Advanced Pharmaceutical Services',
           upc: null,
           offMarket: false,
+          label: dailymedLabel,
         },
       ],
     })
@@ -88,9 +106,7 @@ describe('searchSupplementLabels', () => {
         brand: 'Example Brand',
         upc: '123456789012',
         offMarket: false,
-        label: {
-          id: 82118,
-        },
+        label: creatineLabel,
       },
     }), {
       headers: {
@@ -112,7 +128,7 @@ describe('searchSupplementLabels', () => {
     assert.deepEqual(result, {
       source: 'murph-data-api',
       query: '82118',
-      limit: 10,
+      limit: 5,
       includeOffMarket: false,
       items: [
         {
@@ -123,6 +139,7 @@ describe('searchSupplementLabels', () => {
           brand: 'Example Brand',
           upc: '123456789012',
           offMarket: false,
+          label: creatineLabel,
         },
       ],
     })
@@ -142,6 +159,7 @@ describe('searchSupplementLabels', () => {
         brand: 'Example Brand',
         upc: null,
         offMarket: true,
+        label: creatineLabel,
       },
     }), {
       headers: {
@@ -176,6 +194,7 @@ describe('searchSupplementLabels', () => {
         brand: 'Advanced Pharmaceutical Services',
         upc: null,
         offMarket: false,
+        label: dailymedLabel,
       },
     }), {
       headers: {
@@ -224,6 +243,7 @@ describe('searchSupplementLabels', () => {
             brand: 'Advanced Pharmaceutical Services',
             upc: null,
             offMarket: false,
+            label: dailymedLabel,
           },
         ],
       }), {
@@ -278,7 +298,51 @@ describe('searchSupplementLabels', () => {
 
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(requestUrl.searchParams.get('q'), 'brand: creatine')
+    assert.equal(requestUrl.searchParams.get('limit'), '5')
     assert.equal(requestUrl.searchParams.has('id'), false)
+  })
+
+  it('tolerates metadata-only search responses during deploy skew', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [
+        {
+          id: '82118',
+          dataOrigin: 'dsld',
+          dataOriginId: '82118',
+          name: 'Creatine Monohydrate',
+          brand: null,
+          upc: null,
+          offMarket: false,
+        },
+      ],
+    }), {
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+      },
+      status: 200,
+    }))
+
+    const result = await searchSupplementLabels(
+      {
+        q: 'creatine',
+      },
+      {
+        env: hostedRuntimeEnv,
+        fetchImpl: fetchMock,
+      },
+    )
+
+    assert.deepEqual(result.items, [
+      {
+        id: '82118',
+        dataOrigin: 'dsld',
+        dataOriginId: '82118',
+        name: 'Creatine Monohydrate',
+        brand: null,
+        upc: null,
+        offMarket: false,
+      },
+    ])
   })
 
   it('looks up GTIN-shaped UPC input through the exact UPC endpoint', async () => {
@@ -291,6 +355,7 @@ describe('searchSupplementLabels', () => {
         brand: null,
         upc: '123456789012',
         offMarket: false,
+        label: creatineLabel,
       },
     }), {
       headers: {
@@ -336,6 +401,7 @@ describe('searchSupplementLabels', () => {
           brand: null,
           upc: '123456789012',
           offMarket: false,
+          label: creatineLabel,
         },
       }), {
         headers: {
@@ -426,6 +492,7 @@ describe('searchSupplementLabelsBatch', () => {
               brand: null,
               upc: null,
               offMarket: false,
+              label: creatineLabel,
             },
           ],
         },
@@ -440,6 +507,7 @@ describe('searchSupplementLabelsBatch', () => {
               brand: 'Blueprint',
               upc: null,
               offMarket: false,
+              label: dailymedLabel,
             },
           ],
         },
@@ -480,6 +548,7 @@ describe('searchSupplementLabelsBatch', () => {
               brand: null,
               upc: null,
               offMarket: false,
+              label: creatineLabel,
             },
           ],
         },
@@ -494,6 +563,7 @@ describe('searchSupplementLabelsBatch', () => {
               brand: 'Blueprint',
               upc: null,
               offMarket: false,
+              label: dailymedLabel,
             },
           ],
         },
@@ -527,6 +597,40 @@ describe('searchSupplementLabelsBatch', () => {
         : undefined,
       'application/json',
     )
+  })
+
+  it('uses five matches per batch query by default', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      results: [
+        {
+          query: 'creatine',
+          items: [],
+        },
+      ],
+    }), {
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+      },
+      status: 200,
+    }))
+
+    const result = await searchSupplementLabelsBatch(
+      {
+        queries: ['creatine'],
+      },
+      {
+        env: hostedRuntimeEnv,
+        fetchImpl: fetchMock,
+      },
+    )
+
+    assert.equal(result.limit, 5)
+    const init = fetchMock.mock.calls[0]?.[1]
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      queries: ['creatine'],
+      limit: 5,
+      includeOffMarket: false,
+    })
   })
 
   it('rejects oversized batch queries before calling the hosted API', async () => {
