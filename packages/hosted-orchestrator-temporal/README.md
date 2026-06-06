@@ -32,6 +32,12 @@ payloads, prompts, transcripts, provider responses, secrets, local paths, or
 direct user identifiers. The durable rule lives in
 `agent-docs/references/hosted-temporal-orchestration.md`.
 
+Legacy `device_sync_recovery_requested`, `deviceSyncRecoveryRequested`, and
+`device_sync_recovery` handling is compatibility-only inside this worker. Web
+and shared contracts no longer produce or accept those fields as current demand;
+the worker only tolerates old signals, Activity inputs, and Activity results so
+pre-deletion histories can drain.
+
 ## Local Development
 
 Install or check the Temporal CLI:

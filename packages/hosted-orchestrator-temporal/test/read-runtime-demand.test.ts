@@ -88,6 +88,31 @@ describe("readRuntimeDemand", () => {
     expect(url.search).toBe("");
   });
 
+  it("drops legacy device-sync recovery flags from old Activity inputs", async () => {
+    await stubHostedWebEnvironment();
+
+    const demand: HostedRuntimeDemand = {
+      kind: "idle",
+      mailboxLag: [],
+      nextWakeAt: null,
+      workspace: null,
+    };
+    const observedRequests: ObservedRequest[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      observedRequests.push({ init, url: String(url) });
+      return jsonResponse(demand);
+    }));
+
+    const legacyRequest = {
+      deviceSyncRecoveryRequested: true,
+      userId: "member_test",
+    };
+    await expect(readRuntimeDemand(legacyRequest)).resolves.toEqual(demand);
+
+    const url = new URL(observedRequests[0].url);
+    expect(url.searchParams.has("deviceSyncRecoveryRequested")).toBe(false);
+  });
+
   it("rejects invalid hosted web demand responses", async () => {
     await stubHostedWebEnvironment();
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({

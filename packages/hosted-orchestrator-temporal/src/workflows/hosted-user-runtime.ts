@@ -61,6 +61,10 @@ const HOSTED_USER_RUNTIME_COALESCED_PENDING_SIGNAL_PATCH =
   "hosted-user-runtime-coalesced-pending-signal-v1";
 const HOSTED_USER_RUNTIME_ENSURE_PROCESSING_SOURCE_PATCH =
   "hosted-user-runtime-ensure-processing-source-v1";
+const HOSTED_USER_RUNTIME_DROP_DEVICE_SYNC_RECOVERY_PATCH =
+  "hosted-user-runtime-drop-device-sync-recovery-v1";
+const LEGACY_DEVICE_SYNC_RECOVERY_SOURCE = "device_sync_recovery";
+const HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT = 3;
 
 type HostedUserRuntimeSignal =
   | HostedRuntimeSignal
@@ -164,6 +168,8 @@ export async function hostedUserRuntimeWorkflow(
       patched(HOSTED_USER_RUNTIME_COALESCED_PENDING_SIGNAL_PATCH),
     useEnsureRuntimeProcessingSourcePatch: () =>
       patched(HOSTED_USER_RUNTIME_ENSURE_PROCESSING_SOURCE_PATCH),
+    useDeviceSyncRecoveryDeletionPatch: () =>
+      patched(HOSTED_USER_RUNTIME_DROP_DEVICE_SYNC_RECOVERY_PATCH),
     useSignalOnlyWaitForNonRetryableFailure: () =>
       patched(HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH),
     uuid: uuid4,
@@ -188,11 +194,11 @@ export interface HostedUserRuntimeWorkflowRuntime {
   ensureRuntimeProcessing(input: {
     orchestrationAttemptId: string;
     reason: HostedRuntimeRunDemand["reason"];
-    source?: HostedRuntimeRunDemand["source"] | null;
+    source?: LegacyHostedRuntimeDemandRunSource | null;
     userId: string;
   }): Promise<HostedRuntimeEnsureProcessingResponse>;
   nowMs(): number;
-  readRuntimeDemand(request: HostedRuntimeDemandRequest): Promise<HostedRuntimeDemand>;
+  readRuntimeDemand(request: HostedRuntimeDemandRequest): Promise<HostedUserRuntimeDemand>;
   startRuntimePrewarm(input: {
     prewarmAttemptId: string;
     source: HostedRuntimePrewarmSource;
@@ -207,7 +213,8 @@ export interface HostedUserRuntimeWorkflowRuntime {
   useRuntimeRecheckSignalPatch(): boolean;
   useCoalescedPendingSignalPatch(): boolean;
   useEnsureRuntimeProcessingSourcePatch(): boolean;
-  preserveSameRuntimeWakeAcceptedCountPatchMarker(): void;
+  preserveSameRuntimeWakeAcceptedCountPatchMarker(): boolean;
+  useDeviceSyncRecoveryDeletionPatch(): boolean;
   useSignalOnlyWaitForNonRetryableFailure(): boolean;
   uuid(): string;
   waitForSignalOrTimeout(
@@ -217,6 +224,21 @@ export interface HostedUserRuntimeWorkflowRuntime {
 }
 
 type HostedRuntimeRunDemand = Extract<HostedRuntimeDemand, { kind: "run" }>;
+type LegacyHostedRuntimeDemandRunSource =
+  | HostedRuntimeRunDemand["source"]
+  | typeof LEGACY_DEVICE_SYNC_RECOVERY_SOURCE;
+type LegacyHostedRuntimeRunDemand = Omit<HostedRuntimeRunDemand, "source"> & {
+  source: typeof LEGACY_DEVICE_SYNC_RECOVERY_SOURCE;
+};
+type HostedUserRuntimeDemand = HostedRuntimeDemand | LegacyHostedRuntimeRunDemand;
+type LegacyHostedRuntimeDemandRequest = HostedRuntimeDemandRequest & {
+  deviceSyncRecoveryRequested?: boolean;
+};
+type LegacyHostedUserRuntimeWorkflowCarryForwardState =
+  HostedUserRuntimeWorkflowCarryForwardState & {
+    deviceSyncRecoveryRequested?: boolean;
+    sameRuntimeWakeAcceptedCount?: number;
+  };
 type HostedRuntimeMailboxSignal = Extract<
   HostedRuntimeSignal,
   { kind: "mailbox_appended" }
@@ -252,6 +274,10 @@ export function createHostedUserRuntimeWorkflowMachine(
   const options = normalizeHostedUserRuntimeWorkflowOptions(input.options);
   const continueAsNewOptions = normalizeContinueAsNewOptions(input.options);
   const state = createInitialWorkflowState(input.userId, input.state);
+  let legacyDeviceSyncRecoveryRequested =
+    readLegacyBooleanProperty(input.state, "deviceSyncRecoveryRequested");
+  let legacySameRuntimeWakeAcceptedCount =
+    readLegacyNonNegativeIntegerProperty(input.state, "sameRuntimeWakeAcceptedCount");
   let completedIterations = 0;
   let demandSignalVersion = 0;
 
@@ -329,6 +355,21 @@ export function createHostedUserRuntimeWorkflowMachine(
         break;
       }
       case "device_sync_recovery_requested": {
+        if (runtime.useDeviceSyncRecoveryDeletionPatch()) {
+          state.signalVersion += 1;
+          demandSignalVersion += 1;
+          break;
+        }
+        if (
+          runtime.useCoalescedPendingSignalPatch()
+          && legacyDeviceSyncRecoveryRequested
+        ) {
+          wakeSignalOnlyWaitForCoalescedDemandSignal();
+          break;
+        }
+        state.signalVersion += 1;
+        demandSignalVersion += 1;
+        legacyDeviceSyncRecoveryRequested = true;
         break;
       }
       case "mailbox_lag_observed": {
@@ -357,23 +398,38 @@ export function createHostedUserRuntimeWorkflowMachine(
         runtime.continueAsNewSuggested()
         || completedIterations >= options.continueAsNewAfterIterations
       ) {
+        const deviceSyncRecoveryDeleted =
+          runtime.useDeviceSyncRecoveryDeletionPatch();
         await runtime.continueAsNew({
           options: continueAsNewOptions,
-          state: readCarryForwardState(state),
+          state: readCarryForwardState(
+            state,
+            deviceSyncRecoveryDeleted
+              ? null
+              : {
+                  deviceSyncRecoveryRequested: legacyDeviceSyncRecoveryRequested,
+                  sameRuntimeWakeAcceptedCount: legacySameRuntimeWakeAcceptedCount,
+                },
+          ),
           userId: input.userId,
         });
       }
 
       completedIterations += 1;
       const versionBeforeDemand = state.signalVersion;
-      let demand: HostedRuntimeDemand;
+      let demand: HostedUserRuntimeDemand;
       try {
+        const deviceSyncRecoveryDeleted =
+          runtime.useDeviceSyncRecoveryDeletionPatch();
         demand = await runtime.readRuntimeDemand({
           browserVaultRefreshRequested: state.browserVaultRefreshRequested,
+          ...(!deviceSyncRecoveryDeleted && legacyDeviceSyncRecoveryRequested
+            ? { deviceSyncRecoveryRequested: true }
+            : {}),
           lagRecoveryObserved: state.lagRecoveryObserved,
           manualRunRequested: state.manualRunRequested,
           userId: input.userId,
-        });
+        } satisfies LegacyHostedRuntimeDemandRequest);
       } catch (error) {
         state.lastDemandKind = null;
         state.lastDemandNextWakeAt = null;
@@ -432,7 +488,9 @@ export function createHostedUserRuntimeWorkflowMachine(
             continue;
           }
         }
-        clearSatisfiedFlags(state, versionBeforeDemand);
+        if (clearSatisfiedFlags(state, versionBeforeDemand)) {
+          legacyDeviceSyncRecoveryRequested = false;
+        }
         await waitUntilTimestampOrSignal(
           runtime,
           demand.nextWakeAt,
@@ -452,7 +510,8 @@ export function createHostedUserRuntimeWorkflowMachine(
       try {
         runtime.useEnsureRuntimeProcessingPatch();
         const forwardDemandSource =
-          runtime.useEnsureRuntimeProcessingSourcePatch();
+          runtime.useEnsureRuntimeProcessingSourcePatch()
+          || isLegacyDeviceSyncRecoverySource(demand.source);
         execution = await runtime.ensureRuntimeProcessing({
           orchestrationAttemptId,
           reason: demand.reason,
@@ -465,6 +524,7 @@ export function createHostedUserRuntimeWorkflowMachine(
         state.lastExecutionKind = "failed";
         state.lastRuntimeAttemptId = null;
         state.lastRuntimeStatus = null;
+        legacySameRuntimeWakeAcceptedCount = 0;
         if (demandSignalVersion !== demandVersionBeforeExecution) {
           continue;
         }
@@ -493,12 +553,26 @@ export function createHostedUserRuntimeWorkflowMachine(
 
       if (execution.kind === "runtime_processing_accepted") {
         // Keep this marker for histories that recorded the removed recovery-count patch.
-        runtime.preserveSameRuntimeWakeAcceptedCountPatchMarker();
+        const sameRuntimeWakeCountPatchEnabled =
+          runtime.preserveSameRuntimeWakeAcceptedCountPatchMarker();
+        legacySameRuntimeWakeAcceptedCount = recordLegacyRuntimeWakeAcceptedCount({
+          currentCount: legacySameRuntimeWakeAcceptedCount,
+          execution,
+          lastRuntimeAttemptId: state.lastRuntimeAttemptId,
+          patchEnabled: sameRuntimeWakeCountPatchEnabled,
+        });
         recordRuntimeProcessingAccepted(state, execution);
         if (demandSignalArrivedDuringExecution) {
           continue;
         }
         clearConsumedFlagsAfterRun(state, demand.source);
+        legacyDeviceSyncRecoveryRequested = clearLegacyDeviceSyncRecoveryAfterRun({
+          currentRequested: legacyDeviceSyncRecoveryRequested,
+          execution,
+          source: demand.source,
+          wakeCount: legacySameRuntimeWakeAcceptedCount,
+          wakeLimitEnabled: sameRuntimeWakeCountPatchEnabled,
+        });
         if (signalArrivedDuringExecution) {
           continue;
         }
@@ -516,6 +590,7 @@ export function createHostedUserRuntimeWorkflowMachine(
       if (execution.kind === "retry_later") {
         state.lastRuntimeAttemptId = null;
         state.lastRuntimeStatus = "retry_later";
+        legacySameRuntimeWakeAcceptedCount = 0;
         if (demandSignalArrivedDuringExecution) {
           continue;
         }
@@ -618,6 +693,66 @@ function recordRuntimeProcessingAccepted(
 ): void {
   state.lastRuntimeAttemptId = execution.runtimeAttemptId;
   state.lastRuntimeStatus = "scheduled";
+}
+
+function recordLegacyRuntimeWakeAcceptedCount(input: {
+  currentCount: number;
+  execution: Extract<
+    HostedRuntimeEnsureProcessingResponse,
+    { kind: "runtime_processing_accepted" }
+  >;
+  lastRuntimeAttemptId: string | null;
+  patchEnabled: boolean;
+}): number {
+  const wakeAccepted = isRuntimeWakeAcceptedAction(input.execution.action);
+  const sameRuntimeWake =
+    input.lastRuntimeAttemptId === input.execution.runtimeAttemptId
+    && wakeAccepted;
+
+  if (!wakeAccepted) {
+    return 0;
+  }
+
+  if (sameRuntimeWake) {
+    return input.currentCount + 1;
+  }
+
+  return input.patchEnabled ? 1 : 0;
+}
+
+function clearLegacyDeviceSyncRecoveryAfterRun(input: {
+  currentRequested: boolean;
+  execution: Extract<
+    HostedRuntimeEnsureProcessingResponse,
+    { kind: "runtime_processing_accepted" }
+  >;
+  source: string;
+  wakeCount: number;
+  wakeLimitEnabled: boolean;
+}): boolean {
+  if (!input.currentRequested || !isLegacyDeviceSyncRecoverySource(input.source)) {
+    return input.currentRequested;
+  }
+
+  if (!isRuntimeWakeAcceptedAction(input.execution.action)) {
+    return false;
+  }
+
+  if (!input.wakeLimitEnabled) {
+    return true;
+  }
+
+  return input.wakeCount
+    < HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT;
+}
+
+function isRuntimeWakeAcceptedAction(
+  action: Extract<
+    HostedRuntimeEnsureProcessingResponse,
+    { kind: "runtime_processing_accepted" }
+  >["action"],
+): boolean {
+  return action === "woken" || action === "already_running";
 }
 
 function createInitialWorkflowState(
@@ -739,14 +874,26 @@ function normalizeTaskQueueOption(
 
 function readCarryForwardState(
   state: HostedRuntimeWorkflowState,
-): HostedUserRuntimeWorkflowCarryForwardState {
+  legacy: {
+    deviceSyncRecoveryRequested: boolean;
+    sameRuntimeWakeAcceptedCount: number;
+  } | null,
+): LegacyHostedUserRuntimeWorkflowCarryForwardState {
   const { userId: _userId, ...carryForward } = state;
-  return carryForward;
+  if (legacy === null) {
+    return carryForward;
+  }
+
+  return {
+    ...carryForward,
+    deviceSyncRecoveryRequested: legacy.deviceSyncRecoveryRequested,
+    sameRuntimeWakeAcceptedCount: legacy.sameRuntimeWakeAcceptedCount,
+  };
 }
 
 function recordDemandSummary(
   state: HostedRuntimeWorkflowState,
-  demand: HostedRuntimeDemand,
+  demand: HostedUserRuntimeDemand,
 ): void {
   state.lastDemandKind = demand.kind;
   state.lastMailboxLagLaneCount = demand.mailboxLag.length;
@@ -777,9 +924,9 @@ function recordDemandSummary(
 function clearSatisfiedFlags(
   state: HostedRuntimeWorkflowState,
   expectedSignalVersion: number,
-): void {
+): boolean {
   if (state.signalVersion !== expectedSignalVersion) {
-    return;
+    return false;
   }
 
   state.browserVaultRefreshRequested = false;
@@ -787,11 +934,12 @@ function clearSatisfiedFlags(
   state.latestMailboxPointer = null;
   state.mailboxSignalCount = 0;
   state.manualRunRequested = false;
+  return true;
 }
 
 function clearConsumedFlagsAfterRun(
   state: HostedRuntimeWorkflowState,
-  source: HostedRuntimeRunDemand["source"],
+  source: LegacyHostedRuntimeDemandRunSource,
 ): void {
   switch (source) {
     case "mailbox_backlog": {
@@ -807,6 +955,9 @@ function clearConsumedFlagsAfterRun(
       state.browserVaultRefreshRequested = false;
       return;
     }
+    case "device_sync_recovery": {
+      return;
+    }
     case "lag_recovery": {
       state.lagRecoveryObserved = false;
       return;
@@ -819,6 +970,35 @@ function clearConsumedFlagsAfterRun(
       throw new Error(`Unsupported hosted runtime demand source ${String(exhaustive)}`);
     }
   }
+}
+
+function isLegacyDeviceSyncRecoverySource(source: string): boolean {
+  return source === LEGACY_DEVICE_SYNC_RECOVERY_SOURCE;
+}
+
+function readLegacyBooleanProperty(
+  value: object | undefined,
+  key: string,
+): boolean {
+  if (value === undefined) {
+    return false;
+  }
+  return readObjectProperty(value, key) === true;
+}
+
+function readLegacyNonNegativeIntegerProperty(
+  value: object | undefined,
+  key: string,
+): number {
+  if (value === undefined) {
+    return 0;
+  }
+  const property = readObjectProperty(value, key);
+  return typeof property === "number"
+    && Number.isSafeInteger(property)
+    && property >= 0
+    ? property
+    : 0;
 }
 
 async function waitUntilTimestampOrSignal(

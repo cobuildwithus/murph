@@ -20,11 +20,6 @@ WHERE "status" = 'active'
       "credential_kind" = 'provider_config'
       AND "provider_config_key" IS NOT NULL
     )
-    OR (
-      "credential_kind" = 'none'
-      AND "access_token_encrypted" IS NULL
-      AND "provider_config_key" IS NULL
-    )
   );
 
 UPDATE "device_connection" AS "connection"
@@ -57,10 +52,5 @@ WHERE "connection"."status" = 'active'
     OR (
       "connection"."credential_kind" = 'provider_config'
       AND "connection"."provider_config_key" IS NOT NULL
-    )
-    OR (
-      "connection"."credential_kind" = 'none'
-      AND "connection"."access_token_encrypted" IS NULL
-      AND "connection"."provider_config_key" IS NULL
     )
   );

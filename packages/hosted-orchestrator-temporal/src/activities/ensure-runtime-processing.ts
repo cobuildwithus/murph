@@ -25,12 +25,18 @@ import {
   requestHostedOrchestratorJson,
 } from "./http-client.js";
 
+const LEGACY_DEVICE_SYNC_RECOVERY_SOURCE = "device_sync_recovery";
+
 export interface EnsureRuntimeProcessingInput {
   orchestrationAttemptId: string;
   reason: HostedWorkspaceInvocationReason;
-  source?: HostedRuntimeDemandRunSource | null;
+  source?: EnsureRuntimeProcessingInputSource | null;
   userId: string;
 }
+
+type EnsureRuntimeProcessingInputSource =
+  | HostedRuntimeDemandRunSource
+  | typeof LEGACY_DEVICE_SYNC_RECOVERY_SOURCE;
 
 const CLOUDFLARE_RUNTIME_ENSURE_PROCESSING_PATH_PREFIX = "/internal/users/";
 const CLOUDFLARE_RUNTIME_ENSURE_PROCESSING_PATH_SUFFIX =
@@ -42,10 +48,13 @@ export async function ensureRuntimeProcessing(
 ): Promise<HostedRuntimeEnsureProcessingResponse> {
   const parsedRequest = parseEnsureRuntimeProcessingInput(request);
   const cloudflareEnvironment = readHostedOrchestratorTemporalCloudflareEnvironment();
+  const cloudflareSource = parsedRequest.source === LEGACY_DEVICE_SYNC_RECOVERY_SOURCE
+    ? null
+    : parsedRequest.source ?? null;
   const cloudflareRequest = parseHostedRuntimeEnsureProcessingRequest({
     orchestrationAttemptId: parsedRequest.orchestrationAttemptId,
     reason: parsedRequest.reason,
-    ...(parsedRequest.source ? { source: parsedRequest.source } : {}),
+    ...(cloudflareSource ? { source: cloudflareSource } : {}),
   } satisfies HostedRuntimeEnsureProcessingRequest);
 
   return observeHostedTemporalActivity({
@@ -73,7 +82,7 @@ export async function ensureRuntimeProcessing(
         },
       );
     } catch (error) {
-      if (!parsedRequest.source || !isEnsureProcessingSourceDeploySkewRejection(error)) {
+      if (!cloudflareSource || !isEnsureProcessingSourceDeploySkewRejection(error)) {
         throw error;
       }
 
@@ -132,16 +141,25 @@ function parseEnsureRuntimeProcessingInput(
     ...(record.source === undefined || record.source === null
       ? {}
       : {
-          source: parseHostedRuntimeDemandRunSource(
-            record.source,
-            "Hosted runtime ensure-processing Activity input source",
-          ),
+          source: parseEnsureRuntimeProcessingInputSource(record.source),
         }),
     userId: requireOpaqueIdentifier(
       record.userId,
       "Hosted runtime ensure-processing Activity input userId",
     ),
   };
+}
+
+function parseEnsureRuntimeProcessingInputSource(
+  value: unknown,
+): EnsureRuntimeProcessingInputSource {
+  if (value === LEGACY_DEVICE_SYNC_RECOVERY_SOURCE) {
+    return LEGACY_DEVICE_SYNC_RECOVERY_SOURCE;
+  }
+  return parseHostedRuntimeDemandRunSource(
+    value,
+    "Hosted runtime ensure-processing Activity input source",
+  );
 }
 
 function buildCloudflareRuntimeEnsureProcessingPath(userId: string): string {

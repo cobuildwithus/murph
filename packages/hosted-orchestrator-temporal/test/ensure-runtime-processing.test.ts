@@ -147,6 +147,34 @@ describe("ensureRuntimeProcessing", () => {
     });
   });
 
+  it("drops legacy device-sync recovery source from old Activity inputs", async () => {
+    await stubCloudflareEnvironment();
+
+    const response: HostedRuntimeEnsureProcessingResponse = {
+      action: "started",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-05-20T12:02:30.000Z",
+      runtimeAttemptId: "runtime_attempt_test",
+    };
+    const observedRequests: ObservedRequest[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      observedRequests.push({ init, url: String(url) });
+      return jsonResponse(response);
+    }));
+
+    await expect(ensureRuntimeProcessing({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "nudge",
+      source: "device_sync_recovery",
+      userId: "member_test",
+    })).resolves.toEqual(response);
+
+    expect(JSON.parse(String(observedRequests[0].init?.body))).toEqual({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "nudge",
+    });
+  });
+
   it("does not turn coded current Cloudflare validation failures into retry-later", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-20T12:00:00.000Z"));

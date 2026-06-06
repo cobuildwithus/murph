@@ -659,8 +659,8 @@ describe("hosted Prisma baseline migration", () => {
     expect(sourceConfirmedBackfillMigrationSql).toContain(
       '"connection"."credential_kind" = \'provider_config\'\n      AND "connection"."provider_config_key" IS NOT NULL',
     );
-    expect(sourceConfirmedBackfillMigrationSql).toContain(
-      '"connection"."credential_kind" = \'none\'\n      AND "connection"."access_token_encrypted" IS NULL\n      AND "connection"."provider_config_key" IS NULL',
+    expect(sourceConfirmedBackfillMigrationSql).not.toContain(
+      '"credential_kind" = \'none\'',
     );
   });
 

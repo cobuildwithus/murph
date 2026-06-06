@@ -291,13 +291,15 @@ because the accepted runner failed before checkpointing, demand may select it
 again. Runtime wake and retry facts that matter to product behavior must be
 reflected in durable web/runtime state, not returned as the command result.
 
-Legacy device-sync recovery remains the bounded exception to preserving explicit
-recovery wake hints: after several accepted `woken`/`already_running`
-acknowledgements for the same runtime attempt, the per-user workflow clears the
-coalesced recovery flag and lets the normal owner recheck durable demand again.
-This keeps old histories from becoming low-grade explicit-flag wake loops while
-current dirty and due-reconcile producers use durable `device-sync.wake`
-mailbox handoffs.
+Legacy device-sync recovery handling is replay compatibility only. Current web
+and shared contracts do not produce or accept live recovery demand; the
+per-user workflow only tolerates old recovery signals, old demand Activity
+inputs, and old `device_sync_recovery` demand results so existing histories can
+drain without turning that compatibility path back into a correctness model.
+Deploy the web/database side that writes durable `device-sync.wake` handoffs
+before deploying the Temporal worker deletion patch. The compatibility branch is
+for replayed worker history, not for letting older web producers continue to use
+recovery-only signals as live wake delivery.
 
 ## Cloudflare Execution Adapter Contract
 
@@ -393,8 +395,8 @@ The idle condition is:
 
 - `mailboxLag` is zero across lanes.
 - Workspace wake projection `nextWakeAt` is absent or in the future.
-- Web demand has no explicit manual, browser-vault, legacy device-sync recovery,
-  or lag recovery flag requiring execution.
+- Web demand has no explicit manual, browser-vault, or lag recovery flag
+  requiring execution.
 - Usage/product policy does not report a retryable blocked state.
 
 The runtime remains the only owner of assistant timers. Temporal sleeps on the

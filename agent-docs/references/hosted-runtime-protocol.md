@@ -219,7 +219,10 @@ Temporal signal cannot be accepted after the mailbox row exists, the failure is
 logged as a post-commit best-effort handoff failure and does not make provider
 ingress fail. Web does not run a mailbox-lag cron backstop: missed post-commit
 workflow signal recovery remains future hardening for a DB-backed
-pending-handoff reconciler or Temporal-owned reconciler. Redacted runtime logs
+pending-handoff reconciler or Temporal-owned reconciler. Repeated dirty hints
+while the same connection is already dirty do not append or signal another
+device-sync wake; dirty coalescing remains the work-queue invariant, and any
+stronger signal-delivery repair must be mailbox-wide. Redacted runtime logs
 remain diagnostic evidence only; they must not be merged into checkpointed
 import status for workflow completion or status projection. The narrow liveness
 exception is the exact `runner.accepted_attempt_failed` event: after web has

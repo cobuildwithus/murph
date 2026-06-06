@@ -17,6 +17,10 @@ that transaction, and appends one deterministic `device-sync.wake` mailbox
 handoff only when the connection moves clean-to-dirty. Already-dirty level hints
 coalesce without another mailbox row. The dirty row remains the source of truth;
 the mailbox row is only the durable handoff into the normal Temporal wake path.
+Post-commit Temporal signal failures are logged as best-effort mailbox handoff
+failures; repeated dirty hints while a connection is already dirty do not retry
+the signal, and any stronger repair must be mailbox-wide rather than a
+device-sync recovery path.
 Hosted execution no longer flows through a web-owned acquire/commit/finalize run
 protocol; the restored local runtime imports mailbox items, pulls dirty
 device-sync state, and checkpoints its own workspace state.
@@ -599,8 +603,9 @@ The onboarding lane is intentionally thin:
   canonical hosted mailbox input first. Device-sync webhook freshness records
   dirty state in the same transaction, appends a bounded `device-sync.wake`
   mailbox handoff only on clean-to-dirty transitions, then signals Temporal by
-  mailbox pointer. The dirty row stays the source of truth until the runtime
-  checkpoints it.
+  mailbox pointer. Post-commit signal failures are logged as best-effort
+  mailbox handoff failures. The dirty row stays the source of truth until the
+  runtime checkpoints it.
 - Verified email sync updates canonical hosted email-authorization facts in web
   storage; it does not write hosted execution env.
 
