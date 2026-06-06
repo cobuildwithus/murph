@@ -292,6 +292,12 @@ describe('assistant skill assets', () => {
       'invite product or brand names plus roughly how long they have taken each one or since when',
     )
     expect(raw).toContain(
+      'Current supplements: save each current product with `vault-cli supplement save "<product title>" --status active --started-on <date> --format json`',
+    )
+    expect(raw).toContain(
+      "use the current prompt's local date as the fallback `startedOn`",
+    )
+    expect(raw).toContain(
       'Supplements: mention that they can send a photo of supplement bottles or labels if that is easier',
     )
     expect(raw).toContain('Follow the supplement input affordance')
@@ -305,6 +311,9 @@ describe('assistant skill assets', () => {
       'Default to `vault-cli supplement search-labels` for one supplement or `vault-cli supplement search-labels-batch` for several',
     )
     expect(raw).toContain(
+      'For batch lookup, pass one repeated `--query` flag per product; do not pass product names as positional arguments',
+    )
+    expect(raw).toContain(
       'The label database covers many supplements but is not exhaustive',
     )
     expect(raw).toContain(
@@ -312,6 +321,12 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain(
       'Do not use a progress update for a quick memory save or a single follow-up question',
+    )
+    expect(raw).toContain(
+      'After lookup when useful, save every current supplement product through `vault-cli supplement save`',
+    )
+    expect(raw).toContain(
+      'ask one short follow-up for duration or start timing after the structured save or on the next onboarding turn',
     )
     expect(raw).toContain(
       'Make clear that PDFs or pasted results are welcome whenever the user wants to share them',
@@ -566,10 +581,10 @@ describe('assistant skill assets', () => {
       'If they send PDFs or pasted lab results, handle them through normal attachment/message intake',
     )
     expect(raw).toContain(
-      'broad health context, movement/training context, supplements, protocols, experiments, dated age context, gender, or interests go to memory',
+      'broad health context, movement/training context, protocols, experiments, dated age context, gender, or interests go to memory; current supplements go to structured supplement records',
     )
     expect(raw).toContain(
-      'movement/training context, fitness benchmarks, supplement names and timing, current protocols or experiments',
+      'movement/training context, fitness benchmarks, current protocols or experiments',
     )
     expect(raw).toContain(
       'Age: save as dated Context memory using the current prompt\'s local date',
@@ -634,7 +649,6 @@ describe('assistant skill assets', () => {
     const rejectedPersistenceExpansions = [
       'narrowest matching `vault-cli` surface',
       'web lookup before saving an identifiable product',
-      'vault-cli supplement save',
       'vault-cli regimen save',
       'vault-cli blood-test save',
       'vault-cli protocol import-json',

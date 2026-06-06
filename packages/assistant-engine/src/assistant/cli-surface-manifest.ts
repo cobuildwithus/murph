@@ -32,6 +32,7 @@ export interface AssistantCliLlmsManifestCommandSchema {
 export interface AssistantCliLlmsManifestCommand {
   description?: string
   examples?: readonly unknown[]
+  hint?: string
   name: string
   schema?: AssistantCliLlmsManifestCommandSchema
 }
@@ -486,7 +487,9 @@ function isAssistantCliLlmsManifest(
         typeof command === 'object' &&
         typeof (command as { name?: unknown }).name === 'string' &&
         ((command as { description?: unknown }).description === undefined ||
-          typeof (command as { description?: unknown }).description === 'string'),
+          typeof (command as { description?: unknown }).description === 'string') &&
+        ((command as { hint?: unknown }).hint === undefined ||
+          typeof (command as { hint?: unknown }).hint === 'string'),
     )
   )
 }
