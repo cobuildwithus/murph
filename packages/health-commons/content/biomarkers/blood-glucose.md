@@ -6,6 +6,7 @@ slug: biomarkers/blood-glucose
 title: Blood Glucose
 summary: Sugar circulating in the blood, where insulin signals cells to pull it in for energy and how fast it clears after eating reflects how well that signaling works.
 status: field-testing
+hidden: true
 quality: usable
 aliases:
   - glucose

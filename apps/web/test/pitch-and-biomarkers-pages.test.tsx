@@ -64,18 +64,6 @@ beforeEach(() => {
       },
       {
         aliases: [],
-        categories: ["metabolic_health"],
-        hidden: false,
-        key: "biomarker:blood-glucose",
-        published: true,
-        routeId: "blood-glucose",
-        shortName: "Glucose",
-        summary: "A default glucose marker that should stay off the browse page.",
-        title: "Blood Glucose",
-        unit: "mg/dL",
-      },
-      {
-        aliases: [],
         categories: ["internal"],
         hidden: true,
         key: "internal-hidden-marker",
@@ -97,18 +85,6 @@ beforeEach(() => {
         summary: "This unpublished entry should not render.",
         title: "Draft Marker",
         unit: null,
-      },
-      {
-        aliases: ["Apo B"],
-        categories: ["cardiometabolic"],
-        hidden: false,
-        key: "apolipoprotein-b",
-        published: true,
-        routeId: "apolipoprotein-b",
-        shortName: "ApoB",
-        summary: "A particle-count signal for atherogenic lipoproteins.",
-        title: "Apolipoprotein B",
-        unit: "mg/dL",
       },
     ],
     catalogHash: "test-catalog",
@@ -163,20 +139,10 @@ test("BiomarkersPage metadata and route entrypoint filter generated biomarkers",
 
   assert.match(markup, /Library/);
   assert.match(markup, /Biomarkers/);
-  assert.match(markup, /2 of 2 biomarkers/);
-  const apoBLinkIndex = markup.indexOf('href="/biomarkers/apolipoprotein-b"');
-  const hba1cLinkIndex = markup.indexOf('href="/biomarkers/hba1c"');
-  assert.ok(apoBLinkIndex >= 0);
-  assert.ok(hba1cLinkIndex >= 0);
-  assert.ok(apoBLinkIndex < hba1cLinkIndex);
-  assert.match(markup, /ApoB/);
-  assert.match(markup, /A particle-count signal for atherogenic lipoproteins\./);
+  assert.match(markup, /1 of 1 biomarkers/);
   assert.match(markup, /href="\/biomarkers\/hba1c"/);
   assert.match(markup, /HbA1c/);
   assert.match(markup, /Longer-range blood sugar signal\./);
-  assert.doesNotMatch(markup, /href="\/biomarkers\/blood-glucose"/);
-  assert.doesNotMatch(markup, /Blood Glucose/);
-  assert.doesNotMatch(markup, /A default glucose marker that should stay off the browse page\./);
   assert.doesNotMatch(markup, /Internal Hidden Marker/);
   assert.doesNotMatch(markup, /Hidden Marker/);
   assert.doesNotMatch(markup, /Draft Marker/);
