@@ -123,9 +123,44 @@ it("fails fast when hosted completion reaches a terminal runner error", async ()
         maxSeq: "1",
       },
     ],
-    recentLogs: [],
+    recentLogs: [{
+      at: "2026-05-08T00:00:01.000Z",
+      component: "mailbox",
+      eventCode: "mailbox.imported",
+      level: "info",
+      phase: "import",
+      redactedJson: {
+        webhookDataJson: "{\"objectKey\":\"raw-provider-payload\"}",
+      },
+    }],
     userId: "member_terminal_error",
-    workspace: null,
+    workspace: {
+      browserVaultReplicaRef: {
+        byteLength: 128,
+        dataVersion: "browser-vault-version",
+        generatedAt: "2026-05-08T00:00:02.000Z",
+        keyId: "browser-vault-key",
+        objectKey: "browser-vault/object-key",
+        replicaSchema: "murph.browser-vault-replica",
+        runtimeRootKeyId: "runtime-root-key",
+        schema: "murph.hosted-browser-vault-replica-ref.v1",
+        sourceBundleHash: "a".repeat(64),
+      },
+      checkpointedAt: "2026-05-08T00:00:04.000Z",
+      createdAt: "2026-05-08T00:00:00.000Z",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      redactedStatus: null,
+      snapshotRef: {
+        hash: "b".repeat(64),
+        key: "snapshot/object-key",
+        size: 128,
+        updatedAt: "2026-05-08T00:00:03.000Z",
+      },
+      updatedAt: "2026-05-08T00:00:04.000Z",
+      userId: "member_terminal_error",
+      version: "1",
+    },
   } satisfies HostedRunnerStatusResponse;
   const fetch = vi.fn(async () => Response.json(status));
   vi.stubGlobal("fetch", fetch);
@@ -140,12 +175,31 @@ it("fails fast when hosted completion reaches a terminal runner error", async ()
   });
 
   try {
+    let failureMessage = "";
     await expect(harness.waitForHostedCompletion("member_terminal_error", {
       pollIntervalMs: 1,
       timeoutMs: 5_000,
     })).rejects.toThrow(/terminal error[\s\S]*configuration_error/u);
+    try {
+      await harness.waitForHostedCompletion("member_terminal_error", {
+        pollIntervalMs: 1,
+        timeoutMs: 5_000,
+      });
+    } catch (error) {
+      failureMessage = error instanceof Error ? error.message : String(error);
+    }
 
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(failureMessage).toContain("snapshotRefPresent");
+    expect(failureMessage).toContain("browserVaultReplicaRefPresent");
+    expect(failureMessage).toContain("recentLogsPresent");
+    expect(failureMessage).not.toContain("snapshot/object-key");
+    expect(failureMessage).not.toContain("browser-vault/object-key");
+    expect(failureMessage).not.toContain("runtime-root-key");
+    expect(failureMessage).not.toContain("browser-vault-key");
+    expect(failureMessage).not.toContain("webhookDataJson");
+    expect(failureMessage).not.toContain("raw-provider-payload");
+
+    expect(fetch).toHaveBeenCalledTimes(2);
   } finally {
     await harness.stop();
   }

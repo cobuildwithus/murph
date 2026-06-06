@@ -22,6 +22,10 @@ import {
   JUNCTION_CONNECT_SOURCE_TARGETS,
 } from "@murphai/device-syncd/connect-config";
 import { readConfiguredJunctionDeviceSyncProviderConfig } from "@murphai/device-syncd/config";
+import {
+  JUNCTION_ALLOWED_SUMMARY_RESOURCES,
+  JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+} from "@murphai/importers/device-providers/junction-resources";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const defaultRuntimeRoot = path.join(repoRoot, ".runtime", "tmp", "wearable-fixture-capture");
@@ -53,6 +57,11 @@ interface WearableCaptureTarget {
 
 export const wearableCaptureTargets: readonly WearableCaptureTarget[] =
   wearableCaptureTargetIds.map(resolveWearableCaptureTarget);
+const wearableCaptureJunctionProviderFilter = Object.freeze(
+  Array.from(new Set(wearableCaptureTargets.map((target) => target.sourceProviderSlug))),
+);
+const wearableCaptureSummaryResources = Object.freeze([...JUNCTION_ALLOWED_SUMMARY_RESOURCES]);
+const wearableCaptureTimeseriesResources = Object.freeze([...JUNCTION_ALLOWED_TIMESERIES_RESOURCES]);
 
 interface CaptureCliOptions {
   port: number;
@@ -64,6 +73,7 @@ interface CaptureCliOptions {
 interface CaptureServerState {
   env: NodeJS.ProcessEnv;
   origin: string;
+  captureConfig: CaptureDeviceSyncEnv["captureConfig"];
   browserToken: string;
   options: CaptureCliOptions;
   controlPlane:
@@ -146,6 +156,22 @@ interface AccountSyncBaseline {
 }
 
 type DeviceSyncClient = ReturnType<typeof createDeviceSyncClient>;
+
+export interface CaptureDeviceSyncEnv {
+  env: NodeJS.ProcessEnv;
+  captureConfig: {
+    allowedReturnOrigins: string[];
+    providerFilter: string[];
+    summaryResources: string[];
+    timeseriesResources: string[];
+  };
+}
+
+export interface DeviceSyncJobSummary {
+  jobsQueued: number;
+  jobsRunning: number;
+  jobsDead: number;
+}
 
 type ParsedCandidateFile =
   | {
@@ -243,6 +269,33 @@ export function loadLocalEnvFiles(
   }
 
   return nextEnv;
+}
+
+export function buildCaptureDeviceSyncEnv(input: {
+  env: NodeJS.ProcessEnv;
+  origin: string;
+}): CaptureDeviceSyncEnv {
+  const allowedReturnOrigins = Array.from(
+    new Set([input.origin, ...buildLoopbackOriginAliases(input.origin)]),
+  );
+  return {
+    env: {
+      ...input.env,
+      DEVICE_SYNC_ALLOWED_RETURN_ORIGINS: appendCsvValues(
+        input.env.DEVICE_SYNC_ALLOWED_RETURN_ORIGINS,
+        allowedReturnOrigins,
+      ),
+      JUNCTION_PROVIDER_FILTER: wearableCaptureJunctionProviderFilter.join(","),
+      JUNCTION_SUMMARY_RESOURCES: wearableCaptureSummaryResources.join(","),
+      JUNCTION_TIMESERIES_RESOURCES: wearableCaptureTimeseriesResources.join(","),
+    },
+    captureConfig: {
+      allowedReturnOrigins,
+      providerFilter: [...wearableCaptureJunctionProviderFilter],
+      summaryResources: [...wearableCaptureSummaryResources],
+      timeseriesResources: [...wearableCaptureTimeseriesResources],
+    },
+  };
 }
 
 export async function buildSanitizedWearableFixtureCandidate(input: {
@@ -438,15 +491,11 @@ async function runServer(): Promise<void> {
   const options = parseCaptureCliOptions(process.argv.slice(2));
   const env = loadLocalEnvFiles(repoRoot, process.env);
   const origin = `http://127.0.0.1:${options.port}`;
+  const captureEnv = buildCaptureDeviceSyncEnv({ env, origin });
   const state: CaptureServerState = {
-    env: {
-      ...env,
-      DEVICE_SYNC_ALLOWED_RETURN_ORIGINS: appendCsvValue(
-        env.DEVICE_SYNC_ALLOWED_RETURN_ORIGINS,
-        origin,
-      ),
-    },
+    env: captureEnv.env,
     origin,
+    captureConfig: captureEnv.captureConfig,
     browserToken: randomBytes(24).toString("hex"),
     options,
     controlPlane: null,
@@ -465,6 +514,7 @@ async function runServer(): Promise<void> {
   });
 
   console.log(`Wearable fixture capture helper: ${origin}`);
+  console.log(`Wearable fixture capture helper alias: ${origin.replace("127.0.0.1", "localhost")}`);
   console.log("Raw capture vault and sanitized exports stay under .runtime/tmp/wearable-fixture-capture/.");
 }
 
@@ -572,7 +622,7 @@ export function checkCaptureRequestHost(
     };
   }
 
-  return host.trim().toLowerCase() === expectedHost.toLowerCase()
+  return isAllowedCaptureHost(host.trim(), expectedHost)
     ? {
         allowed: true,
         reason: "ok",
@@ -581,6 +631,40 @@ export function checkCaptureRequestHost(
         allowed: false,
         reason: "unexpected_host",
       };
+}
+
+function isAllowedCaptureHost(host: string, expectedHost: string): boolean {
+  if (host.toLowerCase() === expectedHost.toLowerCase()) {
+    return true;
+  }
+
+  const parsedHost = parseHostHeader(host);
+  const parsedExpectedHost = parseHostHeader(expectedHost);
+  if (parsedHost === null || parsedExpectedHost === null) {
+    return false;
+  }
+
+  return (
+    parsedHost.port === parsedExpectedHost.port &&
+    isLoopbackCaptureHostname(parsedHost.hostname) &&
+    isLoopbackCaptureHostname(parsedExpectedHost.hostname)
+  );
+}
+
+function parseHostHeader(host: string): { hostname: string; port: string } | null {
+  try {
+    const parsed = new URL(`http://${host}`);
+    return {
+      hostname: parsed.hostname.toLowerCase().replace(/^\[|\]$/g, ""),
+      port: parsed.port,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isLoopbackCaptureHostname(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
 async function ensureCaptureClient(state: CaptureServerState): Promise<ReturnType<typeof createDeviceSyncClient>> {
@@ -654,12 +738,14 @@ async function getStatus(state: CaptureServerState): Promise<Record<string, unkn
   let accounts: DeviceSyncAccountRecord[] = [];
   let controlPlaneBaseUrl = state.options.deviceSyncBaseUrl ?? DEFAULT_DEVICE_SYNC_BASE_URL;
   let controlPlaneError: string | null = null;
+  let jobs: DeviceSyncJobSummary | null = null;
 
   if (configStatus.configured) {
     try {
       const client = await ensureCaptureClient(state);
       controlPlaneBaseUrl = client.baseUrl;
       accounts = (await client.listAccounts({ provider: junctionProvider })).accounts;
+      jobs = await readDeviceSyncJobSummary(state);
     } catch (error) {
       controlPlaneError = safeErrorMessage(error);
       accounts = [];
@@ -674,6 +760,12 @@ async function getStatus(state: CaptureServerState): Promise<Record<string, unkn
     controlPlaneBaseUrl,
     vault: ".runtime/tmp/wearable-fixture-capture/vault",
     output: ".runtime/tmp/wearable-fixture-capture/output/junction-wearables-sanitized.json",
+    captureConfig: {
+      providerFilter: state.captureConfig.providerFilter,
+      summaryResourceCount: state.captureConfig.summaryResources.length,
+      timeseriesResourceCount: state.captureConfig.timeseriesResources.length,
+    },
+    jobs,
     targets: buildTargetStatuses(accounts),
     accountCount: accounts.length,
     latestDownloadUrl: state.latestExportPath ? "/download/latest" : null,
@@ -693,12 +785,16 @@ async function reconcileConnectedAccounts(state: CaptureServerState): Promise<Re
   }
 
   const waitResult = await waitForAccountSyncSettlement(client, baselines, before);
+  const jobIdleResult = await waitForDeviceSyncJobIdle(state);
 
   return {
     queuedCount: accounts.length,
     startedAt: before,
     settledCount: waitResult.settledCount,
     timedOutAccountCount: waitResult.timedOutAccountCount,
+    jobIdle: jobIdleResult.idle,
+    jobIdleTimedOut: jobIdleResult.timedOut,
+    jobs: jobIdleResult.summary,
     targets: buildTargetStatuses(waitResult.accounts),
   };
 }
@@ -793,6 +889,7 @@ function isFreshSyncTimestamp(
 
 async function exportSanitizedFixture(state: CaptureServerState): Promise<Record<string, unknown>> {
   const client = await ensureCaptureClient(state);
+  const jobIdleResult = await waitForDeviceSyncJobIdle(state);
   const accounts = (await client.listAccounts({ provider: junctionProvider })).accounts;
   const candidate = await buildSanitizedWearableFixtureCandidate({
     vaultRoot: state.options.vaultRoot,
@@ -811,6 +908,67 @@ async function exportSanitizedFixture(state: CaptureServerState): Promise<Record
     rawArtifactCount: candidate.rawArtifacts.length,
     eventLedgerCount: candidate.eventLedgers.length,
     metricSampleLedgerCount: candidate.metricSampleLedgers.length,
+    jobIdle: jobIdleResult.idle,
+    jobIdleTimedOut: jobIdleResult.timedOut,
+    jobs: jobIdleResult.summary,
+  };
+}
+
+async function waitForDeviceSyncJobIdle(state: CaptureServerState): Promise<{
+  idle: boolean;
+  timedOut: boolean;
+  summary: DeviceSyncJobSummary;
+}> {
+  const deadline = Date.now() + reconcileWaitTimeoutMs;
+  let summary = await readDeviceSyncJobSummary(state);
+
+  while (Date.now() < deadline) {
+    if (isDeviceSyncJobIdle(summary)) {
+      return {
+        idle: true,
+        timedOut: false,
+        summary,
+      };
+    }
+
+    await sleep(reconcilePollMs);
+    summary = await readDeviceSyncJobSummary(state);
+  }
+
+  return {
+    idle: isDeviceSyncJobIdle(summary),
+    timedOut: !isDeviceSyncJobIdle(summary),
+    summary,
+  };
+}
+
+function isDeviceSyncJobIdle(summary: DeviceSyncJobSummary): boolean {
+  return summary.jobsQueued === 0 && summary.jobsRunning === 0;
+}
+
+async function readDeviceSyncJobSummary(state: CaptureServerState): Promise<DeviceSyncJobSummary> {
+  const client = await ensureCaptureClient(state);
+  const healthUrl = new URL("/healthz", client.baseUrl);
+  const headers: Record<string, string> = {};
+  const controlToken = state.controlPlane?.controlToken ?? null;
+  if (controlToken) {
+    headers.Authorization = `Bearer ${controlToken}`;
+  }
+  const response = await fetch(healthUrl, { headers });
+  if (!response.ok) {
+    throw new Error(`Device sync health check failed with HTTP ${response.status}.`);
+  }
+  return parseDeviceSyncJobSummary(await response.json());
+}
+
+export function parseDeviceSyncJobSummary(payload: unknown): DeviceSyncJobSummary {
+  if (!isPlainRecord(payload) || !isPlainRecord(payload.summary)) {
+    throw new Error("Device sync health response did not include a summary.");
+  }
+  return {
+    jobsQueued: readFiniteNonNegativeInteger(payload.summary.jobsQueued, "jobsQueued"),
+    jobsRunning: readFiniteNonNegativeInteger(payload.summary.jobsRunning, "jobsRunning"),
+    jobsDead: readFiniteNonNegativeInteger(payload.summary.jobsDead, "jobsDead"),
   };
 }
 
@@ -950,6 +1108,9 @@ function classifyKey(key: string, keyPath: string[]): "keep" | "drop" | "pseudon
       "email",
       "phone",
       "address",
+      "city",
+      "country",
+      "county",
       "birthdate",
       "dateofbirth",
       "firstname",
@@ -982,6 +1143,16 @@ function classifyKey(key: string, keyPath: string[]): "keep" | "drop" | "pseudon
       "provideruserid",
       "athleteid",
       "profileid",
+      "location",
+      "locality",
+      "place",
+      "placename",
+      "postalcode",
+      "postcode",
+      "state",
+      "street",
+      "title",
+      "zipcode",
     ].includes(normalized)
   ) {
     return "pseudonymize";
@@ -1174,8 +1345,11 @@ function renderPage(browserToken: string): string {
       async function refresh() {
         const status = await api("/api/status");
         config.textContent = status.configured
-          ? "Junction credentials found. Raw data stays in " + status.vault + "."
+          ? "Junction credentials found. Capture targets " + status.captureConfig.providerFilter.join(", ") +
+            " with " + status.captureConfig.summaryResourceCount + " summary resources and " +
+            status.captureConfig.timeseriesResourceCount + " timeseries resources. Raw data stays in " + status.vault + "."
           : status.configError || ("Missing Junction env: " + status.missingEnv.join(", "));
+        if (status.jobs) append("Device sync jobs queued=" + status.jobs.jobsQueued + " running=" + status.jobs.jobsRunning + " dead=" + status.jobs.jobsDead + ".");
         if (status.controlPlaneError) append(status.controlPlaneError);
         targets.innerHTML = status.targets.map((target) =>
           '<div class="target ' + (target.connected ? "connected" : "") + '">' +
@@ -1196,13 +1370,13 @@ function renderPage(browserToken: string): string {
       document.querySelector('[data-action="sync"]').addEventListener("click", async () => {
         append("Sync queued...");
         const result = await api("/api/reconcile", { method: "POST" });
-        append("Queued " + result.queuedCount + " account sync(s).");
+        append("Queued " + result.queuedCount + " account sync(s). Job idle=" + result.jobIdle + ".");
         await refresh();
       });
       document.querySelector('[data-action="export"]').addEventListener("click", async () => {
         append("Building sanitized fixture candidate...");
         const result = await api("/api/export", { method: "POST" });
-        append("Export ready: " + JSON.stringify(result.redactionReport));
+        append("Export ready. Job idle=" + result.jobIdle + ". Redaction: " + JSON.stringify(result.redactionReport));
         await downloadLatest(result.downloadUrl);
         await refresh();
       });
@@ -1354,15 +1528,45 @@ function readFileSyncSafe(filePath: string): string | null {
   }
 }
 
-function appendCsvValue(existing: string | undefined, value: string): string {
+function buildLoopbackOriginAliases(origin: string): string[] {
+  try {
+    const parsed = new URL(origin);
+    const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (!isLoopbackCaptureHostname(hostname)) {
+      return [];
+    }
+    const port = parsed.port ? `:${parsed.port}` : "";
+    return [
+      `${parsed.protocol}//127.0.0.1${port}`,
+      `${parsed.protocol}//localhost${port}`,
+    ];
+  } catch {
+    return [];
+  }
+}
+
+function appendCsvValues(existing: string | undefined, valuesToAdd: readonly string[]): string {
   const values = new Set(
     (existing ?? "")
       .split(",")
       .map((item) => item.trim())
       .filter((item) => item.length > 0),
   );
-  values.add(value);
+  for (const value of valuesToAdd) {
+    values.add(value);
+  }
   return Array.from(values).join(",");
+}
+
+function readFiniteNonNegativeInteger(value: unknown, key: string): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 0
+  ) {
+    throw new Error(`Device sync health summary field ${key} was not a non-negative integer.`);
+  }
+  return value;
 }
 
 function toVaultRelativePath(vaultRoot: string, filePath: string): string {

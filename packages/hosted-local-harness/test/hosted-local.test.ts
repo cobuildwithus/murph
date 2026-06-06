@@ -117,6 +117,49 @@ describe("hosted-local harness", () => {
     expect(missingScenarios).toEqual([]);
   });
 
+  test("keeps the hosted device-sync CI workflow wired to the registered scenario", async () => {
+    const workflow = await readFile(
+      path.join(repoRoot, ".github", "workflows", "cloudflare-hosted-device-sync-e2e.yml"),
+      "utf8",
+    );
+    const workflowScenarios = Array.from(
+      workflow.matchAll(/pnpm hosted-local e2e ([^\s\\]+)/g),
+      (match) => match[1],
+    );
+
+    expect(workflowScenarios).toEqual(["device-sync-junction-wearable-fixture"]);
+    expect(resolveHostedLocalE2eScenarios("device-sync-junction-wearable-fixture")[0]?.file).toBe(
+      "apps/cloudflare/test/hosted-local-device-sync-junction-wearable-fixture-e2e.test.ts",
+    );
+    expect(workflow).toContain(
+      "HOSTED_DEVICE_ROUTING_INDEX_KEY: 0101010101010101010101010101010101010101010101010101010101010101",
+    );
+    expect(workflow).toContain("apps/web/app/(dashboard)/biomarkers/**");
+    expect(workflow).toContain("apps/web/app/api/device-sync/**");
+    expect(workflow).toContain("apps/web/app/api/internal/device-sync/**");
+    expect(workflow).toContain("apps/web/app/api/settings/device-sync/**");
+    expect(workflow).toContain("apps/web/app/device-sync/**");
+    expect(workflow).toContain("apps/web/src/components/biomarkers/**");
+    expect(workflow).toContain("apps/web/src/components/settings/hosted-device-sync-*.tsx");
+    expect(workflow).toContain("apps/web/src/lib/device-sync/**");
+    expect(workflow).toContain("apps/web/src/lib/health-commons/**");
+    expect(workflow).toContain("apps/web/test/biomarker*");
+    expect(workflow).toContain("apps/web/test/device-sync*");
+    expect(workflow).toContain("apps/web/test/health-commons-biomarker*");
+    expect(workflow).toContain("apps/web/test/hosted-device-sync*");
+    expect(workflow).toContain("packages/contracts/**");
+    expect(workflow).toContain("packages/core/**");
+    expect(workflow).toContain("packages/device-syncd/**");
+    expect(workflow).toContain("packages/health-commons/**");
+    expect(workflow).toContain("packages/health-metrics/**");
+    expect(workflow).toContain("packages/importers/**");
+    expect(workflow).toContain("packages/query/**");
+    expect(workflow).toContain("packages/vault-usecases/**");
+    expect(workflow).toContain(".artifacts/hosted-local/**/state.json");
+    expect(workflow).not.toContain("DEVICE_SYNC_ENCRYPTION_KEY");
+    expect(workflow).not.toContain("DEVICE_SYNC_ENCRYPTION_KEY_VERSION");
+  });
+
   test("keeps diagnostic hosted-local E2E scenarios opt-in", () => {
     expect(resolveHostedLocalE2eScenarios("active-turn-latency")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-active-turn-latency-e2e.test.ts",
@@ -132,6 +175,9 @@ describe("hosted-local harness", () => {
     );
     expect(resolveHostedLocalE2eScenarios("device-sync-wake")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-device-sync-wake-e2e.test.ts",
+    );
+    expect(resolveHostedLocalE2eScenarios("device-sync-junction-wearable-fixture")[0]?.file).toBe(
+      "apps/cloudflare/test/hosted-local-device-sync-junction-wearable-fixture-e2e.test.ts",
     );
     expect(resolveHostedLocalE2eScenarios("stuck-invocation-recovery")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-stuck-invocation-recovery-e2e.test.ts",
@@ -152,6 +198,9 @@ describe("hosted-local harness", () => {
       "device-sync-wake",
     );
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).not.toContain(
+      "device-sync-junction-wearable-fixture",
+    );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).not.toContain(
       "stuck-invocation-recovery",
     );
     expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
@@ -168,6 +217,9 @@ describe("hosted-local harness", () => {
     );
     expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
       "device-sync-wake",
+    );
+    expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
+      "device-sync-junction-wearable-fixture",
     );
     expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
       "stuck-invocation-recovery",

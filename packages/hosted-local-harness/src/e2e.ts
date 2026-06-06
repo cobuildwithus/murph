@@ -33,9 +33,11 @@ export type HostedLocalE2eScenarioName =
   | "codex-long-thread"
   | "container-continuity"
   | "device-connect"
+  | "device-sync-junction-wearable-fixture"
   | "device-sync-wake"
   | "direct-r2-presigned-put"
   | "idle-checkpoint-deferred-progress"
+  | "junction-wearable-fixture"
   | "mailbox-platform-env"
   | "linq-first-contact"
   | "linq-delivery"
@@ -99,12 +101,23 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     name: "device-sync-wake",
   },
   {
+    file: "apps/cloudflare/test/hosted-local-device-sync-junction-wearable-fixture-e2e.test.ts",
+    manualOnly: true,
+    name: "device-sync-junction-wearable-fixture",
+    processIsolation: true,
+  },
+  {
     file: "apps/cloudflare/test/hosted-local-direct-r2-presigned-put-e2e.test.ts",
     name: "direct-r2-presigned-put",
   },
   {
     file: "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",
     name: "idle-checkpoint-deferred-progress",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-junction-wearable-fixture-e2e.test.ts",
+    manualOnly: true,
+    name: "junction-wearable-fixture",
   },
   {
     file: "apps/cloudflare/test/hosted-local-mailbox-platform-env-e2e.test.ts",

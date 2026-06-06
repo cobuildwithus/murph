@@ -1,6 +1,16 @@
 import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
+import {
+  buildJunctionProviderSourceInstanceKey,
+} from "@murphai/device-syncd/connect-config";
+import {
+  decodeHostedDeviceRoutingIndexKey,
+} from "../../src/lib/device-sync/routing-index";
 
 const prismaModuleSpecifier = new URL("../../src/lib/prisma.ts", import.meta.url).href;
+const deviceSyncPrismaStoreModuleSpecifier = new URL(
+  "../../src/lib/device-sync/prisma-store.ts",
+  import.meta.url,
+).href;
 const contactPrivacyModuleSpecifier = new URL(
   "../../src/lib/hosted-onboarding/contact-privacy.ts",
   import.meta.url,
@@ -48,6 +58,39 @@ interface HostedActiveLinqMemberSeedInput extends HostedActiveMemberSeedInput {
   memberPhone: string;
   privyUserId?: string | null;
   walletAddress?: string | null;
+}
+
+interface HostedJunctionDeviceSyncReplayDirtyResource {
+  count: number;
+  jobKind: "resource";
+  payload: Record<string, boolean | number | string>;
+  resource: string;
+  resourceCategory: "summary" | "timeseries";
+  sourceProviderSlug: string;
+  windowEnd: string;
+  windowStart: string;
+}
+
+interface HostedJunctionDeviceSyncReplaySource {
+  displayName: string;
+  sourceProviderSlug: string;
+}
+
+export interface HostedJunctionDeviceSyncReplaySeedInput {
+  connectedAt: string;
+  dirtyAt?: string | null;
+  dirtyResources: readonly HostedJunctionDeviceSyncReplayDirtyResource[];
+  displayName: string;
+  environment?: NodeJS.ProcessEnv;
+  externalAccountId: string;
+  memberId: string;
+  sources: readonly HostedJunctionDeviceSyncReplaySource[];
+}
+
+export interface HostedJunctionDeviceSyncReplaySeedResult {
+  connectionId: string;
+  dirtyResourceCount: number;
+  sourceCount: number;
 }
 
 interface HostedMemberSeedPrismaClient {
@@ -131,6 +174,50 @@ interface HostedMemberRoutingStoreModule {
   }): Promise<unknown>;
 }
 
+interface HostedDeviceSyncControlPlaneStore {
+  upsertConnection(input: {
+    connectedAt: string;
+    credential: {
+      kind: "provider_config";
+      providerConfigKey: "junction";
+    };
+    displayName: string;
+    externalAccountId: string;
+    metadata?: Record<string, unknown>;
+    nextReconcileAt?: string | null;
+    ownerId: string;
+    provider: "junction";
+    scopes?: string[];
+    setupPhase?: "source_confirmed";
+    status: "active";
+  }): Promise<{ id: string }>;
+  upsertConnectionSource(input: {
+    connectionId: string;
+    displayName: string;
+    firstSeenAt: string;
+    lastSeenAt: string;
+    sourceInstanceKey: string;
+    sourceProviderSlug: string;
+    status: "connected";
+  }): Promise<unknown>;
+  upsertDirtyConnection(input: {
+    connectionId: string;
+    dirtyAt: string;
+    eventType?: string | null;
+    provider: "junction";
+    resources: readonly HostedJunctionDeviceSyncReplayDirtyResource[];
+    traceId?: string | null;
+    userId: string;
+  }): Promise<unknown>;
+}
+
+interface HostedDeviceSyncPrismaStoreModule {
+  PrismaDeviceSyncControlPlaneStore: new(input: {
+    prisma: HostedMemberSeedPrismaClient;
+    providerAccountBlindIndexKey?: Buffer | null;
+  }) => HostedDeviceSyncControlPlaneStore;
+}
+
 interface HostedMemberSeedModules {
   createPrismaClient: HostedMemberSeedPrismaModule["createPrismaClient"];
   createHostedMember: HostedMemberStoreModule["createHostedMember"];
@@ -145,6 +232,12 @@ interface HostedMemberSeedModules {
   upsertHostedMemberIdentity: HostedMemberIdentityStoreModule["upsertHostedMemberIdentity"];
   writeHostedMemberStripeBillingRefTx:
     HostedMemberBillingStoreModule["writeHostedMemberStripeBillingRefTx"];
+}
+
+interface HostedJunctionDeviceSyncReplaySeedModules {
+  createPrismaClient: HostedMemberSeedPrismaModule["createPrismaClient"];
+  PrismaDeviceSyncControlPlaneStore:
+    HostedDeviceSyncPrismaStoreModule["PrismaDeviceSyncControlPlaneStore"];
 }
 
 export async function seedHostedActiveMember(
@@ -289,6 +382,87 @@ export async function bindHostedActiveLinqHomeChat(input: {
   }
 }
 
+export async function seedHostedJunctionDeviceSyncReplay(
+  input: HostedJunctionDeviceSyncReplaySeedInput,
+): Promise<HostedJunctionDeviceSyncReplaySeedResult> {
+  if (!input.memberId.trim() || !input.externalAccountId.trim()) {
+    throw new Error("Hosted Junction replay seed requires member id and external account id.");
+  }
+  if (input.dirtyResources.length === 0) {
+    throw new Error("Hosted Junction replay seed requires dirty resources.");
+  }
+
+  const environment = applyHostedMemberSeedEnvironment(input.environment);
+  const modules = await loadHostedJunctionDeviceSyncReplaySeedModules(environment);
+  const prisma = createHostedMemberSeedPrisma({
+    environment,
+    modules,
+  });
+  const store = new modules.PrismaDeviceSyncControlPlaneStore({
+    prisma,
+    providerAccountBlindIndexKey: readHostedJunctionReplayProviderAccountBlindIndexKey(environment),
+  });
+
+  try {
+    const connection = await store.upsertConnection({
+      connectedAt: input.connectedAt,
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      displayName: input.displayName,
+      externalAccountId: input.externalAccountId,
+      metadata: {
+        fixture: "junction-wearable-hosted-replay",
+      },
+      nextReconcileAt: null,
+      ownerId: input.memberId,
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+      status: "active",
+    });
+
+    for (const source of input.sources) {
+      const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: connection.id,
+        sourceProviderSlug: source.sourceProviderSlug,
+      });
+      if (!sourceInstanceKey) {
+        throw new Error("Hosted Junction replay seed could not build a source instance key.");
+      }
+
+      await store.upsertConnectionSource({
+        connectionId: connection.id,
+        displayName: source.displayName,
+        firstSeenAt: input.connectedAt,
+        lastSeenAt: input.connectedAt,
+        sourceInstanceKey,
+        sourceProviderSlug: source.sourceProviderSlug,
+        status: "connected",
+      });
+    }
+
+    await store.upsertDirtyConnection({
+      connectionId: connection.id,
+      dirtyAt: input.dirtyAt ?? input.connectedAt,
+      eventType: "junction.fixture.replay",
+      provider: "junction",
+      resources: input.dirtyResources,
+      traceId: `junction-fixture-${connection.id}`,
+      userId: input.memberId,
+    });
+
+    return {
+      connectionId: connection.id,
+      dirtyResourceCount: input.dirtyResources.length,
+      sourceCount: input.sources.length,
+    };
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 function applyHostedMemberSeedEnvironment(
   source: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
@@ -369,9 +543,34 @@ async function loadHostedMemberSeedModules(
   };
 }
 
+async function loadHostedJunctionDeviceSyncReplaySeedModules(
+  environment: NodeJS.ProcessEnv,
+): Promise<HostedJunctionDeviceSyncReplaySeedModules> {
+  const [prismaModule, deviceSyncPrismaStoreModule] = await Promise.all([
+    import(prismaModuleSpecifier),
+    import(deviceSyncPrismaStoreModuleSpecifier),
+  ]);
+
+  if (environment.DATABASE_URL) {
+    process.env.DATABASE_URL = environment.DATABASE_URL;
+  }
+
+  const typedPrismaModule = prismaModule as HostedMemberSeedPrismaModule;
+  const typedDeviceSyncPrismaStoreModule =
+    deviceSyncPrismaStoreModule as HostedDeviceSyncPrismaStoreModule;
+
+  return {
+    createPrismaClient: typedPrismaModule.createPrismaClient,
+    PrismaDeviceSyncControlPlaneStore:
+      typedDeviceSyncPrismaStoreModule.PrismaDeviceSyncControlPlaneStore,
+  };
+}
+
 function createHostedMemberSeedPrisma(input: {
   environment: NodeJS.ProcessEnv;
-  modules: HostedMemberSeedModules;
+  modules: {
+    createPrismaClient: HostedMemberSeedPrismaModule["createPrismaClient"];
+  };
 }): HostedMemberSeedPrismaClient {
   const databaseUrl = input.environment.DATABASE_URL;
   if (!databaseUrl) {
@@ -382,6 +581,17 @@ function createHostedMemberSeedPrisma(input: {
     databaseUrl,
     poolMax: 1,
   });
+}
+
+function readHostedJunctionReplayProviderAccountBlindIndexKey(
+  environment: NodeJS.ProcessEnv,
+): Buffer {
+  const value = environment.HOSTED_DEVICE_ROUTING_INDEX_KEY?.trim();
+  if (!value) {
+    throw new Error("Hosted Junction replay seed requires HOSTED_DEVICE_ROUTING_INDEX_KEY.");
+  }
+
+  return decodeHostedDeviceRoutingIndexKey(value);
 }
 
 async function seedHostedMemberBillingRefTx(input: {
