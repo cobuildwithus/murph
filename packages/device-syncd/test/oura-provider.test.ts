@@ -837,6 +837,37 @@ test("Oura heartrate resource jobs are ignored for historical days", async () =>
   assert.deepEqual(importedSnapshots, []);
 });
 
+test("Oura heartrate delete jobs are ignored", async () => {
+  const importedSnapshots: unknown[] = [];
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+  });
+
+  await provider.jobExecutor.executeJob(
+    {
+      account: createAccount(["heartrate"]),
+      now: "2026-03-16T10:00:00.000Z",
+      logger: {},
+      async importSnapshot(snapshot) {
+        importedSnapshots.push(snapshot);
+        return { ok: true };
+      },
+      async refreshAccountTokens() {
+        throw new Error("refresh should not be called in this test");
+      },
+    },
+    createJob("delete", {
+      dataType: "heartrate",
+      objectId: "2026-03-16T09:30:00.000Z",
+      occurredAt: "2026-03-16T09:30:00.000Z",
+      sourceEventType: "heartrate.deleted",
+    }),
+  );
+
+  assert.deepEqual(importedSnapshots, []);
+});
+
 test("Oura old heartrate-only backfills ignore invalid dense windows without fetching", async () => {
   let fetchCalled = false;
   const provider = createOuraDeviceSyncProvider({
@@ -1094,6 +1125,67 @@ test("Oura provider validates webhook signatures and turns notifications into re
   assert.equal(parsed?.jobs[0]?.dedupeKey, `oura-webhook:${parsed?.traceId}`);
 });
 
+test("Oura old heartrate webhooks are accepted and no-op at execution", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      requests.push(url);
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      event_type: "heartrate.updated",
+      data_type: "heartrate",
+      object_id: "heartrate-1",
+      user_id: "oura-user-1",
+      timestamp: "2026-03-16T09:58:00.000Z",
+    }),
+    "utf8",
+  );
+
+  const parsed = await verifyAndParseWebhook({
+    headers: createOuraWebhookHeaders("oura-client-secret", "2026-03-16T09:58:10.000Z", rawBody),
+    rawBody,
+    now: "2026-03-16T10:00:00.000Z",
+  });
+  const job = parsed?.jobs[0];
+  assert.ok(job);
+  assert.equal(job.kind, "resource");
+  assert.deepEqual(job.payload, {
+    dataType: "heartrate",
+    objectId: "heartrate-1",
+    occurredAt: "2026-03-16T09:58:00.000Z",
+    windowStart: "2026-02-23T10:00:00.000Z",
+    windowEnd: "2026-03-16T10:00:00.000Z",
+    includePersonalInfo: false,
+  });
+
+  await provider.jobExecutor?.executeJob(
+    {
+      account: createAccount(["heartrate"]),
+      async importSnapshot(snapshot) {
+        importedSnapshots.push(snapshot);
+        return { ok: true };
+      },
+      logger: {},
+      now: "2026-03-16T10:00:00.000Z",
+      async refreshAccountTokens() {
+        throw new Error("refresh should not be called in this test");
+      },
+    },
+    createJob("resource", job.payload),
+  );
+
+  assert.deepEqual(requests, []);
+  assert.deepEqual(importedSnapshots, []);
+});
+
 test("Oura provider accepts uppercase hexadecimal webhook signatures", async () => {
   const provider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",
@@ -1209,6 +1301,18 @@ test("Oura webhook preflight helper returns the challenge only for the configure
 });
 
 test("Oura provider webhook admin no-ops without a verification token and reuses the shared subscription client when one is configured", async () => {
+  const defaultWebhookDataTypes = [...new Set(OURA_DEFAULT_WEBHOOK_TARGETS.map((target) => target.dataType))].sort();
+  assert.deepEqual(defaultWebhookDataTypes, [
+    "daily_activity",
+    "daily_readiness",
+    "daily_sleep",
+    "daily_spo2",
+    "session",
+    "sleep",
+    "workout",
+  ]);
+  assert.equal(defaultWebhookDataTypes.includes("heartrate"), false);
+
   const requests: string[] = [];
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -1831,6 +1935,19 @@ test("Oura provider exposes the connect URL, forwards webhook verification throu
   const webhookAdmin = requireValue(provider.webhookAdmin);
   const handleWebhookPreflight = requireValue(webhookAdmin.handleWebhookPreflight);
   const fallbackSnapshots: unknown[] = [];
+  const defaultScopes = provider.descriptor.oauth?.defaultScopes ?? [];
+
+  assert.deepEqual(defaultScopes, ["personal", "daily", "workout", "session", "spo2"]);
+  assert.equal(defaultScopes.includes("heartrate"), false);
+  assert.equal(
+    provider.oauthAdapter.buildConnectUrl({
+      callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
+      scopes: defaultScopes,
+      state: "state-default-connect",
+      now: "2026-03-16T10:00:00.000Z",
+    }).includes("heartrate"),
+    false,
+  );
 
   assert.equal(
     provider.oauthAdapter.buildConnectUrl({

@@ -6,6 +6,7 @@ import {
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  JUNCTION_KNOWN_TIMESERIES_RESOURCES,
   JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
   JUNCTION_SLEEP_STAGE_ARRAY_PATHS,
   JUNCTION_SLEEP_STAGE_COUNT_PATHS,
@@ -362,7 +363,7 @@ const JUNCTION_FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS = new Set([
   "freestyle_libre",
 ]);
 const JUNCTION_TIMESERIES_RESOURCE_NAMES = new Set<string>([
-  ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+  ...JUNCTION_KNOWN_TIMESERIES_RESOURCES,
   "glucose",
 ]);
 const DEFAULT_SUMMARY_BACKFILL_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays;
@@ -409,6 +410,7 @@ export function createJunctionDeviceSyncProvider(
     config.timeseriesResources,
     JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
     JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+    JUNCTION_KNOWN_TIMESERIES_RESOURCES,
     "timeseries",
   );
   const providerFilter = normalizeJunctionProviderFilter(config.providerFilter);
@@ -3079,13 +3081,15 @@ function normalizeOptionalResourceList(
   value: string[] | undefined,
   defaults: readonly string[],
   allowedResources: readonly string[],
+  knownResources: readonly string[],
   label: string,
 ): string[] {
   const normalized = (value === undefined ? defaults : value)
     .map(normalizeJunctionResourceName)
     .filter((entry): entry is string => entry !== null);
   const allowedResourceSet = new Set<string>(allowedResources);
-  const unsupportedResources = normalized.filter((entry) => !allowedResourceSet.has(entry));
+  const knownResourceSet = new Set<string>([...allowedResources, ...knownResources]);
+  const unsupportedResources = normalized.filter((entry) => !knownResourceSet.has(entry));
 
   if (unsupportedResources.length > 0) {
     throw new TypeError(
@@ -3093,7 +3097,7 @@ function normalizeOptionalResourceList(
     );
   }
 
-  return [...new Set(normalized)];
+  return [...new Set(normalized.filter((entry) => allowedResourceSet.has(entry)))];
 }
 
 function normalizeProviderSlug(value: unknown): string | null {

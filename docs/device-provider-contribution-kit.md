@@ -240,10 +240,9 @@ also prove at least one representative snapshot through the real
 normalizer-only assertions are useful, but they are not enough: the fixture must
 round-trip through `core.importDeviceBatch` so invalid observation grains,
 unsupported fields, dense sample leakage, and other core-contract drift fail in
-tests. Keep high-frequency timeseries as raw evidence unless an explicit compact
-tests. High-frequency provider timeseries should be dropped, treated as
-freshness hints, or reduced to compact summary/derived facts before persistence;
-full raw retention needs an explicit product/debug policy and matching tests.
+tests. High-frequency provider timeseries should be dropped, treated as freshness
+hints, or reduced to compact summary/derived facts before persistence; full raw
+retention needs an explicit product/debug policy and matching tests.
 Committed provider fixtures and assertions must stay synthetic or fully
 redacted; never commit real provider tokens, account identifiers, raw private
 payload details, local paths, or direct user identifiers to satisfy this proof.

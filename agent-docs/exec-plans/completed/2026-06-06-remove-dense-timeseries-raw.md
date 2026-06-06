@@ -1,6 +1,6 @@
 # Remove dense wearable timeseries raw retention
 
-Status: active
+Status: completed
 Created: 2026-06-06
 Updated: 2026-06-06
 
@@ -337,3 +337,4 @@ generic full `provider-snapshot` fallback.
   Junction-backed source, or only for sources proven to support those resources?
 - Should Oura `heartrate` parser compatibility remain temporarily for old raw
   artifacts, or be removed in the same patch once producers are gone?
+Completed: 2026-06-06

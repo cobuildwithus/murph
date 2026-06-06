@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
-import { JUNCTION_DEFAULT_SUMMARY_RESOURCES } from "@murphai/importers/device-providers/junction-resources";
+import {
+  JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+} from "@murphai/importers/device-providers/junction-resources";
 import { test } from "vitest";
 
 import { DeviceSyncError } from "../src/errors.ts";
@@ -268,6 +271,172 @@ test("Junction provider defaults do not fetch opt-in profile summaries", async (
 
   assert.equal(summaryResources.includes("profile"), false);
   assert.deepEqual(summaryResources, [...JUNCTION_DEFAULT_SUMMARY_RESOURCES]);
+  assert.equal(importedSnapshots.length, 1);
+});
+
+test("Junction omitted timeseries config defaults to compact resources only", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: ["activity"],
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+      requests.push(url);
+
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [
+            {
+              id: "provider-garmin-1",
+              slug: "garmin",
+              name: "Garmin",
+              status: "connected",
+              resource_availability: Object.fromEntries([
+                "activity",
+                ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+                "heartrate",
+                "hrv",
+                "steps",
+                "distance",
+                "calories_active",
+                "respiratory_rate",
+                "glucose",
+                "weight",
+              ].map((resource) => [resource, true])),
+            },
+          ],
+        });
+      }
+
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+        return createJsonResponse({ data: [] });
+      }
+
+      const timeseriesResource = new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1];
+      if (timeseriesResource) {
+        assert.ok(
+          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
+          `Unexpected default timeseries resource: ${timeseriesResource}`,
+        );
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: [{
+                timestamp: "2026-04-02T12:00:00.000Z",
+                unit: timeseriesResource === "blood_oxygen" ? "%" : "score",
+                value: timeseriesResource === "blood_oxygen" ? 97 : 24,
+              }],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        lastSyncCompletedAt: "2026-04-03T12:00:00.000Z",
+      }),
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const requestedTimeseriesResources = requests
+    .map((url) => new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1])
+    .filter((resource): resource is string => Boolean(resource));
+
+  assert.deepEqual(
+    [...new Set(requestedTimeseriesResources)].sort(),
+    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].sort(),
+  );
+  assert.equal(
+    requests.every((url) =>
+      !url.includes("heartrate") &&
+      !url.includes("hrv") &&
+      !url.includes("steps") &&
+      !url.includes("distance") &&
+      !url.includes("calories_active") &&
+      !url.includes("respiratory_rate") &&
+      !url.includes("glucose") &&
+      !url.includes("weight")
+    ),
+    true,
+  );
+  assert.equal(importedSnapshots.length, 1);
+});
+
+test("Junction stale dense timeseries config is accepted and dropped", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: ["activity"],
+    timeseriesResources: ["steps", "heart_rate"],
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+      requests.push(url);
+
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-1",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+              steps: true,
+              heartrate: true,
+            },
+          }],
+        });
+      }
+
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+        return createJsonResponse({ data: [] });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        lastSyncCompletedAt: "2026-04-03T12:00:00.000Z",
+      }),
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
   assert.equal(importedSnapshots.length, 1);
 });
 

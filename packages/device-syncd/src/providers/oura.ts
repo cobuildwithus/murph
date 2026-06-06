@@ -1054,6 +1054,10 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     const occurredAt = normalizeIsoTimestamp(job.payload.occurredAt) ?? context.now;
     const sourceEventType = normalizeString(job.payload.sourceEventType) ?? undefined;
 
+    if (isIgnoredOuraResourceDataType(dataType ?? null)) {
+      return {};
+    }
+
     if (!dataType || !objectId) {
       throw deviceSyncError({
         code: "OURA_DELETE_JOB_INVALID",
