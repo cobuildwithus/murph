@@ -289,9 +289,6 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('outside supplements')
     expect(raw).toContain('mostly starting fresh')
     expect(raw).toContain(
-      'Keep supplement intake, supplement examples, dosage, and label questions entirely for the next supplement step',
-    )
-    expect(raw).toContain(
       'invite product or brand names plus roughly how long they have taken each one or since when',
     )
     expect(raw).toContain(
@@ -504,11 +501,9 @@ describe('assistant skill assets', () => {
     expect(movementSection).not.toContain('```text')
     const protocolsSection = raw.slice(protocolsIndex, supplementsIndex)
     expect(protocolsSection).toContain(
-      'Keep supplement intake, supplement examples, dosage, and label questions entirely for the next supplement step',
+      'whether they are already trying any health protocols or experiments',
     )
-    expect(protocolsSection).toContain(
-      'do not mention excluding supplements unless the user has already brought supplements into this part of the conversation',
-    )
+    expect(protocolsSection).toContain('mostly starting fresh')
     expect(protocolsSection).toContain('cold exposure')
     expect(protocolsSection).toContain('sauna')
     expect(protocolsSection).toContain('a new workout plan')
@@ -517,6 +512,7 @@ describe('assistant skill assets', () => {
     expect(protocolsSection).toContain('a recovery practice')
     expect(protocolsSection).toContain('caffeine/alcohol timing')
     const normalizedProtocolsSection = protocolsSection.toLowerCase()
+    expect(normalizedProtocolsSection).not.toContain('supplement')
     const supplementExamplesExcludedFromProtocolStep = [
       'magnesium',
       'creatine',
