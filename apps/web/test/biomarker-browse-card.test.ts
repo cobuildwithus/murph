@@ -152,7 +152,7 @@ it.each([
     context: "browser-vault is loading",
     value: { deviceSyncImportPending: false, refreshPending: false, status: "loading" },
   },
-] as const)("shows syncing copy for missing browse values while $context", async ({ value }) => {
+] as const)("keeps the empty placeholder for missing browse values while only $context", async ({ value }) => {
   const { BiomarkersPageClient } = await import(
     "../app/(dashboard)/biomarkers/biomarkers-page-client"
   );
@@ -185,14 +185,14 @@ it.each([
   );
 
   try {
-    expect(rendered.container.textContent).toContain("Syncing...");
-    expect(rendered.container.textContent).not.toContain("---");
+    expect(rendered.container.textContent).not.toContain("Syncing...");
+    expect(rendered.container.textContent).toContain("---");
   } finally {
     await rendered.cleanup();
   }
 });
 
-it("does not show syncing copy for every missing browse value while only device import is pending", async () => {
+it("shows syncing copy for missing browse values while device import is pending", async () => {
   const { BiomarkersPageClient } = await import(
     "../app/(dashboard)/biomarkers/biomarkers-page-client"
   );
@@ -227,8 +227,8 @@ it("does not show syncing copy for every missing browse value while only device 
   );
 
   try {
-    expect(rendered.container.textContent).not.toContain("Syncing...");
-    expect(rendered.container.textContent).toContain("---");
+    expect(rendered.container.textContent).toContain("Syncing...");
+    expect(rendered.container.textContent).not.toContain("---");
   } finally {
     await rendered.cleanup();
   }
