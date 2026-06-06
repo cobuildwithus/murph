@@ -403,6 +403,7 @@ function projectedSleepWindow(summary: ProjectedWearableSleepSummary): WearableS
     date: summary.date,
     durationMinutes,
     endAt: summary.sleepEndAt,
+    externalRef: null,
     nap: false,
     occurredAt: summary.sessionMinutes.selection.occurredAt,
     paths: [],

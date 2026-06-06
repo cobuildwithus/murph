@@ -143,6 +143,7 @@ function makeMetricCandidate(
 ): WearableMetricCandidate {
   return {
     candidateId: overrides.candidateId,
+    dataOrigin: overrides.dataOrigin ?? null,
     date: overrides.date,
     externalRef: overrides.externalRef ?? null,
     metric: overrides.metric,
@@ -167,9 +168,11 @@ function makeSleepWindowCandidate(
 ): WearableSleepWindowCandidate {
   return {
     candidateId: overrides.candidateId,
+    dataOrigin: overrides.dataOrigin ?? null,
     date: overrides.date,
     durationMinutes: overrides.durationMinutes,
     endAt: overrides.endAt ?? null,
+    externalRef: overrides.externalRef ?? null,
     nap: overrides.nap,
     occurredAt: overrides.occurredAt ?? null,
     paths: overrides.paths ?? [`/virtual/${overrides.candidateId}.jsonl`],
@@ -764,6 +767,58 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
   assert.equal(sleepStageAggregates.every((candidate) => candidate.sourceKind === "sleep-stage-aggregate"), true);
   assert.equal(sleepStageAggregates.some((candidate) => candidate.title === "Oura sleep stages" && candidate.value === 40), true);
   assert.equal(sleepStageAggregates.some((candidate) => candidate.title === "Oura sleep stages" && candidate.value === 20), true);
+
+  const originScopedSleepStages = buildSleepStageAggregateCandidates(
+    [
+      makeMetricCandidate({
+        candidateId: "junction:oura:sleep-stage:light",
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "oura",
+          version: 1,
+        },
+        date: "2026-04-02",
+        externalRef: makeExternalRef({
+          resourceId: "stage-light",
+          resourceType: "sleep_stage",
+          system: "junction",
+        }),
+        metric: "lightMinutes",
+        occurredAt: "2026-04-02T01:00:00Z",
+        provider: "oura",
+        sourceFamily: "sample",
+        sourceKind: "sleep_stage:light",
+        title: "Light stage",
+        unit: "minutes",
+        value: 30,
+      }),
+    ],
+    [
+      makeSleepWindowCandidate({
+        candidateId: "junction:garmin:sleep-window",
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "garmin",
+          version: 1,
+        },
+        date: "2026-04-02",
+        durationMinutes: 450,
+        endAt: "2026-04-02T06:30:00Z",
+        externalRef: makeExternalRef({
+          resourceId: "garmin-window",
+          resourceType: "sleep",
+          system: "junction",
+        }),
+        nap: false,
+        provider: "oura",
+        sourceFamily: "event",
+        sourceKind: "sleep_session",
+        startAt: "2026-04-01T23:00:00Z",
+      }),
+    ],
+  );
+  assert.equal(originScopedSleepStages.length, 1);
+  assert.equal(originScopedSleepStages[0]?.externalRef, null);
 
   const candidateBase = createMetricCandidateBase(
     makeEntity({

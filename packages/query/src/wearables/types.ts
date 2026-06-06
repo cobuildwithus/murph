@@ -353,6 +353,7 @@ export interface WearableSleepWindowCandidate {
   date: string;
   durationMinutes: number;
   endAt: string | null;
+  externalRef: WearableExternalRef | null;
   nap: boolean;
   occurredAt: string | null;
   paths: string[];

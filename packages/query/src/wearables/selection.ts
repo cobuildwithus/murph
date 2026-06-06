@@ -219,7 +219,7 @@ export function resolveSleepWindowSelection(
           ? {
               candidateId: selection.candidateId,
               date: selection.date,
-              externalRef: null,
+              externalRef: selection.externalRef,
               metric: "sessionMinutes",
               occurredAt: selection.occurredAt,
               paths: selection.paths,

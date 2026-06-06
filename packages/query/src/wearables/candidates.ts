@@ -86,7 +86,7 @@ export function collectWearableDataset(
       if (entity.stream === "sleep_stage") {
         const candidate = buildSleepStageCandidate(entity, provider, externalRef);
 
-        if (candidate && matchesDateFilters(candidate.date, filters)) {
+        if (candidate) {
           sleepStageCandidates.push(candidate);
         }
 
@@ -137,15 +137,19 @@ export function collectWearableDataset(
 
     if (entity.kind === "sleep_session") {
       const candidate = buildSleepWindowCandidate(entity, provider, externalRef);
-      if (candidate && matchesDateFilters(candidate.date, filters)) {
+      if (candidate) {
         sleepWindows.push(candidate);
       }
     }
   }
 
+  const dedupedSleepWindows = dedupeSleepWindowCandidates(sleepWindows).sort(compareSleepWindowByDateDesc);
+  const filteredSleepWindows = dedupedSleepWindows.filter((candidate) => matchesDateFilters(candidate.date, filters));
+  const sleepStageAggregates = buildSleepStageAggregateCandidates(sleepStageCandidates, dedupedSleepWindows)
+    .filter((candidate) => matchesDateFilters(candidate.date, filters));
   const metricCandidates = [
     ...dedupeExactMetricCandidates(rawMetricCandidates).candidates,
-    ...dedupeExactMetricCandidates(buildSleepStageAggregateCandidates(sleepStageCandidates)).candidates,
+    ...dedupeExactMetricCandidates(sleepStageAggregates).candidates,
   ].sort(compareMetricCandidateByDateDesc);
 
   return {
@@ -153,7 +157,7 @@ export function collectWearableDataset(
     metricCandidates,
     provenanceDiagnostics: [...provenanceDiagnostics.values()].sort(compareWearableProvenanceDiagnostics),
     rawMetricCandidates,
-    sleepWindows: dedupeSleepWindowCandidates(sleepWindows).sort(compareSleepWindowByDateDesc),
+    sleepWindows: filteredSleepWindows,
   };
 }
 
@@ -210,11 +214,21 @@ export function buildActivitySessionAggregates(
 
 export function buildSleepStageAggregateCandidates(
   candidates: readonly WearableMetricCandidate[],
+  sleepWindows: readonly WearableSleepWindowCandidate[] = [],
 ): WearableMetricCandidate[] {
   const grouped = new Map<string, WearableMetricCandidate>();
 
   for (const candidate of dedupeExactMetricCandidates(candidates).candidates) {
-    const key = `${candidate.date}:${candidate.provider}:${wearableDataOriginKey(candidate.dataOrigin)}:${candidate.metric}`;
+    const window = findSleepStageAggregateWindow(candidate, sleepWindows);
+    const aggregateDate = window?.date ?? candidate.date;
+    const externalRef = window?.externalRef ?? null;
+    const key = [
+      aggregateDate,
+      candidate.provider,
+      wearableDataOriginKey(candidate.dataOrigin),
+      candidate.metric,
+      window?.candidateId ?? "unwindowed",
+    ].join(":");
     const existing = grouped.get(key);
 
     if (existing) {
@@ -230,11 +244,13 @@ export function buildSleepStageAggregateCandidates(
       candidateId: buildCandidateId([
         candidate.provider,
         wearableDataOriginKey(candidate.dataOrigin),
-        candidate.date,
+        aggregateDate,
+        window?.candidateId ?? "unwindowed",
         candidate.metric,
         "sleep-stage-aggregate",
       ]),
-      externalRef: null,
+      date: aggregateDate,
+      externalRef,
       sourceFamily: "derived",
       sourceKind: "sleep-stage-aggregate",
       title: `${formatProviderName(candidate.provider)} sleep stages`,
@@ -243,6 +259,96 @@ export function buildSleepStageAggregateCandidates(
   }
 
   return [...grouped.values()].sort(compareMetricCandidateByDateDesc);
+}
+
+function findSleepStageAggregateWindow(
+  candidate: WearableMetricCandidate,
+  sleepWindows: readonly WearableSleepWindowCandidate[],
+): WearableSleepWindowCandidate | null {
+  const matchingWindows = sleepWindows
+    .filter((window) => sleepStageCandidateMatchesWindow(candidate, window))
+    .sort(compareSleepStageAggregateWindow);
+
+  return matchingWindows[0] ?? null;
+}
+
+function sleepStageCandidateMatchesWindow(
+  candidate: WearableMetricCandidate,
+  window: WearableSleepWindowCandidate,
+): boolean {
+  if (candidate.provider !== window.provider) {
+    return false;
+  }
+
+  const candidateOrigin = wearableDataOriginKey(candidate.dataOrigin);
+  const windowOrigin = wearableDataOriginKey(window.dataOrigin);
+  if (candidateOrigin && windowOrigin && candidateOrigin !== windowOrigin) {
+    return false;
+  }
+
+  if (externalRefsShareResource(candidate.externalRef, window.externalRef)) {
+    return true;
+  }
+
+  return sleepStageCandidateOverlapsWindow(candidate, window);
+}
+
+function externalRefsShareResource(
+  left: WearableExternalRef | null,
+  right: WearableExternalRef | null,
+): boolean {
+  const leftResourceId = normalizeLowercaseString(left?.resourceId);
+  const rightResourceId = normalizeLowercaseString(right?.resourceId);
+  if (!leftResourceId || !rightResourceId || leftResourceId !== rightResourceId) {
+    return false;
+  }
+
+  const leftSystem = normalizeLowercaseString(left?.system);
+  const rightSystem = normalizeLowercaseString(right?.system);
+  if (leftSystem && rightSystem && leftSystem !== rightSystem) {
+    return false;
+  }
+
+  const leftResourceType = normalizeLowercaseString(left?.resourceType);
+  const rightResourceType = normalizeLowercaseString(right?.resourceType);
+  return !leftResourceType
+    || !rightResourceType
+    || leftResourceType === rightResourceType
+    || (leftResourceType.includes("sleep") && rightResourceType.includes("sleep"));
+}
+
+function sleepStageCandidateOverlapsWindow(
+  candidate: WearableMetricCandidate,
+  window: WearableSleepWindowCandidate,
+): boolean {
+  const stageStart = parseIsoTime(candidate.occurredAt);
+  const windowStart = parseIsoTime(window.startAt);
+  const windowEnd = parseIsoTime(window.endAt);
+  if (stageStart === null || windowStart === null || windowEnd === null) {
+    return false;
+  }
+
+  const stageDurationMs = candidate.value > 0 ? candidate.value * 60_000 : 0;
+  const stageEnd = stageStart + stageDurationMs;
+  return stageStart < windowEnd && stageEnd > windowStart;
+}
+
+function compareSleepStageAggregateWindow(
+  left: WearableSleepWindowCandidate,
+  right: WearableSleepWindowCandidate,
+): number {
+  return left.durationMinutes - right.durationMinutes
+    || (left.nap === right.nap ? 0 : left.nap ? -1 : 1)
+    || left.candidateId.localeCompare(right.candidateId);
+}
+
+function parseIsoTime(value: string | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export function selectMetricCandidates(
@@ -593,6 +699,7 @@ function buildSleepWindowCandidate(
     date,
     durationMinutes,
     endAt: normalizeNullableString(entity.attributes.endAt),
+    externalRef,
     nap: (title ?? "").toLowerCase().includes("nap"),
     occurredAt: entity.occurredAt ?? null,
     paths: [entity.path],
