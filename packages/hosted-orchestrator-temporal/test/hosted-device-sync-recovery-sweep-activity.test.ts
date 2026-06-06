@@ -21,7 +21,7 @@ describe("runHostedDeviceSyncRecoverySweep", () => {
     vi.restoreAllMocks();
   });
 
-  it("posts a signed pointer-only recovery command to hosted web", async () => {
+  it("posts a signed pointer-only scheduled wake command to hosted web", async () => {
     await stubHostedWebEnvironment();
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
     const observedRequests: ObservedRequest[] = [];
@@ -54,7 +54,7 @@ describe("runHostedDeviceSyncRecoverySweep", () => {
     expect(timeoutSpy).toHaveBeenCalledWith(30_000);
   });
 
-  it("uses the bounded device-sync recovery timeout override", async () => {
+  it("uses the bounded device-sync scheduled wake timeout override", async () => {
     await stubHostedWebEnvironment();
     vi.stubEnv("HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_TIMEOUT_MS", "45000");
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
@@ -67,7 +67,7 @@ describe("runHostedDeviceSyncRecoverySweep", () => {
     expect(timeoutSpy).toHaveBeenCalledWith(45_000);
   });
 
-  it("rejects invalid recovery sweep responses as non-retryable protocol errors", async () => {
+  it("rejects invalid scheduled wake sweep responses as non-retryable protocol errors", async () => {
     await stubHostedWebEnvironment();
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
       dueReconcileSweeper: {},
@@ -111,12 +111,12 @@ function buildRecoverySweepResponse() {
   return {
     dueReconcileSweeper: {
       dueConnections: 2,
-      recoveryAttempted: 2,
-      recoveryFailed: 0,
-      recoveryLimit: 25,
-      recoveryNotRequested: 0,
-      recoveryRequested: 2,
       skippedDueConnections: 0,
+      wakeAccepted: 2,
+      wakeAttempted: 2,
+      wakeFailed: 0,
+      wakeLimit: 25,
+      wakeNotAccepted: 0,
     },
   };
 }

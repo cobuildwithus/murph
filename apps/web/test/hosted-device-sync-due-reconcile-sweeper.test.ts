@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  requestHostedDeviceSyncScheduledReconcileRecovery: vi.fn(),
+  appendHostedDeviceSyncScheduledReconcileWake: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/wake-service", () => ({
-  requestHostedDeviceSyncScheduledReconcileRecovery: mocks.requestHostedDeviceSyncScheduledReconcileRecovery,
+  appendHostedDeviceSyncScheduledReconcileWake: mocks.appendHostedDeviceSyncScheduledReconcileWake,
+  buildHostedDeviceSyncScheduledReconcileWakeEventId: (input: {
+    connectionId: string; nextReconcileAt: string;
+  }) => ["device-sync", "scheduled-reconcile", "v1", input.connectionId, input.nextReconcileAt].join(":"),
 }));
 
 import {
@@ -15,12 +18,15 @@ import {
 describe("hosted device-sync due reconcile sweeper", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requestHostedDeviceSyncScheduledReconcileRecovery.mockResolvedValue({
-      recoveryRequested: true,
+    mocks.appendHostedDeviceSyncScheduledReconcileWake.mockResolvedValue({
+      wakeAccepted: true,
+      wakeAppended: true,
+      wakeDuplicate: false,
+      wakeInserted: true,
     });
   });
 
-  it("requests scheduled background recovery for active due connections", async () => {
+  it("requests scheduled mailbox wakes for active due connections", async () => {
     const logger = buildLogger();
     const store = buildStore([
       {
@@ -34,7 +40,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
     const result = await runHostedDeviceSyncDueReconcileSweeper({
       logger,
       now: new Date("2026-05-05T00:01:00.000Z"),
-      nudgeLimit: 5,
+      wakeLimit: 5,
       store,
     });
 
@@ -43,9 +49,10 @@ describe("hosted device-sync due reconcile sweeper", () => {
       limit: 6,
       recoveryBucketStartedAt: new Date("2026-05-05T00:00:00.000Z"),
     });
-    expect(mocks.requestHostedDeviceSyncScheduledReconcileRecovery).toHaveBeenCalledWith({
+    expect(mocks.appendHostedDeviceSyncScheduledReconcileWake).toHaveBeenCalledWith({
       connectionId: "dsc_due_1",
       createdAt: "2026-05-05T00:01:00.000Z",
+      eventId: "device-sync:scheduled-reconcile:v1:dsc_due_1:2026-05-05T00:00:00.000Z",
       nextReconcileAt: "2026-05-05T00:00:00.000Z",
       provider: "whoop",
       traceId: null,
@@ -53,12 +60,12 @@ describe("hosted device-sync due reconcile sweeper", () => {
     });
     expect(result).toEqual({
       dueConnections: 1,
-      recoveryAttempted: 1,
-      recoveryFailed: 0,
-      recoveryLimit: 5,
-      recoveryNotRequested: 0,
-      recoveryRequested: 1,
       skippedDueConnections: 0,
+      wakeAccepted: 1,
+      wakeAttempted: 1,
+      wakeFailed: 0,
+      wakeLimit: 5,
+      wakeNotAccepted: 0,
     });
     const infoLogs = JSON.stringify(logger.info.mock.calls);
     expect(infoLogs).not.toContain("member_due_1");
@@ -66,7 +73,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
     expect(infoLogs).not.toContain("whoop");
   });
 
-  it("passes the recovery bucket to the selector so retries stay bounded", async () => {
+  it("passes the wake bucket to the selector so retries stay bounded", async () => {
     const store = buildStore([
       {
         connectionId: "dsc_due_1",
@@ -99,7 +106,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
     });
   });
 
-  it("keeps scheduled recovery requests distinct for different due connections", async () => {
+  it("keeps scheduled wakes distinct for different due connections", async () => {
     const store = buildStore([
       {
         connectionId: "dsc_due_1",
@@ -121,10 +128,11 @@ describe("hosted device-sync due reconcile sweeper", () => {
       store,
     });
 
-    expect(mocks.requestHostedDeviceSyncScheduledReconcileRecovery.mock.calls).toEqual([
+    expect(mocks.appendHostedDeviceSyncScheduledReconcileWake.mock.calls).toEqual([
       [{
         connectionId: "dsc_due_1",
         createdAt: "2026-05-05T00:01:00.000Z",
+        eventId: "device-sync:scheduled-reconcile:v1:dsc_due_1:2026-05-05T00:00:00.000Z",
         nextReconcileAt: "2026-05-05T00:00:00.000Z",
         provider: "whoop",
         traceId: null,
@@ -133,6 +141,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
       [{
         connectionId: "dsc_due_2",
         createdAt: "2026-05-05T00:01:00.000Z",
+        eventId: "device-sync:scheduled-reconcile:v1:dsc_due_2:2026-05-05T00:00:00.000Z",
         nextReconcileAt: "2026-05-05T00:00:00.000Z",
         provider: "whoop",
         traceId: null,
@@ -141,7 +150,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
     ]);
   });
 
-  it("reports skipped due connections and recovery request failures without logging raw ids", async () => {
+  it("reports skipped due connections and wake failures without logging raw ids", async () => {
     const logger = buildLogger();
     const store = buildStore([
       {
@@ -157,30 +166,33 @@ describe("hosted device-sync due reconcile sweeper", () => {
         userId: "member_due_2",
       },
     ]);
-    mocks.requestHostedDeviceSyncScheduledReconcileRecovery.mockResolvedValueOnce({
-      reason: "request_failed",
-      recoveryRequested: false,
+    mocks.appendHostedDeviceSyncScheduledReconcileWake.mockResolvedValueOnce({
+      reason: "wake_failed",
+      wakeAccepted: false,
+      wakeAppended: false,
+      wakeDuplicate: false,
+      wakeInserted: false,
     });
 
     const result = await runHostedDeviceSyncDueReconcileSweeper({
       logger,
-      nudgeLimit: 1,
+      wakeLimit: 1,
       store,
     });
 
-    expect(result.recoveryNotRequested).toBe(1);
-    expect(result.recoveryFailed).toBe(1);
+    expect(result.wakeNotAccepted).toBe(1);
+    expect(result.wakeFailed).toBe(1);
     expect(result.skippedDueConnections).toBe(1);
     expect(logger.warn).toHaveBeenCalledWith(
-      "Hosted device-sync due reconcile sweeper background recovery was not requested.",
+      "Hosted device-sync due reconcile sweeper wake was not accepted.",
       expect.objectContaining({
-        reason: "request_failed",
+        reason: "wake_failed",
       }),
     );
     expect(logger.warn).toHaveBeenCalledWith(
-      "Hosted device-sync due reconcile sweeper skipped due connections after recovery limit.",
+      "Hosted device-sync due reconcile sweeper skipped due connections after wake limit.",
       {
-        recoveryLimit: 1,
+        wakeLimit: 1,
         skippedDueConnections: 1,
       },
     );
@@ -191,7 +203,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("whoop");
   });
 
-  it("continues the sweep when one scheduled recovery request throws", async () => {
+  it("continues the sweep when one scheduled wake throws", async () => {
     const logger = buildLogger();
     const store = buildStore([
       {
@@ -207,27 +219,30 @@ describe("hosted device-sync due reconcile sweeper", () => {
         userId: "member_due_2",
       },
     ]);
-    mocks.requestHostedDeviceSyncScheduledReconcileRecovery
-      .mockRejectedValueOnce(new Error("request failed"))
+    mocks.appendHostedDeviceSyncScheduledReconcileWake
+      .mockRejectedValueOnce(new Error("wake failed"))
       .mockResolvedValueOnce({
-        recoveryRequested: true,
+        wakeAccepted: true,
+        wakeAppended: true,
+        wakeDuplicate: false,
+        wakeInserted: true,
       });
 
     const result = await runHostedDeviceSyncDueReconcileSweeper({
       logger,
-      nudgeLimit: 2,
+      wakeLimit: 2,
       store,
     });
 
-    expect(mocks.requestHostedDeviceSyncScheduledReconcileRecovery).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedDeviceSyncScheduledReconcileWake).toHaveBeenCalledTimes(2);
     expect(result).toMatchObject({
-      recoveryAttempted: 2,
-      recoveryFailed: 1,
-      recoveryNotRequested: 1,
-      recoveryRequested: 1,
+      wakeAccepted: 1,
+      wakeAttempted: 2,
+      wakeFailed: 1,
+      wakeNotAccepted: 1,
     });
     expect(logger.warn).toHaveBeenCalledWith(
-      "Hosted device-sync due reconcile sweeper background recovery request failed.",
+      "Hosted device-sync due reconcile sweeper wake request failed.",
       expect.objectContaining({
         errorName: "Error",
       }),

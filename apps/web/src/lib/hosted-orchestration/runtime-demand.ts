@@ -152,7 +152,6 @@ async function buildHostedRuntimeDemandDecision(input: HostedRuntimeDemandReques
   const workspace = projectHostedRuntimeDemandWorkspace(input.workspace);
   const run = selectHostedRuntimeRunDemand({
     browserVaultRefreshRequested: input.browserVaultRefreshRequested === true,
-    deviceSyncRecoveryRequested: input.deviceSyncRecoveryRequested === true,
     lagRecoveryObserved: input.lagRecoveryObserved === true,
     mailboxLag: input.mailboxLag,
     manualRunRequested: input.manualRunRequested === true,
@@ -298,7 +297,6 @@ export function hostedRuntimeDemandNeedsAiUsageGate(
 
 function selectHostedRuntimeRunDemand(input: {
   browserVaultRefreshRequested: boolean;
-  deviceSyncRecoveryRequested: boolean;
   lagRecoveryObserved: boolean;
   mailboxLag: HostedMailboxLaneLag[];
   manualRunRequested: boolean;
@@ -335,13 +333,6 @@ function selectHostedRuntimeRunDemand(input: {
     return {
       reason: "browser_vault_refresh",
       source: "browser_vault_refresh",
-    };
-  }
-
-  if (input.deviceSyncRecoveryRequested) {
-    return {
-      reason: "nudge",
-      source: "device_sync_recovery",
     };
   }
 
@@ -385,10 +376,7 @@ function selectHostedRuntimeControlRunDemand(
         source: "browser_vault_refresh",
       };
     case "runtime.device-sync-recovery-requested":
-      return {
-        reason: "nudge",
-        source: "device_sync_recovery",
-      };
+      return null;
     case "runtime.mailbox-lag-observed":
       return {
         reason: "nudge",

@@ -25,7 +25,7 @@ describe("hostedDeviceSyncReconcilerWorkflow", () => {
     vi.clearAllMocks();
   });
 
-  it("runs one recovery sweep Activity and exits with count-only results", async () => {
+  it("runs one scheduled wake sweep Activity and exits with count-only results", async () => {
     const summary = buildRecoverySweepResponse();
     workflowMocks.runHostedDeviceSyncRecoverySweep.mockResolvedValue(summary);
     workflowMocks.proxyActivities.mockReturnValue({
@@ -204,12 +204,12 @@ function buildRecoverySweepResponse() {
   return {
     dueReconcileSweeper: {
       dueConnections: 2,
-      recoveryAttempted: 2,
-      recoveryFailed: 0,
-      recoveryLimit: 25,
-      recoveryNotRequested: 0,
-      recoveryRequested: 2,
       skippedDueConnections: 0,
+      wakeAccepted: 2,
+      wakeAttempted: 2,
+      wakeFailed: 0,
+      wakeLimit: 25,
+      wakeNotAccepted: 0,
     },
   };
 }

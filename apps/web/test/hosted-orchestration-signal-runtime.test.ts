@@ -53,7 +53,6 @@ vi.mock("@/src/lib/prisma", () => ({
 import {
   sanitizeHostedRuntimeSignalSource,
   signalHostedBrowserVaultRefreshRuntime,
-  signalHostedDeviceSyncBackgroundMaintenanceRuntime,
   signalHostedDeviceSyncMailboxRuntime,
   signalHostedMailboxAppendRuntime,
   signalHostedManualRunRuntime,
@@ -177,27 +176,22 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
-  it("persists device-sync recovery as durable control demand before signaling", async () => {
+  it("signals device-sync mailbox wakes as normal mailbox demand", async () => {
     await signalHostedDeviceSyncMailboxRuntime({
       client: buildClient(),
       mailboxItemId: "mailbox_123",
-      recoveryIntent: "device-sync-reconcile-recovery",
     });
 
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
-      envelope: expect.objectContaining({
-        eventId: expect.stringMatching(/^runtime-control:device-sync-recovery:[0-9a-f]{32}$/u),
-        kind: "runtime.device-sync-recovery-requested",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-        userId: "member_123",
-      }),
-      tx: { kind: "tx" },
-    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.signalWithStart).toHaveBeenCalledWith(
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
       expect.objectContaining({
         signalArgs: [{
-          kind: "device_sync_recovery_requested",
+          kind: "mailbox_appended",
+          lane: "conversation",
+          laneSeq: "42",
+          mailboxItemId: "mailbox_123",
+          source: "device-sync",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),
@@ -209,28 +203,6 @@ describe("hosted runtime Temporal signaling", () => {
     expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prisma,
-    });
-  });
-
-  it("signals device-sync background maintenance without appending mailbox work", async () => {
-    await signalHostedDeviceSyncBackgroundMaintenanceRuntime({
-      client: buildClient(),
-      userId: "member_123",
-    });
-
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.signalWithStart).toHaveBeenCalledWith(
-      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
-      expect.objectContaining({
-        signalArgs: [{
-          kind: "device_sync_recovery_requested",
-        }],
-        workflowId: "hosted-user-runtime:member_123",
-      }),
-    );
-    expect(mocks.ensureHostedWorkspace).toHaveBeenCalledWith({
-      prisma: mocks.prisma,
-      userId: "member_123",
     });
   });
 
@@ -253,79 +225,6 @@ describe("hosted runtime Temporal signaling", () => {
           kind: "runtime_prewarm_requested",
           occurredAt: "2026-03-26T12:00:00.000Z",
           source: "linq.imessage.typing",
-        }],
-        workflowId: "hosted-user-runtime:member_123",
-      }),
-    );
-  });
-
-  it("dedupes durable device-sync recovery demands by source mailbox item", async () => {
-    const client = buildClient();
-
-    await signalHostedDeviceSyncMailboxRuntime({
-      client,
-      mailboxItemId: "mailbox_123",
-      recoveryIntent: "device-sync-reconcile-recovery",
-    });
-    await signalHostedDeviceSyncMailboxRuntime({
-      client,
-      mailboxItemId: "mailbox_123",
-      recoveryIntent: "device-sync-reconcile-recovery",
-    });
-
-    const eventIds = mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(
-      ([input]) => input.envelope.eventId,
-    );
-    const occurredAts = mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(
-      ([input]) => input.envelope.occurredAt,
-    );
-    expect(eventIds[0]).toBe(eventIds[1]);
-    expect(eventIds[0]).toMatch(/^runtime-control:device-sync-recovery:[0-9a-f]{32}$/u);
-    expect(occurredAts).toEqual([
-      "2026-03-26T12:00:00.000Z",
-      "2026-03-26T12:00:00.000Z",
-    ]);
-    expect(mocks.signalWithStart.mock.calls.map(
-      ([, options]) => options.signalArgs[0],
-    )).toEqual([
-      { kind: "device_sync_recovery_requested" },
-      { kind: "device_sync_recovery_requested" },
-    ]);
-  });
-
-  it("re-signals device-sync recovery when the durable control item already exists", async () => {
-    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
-      dedupeConflict: false,
-      duplicate: true,
-      inserted: false,
-      item: {
-        id: "mailbox_existing_recovery_control",
-        kind: "runtime.device-sync-recovery-requested",
-        lane: "system",
-        laneSeq: "77",
-        userId: "member_123",
-      },
-    });
-
-    await signalHostedDeviceSyncMailboxRuntime({
-      client: buildClient(),
-      mailboxItemId: "mailbox_123",
-      recoveryIntent: "device-sync-reconcile-recovery",
-    });
-
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
-      envelope: expect.objectContaining({
-        eventId: expect.stringMatching(/^runtime-control:device-sync-recovery:[0-9a-f]{32}$/u),
-        kind: "runtime.device-sync-recovery-requested",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      }),
-      tx: { kind: "tx" },
-    });
-    expect(mocks.signalWithStart).toHaveBeenCalledWith(
-      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
-      expect.objectContaining({
-        signalArgs: [{
-          kind: "device_sync_recovery_requested",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),

@@ -627,7 +627,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("runs idle device-sync work for background recovery when no foreground input is fresh", async () => {
+  it("runs idle device-sync work for a due scheduled device-sync wake", async () => {
     mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
       deviceSyncProcessed: 1,
       deviceSyncSkipped: false,
@@ -649,8 +649,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
-      reason: "nudge",
-      source: "device_sync_recovery",
+      reason: "alarm",
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "device-sync.reconcile",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
     }));
 
     expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledWith(
@@ -686,8 +696,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
-      reason: "nudge",
-      source: "device_sync_recovery",
+      reason: "alarm",
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "device-sync.reconcile",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
     }));
 
     expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(1);
@@ -877,12 +897,22 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
-  it("keeps background recovery device-sync deferred when foreground input is fresh", async () => {
+  it("keeps scheduled device-sync work deferred when foreground input is fresh", async () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "nudge",
-      source: "device_sync_recovery",
+      reason: "alarm",
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "device-sync.reconcile",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions({
@@ -1171,7 +1201,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect("nextWakeReason" in result).toBe(false);
   });
 
-  it("does not run deferred legacy device-sync recovery after foreground input arrives", async () => {
+  it("does not run deferred device-sync work from an assistant-labeled wake", async () => {
     const shouldYieldBackgroundMaintenance = vi.fn(() => true);
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationProgressed: false,
@@ -2759,6 +2789,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       status: "retryable_failed",
     });
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+      reason: "alarm",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -2806,6 +2838,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+      reason: "alarm",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -3535,7 +3569,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("runs pending assistant input before idle dirty device sync work", async () => {
+  it("runs pending assistant input before due device-sync work", async () => {
     mocks.hasPendingAssistantAutoReplyInput.mockResolvedValueOnce(true);
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationCurrentTurnDeliveryIntentIds: [],
@@ -3556,7 +3590,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
-      source: "device_sync_recovery",
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-27T00:09:59.000Z",
+        nextWakeReason: "device-sync.reconcile",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalled();
@@ -3595,18 +3639,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(result.checkpointReason).toBe("activation_bootstrap");
   });
 
-  it("drains dirty device-sync recovery work alongside non-device system mailbox items", async () => {
-    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
-      item: createSystemMailboxItem(),
-      itemId: "system_mailbox_item_processed",
-      metrics: {
-        bootstrapResult: null,
-        conversationMetrics: null,
-        mailboxLane: "assistant-notification",
-        redactedLogEntries: [],
-      },
-      status: "processed",
-    });
+  it("records dirty post-checkpoint work for due device-sync work", async () => {
     mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
       deviceSyncProcessed: 2,
       deviceSyncSkipped: false,
@@ -3626,7 +3659,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      source: "device_sync_recovery",
+      now: () => "2026-04-27T00:00:00.000Z",
+      reason: "alarm",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -3637,10 +3671,22 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "device-sync.reconcile",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
     }));
 
     expect(result.progressed).toBe(true);
     expect(result.nextWakeAt).toBe("2026-04-27T00:11:00.000Z");
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalled();
     expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledWith(
       expect.objectContaining({
         wake: expect.objectContaining({
@@ -3667,14 +3713,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runtime: expect.any(Object),
     });
     expect(postCheckpoint).toEqual(expect.objectContaining({
-      checkpointReason: "system_mailbox_receipt",
+      checkpointReason: "assistant_runtime_commit",
       nextWakeAt: "2026-04-27T00:11:00.000Z",
       nextWakeReason: "device-sync.reconcile",
       redactedStatus: expect.objectContaining({
         hostedDeviceSyncDirtyAckDeferred: true,
         hostedDeviceSyncDirtyAckRecorded: false,
         hostedDeviceSyncDirtyStillPending: true,
-        hostedSystemMailboxRecorded: 1,
       }),
     }));
   });

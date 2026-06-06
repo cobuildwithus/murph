@@ -380,6 +380,28 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     });
   });
 
+  it("keeps source-confirmed setup connected before the first sync completes", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connections: [buildConnection({
+        connectedAt: "2026-04-03T11:30:00.000Z",
+        lastSyncCompletedAt: null,
+        lastSyncStartedAt: null,
+        setupExpiresAt: null,
+        setupPhase: "source_confirmed",
+        updatedAt: "2026-04-03T11:35:00.000Z",
+      })],
+      now: new Date("2026-04-03T12:00:00.000Z"),
+      providers: [OURA_PROVIDER],
+    });
+
+    expect(source).toMatchObject({
+      headline: "Connected",
+      state: "active",
+      statusLabel: "Connected",
+      tone: "calm",
+    });
+  });
+
   it("treats pending external-link setup without a valid expiry as needing attention", () => {
     const [source] = buildHostedDeviceSyncSettingsSources({
       connections: [buildConnection({

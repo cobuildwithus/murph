@@ -167,6 +167,7 @@ export function createHostedDeviceSyncControlPlane(request: Request): HostedDevi
 
 export async function appendHostedDeviceSyncWake(input: {
   connectionId: string;
+  eventId?: string | null;
   occurredAt: string;
   provider: string;
   source: HostedDeviceSyncWakeSource;

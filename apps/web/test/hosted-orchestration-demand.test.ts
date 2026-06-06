@@ -188,7 +188,7 @@ describe("hosted orchestration demand", () => {
       "browser_vault_refresh",
       false,
     ],
-    ["runtime.device-sync-recovery-requested", "device_sync_recovery", "nudge", false],
+    ["runtime.device-sync-recovery-requested", "mailbox_backlog", "nudge", false],
     ["runtime.mailbox-lag-observed", "lag_recovery", "nudge", false],
   ] as const)(
     "derives %s demand from the first pending system mailbox control item",
@@ -521,7 +521,7 @@ describe("hosted orchestration demand", () => {
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
   });
 
-  it("prioritizes device-sync recovery over lag recovery", async () => {
+  it("ignores legacy device-sync recovery flags when selecting run demand", async () => {
     const response = await demandRoute.GET(
       requestForDemand(
         "?deviceSyncRecoveryRequested=1&lagRecoveryObserved=1",
@@ -533,7 +533,7 @@ describe("hosted orchestration demand", () => {
     expect(demand).toMatchObject({
       kind: "run",
       reason: "nudge",
-      source: "device_sync_recovery",
+      source: "lag_recovery",
     });
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
   });

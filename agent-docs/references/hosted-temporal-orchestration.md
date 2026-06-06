@@ -16,7 +16,7 @@ The final ownership split is:
   device-sync dirty state, usage and product policy, hosted workspace metadata,
   mailbox lag, and runtime status.
 - Temporal owns only orchestration: one per-user workflow for user-runtime
-  wakeups, one short-lived global device-sync recovery reconciler workflow
+  wakeups, one short-lived global device-sync scheduled-wake reconciler workflow
   started by a Temporal Schedule, pointer-only signals, durable sleeps,
   execution retries, and wakeup attempts.
 - `apps/cloudflare` owns only container execution: Durable Object routing,
@@ -102,7 +102,7 @@ write fence is the active ownership truth while a run is in flight.
 | Owner | Owns | Must not own |
 | --- | --- | --- |
 | `apps/web` | Webhook verification, provider minimization, mailbox append and dedupe, device-sync dirty state, hosted member/billing/usage/product policy, hosted workspace metadata, mailbox lag, redacted runtime logs/status, demand endpoint. | Codex invocation, assistant automation semantics, outbox truth, internal runtime timers, container routing, Temporal workflow state. |
-| Temporal | Per-user workflow identity, pointer-only signals, coalesced wake flags, durable timers from web-owned demand projections, retry policy for web demand reads and Cloudflare processing adapter calls, continue-as-new history bounds, and global device-sync recovery cadence/retry through a short-lived reconciler workflow. | Raw payloads, decrypted mailbox contents, provider headers, prompts, transcripts, vault data, full workspace state, full runtime invocation results, signed usage decisions, assistant automation logic, device provider semantics, usage policy decisions, Cloudflare state, provider tokens, dirty resource bodies, or canonical dirty/reconcile facts. |
+| Temporal | Per-user workflow identity, pointer-only signals, coalesced wake flags, durable timers from web-owned demand projections, retry policy for web demand reads and Cloudflare processing adapter calls, continue-as-new history bounds, and global device-sync scheduled-wake cadence/retry through a short-lived reconciler workflow. | Raw payloads, decrypted mailbox contents, provider headers, prompts, transcripts, vault data, full workspace state, full runtime invocation results, signed usage decisions, assistant automation logic, device provider semantics, usage policy decisions, Cloudflare state, provider tokens, dirty resource bodies, or canonical dirty/reconcile facts. |
 | `apps/cloudflare` | Durable Object routing, write-fence generation and validation, container invoke/wake, runtime callback authorization, direct R2/snapshot transport, execution cleanup, alarm cleanup for active write fences. | Durable demand derivation, mailbox backlog decisions, assistant wake calculation, browser-vault scheduling policy, device-sync dirty semantics, retry caps as orchestration, queue history, product facts. |
 | Murph runtime | Mailbox import watermarks, `AssistantInputEvent` staging, active-turn admission, Codex invocation, assistant automation and timers, device-sync runtime execution, outbox/provider cleanup, idle/scheduled-wake checkpointing, `nextWakeAt` and `nextWakeReason` projection. | Temporal workflow state, web product policy, hosted member/billing facts, Durable Object routing, Cloudflare execution lease ownership. |
 
@@ -116,9 +116,9 @@ Allowed Temporal state is tiny and pointer-only:
   sequence, and coarse source label.
 - Explicit wake flags for manual run, browser-vault refresh, device-sync
   recovery, or lag recovery. Current web producers represent manual,
-  browser-vault refresh, and device-sync recovery requests as durable
+  browser-vault refresh, and device-sync mailbox handoff requests as durable
   system-mailbox control rows and use Temporal signals only as wake hints.
-- Global device-sync recovery Schedule id, interval, Workflow start options, and
+- Global device-sync scheduled-wake Schedule id, interval, Workflow start options, and
   count-only due-reconcile sweep results. The reconciler may remember that a
   sweep ran and how many due-reconcile rows/wakes it touched; it must not
   remember provider tokens, dirty resource bodies, external account state, or
@@ -151,14 +151,15 @@ Forbidden Temporal state:
 Temporal may remember that demand exists. It must not become the place where
 Murph decides what demand means.
 
-Manual, browser-vault refresh, and due-reconcile device-sync recovery demand is
-durable web-owned demand. Manual and browser-vault refresh append system-mailbox
-control rows before signaling Temporal with the resulting mailbox pointer.
-Due-reconcile recovery is selected by the signed recovery sweep after the owning
-marker is durable, without appending foreground mailbox work. Dirty webhook
-freshness is separate: web persists dirty state and may send a best-effort
-clean-to-dirty `device_sync_recovery_requested` signal, but dirty rows are not
-selected by a global recovery sweep. Historical `runtime.mailbox-lag-observed`
+Manual, browser-vault refresh, and due-reconcile device-sync demand is durable
+web-owned demand. Manual and browser-vault refresh append system-mailbox control
+rows before signaling Temporal with the resulting mailbox pointer. Due-reconcile
+recovery is selected by the signed recovery sweep after the owning marker is
+durable, then represented as a bounded `device-sync.wake` mailbox handoff keyed
+by connection and reconcile timestamp. Dirty webhook freshness is separate: web
+persists dirty state and appends one deterministic `device-sync.wake` handoff on
+clean-to-dirty transitions, but dirty rows are not selected by a global recovery
+sweep. Historical `runtime.mailbox-lag-observed`
 rows remain valid runtime-control rows for drain compatibility, but web no
 longer produces them from a Vercel lag-recovery cron. The legacy kind-only
 signals remain deploy-skew wake hints only; they carry no event id, source
@@ -188,9 +189,9 @@ Mailbox signal `source` is a bounded safe string, not a provider enum. Parsers
 should enforce a non-empty trimmed value with a small max length and safe
 characters.
 
-## Global Device-Sync Recovery Reconciler
+## Global Device-Sync Scheduled Wake Reconciler
 
-The device-sync recovery cadence belongs to Temporal, not Vercel cron and not
+The device-sync scheduled-wake cadence belongs to Temporal, not Vercel cron and not
 per-user workflow timers. The target is a Temporal Schedule that starts
 `hostedDeviceSyncReconcilerWorkflow` at a fixed interval. That Workflow calls
 one Activity, `runHostedDeviceSyncRecoverySweep`, and then exits, keeping its
@@ -202,20 +203,20 @@ key and the fixed callback identity `hosted-device-sync-reconciler`. The
 request body is empty JSON. The response is count-only. Temporal history may
 contain counts, timestamps, workflow ids, retry metadata, and schedule ids only.
 
-`apps/web` remains the only owner of canonical device-sync recovery facts. The
-signed sweep command reads `DeviceConnection.nextReconcileAt`, requests per-user
-background recovery through the existing `device_sync_recovery_requested` signal
-path, records due-reconcile `DeviceSyncSignal` facts, and never represents
-device-sync recovery as foreground mailbox work. Dirty rows are intentionally
-excluded from this command; webhook clean-to-dirty nudges and runtime
-dirty-pending callbacks are the dirty path. Temporal retries are safe because
-the web command is retryable and duplicate effective work is bounded by
-due-reconcile signals, Temporal signal coalescing, and recovery buckets.
+`apps/web` remains the only owner of canonical device-sync facts. The
+signed sweep command reads `DeviceConnection.nextReconcileAt`, records
+due-reconcile `DeviceSyncSignal` facts, and appends bounded `device-sync.wake`
+mailbox handoffs for due connections. Dirty/stuck rows may be included only
+when they are due-reconcile candidates; webhook clean-to-dirty mailbox handoffs
+and runtime dirty-pending callbacks remain the dirty path. Temporal retries are
+safe because the web command is retryable and duplicate effective work is
+bounded by due-reconcile signals, mailbox event-id dedupe, Temporal signal
+coalescing, and wake buckets.
 
 The Vercel device-sync dirty-sweeper cron is not registered, and there is no
 Temporal dirty-row sweep replacement. Temporal is the single production owner of
-due-reconcile recovery cadence, while the signed web sweep command remains
-available for authenticated operator recovery.
+the due-reconcile scheduled-wake cadence, while the signed web sweep command
+remains available for authenticated operator recovery.
 
 Do not fold global due-reconcile discovery into `hostedUserRuntimeWorkflow` or
 `readRuntimeDemand`, and do not reintroduce global dirty-row discovery there.
@@ -289,15 +290,13 @@ because the accepted runner failed before checkpointing, demand may select it
 again. Runtime wake and retry facts that matter to product behavior must be
 reflected in durable web/runtime state, not returned as the command result.
 
-Device-sync recovery is the bounded exception to preserving explicit recovery
-wake hints: after several accepted `woken`/`already_running` acknowledgements
-for the same runtime attempt, the per-user workflow clears the coalesced
-recovery flag and lets the normal owner recheck read durable demand
-again. This keeps a runtime that never produces the expected recovery progress
-from becoming a low-grade explicit-flag wake loop while leaving web-owned
-mailbox lag and due-reconcile sweeps as durable future nudges. Clean-to-dirty
-signals remain best-effort event-time nudges only, not scheduled recovery
-input.
+Legacy device-sync recovery remains the bounded exception to preserving explicit
+recovery wake hints: after several accepted `woken`/`already_running`
+acknowledgements for the same runtime attempt, the per-user workflow clears the
+coalesced recovery flag and lets the normal owner recheck durable demand again.
+This keeps old histories from becoming low-grade explicit-flag wake loops while
+current dirty and due-reconcile producers use durable `device-sync.wake`
+mailbox handoffs.
 
 ## Cloudflare Execution Adapter Contract
 
@@ -393,8 +392,8 @@ The idle condition is:
 
 - `mailboxLag` is zero across lanes.
 - Workspace wake projection `nextWakeAt` is absent or in the future.
-- Web demand has no explicit manual, browser-vault, device-sync recovery, or lag
-  recovery flag requiring execution.
+- Web demand has no explicit manual, browser-vault, legacy device-sync recovery,
+  or lag recovery flag requiring execution.
 - Usage/product policy does not report a retryable blocked state.
 
 The runtime remains the only owner of assistant timers. Temporal sleeps on the
@@ -422,7 +421,7 @@ Delete or hard-disable these paths during the migration:
   - assistant wake truth
   - mailbox retry truth
   - browser-vault refresh truth
-  - device-sync recovery truth
+  - device-sync scheduled-wake truth
   - failure-count/backoff gates that decide whether demand may run
 - Nudge-as-completion assumptions:
   - accepted Vercel Workflow step means complete
@@ -442,12 +441,13 @@ The hard-cut architecture is accepted when:
 - No Vercel or web-owned mailbox-lag cron remains; future mailbox signal
   reconciliation must be Temporal-owned or backed by an explicit pending-handoff
   ledger instead of nudging Cloudflare.
-- Web browser/manual/device recovery paths signal Temporal.
+- Web browser/manual/device handoff paths signal Temporal.
 - Temporal has one per-user workflow that reads web demand/status and owns
   sleeps/retries.
-- Temporal has one global due-reconcile device-sync recovery Schedule that
-  starts a short-lived reconciler workflow. There is no Vercel device-sync
-  dirty-sweeper cron cadence and no Temporal dirty-row sweep replacement.
+- Temporal has one global due-reconcile device-sync scheduled wakes Schedule that
+  starts a short-lived reconciler workflow whose web command appends bounded
+  `device-sync.wake` handoffs. There is no Vercel device-sync dirty-sweeper
+  cron cadence and no Temporal dirty-row sweep replacement.
 - Temporal stores only pointer fields, coalesced flags, counters, timestamps,
   and bounded metadata.
 - Temporal imports no assistant-runtime, Prisma, Cloudflare Worker, or app code

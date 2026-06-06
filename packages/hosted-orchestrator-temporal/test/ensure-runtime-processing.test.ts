@@ -47,7 +47,7 @@ describe("ensureRuntimeProcessing", () => {
     await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
-      source: "device_sync_recovery",
+      source: "workspace_wake",
       userId: "member_test",
     })).resolves.toEqual(response);
 
@@ -67,7 +67,7 @@ describe("ensureRuntimeProcessing", () => {
     expect(JSON.parse(String(request.init?.body))).toEqual({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
-      source: "device_sync_recovery",
+      source: "workspace_wake",
     });
     expect(String(request.init?.body)).not.toContain("requiresAiUsageDecision");
     expect(String(request.init?.body)).not.toContain("aiUsageAllowDecision");
@@ -132,7 +132,7 @@ describe("ensureRuntimeProcessing", () => {
     await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
-      source: "device_sync_recovery",
+      source: "workspace_wake",
       userId: "member_test",
     })).resolves.toEqual({
       kind: "retry_later",
@@ -143,7 +143,7 @@ describe("ensureRuntimeProcessing", () => {
     expect(JSON.parse(String(observedRequests[0].init?.body))).toEqual({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
-      source: "device_sync_recovery",
+      source: "workspace_wake",
     });
   });
 
@@ -159,7 +159,7 @@ describe("ensureRuntimeProcessing", () => {
     await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
-      source: "device_sync_recovery",
+      source: "workspace_wake",
       userId: "member_test",
     })).rejects.toMatchObject({
       message: "Hosted orchestrator runtime ensure processing failed with HTTP 400.",

@@ -1081,10 +1081,6 @@ function shouldRunIdleDeviceSyncMaintenance(input: {
     return false;
   }
 
-  if (input.phaseInput.request.source === "device_sync_recovery") {
-    return true;
-  }
-
   return isDueHostedDeviceSyncReconcileAlarm(input.phaseInput);
 }
 
@@ -2322,19 +2318,6 @@ function resolveSkippedDeviceSyncWake(input: {
 }): HostedRuntimeWakeCandidate | null {
   if (input.deviceSyncMaintenanceRan) {
     return null;
-  }
-
-  if (
-    input.input.request.source === "device_sync_recovery"
-    && shouldRescheduleSkippedDeviceSyncWake(input.input)
-  ) {
-    return {
-      at: new Date(
-        resolveHostedAssistantPhaseNowMs(input.input)
-          + HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS,
-      ).toISOString(),
-      reason: HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
-    };
   }
 
   const existingWakeAt = input.input.workspace?.nextWakeAt ?? null;

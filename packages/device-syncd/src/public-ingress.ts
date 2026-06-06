@@ -372,10 +372,13 @@ function resolveConnectionSetupPhase(
   connectionKind: PublicProviderDescriptor["connectionKind"],
 ): DeviceSyncAccountSetupPhase | null {
   if (Object.prototype.hasOwnProperty.call(connection, "setupPhase")) {
-    return connection.setupPhase ?? null;
+    const setupPhase = connection.setupPhase ?? null;
+    return setupPhase === "pending_link" || setupPhase === "link_returned"
+      ? "source_confirmed"
+      : setupPhase;
   }
 
-  return connectionKind === "external_link" ? "link_returned" : null;
+  return connectionKind === "external_link" ? "source_confirmed" : null;
 }
 
 function resolveConnectionSetupExpiresAt(input: {
@@ -383,13 +386,15 @@ function resolveConnectionSetupExpiresAt(input: {
   setupPhase: DeviceSyncAccountSetupPhase | null;
   seededSetupExpiresAt: string | null;
 }): string | null {
+  if (input.setupPhase !== "pending_link" && input.setupPhase !== "link_returned") {
+    return null;
+  }
+
   if (Object.prototype.hasOwnProperty.call(input.connection, "setupExpiresAt")) {
     return input.connection.setupExpiresAt ?? null;
   }
 
-  return input.setupPhase === "pending_link" || input.setupPhase === "link_returned"
-    ? input.seededSetupExpiresAt
-    : null;
+  return input.seededSetupExpiresAt;
 }
 
 function assertSeededConnectionExternalAccountMatches(input: {

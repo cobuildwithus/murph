@@ -717,20 +717,6 @@ export class PrismaHostedConnectionStore {
         and "member"."suspended_at" is null
         and not exists (
           select 1
-          from "device_sync_dirty_connection" as "dirty"
-          where "dirty"."connection_id" = "connection"."id"
-            and (
-              "dirty"."dirty_revision" > "dirty"."processed_revision"
-              or exists(
-                select 1
-                from "device_sync_dirty_payload" as "payload"
-                where "payload"."connection_id" = "dirty"."connection_id"
-                  and "payload"."user_id" = "dirty"."user_id"
-              )
-            )
-        )
-        and not exists (
-          select 1
           from "device_sync_signal" as "signal"
           where "signal"."connection_id" = "connection"."id"
             and "signal"."kind" = 'reconcile_due'

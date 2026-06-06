@@ -5,7 +5,7 @@ Private Temporal worker package for hosted runtime orchestration.
 Temporal owns only scheduling, sleeps, signal coalescing, and Activity retries.
 Web remains the demand and product-status owner. Cloudflare remains the runtime
 execution adapter. The workflow state and signals must stay pointer-only.
-The package also owns the global device-sync recovery reconciler workflow and
+The package also owns the global device-sync scheduled-wake reconciler workflow and
 Temporal Schedule helper. That reconciler calls a signed web command and stores
 only count/status metadata in Temporal history; web remains the owner of
 canonical dirty state and due-reconcile facts, and the reconciler selects only
@@ -121,18 +121,18 @@ execution still requires the local web and Cloudflare adapter endpoints above.
 
 ## Device-Sync Reconciler Schedule
 
-The device-sync recovery cadence should be owned by a Temporal Schedule that
+The device-sync scheduled-wake cadence should be owned by a Temporal Schedule that
 starts `hostedDeviceSyncReconcilerWorkflow`. The Workflow runs one
 `runHostedDeviceSyncRecoverySweep` Activity and exits. The Activity signs an
 empty JSON request to the hosted web command at
 `/api/internal/device-sync/recovery-sweep`; web reads due-reconcile facts,
-records due-reconcile recovery markers, requests bounded background recovery
-nudges, and returns count-only summaries.
+records due-reconcile wake markers, appends bounded `device-sync.wake`
+mailbox handoffs, and returns count-only summaries.
 
 Dirty state is not a scheduler. Webhook clean-to-dirty transitions may still
-best-effort nudge runtime immediately, and runtime maintenance drains pending
-dirty state when device-sync work runs, but the global recovery sweep must not
-wake runtimes only because dirty rows remain unacknowledged. Do not move dirty
+append one bounded mailbox handoff, and runtime maintenance drains pending dirty
+state when device-sync work runs, but the global recovery sweep must not wake
+runtimes only because dirty rows remain unacknowledged. Do not move dirty
 resources, provider tokens, external
 account state, or canonical dirty/reconcile facts into Temporal Workflow state.
 
@@ -208,7 +208,7 @@ Activity HTTP targets:
   callback key.
 - `HOSTED_RUNTIME_DEMAND_TIMEOUT_MS`: optional demand timeout, max 30000.
 - `HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_TIMEOUT_MS`: optional HTTP timeout for the
-  signed web device-sync recovery sweep Activity, default `30000`, max
+  signed web device-sync scheduled wake sweep Activity, default `30000`, max
   `120000`.
 - `HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS`: short HTTP timeout for the
   ensure-processing command, max 30000. The Workflow Activity

@@ -37,7 +37,6 @@ const mocks = vi.hoisted(() => {
       $transaction: vi.fn(),
     },
     nudgeHostedRunnerUserBestEffortResult: vi.fn(),
-    signalHostedDeviceSyncBackgroundMaintenanceRuntime: vi.fn(),
     signalHostedDeviceSyncMailboxRuntime: vi.fn(),
     appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
       envelope: { eventId: string; userId: string };
@@ -83,8 +82,6 @@ vi.mock("@/src/lib/hosted-runner/control", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  signalHostedDeviceSyncBackgroundMaintenanceRuntime:
-    mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime,
   signalHostedDeviceSyncMailboxRuntime: mocks.signalHostedDeviceSyncMailboxRuntime,
 }));
 
@@ -303,7 +300,6 @@ import {
 } from "@/src/lib/device-sync/control-plane";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
-  requestHostedDeviceSyncScheduledReconcileRecovery,
 } from "@/src/lib/device-sync/wake-service";
 import { createHostedBrowserConnectionId } from "@/src/lib/device-sync/public-connection";
 
@@ -423,10 +419,6 @@ describe("appendHostedDeviceSyncWake", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:user-123",
     });
-    mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime.mockResolvedValue({
-      signalAccepted: true,
-      workflowId: "hosted-user-runtime:user-123",
-    });
     mocks.appendHostedMailboxEnvelope.mockResolvedValue(undefined);
     mocks.getConnectionForUser.mockResolvedValue(buildHostedConnection());
     mocks.getConnectionOwnerId.mockResolvedValue("user-123");
@@ -537,7 +529,6 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
-      recoveryIntent: null,
     });
   });
 
@@ -555,7 +546,6 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
-      recoveryIntent: null,
     });
   });
 
@@ -594,7 +584,6 @@ describe("appendHostedDeviceSyncWake", () => {
     );
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
-      recoveryIntent: "device-sync-reconcile-recovery",
     });
   });
 
@@ -625,7 +614,6 @@ describe("appendHostedDeviceSyncWake", () => {
 
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_existing",
-      recoveryIntent: "device-sync-reconcile-recovery",
     });
     expect(mocks.createSignal).toHaveBeenCalledWith({
       connectionId: "dsc_123",
@@ -670,6 +658,70 @@ describe("appendHostedDeviceSyncWake", () => {
     });
 
     expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("appends one deterministic device-sync wake when a level webhook makes a connection dirty", async () => {
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura", Buffer.from("{}"))).resolves.toEqual({
+      accepted: true,
+    });
+
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: "dsc_123",
+      dirtyAt: "2026-03-26T11:59:00.000Z",
+      eventType: "sleep.updated",
+      provider: "oura",
+      resourceCategory: "daily_sleep",
+      traceId: "trace_123",
+      tx: mocks.prismaTx,
+      userId: "user-123",
+    }));
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          connectionId: "dsc_123",
+          eventId: "device-sync:dirty:v1:dsc_123:1",
+          hint: expect.objectContaining({
+            eventType: "sleep.updated",
+            occurredAt: "2026-03-26T11:59:00.000Z",
+            reason: "webhook_dirty_transition",
+            resourceCategory: "daily_sleep",
+            traceId: "trace_123",
+          }),
+          kind: "device-sync.wake",
+          occurredAt: "2026-03-26T11:59:00.000Z",
+          provider: "oura",
+          reason: "webhook_hint",
+          userId: "user-123",
+        }),
+        tx: mocks.prismaTx,
+      }),
+    );
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_123",
+    });
+  });
+
+  it("does not append another device-sync wake for level webhooks while dirty work is already pending", async () => {
+    mocks.hasPendingDirtyConnection.mockResolvedValueOnce(true);
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura", Buffer.from("{}"))).resolves.toEqual({
+      accepted: true,
+    });
+
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
@@ -729,40 +781,6 @@ describe("appendHostedDeviceSyncWake", () => {
     }
   });
 
-  it("signals direct scheduled recovery before recording the retry marker", async () => {
-    await expect(requestHostedDeviceSyncScheduledReconcileRecovery({
-      connectionId: "dsc_123",
-      createdAt: "2026-03-26T12:01:00.000Z",
-      nextReconcileAt: "2026-03-26T12:00:00.000Z",
-      provider: "oura",
-      userId: "user-123",
-    })).resolves.toEqual({
-      recoveryRequested: true,
-    });
-
-    expect(mocks.createSignal).toHaveBeenCalledWith({
-      connectionId: "dsc_123",
-      createdAt: "2026-03-26T12:01:00.000Z",
-      eventType: null,
-      kind: "reconcile_due",
-      nextReconcileAt: "2026-03-26T12:00:00.000Z",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      provider: "oura",
-      reason: null,
-      resourceCategory: null,
-      revokeWarning: null,
-      traceId: null,
-      userId: "user-123",
-    });
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledWith({
-      userId: "user-123",
-    });
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.createSignal.mock.invocationCallOrder[0],
-    );
-    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
-  });
-
   it("uses the dedicated device-sync wake path for disconnect events", async () => {
     await appendHostedDeviceSyncWake({
       connectionId: "dsc_123",
@@ -807,7 +825,6 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
-      recoveryIntent: null,
     });
   });
 
@@ -1632,7 +1649,7 @@ describe("appendHostedDeviceSyncWake", () => {
     consoleWarn.mockRestore();
   });
 
-  it("persists dirty state before sparse webhook audit and nudges background recovery only for dirty transitions", async () => {
+  it("persists dirty state before sparse webhook audit and appends a mailbox wake only for dirty transitions", async () => {
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
@@ -1691,18 +1708,30 @@ describe("appendHostedDeviceSyncWake", () => {
     });
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
     expect(mocks.upsertDirtyConnection.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.createSignal.mock.invocationCallOrder[0],
-    );
-    expect(mocks.createSignal.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.completeWebhookTrace.mock.invocationCallOrder[0],
     );
     expect(mocks.completeWebhookTrace.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime.mock.invocationCallOrder[0],
+      mocks.appendHostedMailboxEnvelope.mock.invocationCallOrder[0],
     );
-    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledWith({
-      userId: "user-123",
+    expect(mocks.appendHostedMailboxEnvelope.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.createSignal.mock.invocationCallOrder[0],
+    );
+    expect(mocks.completeWebhookTrace.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.signalHostedDeviceSyncMailboxRuntime.mock.invocationCallOrder[0],
+    );
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          eventId: "device-sync:dirty:v1:dsc_123:1",
+          kind: "device-sync.wake",
+          reason: "webhook_hint",
+          userId: "user-123",
+        }),
+        tx: mocks.prismaTx,
+      }),
+    );
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_123",
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
@@ -1722,10 +1751,17 @@ describe("appendHostedDeviceSyncWake", () => {
 
     await controlPlane.handleWebhook("oura");
 
-    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledWith({
-      userId: "user-123",
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          eventId: "device-sync:dirty:v1:dsc_123:1",
+          kind: "device-sync.wake",
+        }),
+        tx: mocks.prismaTx,
+      }),
+    );
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_123",
     });
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
   });
@@ -1754,7 +1790,6 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).not.toHaveBeenCalled();
   });
 
   it("coalesces level-triggered webhooks after committed dirty state exists", async () => {
@@ -1779,7 +1814,6 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).not.toHaveBeenCalled();
   });
 
   it("accepts level-triggered webhooks before dirty state commits", async () => {
@@ -1805,9 +1839,9 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
   });
 
-  it("keeps hosted webhook traces completed when the post-commit background recovery signal fails", async () => {
+  it("keeps hosted webhook traces completed when the post-commit mailbox signal fails", async () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime.mockRejectedValueOnce(new Error("Temporal unavailable"));
+    mocks.signalHostedDeviceSyncMailboxRuntime.mockRejectedValueOnce(new Error("Temporal unavailable"));
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
@@ -1826,18 +1860,17 @@ describe("appendHostedDeviceSyncWake", () => {
       });
 
       expect(mocks.createSignal).toHaveBeenCalledTimes(1);
-      expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
-      expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-      expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledWith({
-        userId: "user-123",
+      expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+      expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+        mailboxItemId: "mailbox_123",
       });
       expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
       expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
       expect(consoleWarn).toHaveBeenCalledWith(
-        "Hosted device-sync recovery Temporal signal failed.",
+        "Hosted device-sync wake Temporal signal failed after mailbox append.",
         expect.objectContaining({
-          code: "HOSTED_DEVICE_SYNC_RECOVERY_TEMPORAL_SIGNAL_FAILED",
-          userIdPresent: true,
+          code: "HOSTED_DEVICE_SYNC_TEMPORAL_SIGNAL_FAILED",
+          mailboxItemIdPresent: true,
         }),
       );
     } finally {
@@ -1845,7 +1878,7 @@ describe("appendHostedDeviceSyncWake", () => {
     }
   });
 
-  it("does not make webhook acceptance depend on dirty wake mailbox append", async () => {
+  it("keeps webhook acceptance retryable when dirty wake mailbox append fails", async () => {
     mocks.appendHostedMailboxEnvelopeTx.mockRejectedValueOnce(new Error("mailbox append failed"));
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
@@ -1859,19 +1892,15 @@ describe("appendHostedDeviceSyncWake", () => {
       }),
     );
 
-    await expect(controlPlane.handleWebhook("oura")).resolves.toMatchObject({
-      accepted: true,
-    });
+    await expect(controlPlane.handleWebhook("oura")).rejects.toThrow("mailbox append failed");
 
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
-    expect(mocks.createSignal).toHaveBeenCalledTimes(1);
-    expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledTimes(1);
   });
 
-  it("does not inspect dirty wake mailbox dedupe state during webhook acceptance", async () => {
+  it("keeps webhook acceptance retryable when dirty wake mailbox dedupe conflicts", async () => {
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
       dedupeConflict: true,
       duplicate: true,
@@ -1893,19 +1922,20 @@ describe("appendHostedDeviceSyncWake", () => {
       }),
     );
 
-    await expect(controlPlane.handleWebhook("oura")).resolves.toMatchObject({
-      accepted: true,
+    await expect(controlPlane.handleWebhook("oura")).rejects.toMatchObject({
+      code: "HOSTED_DEVICE_SYNC_DIRTY_WAKE_DEDUPE_CONFLICT",
+      httpStatus: 503,
+      retryable: true,
     });
 
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
-    expect(mocks.createSignal).toHaveBeenCalledTimes(1);
-    expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledTimes(1);
   });
 
-  it("does not duplicate recovery nudges when later level webhooks coalesce behind the dirty row", async () => {
+  it("does not duplicate mailbox wakes when later level webhooks coalesce behind the dirty row", async () => {
     mocks.hasPendingDirtyConnection
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
@@ -1931,12 +1961,11 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
     expect(mocks.createSignal).toHaveBeenCalledTimes(1);
     expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(2);
-    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledTimes(1);
   });
 
-  it("coalesces a historical webhook burst into one dirty row and one recovery nudge while the connection stays dirty", async () => {
+  it("coalesces a historical webhook burst into one dirty row and one mailbox wake while the connection stays dirty", async () => {
     let traceIndex = 0;
     mocks.createDeviceSyncPublicIngress.mockImplementation((input: {
       hooks?: {
@@ -2019,16 +2048,12 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.createSignal).toHaveBeenCalledTimes(1);
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
     expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledTimes(1);
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledWith({
-      userId: "user-123",
-    });
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
-  it("requests another recovery nudge in the same wall-clock bucket after prior work is clean", async () => {
+  it("requests another mailbox wake in the same wall-clock bucket after prior work is clean", async () => {
     let traceIndex = 0;
     mocks.createDeviceSyncPublicIngress.mockImplementation((input: {
       hooks?: {
@@ -2104,9 +2129,8 @@ describe("appendHostedDeviceSyncWake", () => {
       });
     }
 
-    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(2);
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledTimes(2);
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
@@ -2135,7 +2159,6 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).not.toHaveBeenCalled();
   });
 
   it("does not complete or nudge a hosted webhook trace when dirty-state persistence fails", async () => {
@@ -2159,7 +2182,6 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).not.toHaveBeenCalled();
   });
 
   it("does not nudge after a hosted webhook trace claim is lost before completion", async () => {
@@ -2182,13 +2204,12 @@ describe("appendHostedDeviceSyncWake", () => {
       retryable: true,
     });
 
-    expect(mocks.createSignal).toHaveBeenCalledTimes(1);
+    expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
     expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).not.toHaveBeenCalled();
   });
 
   it("shapes hosted webhook dirty resources by provider and job allowlists instead of key redaction", async () => {
@@ -2301,10 +2322,15 @@ describe("appendHostedDeviceSyncWake", () => {
         windowStart: "2026-03-19T00:00:00.000Z",
       },
     ]);
-    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledWith({
-      userId: "user-123",
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(expect.objectContaining({
+      envelope: expect.objectContaining({
+        eventId: "device-sync:dirty:v1:dsc_123:1",
+        kind: "device-sync.wake",
+      }),
+    }));
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_123",
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
@@ -2421,7 +2447,6 @@ describe("appendHostedDeviceSyncWake", () => {
     ]);
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).not.toHaveBeenCalled();
   });
 
   it("accepts durable Junction payload webhooks without a connection acceptance lock", async () => {
@@ -2726,10 +2751,9 @@ describe("appendHostedDeviceSyncWake", () => {
         windowStart: null,
       },
     ]);
-    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledWith({
-      userId: "user-123",
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_123",
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
@@ -2771,7 +2795,6 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).not.toHaveBeenCalled();
   });
 
   it("keeps delete webhook dirty resources narrow across the hosted handoff", async () => {
@@ -2860,10 +2883,9 @@ describe("appendHostedDeviceSyncWake", () => {
       },
     ]);
     expect(JSON.stringify(dirtyResources)).not.toContain("oura-user-1");
-    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledWith({
-      userId: "user-123",
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_123",
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });

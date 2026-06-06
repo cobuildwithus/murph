@@ -13,10 +13,10 @@ Exact hosted message/event producers append encrypted mailbox items in Postgres,
 then signal the pointer-only hosted Temporal workflow for the affected member.
 Device-sync webhook freshness is a dirty-state path instead: web records
 trace/audit facts, widens per-connection dirty resources, completes the trace in
-that transaction, and then sends a best-effort user-level Temporal recovery
-nudge. No foreground mailbox item is appended for dirty freshness. The dirty row
-remains the source of truth, and bounded recovery re-signals by dirty user or
-due-reconcile marker if the post-commit signal is missed.
+that transaction, and appends one deterministic `device-sync.wake` mailbox
+handoff only when the connection moves clean-to-dirty. Already-dirty level hints
+coalesce without another mailbox row. The dirty row remains the source of truth;
+the mailbox row is only the durable handoff into the normal Temporal wake path.
 Hosted execution no longer flows through a web-owned acquire/commit/finalize run
 protocol; the restored local runtime imports mailbox items, pulls dirty
 device-sync state, and checkpoints its own workspace state.
@@ -597,10 +597,10 @@ The onboarding lane is intentionally thin:
   not a second execution lifecycle authority.
 - Temporal-bound execution from onboarding and exact message ingress appends
   canonical hosted mailbox input first. Device-sync webhook freshness records
-  dirty state in the same transaction, then treats the post-commit user-level
-  Temporal recovery signal as a best-effort wake hint. No foreground mailbox
-  item is appended for dirty freshness; the dirty row stays the source of truth
-  until the runtime checkpoints it.
+  dirty state in the same transaction, appends a bounded `device-sync.wake`
+  mailbox handoff only on clean-to-dirty transitions, then signals Temporal by
+  mailbox pointer. The dirty row stays the source of truth until the runtime
+  checkpoints it.
 - Verified email sync updates canonical hosted email-authorization facts in web
   storage; it does not write hosted execution env.
 
