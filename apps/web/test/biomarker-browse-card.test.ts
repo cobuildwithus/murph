@@ -145,10 +145,6 @@ it("wires browser-vault metric selections into biomarker browse cards", async ()
 
 it.each([
   {
-    context: "device import is pending",
-    value: { deviceSyncImportPending: true, refreshPending: false, status: "ready" },
-  },
-  {
     context: "browser-vault refresh is pending",
     value: { deviceSyncImportPending: false, refreshPending: true, status: "ready" },
   },
@@ -191,6 +187,48 @@ it.each([
   try {
     expect(rendered.container.textContent).toContain("Syncing...");
     expect(rendered.container.textContent).not.toContain("---");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+it("does not show syncing copy for every missing browse value while only device import is pending", async () => {
+  const { BiomarkersPageClient } = await import(
+    "../app/(dashboard)/biomarkers/biomarkers-page-client"
+  );
+
+  browserVaultMock.value = {
+    client: {
+      metricSelections: {
+        getByBiomarker() {
+          return null;
+        },
+      },
+    },
+    deviceSyncImportPending: true,
+    refreshPending: false,
+    status: "ready",
+  };
+
+  const rendered = await renderClientComponent(
+    createElement(BiomarkersPageClient, {
+      biomarkers: [{
+        aliases: [],
+        categories: ["sleep"],
+        key: "biomarker:deep-sleep-minutes",
+        routeId: "deep-sleep-minutes",
+        shortName: "Deep sleep",
+        summary: "Time spent in slow-wave sleep.",
+        title: "Deep Sleep",
+        unit: "minutes",
+      }],
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    expect(rendered.container.textContent).not.toContain("Syncing...");
+    expect(rendered.container.textContent).toContain("---");
   } finally {
     await rendered.cleanup();
   }
