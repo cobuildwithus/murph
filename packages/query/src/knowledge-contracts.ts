@@ -54,6 +54,7 @@ export interface KnowledgeUpsertResult {
 }
 
 export interface KnowledgeListResult {
+  limit: number;
   pageCount: number;
   pageType: string | null;
   pages: KnowledgePageMetadata[];
@@ -144,6 +145,7 @@ export const knowledgeUpsertResultSchema = z.object({
 }) satisfies z.ZodType<KnowledgeUpsertResult>;
 
 export const knowledgeListResultSchema = z.object({
+  limit: z.number().int().positive().max(200),
   pageCount: z.number().int().nonnegative(),
   pageType: nullableNonEmptyStringSchema,
   pages: z.array(knowledgePageMetadataSchema),

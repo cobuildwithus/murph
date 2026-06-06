@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -300,20 +300,12 @@ test("Junction raw-only timeseries stay out of default query/search and wearable
     },
   };
   const rawOnlyPayload = normalizeJunctionSnapshot(rawTimeseriesSnapshot);
-  const rawArtifact = rawOnlyPayload.rawArtifacts?.find((artifact) =>
-    artifact.role === "junction-timeseries-heartrate"
-  );
 
   assert.deepEqual(rawOnlyPayload.events, []);
   assert.deepEqual(rawOnlyPayload.samples ?? [], []);
-  assert.ok(rawArtifact);
+  assert.deepEqual(rawOnlyPayload.rawArtifacts ?? [], []);
 
   try {
-    const rawArtifactPath = path.join(
-      vaultRoot,
-      "raw/integrations/junction/2026/05/xfm_junction_raw_timeseries/01-junction-timeseries-heartrate.json",
-    );
-    await mkdir(path.dirname(rawArtifactPath), { recursive: true });
     await writeFile(
       path.join(vaultRoot, "vault.json"),
       `${JSON.stringify({
@@ -325,9 +317,6 @@ test("Junction raw-only timeseries stay out of default query/search and wearable
       })}\n`,
       "utf8",
     );
-    await writeFile(rawArtifactPath, `${JSON.stringify(rawArtifact.content)}\n`, "utf8");
-
-    assert.match(await readFile(rawArtifactPath, "utf8"), /"value":61/u);
 
     const persistedRawVault = await readVault(vaultRoot);
     assert.deepEqual(listEntities(persistedRawVault, { families: ["event"] }), []);

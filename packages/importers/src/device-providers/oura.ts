@@ -45,8 +45,6 @@ export interface OuraSnapshotInput {
   sleeps?: unknown[];
   sessions?: unknown[];
   workouts?: unknown[];
-  heartrate?: unknown[];
-  heartRate?: unknown[];
   deletions?: unknown[];
 }
 
@@ -64,13 +62,37 @@ const ouraSnapshotSchema = z.object({
   sleeps: ouraCollectionSchema.optional(),
   sessions: ouraCollectionSchema.optional(),
   workouts: ouraCollectionSchema.optional(),
-  heartrate: ouraCollectionSchema.optional(),
-  heartRate: ouraCollectionSchema.optional(),
   deletions: ouraCollectionSchema.optional(),
 }).catchall(z.unknown());
 
 function parseOuraSnapshot(snapshot: unknown): OuraSnapshotInput {
   return ouraSnapshotSchema.parse(snapshot);
+}
+
+function sanitizeOuraRawSnapshot(snapshot: OuraSnapshotInput): unknown {
+  const source = asPlainObject(snapshot);
+  if (!source) {
+    return source;
+  }
+
+  const sanitized: PlainObject = { ...source };
+  delete sanitized.heartrate;
+  delete sanitized.heartRate;
+
+  const hasRetainedCollection = [
+    sanitized.personalInfo,
+    sanitized.dailyActivity,
+    sanitized.dailySleep,
+    sanitized.dailyReadiness,
+    sanitized.dailySpO2,
+    sanitized.dailySpo2,
+    sanitized.sleeps,
+    sanitized.sessions,
+    sanitized.workouts,
+    sanitized.deletions,
+  ].some((value) => Array.isArray(value) ? value.length > 0 : value !== undefined && value !== null);
+
+  return hasRetainedCollection ? sanitized : {};
 }
 
 function secondsToMinutes(value: unknown): number | undefined {
@@ -438,9 +460,6 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
   const workouts = asArray(request.workouts)
     .map((entry) => asPlainObject(entry))
     .filter(Boolean) as PlainObject[];
-  const heartrate = asArray(request.heartrate ?? request.heartRate)
-    .map((entry) => asPlainObject(entry))
-    .filter(Boolean) as PlainObject[];
   const deletions = asArray(request.deletions)
     .map((entry) => asPlainObject(entry))
     .filter(Boolean) as PlainObject[];
@@ -450,7 +469,6 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     stringId(request.accountId) ?? stringId(personalInfo?.id ?? personalInfo?.user_id ?? personalInfo?.userId);
 
   pushRawArtifact(rawArtifacts, createRawArtifact("personal-info", "personal-info.json", personalInfo));
-  pushRawArtifact(rawArtifacts, createRawArtifact("heartrate", "heartrate.json", heartrate));
 
   for (const activity of dailyActivity) {
     const activityId = stringId(activity.id) ?? stringId(activity.day) ?? `daily-activity-${events.length + 1}`;
@@ -736,7 +754,6 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
       sleeps: sleeps.length,
       sessions: sessions.length,
       workouts: workouts.length,
-      heartrate: heartrate.length,
       deletions: deletions.length,
     },
   });
@@ -755,4 +772,5 @@ export const ouraProviderAdapter: DeviceProviderAdapter<OuraSnapshotInput> = {
   ...OURA_DEVICE_PROVIDER_DESCRIPTOR,
   parseSnapshot: parseOuraSnapshot,
   normalizeSnapshot: normalizeOuraSnapshot,
+  sanitizeRawSnapshot: sanitizeOuraRawSnapshot,
 };

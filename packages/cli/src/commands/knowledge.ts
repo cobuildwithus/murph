@@ -107,6 +107,13 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
         .min(1)
         .optional()
         .describe('Optional status filter.'),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(200)
+        .default(20)
+        .describe('Maximum number of knowledge pages to return.'),
     }),
     output: knowledgeListResultSchema,
     run({ options }) {
@@ -114,6 +121,7 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
         vault: options.vault,
         pageType: options.pageType,
         status: options.status,
+        limit: options.limit,
       })
     },
   })
@@ -143,8 +151,8 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
         .int()
         .positive()
         .max(200)
-        .optional()
-        .describe('Optional result limit. Defaults to 20 and is capped at 200.'),
+        .default(10)
+        .describe('Maximum number of knowledge search hits to return.'),
     }),
     output: knowledgeSearchResultSchema,
     run({ args, options }) {

@@ -391,7 +391,7 @@ test('root config file can provide command option defaults', async () => {
     })
     assert.equal(withoutConfig.ok, true)
     if (withoutConfig.ok) {
-      assert.equal(withoutConfig.data.filters.limit, 20)
+      assert.equal(withoutConfig.data.filters.limit, 10)
     }
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
@@ -977,7 +977,7 @@ test('supplement search-labels schema exposes hosted label lookup inputs', async
   )
   assert.match(
     String(schema.options.properties.limit?.description ?? ''),
-    /Maximum label matches to return\. Defaults to 5/u,
+    /Maximum label matches to return\. Defaults to 1/u,
   )
 })
 
@@ -1010,7 +1010,7 @@ test('supplement search-labels-batch schema exposes hosted batch lookup inputs',
   )
   assert.match(
     String(schema.options.properties.limit?.description ?? ''),
-    /Maximum label matches to return per query\. Defaults to 5/u,
+    /Maximum label matches to return per query\. Defaults to 1/u,
   )
 })
 
@@ -1109,6 +1109,18 @@ test('knowledge commands expose the expected schema', async () => {
       required?: string[]
     }
   }
+  const listSchema = JSON.parse(
+    await runSourceCliRaw(['knowledge', 'list', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties?: Record<string, unknown>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
   const showSchema = JSON.parse(
     await runSourceCliRaw(['knowledge', 'show', '--schema', '--format', 'json']),
   ) as {
@@ -1154,7 +1166,11 @@ test('knowledge commands expose the expected schema', async () => {
   assert.equal('query' in searchSchema.args.properties, true)
   assert.deepEqual(searchSchema.args.required, ['query'])
   assert.equal('limit' in searchSchema.options.properties, true)
-  assert.deepEqual(searchSchema.options.required ?? [], [])
+  assert.deepEqual(searchSchema.options.required, ['limit'])
+
+  assert.deepEqual(listSchema.args.required ?? [], [])
+  assert.equal('limit' in listSchema.options.properties, true)
+  assert.deepEqual(listSchema.options.required, ['limit'])
 
   assert.equal('slug' in showSchema.args.properties, true)
   assert.deepEqual(showSchema.args.required, ['slug'])

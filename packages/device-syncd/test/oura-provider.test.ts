@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { test } from "vitest";
 import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
-import type { DeviceBatchImportPayload, WearableRawIngestReceipt } from "@murphai/importers";
 
 import { DeviceSyncError } from "../src/errors.ts";
 import { createOuraDeviceSyncProvider, resolveOuraWebhookPreflightResponse } from "../src/providers/oura.ts";
@@ -32,12 +31,6 @@ type StoredDeviceSyncAccountOverrides = Partial<Omit<StoredDeviceSyncAccount, "c
   refreshTokenEncrypted?: string | null;
   credential?: StoredDeviceSyncAccount["credential"];
 };
-
-function readRawReceiptArtifact(payload: DeviceBatchImportPayload): WearableRawIngestReceipt {
-  const artifact = payload.rawArtifacts?.find((entry) => entry.role.startsWith("wearable-raw-receipt:"));
-  assert.ok(artifact);
-  return artifact.content as WearableRawIngestReceipt;
-}
 
 function createAccount(scopes: string[], overrides: DeviceSyncAccountOverrides = {}): DeviceSyncAccount {
   const {
@@ -575,12 +568,6 @@ test("Oura provider backfills snapshot windows with polling-friendly collection 
         });
       }
 
-      if (url.startsWith("https://api.ouraring.com/v2/usercollection/heartrate?")) {
-        return createJsonResponse({
-          data: [{ timestamp: "2026-03-15T12:00:00.000Z", bpm: 64 }],
-        });
-      }
-
       throw new Error(`Unexpected request: ${url}`);
     },
   });
@@ -609,7 +596,7 @@ test("Oura provider backfills snapshot windows with polling-friendly collection 
     }),
   );
 
-  assert.equal(importedSnapshots.length, 2);
+  assert.equal(importedSnapshots.length, 1);
   assert.deepEqual(importedSnapshots[0], {
     accountId: "oura-user-1",
     importedAt: "2026-03-16T10:00:00.000Z",
@@ -625,13 +612,8 @@ test("Oura provider backfills snapshot windows with polling-friendly collection 
     sessions: [{ id: "session-1", type: "meditation" }],
     workouts: [{ id: "workout-1", activity: "running" }],
   });
-  assert.deepEqual(importedSnapshots[1], {
-    accountId: "oura-user-1",
-    importedAt: "2026-03-16T00:00:00.000Z",
-    heartrate: [{ timestamp: "2026-03-15T12:00:00.000Z", bpm: 64 }],
-  });
   assert.ok(requests.some((url) => url.includes("/v2/usercollection/daily_activity?")));
-  assert.ok(requests.some((url) => url.includes("/v2/usercollection/heartrate?")));
+  assert.equal(requests.some((url) => url.includes("/v2/usercollection/heartrate?")), false);
   assert.equal(provider.descriptor.webhook?.path, "/webhooks/oura");
 });
 
@@ -739,7 +721,7 @@ test("Oura provider rejects excessive unique pagination tokens", async () => {
   );
 });
 
-test("Oura provider imports heartrate backfills through closed daily snapshots", async () => {
+test("Oura provider ignores old heartrate-only grants during backfill", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createOuraDeviceSyncProvider({
@@ -748,16 +730,6 @@ test("Oura provider imports heartrate backfills through closed daily snapshots",
     fetchImpl: async (input) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       requests.push(url);
-
-      if (url.startsWith("https://api.ouraring.com/v2/usercollection/heartrate?")) {
-        const search = new URL(url).searchParams;
-        const start = search.get("start_datetime");
-
-        return createJsonResponse({
-          data: start ? [{ timestamp: start, bpm: 64 }] : [],
-        });
-      }
-
       throw new Error(`Unexpected request: ${url}`);
     },
   });
@@ -785,214 +757,11 @@ test("Oura provider imports heartrate backfills through closed daily snapshots",
     }),
   );
 
-  const heartrateRequests = requests
-    .filter((url) => url.startsWith("https://api.ouraring.com/v2/usercollection/heartrate?"))
-    .map((url) => {
-      const search = new URL(url).searchParams;
-      return {
-        start: search.get("start_datetime"),
-        end: search.get("end_datetime"),
-      };
-    });
-
-  assert.deepEqual(heartrateRequests, [
-    {
-      start: "2026-01-01T00:00:00.000Z",
-      end: "2026-01-02T00:00:00.000Z",
-    },
-    {
-      start: "2026-01-02T00:00:00.000Z",
-      end: "2026-01-03T00:00:00.000Z",
-    },
-    {
-      start: "2026-01-03T00:00:00.000Z",
-      end: "2026-01-04T00:00:00.000Z",
-    },
-  ]);
-  assert.deepEqual(importedSnapshots, [
-    {
-      accountId: "oura-user-1",
-      importedAt: "2026-01-02T00:00:00.000Z",
-      heartrate: [{ timestamp: "2026-01-01T00:00:00.000Z", bpm: 64 }],
-    },
-    {
-      accountId: "oura-user-1",
-      importedAt: "2026-01-03T00:00:00.000Z",
-      heartrate: [{ timestamp: "2026-01-02T00:00:00.000Z", bpm: 64 }],
-    },
-    {
-      accountId: "oura-user-1",
-      importedAt: "2026-01-04T00:00:00.000Z",
-      heartrate: [{ timestamp: "2026-01-03T00:00:00.000Z", bpm: 64 }],
-    },
-  ]);
+  assert.deepEqual(requests, []);
+  assert.deepEqual(importedSnapshots, []);
 });
 
-test("Oura provider caps dense heartrate backfills at the provider-local dense window", async () => {
-  const requests: string[] = [];
-  const provider = createOuraDeviceSyncProvider({
-    clientId: "oura-client-id",
-    clientSecret: "<REDACTED_OURA_CLIENT_SECRET>",
-    fetchImpl: async (input) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      requests.push(url);
-
-      if (url.startsWith("https://api.ouraring.com/v2/usercollection/heartrate?")) {
-        return createJsonResponse({ data: [] });
-      }
-
-      throw new Error(`Unexpected request: ${url}`);
-    },
-  });
-  const context: ProviderJobContext = {
-    account: createAccount(["heartrate"]),
-    now: "2026-04-01T12:00:00.000Z",
-    logger: {},
-    async importSnapshot() {
-      throw new Error("empty dense snapshots should not be imported");
-    },
-    async refreshAccountTokens() {
-      throw new Error("refresh should not be called in this test");
-    },
-  };
-
-  await provider.jobExecutor.executeJob(
-    context,
-    createJob("backfill", {
-      windowStart: "2025-10-03T00:00:00.000Z",
-      windowEnd: "2026-04-01T00:00:00.000Z",
-      includePersonalInfo: false,
-    }),
-  );
-
-  const heartrateRequests = requests
-    .filter((url) => url.startsWith("https://api.ouraring.com/v2/usercollection/heartrate?"))
-    .map((url) => {
-      const search = new URL(url).searchParams;
-      return {
-        start: search.get("start_datetime"),
-        end: search.get("end_datetime"),
-      };
-    });
-
-  assert.equal(heartrateRequests.length, 90);
-  assert.deepEqual(heartrateRequests[0], {
-    start: "2026-01-01T00:00:00.000Z",
-    end: "2026-01-02T00:00:00.000Z",
-  });
-  assert.deepEqual(heartrateRequests.at(-1), {
-    start: "2026-03-31T00:00:00.000Z",
-    end: "2026-04-01T00:00:00.000Z",
-  });
-});
-
-test("Oura reconcile imports heartrate through stable closed-day snapshots", async () => {
-  const requests: string[] = [];
-  const importedSnapshots: unknown[] = [];
-  const provider = createOuraDeviceSyncProvider({
-    clientId: "oura-client-id",
-    clientSecret: "oura-client-secret",
-    fetchImpl: async (input) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      requests.push(url);
-
-      if (url.startsWith("https://api.ouraring.com/v2/usercollection/heartrate?")) {
-        const search = new URL(url).searchParams;
-        return createJsonResponse({
-          data: [{
-            timestamp: search.get("start_datetime"),
-            bpm: 64,
-          }],
-        });
-      }
-
-      throw new Error(`Unexpected request: ${url}`);
-    },
-  });
-  const baseContext: Omit<ProviderJobContext, "now"> = {
-    account: createAccount(["heartrate"]),
-    logger: {},
-    async importSnapshot(snapshot) {
-      importedSnapshots.push(snapshot);
-      return { ok: true };
-    },
-    async refreshAccountTokens() {
-      throw new Error("refresh should not be called in this test");
-    },
-  };
-
-  await provider.jobExecutor.executeJob(
-    {
-      ...baseContext,
-      now: "2026-03-16T10:00:00.000Z",
-    },
-    createJob("reconcile", {
-      windowStart: "2026-03-15T00:00:00.000Z",
-      windowEnd: "2026-03-16T10:00:00.000Z",
-      includePersonalInfo: false,
-    }),
-  );
-  await provider.jobExecutor.executeJob(
-    {
-      ...baseContext,
-      now: "2026-03-16T11:00:00.000Z",
-    },
-    createJob("reconcile", {
-      windowStart: "2026-03-15T00:00:00.000Z",
-      windowEnd: "2026-03-16T11:00:00.000Z",
-      includePersonalInfo: false,
-    }),
-  );
-
-  assert.deepEqual(importedSnapshots, [
-    {
-      accountId: "oura-user-1",
-      importedAt: "2026-03-16T00:00:00.000Z",
-      heartrate: [{ timestamp: "2026-03-15T00:00:00.000Z", bpm: 64 }],
-    },
-    {
-      accountId: "oura-user-1",
-      importedAt: "2026-03-16T00:00:00.000Z",
-      heartrate: [{ timestamp: "2026-03-15T00:00:00.000Z", bpm: 64 }],
-    },
-  ]);
-  const heartrateRequests = requests
-    .filter((url) => url.startsWith("https://api.ouraring.com/v2/usercollection/heartrate?"))
-    .map((url) => new URL(url).searchParams);
-  assert.equal(heartrateRequests.length, 2);
-  assert.deepEqual(
-    heartrateRequests.map((search) => ({
-      start: search.get("start_datetime"),
-      end: search.get("end_datetime"),
-    })),
-    [
-      {
-        start: "2026-03-15T00:00:00.000Z",
-        end: "2026-03-16T00:00:00.000Z",
-      },
-      {
-        start: "2026-03-15T00:00:00.000Z",
-        end: "2026-03-16T00:00:00.000Z",
-      },
-    ],
-  );
-
-  const [firstPayload, secondPayload] = await Promise.all(
-    importedSnapshots.map((snapshot) =>
-      prepareDeviceProviderSnapshotImport({
-        provider: "oura",
-        snapshot,
-      })
-    ),
-  );
-  assert.equal(firstPayload.importedAt, secondPayload.importedAt);
-  assert.equal(
-    readRawReceiptArtifact(firstPayload).payloadHash,
-    readRawReceiptArtifact(secondPayload).payloadHash,
-  );
-});
-
-test("Oura heartrate resource jobs skip the current partial day", async () => {
+test("Oura heartrate resource jobs are ignored for current partial days", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createOuraDeviceSyncProvider({
@@ -1030,7 +799,7 @@ test("Oura heartrate resource jobs skip the current partial day", async () => {
   assert.deepEqual(importedSnapshots, []);
 });
 
-test("Oura heartrate resource jobs use stable closed historical day snapshots", async () => {
+test("Oura heartrate resource jobs are ignored for historical days", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createOuraDeviceSyncProvider({
@@ -1039,17 +808,6 @@ test("Oura heartrate resource jobs use stable closed historical day snapshots", 
     fetchImpl: async (input) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       requests.push(url);
-
-      if (url.startsWith("https://api.ouraring.com/v2/usercollection/heartrate?")) {
-        const search = new URL(url).searchParams;
-        return createJsonResponse({
-          data: [{
-            timestamp: search.get("start_datetime"),
-            bpm: 64,
-          }],
-        });
-      }
-
       throw new Error(`Unexpected request: ${url}`);
     },
   });
@@ -1075,20 +833,42 @@ test("Oura heartrate resource jobs use stable closed historical day snapshots", 
     }),
   );
 
-  assert.deepEqual(importedSnapshots, [
-    {
-      accountId: "oura-user-1",
-      importedAt: "2026-03-16T00:00:00.000Z",
-      heartrate: [{ timestamp: "2026-03-15T00:00:00.000Z", bpm: 64 }],
-    },
-  ]);
-  assert.equal(requests.length, 1);
-  const requestSearch = new URL(requests[0] ?? "").searchParams;
-  assert.equal(requestSearch.get("start_datetime"), "2026-03-15T00:00:00.000Z");
-  assert.equal(requestSearch.get("end_datetime"), "2026-03-16T00:00:00.000Z");
+  assert.deepEqual(requests, []);
+  assert.deepEqual(importedSnapshots, []);
 });
 
-test("Oura provider rejects invalid heartrate window payloads", async () => {
+test("Oura heartrate delete jobs are ignored", async () => {
+  const importedSnapshots: unknown[] = [];
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+  });
+
+  await provider.jobExecutor.executeJob(
+    {
+      account: createAccount(["heartrate"]),
+      now: "2026-03-16T10:00:00.000Z",
+      logger: {},
+      async importSnapshot(snapshot) {
+        importedSnapshots.push(snapshot);
+        return { ok: true };
+      },
+      async refreshAccountTokens() {
+        throw new Error("refresh should not be called in this test");
+      },
+    },
+    createJob("delete", {
+      dataType: "heartrate",
+      objectId: "2026-03-16T09:30:00.000Z",
+      occurredAt: "2026-03-16T09:30:00.000Z",
+      sourceEventType: "heartrate.deleted",
+    }),
+  );
+
+  assert.deepEqual(importedSnapshots, []);
+});
+
+test("Oura old heartrate-only backfills ignore invalid dense windows without fetching", async () => {
   let fetchCalled = false;
   const provider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",
@@ -1110,16 +890,13 @@ test("Oura provider rejects invalid heartrate window payloads", async () => {
     },
   };
 
-  await assert.rejects(
-    provider.jobExecutor.executeJob(
-      context,
-      createJob("backfill", {
-        windowStart: "not-a-date",
-        windowEnd: "2026-03-16T00:00:00.000Z",
-        includePersonalInfo: false,
-      }),
-    ),
-    (error) => error instanceof RangeError,
+  await provider.jobExecutor.executeJob(
+    context,
+    createJob("backfill", {
+      windowStart: "not-a-date",
+      windowEnd: "2026-03-16T00:00:00.000Z",
+      includePersonalInfo: false,
+    }),
   );
   assert.equal(fetchCalled, false);
 });
@@ -1348,6 +1125,67 @@ test("Oura provider validates webhook signatures and turns notifications into re
   assert.equal(parsed?.jobs[0]?.dedupeKey, `oura-webhook:${parsed?.traceId}`);
 });
 
+test("Oura old heartrate webhooks are accepted and no-op at execution", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      requests.push(url);
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      event_type: "heartrate.updated",
+      data_type: "heartrate",
+      object_id: "heartrate-1",
+      user_id: "oura-user-1",
+      timestamp: "2026-03-16T09:58:00.000Z",
+    }),
+    "utf8",
+  );
+
+  const parsed = await verifyAndParseWebhook({
+    headers: createOuraWebhookHeaders("oura-client-secret", "2026-03-16T09:58:10.000Z", rawBody),
+    rawBody,
+    now: "2026-03-16T10:00:00.000Z",
+  });
+  const job = parsed?.jobs[0];
+  assert.ok(job);
+  assert.equal(job.kind, "resource");
+  assert.deepEqual(job.payload, {
+    dataType: "heartrate",
+    objectId: "heartrate-1",
+    occurredAt: "2026-03-16T09:58:00.000Z",
+    windowStart: "2026-02-23T10:00:00.000Z",
+    windowEnd: "2026-03-16T10:00:00.000Z",
+    includePersonalInfo: false,
+  });
+
+  await provider.jobExecutor?.executeJob(
+    {
+      account: createAccount(["heartrate"]),
+      async importSnapshot(snapshot) {
+        importedSnapshots.push(snapshot);
+        return { ok: true };
+      },
+      logger: {},
+      now: "2026-03-16T10:00:00.000Z",
+      async refreshAccountTokens() {
+        throw new Error("refresh should not be called in this test");
+      },
+    },
+    createJob("resource", job.payload),
+  );
+
+  assert.deepEqual(requests, []);
+  assert.deepEqual(importedSnapshots, []);
+});
+
 test("Oura provider accepts uppercase hexadecimal webhook signatures", async () => {
   const provider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",
@@ -1463,6 +1301,18 @@ test("Oura webhook preflight helper returns the challenge only for the configure
 });
 
 test("Oura provider webhook admin no-ops without a verification token and reuses the shared subscription client when one is configured", async () => {
+  const defaultWebhookDataTypes = [...new Set(OURA_DEFAULT_WEBHOOK_TARGETS.map((target) => target.dataType))].sort();
+  assert.deepEqual(defaultWebhookDataTypes, [
+    "daily_activity",
+    "daily_readiness",
+    "daily_sleep",
+    "daily_spo2",
+    "session",
+    "sleep",
+    "workout",
+  ]);
+  assert.equal(defaultWebhookDataTypes.includes("heartrate"), false);
+
   const requests: string[] = [];
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -2085,6 +1935,36 @@ test("Oura provider exposes the connect URL, forwards webhook verification throu
   const webhookAdmin = requireValue(provider.webhookAdmin);
   const handleWebhookPreflight = requireValue(webhookAdmin.handleWebhookPreflight);
   const fallbackSnapshots: unknown[] = [];
+  const defaultScopes = provider.descriptor.oauth?.defaultScopes ?? [];
+
+  assert.deepEqual(defaultScopes, ["personal", "daily", "workout", "session", "spo2"]);
+  assert.equal(defaultScopes.includes("heartrate"), false);
+  assert.equal(
+    provider.oauthAdapter.buildConnectUrl({
+      callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
+      scopes: defaultScopes,
+      state: "state-default-connect",
+      now: "2026-03-16T10:00:00.000Z",
+    }).includes("heartrate"),
+    false,
+  );
+
+  const staleScopeProvider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    scopes: ["personal", "daily", "heartrate", "extapi:heartrate", "workout"],
+  });
+  const staleConfiguredScopes = staleScopeProvider.descriptor.oauth?.defaultScopes ?? [];
+  assert.deepEqual(staleConfiguredScopes, ["personal", "daily", "workout", "session", "spo2"]);
+  assert.equal(
+    staleScopeProvider.oauthAdapter.buildConnectUrl({
+      callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
+      scopes: staleConfiguredScopes,
+      state: "state-stale-scope-connect",
+      now: "2026-03-16T10:00:00.000Z",
+    }).includes("heartrate"),
+    false,
+  );
 
   assert.equal(
     provider.oauthAdapter.buildConnectUrl({

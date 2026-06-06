@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const DATA_API_KEY_ENV = "MURPH_DATA_API_KEY";
-const DEFAULT_SUPPLEMENTS_LIMIT = 5;
+const DEFAULT_SUPPLEMENTS_LIMIT = 1;
 const MAX_SUPPLEMENTS_LIMIT = 50;
 const MAX_BATCH_QUERIES = 10;
 const MAX_BATCH_QUERY_LENGTH = 256;

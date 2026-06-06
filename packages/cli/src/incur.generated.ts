@@ -150,9 +150,9 @@ declare module 'incur' {
       'journal unlink': { args: { date: string }; options: { requestId?: string; eventId?: string[]; stream?: string[] } }
       'knowledge index rebuild': { args: {}; options: { requestId?: string } }
       'knowledge lint': { args: {}; options: { requestId?: string } }
-      'knowledge list': { args: {}; options: { requestId?: string; pageType?: string; status?: string } }
+      'knowledge list': { args: {}; options: { requestId?: string; pageType?: string; status?: string; limit: number } }
       'knowledge log tail': { args: {}; options: { requestId?: string; limit: number } }
-      'knowledge search': { args: { query: string }; options: { requestId?: string; pageType?: string; status?: string; limit?: number } }
+      'knowledge search': { args: { query: string }; options: { requestId?: string; pageType?: string; status?: string; limit: number } }
       'knowledge show': { args: { slug: string }; options: { requestId?: string } }
       'knowledge upsert': { args: {}; options: { requestId?: string; body: string; title?: string; slug?: string; pageType?: string; status?: string; clearLibraryLinks?: boolean; relatedSlug?: string[]; librarySlug?: string[]; sourcePath?: string[] } }
       'list': { args: {}; options: { requestId?: string; recordType?: string[]; kind?: string; status?: string; stream?: string[]; experiment?: string; from?: string; to?: string; tag?: string[]; limit: number } }

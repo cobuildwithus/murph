@@ -410,11 +410,11 @@ export const OURA_DEVICE_PROVIDER_DESCRIPTOR = {
   connection: {
     kind: "oauth2",
     callbackPath: "/oauth/oura/callback",
-    defaultScopes: ["personal", "daily", "heartrate", "workout", "session", "spo2"],
+    defaultScopes: ["personal", "daily", "workout", "session", "spo2"],
   },
   oauth: {
     callbackPath: "/oauth/oura/callback",
-    defaultScopes: ["personal", "daily", "heartrate", "workout", "session", "spo2"],
+    defaultScopes: ["personal", "daily", "workout", "session", "spo2"],
   },
   webhook: {
     path: "/webhooks/oura",
