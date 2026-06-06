@@ -29,6 +29,9 @@ import {
   createHostedWebCallbackSignatureHeaders,
   readHostedWebCallbackSigningEnvironment,
 } from "../src/web-callback-auth.ts";
+import {
+  HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
+} from "../src/hosted-runner-smoke-contract.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -56,6 +59,8 @@ interface SmokeRunnerBundleManifest {
 }
 
 interface SmokeCodexShellResult {
+  cliSurfaceContractBytes?: unknown;
+  cliSurfaceHotPathProofCount?: unknown;
   client?: unknown;
   murphPathBytes?: unknown;
   noteAddBytes?: unknown;
@@ -358,6 +363,7 @@ function assertSmokeCodexShellResult(
     throw new Error("runner container Codex shell smoke did not use the Codex app-server client.");
   }
   for (const [key, rawValue] of Object.entries({
+    cliSurfaceContractBytes: value.cliSurfaceContractBytes,
     murphPathBytes: value.murphPathBytes,
     noteAddBytes: value.noteAddBytes,
     vaultCliLlmsBytes: value.vaultCliLlmsBytes,
@@ -367,6 +373,14 @@ function assertSmokeCodexShellResult(
     if (typeof rawValue !== "number" || rawValue <= 0) {
       throw new Error(`runner container Codex shell smoke reported invalid ${key}.`);
     }
+  }
+  if (
+    typeof value.cliSurfaceHotPathProofCount !== "number" ||
+    value.cliSurfaceHotPathProofCount < HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT
+  ) {
+    throw new Error(
+      "runner container Codex shell smoke did not prove assistant CLI surface hot-path schemas.",
+    );
   }
   if (typeof value.stderrBytes !== "number" || value.stderrBytes < 0) {
     throw new Error("runner container Codex shell smoke reported invalid stderr bytes.");

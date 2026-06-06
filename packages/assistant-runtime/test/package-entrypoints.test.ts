@@ -103,6 +103,7 @@ import {
 
 const expectedAssistantRuntimePublicExportKeys = [
   ".",
+  "./hosted-assistant-bootstrap",
   "./hosted-assistant-env",
   "./hosted-assistant-env-constants",
   "./hosted-checkpoint-bridge",
@@ -171,6 +172,12 @@ test("hosted-runtime-contracts omits assistant-engine Codex lifecycle hooks", as
 
   assert.equal("snapshotExpectedCodexRootProcess" in contracts, false);
   assert.equal("stopWarmCodexAppServer" in contracts, false);
+});
+
+test("hosted assistant bootstrap exposes the CLI surface reader", async () => {
+  const bootstrap = await import("@murphai/assistant-runtime/hosted-assistant-bootstrap");
+
+  assert.equal(typeof bootstrap.readHostedAssistantCliSurfaceBootstrapContext, "function");
 });
 
 test("hosted-assistant-env subpath stays wired to the hosted env source surface", () => {

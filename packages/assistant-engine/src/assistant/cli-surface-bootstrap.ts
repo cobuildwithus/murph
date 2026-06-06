@@ -22,6 +22,8 @@ const assistantCliSurfaceBootstrapRenderPolicyVersion =
 const assistantCliSurfaceBootstrapContractCharBudget = 40_000
 export const assistantCliSurfacePrebuiltArtifactFileName =
   'cli-surface-contract.generated.json'
+const assistantCliSurfacePrebuiltArtifactPathEnv =
+  'MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH'
 const assistantCliSurfaceBootstrapIgnoredOptionNames = new Set([
   'requestId',
   'vault',
@@ -162,9 +164,9 @@ export async function readPrebuiltAssistantCliSurfaceContract(input: {
     return await cachedPrebuiltAssistantCliSurfaceContractPromise
   }
 
-  const prebuiltArtifactPath = resolveAssistantCliSurfacePrebuiltArtifactPath()
+  const prebuiltArtifactPaths = resolveAssistantCliSurfacePrebuiltArtifactPaths()
   cachedPrebuiltAssistantCliSurfaceContractPromise =
-    readPrebuiltAssistantCliSurfaceContractFromPath(prebuiltArtifactPath)
+    readFirstPrebuiltAssistantCliSurfaceContract(prebuiltArtifactPaths)
 
   try {
     const contract = await cachedPrebuiltAssistantCliSurfaceContractPromise
@@ -335,11 +337,43 @@ function createInvalidAssistantCliSurfacePrebuiltArtifactError(
   })
 }
 
-function resolveAssistantCliSurfacePrebuiltArtifactPath(): string {
-  return path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
+function resolveAssistantCliSurfacePrebuiltArtifactPaths(): string[] {
+  const overridePath = process.env[assistantCliSurfacePrebuiltArtifactPathEnv]?.trim()
+  if (overridePath) {
+    return [overridePath]
+  }
+
+  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url))
+  const primaryPath = path.join(
+    moduleDirectory,
     assistantCliSurfacePrebuiltArtifactFileName,
   )
+  const paths = [primaryPath]
+  if (path.basename(moduleDirectory) === 'assistant') {
+    const sourceModeDistPath = path.resolve(
+      moduleDirectory,
+      '../../dist/assistant',
+      assistantCliSurfacePrebuiltArtifactFileName,
+    )
+    if (sourceModeDistPath !== primaryPath) {
+      paths.push(sourceModeDistPath)
+    }
+  }
+
+  return paths
+}
+
+async function readFirstPrebuiltAssistantCliSurfaceContract(
+  artifactPaths: readonly string[],
+): Promise<AssistantCliSurfaceContractSnapshot | null> {
+  for (const artifactPath of artifactPaths) {
+    const contract = await readPrebuiltAssistantCliSurfaceContractFromPath(artifactPath)
+    if (contract !== null) {
+      return contract
+    }
+  }
+
+  return null
 }
 
 async function loadAssistantCliSurfaceContract(input: {

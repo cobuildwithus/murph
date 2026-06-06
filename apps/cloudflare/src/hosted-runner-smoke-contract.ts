@@ -1,4 +1,5 @@
 export const HOSTED_RUNNER_SMOKE_RESULT_SCHEMA = "murph.cloudflare-hosted-runner-smoke.v1";
+export const HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT = 4;
 export const HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT = 11;
 export const HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT = 2;
 
@@ -13,6 +14,8 @@ export interface HostedRunnerSmokeResult {
   childCwdIsIsolated: boolean;
   codexAppServerHelpBytes: number;
   codexCommandDiscovered: boolean;
+  codexHostedCliSurfaceContractBytes: number;
+  codexHostedCliSurfaceHotPathProofCount: number;
   codexHostedConfigShellEnvironmentPolicyAllowlisted: boolean;
   codexHostedCliSchemaVaultOptionHidden: boolean;
   codexHostedCliVaultCommandProofCount: number;
@@ -48,6 +51,8 @@ const HOSTED_RUNNER_SMOKE_RESULT_KEYS = new Set([
   "childCwdIsIsolated",
   "codexAppServerHelpBytes",
   "codexCommandDiscovered",
+  "codexHostedCliSurfaceContractBytes",
+  "codexHostedCliSurfaceHotPathProofCount",
   "codexHostedConfigShellEnvironmentPolicyAllowlisted",
   "codexHostedCliSchemaVaultOptionHidden",
   "codexHostedCliVaultCommandProofCount",
@@ -121,6 +126,15 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
     codexCommandDiscovered: readTrue(
       record.codexCommandDiscovered,
       "Hosted runner smoke result.codexCommandDiscovered",
+    ),
+    codexHostedCliSurfaceContractBytes: readPositiveFiniteNumber(
+      record.codexHostedCliSurfaceContractBytes,
+      "Hosted runner smoke result.codexHostedCliSurfaceContractBytes",
+    ),
+    codexHostedCliSurfaceHotPathProofCount: readMinimumFiniteNumber(
+      record.codexHostedCliSurfaceHotPathProofCount,
+      "Hosted runner smoke result.codexHostedCliSurfaceHotPathProofCount",
+      HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
     ),
     codexHostedConfigShellEnvironmentPolicyAllowlisted: readTrue(
       record.codexHostedConfigShellEnvironmentPolicyAllowlisted,
@@ -239,6 +253,54 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
     ),
   };
 }
+
+export function countAssistantCliSurfaceHotPathProofs(contract: string): number {
+  const lines = contract.split(/\r?\n/u);
+
+  return assistantCliSurfaceHotPathProofs.filter(({ command, snippets }) => {
+    const commandLine = lines.find((line) => line.includes(`\`${command}\``));
+    return commandLine !== undefined &&
+      snippets.every((snippet) => commandLine.includes(snippet));
+  }
+  ).length;
+}
+
+const assistantCliSurfaceHotPathProofs: readonly {
+  command: string;
+  snippets: readonly string[];
+}[] = [
+  {
+    command: "memory upsert",
+    snippets: [
+      "args <text>",
+      "--section=Identity|Preferences|Instructions|Context",
+    ],
+  },
+  {
+    command: "goal save",
+    snippets: [
+      "args <title>",
+      "--status=active|paused|completed|abandoned",
+      "--horizon=short_term|medium_term|long_term|ongoing",
+      "--priority=integer",
+      "repeat --domain=string",
+    ],
+  },
+  {
+    command: "device account list",
+    snippets: [
+      "--provider=string",
+      "--source-provider=string",
+    ],
+  },
+  {
+    command: "device connect",
+    snippets: [
+      "args <provider>",
+      "--returnTo=string",
+    ],
+  },
+];
 
 function readObjectRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {

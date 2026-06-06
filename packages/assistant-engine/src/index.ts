@@ -9,6 +9,9 @@
 export * from './assistant-automation.js'
 export * from './assistant-codex.js'
 export * from './assistant-context-snapshot.js'
+export {
+  readAssistantCliSurfaceBootstrapContext,
+} from './assistant/cli-surface-bootstrap.js'
 export * from './assistant-cron.js'
 export * from './assistant-outbox.js'
 export * from './assistant-runtime.js'

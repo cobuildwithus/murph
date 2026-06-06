@@ -23,6 +23,9 @@ import {
   HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE,
   HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import {
+  readHostedAssistantCliSurfaceBootstrapContext,
+} from "@murphai/assistant-runtime/hosted-assistant-bootstrap";
 import type {
   createDefaultParserRegistry as createDefaultParserRegistryType,
   parseAttachment as parseAttachmentType,
@@ -35,9 +38,11 @@ import {
   createHostedRunnerNativeParserToolchain,
 } from "./runner-native-parser-toolchain.ts";
 import {
+  HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
+  countAssistantCliSurfaceHotPathProofs,
   parseHostedRunnerSmokeInput,
   type HostedRunnerSmokeResult,
 } from "./hosted-runner-smoke-contract.js";
@@ -121,6 +126,7 @@ async function runSmokeChecks(input: {
   await runTextCommand("murph", ["--help"]);
   await runTextCommand("vault-cli", ["--help"]);
   const codexPreflight = await runCodexPreflight();
+  const assistantCliSurface = await runAssistantCliSurfaceContractSmoke(input.vaultRoot);
   const hostedCodexConfig =
     await runHostedCodexConfigShellEnvironmentPolicySmoke({
       expectedVaultId: input.expectedVaultId,
@@ -180,6 +186,8 @@ async function runSmokeChecks(input: {
     childCwdIsIsolated: true,
     codexAppServerHelpBytes: codexPreflight.appServerHelpBytes,
     codexCommandDiscovered: true,
+    codexHostedCliSurfaceContractBytes: assistantCliSurface.contractBytes,
+    codexHostedCliSurfaceHotPathProofCount: assistantCliSurface.hotPathProofCount,
     codexHostedConfigShellEnvironmentPolicyAllowlisted:
       hostedCodexConfig.shellEnvironmentPolicyAllowlisted,
     codexHostedCliSchemaVaultOptionHidden: hostedCodexConfig.schemaVaultOptionHidden,
@@ -216,6 +224,31 @@ async function runSmokeChecks(input: {
     ),
     wavTranscriptProviderId: wavParse.providerId,
     wavTranscriptSha256: sha256Hex(wavParse.text),
+  };
+}
+
+async function runAssistantCliSurfaceContractSmoke(vaultRoot: string): Promise<{
+  contractBytes: number;
+  hotPathProofCount: number;
+}> {
+  const contract = await readHostedAssistantCliSurfaceBootstrapContext({
+    sessionId: "hosted-runner-smoke",
+    vault: vaultRoot,
+  });
+  if (!contract) {
+    throw new Error("Hosted runner smoke assistant CLI surface contract was missing.");
+  }
+
+  const hotPathProofCount = countAssistantCliSurfaceHotPathProofs(contract);
+  if (hotPathProofCount < HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT) {
+    throw new Error(
+      `Hosted runner smoke assistant CLI surface contract was missing hot-path schemas. proofCount=${hotPathProofCount}`,
+    );
+  }
+
+  return {
+    contractBytes: Buffer.byteLength(contract, "utf8"),
+    hotPathProofCount,
   };
 }
 

@@ -6,6 +6,7 @@ import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
 } from "../src/hosted-runner-smoke-contract.js";
@@ -84,6 +85,9 @@ describe("runHostedRunnerSmokeDetailed", () => {
             childCwdIsIsolated: options.cwd.includes("hosted-runner-smoke-launch-"),
             codexAppServerHelpBytes: 2048,
             codexCommandDiscovered: true,
+            codexHostedCliSurfaceContractBytes: 37282,
+            codexHostedCliSurfaceHotPathProofCount:
+              HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
             codexHostedConfigShellEnvironmentPolicyAllowlisted: true,
             codexHostedCliSchemaVaultOptionHidden: true,
             codexHostedCliVaultCommandProofCount:
@@ -138,6 +142,10 @@ describe("runHostedRunnerSmokeDetailed", () => {
       expect(result.childCwdIsIsolated).toBe(true);
       expect(result.codexAppServerHelpBytes).toBe(2048);
       expect(result.codexCommandDiscovered).toBe(true);
+      expect(result.codexHostedCliSurfaceContractBytes).toBe(37282);
+      expect(result.codexHostedCliSurfaceHotPathProofCount).toBe(
+        HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
+      );
       expect(result.codexHostedConfigShellEnvironmentPolicyAllowlisted).toBe(true);
       expect(result.codexHostedCliSchemaVaultOptionHidden).toBe(true);
       expect(result.codexHostedCliVaultCommandProofCount).toBe(

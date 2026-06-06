@@ -38,8 +38,15 @@ import {
   stopWarmCodexAppServer,
 } from "@murphai/assistant-engine/codex-lifecycle";
 import {
+  readHostedAssistantCliSurfaceBootstrapContext,
+} from "@murphai/assistant-runtime/hosted-assistant-bootstrap";
+import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "./hosted-runtime-architecture.ts";
+import {
+  HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
+  countAssistantCliSurfaceHotPathProofs,
+} from "./hosted-runner-smoke-contract.ts";
 import {
   runHostedWorkspaceInvocation as runHostedWorkspaceInvocationDirect,
 } from "./hosted-workspace-invocation.ts";
@@ -153,6 +160,8 @@ interface HostedContainerRuntimeDependencies {
 
 interface HostedContainerCodexShellSmokeResult {
   client: "codex-app-server";
+  cliSurfaceContractBytes: number;
+  cliSurfaceHotPathProofCount: number;
   murphPathBytes: number;
   noteAddBytes: number;
   stderrBytes: number;
@@ -1149,6 +1158,8 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
       }
       resolve(result ?? {
         client: "codex-app-server",
+        cliSurfaceContractBytes: 0,
+        cliSurfaceHotPathProofCount: 0,
         murphPathBytes: 0,
         noteAddBytes: 0,
         stderrBytes,
@@ -1287,6 +1298,7 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
         "--format",
         "json",
       ]);
+      const cliSurface = await runHostedContainerCliSurfaceContractSmoke(input.smokeVaultRoot);
       const vaultShow = await execCommand("vault-show", [
         "vault-cli",
         "vault",
@@ -1306,6 +1318,8 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
       ]);
       finish(undefined, {
         client: "codex-app-server",
+        cliSurfaceContractBytes: cliSurface.contractBytes,
+        cliSurfaceHotPathProofCount: cliSurface.hotPathProofCount,
         murphPathBytes: environmentProbe.murphPathBytes,
         noteAddBytes: Buffer.byteLength(noteAdd.stdout, "utf8"),
         stderrBytes,
@@ -1317,6 +1331,31 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
       fail(error instanceof Error ? error : new Error("Hosted Codex shell smoke failed."));
     });
   });
+}
+
+async function runHostedContainerCliSurfaceContractSmoke(smokeVaultRoot: string): Promise<{
+  contractBytes: number;
+  hotPathProofCount: number;
+}> {
+  const contract = await readHostedAssistantCliSurfaceBootstrapContext({
+    sessionId: "hosted-container-deploy-smoke",
+    vault: smokeVaultRoot,
+  });
+  if (!contract) {
+    throw new Error("Hosted Codex shell smoke assistant CLI surface contract was missing.");
+  }
+
+  const hotPathProofCount = countAssistantCliSurfaceHotPathProofs(contract);
+  if (hotPathProofCount < HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT) {
+    throw new Error(
+      `Hosted Codex shell smoke assistant CLI surface contract was missing hot-path schemas. proofCount=${hotPathProofCount}`,
+    );
+  }
+
+  return {
+    contractBytes: Buffer.byteLength(contract, "utf8"),
+    hotPathProofCount,
+  };
 }
 
 function buildHostedContainerCodexShellSmokeProcessEnv(input: {

@@ -2812,6 +2812,8 @@ function createRunnerContainerNamespace(): WorkerEnvironmentSource["RUNNER_CONTA
 
 function createCodexShellSmokeResult() {
   return {
+    cliSurfaceContractBytes: 37282,
+    cliSurfaceHotPathProofCount: 4,
     client: "codex-app-server",
     murphPathBytes: 28,
     noteAddBytes: 128,

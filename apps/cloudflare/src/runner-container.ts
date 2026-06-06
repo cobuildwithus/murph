@@ -221,6 +221,8 @@ interface RunnerContainerDestroyRequestRecord {
 
 interface HostedExecutionContainerSmokeHealthResult {
   codexShell?: {
+    cliSurfaceContractBytes: number | null;
+    cliSurfaceHotPathProofCount: number | null;
     client: string | null;
     murphPathBytes: number | null;
     noteAddBytes: number | null;
@@ -660,6 +662,12 @@ export class RunnerContainer extends Container {
     }
     const result = readRunnerContainerMetadataRecordProperty(payload.codexShell);
     return {
+      cliSurfaceContractBytes: typeof result.cliSurfaceContractBytes === "number"
+        ? result.cliSurfaceContractBytes
+        : null,
+      cliSurfaceHotPathProofCount: typeof result.cliSurfaceHotPathProofCount === "number"
+        ? result.cliSurfaceHotPathProofCount
+        : null,
       client: typeof result.client === "string" ? result.client : null,
       murphPathBytes: typeof result.murphPathBytes === "number" ? result.murphPathBytes : null,
       noteAddBytes: typeof result.noteAddBytes === "number" ? result.noteAddBytes : null,

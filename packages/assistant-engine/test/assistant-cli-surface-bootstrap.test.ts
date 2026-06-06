@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-import { afterEach, test, vi } from 'vitest'
+import { afterEach, beforeEach, test, vi } from 'vitest'
 
 import {
   resolveAssistantStateDocumentPath,
@@ -15,6 +15,8 @@ import {
 import { createTempVaultContext } from './test-helpers.js'
 
 const cleanupPaths: string[] = []
+const prebuiltArtifactPathEnv = 'MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH'
+const originalPrebuiltArtifactPathEnv = process.env[prebuiltArtifactPathEnv]
 
 function createManifestCommandChildProcess(output: unknown): EventEmitter & {
   kill: () => void
@@ -50,7 +52,20 @@ function createManifestCommandChildProcess(output: unknown): EventEmitter & {
   return child
 }
 
+beforeEach(() => {
+  process.env[prebuiltArtifactPathEnv] = path.join(
+    path.sep,
+    'tmp',
+    'murph-test-missing-cli-surface-contract.generated.json',
+  )
+})
+
 afterEach(async () => {
+  if (originalPrebuiltArtifactPathEnv === undefined) {
+    delete process.env[prebuiltArtifactPathEnv]
+  } else {
+    process.env[prebuiltArtifactPathEnv] = originalPrebuiltArtifactPathEnv
+  }
   vi.resetModules()
   vi.restoreAllMocks()
   vi.clearAllMocks()
@@ -184,6 +199,64 @@ test('readPrebuiltAssistantCliSurfaceContract rejects malformed generated artifa
     }),
     /Generated assistant CLI surface contract artifact is invalid/u,
   )
+})
+
+test('readPrebuiltAssistantCliSurfaceContract falls back from source mode to the built dist artifact', async () => {
+  vi.resetModules()
+  delete process.env[prebuiltArtifactPathEnv]
+
+  const distContract = 'Murph CLI Contract:\nDist assistant cli contract'
+  vi.doMock('node:fs/promises', async () => {
+    const actual =
+      await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    return {
+      ...actual,
+      readFile: vi.fn(async (targetPath: string) => {
+        if (
+          targetPath.endsWith(
+            path.join(
+              'src',
+              'assistant',
+              'cli-surface-contract.generated.json',
+            ),
+          )
+        ) {
+          throw Object.assign(new Error('missing source prebuilt artifact'), {
+            code: 'ENOENT',
+          })
+        }
+
+        if (
+          targetPath.endsWith(
+            path.join(
+              'dist',
+              'assistant',
+              'cli-surface-contract.generated.json',
+            ),
+          )
+        ) {
+          return JSON.stringify({
+            contract: distContract,
+            manifestFingerprint: '4'.repeat(64),
+            schemaVersion: 'murph.assistant-cli-surface-prebuilt.v2',
+          })
+        }
+
+        throw Object.assign(new Error(`unexpected read: ${targetPath}`), {
+          code: 'ENOENT',
+        })
+      }),
+    }
+  })
+
+  const {
+    readPrebuiltAssistantCliSurfaceContract,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  assert.deepEqual(await readPrebuiltAssistantCliSurfaceContract(), {
+    contract: distContract,
+    manifestFingerprint: '4'.repeat(64),
+  })
 })
 
 test('buildAssistantCliSurfaceContract normalizes commands and renders detailed option signatures', async () => {
@@ -515,6 +588,100 @@ test('readAssistantCliLlmsFullManifest launches the full schema-bearing manifest
   assert.ok(spawnCall)
   assert.equal(spawnCall.command, fakeTsxBinary)
   assert.deepEqual(spawnCall.args.slice(3), ['--llms-full', '--format', 'json'])
+})
+
+test('generate-cli-surface-contract builds the prebuilt artifact from the full manifest', async () => {
+  vi.resetModules()
+
+  const writeFileMock = vi.fn(
+    async (_artifactPath: string, _rawArtifact: string, _encoding: BufferEncoding) =>
+      undefined,
+  )
+  vi.doMock('node:fs/promises', async () => {
+    const actual =
+      await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    return {
+      ...actual,
+      writeFile: writeFileMock,
+    }
+  })
+
+  const readAssistantCliLlmsManifest = vi.fn(
+    async (_input: { workingDirectory?: string | null }) => {
+      throw new Error('compact manifest should not be used for prebuilt generation')
+    },
+  )
+  const readAssistantCliLlmsFullManifest = vi.fn(
+    async (_input: { workingDirectory?: string | null }) => ({
+      commands: [
+        {
+          description: 'Create or update one goal from typed command fields.',
+          name: 'goal save',
+          schema: {
+            args: {
+              properties: {
+                title: {
+                  type: 'string',
+                },
+              },
+              required: ['title'],
+            },
+            options: {
+              properties: {
+                horizon: {
+                  enum: ['short_term', 'medium_term', 'long_term', 'ongoing'],
+                  type: 'string',
+                },
+                status: {
+                  enum: ['active', 'paused', 'completed', 'abandoned'],
+                  type: 'string',
+                },
+              },
+            },
+          },
+        },
+      ],
+    }),
+  )
+  vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
+    buildAssistantCliProcessEnv: () => ({}),
+    readAssistantCliLlmsFullManifest,
+    readAssistantCliLlmsManifest,
+  }))
+
+  await import('../src/assistant/generate-cli-surface-contract.ts')
+
+  assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 0)
+  assert.equal(readAssistantCliLlmsFullManifest.mock.calls.length, 1)
+  assert.match(
+    readAssistantCliLlmsFullManifest.mock.calls[0]?.[0]?.workingDirectory ?? '',
+    /murph$/u,
+  )
+  assert.equal(writeFileMock.mock.calls.length, 1)
+
+  const writeCall = writeFileMock.mock.calls[0]
+  assert.ok(writeCall)
+  const [artifactPath, rawArtifact, encoding] = writeCall
+  assert.match(
+    String(artifactPath),
+    /packages[\\/]assistant-engine[\\/]src[\\/]assistant[\\/]cli-surface-contract\.generated\.json$/u,
+  )
+  assert.equal(encoding, 'utf8')
+
+  const artifact = JSON.parse(String(rawArtifact)) as {
+    contract: string
+    manifestFingerprint: string
+    schemaVersion: string
+  }
+  assert.equal(
+    artifact.schemaVersion,
+    'murph.assistant-cli-surface-prebuilt.v2',
+  )
+  assert.match(artifact.manifestFingerprint, /^[a-f0-9]{64}$/u)
+  assert.match(
+    artifact.contract,
+    /- `goal save`: Create or update one goal from typed command fields\.; args <title>; options --horizon=short_term\|medium_term\|long_term\|ongoing, --status=active\|paused\|completed\|abandoned\./u,
+  )
 })
 
 test('readAssistantCliLlmsManifest skips workspace CLI source when base tsconfig is missing', async () => {

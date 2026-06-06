@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
+  countAssistantCliSurfaceHotPathProofs,
   parseHostedRunnerSmokeInput,
   parseHostedRunnerSmokeResult,
 } from "../src/hosted-runner-smoke-contract.js";
@@ -12,6 +14,8 @@ const validHostedRunnerSmokeResult = {
   childCwdIsIsolated: true,
   codexAppServerHelpBytes: 2048,
   codexCommandDiscovered: true,
+  codexHostedCliSurfaceContractBytes: 37282,
+  codexHostedCliSurfaceHotPathProofCount: HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
   codexHostedConfigShellEnvironmentPolicyAllowlisted: true,
   codexHostedCliSchemaVaultOptionHidden: true,
   codexHostedCliVaultCommandProofCount: HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
@@ -78,6 +82,8 @@ describe("parseHostedRunnerSmokeResult", () => {
       childCwdIsIsolated: true,
       codexAppServerHelpBytes: 2048,
       codexCommandDiscovered: true,
+      codexHostedCliSurfaceContractBytes: 37282,
+      codexHostedCliSurfaceHotPathProofCount: HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
       codexHostedConfigShellEnvironmentPolicyAllowlisted: true,
       codexHostedCliSchemaVaultOptionHidden: true,
       codexHostedCliVaultCommandProofCount: HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
@@ -182,6 +188,20 @@ describe("parseHostedRunnerSmokeResult", () => {
 
     expect(() => parseHostedRunnerSmokeResult({
       ...validHostedRunnerSmokeResult,
+      codexHostedCliSurfaceContractBytes: 0,
+    })).toThrow(
+      "Hosted runner smoke result.codexHostedCliSurfaceContractBytes must be a positive finite number.",
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      codexHostedCliSurfaceHotPathProofCount: 0,
+    })).toThrow(
+      `Hosted runner smoke result.codexHostedCliSurfaceHotPathProofCount must be at least ${HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT}.`,
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
       codexHostedShellVaultCliLlmsBytes: Number.NaN,
     })).toThrow(
       "Hosted runner smoke result.codexHostedShellVaultCliLlmsBytes must be a finite number.",
@@ -267,5 +287,25 @@ describe("parseHostedRunnerSmokeResult", () => {
       ...validHostedRunnerSmokeResult,
       stdout: "{}",
     })).toThrow("Hosted runner smoke result must not include unexpected fields.");
+  });
+});
+
+describe("countAssistantCliSurfaceHotPathProofs", () => {
+  it("counts only detailed hot-path command signatures", () => {
+    const detailedContract = [
+      "- `memory upsert`: args <text>; options --section=Identity|Preferences|Instructions|Context.",
+      "- `goal save`: args <title>; options --status=active|paused|completed|abandoned, --horizon=short_term|medium_term|long_term|ongoing, --priority=integer, repeat --domain=string.",
+      "- `device account list`: options --provider=string, --source-provider=string.",
+      "- `device connect`: args <provider>; options --returnTo=string.",
+    ].join("\n");
+
+    expect(countAssistantCliSurfaceHotPathProofs(detailedContract)).toBe(
+      HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
+    );
+    expect(countAssistantCliSurfaceHotPathProofs("- `memory upsert`: Add a memory.")).toBe(0);
+    expect(countAssistantCliSurfaceHotPathProofs([
+      "- `device connect`: Create a browser-based OAuth connection link.",
+      "- `provider connect`: args <provider>; options --returnTo=string.",
+    ].join("\n"))).toBe(0);
   });
 });
