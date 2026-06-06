@@ -158,6 +158,7 @@ test('workout format save schema exposes typed routine-template parity fields', 
     optionDescription(schema, 'exercise'),
     /Supported keys: order, name, groupId, mode, unitOverride, note/u,
   )
+  assert.match(optionDescription(schema, 'exercise'), /Shell-quote each semicolon-separated value/u)
   assert.match(
     optionDescription(schema, 'setTemplate'),
     /Prefer targetReps, targetWeight, targetWeightUnit, targetDurationSeconds, targetDistanceMeters, and targetRpe/u,
@@ -173,10 +174,11 @@ test('workout format save help teaches typed routine compact grammar', async () 
   const help = await runRawInProcessCli(cli, ['workout', 'format', 'save', '--help'])
 
   assert.match(help, /Save a typed routine template with planned sets/u)
-  assert.match(help, /order=2;name=Ring row;mode=bodyweight/u)
+  assert.match(help, /workout format save 'Upper Body A'/u)
+  assert.match(help, /--exercise 'order=1;name=Bench press;mode=weight_reps;unitOverride=lb'/u)
   assert.match(
     help,
-    /targetReps=5;targetWeight=185;targetWeightUnit=lb;targetRpe=8/u,
+    /--setTemplate 'exercise=1;order=1;type=normal;targetReps=5;targetWeight=185;targetWeightUnit=lb;targetRpe=8'/u,
   )
 })
 
@@ -185,8 +187,10 @@ test('workout format save LLM schema exposes compact routine keys', async () => 
   const schema = await readLlmCommandSchema(cli, 'workout format save')
 
   assert.match(optionDescription(schema, 'exercise'), /Compact exercise grammar/u)
+  assert.match(optionDescription(schema, 'exercise'), /Shell-quote each semicolon-separated value/u)
   assert.match(optionDescription(schema, 'exercise'), /Supported keys: order, name/u)
   assert.match(optionDescription(schema, 'setTemplate'), /Compact setTemplate grammar/u)
+  assert.match(optionDescription(schema, 'setTemplate'), /Shell-quote each semicolon-separated value/u)
   assert.match(optionDescription(schema, 'setTemplate'), /Prefer targetReps/u)
   assert.match(optionDescription(schema, 'setTemplate'), /targetDurationSeconds/u)
 })

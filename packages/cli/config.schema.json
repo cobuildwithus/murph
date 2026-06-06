@@ -1069,7 +1069,7 @@
                           "maxLength": 4000
                         },
                         "tags": {
-                          "description": "Optional automation tags. Repeat --tags for multiple values.",
+                          "description": "Optional automation tags. Repeat --tags for multiple values. Do not comma-delimit multiple tags.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -1349,7 +1349,7 @@
                           "maxLength": 4000
                         },
                         "actionTag": {
-                          "description": "Optional action-local tag. Repeat --action-tag for multiple values.",
+                          "description": "Optional action-local tag. Repeat --action-tag for multiple values. Do not comma-delimit multiple tags.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -1363,7 +1363,7 @@
                           "maxLength": 80
                         },
                         "ingredient": {
-                          "description": "Optional meal.add ingredient. Repeat --ingredient for multiple values.",
+                          "description": "Optional meal.add ingredient. Repeat --ingredient for multiple values; shell-quote ingredients with spaces. Do not comma-delimit multiple ingredients.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -1492,7 +1492,7 @@
                           "maxLength": 4000
                         },
                         "workoutMedia": {
-                          "description": "Workout media as kind=...;relativePath=... with optional mediaType/caption. Repeat --workout-media for multiple entries.",
+                          "description": "Workout media as kind=...;relativePath=... with optional mediaType/caption. Shell-quote each semicolon-separated value. Repeat --workout-media for multiple entries.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -1500,7 +1500,7 @@
                           }
                         },
                         "workoutExercise": {
-                          "description": "Workout exercise as order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Repeat --workout-exercise for multiple exercises.",
+                          "description": "Workout exercise as order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Repeat --workout-exercise for multiple exercises.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -1508,7 +1508,7 @@
                           }
                         },
                         "workoutSet": {
-                          "description": "Workout set as exercise=...;order=... plus optional type/reps/weight/weightUnit/durationSeconds/distanceMeters/rpe/bodyweightKg/assistanceKg/addedWeightKg. Repeat --workout-set for multiple sets.",
+                          "description": "Workout set as exercise=...;order=... plus optional type/reps/weight/weightUnit/durationSeconds/distanceMeters/rpe/bodyweightKg/assistanceKg/addedWeightKg. Shell-quote each semicolon-separated value. Repeat --workout-set for multiple sets.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -1516,7 +1516,7 @@
                           }
                         },
                         "measurementMetric": {
-                          "description": "Measurement metric slug. Repeat with value/unit for multiple measurements.",
+                          "description": "Measurement metric slug. Repeat --measurement-metric with --measurement-value and --measurement-unit for multiple measurements; keep the order aligned.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -1524,14 +1524,14 @@
                           }
                         },
                         "measurementValue": {
-                          "description": "Measurement numeric value. Repeat with metric/unit for multiple measurements.",
+                          "description": "Measurement numeric value. Repeat --measurement-value with --measurement-metric and --measurement-unit for multiple measurements; keep the order aligned.",
                           "type": "array",
                           "items": {
                             "type": "number"
                           }
                         },
                         "measurementUnit": {
-                          "description": "Measurement unit. Repeat with metric/value for multiple measurements.",
+                          "description": "Measurement unit. Repeat --measurement-unit with --measurement-metric and --measurement-value for multiple measurements; keep the order aligned. Do not comma-delimit multiple units.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -1563,7 +1563,7 @@
                           "maxLength": 500
                         },
                         "tag": {
-                          "description": "Optional top-level scheduled log tag. Repeat --tag for multiple values.",
+                          "description": "Optional top-level scheduled log tag. Repeat --tag for multiple values. Do not comma-delimit multiple tags.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -3290,7 +3290,7 @@
                           ]
                         },
                         "ingredient": {
-                          "description": "Optional repeatable meal ingredient. Repeat --ingredient for each item.",
+                          "description": "Optional repeatable meal ingredient. Repeat --ingredient for each item; shell-quote values with spaces, for example --ingredient 'rolled oats'. Do not comma-delimit multiple ingredients.",
                           "maxItems": 100,
                           "type": "array",
                           "items": {
@@ -3485,7 +3485,7 @@
                           ]
                         },
                         "ingredient": {
-                          "description": "Optional repeatable meal ingredient. Repeat --ingredient for each item.",
+                          "description": "Optional repeatable meal ingredient. Repeat --ingredient for each item; shell-quote values with spaces, for example --ingredient 'rolled oats'. Do not comma-delimit multiple ingredients.",
                           "maxItems": 100,
                           "type": "array",
                           "items": {
@@ -3799,7 +3799,7 @@
                           "maxLength": 128
                         },
                         "metric": {
-                          "description": "Measurement metric name or slug. Repeat --metric with --value and --unit for grouped measurements. Friendly names are normalized to kebab-case.",
+                          "description": "Measurement metric name or slug. Repeat --metric with --value and --unit for grouped measurements; keep the order aligned. Shell-quote friendly names with spaces. Do not comma-delimit multiple metrics.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -3808,14 +3808,14 @@
                           }
                         },
                         "value": {
-                          "description": "Measurement numeric value. Repeat --value with --metric and --unit for grouped measurements.",
+                          "description": "Measurement numeric value. Repeat --value with --metric and --unit for grouped measurements; keep the order aligned.",
                           "type": "array",
                           "items": {
                             "type": "number"
                           }
                         },
                         "unit": {
-                          "description": "Measurement unit such as lb, kg, percent, ms, bpm, or mmol/L. Repeat --unit with --metric and --value for grouped measurements.",
+                          "description": "Measurement unit such as lb, kg, percent, ms, bpm, or mmol/L. Repeat --unit with --metric and --value for grouped measurements; keep the order aligned. Do not comma-delimit multiple units.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -4178,7 +4178,7 @@
                           "maxLength": 4000
                         },
                         "workoutMedia": {
-                          "description": "Compact workoutMedia grammar: kind=...;relativePath=... with optional mediaType/caption. Supported keys: kind, relativePath, mediaType, caption. Repeat --workout-media for multiple entries. Use --media for local file staging.",
+                          "description": "Compact workoutMedia grammar: kind=...;relativePath=... with optional mediaType/caption. Shell-quote each semicolon-separated value. Supported keys: kind, relativePath, mediaType, caption. Repeat --workout-media for multiple entries. Use --media for local file staging.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -4186,7 +4186,7 @@
                           }
                         },
                         "workoutExercise": {
-                          "description": "Compact workoutExercise grammar: order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Supported keys: name, order, sourceExerciseId, groupId, mode, unitOverride, note. Repeat --workout-exercise for multiple exercises.",
+                          "description": "Compact workoutExercise grammar: order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Supported keys: name, order, sourceExerciseId, groupId, mode, unitOverride, note. Repeat --workout-exercise for multiple exercises.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -4194,7 +4194,7 @@
                           }
                         },
                         "workoutSet": {
-                          "description": "Compact workoutSet grammar: exercise=...;order=... plus optional set fields. Supported keys: exercise, order, type, weightUnit, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg. Repeat --workout-set for multiple sets.",
+                          "description": "Compact workoutSet grammar: exercise=...;order=... plus optional set fields. Shell-quote each semicolon-separated value. Supported keys: exercise, order, type, weightUnit, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg. Repeat --workout-set for multiple sets.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -4527,7 +4527,7 @@
                           "maxLength": 4000
                         },
                         "workoutMedia": {
-                          "description": "Replace stored media with the compact workoutMedia grammar: kind=...;relativePath=... plus optional mediaType/caption. Supported keys: kind, relativePath, mediaType, caption. Repeat --workout-media for multiple entries.",
+                          "description": "Replace stored media with the compact workoutMedia grammar: kind=...;relativePath=... plus optional mediaType/caption. Shell-quote each semicolon-separated value. Supported keys: kind, relativePath, mediaType, caption. Repeat --workout-media for multiple entries.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -4535,7 +4535,7 @@
                           }
                         },
                         "workoutExercise": {
-                          "description": "Replace exercises with the compact workoutExercise grammar: order=...;name=... plus optional sourceExerciseId/groupId/mode/unitOverride/note. Supported keys: name, order, sourceExerciseId, groupId, mode, unitOverride, note. Repeat --workout-exercise for multiple exercises.",
+                          "description": "Replace exercises with the compact workoutExercise grammar: order=...;name=... plus optional sourceExerciseId/groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Supported keys: name, order, sourceExerciseId, groupId, mode, unitOverride, note. Repeat --workout-exercise for multiple exercises.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -4543,7 +4543,7 @@
                           }
                         },
                         "workoutSet": {
-                          "description": "Attach replacement sets with the compact workoutSet grammar: exercise=...;order=... plus optional set fields. Supported keys: exercise, order, type, weightUnit, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg. Repeat --workout-set for multiple sets.",
+                          "description": "Attach replacement sets with the compact workoutSet grammar: exercise=...;order=... plus optional set fields. Shell-quote each semicolon-separated value. Supported keys: exercise, order, type, weightUnit, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg. Repeat --workout-set for multiple sets.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -4802,7 +4802,7 @@
                                   "maxLength": 4000
                                 },
                                 "exercise": {
-                                  "description": "Compact exercise grammar: order=...;name=... with optional groupId/mode/unitOverride/note. Supported keys: order, name, groupId, mode, unitOverride, note. Repeat --exercise for multiple exercises.",
+                                  "description": "Compact exercise grammar: order=...;name=... with optional groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Supported keys: order, name, groupId, mode, unitOverride, note. Repeat --exercise for multiple exercises.",
                                   "type": "array",
                                   "items": {
                                     "type": "string",
@@ -4810,7 +4810,7 @@
                                   }
                                 },
                                 "setTemplate": {
-                                  "description": "Compact setTemplate grammar: exercise=...;order=... plus optional planned set targets. Prefer targetReps, targetWeight, targetWeightUnit, targetDurationSeconds, targetDistanceMeters, and targetRpe. Supported keys: exercise, order, type, targetReps, reps, targetWeight, weight, targetWeightUnit, weightUnit, targetDurationSeconds, durationSeconds, targetDistanceMeters, distanceMeters, targetRpe, rpe. Repeat --set-template for multiple sets.",
+                                  "description": "Compact setTemplate grammar: exercise=...;order=... plus optional planned set targets. Shell-quote each semicolon-separated value. Prefer targetReps, targetWeight, targetWeightUnit, targetDurationSeconds, targetDistanceMeters, and targetRpe. Supported keys: exercise, order, type, targetReps, reps, targetWeight, weight, targetWeightUnit, weightUnit, targetDurationSeconds, durationSeconds, targetDistanceMeters, distanceMeters, targetRpe, rpe. Repeat --set-template for multiple sets.",
                                   "type": "array",
                                   "items": {
                                     "type": "string",
@@ -6196,7 +6196,7 @@
                           "maxLength": 240
                         },
                         "alias": {
-                          "description": "Optional alias. Repeat --alias for multiple values.",
+                          "description": "Optional alias. Repeat --alias for multiple values; shell-quote aliases with spaces. Do not comma-delimit multiple aliases.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -6205,7 +6205,7 @@
                           }
                         },
                         "ingredient": {
-                          "description": "Optional ingredient. Repeat --ingredient for multiple values.",
+                          "description": "Optional ingredient. Repeat --ingredient for multiple values; shell-quote ingredients with spaces. Do not comma-delimit multiple ingredients.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -6214,7 +6214,7 @@
                           }
                         },
                         "tag": {
-                          "description": "Optional lowercase tag slug. Repeat --tag for multiple values.",
+                          "description": "Optional lowercase tag slug. Repeat --tag for multiple values. Do not comma-delimit multiple tags.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -6450,7 +6450,7 @@
                           "maxLength": 240
                         },
                         "alias": {
-                          "description": "Replace aliases. Repeat --alias for multiple values.",
+                          "description": "Replace aliases. Repeat --alias for multiple values; shell-quote aliases with spaces. Do not comma-delimit multiple aliases.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -6459,7 +6459,7 @@
                           }
                         },
                         "ingredient": {
-                          "description": "Replace ingredients. Repeat --ingredient for multiple values.",
+                          "description": "Replace ingredients. Repeat --ingredient for multiple values; shell-quote ingredients with spaces. Do not comma-delimit multiple ingredients.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -6468,7 +6468,7 @@
                           }
                         },
                         "tag": {
-                          "description": "Replace tags. Repeat --tag for multiple values.",
+                          "description": "Replace tags. Repeat --tag for multiple values. Do not comma-delimit multiple tags.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -12348,7 +12348,7 @@
                           "maxLength": 160
                         },
                         "ingredient": {
-                          "description": "Optional supplement ingredient JSON object. Repeat --ingredient for up to 64 ingredients.",
+                          "description": "Optional ingredient as one shell-quoted JSON object; repeat once per ingredient for up to 64. Fields: compound required; label, amount, unit, active, note optional. Do not pass an array.",
                           "maxItems": 64,
                           "type": "array",
                           "items": {

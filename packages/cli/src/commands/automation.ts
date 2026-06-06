@@ -315,13 +315,13 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     examples: [
       {
         args: {
-          title: "Daily mobility",
+          title: "'Daily mobility'",
         },
         description: "Save a daily automation without a JSON payload.",
         options: {
           channel: "telegram",
           deliveryTarget: "telegram_thread_real",
-          instructions: "Ask about mobility work and summarize the next step.",
+          instructions: "'Ask about mobility work and summarize the next step.'",
           scheduleKind: "dailyLocal",
           scheduleLocalTime: "08:30",
           slug: "daily-mobility",
@@ -351,7 +351,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
       tags: z
         .array(z.string().min(1))
         .optional()
-        .describe("Optional automation tags. Repeat --tags for multiple values."),
+        .describe("Optional automation tags. Repeat --tags for multiple values. Do not comma-delimit multiple tags."),
       continuityPolicy: z
         .enum(automationContinuityPolicyValues)
         .optional()

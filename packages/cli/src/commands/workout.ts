@@ -383,28 +383,26 @@ export function registerWorkoutCommands(
       {
         description: 'Capture a run directly from one note.',
         args: {
-          text: 'Went for a 30-minute run around the neighborhood.',
+          text: "'Went for a 30-minute run around the neighborhood.'",
         },
         options: {
           vault: './vault',
         },
       },
       {
-        description: 'Capture workout media plus multiple exercises and sets.',
+        description: 'Capture workout media plus one structured exercise and set.',
         args: {},
         options: {
           vault: './vault',
-          note: 'Upper body session.',
+          note: "'Upper body session.'",
           type: 'strength-training',
           duration: 45,
-          workoutMedia: ['kind=photo;relativePath=raw/workouts/2026/03/upper/bench.jpg;mediaType=image/jpeg;caption=Bench setup'],
+          workoutMedia: ["'kind=photo;relativePath=raw/workouts/2026/03/upper/bench.jpg;mediaType=image/jpeg;caption=Bench setup'"],
           workoutExercise: [
-            'order=1;name=Bench press;mode=weight_reps;unitOverride=lb',
-            'order=2;name=Ring row;mode=bodyweight',
+            "'order=1;name=Bench press;mode=weight_reps;unitOverride=lb'",
           ],
           workoutSet: [
-            'exercise=1;order=1;type=normal;reps=5;weight=185;weightUnit=lb',
-            'exercise=2;order=1;type=normal;reps=10;bodyweightKg=82',
+            "'exercise=1;order=1;type=normal;reps=5;weight=185;weightUnit=lb'",
           ],
         },
       },
@@ -497,15 +495,15 @@ export function registerWorkoutCommands(
       workoutMedia: z
         .array(z.string().min(1))
         .optional()
-        .describe(`Compact workoutMedia grammar: kind=...;relativePath=... with optional mediaType/caption. Supported keys: ${workoutAddMediaFieldList}. Repeat --workout-media for multiple entries. Use --media for local file staging.`),
+        .describe(`Compact workoutMedia grammar: kind=...;relativePath=... with optional mediaType/caption. Shell-quote each semicolon-separated value. Supported keys: ${workoutAddMediaFieldList}. Repeat --workout-media for multiple entries. Use --media for local file staging.`),
       workoutExercise: z
         .array(z.string().min(1))
         .optional()
-        .describe(`Compact workoutExercise grammar: order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Supported keys: ${workoutAddExerciseFieldList}. Repeat --workout-exercise for multiple exercises.`),
+        .describe(`Compact workoutExercise grammar: order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Supported keys: ${workoutAddExerciseFieldList}. Repeat --workout-exercise for multiple exercises.`),
       workoutSet: z
         .array(z.string().min(1))
         .optional()
-        .describe(`Compact workoutSet grammar: exercise=...;order=... plus optional set fields. Supported keys: ${workoutAddSetFieldList}. Repeat --workout-set for multiple sets.`),
+        .describe(`Compact workoutSet grammar: exercise=...;order=... plus optional set fields. Shell-quote each semicolon-separated value. Supported keys: ${workoutAddSetFieldList}. Repeat --workout-set for multiple sets.`),
     }),
     output: workoutAddResultSchema,
     async run({ args, options }) {
@@ -701,20 +699,18 @@ export function registerWorkoutCommands(
       'Edit one workout session from typed fields.',
     examples: [
       {
-        description: 'Replace workout media plus multiple exercises and sets.',
+        description: 'Replace workout media plus one structured exercise and set.',
         args: {
           id: 'evt_01JQY2Z0R9Z5K6BT4CB4D9F4CA',
         },
         options: {
           vault: './vault',
-          workoutMedia: ['kind=photo;relativePath=raw/workouts/2026/03/upper/bench.jpg;mediaType=image/jpeg;caption=Bench setup'],
+          workoutMedia: ["'kind=photo;relativePath=raw/workouts/2026/03/upper/bench.jpg;mediaType=image/jpeg;caption=Bench setup'"],
           workoutExercise: [
-            'order=1;name=Bench press;mode=weight_reps;unitOverride=lb',
-            'order=2;name=Ring row;mode=bodyweight',
+            "'order=1;name=Bench press;mode=weight_reps;unitOverride=lb'",
           ],
           workoutSet: [
-            'exercise=1;order=1;type=normal;reps=5;weight=185;weightUnit=lb',
-            'exercise=2;order=1;type=normal;reps=10;bodyweightKg=82',
+            "'exercise=1;order=1;type=normal;reps=5;weight=185;weightUnit=lb'",
           ],
         },
       },
@@ -730,9 +726,9 @@ export function registerWorkoutCommands(
       workoutRoutineId: z.string().min(1).max(200).optional().describe('Replace nested workout routine id.'),
       workoutRoutineName: z.string().min(1).max(160).optional().describe('Replace nested workout routine name.'),
       workoutSessionNote: z.string().min(1).max(4000).optional().describe('Replace nested workout session note.'),
-      workoutMedia: z.array(z.string().min(1)).optional().describe(`Replace stored media with the compact workoutMedia grammar: kind=...;relativePath=... plus optional mediaType/caption. Supported keys: ${workoutAddMediaFieldList}. Repeat --workout-media for multiple entries.`),
-      workoutExercise: z.array(z.string().min(1)).optional().describe(`Replace exercises with the compact workoutExercise grammar: order=...;name=... plus optional sourceExerciseId/groupId/mode/unitOverride/note. Supported keys: ${workoutAddExerciseFieldList}. Repeat --workout-exercise for multiple exercises.`),
-      workoutSet: z.array(z.string().min(1)).optional().describe(`Attach replacement sets with the compact workoutSet grammar: exercise=...;order=... plus optional set fields. Supported keys: ${workoutAddSetFieldList}. Repeat --workout-set for multiple sets.`),
+      workoutMedia: z.array(z.string().min(1)).optional().describe(`Replace stored media with the compact workoutMedia grammar: kind=...;relativePath=... plus optional mediaType/caption. Shell-quote each semicolon-separated value. Supported keys: ${workoutAddMediaFieldList}. Repeat --workout-media for multiple entries.`),
+      workoutExercise: z.array(z.string().min(1)).optional().describe(`Replace exercises with the compact workoutExercise grammar: order=...;name=... plus optional sourceExerciseId/groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Supported keys: ${workoutAddExerciseFieldList}. Repeat --workout-exercise for multiple exercises.`),
+      workoutSet: z.array(z.string().min(1)).optional().describe(`Attach replacement sets with the compact workoutSet grammar: exercise=...;order=... plus optional set fields. Shell-quote each semicolon-separated value. Supported keys: ${workoutAddSetFieldList}. Repeat --workout-set for multiple sets.`),
       clearDuration: z.boolean().optional().describe('Clear saved duration.'),
       clearDistance: z.boolean().optional().describe('Clear saved distance.'),
       clearWorkout: z.boolean().optional().describe('Clear the nested workout session payload.'),
@@ -1215,8 +1211,8 @@ export function registerWorkoutCommands(
       {
         description: 'Save one reusable strength workout format from freeform text.',
         args: {
-          name: 'Push Day A',
-          text: '20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.',
+          name: "'Push Day A'",
+          text: "'20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.'",
         },
         options: {
           vault: './vault',
@@ -1225,19 +1221,17 @@ export function registerWorkoutCommands(
       {
         description: 'Save a typed routine template with planned sets.',
         args: {
-          name: 'Upper Body A',
+          name: "'Upper Body A'",
         },
         options: {
           vault: './vault',
           type: 'strength-training',
           duration: 45,
           exercise: [
-            'order=1;name=Bench press;mode=weight_reps;unitOverride=lb',
-            'order=2;name=Ring row;mode=bodyweight',
+            "'order=1;name=Bench press;mode=weight_reps;unitOverride=lb'",
           ],
           setTemplate: [
-            'exercise=1;order=1;type=normal;targetReps=5;targetWeight=185;targetWeightUnit=lb;targetRpe=8',
-            'exercise=2;order=1;type=normal;targetReps=10',
+            "'exercise=1;order=1;type=normal;targetReps=5;targetWeight=185;targetWeightUnit=lb;targetRpe=8'",
           ],
         },
       },
@@ -1290,11 +1284,11 @@ export function registerWorkoutCommands(
       exercise: z
         .array(z.string().min(1))
         .optional()
-        .describe(`Compact exercise grammar: order=...;name=... with optional groupId/mode/unitOverride/note. Supported keys: ${workoutFormatExerciseFieldList}. Repeat --exercise for multiple exercises.`),
+        .describe(`Compact exercise grammar: order=...;name=... with optional groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Supported keys: ${workoutFormatExerciseFieldList}. Repeat --exercise for multiple exercises.`),
       setTemplate: z
         .array(z.string().min(1))
         .optional()
-        .describe(`Compact setTemplate grammar: exercise=...;order=... plus optional planned set targets. Prefer targetReps, targetWeight, targetWeightUnit, targetDurationSeconds, targetDistanceMeters, and targetRpe. Supported keys: ${workoutFormatSetTemplateFieldList}. Repeat --set-template for multiple sets.`),
+        .describe(`Compact setTemplate grammar: exercise=...;order=... plus optional planned set targets. Shell-quote each semicolon-separated value. Prefer targetReps, targetWeight, targetWeightUnit, targetDurationSeconds, targetDistanceMeters, and targetRpe. Supported keys: ${workoutFormatSetTemplateFieldList}. Repeat --set-template for multiple sets.`),
       duration: z
         .number()
         .int()
@@ -1449,7 +1443,7 @@ export function registerWorkoutCommands(
       {
         description: 'Log one saved workout format for today.',
         args: {
-          name: 'Push Day A',
+          name: "'Push Day A'",
         },
         options: {
           vault: './vault',

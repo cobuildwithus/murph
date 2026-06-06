@@ -335,7 +335,9 @@ export function registerSupplementCommands(
         },
         description: 'Save a supplement product without a JSON payload file.',
         options: {
-          ingredient: ['{"compound":"Magnesium","label":"Magnesium glycinate","amount":200,"unit":"mg","active":true}'],
+          ingredient: [
+            '\'{"compound":"Magnesium","label":"Magnesium glycinate","amount":200,"unit":"mg","active":true}\'',
+          ],
           schedule: 'nightly',
           vault: './vault',
         },
@@ -407,7 +409,7 @@ export function registerSupplementCommands(
         .max(SUPPLEMENT_INGREDIENTS_MAX_ITEMS)
         .optional()
         .describe(
-          `Optional supplement ingredient JSON object. Repeat --ingredient for up to ${SUPPLEMENT_INGREDIENTS_MAX_ITEMS} ingredients.`,
+          `Optional ingredient as one shell-quoted JSON object; repeat once per ingredient for up to ${SUPPLEMENT_INGREDIENTS_MAX_ITEMS}. Fields: compound required; label, amount, unit, active, note optional. Do not pass an array.`,
         ),
       relatedGoalId: repeatedRelationOptionSchema(
         'Optional related goal id. Repeat --related-goal-id for multiple values.',

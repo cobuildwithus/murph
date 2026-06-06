@@ -93,6 +93,18 @@ async function readCommandSchema(
   ) as CommandSchemaEnvelope
 }
 
+function optionDescription(schema: CommandSchemaEnvelope, optionName: string): string {
+  const property = schema.options.properties[optionName]
+  assert.equal(typeof property, 'object', `missing ${optionName}`)
+  assert.notEqual(property, null, `missing ${optionName}`)
+
+  const description = (property as { description?: unknown }).description
+  if (typeof description !== 'string') {
+    assert.fail(`missing ${optionName} description`)
+  }
+  return description
+}
+
 test('food save schema exposes typed parity fields without requiring raw input', async () => {
   const schema = await readCommandSchema(createFoodCli(), ['food', 'save'])
 
@@ -126,6 +138,23 @@ test('food save schema exposes typed parity fields without requiring raw input',
     'linkRelatedRegimenId',
   ]) {
     assert.equal(field in schema.options.properties, true, field)
+  }
+})
+
+test('food save guidance teaches quoted repeatable aliases and servings', async () => {
+  const cli = createFoodCli()
+  const schema = await readCommandSchema(cli, ['food', 'save'])
+  const help = await runRawInProcessCli(cli, ['food', 'save', '--help'])
+  const llms = await runRawInProcessCli(cli, ['food', 'save', '--llms-full'])
+
+  assert.match(optionDescription(schema, 'alias'), /shell-quote aliases with spaces/u)
+  assert.match(optionDescription(schema, 'alias'), /Do not comma-delimit multiple aliases/u)
+  assert.match(optionDescription(schema, 'ingredient'), /shell-quote ingredients with spaces/u)
+
+  for (const rendered of [help, llms]) {
+    assert.match(rendered, /food save 'Regular Acai Bowl'/u)
+    assert.match(rendered, /--alias 'usual acai bowl'/u)
+    assert.match(rendered, /--serving '1 bowl'/u)
   }
 })
 

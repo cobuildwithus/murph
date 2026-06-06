@@ -147,6 +147,30 @@ test('supplement save schema exposes typed top-level dose fields and repeatable 
   }
 })
 
+test('supplement save compact guidance teaches shell-safe ingredient JSON objects', async () => {
+  const cli = createSupplementCli()
+  const schema = await readCommandSchema(cli, ['supplement', 'save'])
+  const ingredientSchema = schema.options.properties.ingredient as {
+    description?: string
+  }
+  const help = await runRawInProcessCli(cli, ['supplement', 'save', '--help'])
+  const llms = await runRawInProcessCli(cli, ['supplement', 'save', '--llms-full'])
+
+  for (const rendered of [ingredientSchema.description ?? '', help, llms]) {
+    assert.match(rendered, /one shell-quoted JSON object/u)
+    assert.match(rendered, /compound required/u)
+    assert.match(rendered, /label, amount, unit, active, note optional/u)
+    assert.match(rendered, /Do not pass an array/u)
+  }
+
+  for (const rendered of [help, llms]) {
+    assert.match(
+      rendered,
+      /--ingredient '\{"compound":"Magnesium","label":"Magnesium glycinate","amount":200,"unit":"mg","active":true\}'/u,
+    )
+  }
+})
+
 test('supplement save persists top-level dose fields and repeated typed ingredients', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-cli-supplement-save-parity-',
