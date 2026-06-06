@@ -171,7 +171,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Only send a wearable connect link when `vault-cli device connect ... --format json` or another real runtime action returned it in the current turn',
     )
     expect(prompt).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md',
+      '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
     )
     expect(prompt).not.toContain(
       '`vault-cli device account list --format json` shows an active user-facing provider account or connected upstream source',
@@ -313,6 +313,12 @@ describe('assistant consumption lookup guidance', () => {
     )
     expect(prompt).toContain(
       'if it misses the product or brand, or lacks needed ingredients, fall back to web lookup',
+    )
+    expect(prompt).toContain(
+      'preserve the full active ingredient panel with repeated `vault-cli supplement save --ingredient` JSON-object flags',
+    )
+    expect(prompt).toContain(
+      'Do not collapse multi-ingredient labels to one primary ingredient',
     )
     expect(prompt).toContain(
       'For any product lookup, prefer official labels, manufacturer pages, restaurant/menu nutrition pages, or other primary sources',
@@ -572,7 +578,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'f4fb452015524c9b308895d2a549d969e9119efe1c0a3d5ca99a710200464725',
+      'e3ea1bcccb8677a06c2b7b6123c400976c5574d7f2eef1d788f03bade50e3a13',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -633,11 +639,11 @@ describe('assistant system prompt cache stability', () => {
     expect(openStablePrefix).toEqual(closedStablePrefix)
     expect(openStablePrefix).toContain('Murph skill files:')
     expect(openStablePrefix).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md',
+      '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
     )
-    expect(openStablePrefix).not.toContain('Conversation onboarding:')
-    expect(openDynamicSuffix).toContain('Conversation onboarding:')
-    expect(closedDynamicSuffix).not.toContain('Conversation onboarding:')
+    expect(openStablePrefix).not.toContain('Murph onboarding:')
+    expect(openDynamicSuffix).toContain('Murph onboarding:')
+    expect(closedDynamicSuffix).not.toContain('Murph onboarding:')
   })
 
   it('keeps the notification decision prefix stable across dynamic turn context', () => {
@@ -743,9 +749,9 @@ describe('assistant experiment onboarding guidance', () => {
     }))
 
     expect(prompt).toContain('Murph skill files:')
-    expect(prompt).toContain('conversation-onboarding')
+    expect(prompt).toContain('murph-onboarding')
     expect(prompt).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md',
+      '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
     )
     expect(prompt).toContain('experiment-onboarding')
     expect(prompt).toContain(
@@ -835,8 +841,8 @@ describe('assistant notification decision guidance', () => {
   })
 })
 
-describe('assistant conversation onboarding guidance', () => {
-  it('injects the conversation onboarding skill activation without inlining the full workflow', () => {
+describe('assistant Murph onboarding guidance', () => {
+  it('injects the Murph onboarding skill activation without inlining the full workflow', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
       assistantHostedDeviceConnectAvailable: true,
@@ -857,15 +863,15 @@ describe('assistant conversation onboarding guidance', () => {
       assistantContextSnapshotPrompt: null,
     })
 
-    expect(prompt).toContain('Conversation onboarding:')
+    expect(prompt).toContain('Murph onboarding:')
     expect(prompt).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md',
+      '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
     )
     expect(prompt).toContain(
-      'First-run conversation onboarding is eligible for this turn, but it is not mandatory and must not block concrete help',
+      'First-run Murph onboarding is eligible for this turn, but it is not mandatory and must not block concrete help',
     )
     expect(prompt).toContain(
-      'Use `$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md` only when the current user message is a greeting',
+      'Use `$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md` only when the current user message is a greeting',
     )
     expect(prompt).toContain(
       'Do not read or follow the onboarding skill before handling concrete help',
@@ -877,7 +883,7 @@ describe('assistant conversation onboarding guidance', () => {
       'Use the current prompt\'s date, timezone, channel, delivery route, and hosted wearable connection guidance as runtime context whenever the onboarding skill is actually used',
     )
     expect(prompt).not.toContain(
-      'Before replying, read `$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md`',
+      'Before replying, read `$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md`',
     )
     expect(prompt).toContain(
       'Hosted wearable connection links are available for WHOOP (`whoop`)',
@@ -900,17 +906,17 @@ describe('assistant conversation onboarding guidance', () => {
     )
   })
 
-  it('does not inject the conversation onboarding activation after onboarding closes', () => {
+  it('does not inject the Murph onboarding activation after onboarding closes', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       onboardingGuidance: false,
     }))
 
     expect(prompt).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md',
+      '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
     )
-    expect(prompt).not.toContain('Conversation onboarding:')
+    expect(prompt).not.toContain('Murph onboarding:')
     expect(prompt).not.toContain(
-      'First-run conversation onboarding is eligible for this turn',
+      'First-run Murph onboarding is eligible for this turn',
     )
   })
 })

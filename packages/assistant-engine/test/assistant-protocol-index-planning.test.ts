@@ -117,7 +117,7 @@ describe('assistant protocol index planning', () => {
     expect(plan.systemPrompt).not.toContain('Supported experiment protocols:')
   })
 
-  it('injects conversation onboarding skill activation through route planning', async () => {
+  it('injects Murph onboarding skill activation through route planning', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -144,11 +144,11 @@ describe('assistant protocol index planning', () => {
       }),
     })
 
-    const skillRef = buildAssistantSkillFileRef('conversation-onboarding')
+    const skillRef = buildAssistantSkillFileRef('murph-onboarding')
 
     expect(plan.onboardingGuidanceInjected).toBe(true)
     expect(plan.systemPrompt).toContain(skillRef)
-    expect(plan.turnContextPrompt).toContain('Conversation onboarding:')
+    expect(plan.turnContextPrompt).toContain('Murph onboarding:')
     expect(plan.turnContextPrompt).toContain(
       `Use \`${skillRef}\` only when the current user message is a greeting`,
     )

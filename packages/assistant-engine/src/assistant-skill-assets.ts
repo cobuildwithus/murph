@@ -9,8 +9,8 @@ export const MURPH_ASSISTANT_SKILLS_ROOT_REF =
 
 export const ASSISTANT_SKILLS = [
   {
-    slug: 'conversation-onboarding',
-    name: 'conversation-onboarding',
+    slug: 'murph-onboarding',
+    name: 'murph-onboarding',
     triggerHint:
       'Use only when onboarding is eligible or open and the current user message is a greeting, vague getting-started message, answer to a prior onboarding question, explicit setup/onboarding request, or onboarding decline. Do not read or follow this skill before handling concrete help. Concrete help includes user questions, health data, attachments, PDFs, lab results, logging requests, device connection requests, research requests, urgent symptoms, or requests to inspect, save, update, compare, or troubleshoot anything.',
   },

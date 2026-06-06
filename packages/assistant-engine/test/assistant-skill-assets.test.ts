@@ -64,8 +64,8 @@ describe('assistant skill assets', () => {
 
   it('builds stable symbolic skill file references', () => {
     expect(MURPH_ASSISTANT_SKILLS_ROOT_REF).toBe('$MURPH_ASSISTANT_SKILLS_ROOT')
-    expect(buildAssistantSkillFileRef('conversation-onboarding')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md',
+    expect(buildAssistantSkillFileRef('murph-onboarding')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
     )
     expect(buildAssistantSkillFileRef('experiment-onboarding')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md',
@@ -167,31 +167,31 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('.codex-hosted')
   })
 
-  it('keeps conversation onboarding details in the skill file, not the prompt', async () => {
-    const conversationOnboardingSkill = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'conversation-onboarding',
+  it('keeps Murph onboarding details in the skill file, not the prompt', async () => {
+    const murphOnboardingSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'murph-onboarding',
     )
-    expect(conversationOnboardingSkill).toBeTruthy()
-    if (!conversationOnboardingSkill) {
+    expect(murphOnboardingSkill).toBeTruthy()
+    if (!murphOnboardingSkill) {
       return
     }
 
-    const raw = await readSkillFile(conversationOnboardingSkill)
-    expect(conversationOnboardingSkill.triggerHint).toContain(
+    const raw = await readSkillFile(murphOnboardingSkill)
+    expect(murphOnboardingSkill.triggerHint).toContain(
       'Use only when onboarding is eligible or open',
     )
-    expect(conversationOnboardingSkill.triggerHint).toContain(
+    expect(murphOnboardingSkill.triggerHint).toContain(
       'Do not read or follow this skill before handling concrete help',
     )
-    expect(conversationOnboardingSkill.triggerHint).toContain(
+    expect(murphOnboardingSkill.triggerHint).toContain(
       'Concrete help includes user questions, health data, attachments, PDFs, lab results',
     )
 
     expect(raw).toContain(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)
     expect(raw).toContain(
-      'Use this skill only when the current prompt includes the `Conversation onboarding:` activation',
+      'Use this skill only when the current prompt includes the `Murph onboarding:` activation',
     )
-    expect(raw).toContain('roughly 8-9 short assistant messages')
+    expect(raw).toContain('roughly 9-10 short assistant messages')
     expect(raw).toContain(
       'age plus gender first, then the wearable/app checkpoint',
     )
@@ -199,6 +199,8 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('then current health protocols or experiments')
     expect(raw).toContain('then current supplements with brand or product names')
     expect(raw).toContain('roughly how long they have taken them or since when')
+    expect(raw).toContain('then one open medical-context question')
+    expect(raw).toContain('diagnosed conditions, allergies or intolerances, and pregnancy or nursing')
     expect(raw).toContain('age plus gender')
     expect(raw).toContain(
       'ask a natural optional question for age and gender context',
@@ -363,11 +365,14 @@ describe('assistant skill assets', () => {
     const supplementsIndex = raw.indexOf(
       '8. Supplements.',
     )
-    const bloodTestsIndex = raw.indexOf(
-      '9. Blood tests.',
+    const medicalContextIndex = raw.indexOf(
+      '9. Medical context.',
     )
-    const orientationIndex = raw.indexOf('10. Orientation.')
-    const firstExperimentIndex = raw.indexOf('11. First experiment setup.')
+    const bloodTestsIndex = raw.indexOf(
+      '10. Blood tests.',
+    )
+    const orientationIndex = raw.indexOf('11. Orientation.')
+    const firstExperimentIndex = raw.indexOf('12. First experiment setup.')
     expect(nameContextIndex).toBeGreaterThanOrEqual(0)
     expect(highLevelIndex).toBeGreaterThanOrEqual(0)
     expect(highLevelIndex).toBeGreaterThan(nameContextIndex)
@@ -376,7 +381,8 @@ describe('assistant skill assets', () => {
     expect(movementIndex).toBeGreaterThan(hostedWearableIndex)
     expect(protocolsIndex).toBeGreaterThan(movementIndex)
     expect(supplementsIndex).toBeGreaterThan(protocolsIndex)
-    expect(bloodTestsIndex).toBeGreaterThan(supplementsIndex)
+    expect(medicalContextIndex).toBeGreaterThan(supplementsIndex)
+    expect(bloodTestsIndex).toBeGreaterThan(medicalContextIndex)
     expect(orientationIndex).toBeGreaterThan(bloodTestsIndex)
     expect(firstExperimentIndex).toBeGreaterThan(orientationIndex)
     expect(raw).toContain(
@@ -581,7 +587,7 @@ describe('assistant skill assets', () => {
       'If they send PDFs or pasted lab results, handle them through normal attachment/message intake',
     )
     expect(raw).toContain(
-      'broad health context, movement/training context, protocols, experiments, dated age context, gender, or interests go to memory; current supplements go to structured supplement records',
+      'broad health context, movement/training context, protocols, experiments, dated age context, gender, pregnancy or nursing status, or interests go to memory; current supplements, medications, diagnosed conditions, and allergies go to structured records',
     )
     expect(raw).toContain(
       'movement/training context, fitness benchmarks, current protocols or experiments',
@@ -591,8 +597,12 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('User was 20 years old on 2026-02-01.')
     expect(raw).toContain('Do not infer or store a birthday from age alone')
+    expect(raw).toContain('vault-cli regimen save "<medication name>" --kind medication --status active --format json')
+    expect(raw).toContain('vault-cli condition save "<condition title>" --clinical-status active --format json')
+    expect(raw).toContain('vault-cli allergy save "<allergy title>" --status active --format json')
+    expect(raw).toContain('Do not save this as a condition record')
     expect(raw).toContain(
-      'high-level age/gender prompt, wearable/app checkpoint, movement/training prompt, current protocol/experiment prompt, supplement prompt, and blood-test prompt have been asked',
+      'high-level age/gender prompt, wearable/app checkpoint, movement/training prompt, current protocol/experiment prompt, supplement prompt, medical-context prompt, and blood-test prompt have been asked',
     )
     expect(raw).toContain(
       'verify that every useful setup answer they supplied has already been persisted',
@@ -649,7 +659,6 @@ describe('assistant skill assets', () => {
     const rejectedPersistenceExpansions = [
       'narrowest matching `vault-cli` surface',
       'web lookup before saving an identifiable product',
-      'vault-cli regimen save',
       'vault-cli blood-test save',
       'vault-cli protocol import-json',
       'Completion may intentionally skip saving',

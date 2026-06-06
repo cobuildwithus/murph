@@ -479,6 +479,7 @@ function buildAssistantHealthReasoningText(): string {
 - When saving a meal and the user provides enough food identity, ingredients, portion hints, package/menu facts, or attachment evidence to form a useful estimate, do not leave nutrition blank just because exact serving weights are missing. Make ordinary portion assumptions, estimate calories first, estimate protein/carbs/fat/fiber when reasonably inferable, set nutrition provenance to \`estimated\`, choose low or medium confidence based on specificity, and put the key assumptions in provenance detail. Ask one targeted follow-up only when the meal is too vague to identify the food or rough amount.
 - For foods, drinks, menu items, and other non-supplement consumed products, use web lookup before writing when the item is identifiable and local context or attachments do not provide key facts.
 - For supplements, pills, powders, and supplement-like consumed products, default to \`vault-cli supplement search-labels\` for one item or \`vault-cli supplement search-labels-batch\` for several before web lookup. The default label lookup returns one match; pass an explicit higher limit only when the first result is ambiguous, generic, or missing likely product variants. If the lookup returns a usable serving, dose, or amount, use it instead of asking the user to restate dosage. The hosted label database covers many supplements but is not exhaustive; if it misses the product or brand, or lacks needed ingredients, fall back to web lookup.
+- When saving known supplement label facts, preserve the full active ingredient panel with repeated \`vault-cli supplement save --ingredient\` JSON-object flags. Do not collapse multi-ingredient labels to one primary ingredient.
 - For any product lookup, prefer official labels, manufacturer pages, restaurant/menu nutrition pages, or other primary sources. Try to recover serving size, ingredients, active compounds, dose, calories, protein, carbs, fat, fiber, caffeine, alcohol, sodium, sugar, allergens, and warnings when available. If the item is generic, the user asks you to just note it, or evidence is unavailable, log what is known, mark estimates and confidence, and do not imply a lookup happened.
 - Use product lookups to make the answer or saved record accurate, not to create visible citation clutter. Do not add inline source links after ingredient or nutrition facts unless the user asks for links.
 - If a workout describes a route between recognizable places, recover estimated distance, duration, or elevation for logging. Mark derived fields as estimates.
@@ -682,11 +683,11 @@ function buildAssistantOnboardingGuidanceText(input: {
     return null;
   }
 
-  return `Conversation onboarding:
-First-run conversation onboarding is eligible for this turn, but it is not mandatory and must not block concrete help.
+  return `Murph onboarding:
+First-run Murph onboarding is eligible for this turn, but it is not mandatory and must not block concrete help.
 
 Use ${code(
-    buildAssistantSkillFileRef("conversation-onboarding")
+    buildAssistantSkillFileRef("murph-onboarding")
   )} only when the current user message is a greeting, vague getting-started message, answer to a prior onboarding question, explicit setup/onboarding request, or onboarding decline.
 
 Do not read or follow the onboarding skill before handling concrete help. Concrete help includes user questions, health data, attachments, PDFs, lab results, logging requests, device connection requests, research requests, urgent symptoms, or requests to inspect, save, update, compare, or troubleshoot anything.
