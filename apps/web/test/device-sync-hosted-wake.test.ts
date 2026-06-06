@@ -296,7 +296,6 @@ vi.mock("@/src/lib/device-sync/shared", () => ({
 
 import {
   HostedDeviceSyncControlPlane,
-  appendHostedDeviceSyncWake,
 } from "@/src/lib/device-sync/control-plane";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
@@ -307,7 +306,7 @@ function buildPublicConnectionId(connectionId: string): string {
   return createHostedBrowserConnectionId(ROUTING_INDEX_KEY, connectionId);
 }
 
-describe("appendHostedDeviceSyncWake", () => {
+describe("hosted device-sync wakes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.readHostedDeviceSyncEnvironment.mockImplementation(() => createHostedEnv());
@@ -483,96 +482,6 @@ describe("appendHostedDeviceSyncWake", () => {
 
     expect(controlPlane.publicIngressBaseUrl).toBe("http://localhost:3000/api/device-sync");
     expect(controlPlane.allowedReturnOrigins).toEqual(["http://localhost:3000"]);
-  });
-
-  it("wakes hosted execution with a dedicated device-sync wake event for connection events", async () => {
-    await appendHostedDeviceSyncWake({
-      connectionId: "dsc_123",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      provider: "oura",
-      source: "connection-established",
-      userId: "user-123",
-    });
-
-    expect(mocks.createSignal).toHaveBeenCalledWith({
-      connectionId: "dsc_123",
-      createdAt: "2026-03-26T12:00:00.000Z",
-      eventType: null,
-      kind: "connected",
-      nextReconcileAt: null,
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      provider: "oura",
-      reason: null,
-      resourceCategory: null,
-      revokeWarning: null,
-      traceId: null,
-      tx: mocks.prismaTx,
-      userId: "user-123",
-    });
-    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
-      expect.objectContaining({
-        envelope: expect.objectContaining({
-          connectionId: "dsc_123",
-          hint: {
-            occurredAt: "2026-03-26T12:00:00.000Z",
-          },
-          eventId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
-          kind: "device-sync.wake",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-          provider: "oura",
-          reason: "connected",
-          userId: "user-123",
-        }),
-        tx: mocks.prismaTx,
-      }),
-    );
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_123",
-    });
-  });
-
-  it("signals the hosted user runtime after appending the wake", async () => {
-    await expect(appendHostedDeviceSyncWake({
-      connectionId: "dsc_123",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      provider: "oura",
-      source: "connection-established",
-      userId: "user-123",
-    })).resolves.toEqual({
-      wakeAppended: true,
-    });
-
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_123",
-    });
-  });
-
-  it("does not accept lifecycle wake dedupe conflicts as successful handoffs", async () => {
-    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
-      dedupeConflict: true,
-      duplicate: true,
-      inserted: false,
-      item: {
-        id: "mailbox_existing",
-        userId: "user-123",
-      },
-    });
-
-    await expect(appendHostedDeviceSyncWake({
-      connectionId: "dsc_123",
-      eventId: "device-sync:manual-conflict",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      provider: "oura",
-      source: "connection-established",
-      userId: "user-123",
-    })).resolves.toEqual({
-      reason: "dedupe_conflict",
-      wakeAppended: false,
-    });
-
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
   it("uses explicit scheduled wake identity and created time for inserted due-reconcile signals", async () => {
@@ -751,35 +660,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
-  it("keeps committed wakes when the post-commit Temporal signal fails", async () => {
-    mocks.signalHostedDeviceSyncMailboxRuntime.mockRejectedValue(new Error("Temporal unavailable"));
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-
-    try {
-      await expect(appendHostedDeviceSyncWake({
-        connectionId: "dsc_123",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-        provider: "oura",
-        source: "connection-established",
-        userId: "user-123",
-      })).resolves.toEqual({
-        wakeAppended: true,
-      });
-
-      expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
-      expect(warn).toHaveBeenCalledWith(
-        "Hosted device-sync wake Temporal signal failed after mailbox append.",
-        {
-          code: "HOSTED_DEVICE_SYNC_TEMPORAL_SIGNAL_FAILED",
-          mailboxItemIdPresent: true,
-        },
-      );
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  it("surfaces scheduled recovery Temporal signal failures before recording the due claim", async () => {
+  it("surfaces scheduled wake Temporal signal failures before recording the due claim", async () => {
     mocks.signalHostedDeviceSyncMailboxRuntime.mockRejectedValue(new Error("Temporal unavailable"));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
@@ -805,53 +686,6 @@ describe("appendHostedDeviceSyncWake", () => {
     } finally {
       warn.mockRestore();
     }
-  });
-
-  it("uses the dedicated device-sync wake path for disconnect events", async () => {
-    await appendHostedDeviceSyncWake({
-      connectionId: "dsc_123",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      provider: "oura",
-      source: "disconnect",
-      userId: "user-123",
-    });
-
-    expect(mocks.createSignal).toHaveBeenCalledWith({
-      connectionId: "dsc_123",
-      createdAt: "2026-03-26T12:00:00.000Z",
-      eventType: null,
-      kind: "disconnected",
-      nextReconcileAt: null,
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      provider: "oura",
-      reason: null,
-      resourceCategory: null,
-      revokeWarning: null,
-      traceId: null,
-      tx: mocks.prismaTx,
-      userId: "user-123",
-    });
-    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
-      expect.objectContaining({
-        envelope: expect.objectContaining({
-          connectionId: "dsc_123",
-          hint: {
-            occurredAt: "2026-03-26T12:00:00.000Z",
-          },
-          eventId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
-          kind: "device-sync.wake",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-          provider: "oura",
-          reason: "disconnected",
-          userId: "user-123",
-        }),
-        tx: mocks.prismaTx,
-      }),
-    );
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_123",
-    });
   });
 
   it("queues a disconnected signal and wake together inside the disconnect flow", async () => {

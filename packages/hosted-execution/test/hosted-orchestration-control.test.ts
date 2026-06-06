@@ -84,9 +84,12 @@ describe("hosted orchestration control contracts", () => {
     }
   });
 
-  it("keeps typing prewarm out of durable demand sources", () => {
+  it("keeps retired runtime wake sources out of durable demand sources", () => {
     expect(HOSTED_RUNTIME_DEMAND_RUN_SOURCES).not.toContain(
       "linq.imessage.typing",
+    );
+    expect(HOSTED_RUNTIME_DEMAND_RUN_SOURCES).not.toContain(
+      "device_sync_recovery",
     );
   });
 
@@ -210,6 +213,13 @@ describe("hosted orchestration control contracts", () => {
 
   it("rejects raw payload-shaped fields in demand contracts", () => {
     expect(() => parseHostedRuntimeDemandRequest({
+      deviceSyncRecoveryRequested: true,
+      userId: "user_test",
+    })).toThrow(
+      "Hosted runtime demand request must not include deviceSyncRecoveryRequested.",
+    );
+
+    expect(() => parseHostedRuntimeDemandRequest({
       payload: true,
       userId: "user_test",
     })).toThrow("Hosted runtime demand request must not include payload.");
@@ -221,6 +231,14 @@ describe("hosted orchestration control contracts", () => {
       nextWakeAt: null,
       workspace: null,
     })).toThrow("Hosted runtime idle demand must not include body.");
+
+    expect(() => parseHostedRuntimeDemand({
+      kind: "run",
+      mailboxLag: [],
+      reason: "nudge",
+      source: "device_sync_recovery",
+      workspace: null,
+    })).toThrow("Hosted runtime run demand source is not supported.");
 
     expect(() => parseHostedRuntimeDemand({
       kind: "run",

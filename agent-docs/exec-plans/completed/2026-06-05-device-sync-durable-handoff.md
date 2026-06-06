@@ -1,8 +1,8 @@
 # Device sync durable handoff
 
-Status: active
+Status: completed
 Created: 2026-06-05
-Updated: 2026-06-06
+Updated: 2026-06-05
 
 ## Goal
 
@@ -86,3 +86,4 @@ Updated: 2026-06-06
   - `pnpm typecheck`
   - Additional package/app checks or direct scenario proof if audit findings
     reveal a gap.
+Completed: 2026-06-05

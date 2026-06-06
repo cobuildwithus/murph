@@ -11,7 +11,6 @@ import {
   createHostedDeviceSyncControlPlaneContext,
   type HostedDeviceSyncControlPlaneContext,
 } from "./control-plane-context";
-import type { HostedDeviceSyncWakeSource } from "./wake";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import {
   type HostedAgentSessionRecord,
@@ -22,9 +21,6 @@ import {
   type HostedTokenBundleRefreshResponse,
 } from "./agent-session-service";
 import { HostedDeviceSyncPublicIngressService } from "./public-ingress-service";
-import {
-  appendHostedDeviceSyncWake as appendHostedDeviceSyncWakeInternal,
-} from "./wake-service";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
 
 export class HostedDeviceSyncControlPlane {
@@ -163,16 +159,4 @@ export class HostedDeviceSyncControlPlane {
 
 export function createHostedDeviceSyncControlPlane(request: Request): HostedDeviceSyncControlPlane {
   return new HostedDeviceSyncControlPlane(request);
-}
-
-export async function appendHostedDeviceSyncWake(input: {
-  connectionId: string;
-  eventId?: string | null;
-  occurredAt: string;
-  provider: string;
-  source: HostedDeviceSyncWakeSource;
-  traceId?: string | null;
-  userId: string;
-}): Promise<{ wakeAppended: boolean; reason?: string }> {
-  return appendHostedDeviceSyncWakeInternal(input);
 }

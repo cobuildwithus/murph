@@ -639,7 +639,16 @@ describe("hosted Prisma baseline migration", () => {
     );
 
     expect(sourceConfirmedBackfillMigrationSql).toContain(
+      '"setup_phase" = \'source_confirmed\',\n  "setup_expires_at" = NULL',
+    );
+    expect(sourceConfirmedBackfillMigrationSql).toContain(
+      'WHERE "status" = \'active\'\n  AND "setup_phase" IN (\'pending_link\', \'link_returned\')',
+    );
+    expect(sourceConfirmedBackfillMigrationSql).toContain(
       '"next_reconcile_at" = LEAST(COALESCE("connection"."next_reconcile_at", NOW()), NOW())',
+    );
+    expect(sourceConfirmedBackfillMigrationSql).toContain(
+      'WHERE "connection"."status" = \'active\'',
     );
     expect(sourceConfirmedBackfillMigrationSql).toContain(
       '"connection"."last_sync_started_at" IS NULL',

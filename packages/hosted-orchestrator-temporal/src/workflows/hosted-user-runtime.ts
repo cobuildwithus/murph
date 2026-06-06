@@ -49,6 +49,8 @@ const HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH =
   "hosted-user-runtime-non-retryable-failure-signal-wait-v1";
 const HOSTED_USER_RUNTIME_ENSURE_PROCESSING_PATCH =
   "hosted-user-runtime-ensure-runtime-processing-v1";
+const HOSTED_USER_RUNTIME_SAME_RUNTIME_WAKE_COUNT_PATCH =
+  "hosted-user-runtime-same-runtime-wake-count-v1";
 const HOSTED_USER_RUNTIME_RECHECK_SIGNAL_PATCH =
   "hosted-user-runtime-recheck-signal-v1";
 const HOSTED_USER_RUNTIME_PREWARM_SIGNAL_PATCH =
@@ -152,6 +154,8 @@ export async function hostedUserRuntimeWorkflow(
     },
     useEnsureRuntimeProcessingPatch: () =>
       patched(HOSTED_USER_RUNTIME_ENSURE_PROCESSING_PATCH),
+    preserveSameRuntimeWakeAcceptedCountPatchMarker: () =>
+      patched(HOSTED_USER_RUNTIME_SAME_RUNTIME_WAKE_COUNT_PATCH),
     useRuntimePrewarmSignalPatch: () =>
       patched(HOSTED_USER_RUNTIME_PREWARM_SIGNAL_PATCH),
     useRuntimeRecheckSignalPatch: () =>
@@ -203,6 +207,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
   useRuntimeRecheckSignalPatch(): boolean;
   useCoalescedPendingSignalPatch(): boolean;
   useEnsureRuntimeProcessingSourcePatch(): boolean;
+  preserveSameRuntimeWakeAcceptedCountPatchMarker(): void;
   useSignalOnlyWaitForNonRetryableFailure(): boolean;
   uuid(): string;
   waitForSignalOrTimeout(
@@ -487,6 +492,8 @@ export function createHostedUserRuntimeWorkflowMachine(
         demandSignalVersion !== demandVersionBeforeExecution;
 
       if (execution.kind === "runtime_processing_accepted") {
+        // Keep this marker for histories that recorded the removed recovery-count patch.
+        runtime.preserveSameRuntimeWakeAcceptedCountPatchMarker();
         recordRuntimeProcessingAccepted(state, execution);
         if (demandSignalArrivedDuringExecution) {
           continue;

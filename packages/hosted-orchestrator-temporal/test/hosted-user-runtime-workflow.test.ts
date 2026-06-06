@@ -365,6 +365,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     const continued = await runUntilContinueAsNew(machine);
 
     expect(runtime.waits).toEqual([11_000, null]);
+    expect(runtime.sameRuntimeWakeAcceptedCountPatchMarkerCount).toBe(1);
     expect(continued.state).toMatchObject({
       lastExecutionKind: "runtime_processing_accepted",
       lastRuntimeAttemptId: "runtime_attempt_test",
@@ -1072,6 +1073,7 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   coalescedPendingSignalPatchEnabled = true;
   ensureProcessingSourcePatchEnabled = true;
   runtimeRecheckSignalPatchEnabled = true;
+  sameRuntimeWakeAcceptedCountPatchMarkerCount = 0;
   signalOnlyNonRetryableFailureWaitEnabled = true;
   suggestContinueAsNew = false;
   readonly waits: Array<number | null> = [];
@@ -1181,6 +1183,10 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
 
   useEnsureRuntimeProcessingPatch(): void {
     return;
+  }
+
+  preserveSameRuntimeWakeAcceptedCountPatchMarker(): void {
+    this.sameRuntimeWakeAcceptedCountPatchMarkerCount += 1;
   }
 
   useRuntimeRecheckSignalPatch(): boolean {

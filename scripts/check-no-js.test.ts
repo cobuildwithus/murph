@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -39,6 +39,18 @@ describe("check-no-js hygiene guards", () => {
     expect(generatedArtifactDirectories).toContain("apps/cloudflare/.deploy/.deploy");
     expect(generatedArtifactDirectories).toContain("apps/cloudflare/.deploy/dry-run");
     expect(generatedArtifactDirectories).toContain("apps/cloudflare/.deploy/smoke-dist");
+  });
+
+  it("keeps large git file-list scans on an explicit buffer", async () => {
+    const [checkNoJsSource, pruneSource] = await Promise.all([
+      readFile(new URL("./check-no-js.ts", import.meta.url), "utf8"),
+      readFile(new URL("./prune-generated-source-sidecars.ts", import.meta.url), "utf8"),
+    ]);
+
+    for (const source of [checkNoJsSource, pruneSource]) {
+      expect(source).toContain("const gitListMaxBuffer = 16 * 1024 * 1024;");
+      expect(source).toMatch(/execFileAsync\("git",[\s\S]*?maxBuffer: gitListMaxBuffer,/u);
+    }
   });
 
   it("refuses to prune through symlinked generated artifact parents", async () => {

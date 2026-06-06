@@ -33,7 +33,6 @@ import {
 } from "../hosted-orchestration/signal-runtime";
 import {
   buildHostedDeviceSyncWake,
-  type HostedDeviceSyncWakeSource,
 } from "./wake";
 import { PrismaDeviceSyncControlPlaneStore, type HostedPrismaTransactionClient } from "./prisma-store";
 import type { HostedDeviceSyncDirtyResource } from "./prisma-store";
@@ -449,58 +448,6 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   });
 }
 
-export async function appendHostedDeviceSyncWake(input: {
-  connectionId: string;
-  eventId?: string | null;
-  hint?: HostedExecutionDeviceSyncWakeEvent["hint"] | null;
-  occurredAt: string;
-  provider: string;
-  source: HostedDeviceSyncWakeSource;
-  traceId?: string | null;
-  userId: string;
-}): Promise<{ wakeAppended: boolean; reason?: string }> {
-  const prisma = getPrisma();
-  const hint = buildHostedDeviceSyncSignalPayload(input);
-  const store = new PrismaDeviceSyncControlPlaneStore({
-    prisma,
-  });
-  const wake = buildHostedDeviceSyncWake({
-    ...input,
-    eventId: input.eventId ?? null,
-    hint,
-  });
-  const persistSignal = async (tx: HostedPrismaTransactionClient) => {
-    await store.createSignal({
-      userId: input.userId,
-      connectionId: input.connectionId,
-      provider: input.provider,
-      kind: mapHostedDeviceSyncSignalKind(input.source),
-      occurredAt: hint.occurredAt ?? null,
-      traceId: normalizeNullableString(hint.traceId),
-      eventType: normalizeNullableString(hint.eventType),
-      resourceCategory: normalizeNullableString(hint.resourceCategory),
-      reason: normalizeNullableString(hint.reason),
-      nextReconcileAt: hint.nextReconcileAt ?? null,
-      revokeWarning: hint.revokeWarning ?? null,
-      createdAt: input.occurredAt,
-      tx,
-    });
-  };
-
-  const appendResult = await persistHostedDeviceSyncWake({
-    wake,
-    store,
-    persist: persistSignal,
-  });
-  const wakeAccepted = appendResult.inserted
-    || (appendResult.duplicate && !appendResult.dedupeConflict);
-
-  return {
-    ...(appendResult.dedupeConflict ? { reason: "dedupe_conflict" } : {}),
-    wakeAppended: wakeAccepted,
-  };
-}
-
 export interface HostedDeviceSyncScheduledReconcileWakeResult {
   reason?: string;
   wakeAccepted: boolean;
@@ -871,21 +818,6 @@ function buildHostedDeviceSyncSignalPayload(input: {
     ...(input.hint?.occurredAt === undefined ? { occurredAt: input.occurredAt } : {}),
     ...(input.traceId && input.hint?.traceId === undefined ? { traceId: input.traceId } : {}),
   };
-}
-
-function mapHostedDeviceSyncSignalKind(source: HostedDeviceSyncWakeSource): string {
-  switch (source) {
-    case "connection-established":
-      return "connected";
-    case "disconnect":
-      return "disconnected";
-    case "webhook-hint":
-      return "webhook_hint";
-    case "scheduled-reconcile":
-      return "reconcile_due";
-    default:
-      throw new Error(`Unsupported hosted device-sync wake source: ${String(source)}`);
-  }
 }
 
 function normalizeHostedDeviceSyncJobHints(input: {
