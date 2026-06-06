@@ -1952,7 +1952,7 @@ test("Oura provider exposes the connect URL, forwards webhook verification throu
   const staleScopeProvider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
-    scopes: ["personal", "daily", "heartrate", "workout"],
+    scopes: ["personal", "daily", "heartrate", "extapi:heartrate", "workout"],
   });
   const staleConfiguredScopes = staleScopeProvider.descriptor.oauth?.defaultScopes ?? [];
   assert.deepEqual(staleConfiguredScopes, ["personal", "daily", "workout", "session", "spo2"]);

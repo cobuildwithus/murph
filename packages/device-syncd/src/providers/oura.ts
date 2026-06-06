@@ -168,8 +168,12 @@ function buildOuraScopes(input: string[] | undefined): string[] {
   return [...new Set(
     requested
       .map((scope) => scope.trim())
-      .filter((scope) => scope && scope !== "heartrate"),
+      .filter((scope) => scope && !isDeprecatedOuraScope(scope)),
   )];
+}
+
+function isDeprecatedOuraScope(scope: string): boolean {
+  return scope.replace(/^extapi:/u, "") === "heartrate";
 }
 
 function hasOuraScope(account: DeviceSyncAccount, scope: string): boolean {
