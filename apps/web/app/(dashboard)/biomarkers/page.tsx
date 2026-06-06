@@ -8,6 +8,8 @@ import {
   type BiomarkerBrowseEntry,
 } from "./biomarkers-page-client";
 
+const BROWSE_EXCLUDED_BIOMARKER_ROUTE_IDS = new Set(["blood-glucose"]);
+
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Biomarkers — Murph",
   description:
@@ -17,7 +19,11 @@ export const metadata: Metadata = createMurphPageMetadata({
 export default function BiomarkersPage() {
   const index = getGeneratedHealthCommonsWebBiomarkerIndex();
   const biomarkers: BiomarkerBrowseEntry[] = index.biomarkers
-    .filter((entry) => entry.published && !entry.hidden)
+    .filter((entry) =>
+      entry.published &&
+      !entry.hidden &&
+      !BROWSE_EXCLUDED_BIOMARKER_ROUTE_IDS.has(entry.routeId)
+    )
     .map((entry) => ({
       key: entry.key,
       routeId: entry.routeId,
