@@ -297,6 +297,12 @@ describe('assistant consumption lookup guidance', () => {
       'default to `vault-cli supplement search-labels` for one item or `vault-cli supplement search-labels-batch` for several before web lookup',
     )
     expect(prompt).toContain(
+      'The default label lookup returns one match; pass an explicit higher limit only when the first result is ambiguous, generic, or missing likely product variants',
+    )
+    expect(prompt).toContain(
+      'If the lookup returns a usable serving, dose, or amount, use it instead of asking the user to restate dosage',
+    )
+    expect(prompt).toContain(
       'The hosted label database covers many supplements but is not exhaustive',
     )
     expect(prompt).toContain(
@@ -560,7 +566,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '86ebdff65a5fb69bfbba0c3ae3a6c91109618147c0fc6e1b3d54a158aaea532f',
+      '08bf7e6823a1fcb1354514ff99007dbc21a84fead07491cfdb5fbc61135dc5cf',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

@@ -187,7 +187,7 @@ export function registerSupplementCommands(
         },
         description: 'Search supplement labels by product or ingredient text.',
         options: {
-          limit: 5,
+          limit: 1,
         },
       },
     ],
@@ -199,7 +199,7 @@ export function registerSupplementCommands(
         .positive()
         .max(50)
         .optional()
-        .describe('Maximum label matches to return. Defaults to 5.'),
+        .describe('Maximum label matches to return. Defaults to 1.'),
       includeOffMarket: z
         .boolean()
         .optional()
@@ -223,7 +223,7 @@ export function registerSupplementCommands(
         description: 'Search labels for several supplement names in one hosted API call.',
         options: {
           query: ['creatine', 'magnesium glycinate', 'blueprint bryan johnson'],
-          limit: 5,
+          limit: 1,
         },
       },
     ],
@@ -240,7 +240,7 @@ export function registerSupplementCommands(
         .positive()
         .max(50)
         .optional()
-        .describe('Maximum label matches to return per query. Defaults to 5.'),
+        .describe('Maximum label matches to return per query. Defaults to 1.'),
       includeOffMarket: z
         .boolean()
         .optional()

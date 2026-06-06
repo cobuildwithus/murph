@@ -286,7 +286,11 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'whether they are already trying any health protocols or experiments',
     )
+    expect(raw).toContain('outside supplements')
     expect(raw).toContain('mostly starting fresh')
+    expect(raw).toContain(
+      'Keep supplement intake, supplement examples, dosage, and label questions entirely for the next supplement step',
+    )
     expect(raw).toContain(
       'invite product or brand names plus roughly how long they have taken each one or since when',
     )
@@ -304,7 +308,7 @@ describe('assistant skill assets', () => {
       'Default to `vault-cli supplement search-labels` for one supplement or `vault-cli supplement search-labels-batch` for several',
     )
     expect(raw).toContain(
-      'the label database covers many supplements but is not exhaustive',
+      'The label database covers many supplements but is not exhaustive',
     )
     expect(raw).toContain(
       'fall back to web search for products or ingredients it misses',
@@ -498,9 +502,21 @@ describe('assistant skill assets', () => {
       'Save useful movement/training context to Context memory',
     )
     expect(movementSection).not.toContain('```text')
-    expect(raw.slice(protocolsIndex, supplementsIndex)).not.toContain('```text')
+    const protocolsSection = raw.slice(protocolsIndex, supplementsIndex)
+    expect(protocolsSection).toContain(
+      'Keep supplement intake, supplement examples, dosage, and label questions entirely for the next supplement step',
+    )
+    expect(protocolsSection).toContain('cold exposure')
+    expect(protocolsSection).toContain('sauna')
+    expect(protocolsSection).toContain('a new workout plan')
+    expect(protocolsSection).toContain('a diet pattern change')
+    expect(protocolsSection).toContain('a sleep routine change')
+    expect(protocolsSection).not.toContain('```text')
     const supplementSection = raw.slice(supplementsIndex, bloodTestsIndex)
     expect(supplementSection).toContain('Follow the supplement input affordance')
+    expect(supplementSection).toContain(
+      'The default lookup returns one match per query; pass an explicit higher limit only when the first result is ambiguous, generic, or missing likely product variants',
+    )
     expect(supplementSection).not.toContain('```text')
     expect(raw.slice(bloodTestsIndex, orientationIndex)).not.toContain('```text')
     expect(raw.match(/Do not use a fixed script for this turn/g)?.length).toBe(5)
@@ -519,6 +535,9 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain(
       'Ask follow-up questions about dosage only when the user asks to set up a specific experiment',
+    )
+    expect(raw).toContain(
+      'only if the supplement lookup does not already provide a usable serving, dose, or amount',
     )
     expect(raw).toContain(
       'Ask follow-up questions about protocol adherence only when the user asks to set up a specific experiment',

@@ -3,7 +3,7 @@ import { errorMessage, normalizeNullableString } from '@murphai/operator-config/
 import { HOSTED_RUNTIME_PROCESS_ENV } from '@murphai/hosted-execution/cli-runtime-bridge'
 import { z } from 'zod'
 
-const DEFAULT_SUPPLEMENT_LABEL_LIMIT = 5
+const DEFAULT_SUPPLEMENT_LABEL_LIMIT = 1
 const MAX_SUPPLEMENT_LABEL_LIMIT = 50
 const MAX_SUPPLEMENT_LABEL_BATCH_QUERIES = 10
 const MAX_SUPPLEMENT_LABEL_BATCH_QUERY_LENGTH = 256

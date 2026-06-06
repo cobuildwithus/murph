@@ -110,7 +110,7 @@ describe("supplements API route", () => {
     });
   });
 
-  it("uses five search results by default", async () => {
+  it("uses one search result by default", async () => {
     mocks.searchSupplements.mockResolvedValue([]);
 
     const response = await supplementsRoute.GET(
@@ -124,7 +124,7 @@ describe("supplements API route", () => {
     expect(response.status).toBe(200);
     expect(mocks.searchSupplements).toHaveBeenCalledWith({
       q: "creatine",
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
     });
     await expect(response.json()).resolves.toEqual({ items: [] });
@@ -321,7 +321,7 @@ describe("supplements API route", () => {
     });
   });
 
-  it("uses five matches per batch query by default", async () => {
+  it("uses one match per batch query by default", async () => {
     mocks.searchSupplements.mockResolvedValue([]);
 
     const response = await supplementsRoute.POST(
@@ -340,12 +340,12 @@ describe("supplements API route", () => {
     expect(response.status).toBe(200);
     expect(mocks.searchSupplements).toHaveBeenCalledWith({
       q: "creatine",
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
     });
     await expect(response.json()).resolves.toEqual({
       includeOffMarket: false,
-      limit: 5,
+      limit: 1,
       results: [
         {
           query: "creatine",
