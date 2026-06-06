@@ -12356,7 +12356,7 @@
                           "maxLength": 160
                         },
                         "ingredient": {
-                          "description": "Optional ingredient as one shell-quoted JSON object; repeat once per ingredient for up to 64. Fields: compound required; label, amount, unit, active, note optional. Do not pass an array.",
+                          "description": "Optional ingredient as one shell-quoted JSON object; repeat once per ingredient for up to 64. Fields: compound required; label, amount, unit, active, note optional. On update, omit to preserve saved ingredients; supplying --ingredient replaces the saved ingredient list. Keep unit as a compact token like \"mcg\"; put qualifiers such as \"DFE\" in note. Do not pass an array.",
                           "maxItems": 64,
                           "type": "array",
                           "items": {
