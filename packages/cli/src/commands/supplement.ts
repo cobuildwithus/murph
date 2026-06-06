@@ -152,7 +152,7 @@ export function registerSupplementCommands(
     examples: [
       {
         args: {
-          id: '<supplement-id>',
+          id: 'magnesium-glycinate',
         },
         description: 'Show one saved supplement product.',
         options: {
@@ -222,7 +222,9 @@ export function registerSupplementCommands(
       {
         description: 'Search labels for several supplement names in one hosted API call.',
         options: {
-          query: ['creatine', 'magnesium glycinate', 'blueprint bryan johnson'],
+          query: [
+            "'creatine' --query 'magnesium glycinate' --query 'blueprint bryan johnson'",
+          ],
           limit: 5,
         },
       },
@@ -264,7 +266,7 @@ export function registerSupplementCommands(
     examples: [
       {
         args: {
-          id: '<supplement-id>',
+          id: 'magnesium-glycinate',
         },
         description: 'Stop a supplement today.',
         options: {
@@ -273,7 +275,7 @@ export function registerSupplementCommands(
       },
       {
         args: {
-          id: '<supplement-id>',
+          id: 'magnesium-glycinate',
         },
         description: 'Stop a supplement on a specific calendar day.',
         options: {
@@ -331,7 +333,7 @@ export function registerSupplementCommands(
     examples: [
       {
         args: {
-          title: 'Magnesium glycinate',
+          title: "'Magnesium glycinate'",
         },
         description: 'Save a supplement product without a JSON payload file.',
         options: {

@@ -164,6 +164,11 @@ test('supplement save compact guidance teaches shell-safe ingredient JSON object
   }
 
   for (const rendered of [help, llms]) {
+    assert.match(rendered, /supplement save 'Magnesium glycinate'/u)
+    assert.doesNotMatch(
+      rendered,
+      /supplement save Magnesium glycinate --ingredient/u,
+    )
     assert.match(
       rendered,
       /--ingredient '\{"compound":"Magnesium","label":"Magnesium glycinate","amount":200,"unit":"mg","active":true\}'/u,

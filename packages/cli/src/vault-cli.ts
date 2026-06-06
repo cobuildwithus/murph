@@ -11,6 +11,7 @@ import {
   type CliVaultServices,
 } from './device-services.js'
 import { registerVaultCliCommandDescriptors } from './vault-cli-command-manifest.js'
+import { installVaultCliLlmsNormalizer } from './vault-cli-llms-normalizer.js'
 import { installVaultCliSchemaIndex } from './vault-cli-schema-index.js'
 import {
   createVaultCliVaultContext,
@@ -38,7 +39,8 @@ export function createVaultCliWithOptions(
       ? createDefaultVaultServices()
       : ensureCliVaultServices(input.services)
   const inboxServices = input.inboxServices ?? createDefaultInboxServices()
-  const cli = createVaultCliShell(input.commandName)
+  const commandName = input.commandName ?? 'vault-cli'
+  const cli = createVaultCliShell(commandName)
 
   registerVaultCliCommandDescriptors({
     cli,
@@ -46,6 +48,7 @@ export function createVaultCliWithOptions(
     inboxServices,
   })
   installVaultCliSchemaIndex(cli)
+  installVaultCliLlmsNormalizer(cli, commandName)
   installVaultCliVaultContext(
     cli,
     input.vaultContext ?? createVaultCliVaultContext(),
