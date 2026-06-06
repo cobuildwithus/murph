@@ -643,16 +643,18 @@ test("hosted platform-backed env keeps platform Telegram values when forwarded e
   );
 });
 
-test("hosted runtime config strips hosted web base URL from runtime env", () => {
+test("hosted runtime config strips hosted data API config from runtime env", () => {
   const platform = createHostedRuntimePlatformStub();
 
   const normalized = normalizeHostedAssistantRuntimeConfig(
     {
       platformEnv: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
+        MURPH_DATA_API_KEY: "data-api-secret",
       },
       userEnv: {
         HOSTED_WEB_BASE_URL: "https://evil-web.example.test",
+        MURPH_DATA_API_KEY: "evil-data-api-secret",
       },
     },
     platform,

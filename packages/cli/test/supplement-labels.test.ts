@@ -547,4 +547,24 @@ describe('searchSupplementLabelsBatch', () => {
     })
     assert.equal(fetchMock.mock.calls.length, 0)
   })
+
+  it('fails explicitly outside hosted assistant runtime', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('unexpected'))
+
+    await expect(
+      searchSupplementLabelsBatch(
+        {
+          queries: ['creatine'],
+        },
+        {
+          env: {},
+          fetchImpl: fetchMock,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'supplement_labels_api_hosted_only',
+      message: 'Supplement label search runs through the hosted Murph data API and is only available inside hosted assistant runtime.',
+    })
+    assert.equal(fetchMock.mock.calls.length, 0)
+  })
 })
