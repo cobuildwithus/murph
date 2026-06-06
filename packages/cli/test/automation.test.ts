@@ -72,6 +72,18 @@ async function readCommandSchema(
   ) as CommandSchemaEnvelope;
 }
 
+function optionDescription(schema: CommandSchemaEnvelope, optionName: string): string {
+  const property = schema.options.properties[optionName];
+  assert.equal(typeof property, "object", `missing ${optionName}`);
+  assert.notEqual(property, null, `missing ${optionName}`);
+
+  const description = (property as { description?: unknown }).description;
+  if (typeof description !== "string") {
+    assert.fail(`missing ${optionName} description`);
+  }
+  return description;
+}
+
 async function startAssistantCurrentRouteBridgeStub(input: {
   channel: string;
   deliveryTarget: string;
@@ -341,6 +353,24 @@ test("automation save schema exposes typed fields while automation import-json i
   assert.equal("input" in importJsonSchema.options.properties, true);
   assert.equal(importJsonSchema.options.required?.includes("input") ?? false, true);
   assert.deepEqual(importJsonSchema.args.required ?? [], []);
+});
+
+test("automation save guidance keeps examples shell-copyable", async () => {
+  const cli = Cli.create("vault-cli", {
+    description: "automation test cli",
+    version: "0.0.0-test",
+  });
+  registerAutomationCommands(cli);
+
+  const schema = await readCommandSchema(cli, ["automation", "save"]);
+  const help = await runRawInProcessCli(cli, ["automation", "save", "--help"]);
+  const llms = await runRawInProcessCli(cli, ["automation", "save", "--llms-full"]);
+
+  assert.match(optionDescription(schema, "tags"), /Do not comma-delimit multiple tags/u);
+  for (const rendered of [help, llms]) {
+    assert.match(rendered, /automation save 'Daily mobility'/u);
+    assert.match(rendered, /--instructions 'Ask about mobility work and summarize the next step\.'/u);
+  }
 });
 
 test("automation save injects the current private iMessage delivery route", async () => {

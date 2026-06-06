@@ -12,6 +12,7 @@ import {
   RECIPE_STATUSES,
   REGIMEN_KINDS,
   REGIMEN_STATUSES,
+  SUPPLEMENT_INGREDIENTS_MAX_ITEMS,
   VARIANT_SIGNIFICANCES,
   VARIANT_ZYGOSITIES,
   WORKOUT_FORMAT_STATUSES,
@@ -481,7 +482,9 @@ export const regimenUpsertPayloadSchema = withContractMetadata(
       brand: boundedString(1, 160).optional(),
       manufacturer: boundedString(1, 160).optional(),
       servingSize: boundedString(1, 160).optional(),
-      ingredients: uniqueArray(supplementIngredientPayloadSchema, { maxItems: 64 }).optional(),
+      ingredients: uniqueArray(supplementIngredientPayloadSchema, {
+        maxItems: SUPPLEMENT_INGREDIENTS_MAX_ITEMS,
+      }).optional(),
       relatedGoalIds: uniqueArray(goalIdSchema, { uniqueItems: true }).optional(),
       relatedConditionIds: uniqueArray(conditionIdSchema, { uniqueItems: true }).optional(),
       relatedRegimenIds: uniqueArray(regimenIdSchema, { uniqueItems: true }).optional(),

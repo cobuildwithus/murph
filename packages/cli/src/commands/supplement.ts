@@ -1,5 +1,5 @@
 import { Cli, z } from "incur"
-import { REGIMEN_STATUSES } from "@murphai/contracts"
+import { REGIMEN_STATUSES, SUPPLEMENT_INGREDIENTS_MAX_ITEMS } from "@murphai/contracts"
 import { requestIdFromOptions, withBaseOptions } from "@murphai/operator-config/command-helpers"
 import {
   healthListResultSchema,
@@ -152,7 +152,7 @@ export function registerSupplementCommands(
     examples: [
       {
         args: {
-          id: '<supplement-id>',
+          id: 'magnesium-glycinate',
         },
         description: 'Show one saved supplement product.',
         options: {
@@ -222,8 +222,10 @@ export function registerSupplementCommands(
       {
         description: 'Search labels for several supplement names in one hosted API call.',
         options: {
-          query: ['creatine', 'magnesium glycinate', 'blueprint bryan johnson'],
-          limit: 1,
+          query: [
+            "'creatine' --query 'magnesium glycinate' --query 'blueprint bryan johnson'",
+          ],
+          limit: 5,
         },
       },
     ],
@@ -264,7 +266,7 @@ export function registerSupplementCommands(
     examples: [
       {
         args: {
-          id: '<supplement-id>',
+          id: 'magnesium-glycinate',
         },
         description: 'Stop a supplement today.',
         options: {
@@ -273,7 +275,7 @@ export function registerSupplementCommands(
       },
       {
         args: {
-          id: '<supplement-id>',
+          id: 'magnesium-glycinate',
         },
         description: 'Stop a supplement on a specific calendar day.',
         options: {
@@ -331,14 +333,14 @@ export function registerSupplementCommands(
     examples: [
       {
         args: {
-          title: 'Magnesium glycinate',
+          title: "'Magnesium glycinate'",
         },
         description: 'Save a supplement product without a JSON payload file.',
         options: {
-          amount: 200,
-          compound: 'Magnesium',
+          ingredient: [
+            '\'{"compound":"Magnesium","label":"Magnesium glycinate","amount":200,"unit":"mg","active":true}\'',
+          ],
           schedule: 'nightly',
-          unit: 'mg',
           vault: './vault',
         },
       },
@@ -404,39 +406,13 @@ export function registerSupplementCommands(
         .max(160)
         .optional()
         .describe('Optional serving-size label.'),
-      compound: z
-        .string()
-        .min(1)
-        .max(160)
+      ingredient: z
+        .array(z.string().min(1))
+        .max(SUPPLEMENT_INGREDIENTS_MAX_ITEMS)
         .optional()
-        .describe('Optional primary ingredient or compound name.'),
-      ingredientLabel: z
-        .string()
-        .min(1)
-        .max(160)
-        .optional()
-        .describe('Optional ingredient label as it appears on the product.'),
-      amount: z
-        .number()
-        .nonnegative()
-        .optional()
-        .describe('Optional amount for the primary compound.'),
-      unit: z
-        .string()
-        .min(1)
-        .max(40)
-        .optional()
-        .describe('Optional unit for the primary compound amount.'),
-      ingredientActive: z
-        .boolean()
-        .optional()
-        .describe('Optional active flag for the primary compound ingredient.'),
-      note: z
-        .string()
-        .min(1)
-        .max(4000)
-        .optional()
-        .describe('Optional note for the primary compound. Requires --compound.'),
+        .describe(
+          `Optional ingredient as one shell-quoted JSON object; repeat once per ingredient for up to ${SUPPLEMENT_INGREDIENTS_MAX_ITEMS}. Fields: compound required; label, amount, unit, active, note optional. Do not pass an array.`,
+        ),
       relatedGoalId: repeatedRelationOptionSchema(
         'Optional related goal id. Repeat --related-goal-id for multiple values.',
       ),
@@ -450,16 +426,12 @@ export function registerSupplementCommands(
     output: supplementUpsertResultSchema,
     async run(context) {
       const saved = await services.core.saveSupplement({
-        amount: context.options.amount,
         brand: context.options.brand,
-        compound: context.options.compound,
         dose: context.options.dose,
         doseUnit: context.options.doseUnit,
         group: context.options.group,
-        ingredientActive: context.options.ingredientActive,
-        ingredientLabel: context.options.ingredientLabel,
+        ingredient: context.options.ingredient,
         manufacturer: context.options.manufacturer,
-        note: context.options.note,
         regimenId: context.options.id,
         relatedConditionId: context.options.relatedConditionId,
         relatedGoalId: context.options.relatedGoalId,
@@ -473,7 +445,6 @@ export function registerSupplementCommands(
         stoppedOn: context.options.stoppedOn,
         substance: context.options.substance,
         title: context.args.title,
-        unit: context.options.unit,
         vault: context.options.vault,
       })
 

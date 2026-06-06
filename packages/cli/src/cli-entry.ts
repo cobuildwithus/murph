@@ -310,11 +310,13 @@ async function servePlannedVaultCliInvocation(input: {
     const [
       { createVaultCliShell },
       { registerScopedVaultCliCommand },
+      { installVaultCliLlmsNormalizer },
       { installVaultCliSchemaIndex },
       { installVaultCliVaultContext },
     ] = await Promise.all([
       import('./vault-cli-shell.js'),
       import('./vault-cli-command-routing.js'),
+      import('./vault-cli-llms-normalizer.js'),
       import('./vault-cli-schema-index.js'),
       import('./vault-cli-vault-context.js'),
     ])
@@ -325,6 +327,7 @@ async function servePlannedVaultCliInvocation(input: {
       root: input.plan.root,
     })
     installVaultCliSchemaIndex(cli)
+    installVaultCliLlmsNormalizer(cli, input.programName)
     installVaultCliVaultContext(cli, input.vaultContext)
     await cli.serve(input.argv, input.serveOptions)
     return

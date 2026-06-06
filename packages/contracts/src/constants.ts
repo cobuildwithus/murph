@@ -156,6 +156,7 @@ export const ALLERGY_CRITICALITIES = Object.freeze(["low", "high", "unable_to_as
 export const REGIMEN_KINDS = Object.freeze(["medication", "supplement", "therapy", "habit"] as const);
 
 export const REGIMEN_STATUSES = Object.freeze(["active", "paused", "completed", "stopped"] as const);
+export const SUPPLEMENT_INGREDIENTS_MAX_ITEMS = 64;
 
 export const PROTOCOL_STATUSES = Object.freeze(["available", "archived"] as const);
 

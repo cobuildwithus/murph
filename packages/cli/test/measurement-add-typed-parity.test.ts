@@ -152,44 +152,6 @@ async function readCommandSchema(
   ) as CommandSchemaEnvelope
 }
 
-async function readMeasurementAddLlmExample(cli: Cli.Cli): Promise<string> {
-  const manifest = JSON.parse(
-    await runRawInProcessCli(cli, ['--llms-full', '--format', 'json', 'measurement']),
-  ) as unknown
-  if (!isRecord(manifest)) {
-    assert.fail('LLM manifest must be an object')
-  }
-  const commands = manifest.commands
-  if (!Array.isArray(commands)) {
-    assert.fail('LLM manifest commands must be an array')
-  }
-  const addCommand = commands.find(
-    (command): command is Record<string, unknown> =>
-      isRecord(command) && command.name === 'measurement add',
-  )
-  if (!isRecord(addCommand)) {
-    assert.fail('measurement add LLM command must exist')
-  }
-  const examples = addCommand.examples
-  if (!Array.isArray(examples)) {
-    assert.fail('measurement add LLM examples must be an array')
-  }
-  const groupedExample = examples.find(
-    (example): example is Record<string, unknown> =>
-      isRecord(example) &&
-      typeof example.command === 'string' &&
-      example.command.includes('1:side=right'),
-  )
-  if (!isRecord(groupedExample)) {
-    assert.fail('indexed grouped measurement example must exist')
-  }
-  const command = groupedExample.command
-  if (typeof command !== 'string') {
-    assert.fail('indexed grouped measurement example command must be a string')
-  }
-  return command
-}
-
 async function initVault(cli: Cli.Cli, vaultRoot: string) {
   const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
     'init',
@@ -225,19 +187,20 @@ test('measurement add schema exposes typed single-record and grouped-event field
   }
 })
 
-test('measurement add guidance surfaces show indexed grouped qualifiers and notes', async () => {
+test('measurement add guidance surfaces teach quoted metrics and indexed grouped qualifiers', async () => {
   const cli = createMeasurementCli()
   const help = await runRawInProcessCli(cli, ['measurement', 'add', '--help'])
   const schema = await readCommandSchema(cli, ['measurement', 'add'])
-  const llmExample = await readMeasurementAddLlmExample(cli)
+  const llms = await runRawInProcessCli(cli, ['measurement', 'add', '--llms-full'])
 
-  for (const rendered of [help, llmExample]) {
-    assert.match(rendered, /1:side=right/u)
-    assert.match(rendered, /2:posture=seated/u)
-    assert.match(rendered, /1:after coffee/u)
-    assert.match(rendered, /2:five quiet minutes/u)
+  for (const rendered of [help, llms]) {
+    assert.match(rendered, /--metric 'grip strength'/u)
+    assert.match(rendered, /--metric 'resting heart rate'/u)
+    assert.match(rendered, /Do not comma-delimit multiple metrics/u)
   }
 
+  assert.match(getOptionDescription(schema, 'metric'), /Shell-quote friendly names with spaces/u)
+  assert.match(getOptionDescription(schema, 'metric'), /Do not comma-delimit multiple metrics/u)
   assert.match(getOptionDescription(schema, 'qualifier'), /1:side=right/u)
   assert.match(getOptionDescription(schema, 'qualifier'), /2:posture=seated/u)
   assert.match(getOptionDescription(schema, 'measurementNote'), /1:after coffee/u)

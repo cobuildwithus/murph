@@ -150,6 +150,26 @@ test(
   },
 )
 
+test('meal add guidance teaches quoted repeatable ingredients', async () => {
+  const cli = createMealCli()
+  const schema = await readCommandSchema(cli, ['meal', 'add'])
+  const ingredientSchema = schema.options.properties.ingredient as {
+    description?: string
+  }
+  const help = await runRawInProcessCli(cli, ['meal', 'add', '--help'])
+  const llms = await runRawInProcessCli(cli, ['meal', 'add', '--llms-full'])
+
+  for (const rendered of [ingredientSchema.description ?? '', help, llms]) {
+    assert.match(rendered, /shell-quote values with spaces/u)
+    assert.match(rendered, /Do not comma-delimit multiple ingredients/u)
+  }
+
+  for (const rendered of [help, llms]) {
+    assert.match(rendered, /--note 'Eggs, toast, and coffee\.'/u)
+    assert.match(rendered, /--ingredient 'rolled oats'/u)
+  }
+})
+
 test('meal import-json schema exposes the structured payload escape hatch', async () => {
   const schema = await readCommandSchema(createMealCli(), ['meal', 'import-json'])
 

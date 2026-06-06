@@ -74,6 +74,18 @@ async function readCommandSchema(
   ) as CommandSchemaEnvelope;
 }
 
+function optionDescription(schema: CommandSchemaEnvelope, optionName: string): string {
+  const property = schema.options.properties[optionName];
+  assert.equal(typeof property, "object", `missing ${optionName}`);
+  assert.notEqual(property, null, `missing ${optionName}`);
+
+  const description = (property as { description?: unknown }).description;
+  if (typeof description !== "string") {
+    assert.fail(`missing ${optionName} description`);
+  }
+  return description;
+}
+
 function requireSavedPath(result: ScheduledLogSaveResult): string {
   if (!result.path) {
     throw new Error("Expected scheduled-log save result to include a relative path.");
@@ -154,8 +166,9 @@ test("scheduled-log save schema exposes typed parity fields while import-json re
   });
 });
 
-test("scheduled-log save help surfaces branch examples for workout and measurement actions", async () => {
+test("scheduled-log save guidance keeps branch examples shell-copyable", async () => {
   const cli = createScheduledLogCli();
+  const schema = await readCommandSchema(cli, ["scheduled-log", "save"]);
   const help = await runRawInProcessCli(cli, ["scheduled-log", "save", "--help"]);
   const llms = await runRawInProcessCli(cli, [
     "scheduled-log",
@@ -163,14 +176,18 @@ test("scheduled-log save help surfaces branch examples for workout and measureme
     "--llms-full",
   ]);
 
+  assert.match(optionDescription(schema, "workoutExercise"), /Shell-quote each semicolon-separated value/u);
+  assert.match(optionDescription(schema, "ingredient"), /Do not comma-delimit multiple ingredients/u);
+  assert.match(optionDescription(schema, "measurementMetric"), /keep the order aligned/u);
+
   for (const rendered of [help, llms]) {
     assert.match(
       rendered,
-      /Weekly strength template[\s\S]*--actionKind activity_session\.add[\s\S]*--workoutExercise order=1;name=Goblet Squat;mode=weight_reps[\s\S]*--workoutSet exercise=1;order=1;reps=10;weight=24;weightUnit=kg/u,
+      /scheduled-log save 'Weekly strength template'[\s\S]*--actionKind activity_session\.add[\s\S]*--scheduleCron '0 7 \* \* 1'[\s\S]*--workoutExercise 'order=1;name=Goblet Squat;mode=weight_reps'[\s\S]*--workoutSet 'exercise=1;order=1;reps=10;weight=24;weightUnit=kg'/u,
     );
     assert.match(
       rendered,
-      /Weekly weight check[\s\S]*--actionKind measurement\.add[\s\S]*--measurementMetric weight[\s\S]*--measurementQualifier fasting=true/u,
+      /scheduled-log save 'Weekly weight check'[\s\S]*--actionKind measurement\.add[\s\S]*--actionTitle 'Weight check'[\s\S]*--measurementMetric weight[\s\S]*--measurementQualifier fasting=true/u,
     );
   }
 });

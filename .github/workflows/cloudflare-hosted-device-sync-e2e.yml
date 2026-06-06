@@ -1,0 +1,118 @@
+name: Cloudflare Hosted Device Sync E2E
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/cloudflare-hosted-device-sync-e2e.yml"
+      - "Dockerfile.cloudflare-hosted-runner"
+      - "Dockerfile.cloudflare-hosted-runner-base"
+      - "Dockerfile.cloudflare-whisper-model"
+      - "package.json"
+      - "apps/cloudflare/**"
+      - "apps/web/app/(dashboard)/biomarkers/**"
+      - "apps/web/app/api/device-sync/**"
+      - "apps/web/app/api/internal/device-sync/**"
+      - "apps/web/app/api/settings/device-sync/**"
+      - "apps/web/app/device-sync/**"
+      - "apps/web/src/components/biomarkers/**"
+      - "apps/web/src/components/settings/hosted-device-sync-*.tsx"
+      - "apps/web/src/lib/device-sync/**"
+      - "apps/web/src/lib/health-commons/**"
+      - "apps/web/src/lib/hosted-orchestration/**"
+      - "apps/web/test/biomarker*"
+      - "apps/web/test/device-sync*"
+      - "apps/web/test/health-commons-biomarker*"
+      - "apps/web/test/hosted-device-sync*"
+      - "apps/web/test/support/**"
+      - "packages/assistant-runtime/**"
+      - "packages/cloudflare-hosted-control/**"
+      - "packages/contracts/**"
+      - "packages/core/**"
+      - "packages/device-syncd/**"
+      - "packages/health-metrics/**"
+      - "packages/health-commons/**"
+      - "packages/hosted-execution/**"
+      - "packages/hosted-local-harness/**"
+      - "packages/hosted-orchestrator-temporal/**"
+      - "packages/importers/**"
+      - "packages/query/**"
+      - "packages/vault-usecases/**"
+      - "render.yaml"
+      - "scripts/dev-hosted-local.ts"
+      - "scripts/hosted-local.ts"
+      - "scripts/setup-temporal-cli.sh"
+      - "scripts/temporal-dev-server.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The hosted local E2E harness runs `prisma db push` during setup, so this
+  # job needs a real loopback Postgres target rather than the unreachable
+  # build-only placeholder URL used by release/build verification lanes.
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test
+  HOSTED_DEVICE_ROUTING_INDEX_KEY: 0101010101010101010101010101010101010101010101010101010101010101
+  HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
+  HOSTED_MAILBOX_FINGERPRINT_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
+  NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
+  PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key
+
+jobs:
+  junction-wearable-direct-resource-replay:
+    name: Junction wearable direct-resource replay E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_DB: murph_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    concurrency:
+      group: cloudflare-hosted-device-sync-e2e-junction-wearable-${{ github.event.pull_request.number || github.ref || github.run_id }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Install/check Temporal CLI
+        run: pnpm temporal:cli:setup
+
+      - name: Run Junction wearable direct-resource replay hosted E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/cloudflare-hosted-device-sync-e2e
+          pnpm hosted-local e2e device-sync-junction-wearable-direct-resource-replay 2>&1 \
+            | tee .artifacts/cloudflare-hosted-device-sync-e2e/junction-wearable-direct-resource-replay.log
+
+      - name: Upload Junction wearable direct-resource replay E2E logs
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: cloudflare-hosted-device-sync-e2e-junction-wearable-direct-resource-replay-logs
+          path: |
+            .artifacts/cloudflare-hosted-device-sync-e2e/junction-wearable-direct-resource-replay.log
+            .artifacts/hosted-local/**/state.json
+          if-no-files-found: warn

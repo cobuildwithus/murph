@@ -30,6 +30,7 @@ type ProcessWithSqliteWarningFilterFlag = NodeJS.Process & {
 const mockedCliEntryModules = [
   "../src/vault-cli.js",
   "../src/vault-cli-command-routing.js",
+  "../src/vault-cli-llms-normalizer.js",
   "../src/vault-cli-schema-index.js",
   "../src/vault-cli-shell.js",
   "../src/vault-cli-vault-context.js",
@@ -44,6 +45,7 @@ function mockCliActionModules(input: {
   cli: {
     serve: ReturnType<typeof vi.fn>;
   };
+  installVaultCliLlmsNormalizer?: ReturnType<typeof vi.fn>;
   onInstallVaultCliVaultContext?: (context: Record<string, unknown>) => void;
   onCreateVaultCliWithOptions?: (input: Record<string, unknown>) => void;
   operatorConfigModule: Record<string, unknown>;
@@ -64,6 +66,10 @@ function mockCliActionModules(input: {
   vi.doMock("../src/vault-cli-command-routing.js", () => ({
     registerScopedVaultCliCommand:
       input.registerScopedVaultCliCommand ?? vi.fn(async () => undefined),
+  }));
+  vi.doMock("../src/vault-cli-llms-normalizer.js", () => ({
+    installVaultCliLlmsNormalizer:
+      input.installVaultCliLlmsNormalizer ?? vi.fn(),
   }));
   vi.doMock("../src/vault-cli-schema-index.js", () => ({
     installVaultCliSchemaIndex: vi.fn(),
@@ -255,6 +261,7 @@ test("runMurphCliAction lets Incur handle --version on the full CLI", async () =
 
 test("runMurphCliAction scopes known root commands without creating the full CLI", async () => {
   const serve = vi.fn(async () => undefined);
+  const installVaultCliLlmsNormalizer = vi.fn();
   const registerScopedVaultCliCommand = vi.fn(async () => undefined);
   const resolveDefaultVault = vi.fn(async () => "/vaults/default");
   const vaultContextRef: {
@@ -265,6 +272,7 @@ test("runMurphCliAction scopes known root commands without creating the full CLI
 
   mockCliActionModules({
     cli: { serve },
+    installVaultCliLlmsNormalizer,
     onCreateVaultCliWithOptions: () => {
       throw new Error("full CLI graph should not be created for a scoped device command");
     },
@@ -299,6 +307,14 @@ test("runMurphCliAction scopes known root commands without creating the full CLI
   ]);
   assert.ok(vaultContextRef.value);
   assert.equal(vaultContextRef.value.current, "/vaults/default");
+  assert.deepEqual(installVaultCliLlmsNormalizer.mock.calls, [
+    [
+      {
+        serve,
+      },
+      "vault-cli",
+    ],
+  ]);
   assert.deepEqual(serve.mock.calls, [
     [
       ["device", "account", "list"],

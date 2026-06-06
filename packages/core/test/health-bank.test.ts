@@ -4,6 +4,8 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test, vi } from "vitest";
 
+import { SUPPLEMENT_INGREDIENTS_MAX_ITEMS } from "@murphai/contracts";
+
 import { initializeVault, readJsonlRecords, VaultError } from "../src/index.ts";
 import { resolveAuditShardPath } from "../src/audit.ts";
 import { listWriteOperationMetadataPaths, readStoredWriteOperation } from "../src/operations/index.ts";
@@ -2548,6 +2550,22 @@ test("regimens support medication and supplement groups plus stop handling", asy
     vaultRoot,
     regimenId: supplement.record.entity.regimenId,
   });
+  await assert.rejects(
+    () =>
+      upsertRegimen({
+        vaultRoot,
+        title: "Too many ingredients",
+        kind: "supplement",
+        status: "active",
+        ingredients: Array.from({ length: SUPPLEMENT_INGREDIENTS_MAX_ITEMS + 1 }, (_, index) => ({
+          compound: `Ingredient ${index + 1}`,
+        })),
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === `ingredients must contain at most ${SUPPLEMENT_INGREDIENTS_MAX_ITEMS} ingredients.`,
+  );
   const regimenAuditRecords = await readJsonlRecords({
     vaultRoot,
     relativePath: patchedSupplement.auditPath,

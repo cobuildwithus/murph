@@ -3458,6 +3458,109 @@ test("Junction verifies Svix webhooks and maps data events to scalar resource jo
   assert.equal(typeof parsed.jobs[0]?.dedupeKey, "string");
 });
 
+test("Junction signed wearable webhooks create direct import jobs for Oura sleep and Garmin activity", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      summaryResources: ["activity", "sleep"],
+      timeseriesResources: [],
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+  const context = createJunctionJobContext({
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+  });
+
+  for (const testCase of [
+    {
+      data: {
+        data: {
+          bedtime_start: "2026-04-02T03:00:00.000Z",
+          bedtime_stop: "2026-04-02T11:00:00.000Z",
+          duration: 28_800,
+          total: 25_200,
+        },
+        id: "oura-sleep-1",
+        resource: "sleep",
+        source: { provider: "oura" },
+      },
+      eventType: "daily.data.sleep.created",
+      messageId: "msg_oura_sleep_fixture_1",
+      provider: "oura",
+      resource: "sleep",
+    },
+    {
+      data: {
+        date: "2026-04-02",
+        id: "garmin-activity-1",
+        resource: "activity",
+        source: { provider: "garmin" },
+        steps: 12_345,
+      },
+      eventType: "daily.data.activity.created",
+      messageId: "msg_garmin_activity_fixture_1",
+      provider: "garmin",
+      resource: "activity",
+    },
+  ] as const) {
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: testCase.eventType,
+        user_id: "junction-user-1",
+        client_user_id: "murph_blinded",
+        data: testCase.data,
+      },
+      messageId: testCase.messageId,
+      timestamp: "1775174400",
+    });
+
+    const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: "2026-04-03T00:00:00.000Z",
+    });
+
+    assert.equal(parsed.eventType, testCase.eventType);
+    assert.equal(parsed.acceptanceMode, "durable_webhook_work");
+    assert.equal(parsed.resourceCategory, "summary");
+    assert.equal(parsed.jobs.length, 1);
+    const job = parsed.jobs[0];
+    assert.equal(job?.kind, "resource");
+    assert.equal(job?.payload?.eventType, testCase.eventType);
+    assert.equal(job?.payload?.resource, testCase.resource);
+    assert.equal(job?.payload?.resourceCategory, "summary");
+    assert.equal(job?.payload?.sourceProviderSlug, testCase.provider);
+    assert.equal(typeof job?.payload?.webhookDataJson, "string");
+    assert.equal(String(job?.payload?.webhookDataJson).includes("junction-user-1"), false);
+    assert.equal(String(job?.payload?.webhookDataJson).includes("murph_blinded"), false);
+
+    await executeJunctionJob(
+      provider,
+      context,
+      createJob(job?.kind ?? "resource", job?.payload ?? {}),
+    );
+  }
+
+  assert.deepEqual(requests, []);
+  assert.equal(importedSnapshots.length, 2);
+  const providers = importedSnapshots.flatMap((snapshot) => {
+    const summaries = (snapshot as {
+      summaries?: Record<string, Array<{ sourceProviderSlug?: string }>>;
+    }).summaries ?? {};
+    return Object.values(summaries)
+      .flat()
+      .flatMap((record) => record.sourceProviderSlug ? [record.sourceProviderSlug] : []);
+  });
+  assert.deepEqual(providers.sort(), ["garmin", "oura"]);
+});
+
 test("Junction rejects webhooks with only a client_user_id and no Junction user_id", async () => {
   const provider = createJunctionProvider(
     async (input) => {

@@ -47,13 +47,23 @@ import {
   wakeHostedWorkerForLatestPendingWake,
 } from "./hosted-local-wake.js";
 import {
+  sanitizeHostedFailureText,
+  sanitizeHostedStatusForFailureLog,
   startHostedLocalDevHarness,
   type HostedLocalDevHarness,
 } from "./hosted-local-dev-harness.js";
 import {
   bindHostedActiveLinqHomeChat,
+  readHostedJunctionDeviceSyncReplayDrainStatus,
+  seedHostedJunctionDeviceSyncConnection,
+  seedHostedJunctionDeviceSyncReplay,
   seedHostedActiveLinqMember,
   seedHostedActiveMember,
+  type HostedJunctionDeviceSyncConnectionSeedInput,
+  type HostedJunctionDeviceSyncConnectionSeedResult,
+  type HostedJunctionDeviceSyncReplayDrainStatus,
+  type HostedJunctionDeviceSyncReplaySeedInput,
+  type HostedJunctionDeviceSyncReplaySeedResult,
   type HostedMailboxAppendForTestResponse,
 } from "#hosted-web-testing";
 
@@ -76,6 +86,12 @@ interface HostedActiveLinqMemberSeedArgs extends HostedActiveMemberSeedArgs {
   walletAddress?: string | null;
 }
 
+type HostedJunctionDeviceSyncReplaySeedArgs =
+  Omit<HostedJunctionDeviceSyncReplaySeedInput, "environment">;
+
+type HostedJunctionDeviceSyncConnectionSeedArgs =
+  Omit<HostedJunctionDeviceSyncConnectionSeedInput, "environment">;
+
 export interface HostedLocalFullStackScenario {
   assistantProviderRequests: HostedLocalAssistantProviderStubRequest[];
   bindActiveHostedLinqHomeChat(input: {
@@ -87,6 +103,9 @@ export interface HostedLocalFullStackScenario {
   runWake(
     wake: HostedExecutionWake,
     userId: string,
+    input?: {
+      timeoutMs?: number;
+    },
   ): Promise<{
     append: HostedMailboxAppendForTestResponse;
     wakeResult: HostedRuntimeEnsureProcessingResponse;
@@ -116,6 +135,16 @@ export interface HostedLocalFullStackScenario {
   buildFailureMessage(userId: string, summaryLines: readonly string[]): Promise<string>;
   seedActiveHostedLinqMember(input: HostedActiveLinqMemberSeedArgs): Promise<void>;
   seedActiveHostedMember(input: HostedActiveMemberSeedArgs): Promise<void>;
+  readJunctionDeviceSyncReplayDrainStatus(input: {
+    connectionId: string;
+    memberId: string;
+  }): Promise<HostedJunctionDeviceSyncReplayDrainStatus>;
+  seedJunctionDeviceSyncConnection(
+    input: HostedJunctionDeviceSyncConnectionSeedArgs,
+  ): Promise<HostedJunctionDeviceSyncConnectionSeedResult>;
+  seedJunctionDeviceSyncReplay(
+    input: HostedJunctionDeviceSyncReplaySeedArgs,
+  ): Promise<HostedJunctionDeviceSyncReplaySeedResult>;
 }
 
 export async function startHostedLocalFullStackScenario(input: {
@@ -256,18 +285,22 @@ export async function startHostedLocalFullStackScenario(input: {
     const scenarioHarness = harness;
     const scenarioRuntimeEnv = scenarioHarness.runtimeEnv;
     const seedEnvironment = input.seedEnvironment ?? scenarioRuntimeEnv;
+    const buildScenarioSeedEnvironment = (
+      overrides: NodeJS.ProcessEnv = {},
+    ): NodeJS.ProcessEnv => ({
+      ...seedEnvironment,
+      DATABASE_URL: localDatabaseUrl,
+      NODE_ENV: "test",
+      VITEST: "1",
+      ...overrides,
+    });
 
     return {
       assistantProviderRequests,
       bindActiveHostedLinqHomeChat: async (bindingInput) => {
         await bindHostedActiveLinqHomeChat({
           chatId: bindingInput.chatId,
-          environment: {
-            ...seedEnvironment,
-            DATABASE_URL: localDatabaseUrl,
-            NODE_ENV: "test",
-            VITEST: "1",
-          },
+          environment: buildScenarioSeedEnvironment(),
           memberId: bindingInput.memberId,
           recipientPhone: bindingInput.recipientPhone,
         });
@@ -288,10 +321,12 @@ export async function startHostedLocalFullStackScenario(input: {
         }));
         return [
           ...summaryLines,
-          ...(status ? [`hosted status: ${JSON.stringify(status)}`] : []),
+          ...(status
+            ? [`hosted status: ${JSON.stringify(sanitizeHostedStatusForFailureLog(status))}`]
+            : []),
           `assistant provider requests: ${JSON.stringify(assistantProviderRequestLog)}`,
-          `stdout tail: ${scenarioHarness.stdoutTail()}`,
-          `stderr tail: ${scenarioHarness.stderrTail()}`,
+          `stdout tail: ${sanitizeHostedFailureText(scenarioHarness.stdoutTail())}`,
+          `stderr tail: ${sanitizeHostedFailureText(scenarioHarness.stderrTail())}`,
         ].join("\n");
       },
       runtimeEnv: scenarioRuntimeEnv,
@@ -305,26 +340,17 @@ export async function startHostedLocalFullStackScenario(input: {
           assistantProviderStubState.queuedResponseTexts.push(trimmed);
         }
       },
-      runWake: async (wake, userId) =>
+      runWake: async (wake, userId, runInput) =>
         await appendHostedWakeAndWakeWorker({
-          environment: {
-            ...seedEnvironment,
-            DATABASE_URL: localDatabaseUrl,
-            NODE_ENV: "test",
-            VITEST: "1",
-          },
+          environment: buildScenarioSeedEnvironment(),
           harness: scenarioHarness,
+          timeoutMs: runInput?.timeoutMs,
           userId,
           wake,
         }),
       enqueueWake: async (wake, userId) =>
         await appendHostedWake({
-          environment: {
-            ...seedEnvironment,
-            DATABASE_URL: localDatabaseUrl,
-            NODE_ENV: "test",
-            VITEST: "1",
-          },
+          environment: buildScenarioSeedEnvironment(),
           harness: scenarioHarness,
           userId,
           wake,
@@ -333,13 +359,7 @@ export async function startHostedLocalFullStackScenario(input: {
       seedActiveHostedLinqMember: async (seedInput) => {
         await seedHostedActiveLinqMember({
           billingPlanCode: seedInput.billingPlanCode,
-          environment: {
-            ...seedEnvironment,
-            DATABASE_URL: localDatabaseUrl,
-            NODE_ENV: "test",
-            VITEST: "1",
-            ...(seedInput.environment ?? {}),
-          },
+          environment: buildScenarioSeedEnvironment(seedInput.environment),
           homePhone: seedInput.homePhone,
           memberId: seedInput.memberId,
           memberPhone: seedInput.memberPhone,
@@ -352,18 +372,38 @@ export async function startHostedLocalFullStackScenario(input: {
       seedActiveHostedMember: async (seedInput) => {
         await seedHostedActiveMember({
           billingPlanCode: seedInput.billingPlanCode,
-          environment: {
-            ...seedEnvironment,
-            DATABASE_URL: localDatabaseUrl,
-            NODE_ENV: "test",
-            VITEST: "1",
-            ...(seedInput.environment ?? {}),
-          },
+          environment: buildScenarioSeedEnvironment(seedInput.environment),
           memberId: seedInput.memberId,
           stripeCustomerId: seedInput.stripeCustomerId,
           stripeSubscriptionId: seedInput.stripeSubscriptionId,
         });
       },
+      readJunctionDeviceSyncReplayDrainStatus: async (drainInput) =>
+        await readHostedJunctionDeviceSyncReplayDrainStatus({
+          connectionId: drainInput.connectionId,
+          environment: buildScenarioSeedEnvironment(),
+          memberId: drainInput.memberId,
+        }),
+      seedJunctionDeviceSyncConnection: async (seedInput) =>
+        await seedHostedJunctionDeviceSyncConnection({
+          connectedAt: seedInput.connectedAt,
+          displayName: seedInput.displayName,
+          environment: buildScenarioSeedEnvironment(),
+          externalAccountId: seedInput.externalAccountId,
+          memberId: seedInput.memberId,
+          sources: seedInput.sources,
+        }),
+      seedJunctionDeviceSyncReplay: async (seedInput) =>
+        await seedHostedJunctionDeviceSyncReplay({
+          connectedAt: seedInput.connectedAt,
+          dirtyAt: seedInput.dirtyAt,
+          dirtyResources: seedInput.dirtyResources,
+          displayName: seedInput.displayName,
+          environment: buildScenarioSeedEnvironment(),
+          externalAccountId: seedInput.externalAccountId,
+          memberId: seedInput.memberId,
+          sources: seedInput.sources,
+        }),
       stop: async () => {
         await harness?.stop();
         harness = null;

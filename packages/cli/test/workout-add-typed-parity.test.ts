@@ -236,14 +236,17 @@ test('workout add schema exposes typed fields without raw input fallback', async
     optionDescription(schema, 'workoutMedia'),
     /Supported keys: kind, relativePath, mediaType, caption/u,
   )
+  assert.match(optionDescription(schema, 'workoutMedia'), /Shell-quote each semicolon-separated value/u)
   assert.match(
     optionDescription(schema, 'workoutExercise'),
     /Supported keys: name, order, sourceExerciseId, groupId, mode, unitOverride, note/u,
   )
+  assert.match(optionDescription(schema, 'workoutExercise'), /Shell-quote each semicolon-separated value/u)
   assert.match(
     optionDescription(schema, 'workoutSet'),
     /Supported keys: exercise, order, type, weightUnit, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg/u,
   )
+  assert.match(optionDescription(schema, 'workoutSet'), /Shell-quote each semicolon-separated value/u)
 })
 
 test('workout add and edit help teach compact media, exercise, and set examples', async () => {
@@ -254,17 +257,17 @@ test('workout add and edit help teach compact media, exercise, and set examples'
   const llmsFull = await runRawInProcessCli(cli, ['--llms-full'])
 
   for (const rendered of [addHelp, llmsFull]) {
-    assert.match(rendered, /Capture workout media plus multiple exercises and sets/u)
+    assert.match(rendered, /Capture workout media plus one structured exercise and set/u)
     assert.match(rendered, /raw\/workouts\/2026\/03\/upper\/bench\.jpg/u)
-    assert.match(rendered, /order=2;name=Ring row;mode=bodyweight/u)
-    assert.match(rendered, /exercise=2;order=1;type=normal;reps=10;bodyweightKg=82/u)
+    assert.match(rendered, /--workoutExercise 'order=1;name=Bench press;mode=weight_reps;unitOverride=lb'/u)
+    assert.match(rendered, /--workoutSet 'exercise=1;order=1;type=normal;reps=5;weight=185;weightUnit=lb'/u)
   }
 
   for (const rendered of [editHelp, llmsFull]) {
-    assert.match(rendered, /Replace workout media plus multiple exercises and sets/u)
+    assert.match(rendered, /Replace workout media plus one structured exercise and set/u)
     assert.match(rendered, /evt_01JQY2Z0R9Z5K6BT4CB4D9F4CA/u)
     assert.match(rendered, /raw\/workouts\/2026\/03\/upper\/bench\.jpg/u)
-    assert.match(rendered, /exercise=2;order=1;type=normal;reps=10;bodyweightKg=82/u)
+    assert.match(rendered, /--workoutSet 'exercise=1;order=1;type=normal;reps=5;weight=185;weightUnit=lb'/u)
   }
 })
 
@@ -273,12 +276,16 @@ test('workout add and edit LLM schemas expose compact supported keys', async () 
 
   const addSchema = await readLlmCommandSchema(cli, 'workout add')
   assert.match(optionDescription(addSchema, 'workoutMedia'), /Compact workoutMedia grammar/u)
+  assert.match(optionDescription(addSchema, 'workoutMedia'), /Shell-quote each semicolon-separated value/u)
   assert.match(optionDescription(addSchema, 'workoutExercise'), /Supported keys: name, order/u)
+  assert.match(optionDescription(addSchema, 'workoutExercise'), /Shell-quote each semicolon-separated value/u)
   assert.match(optionDescription(addSchema, 'workoutSet'), /bodyweightKg, assistanceKg, addedWeightKg/u)
 
   const editSchema = await readLlmCommandSchema(cli, 'workout edit')
   assert.match(optionDescription(editSchema, 'workoutMedia'), /compact workoutMedia grammar/u)
+  assert.match(optionDescription(editSchema, 'workoutMedia'), /Shell-quote each semicolon-separated value/u)
   assert.match(optionDescription(editSchema, 'workoutExercise'), /Supported keys: name, order/u)
+  assert.match(optionDescription(editSchema, 'workoutExercise'), /Shell-quote each semicolon-separated value/u)
   assert.match(optionDescription(editSchema, 'workoutSet'), /bodyweightKg, assistanceKg, addedWeightKg/u)
 })
 

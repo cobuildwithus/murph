@@ -135,12 +135,7 @@ export interface SupplementSaveInput extends CommandContext {
   brand?: string
   manufacturer?: string
   servingSize?: string
-  compound?: string
-  ingredientLabel?: string
-  amount?: number
-  unit?: string
-  ingredientActive?: boolean
-  note?: string
+  ingredient?: string[]
   relatedGoalId?: string[]
   relatedConditionId?: string[]
   relatedRegimenId?: string[]

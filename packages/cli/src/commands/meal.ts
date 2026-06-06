@@ -319,7 +319,7 @@ const mealAddTypedOptionShape = {
     .optional()
     .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
   ingredient: mealIngredientsSchema
-    .describe('Optional repeatable meal ingredient. Repeat --ingredient for each item.'),
+    .describe('Optional repeatable meal ingredient. Repeat --ingredient for each item; shell-quote values with spaces, for example --ingredient \'rolled oats\'. Do not comma-delimit multiple ingredients.'),
   nutritionCalories: z
     .number()
     .nonnegative()
@@ -455,16 +455,16 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
           description: 'Capture a simple meal note with one optional photo.',
           args: {},
           options: {
-            note: 'Eggs, toast, and coffee.',
+            note: "'Eggs, toast, and coffee.'",
             photo: './breakfast.jpg',
             vault: './vault',
           },
         },
         {
-          description: 'Capture a meal with typed ingredients and nutrition.',
+          description: 'Capture a meal with a typed ingredient and nutrition.',
           args: {},
           options: {
-            ingredient: ['rolled oats', 'blueberries'],
+            ingredient: ["'rolled oats'"],
             nutritionCalories: 390,
             nutritionProteinGrams: 15,
             nutritionCarbsGrams: 56,

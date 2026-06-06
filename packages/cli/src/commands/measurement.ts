@@ -242,15 +242,15 @@ export function registerMeasurementCommands(cli: Cli.Cli) {
     metric: z
       .array(z.string().min(1).max(120))
       .optional()
-      .describe('Measurement metric name or slug. Repeat --metric with --value and --unit for grouped measurements. Friendly names are normalized to kebab-case.'),
+      .describe('Measurement metric name or slug. Repeat --metric with --value and --unit for grouped measurements; keep the order aligned. Shell-quote friendly names with spaces. Do not comma-delimit multiple metrics.'),
     value: z
       .array(z.coerce.number())
       .optional()
-      .describe('Measurement numeric value. Repeat --value with --metric and --unit for grouped measurements.'),
+      .describe('Measurement numeric value. Repeat --value with --metric and --unit for grouped measurements; keep the order aligned.'),
     unit: z
       .array(z.string().min(1).max(64))
       .optional()
-      .describe('Measurement unit such as lb, kg, percent, ms, bpm, or mmol/L. Repeat --unit with --metric and --value for grouped measurements.'),
+      .describe('Measurement unit such as lb, kg, percent, ms, bpm, or mmol/L. Repeat --unit with --metric and --value for grouped measurements; keep the order aligned. Do not comma-delimit multiple units.'),
     qualifier: z
       .array(z.string().min(1))
       .optional()
@@ -307,22 +307,22 @@ export function registerMeasurementCommands(cli: Cli.Cli) {
         args: {},
         options: {
           vault: './vault',
-          metric: ['grip strength'],
+          metric: ["'grip strength'"],
           value: [97.2],
           unit: ['lb'],
           qualifier: ['side=right'],
         },
       },
       {
-        description: 'Record grouped grip and heart-rate measurements with indexed qualifiers and notes.',
+        description: 'Record one heart-rate measurement with a qualifier and note.',
         args: {},
         options: {
           vault: './vault',
-          metric: ['grip strength', 'resting heart rate'],
-          value: [97.2, 54],
-          unit: ['lb', 'bpm'],
-          qualifier: ['1:side=right', '2:posture=seated'],
-          measurementNote: ['1:after coffee', '2:five quiet minutes'],
+          metric: ["'resting heart rate'"],
+          value: [54],
+          unit: ['bpm'],
+          qualifier: ['posture=seated'],
+          measurementNote: ["'five quiet minutes'"],
         },
       },
     ],

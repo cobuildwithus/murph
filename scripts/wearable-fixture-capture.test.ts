@@ -5,8 +5,11 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  assertDeviceSyncJobsReadyForFixtureExport,
+  buildCaptureDeviceSyncEnv,
   buildSanitizedWearableFixtureCandidate,
   checkCaptureRequestHost,
+  parseDeviceSyncJobSummary,
 } from "./wearable-fixture-capture.ts";
 
 describe("buildSanitizedWearableFixtureCandidate", () => {
@@ -40,6 +43,7 @@ describe("buildSanitizedWearableFixtureCandidate", () => {
           measuredAt: "2026-05-10 14:00:00",
           startTimeEpochMs: Date.parse("2026-05-10T15:00:00.000Z"),
           endTimeEpochSeconds: Math.round(Date.parse("2026-05-10T16:00:00.000Z") / 1_000),
+          title: "unsafe-freeform-title",
           summaries: [
             {
               resourceType: "sleep",
@@ -103,6 +107,7 @@ describe("buildSanitizedWearableFixtureCandidate", () => {
       expect(serialized).not.toContain("2026-05-10 14:00:00");
       expect(serialized).not.toContain(String(Date.parse("2026-05-10T15:00:00.000Z")));
       expect(serialized).not.toContain(String(Math.round(Date.parse("2026-05-10T16:00:00.000Z") / 1_000)));
+      expect(serialized).not.toContain("unsafe-freeform-title");
       expect(serialized).not.toContain("Bearer secret");
       expect(serialized).not.toContain("+1 555 111 2222");
       expect(serialized).not.toContain("latitude");
@@ -116,6 +121,7 @@ describe("buildSanitizedWearableFixtureCandidate", () => {
       expect(serialized).toContain("\"sourceDeviceId\":\"fixture-sourcedeviceid-1\"");
       expect(serialized).toContain("\"client_user_id\":\"fixture-clientuserid-1\"");
       expect(serialized).toContain("\"owner_id\":\"fixture-ownerid-1\"");
+      expect(serialized).toContain("\"title\":\"fixture-title-1\"");
       expect(serialized).toContain("\"id\":\"fixture-id-1\"");
       expect(serialized).not.toMatch(/fixture-email-[0-9a-f]{10}/u);
       expect(candidate.rawArtifacts).toHaveLength(1);
@@ -130,10 +136,22 @@ describe("buildSanitizedWearableFixtureCandidate", () => {
 });
 
 describe("checkCaptureRequestHost", () => {
-  it("only allows the expected loopback host and rejects forwarded headers", () => {
+  it("allows equivalent loopback hosts and rejects forwarded headers", () => {
     expect(checkCaptureRequestHost({ host: "127.0.0.1:8799" }, "127.0.0.1:8799")).toEqual({
       allowed: true,
       reason: "ok",
+    });
+    expect(checkCaptureRequestHost({ host: "localhost:8799" }, "127.0.0.1:8799")).toEqual({
+      allowed: true,
+      reason: "ok",
+    });
+    expect(checkCaptureRequestHost({ host: "127.0.0.1:8799" }, "localhost:8799")).toEqual({
+      allowed: true,
+      reason: "ok",
+    });
+    expect(checkCaptureRequestHost({ host: "localhost:8800" }, "127.0.0.1:8799")).toEqual({
+      allowed: false,
+      reason: "unexpected_host",
     });
     expect(checkCaptureRequestHost({ host: "evil.example:8799" }, "127.0.0.1:8799")).toEqual({
       allowed: false,
@@ -151,6 +169,116 @@ describe("checkCaptureRequestHost", () => {
       allowed: false,
       reason: "forwarded_header",
     });
+  });
+});
+
+describe("buildCaptureDeviceSyncEnv", () => {
+  it("pins the local capture run to all wearable targets and allowed Junction resources", () => {
+    const result = buildCaptureDeviceSyncEnv({
+      env: {
+        DEVICE_SYNC_ALLOWED_RETURN_ORIGINS: "http://existing.local",
+        JUNCTION_PROVIDER_FILTER: "oura",
+        JUNCTION_SUMMARY_RESOURCES: "sleep",
+        JUNCTION_TIMESERIES_RESOURCES: "hrv",
+      },
+      origin: "http://127.0.0.1:8799",
+    });
+
+    expect(result.env.DEVICE_SYNC_ALLOWED_RETURN_ORIGINS?.split(",")).toEqual([
+      "http://existing.local",
+      "http://127.0.0.1:8799",
+      "http://localhost:8799",
+    ]);
+    expect(result.captureConfig.providerFilter).toEqual(["oura", "whoop_v2", "garmin"]);
+    expect(result.env.JUNCTION_PROVIDER_FILTER).toBe("oura,whoop_v2,garmin");
+    expect(result.captureConfig.summaryResources).toEqual(
+      expect.arrayContaining([
+        "activity",
+        "sleep",
+        "sleep_cycle",
+        "workouts",
+        "body",
+        "profile",
+        "meal",
+        "menstrual_cycle",
+      ]),
+    );
+    expect(result.captureConfig.timeseriesResources).toEqual(
+      expect.arrayContaining([
+        "steps",
+        "distance",
+        "calories_active",
+        "heartrate",
+        "hrv",
+        "respiratory_rate",
+        "blood_oxygen",
+        "stress_level",
+        "weight",
+      ]),
+    );
+    expect(result.env.JUNCTION_SUMMARY_RESOURCES).toBe(result.captureConfig.summaryResources.join(","));
+    expect(result.env.JUNCTION_TIMESERIES_RESOURCES).toBe(result.captureConfig.timeseriesResources.join(","));
+  });
+});
+
+describe("parseDeviceSyncJobSummary", () => {
+  it("reads queued/running/dead job counts from daemon health responses", () => {
+    expect(
+      parseDeviceSyncJobSummary({
+        ok: true,
+        summary: {
+          accountsTotal: 3,
+          accountsActive: 3,
+          jobsQueued: 1,
+          jobsRunning: 2,
+          jobsDead: 0,
+        },
+      }),
+    ).toEqual({
+      jobsQueued: 1,
+      jobsRunning: 2,
+      jobsDead: 0,
+    });
+  });
+
+  it("rejects malformed daemon health responses", () => {
+    expect(() => parseDeviceSyncJobSummary({ summary: { jobsQueued: -1, jobsRunning: 0, jobsDead: 0 } }))
+      .toThrow(/jobsQueued/u);
+    expect(() => parseDeviceSyncJobSummary({ ok: true })).toThrow(/summary/u);
+  });
+});
+
+describe("assertDeviceSyncJobsReadyForFixtureExport", () => {
+  it("allows exports only after jobs are idle and healthy", () => {
+    expect(() => assertDeviceSyncJobsReadyForFixtureExport({
+      idle: true,
+      timedOut: false,
+      summary: {
+        jobsDead: 0,
+        jobsQueued: 0,
+        jobsRunning: 0,
+      },
+    })).not.toThrow();
+
+    expect(() => assertDeviceSyncJobsReadyForFixtureExport({
+      idle: false,
+      timedOut: true,
+      summary: {
+        jobsDead: 0,
+        jobsQueued: 1,
+        jobsRunning: 0,
+      },
+    })).toThrow(/incomplete or dead/u);
+
+    expect(() => assertDeviceSyncJobsReadyForFixtureExport({
+      idle: true,
+      timedOut: false,
+      summary: {
+        jobsDead: 1,
+        jobsQueued: 0,
+        jobsRunning: 0,
+      },
+    })).toThrow(/dead=1/u);
   });
 });
 

@@ -709,7 +709,7 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
     examples: [
       {
         args: {
-          title: "Daily sauna",
+          title: "'Daily sauna'",
         },
         description: "Save a daily scheduled intervention log without a JSON payload.",
         options: {
@@ -724,35 +724,35 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
       },
       {
         args: {
-          title: "Weekly strength template",
+          title: "'Weekly strength template'",
         },
         description: "Save an activity scheduled log with a compact workout template.",
         options: {
           actionKind: "activity_session.add",
-          actionTitle: "Strength session",
+          actionTitle: "'Strength session'",
           activityType: "strength",
           durationMinutes: 45,
           scheduleKind: "cron",
-          scheduleCron: "0 7 * * 1",
-          workoutExercise: ["order=1;name=Goblet Squat;mode=weight_reps"],
-          workoutSet: ["exercise=1;order=1;reps=10;weight=24;weightUnit=kg"],
+          scheduleCron: "'0 7 * * 1'",
+          workoutExercise: ["'order=1;name=Goblet Squat;mode=weight_reps'"],
+          workoutSet: ["'exercise=1;order=1;reps=10;weight=24;weightUnit=kg'"],
           vault: "./vault",
         },
       },
       {
         args: {
-          title: "Weekly weight check",
+          title: "'Weekly weight check'",
         },
         description: "Save a measurement scheduled log with typed measurement entries.",
         options: {
           actionKind: "measurement.add",
-          actionTitle: "Weight check",
+          actionTitle: "'Weight check'",
           measurementMetric: ["weight"],
           measurementQualifier: ["fasting=true"],
           measurementUnit: ["kg"],
           measurementValue: [72.5],
           scheduleKind: "cron",
-          scheduleCron: "0 8 * * 1",
+          scheduleCron: "'0 8 * * 1'",
           vault: "./vault",
         },
       },
@@ -810,7 +810,7 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
       actionTag: z
         .array(z.string().regex(scheduledLogSlugPattern))
         .optional()
-        .describe("Optional action-local tag. Repeat --action-tag for multiple values."),
+        .describe("Optional action-local tag. Repeat --action-tag for multiple values. Do not comma-delimit multiple tags."),
       foodId: z
         .string()
         .min(1)
@@ -820,7 +820,7 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
       ingredient: z
         .array(z.string().min(1).max(4000))
         .optional()
-        .describe("Optional meal.add ingredient. Repeat --ingredient for multiple values."),
+        .describe("Optional meal.add ingredient. Repeat --ingredient for multiple values; shell-quote ingredients with spaces. Do not comma-delimit multiple ingredients."),
       nutritionCalories: z.number().nonnegative().optional().describe("Optional meal calorie total."),
       nutritionProteinGrams: z.number().nonnegative().optional().describe("Optional meal protein grams."),
       nutritionCarbsGrams: z.number().nonnegative().optional().describe("Optional meal carbohydrate grams."),
@@ -907,27 +907,27 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
       workoutMedia: z
         .array(z.string().min(1))
         .optional()
-        .describe("Workout media as kind=...;relativePath=... with optional mediaType/caption. Repeat --workout-media for multiple entries."),
+        .describe("Workout media as kind=...;relativePath=... with optional mediaType/caption. Shell-quote each semicolon-separated value. Repeat --workout-media for multiple entries."),
       workoutExercise: z
         .array(z.string().min(1))
         .optional()
-        .describe("Workout exercise as order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Repeat --workout-exercise for multiple exercises."),
+        .describe("Workout exercise as order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Repeat --workout-exercise for multiple exercises."),
       workoutSet: z
         .array(z.string().min(1))
         .optional()
-        .describe("Workout set as exercise=...;order=... plus optional type/reps/weight/weightUnit/durationSeconds/distanceMeters/rpe/bodyweightKg/assistanceKg/addedWeightKg. Repeat --workout-set for multiple sets."),
+        .describe("Workout set as exercise=...;order=... plus optional type/reps/weight/weightUnit/durationSeconds/distanceMeters/rpe/bodyweightKg/assistanceKg/addedWeightKg. Shell-quote each semicolon-separated value. Repeat --workout-set for multiple sets."),
       measurementMetric: z
         .array(z.string().regex(scheduledLogSlugPattern))
         .optional()
-        .describe("Measurement metric slug. Repeat with value/unit for multiple measurements."),
+        .describe("Measurement metric slug. Repeat --measurement-metric with --measurement-value and --measurement-unit for multiple measurements; keep the order aligned."),
       measurementValue: z
         .array(z.coerce.number())
         .optional()
-        .describe("Measurement numeric value. Repeat with metric/unit for multiple measurements."),
+        .describe("Measurement numeric value. Repeat --measurement-value with --measurement-metric and --measurement-unit for multiple measurements; keep the order aligned."),
       measurementUnit: z
         .array(z.string().min(1).max(64))
         .optional()
-        .describe("Measurement unit. Repeat with metric/value for multiple measurements."),
+        .describe("Measurement unit. Repeat --measurement-unit with --measurement-metric and --measurement-value for multiple measurements; keep the order aligned. Do not comma-delimit multiple units."),
       measurementQualifier: z
         .array(z.string().min(1))
         .optional()
@@ -945,7 +945,7 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
       tag: z
         .array(z.string().regex(scheduledLogSlugPattern))
         .optional()
-        .describe("Optional top-level scheduled log tag. Repeat --tag for multiple values."),
+        .describe("Optional top-level scheduled log tag. Repeat --tag for multiple values. Do not comma-delimit multiple tags."),
       body: z.string().max(40_000).optional().describe("Optional markdown body."),
     }),
     output: scheduledLogWriteResultSchema,

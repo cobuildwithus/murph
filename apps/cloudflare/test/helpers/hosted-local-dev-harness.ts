@@ -259,7 +259,7 @@ export async function startHostedLocalDevHarness(input: {
           if (hostedStatusHasCompletedWithError(status)) {
             throw new Error(formatFailure([
               `Hosted runner reported terminal error for ${userId}.`,
-              `last status: ${JSON.stringify(status)}`,
+              `last status: ${JSON.stringify(sanitizeHostedStatusForFailureLog(status))}`,
             ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
           }
 
@@ -303,7 +303,9 @@ export async function startHostedLocalDevHarness(input: {
 
         throw new Error(formatFailure([
           `Timed out waiting for hosted completion for ${userId}.`,
-          ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
+          ...(lastStatus
+            ? [`last status: ${JSON.stringify(sanitizeHostedStatusForFailureLog(lastStatus))}`]
+            : []),
         ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
       },
       waitForHostedIdle: async (
@@ -673,11 +675,75 @@ function buildAuthenticatedHeaders(
   return normalized;
 }
 
+export function sanitizeHostedStatusForFailureLog(status: HostedRunnerStatusResponse): unknown {
+  return sanitizeHostedFailureValue(status);
+}
+
+export function sanitizeHostedFailureText(value: string): string {
+  return value
+    .replace(
+      /"recentLogs"\s*:\s*\[[\s\S]*?\](?=\s*[,}])/giu,
+      "\"recentLogsPresent\":true",
+    )
+    .replace(
+      /"((?:snapshotRef|browserVaultReplicaRef|dataKeyEnvelope|keyEnvelope|cipherEnvelope))"\s*:\s*\{[\s\S]*?\}(?=\s*[,}])/giu,
+      (_, key: string) => `"${key}Present":true`,
+    )
+    .replace(
+      /"((?:snapshotRef|browserVaultReplicaRef|recentLogs|objectKey|keyId|rootKeyId|runtimeRootKeyId|dataKeyId|keyEnvelope|wrappedKey|webhookDataJson|cipherEnvelope))"\s*:\s*"(?:(?:\\.)|[^"\\])*"/giu,
+      (_, key: string) => `"${key}":"<redacted-hosted-ref>"`,
+    )
+    .replace(
+      /\b(snapshotRef|browserVaultReplicaRef|recentLogs|objectKey|keyId|rootKeyId|runtimeRootKeyId|dataKeyId|keyEnvelope|wrappedKey|webhookDataJson|cipherEnvelope)=\S+/giu,
+      (_, key: string) => `${key}=<redacted-hosted-ref>`,
+    );
+}
+
+function sanitizeHostedFailureValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeHostedFailureValue(item));
+  }
+
+  if (!value || typeof value !== "object") {
+    return typeof value === "string" ? sanitizeHostedFailureText(value) : value;
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (shouldOmitHostedFailureStatusKey(key)) {
+      if (child !== null && child !== undefined) {
+        sanitized[`${key}Present`] = true;
+      }
+      continue;
+    }
+
+    sanitized[key] = sanitizeHostedFailureValue(child);
+  }
+
+  return sanitized;
+}
+
+function shouldOmitHostedFailureStatusKey(key: string): boolean {
+  const normalized = key.replace(/[^a-z0-9]/giu, "").toLowerCase();
+  return normalized === "recentlogs"
+    || normalized === "snapshotref"
+    || normalized === "browservaultreplicaref"
+    || normalized.endsWith("objectkey")
+    || normalized.endsWith("keyenvelope")
+    || normalized.endsWith("wrappedkey")
+    || normalized.endsWith("keyjwk")
+    || normalized.endsWith("keyid")
+    || normalized.endsWith("rootkeyid")
+    || normalized.endsWith("datakeyid")
+    || normalized.includes("cipherenvelope")
+    || normalized.includes("webhookdatajson");
+}
+
 function formatFailure(lines: string[], stdout: string, stderr: string): string {
   return [
-    ...lines,
-    `stdout tail: ${tail(stdout)}`,
-    `stderr tail: ${tail(stderr)}`,
+    ...lines.map(sanitizeHostedFailureText),
+    `stdout tail: ${sanitizeHostedFailureText(tail(stdout))}`,
+    `stderr tail: ${sanitizeHostedFailureText(tail(stderr))}`,
   ].join("\n");
 }
 

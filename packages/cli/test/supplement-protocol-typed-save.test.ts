@@ -107,16 +107,22 @@ test('supplement and regimen save schemas expose typed fields while regimen JSON
     'brand',
     'manufacturer',
     'servingSize',
-    'compound',
-    'ingredientLabel',
-    'amount',
-    'unit',
-    'note',
+    'ingredient',
     'relatedGoalId',
     'relatedConditionId',
     'relatedRegimenId',
   ]) {
     assert.equal(field in supplementSave.options.properties, true, field)
+  }
+  for (const staleField of [
+    'compound',
+    'ingredientLabel',
+    'amount',
+    'unit',
+    'ingredientActive',
+    'note',
+  ]) {
+    assert.equal(staleField in supplementSave.options.properties, false, staleField)
   }
 
   const regimenSave = await readCommandSchema(cli, ['regimen', 'save'])
@@ -183,16 +189,8 @@ test('typed save commands write supplement and regimen records without JSON payl
       'LivOn Laboratories',
       '--serving-size',
       '1 packet',
-      '--compound',
-      'Vitamin C',
-      '--ingredient-label',
-      'Ascorbic acid',
-      '--amount',
-      '500',
-      '--unit',
-      'mg',
-      '--note',
-      'Use with breakfast.',
+      '--ingredient',
+      '{"compound":"Vitamin C","label":"Ascorbic acid","amount":500,"unit":"mg","note":"Use with breakfast."}',
       '--related-goal-id',
       'goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8',
       '--related-condition-id',

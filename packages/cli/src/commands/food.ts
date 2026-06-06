@@ -266,13 +266,13 @@ function createFoodSaveCommandConfig(services: VaultServices) {
     examples: [
       {
         args: {
-          title: 'Regular Acai Bowl',
+          title: "'Regular Acai Bowl'",
         },
         description: 'Save a remembered food without a JSON payload file.',
         options: {
-          alias: ['usual acai bowl'],
+          alias: ["'usual acai bowl'"],
           calories: 540,
-          serving: '1 bowl',
+          serving: "'1 bowl'",
           vault: './vault',
         },
       },
@@ -308,14 +308,14 @@ function createFoodSaveCommandConfig(services: VaultServices) {
         .optional()
         .describe('Optional nutrition provenance detail. Requires --nutrition-source.'),
       alias: repeatedTextOptionSchema(
-        'Optional alias. Repeat --alias for multiple values.',
+        'Optional alias. Repeat --alias for multiple values; shell-quote aliases with spaces. Do not comma-delimit multiple aliases.',
       ),
       ingredient: repeatedTextOptionSchema(
-        'Optional ingredient. Repeat --ingredient for multiple values.',
+        'Optional ingredient. Repeat --ingredient for multiple values; shell-quote ingredients with spaces. Do not comma-delimit multiple ingredients.',
         4000,
       ),
       tag: repeatedTextOptionSchema(
-        'Optional lowercase tag slug. Repeat --tag for multiple values.',
+        'Optional lowercase tag slug. Repeat --tag for multiple values. Do not comma-delimit multiple tags.',
       ),
       note: z.string().min(1).max(4000).optional().describe('Optional food note.'),
       attachedRegimenId: z
@@ -572,9 +572,9 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
       nutritionSource: nutritionProvenanceSourceSchema.optional().describe('Replace nutrition provenance source.'),
       nutritionConfidence: nutritionConfidenceLevelSchema.optional().describe('Replace nutrition provenance confidence.'),
       nutritionSourceDetail: z.string().min(1).max(240).optional().describe('Replace nutrition provenance detail.'),
-      alias: repeatedTextOptionSchema('Replace aliases. Repeat --alias for multiple values.'),
-      ingredient: repeatedTextOptionSchema('Replace ingredients. Repeat --ingredient for multiple values.', 4000),
-      tag: repeatedTextOptionSchema('Replace tags. Repeat --tag for multiple values.'),
+      alias: repeatedTextOptionSchema('Replace aliases. Repeat --alias for multiple values; shell-quote aliases with spaces. Do not comma-delimit multiple aliases.'),
+      ingredient: repeatedTextOptionSchema('Replace ingredients. Repeat --ingredient for multiple values; shell-quote ingredients with spaces. Do not comma-delimit multiple ingredients.', 4000),
+      tag: repeatedTextOptionSchema('Replace tags. Repeat --tag for multiple values. Do not comma-delimit multiple tags.'),
       note: z.string().min(1).max(4000).optional().describe('Replace food note.'),
       attachedRegimenId: z.array(regimenIdSchema).optional().describe('Replace attached regimen ids. Repeat --attached-regimen-id for multiple values.'),
       linkRelatedRegimenId: z.array(regimenIdSchema).optional().describe('Replace related regimen links. Repeat --link-related-regimen-id for multiple links.'),

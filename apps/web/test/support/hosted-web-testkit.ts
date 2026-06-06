@@ -1,7 +1,16 @@
 export {
   bindHostedActiveLinqHomeChat,
+  readHostedJunctionDeviceSyncReplayDrainStatus,
+  seedHostedJunctionDeviceSyncConnection,
+  seedHostedJunctionDeviceSyncReplay,
   seedHostedActiveLinqMember,
   seedHostedActiveMember,
+  type HostedJunctionDeviceSyncConnectionSeedInput,
+  type HostedJunctionDeviceSyncConnectionSeedResult,
+  type HostedJunctionDeviceSyncReplayDrainStatus,
+  type HostedJunctionDeviceSyncReplayDrainStatusInput,
+  type HostedJunctionDeviceSyncReplaySeedInput,
+  type HostedJunctionDeviceSyncReplaySeedResult,
 } from "./hosted-member-seeds";
 
 import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/contracts";

@@ -69,6 +69,7 @@ function makeSleepWindowCandidate(
     date: overrides.date,
     durationMinutes: overrides.durationMinutes,
     endAt: overrides.endAt ?? null,
+    externalRef: overrides.externalRef ?? null,
     nap: overrides.nap,
     occurredAt: overrides.occurredAt ?? null,
     paths: overrides.paths ?? [`/virtual/${overrides.candidateId}.jsonl`],
