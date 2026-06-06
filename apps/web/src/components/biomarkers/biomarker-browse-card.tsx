@@ -19,7 +19,7 @@ export interface BiomarkerBrowseCardProps {
   unit: string | null;
   summary: string | null;
   privateValue?: BiomarkerBrowsePrivateValue | null;
-  privateValueLoading?: boolean;
+  privateValueSyncing?: boolean;
   className?: string;
 }
 
@@ -29,7 +29,7 @@ export function BiomarkerBrowseCard({
   category,
   summary,
   privateValue,
-  privateValueLoading,
+  privateValueSyncing,
   className,
 }: BiomarkerBrowseCardProps) {
   return (
@@ -66,8 +66,10 @@ export function BiomarkerBrowseCard({
           <span className="font-serif text-2xl font-semibold tracking-tight text-foreground">
             {privateValue.valueLabel}{privateValue.unit ? ` ${displayUnit(privateValue.unit)}` : ""}
           </span>
-        ) : privateValueLoading ? (
-          <div className="h-8 w-24 animate-pulse rounded-md bg-muted/40" />
+        ) : privateValueSyncing ? (
+          <span className="font-mono text-[10px] tracking-[0.14em] text-muted-foreground">
+            Syncing...
+          </span>
         ) : (
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground/50">---</span>
         )}
