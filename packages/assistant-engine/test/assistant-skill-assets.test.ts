@@ -293,11 +293,14 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'invite product or brand names plus roughly how long they have taken each one or since when',
     )
-    expect(raw).toContain(
-      'Current supplements: save each current product with `vault-cli supplement save "<product title>" --status active --started-on <date> --format json`',
+    expect(raw).not.toContain(
+      'Current supplements: save each current product with',
     )
     expect(raw).toContain(
-      "use the current prompt's local date as the fallback `startedOn`",
+      'save every current supplement product through `vault-cli supplement save`',
+    )
+    expect(raw).toContain(
+      "use the current prompt's local date as fallback `startedOn`",
     )
     expect(raw).toContain(
       'Supplements: mention that they can send a photo of supplement bottles or labels if that is easier',
@@ -339,12 +342,18 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'call `send_progress_update` before reading the content or using file/import tools',
     )
-    expect(raw).toContain('Save useful onboarding answers as they arrive')
+    expect(raw).toContain('Persist useful answers as they arrive, not at the end')
+    expect(raw).toContain(
+      'Each fact goes to its best-fit canonical `vault-cli` surface',
+    )
+    expect(raw).toContain(
+      'Do not dump structured items into freeform memory',
+    )
     expect(raw).toContain(
       'before asking the next onboarding question',
     )
     expect(raw).toContain(
-      'Do not wait until all setup prompts are done',
+      'verify that every useful setup answer they supplied has already been persisted through the saving rules above',
     )
     const nameContextIndex = raw.indexOf(
       '2. Name and context. After the welcome',
@@ -587,20 +596,23 @@ describe('assistant skill assets', () => {
       'If they send PDFs or pasted lab results, handle them through normal attachment/message intake',
     )
     expect(raw).toContain(
-      'broad health context, movement/training context, protocols, experiments, dated age context, gender, pregnancy or nursing status, or interests go to memory; current supplements, medications, diagnosed conditions, and allergies go to structured records',
+      'Useful setup answers are persisted to their best-fit canonical surface as the user shares them',
     )
     expect(raw).toContain(
-      'movement/training context, fitness benchmarks, current protocols or experiments',
+      'Use a structured record whenever a typed `vault-cli` surface exists for the fact',
     )
     expect(raw).toContain(
-      'Age: save as dated Context memory using the current prompt\'s local date',
+      'fall back to Identity or Context memory only for facts with no structured home',
     )
-    expect(raw).toContain('User was 20 years old on 2026-02-01.')
-    expect(raw).toContain('Do not infer or store a birthday from age alone')
-    expect(raw).toContain('vault-cli regimen save "<medication name>" --kind medication --status active --format json')
-    expect(raw).toContain('vault-cli condition save "<condition title>" --clinical-status active --format json')
-    expect(raw).toContain('vault-cli allergy save "<allergy title>" --status active --format json')
-    expect(raw).toContain('Do not save this as a condition record')
+    expect(raw).toContain(
+      'preferred name, demographics, lifestyle context, interests, pregnancy or nursing status',
+    )
+    expect(raw).toContain(
+      "Save dated facts with the current prompt's local date rather than inferring a birthday or onset",
+    )
+    expect(raw).toContain(
+      'save soft "curious about sleep" mentions as Context memory unless the user framed a concrete goal',
+    )
     expect(raw).toContain(
       'high-level age/gender prompt, wearable/app checkpoint, movement/training prompt, current protocol/experiment prompt, supplement prompt, medical-context prompt, and blood-test prompt have been asked',
     )
@@ -630,18 +642,8 @@ describe('assistant skill assets', () => {
       'One question per turn. Keep each turn short: one paragraph and at most one question, except the movement/training context turn may include a compact examples list',
     )
     expect(raw).toContain(
-      'Useful setup answers are persisted canonically when the user shared them',
+      'If any useful answer has not been saved yet, save it through the same canonical vault commands before marking onboarding complete',
     )
-    expect(raw).toContain(
-      'vault-cli memory upsert "<identity memory>" --section Identity --format json',
-    )
-    expect(raw).toContain(
-      'vault-cli memory upsert "<context memory>" --section Context --format json',
-    )
-    expect(raw).toContain(
-      'vault-cli goal save "<goal title>" --status active --horizon ongoing --format json',
-    )
-    expect(raw).toContain('add `--domain <domain>` only when a clear domain exists')
     expect(raw).toContain(
       'After required canonical memory/goal writes succeed, mark onboarding complete',
     )

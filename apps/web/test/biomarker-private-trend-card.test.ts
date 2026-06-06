@@ -194,21 +194,21 @@ test("renders private trend values from the browser-vault selector", () => {
   assert.doesNotMatch(markup, /demo wearable/iu);
 });
 
-test("does not label glucose values with an unrelated sole wearable source", () => {
-  const biomarker = resolveHealthCommonsBiomarkerOverview("blood-glucose");
+test("does not label lab values with an unrelated sole wearable source", () => {
+  const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
   const metricRows = metricRowsForTest({
     biomarkerKey: biomarker.key,
-    metricKey: "glucose",
+    metricKey: "resting-heart-rate",
     rows: [
-      ["2026-04-23", 80],
-      ["2026-04-24", 79],
-      ["2026-04-25", 81],
-      ["2026-04-26", 78],
-      ["2026-04-27", 80],
+      ["2026-04-23", 56],
+      ["2026-04-24", 57],
+      ["2026-04-25", 55],
+      ["2026-04-26", 56],
+      ["2026-04-27", 57],
     ],
-    sourceLabel: "Comprehensive metabolic panel from Labcorp April blood result panel with glucose",
-    unit: "mg/dL",
+    sourceLabel: "clinic vitals from April annual exam",
+    unit: "bpm",
   });
 
   mocks.useBrowserVault.mockReturnValue({
@@ -242,10 +242,10 @@ test("does not label glucose values with an unrelated sole wearable source", () 
     createElement(BiomarkerPrivateTrendCard, { biomarker }),
   );
 
-  assert.match(markup, /Comprehensive Metabolic Panel From Labcorp April Blood Result Panel With Glucose/u);
+  assert.match(markup, /Clinic Vitals From April Annual Exam/u);
   assert.match(
     markup,
-    /title="Comprehensive Metabolic Panel From Labcorp April Blood Result Panel With Glucose · Apr 27"/u,
+    /title="Clinic Vitals From April Annual Exam · Apr 27"/u,
   );
   assert.match(markup, /class="[^"]*truncate[^"]*text-xs[^"]*"/u);
   assert.doesNotMatch(markup, /WHOOP/u);

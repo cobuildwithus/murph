@@ -87,7 +87,6 @@ describe("BiomarkerPage", () => {
     expect(source).not.toContain("./catalog");
 
     expect(generateStaticParams()).toEqual([
-      { biomarkerId: "blood-glucose" },
       { biomarkerId: "blood-oxygen-spo2" },
       { biomarkerId: "deep-sleep-minutes" },
       { biomarkerId: "estimated-vo2max" },
@@ -498,7 +497,6 @@ describe("BiomarkerPage", () => {
 
     const routeIds = listHealthCommonsBiomarkerRoutes(reader);
     expect(routeIds).toEqual(expect.arrayContaining([
-      "blood-glucose",
       "blood-oxygen-spo2",
       "deep-sleep-minutes",
       "estimated-vo2max",
@@ -506,6 +504,7 @@ describe("BiomarkerPage", () => {
       "rem-sleep-minutes",
       "resting-heart-rate",
     ]));
+    expect(routeIds).not.toContain("blood-glucose");
     expect(routeIds).not.toContain("incomplete-rhr-fixture");
     expect(routeIds).not.toContain("apolipoprotein-b");
     expect(routeIds).not.toContain("sleep-quality");
