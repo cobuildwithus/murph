@@ -212,7 +212,7 @@ Strong recommendations:
 - Reuse `makeNormalizedDeviceBatch()` and the helpers in `shared-normalization.ts`.
 - Retain unsupported-but-useful upstream sections as `snapshot-section:*` raw artifacts instead of silently discarding them.
 - Prefer existing event kinds such as `observation`, `sleep_session`, and `activity_session`.
-- Keep high-frequency provider timeseries raw unless a product surface has an explicit deep-inspection API.
+- Do not retain high-frequency provider timeseries as full raw sample arrays by default. Fetch only product-needed timeseries, reduce them to compact facts in memory, and persist only tiny evidence artifacts unless an explicit debug/deep-inspection feature proves the need for raw retention.
 - If you need a new metric family or raw/debug stream, update the compatibility matrix in the same patch.
 
 ### 5. Wire config, defaults, exports, and tests
@@ -241,7 +241,9 @@ normalizer-only assertions are useful, but they are not enough: the fixture must
 round-trip through `core.importDeviceBatch` so invalid observation grains,
 unsupported fields, dense sample leakage, and other core-contract drift fail in
 tests. Keep high-frequency timeseries as raw evidence unless an explicit compact
-summary or derived fact already fits the canonical device contract.
+tests. High-frequency provider timeseries should be dropped, treated as
+freshness hints, or reduced to compact summary/derived facts before persistence;
+full raw retention needs an explicit product/debug policy and matching tests.
 Committed provider fixtures and assertions must stay synthetic or fully
 redacted; never commit real provider tokens, account identifiers, raw private
 payload details, local paths, or direct user identifiers to satisfy this proof.
