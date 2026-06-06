@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { access, chmod, mkdir, mkdtemp, readFile, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -11,6 +11,7 @@ import {
 
 import { resolveHostedLocalDevConfig } from "./config.ts";
 import {
+  cloudflareDir,
   cloudflareDevVarsPath,
   DEFAULT_DATABASE_URL,
   DEFAULT_WEB_PORT,
@@ -160,6 +161,7 @@ const HOSTED_LOCAL_RUNNER_BUNDLE_ROOT = path.join(
   ".deploy",
   "runner-bundle",
 );
+const HOSTED_LOCAL_CLOUDFLARE_SOURCE_SNAPSHOT_DIR = "cloudflare-source";
 const HOSTED_LOCAL_CODEX_APP_SERVER_STUB_CONTAINER_COMMAND =
   "/app/.murph-hosted-local/codex-app-server-stub/codex";
 const HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BUNDLE_INSTALL_PATH = path.join(
@@ -168,6 +170,11 @@ const HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BUNDLE_INSTALL_PATH = path.join(
   "codex-app-server-stub",
   "codex",
 );
+
+type HostedLocalCloudflareSourceSnapshot = {
+  cloudflareAppDir: string;
+  workspaceRoot: string;
+};
 
 export interface HostedLocalProcessResidueOwnership {
   cloudflareWorker: boolean;
@@ -460,21 +467,6 @@ export async function startHostedLocalDevStack(input: {
         mode: 0o600,
       });
       await chmod(hostedLocalStateDevVarsPath, 0o600);
-      await writeFile(
-        workerConfigPath,
-        `${JSON.stringify(
-          buildWranglerLocalDevConfig(workerRuntimeEnv, {
-            configDir: path.dirname(workerConfigPath),
-          }),
-          null,
-          2,
-        )}\n`,
-        {
-          encoding: "utf8",
-          mode: 0o600,
-        },
-      );
-      await chmod(workerConfigPath, 0o600);
       if (shouldLinkGlobalCloudflareDevVars) {
         try {
           await rename(cloudflareDevVarsPath, workerDevVarsBackupPath);
@@ -582,6 +574,27 @@ export async function startHostedLocalDevStack(input: {
         containerReachableHost,
         rawVercelEnv,
       });
+      const cloudflareSourceSnapshot = await prepareHostedLocalCloudflareSourceSnapshot({
+        abortSignal: input.abortSignal,
+        tempDir,
+      });
+      await writeFile(
+        workerConfigPath,
+        `${JSON.stringify(
+          buildWranglerLocalDevConfig(workerRuntimeEnv, {
+            cloudflareAppDir: cloudflareSourceSnapshot.cloudflareAppDir,
+            configDir: path.dirname(workerConfigPath),
+            workspaceRoot: cloudflareSourceSnapshot.workspaceRoot,
+          }),
+          null,
+          2,
+        )}\n`,
+        {
+          encoding: "utf8",
+          mode: 0o600,
+        },
+      );
+      await chmod(workerConfigPath, 0o600);
 
       const runnerCleanupScope = resolvePreStartHostedRunnerContainerCleanupScope(initialEnv);
       await cleanupHostedRunnerContainers({
@@ -1260,6 +1273,71 @@ function requiresHostedLocalE2eIsolation(env: NodeJS.ProcessEnv): boolean {
 function shouldUseIsolatedDockerConfig(env: NodeJS.ProcessEnv): boolean {
   return requiresHostedLocalE2eIsolation(env)
     && env[HOSTED_LOCAL_PRESERVE_DOCKER_CONFIG_ENV]?.trim() !== "1";
+}
+
+async function prepareHostedLocalCloudflareSourceSnapshot(input: {
+  abortSignal: AbortSignal | undefined;
+  tempDir: string;
+}): Promise<HostedLocalCloudflareSourceSnapshot> {
+  const workspaceRoot = path.join(
+    input.tempDir,
+    HOSTED_LOCAL_CLOUDFLARE_SOURCE_SNAPSHOT_DIR,
+  );
+  const cloudflareAppDir = path.join(workspaceRoot, "apps", "cloudflare");
+
+  await rm(workspaceRoot, { force: true, recursive: true });
+  await mkdir(cloudflareAppDir, { recursive: true });
+  throwIfAbortSignalAborted(input.abortSignal);
+
+  await copyFile(
+    path.join(repoRoot, "Dockerfile.cloudflare-hosted-runner"),
+    path.join(workspaceRoot, "Dockerfile.cloudflare-hosted-runner"),
+  );
+  await copyFile(
+    path.join(cloudflareDir, "package.json"),
+    path.join(cloudflareAppDir, "package.json"),
+  );
+  await copyFile(
+    path.join(cloudflareDir, ".dockerignore"),
+    path.join(cloudflareAppDir, ".dockerignore"),
+  );
+  await cp(
+    path.join(cloudflareDir, "src"),
+    path.join(cloudflareAppDir, "src"),
+    { recursive: true },
+  );
+  throwIfAbortSignalAborted(input.abortSignal);
+
+  await mkdir(path.join(cloudflareAppDir, ".deploy"), { recursive: true });
+  await cp(
+    HOSTED_LOCAL_RUNNER_BUNDLE_ROOT,
+    path.join(cloudflareAppDir, ".deploy", "runner-bundle"),
+    { recursive: true },
+  );
+  await symlinkIfPresent(
+    path.join(repoRoot, "node_modules"),
+    path.join(workspaceRoot, "node_modules"),
+  );
+  await symlinkIfPresent(
+    path.join(cloudflareDir, "node_modules"),
+    path.join(cloudflareAppDir, "node_modules"),
+  );
+
+  return { cloudflareAppDir, workspaceRoot };
+}
+
+async function symlinkIfPresent(sourcePath: string, targetPath: string): Promise<void> {
+  try {
+    await access(sourcePath);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return;
+    }
+
+    throw error;
+  }
+
+  await symlink(sourcePath, targetPath, "dir");
 }
 
 async function prepareIsolatedDockerConfig(input: {

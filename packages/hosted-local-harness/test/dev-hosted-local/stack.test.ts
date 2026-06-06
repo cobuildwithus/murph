@@ -1,4 +1,4 @@
-import { access, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { access, copyFile, cp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Writable } from "node:stream";
 
@@ -220,6 +220,8 @@ vi.mock("node:fs/promises", () => ({
     throw error;
   }),
   chmod: vi.fn(async () => {}),
+  copyFile: vi.fn(async () => {}),
+  cp: vi.fn(async () => {}),
   mkdir: vi.fn(async () => {}),
   mkdtemp: vi.fn(async () => "/tmp/murph-dev-env-test"),
   readFile: vi.fn(async () => {
@@ -426,6 +428,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
 
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
@@ -520,6 +523,38 @@ describe("hosted local dev stack", () => {
         }),
         name: "setup",
       }),
+    );
+    expect(vi.mocked(copyFile)).toHaveBeenCalledWith(
+      expect.stringContaining("Dockerfile.cloudflare-hosted-runner"),
+      "/tmp/murph-dev-env-test/cloudflare-source/Dockerfile.cloudflare-hosted-runner",
+    );
+    expect(vi.mocked(copyFile)).toHaveBeenCalledWith(
+      expect.stringContaining("apps/cloudflare/package.json"),
+      "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare/package.json",
+    );
+    expect(vi.mocked(copyFile)).toHaveBeenCalledWith(
+      expect.stringContaining("apps/cloudflare/.dockerignore"),
+      "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare/.dockerignore",
+    );
+    expect(vi.mocked(cp)).toHaveBeenCalledWith(
+      expect.stringContaining("apps/cloudflare/src"),
+      "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare/src",
+      { recursive: true },
+    );
+    expect(vi.mocked(cp)).toHaveBeenCalledWith(
+      expect.stringContaining("apps/cloudflare/.deploy/runner-bundle"),
+      "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare/.deploy/runner-bundle",
+      { recursive: true },
+    );
+    expect(vi.mocked(environmentModule.buildWranglerLocalDevConfig)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      }),
+      {
+        cloudflareAppDir: "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare",
+        configDir: "/tmp/murph-dev-env-test",
+        workspaceRoot: "/tmp/murph-dev-env-test/cloudflare-source",
+      },
     );
     expect(vi.mocked(writeFile)).toHaveBeenCalledWith(
       "/tmp/murph-dev-env-test/cloudflare-worker.env",
