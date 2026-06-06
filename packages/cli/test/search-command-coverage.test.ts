@@ -378,7 +378,7 @@ test('search query omits optional repeatable filters when none are provided', as
         from: undefined,
         to: undefined,
         tags: undefined,
-        limit: 20,
+        limit: 10,
       })
 
       return {
@@ -424,7 +424,7 @@ test('search query omits optional repeatable filters when none are provided', as
     from: null,
     to: null,
     tags: [],
-    limit: 20,
+    limit: 10,
   })
 })
 
@@ -455,7 +455,7 @@ test('search query accepts matching positional and named text in the schema smok
         from: undefined,
         to: undefined,
         tags: undefined,
-        limit: 20,
+        limit: 10,
       })
 
       return {
@@ -570,7 +570,7 @@ test('timeline forwards repeatable filters and selective entry types', async () 
     kinds: [],
     streams: [],
     entryTypes: [],
-    limit: 50,
+    limit: 20,
   })
   assert.equal(requireData(defaultTimeline.envelope).items[0]?.id, 'entry_01')
   assert.equal('data' in (requireData(defaultTimeline.envelope).items[0] ?? {}), false)
@@ -584,7 +584,7 @@ test('timeline forwards repeatable filters and selective entry types', async () 
     includeEvents: true,
     includeAssessments: true,
     includeDailySampleSummaries: true,
-    limit: 50,
+    limit: 20,
   })
 
   const filteredTimeline = await runSearchCli<{

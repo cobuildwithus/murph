@@ -276,6 +276,12 @@ describe('assistant consumption lookup guidance', () => {
     expect(prompt).toContain(
       'When logging meals, supplements, workouts, activities, symptoms, body data, or lab results, recover the useful structure',
     )
+    expect(prompt).toContain(
+      'When using vault CLI search, query, timeline, list, knowledge, or Health Commons discovery commands, start with the smallest useful result set',
+    )
+    expect(prompt).toContain(
+      'Pass a higher limit only when the user asks for broad history or trends, the first page is ambiguous, or you need more evidence to answer accurately',
+    )
   })
 
   it('uses a concise decision rule for identifiable consumed products', () => {
@@ -566,7 +572,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '08bf7e6823a1fcb1354514ff99007dbc21a84fead07491cfdb5fbc61135dc5cf',
+      'f4fb452015524c9b308895d2a549d969e9119efe1c0a3d5ca99a710200464725',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

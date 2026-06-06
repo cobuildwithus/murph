@@ -203,7 +203,7 @@ export function registerSearchCommands(cli: Cli.Cli) {
         .int()
         .positive()
         .max(200)
-        .default(20)
+        .default(10)
         .describe('Maximum number of hits to return.'),
     }),
     examples: [
@@ -367,7 +367,7 @@ export function registerSearchCommands(cli: Cli.Cli) {
           .int()
           .positive()
           .max(500)
-          .default(50)
+          .default(20)
           .describe('Maximum number of timeline entries to return.'),
       }),
       examples: [

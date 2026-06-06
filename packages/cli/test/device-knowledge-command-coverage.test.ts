@@ -542,6 +542,7 @@ test('knowledge commands round-trip the registered CLI against a temp vault', as
   ])
   assert.equal(listed.exitCode, null)
   assert.equal(listed.envelope.ok, true)
+  assert.equal(listed.envelope.data.limit, 20)
   assert.equal(listed.envelope.data.pageCount, 1)
   assert.equal(listed.envelope.data.pages[0]?.slug, upserted.envelope.data.page.slug)
 

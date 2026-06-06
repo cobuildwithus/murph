@@ -2198,7 +2198,7 @@
                                   }
                                 },
                                 "limit": {
-                                  "default": 50,
+                                  "default": 10,
                                   "description": "Maximum number of public protocol variants to return.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
@@ -10252,7 +10252,7 @@
                           }
                         },
                         "limit": {
-                          "default": 20,
+                          "default": 10,
                           "description": "Maximum number of hits to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
@@ -10380,7 +10380,7 @@
                   }
                 },
                 "limit": {
-                  "default": 50,
+                  "default": 20,
                   "description": "Maximum number of timeline entries to return.",
                   "type": "integer",
                   "exclusiveMinimum": 0,
@@ -10495,6 +10495,13 @@
                           "description": "Optional status filter.",
                           "type": "string",
                           "minLength": 1
+                        },
+                        "limit": {
+                          "default": 20,
+                          "description": "Maximum number of knowledge pages to return.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 200
                         }
                       }
                     }
@@ -10525,7 +10532,8 @@
                           "minLength": 1
                         },
                         "limit": {
-                          "description": "Optional result limit. Defaults to 20 and is capped at 200.",
+                          "default": 10,
+                          "description": "Maximum number of knowledge search hits to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -12187,7 +12195,7 @@
                       "additionalProperties": false,
                       "properties": {
                         "limit": {
-                          "description": "Maximum label matches to return. Defaults to 5.",
+                          "description": "Maximum label matches to return. Defaults to 1.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 50
@@ -12220,7 +12228,7 @@
                           "description": "Supplement product, brand, or ingredient search text. Repeat --query for multiple values."
                         },
                         "limit": {
-                          "description": "Maximum label matches to return per query. Defaults to 5.",
+                          "description": "Maximum label matches to return per query. Defaults to 1.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 50
