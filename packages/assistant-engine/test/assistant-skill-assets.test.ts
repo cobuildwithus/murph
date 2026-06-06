@@ -286,9 +286,16 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'whether they are already trying any health protocols or experiments',
     )
+    expect(raw).not.toContain('outside supplements')
     expect(raw).toContain('mostly starting fresh')
     expect(raw).toContain(
       'invite product or brand names plus roughly how long they have taken each one or since when',
+    )
+    expect(raw).toContain(
+      'Current supplements: save each current product with `vault-cli supplement save "<product title>" --status active --started-on <date> --format json`',
+    )
+    expect(raw).toContain(
+      "use the current prompt's local date as the fallback `startedOn`",
     )
     expect(raw).toContain(
       'Supplements: mention that they can send a photo of supplement bottles or labels if that is easier',
@@ -304,13 +311,22 @@ describe('assistant skill assets', () => {
       'Default to `vault-cli supplement search-labels` for one supplement or `vault-cli supplement search-labels-batch` for several',
     )
     expect(raw).toContain(
-      'the label database covers many supplements but is not exhaustive',
+      'For batch lookup, pass one repeated `--query` flag per product; do not pass product names as positional arguments',
+    )
+    expect(raw).toContain(
+      'The label database covers many supplements but is not exhaustive',
     )
     expect(raw).toContain(
       'fall back to web search for products or ingredients it misses',
     )
     expect(raw).toContain(
       'Do not use a progress update for a quick memory save or a single follow-up question',
+    )
+    expect(raw).toContain(
+      'After lookup when useful, save every current supplement product through `vault-cli supplement save`',
+    )
+    expect(raw).toContain(
+      'ask one short follow-up for duration or start timing after the structured save or on the next onboarding turn',
     )
     expect(raw).toContain(
       'Make clear that PDFs or pasted results are welcome whenever the user wants to share them',
@@ -498,9 +514,42 @@ describe('assistant skill assets', () => {
       'Save useful movement/training context to Context memory',
     )
     expect(movementSection).not.toContain('```text')
-    expect(raw.slice(protocolsIndex, supplementsIndex)).not.toContain('```text')
+    const protocolsSection = raw.slice(protocolsIndex, supplementsIndex)
+    expect(protocolsSection).toContain(
+      'whether they are already trying any health protocols or experiments',
+    )
+    expect(protocolsSection).toContain('mostly starting fresh')
+    expect(protocolsSection).toContain('cold exposure')
+    expect(protocolsSection).toContain('sauna')
+    expect(protocolsSection).toContain('a new workout plan')
+    expect(protocolsSection).toContain('a diet pattern change')
+    expect(protocolsSection).toContain('a sleep routine change')
+    expect(protocolsSection).toContain('a recovery practice')
+    expect(protocolsSection).toContain('caffeine/alcohol timing')
+    const normalizedProtocolsSection = protocolsSection.toLowerCase()
+    expect(normalizedProtocolsSection).not.toContain('supplement')
+    const supplementExamplesExcludedFromProtocolStep = [
+      'magnesium',
+      'creatine',
+      'vitamin d',
+      'fish oil',
+      'omega-3',
+      'ashwagandha',
+      'protein powder',
+      'multivitamin',
+    ]
+    for (const supplementExample of supplementExamplesExcludedFromProtocolStep) {
+      expect(normalizedProtocolsSection).not.toContain(supplementExample)
+    }
+    expect(protocolsSection).not.toContain('```text')
     const supplementSection = raw.slice(supplementsIndex, bloodTestsIndex)
+    expect(supplementSection).toContain(
+      'When relevant, invite product or brand names plus roughly how long they have taken each one or since when',
+    )
     expect(supplementSection).toContain('Follow the supplement input affordance')
+    expect(supplementSection).toContain(
+      'The default lookup returns one match per query; pass an explicit higher limit only when the first result is ambiguous, generic, or missing likely product variants',
+    )
     expect(supplementSection).not.toContain('```text')
     expect(raw.slice(bloodTestsIndex, orientationIndex)).not.toContain('```text')
     expect(raw.match(/Do not use a fixed script for this turn/g)?.length).toBe(5)
@@ -521,6 +570,9 @@ describe('assistant skill assets', () => {
       'Ask follow-up questions about dosage only when the user asks to set up a specific experiment',
     )
     expect(raw).toContain(
+      'only if the supplement lookup does not already provide a usable serving, dose, or amount',
+    )
+    expect(raw).toContain(
       'Ask follow-up questions about protocol adherence only when the user asks to set up a specific experiment',
     )
     expect(raw).not.toContain('birth month plus year and gender')
@@ -529,10 +581,10 @@ describe('assistant skill assets', () => {
       'If they send PDFs or pasted lab results, handle them through normal attachment/message intake',
     )
     expect(raw).toContain(
-      'broad health context, movement/training context, supplements, protocols, experiments, dated age context, gender, or interests go to memory',
+      'broad health context, movement/training context, protocols, experiments, dated age context, gender, or interests go to memory; current supplements go to structured supplement records',
     )
     expect(raw).toContain(
-      'movement/training context, fitness benchmarks, supplement names and timing, current protocols or experiments',
+      'movement/training context, fitness benchmarks, current protocols or experiments',
     )
     expect(raw).toContain(
       'Age: save as dated Context memory using the current prompt\'s local date',
@@ -597,7 +649,6 @@ describe('assistant skill assets', () => {
     const rejectedPersistenceExpansions = [
       'narrowest matching `vault-cli` surface',
       'web lookup before saving an identifiable product',
-      'vault-cli supplement save',
       'vault-cli regimen save',
       'vault-cli blood-test save',
       'vault-cli protocol import-json',

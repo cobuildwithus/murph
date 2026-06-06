@@ -6,34 +6,25 @@ export const JUNCTION_DEFAULT_SUMMARY_RESOURCES = Object.freeze([
   "body",
 ] as const);
 
-export const JUNCTION_TIMESERIES_RESOURCE_POLICIES = Object.freeze([
-  { resource: "steps", retentionClass: "debug_temporary" },
-  { resource: "distance", retentionClass: "debug_temporary" },
-  { resource: "calories_active", retentionClass: "debug_temporary" },
-  { resource: "heartrate", retentionClass: "debug_temporary" },
-  { resource: "hrv", retentionClass: "debug_temporary" },
-  { resource: "respiratory_rate", retentionClass: "debug_temporary" },
-  { resource: "blood_oxygen", retentionClass: "debug_temporary" },
-  { resource: "stress_level", retentionClass: "debug_temporary" },
-  { resource: "weight", retentionClass: "provider_evidence" },
+export const JUNCTION_KNOWN_TIMESERIES_RESOURCES = Object.freeze([
+  "steps",
+  "distance",
+  "calories_active",
+  "heartrate",
+  "hrv",
+  "respiratory_rate",
+  "blood_oxygen",
+  "stress_level",
+  "weight",
 ] as const);
 
 export type JunctionTimeseriesResource =
-  (typeof JUNCTION_TIMESERIES_RESOURCE_POLICIES)[number]["resource"];
-export type JunctionTimeseriesRetentionClass =
-  (typeof JUNCTION_TIMESERIES_RESOURCE_POLICIES)[number]["retentionClass"];
-
-export interface JunctionTimeseriesRawArtifactMetadata extends Record<string, unknown> {
-  artifactClass: "dense_provider_timeseries" | "sparse_provider_timeseries";
-  provider: "junction";
-  resource: JunctionTimeseriesResource;
-  resourceCategory: "timeseries";
-  retentionClass: JunctionTimeseriesRetentionClass;
-}
+  (typeof JUNCTION_KNOWN_TIMESERIES_RESOURCES)[number];
 
 export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
-  ...JUNCTION_TIMESERIES_RESOURCE_POLICIES.map((policy) => policy.resource),
-]);
+  "blood_oxygen",
+  "stress_level",
+] as const);
 
 export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([] as const);
 
@@ -56,41 +47,6 @@ export const JUNCTION_ALLOWED_TIMESERIES_RESOURCES = Object.freeze([
   ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   ...JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
 ] as const);
-
-const JUNCTION_TIMESERIES_RESOURCE_POLICY_BY_RESOURCE: ReadonlyMap<
-  string,
-  (typeof JUNCTION_TIMESERIES_RESOURCE_POLICIES)[number]
-> = new Map(
-  JUNCTION_TIMESERIES_RESOURCE_POLICIES.map((policy) => [policy.resource, policy]),
-);
-
-export function readJunctionTimeseriesRawArtifactMetadata(
-  resource: string,
-): JunctionTimeseriesRawArtifactMetadata | null {
-  const normalized = normalizeJunctionResourceName(resource);
-  if (!normalized) {
-    return null;
-  }
-  const policy = JUNCTION_TIMESERIES_RESOURCE_POLICY_BY_RESOURCE.get(normalized);
-  if (!policy) {
-    return null;
-  }
-
-  return {
-    artifactClass: policy.retentionClass === "debug_temporary"
-      ? "dense_provider_timeseries"
-      : "sparse_provider_timeseries",
-    provider: "junction",
-    resource: policy.resource,
-    resourceCategory: "timeseries",
-    retentionClass: policy.retentionClass,
-  };
-}
-
-export function isJunctionDenseTimeseriesResource(resource: string): boolean {
-  return readJunctionTimeseriesRawArtifactMetadata(resource)?.artifactClass
-    === "dense_provider_timeseries";
-}
 
 export function normalizeJunctionRawIdentityKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]+/gu, "");

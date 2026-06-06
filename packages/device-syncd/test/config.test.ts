@@ -369,7 +369,7 @@ test("cloneSerializableConfiguredDeviceSyncProviderConfigs strips provider-only 
       clientId: "oura-client-id",
       clientSecret: "oura-client-secret",
       fetchImpl: fetch,
-      scopes: ["daily", "heartrate"],
+      scopes: ["daily", "spo2"],
       webhookVerificationToken: "verify-token-for-tests",
     },
     whoop: {
@@ -393,7 +393,7 @@ test("cloneSerializableConfiguredDeviceSyncProviderConfigs strips provider-only 
     oura: {
       clientId: "oura-client-id",
       clientSecret: "oura-client-secret",
-      scopes: ["daily", "heartrate"],
+      scopes: ["daily", "spo2"],
     },
     whoop: {
       clientId: "whoop-client-id",
@@ -539,7 +539,7 @@ test("parseSerializableConfiguredDeviceSyncProviderConfigs parses the hosted run
         reconcileDays: 7,
         reconcileIntervalMs: 7_200_000,
         requestTimeoutMs: 30_000,
-        scopes: ["daily", "heartrate"],
+        scopes: ["daily", "spo2"],
         webhookTimestampToleranceMs: 60_000,
       },
       whoop: {
@@ -578,7 +578,7 @@ test("parseSerializableConfiguredDeviceSyncProviderConfigs parses the hosted run
       reconcileDays: 7,
       reconcileIntervalMs: 7_200_000,
       requestTimeoutMs: 30_000,
-      scopes: ["daily", "heartrate"],
+      scopes: ["daily", "spo2"],
       webhookTimestampToleranceMs: 60_000,
     },
     whoop: {
@@ -896,7 +896,7 @@ test("readConfiguredOuraDeviceSyncProviderConfig trims scopes and parses integer
   const config = readConfiguredOuraDeviceSyncProviderConfig({
     OURA_CLIENT_ID: "oura-client-id",
     OURA_CLIENT_SECRET: "oura-client-secret",
-    OURA_SCOPES: " daily:read , heartrate:read,  ",
+    OURA_SCOPES: " daily:read , spo2:read,  ",
     OURA_BACKFILL_DAYS: "30",
     OURA_RECONCILE_DAYS: "7",
     OURA_RECONCILE_INTERVAL_MS: "60000",
@@ -909,7 +909,7 @@ test("readConfiguredOuraDeviceSyncProviderConfig trims scopes and parses integer
     clientSecret: "oura-client-secret",
     authBaseUrl: undefined,
     apiBaseUrl: undefined,
-    scopes: ["daily:read", "heartrate:read"],
+    scopes: ["daily:read", "spo2:read"],
     backfillDays: 30,
     reconcileDays: 7,
     reconcileIntervalMs: 60000,

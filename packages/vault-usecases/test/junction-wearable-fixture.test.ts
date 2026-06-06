@@ -80,6 +80,35 @@ describe("Junction wearable fixture testing helpers", () => {
     }
   });
 
+  it("does not replay dense timeseries artifacts that production no longer imports", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-fixture-"));
+    const fixturePath = path.join(tempRoot, "junction-wearables-hosted-smoke.json");
+
+    try {
+      const fixture = buildSafeFixture({ recordCount: 1 });
+      fixture.rawArtifacts.push({
+        content: [{
+          date: "2026-04-01",
+          sourceProviderSlug: "oura",
+          value: 58,
+        }],
+        relativePath: "hosted-smoke/oura/02-junction-timeseries-heartrate.json",
+      });
+      await writeFile(fixturePath, JSON.stringify(fixture), "utf8");
+
+      const plan = await buildJunctionWearableHostedReplayPlan({ fixturePath });
+      expect(plan.resources.map((resource) => [
+        resource.resourceCategory,
+        resource.resource,
+      ])).toEqual([["summary", "activity"]]);
+      expect(plan.dirtyResources.every((resource) =>
+        resource.resourceCategory !== "timeseries"
+      )).toBe(true);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it("rejects invalid hosted replay record limits", async () => {
     await expect(buildJunctionWearableHostedReplayPlan({
       fixturePath: "unused.json",

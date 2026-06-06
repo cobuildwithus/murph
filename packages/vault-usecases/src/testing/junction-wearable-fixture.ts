@@ -44,6 +44,8 @@ export const JUNCTION_WEARABLE_FIXTURE_SUMMARY_RESOURCES = Object.freeze([
 export const JUNCTION_WEARABLE_FIXTURE_TIMESERIES_RESOURCES = Object.freeze([
   ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
 ]);
+const JUNCTION_ALLOWED_SUMMARY_RESOURCE_NAMES: readonly string[] = JUNCTION_ALLOWED_SUMMARY_RESOURCES;
+const JUNCTION_ALLOWED_TIMESERIES_RESOURCE_NAMES: readonly string[] = JUNCTION_ALLOWED_TIMESERIES_RESOURCES;
 const DEFAULT_WEARABLE_TREND_DEFAULTS = {
   aggregation: "median",
   comparisonWindowDays: 30,
@@ -754,7 +756,7 @@ function buildHostedReplayRecordGroups(
   const groups = new Map<string, HostedReplayRecordGroup>();
   for (const artifact of fixture.artifacts) {
     const replayResource = hostedReplayResourceFromRelativePath(artifact.relativePath);
-    if (!replayResource) {
+    if (!replayResource || !isHostedReplayResourceAllowed(replayResource)) {
       continue;
     }
 
@@ -826,6 +828,15 @@ function hostedReplayResourceFromRelativePath(
   }
 
   return null;
+}
+
+function isHostedReplayResourceAllowed(input: {
+  resource: string;
+  resourceCategory: "summary" | "timeseries";
+}): boolean {
+  return input.resourceCategory === "summary"
+    ? JUNCTION_ALLOWED_SUMMARY_RESOURCE_NAMES.includes(input.resource)
+    : JUNCTION_ALLOWED_TIMESERIES_RESOURCE_NAMES.includes(input.resource);
 }
 
 function selectHostedReplayRecords(

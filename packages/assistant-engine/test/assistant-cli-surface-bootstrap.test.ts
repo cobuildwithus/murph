@@ -542,6 +542,43 @@ test('buildAssistantCliSurfaceContract renders required string option signatures
   assert.doesNotMatch(contract, /--freeform/u)
 })
 
+test('buildAssistantCliSurfaceContract renders required array options as repeated flags with hints', async () => {
+  const {
+    buildAssistantCliSurfaceContract,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  const contract = buildAssistantCliSurfaceContract({
+    commands: [
+      {
+        description: 'Search several supplement label queries.',
+        hint: 'Repeat --query for each supplement.',
+        name: 'supplement search-labels-batch',
+        schema: {
+          options: {
+            properties: {
+              query: {
+                items: {
+                  type: 'string',
+                },
+                type: 'array',
+              },
+            },
+            required: ['query'],
+          },
+        },
+      },
+    ],
+  })
+
+  assert.ok(contract)
+  assert.match(
+    contract,
+    /required repeat --query=string; hint Repeat --query for each supplement\./u,
+  )
+  assert.doesNotMatch(contract, /supplement\.\./u)
+  assert.doesNotMatch(contract, /--query=list/u)
+})
+
 test('buildAssistantCliSurfaceContract renders low-frequency families as bare command names', async () => {
   const {
     buildAssistantCliSurfaceContract,

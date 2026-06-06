@@ -137,6 +137,7 @@ test("Junction webhooks canonicalize resource aliases before category inference"
 
   const cases = [
     ["daily.data.heart_rate.created", "heartrate", "timeseries"],
+    ["daily.data.steps.created", "steps", "timeseries"],
     ["daily.data.body_weight.created", "weight", "timeseries"],
     ["daily.data.stress_level.created", "stress_level", "timeseries"],
     ["daily.data.sleep_cycle.created", "sleep_cycle", "summary"],
@@ -172,6 +173,9 @@ test("Junction webhooks canonicalize resource aliases before category inference"
     assert.ok(payload);
     assert.equal(payload.resource, resource);
     assert.equal(payload.resourceCategory, resourceCategory);
+    if (resourceCategory === "timeseries") {
+      assert.equal(Object.hasOwn(payload, "webhookDataJson"), false);
+    }
   }
 });
 
@@ -497,29 +501,33 @@ test("Junction REST diagnostics canonicalize resource aliases before allowlist c
       resource: "body_weight",
       canonicalResource: "weight",
       category: "timeseries",
+      configuredResource: false,
       path: /\/v2\/timeseries\/junction-user-1\/body_weight\/grouped/u,
     },
     {
       resource: "calories_active",
       canonicalResource: "calories_active",
       category: "timeseries",
+      configuredResource: false,
       path: /\/v2\/timeseries\/junction-user-1\/calories_active\/grouped/u,
     },
     {
       resource: "distance",
       canonicalResource: "distance",
       category: "timeseries",
+      configuredResource: false,
       path: /\/v2\/timeseries\/junction-user-1\/distance\/grouped/u,
     },
     {
       resource: "hypnogram",
       canonicalResource: "sleep_cycle",
       category: "summary",
+      configuredResource: true,
       path: /\/v2\/summary\/sleep_cycle\/junction-user-1/u,
     },
   ] as const;
 
-  for (const { resource, canonicalResource, category, path } of cases) {
+  for (const { resource, canonicalResource, category, configuredResource, path } of cases) {
     seenUrls.length = 0;
     const result = await probeRest({
       account: createAccount(),
@@ -532,7 +540,7 @@ test("Junction REST diagnostics canonicalize resource aliases before allowlist c
     const request = requireRecord(result.result.request);
     const url = seenUrls[0];
 
-    assert.equal(request.configuredResource, true);
+    assert.equal(request.configuredResource, configuredResource);
     assert.equal(request.resource, canonicalResource);
     assert.equal(request.resourceCategory, category);
     assert.ok(url);
@@ -540,7 +548,7 @@ test("Junction REST diagnostics canonicalize resource aliases before allowlist c
   }
 });
 
-test("Junction resource jobs re-infer category for canonicalized aliases", async () => {
+test("Junction resource jobs re-infer category for dropped canonicalized timeseries aliases", async () => {
   const seenUrls: string[] = [];
   const provider = createProvider(async (input) => {
     const url = readUrl(input);
@@ -556,20 +564,6 @@ test("Junction resource jobs re-infer category for canonicalized aliases", async
             body_weight: true,
           },
         }],
-      });
-    }
-
-    if (url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")) {
-      return createJsonResponse({
-        groups: {
-          withings: [{
-            data: [{
-              timestamp: "2026-04-02T07:15:00Z",
-              body_weight: 82.1,
-            }],
-            source: { provider: "withings", type: "scale" },
-          }],
-        },
       });
     }
 
@@ -594,8 +588,6 @@ test("Junction resource jobs re-infer category for canonicalized aliases", async
   );
 
   assert.equal(seenUrls.some((url) => url.includes("/v2/summary/weight/")), false);
-  assert.equal(seenUrls.some((url) => url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")), true);
-  assert.equal(importedSnapshots.length, 1);
-  const snapshot = importedSnapshots[0] as { timeseries?: Record<string, unknown[]> };
-  assert.equal(snapshot.timeseries?.weight?.length, 1);
+  assert.equal(seenUrls.some((url) => url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")), false);
+  assert.equal(importedSnapshots.length, 0);
 });

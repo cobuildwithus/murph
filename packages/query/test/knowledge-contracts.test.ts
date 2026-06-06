@@ -5,6 +5,7 @@ import {
   knowledgeGetResultSchema,
   knowledgeGraphSearchResultSchema,
   knowledgeIndexRebuildResultSchema,
+  knowledgeListResultSchema,
   knowledgeLintResultSchema,
   knowledgeLogTailResultSchema,
   knowledgePageReferenceSchema,
@@ -77,7 +78,7 @@ describe("knowledge contracts", () => {
     });
   });
 
-  it("parses the shared get, upsert, rebuild, log, and lint result shapes", () => {
+  it("parses the shared get, list, upsert, rebuild, log, and lint result shapes", () => {
     const page = {
       ...reference,
       body: "Example body.",
@@ -103,6 +104,17 @@ describe("knowledge contracts", () => {
         vault: "/vault",
       }).page,
     ).toEqual(reference);
+
+    expect(
+      knowledgeListResultSchema.parse({
+        limit: 20,
+        pageCount: 1,
+        pages: [reference],
+        pageType: "guide",
+        status: "published",
+        vault: "/vault",
+      }).pages,
+    ).toHaveLength(1);
 
     expect(
       knowledgeIndexRebuildResultSchema.parse({

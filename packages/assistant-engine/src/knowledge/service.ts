@@ -46,6 +46,8 @@ import {
 } from './documents.js'
 const DEFAULT_KNOWLEDGE_PAGE_TYPE = 'concept'
 const DEFAULT_KNOWLEDGE_STATUS = 'active'
+const DEFAULT_KNOWLEDGE_LIST_LIMIT = 20
+const MAX_KNOWLEDGE_LIST_LIMIT = 200
 const FORBIDDEN_KNOWLEDGE_SOURCE_ROOTS = ['derived', '.runtime', 'assistant-state'] as const
 const KNOWLEDGE_PROBLEM_SEVERITY_ORDER: Record<KnowledgeLintProblem['severity'], number> = {
   error: 0,
@@ -82,6 +84,7 @@ export interface KnowledgeListInput {
   vault: string
   pageType?: string | null
   status?: string | null
+  limit?: number | null
 }
 
 export interface KnowledgeSearchInput {
@@ -305,18 +308,32 @@ export async function listKnowledgePages(
 ): Promise<KnowledgeListResult> {
   const graph = await readDerivedKnowledgeGraph(input.vault)
   const filters = normalizeKnowledgeFilters(input)
+  const limit = normalizeKnowledgeListLimit(input.limit)
   const pages = graph.nodes
     .filter((node: DerivedKnowledgeNode) => matchesKnowledgeFilter(node.pageType, filters.pageType))
     .filter((node: DerivedKnowledgeNode) => matchesKnowledgeFilter(node.status, filters.status))
     .map(toKnowledgeMetadata)
+    .slice(0, limit)
 
   return {
+    limit,
     pageCount: pages.length,
     pageType: filters.pageType,
     pages,
     status: filters.status,
     vault: input.vault,
   }
+}
+
+function normalizeKnowledgeListLimit(limit: number | null | undefined): number {
+  if (!Number.isFinite(limit)) {
+    return DEFAULT_KNOWLEDGE_LIST_LIMIT
+  }
+
+  return Math.max(
+    1,
+    Math.min(MAX_KNOWLEDGE_LIST_LIMIT, Math.trunc(limit ?? DEFAULT_KNOWLEDGE_LIST_LIMIT)),
+  )
 }
 
 export async function getKnowledgePage(

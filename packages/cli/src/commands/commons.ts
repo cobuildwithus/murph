@@ -137,7 +137,7 @@ export function registerCommonsCommands(cli: Cli.Cli) {
         .int()
         .positive()
         .max(500)
-        .default(50)
+        .default(10)
         .describe("Maximum number of public protocol variants to return."),
     }),
     examples: [

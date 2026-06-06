@@ -1,5 +1,5 @@
 import { Cli, z } from "incur"
-import { REGIMEN_STATUSES, SUPPLEMENT_INGREDIENTS_MAX_ITEMS } from "@murphai/contracts"
+import { REGIMEN_STATUSES } from "@murphai/contracts"
 import { requestIdFromOptions, withBaseOptions } from "@murphai/operator-config/command-helpers"
 import {
   healthListResultSchema,
@@ -152,7 +152,7 @@ export function registerSupplementCommands(
     examples: [
       {
         args: {
-          id: 'magnesium-glycinate',
+          id: '<supplement-id>',
         },
         description: 'Show one saved supplement product.',
         options: {
@@ -187,7 +187,7 @@ export function registerSupplementCommands(
         },
         description: 'Search supplement labels by product or ingredient text.',
         options: {
-          limit: 5,
+          limit: 1,
         },
       },
     ],
@@ -199,7 +199,7 @@ export function registerSupplementCommands(
         .positive()
         .max(50)
         .optional()
-        .describe('Maximum label matches to return. Defaults to 5.'),
+        .describe('Maximum label matches to return. Defaults to 1.'),
       includeOffMarket: z
         .boolean()
         .optional()
@@ -222,10 +222,8 @@ export function registerSupplementCommands(
       {
         description: 'Search labels for several supplement names in one hosted API call.',
         options: {
-          query: [
-            "'creatine' --query 'magnesium glycinate' --query 'blueprint bryan johnson'",
-          ],
-          limit: 5,
+          query: ['creatine', 'magnesium glycinate', 'blueprint bryan johnson'],
+          limit: 1,
         },
       },
     ],
@@ -242,7 +240,7 @@ export function registerSupplementCommands(
         .positive()
         .max(50)
         .optional()
-        .describe('Maximum label matches to return per query. Defaults to 5.'),
+        .describe('Maximum label matches to return per query. Defaults to 1.'),
       includeOffMarket: z
         .boolean()
         .optional()
@@ -266,7 +264,7 @@ export function registerSupplementCommands(
     examples: [
       {
         args: {
-          id: 'magnesium-glycinate',
+          id: '<supplement-id>',
         },
         description: 'Stop a supplement today.',
         options: {
@@ -275,7 +273,7 @@ export function registerSupplementCommands(
       },
       {
         args: {
-          id: 'magnesium-glycinate',
+          id: '<supplement-id>',
         },
         description: 'Stop a supplement on a specific calendar day.',
         options: {
@@ -333,14 +331,14 @@ export function registerSupplementCommands(
     examples: [
       {
         args: {
-          title: "'Magnesium glycinate'",
+          title: 'Magnesium glycinate',
         },
         description: 'Save a supplement product without a JSON payload file.',
         options: {
-          ingredient: [
-            '\'{"compound":"Magnesium","label":"Magnesium glycinate","amount":200,"unit":"mg","active":true}\'',
-          ],
+          amount: 200,
+          compound: 'Magnesium',
           schedule: 'nightly',
+          unit: 'mg',
           vault: './vault',
         },
       },
@@ -406,13 +404,39 @@ export function registerSupplementCommands(
         .max(160)
         .optional()
         .describe('Optional serving-size label.'),
-      ingredient: z
-        .array(z.string().min(1))
-        .max(SUPPLEMENT_INGREDIENTS_MAX_ITEMS)
+      compound: z
+        .string()
+        .min(1)
+        .max(160)
         .optional()
-        .describe(
-          `Optional ingredient as one shell-quoted JSON object; repeat once per ingredient for up to ${SUPPLEMENT_INGREDIENTS_MAX_ITEMS}. Fields: compound required; label, amount, unit, active, note optional. Do not pass an array.`,
-        ),
+        .describe('Optional primary ingredient or compound name.'),
+      ingredientLabel: z
+        .string()
+        .min(1)
+        .max(160)
+        .optional()
+        .describe('Optional ingredient label as it appears on the product.'),
+      amount: z
+        .number()
+        .nonnegative()
+        .optional()
+        .describe('Optional amount for the primary compound.'),
+      unit: z
+        .string()
+        .min(1)
+        .max(40)
+        .optional()
+        .describe('Optional unit for the primary compound amount.'),
+      ingredientActive: z
+        .boolean()
+        .optional()
+        .describe('Optional active flag for the primary compound ingredient.'),
+      note: z
+        .string()
+        .min(1)
+        .max(4000)
+        .optional()
+        .describe('Optional note for the primary compound. Requires --compound.'),
       relatedGoalId: repeatedRelationOptionSchema(
         'Optional related goal id. Repeat --related-goal-id for multiple values.',
       ),
@@ -426,12 +450,16 @@ export function registerSupplementCommands(
     output: supplementUpsertResultSchema,
     async run(context) {
       const saved = await services.core.saveSupplement({
+        amount: context.options.amount,
         brand: context.options.brand,
+        compound: context.options.compound,
         dose: context.options.dose,
         doseUnit: context.options.doseUnit,
         group: context.options.group,
-        ingredient: context.options.ingredient,
+        ingredientActive: context.options.ingredientActive,
+        ingredientLabel: context.options.ingredientLabel,
         manufacturer: context.options.manufacturer,
+        note: context.options.note,
         regimenId: context.options.id,
         relatedConditionId: context.options.relatedConditionId,
         relatedGoalId: context.options.relatedGoalId,
@@ -445,6 +473,7 @@ export function registerSupplementCommands(
         stoppedOn: context.options.stoppedOn,
         substance: context.options.substance,
         title: context.args.title,
+        unit: context.options.unit,
         vault: context.options.vault,
       })
 

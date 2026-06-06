@@ -665,7 +665,7 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "sleep:sleep-1"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "session:session-1"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "workout:workout-1"));
-  assert.equal(payload.rawArtifacts?.filter((artifact) => artifact.role === "heartrate").length, 1);
+  assert.equal(payload.rawArtifacts?.filter((artifact) => artifact.role === "heartrate").length, 0);
   assert.ok(
     payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("deletion:workout:workout.deleted:")),
   );
@@ -880,6 +880,7 @@ test("prepareDeviceProviderSnapshotImport handles Oura string numerics through s
   );
   assert.ok(payload.events?.some((event) => event.fields?.metric === "hrv" && event.fields?.value === 41.2));
   assert.ok(payload.events?.some((event) => event.fields?.metric === "average-heart-rate" && event.fields?.value === 56));
+  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "heartrate"), false);
   assert.equal(payload.samples?.length ?? 0, 0);
 });
 
@@ -1815,7 +1816,7 @@ test("importDeviceProviderSnapshot uses the default Oura adapter registry", asyn
   assert.ok(calls[0]?.events?.some((event) => event.fields?.metric === "readiness-score"));
 });
 
-test("importDeviceProviderSnapshot imports Oura heart-rate raw artifacts once", async () => {
+test("importDeviceProviderSnapshot ignores legacy Oura heart-rate raw samples", async () => {
   const vaultRoot = await makeTempDirectory("murph-oura-heartrate-import");
   await coreRuntime.initializeVault({
     vaultRoot,
@@ -1850,11 +1851,41 @@ test("importDeviceProviderSnapshot imports Oura heart-rate raw artifacts once", 
 
   assert.equal(
     result.rawArtifacts.filter((artifact) => artifact.relativePath.endsWith("/01-heartrate.json")).length,
-    1,
+    0,
   );
 });
 
-test("prepareDeviceProviderSnapshotImport routes Junction floating timeseries entries through the closed day window", async () => {
+test("prepareDeviceProviderSnapshotImport does not retain legacy Oura heartrate-only snapshots", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "oura",
+    snapshot: {
+      accountId: "oura-user-1",
+      importedAt: "2026-03-16T12:00:00.000Z",
+      heartrate: [
+        {
+          timestamp: "2026-03-16T08:00:00.000Z",
+          bpm: 62,
+        },
+      ],
+      heartRate: [
+        {
+          timestamp: "2026-03-16T08:05:00.000Z",
+          bpm: 63,
+        },
+      ],
+    },
+  });
+
+  const rawArtifactText = JSON.stringify(payload.rawArtifacts ?? []);
+
+  assert.deepEqual(payload.events ?? [], []);
+  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "heartrate"), false);
+  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"), false);
+  assert.equal(rawArtifactText.includes("\"bpm\":62"), false);
+  assert.equal(rawArtifactText.includes("\"bpm\":63"), false);
+});
+
+test("prepareDeviceProviderSnapshotImport drops Junction floating raw-only timeseries entries", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",
     snapshot: {
@@ -1884,17 +1915,9 @@ test("prepareDeviceProviderSnapshotImport routes Junction floating timeseries en
   );
 
   assert.equal(weightEvent, undefined);
-  assert.ok(weightArtifact);
-  assert.deepEqual(weightArtifact.content, [
-    {
-      day: "2026-03-15",
-      source: {
-        provider: "apple-health",
-        type: "watch",
-      },
-      value: 72.4,
-    },
-  ]);
+  assert.equal(weightArtifact, undefined);
+  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"), false);
+  assert.doesNotMatch(JSON.stringify(payload.rawArtifacts ?? []), /72\.4|apple-health|device-1/u);
 });
 
 test("prepareDeviceProviderSnapshotImport strips direct Junction identities from raw-only resources", async () => {
@@ -2028,7 +2051,7 @@ test("prepareDeviceProviderSnapshotImport strips direct Junction identities from
   assert.match(rawArtifactText, /cycleDay/u);
 });
 
-test("importDeviceProviderSnapshot tags and prunes actual Junction dense timeseries while preserving weight", async () => {
+test("importDeviceProviderSnapshot keeps new Junction timeseries imports out of dense retention", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-dense-retention");
   await coreRuntime.initializeVault({
     createdAt: "2026-05-01T00:00:00.000Z",
@@ -2043,6 +2066,17 @@ test("importDeviceProviderSnapshot tags and prunes actual Junction dense timeser
         accountId: "junction-user-1",
         importedAt: "2026-05-01T00:00:00.000Z",
         timeseries: {
+          blood_oxygen: {
+            groups: {
+              oura: [{
+                data: [{
+                  timestamp: "2026-05-01T00:00:00.000Z",
+                  value: 96,
+                }],
+                source: { provider: "oura", type: "ring" },
+              }],
+            },
+          },
           heartrate: [
             {
               timestamp: "2026-05-01T00:00:00.000Z",
@@ -2067,56 +2101,44 @@ test("importDeviceProviderSnapshot tags and prunes actual Junction dense timeser
     await readFile(join(vaultRoot, result.manifestPath), "utf8"),
   ) as RawImportManifest;
   const rawManifestArtifacts = readRawArtifactProvenanceEntries(manifest);
-  const heartrateArtifact = rawManifestArtifacts.find(
-    (artifact) => artifact.role === "junction-timeseries-heartrate",
+  const compactBloodOxygenArtifact = rawManifestArtifacts.find(
+    (artifact) => artifact.role.startsWith("junction-timeseries-daily-blood-oxygen:"),
   );
-  const weightArtifact = rawManifestArtifacts.find(
-    (artifact) => artifact.role === "junction-timeseries-weight",
-  );
-  assert.ok(heartrateArtifact);
-  assert.ok(weightArtifact);
+  assert.ok(compactBloodOxygenArtifact);
+  assert.equal(rawManifestArtifacts.some((artifact) => artifact.role === "junction-timeseries-heartrate"), false);
+  assert.equal(rawManifestArtifacts.some((artifact) => artifact.role === "junction-timeseries-weight"), false);
   const metadataByRole = new Map(
     rawManifestArtifacts.map((artifact) => [
       artifact.role,
       artifact.metadata,
     ]),
   );
-  assert.deepEqual(metadataByRole.get("junction-timeseries-heartrate"), {
-    artifactClass: "dense_provider_timeseries",
+  assert.deepEqual(metadataByRole.get(compactBloodOxygenArtifact.role), {
+    artifactClass: "compact_provider_timeseries_aggregate",
     provider: "junction",
-    resource: "heartrate",
-    resourceCategory: "timeseries",
-    retentionClass: "debug_temporary",
-  });
-  assert.deepEqual(metadataByRole.get("junction-timeseries-weight"), {
-    artifactClass: "sparse_provider_timeseries",
-    provider: "junction",
-    resource: "weight",
-    resourceCategory: "timeseries",
+    resource: "blood_oxygen",
+    resourceCategory: "timeseries_daily_aggregate",
     retentionClass: "provider_evidence",
   });
 
   const detection = await coreRuntime.detectWearableStorageMigrationCandidates({
+    includeRecentDenseRaw: true,
     now: new Date("2026-05-09T00:00:00.000Z"),
     vaultRoot,
   });
-  assert.equal(detection.denseProviderRawTimeseriesCount, 1);
-  assert.equal(detection.retentionEligibleDenseProviderRawTimeseriesCount, 1);
+  assert.equal(detection.denseProviderRawTimeseriesCount, 0);
+  assert.equal(detection.retentionEligibleDenseProviderRawTimeseriesCount, 0);
 
   const pruneResult = await coreRuntime.pruneWearableDenseRawTimeseries({
     maxFiles: 5,
     now: new Date("2026-05-09T00:00:00.000Z"),
     vaultRoot,
   });
-  assert.equal(pruneResult.tombstonedDenseRawArtifactCount, 1);
+  assert.equal(pruneResult.tombstonedDenseRawArtifactCount, 0);
 
-  assert.match(
-    await readFile(join(vaultRoot, heartrateArtifact.relativePath), "utf8"),
-    /wearable\.dense_provider_timeseries_pruned\.v1/u,
-  );
-  const weightRawText = await readFile(join(vaultRoot, weightArtifact.relativePath), "utf8");
-  assert.match(weightRawText, /72\.4/u);
-  assert.doesNotMatch(weightRawText, /dense_provider_timeseries_pruned/u);
+  const compactRawText = await readFile(join(vaultRoot, compactBloodOxygenArtifact.relativePath), "utf8");
+  assert.match(compactRawText, /"meanValue":96/u);
+  assert.doesNotMatch(compactRawText, /dense_provider_timeseries_pruned|70|72\.4/u);
 });
 
 test("importDeviceProviderSnapshot delegates normalized device batches to core", async () => {

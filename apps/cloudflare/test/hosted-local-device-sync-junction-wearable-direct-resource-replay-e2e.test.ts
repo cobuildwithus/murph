@@ -54,6 +54,7 @@ const junctionWebhookSecret = "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==";
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
+const fixtureTimeseriesResourceNames: readonly string[] = JUNCTION_WEARABLE_FIXTURE_TIMESERIES_RESOURCES;
 const textDecoder = new TextDecoder();
 
 let plan: JunctionWearableHostedReplayPlan | null = null;
@@ -127,6 +128,17 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       typeof resource.payload.eventType === "string"
       && resource.payload.eventType.startsWith("daily.data.")
     )).toBe(true);
+    const replayedTimeseriesResources = replayPlan.resources
+      .filter((resource) => resource.resourceCategory === "timeseries")
+      .map((resource) => resource.resource);
+    expect(replayedTimeseriesResources.every((resource) =>
+      fixtureTimeseriesResourceNames.includes(resource)
+    )).toBe(true);
+    expect(replayedTimeseriesResources).not.toEqual(expect.arrayContaining([
+      "heartrate",
+      "hrv",
+      "respiratory_rate",
+    ]));
     expect(replayPlan.sources.map((source) => source.sourceProviderSlug).sort()).toEqual([
       "garmin",
       "oura",
@@ -136,7 +148,6 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     expect(requireReplayResource("garmin", "summary", "activity").recordCount).toBeGreaterThanOrEqual(5);
     expect(requireReplayResource("garmin", "summary", "sleep").recordCount).toBeGreaterThanOrEqual(5);
     expect(requireReplayResource("oura", "summary", "sleep").recordCount).toBeGreaterThanOrEqual(5);
-    expect(requireReplayResource("oura", "timeseries", "heartrate").recordCount).toBeGreaterThanOrEqual(5);
     expect(requireReplayResource("whoop_v2", "summary", "activity").recordCount).toBeGreaterThanOrEqual(5);
     expect(requireReplayResource("whoop_v2", "summary", "sleep").recordCount).toBeGreaterThanOrEqual(5);
   });
@@ -238,8 +249,8 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     });
 
     expect(signedSummary.metrics.rowCount).toBeGreaterThan(0);
+    expect(signedSummary.metrics.metricRowsByKey.steps ?? 0).toBeGreaterThan(0);
     expect(requireSourceHealthFromSummary(signedSummary, "oura").sleepNights).toBeGreaterThan(0);
-    expect(requireSourceHealthFromSummary(signedSummary, "garmin").activityDays).toBeGreaterThan(0);
   }, 540_000);
 
   it("imports direct-resource replay jobs through hosted device-sync and publishes /biomarkers data", async () => {

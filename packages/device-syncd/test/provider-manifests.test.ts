@@ -93,6 +93,19 @@ describe("deviceSyncProviderManifests", () => {
     expect(config).not.toHaveProperty("baseUrl");
   });
 
+  it("accepts stale Junction dense timeseries env overrides without enabling dense fetches", () => {
+    const configs = readConfiguredDeviceSyncProviderConfigs({
+      JUNCTION_API_KEY: "sk_us_test_manifest",
+      JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+      JUNCTION_ENV: "sandbox",
+      JUNCTION_REGION: "us",
+      JUNCTION_TIMESERIES_RESOURCES: "steps,heart_rate",
+    });
+
+    expect(configs.junction?.timeseriesResources).toEqual(["steps", "heart_rate"]);
+    expect(() => createConfiguredDeviceSyncProvidersFromConfigs(configs)).not.toThrow();
+  });
+
   it("resolves Junction canonical base URLs from environment and region", () => {
     const profiles = [
       {
@@ -215,7 +228,7 @@ describe("deviceSyncProviderManifests", () => {
         webhookTimestampToleranceMs: 300_000,
         providerFilter: ["oura", "withings"],
         summaryResources: ["profile", "activity"],
-        timeseriesResources: ["steps", "heartrate"],
+        timeseriesResources: ["blood_oxygen", "stress_level"],
         summaryBackfillDays: 180,
         timeseriesBackfillDays: 14,
         reconcileDays: 7,

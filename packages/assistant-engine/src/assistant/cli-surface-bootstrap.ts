@@ -456,6 +456,10 @@ function normalizeAssistantCliManifestCommands(
         typeof command.description === 'string' && command.description.trim().length > 0
           ? command.description.trim()
           : undefined,
+      hint:
+        typeof command.hint === 'string' && command.hint.trim().length > 0
+          ? command.hint.trim()
+          : undefined,
       name,
     })
   }
@@ -534,6 +538,10 @@ function renderAssistantCliContractCommandLine(
 ): string {
   const normalizedDescription =
     mode === 'name-only' ? '' : truncateAssistantCliText(command.description ?? '', 220)
+  const normalizedHint =
+    mode === 'name-only' || !hasRequiredAssistantCliArrayOption(command)
+      ? ''
+      : trimAssistantCliContractHint(truncateAssistantCliText(command.hint ?? '', 180))
   const parts = [`- \`${command.name}\`${normalizedDescription ? `: ${normalizedDescription}` : ''}`]
   const argsSchema = command.schema?.args
   const optionsSchema = command.schema?.options
@@ -552,6 +560,10 @@ function renderAssistantCliContractCommandLine(
     if (requiredOptions.length > 0) {
       parts.push(`required ${requiredOptions.join(', ')}`)
     }
+  }
+
+  if (normalizedHint) {
+    parts.push(`hint ${normalizedHint}`)
   }
 
   return `${parts.join('; ')}.`
@@ -581,8 +593,31 @@ function renderAssistantCliOptionSignature(
   optionName: string,
   schema: AssistantCliLlmsManifestSchemaNode | undefined,
 ): string {
+  if (schema?.type === 'array') {
+    return `repeat --${optionName}${renderAssistantCliArrayItemValueSuffix(schema.items)}`
+  }
+
   const suffix = renderAssistantCliOptionValueSuffix(schema)
   return `--${optionName}${suffix}`
+}
+
+function hasRequiredAssistantCliArrayOption(
+  command: AssistantCliLlmsManifestCommand,
+): boolean {
+  const optionsSchema = command.schema?.options
+  return readAssistantCliRequiredSchemaPropertyNames(optionsSchema)
+    .filter((name) => !assistantCliSurfaceBootstrapIgnoredOptionNames.has(name))
+    .some((name) => optionsSchema?.properties?.[name]?.type === 'array')
+}
+
+function renderAssistantCliArrayItemValueSuffix(
+  schema: AssistantCliLlmsManifestSchemaNode | undefined,
+): string {
+  return renderAssistantCliOptionValueSuffix(schema) || '=value'
+}
+
+function trimAssistantCliContractHint(value: string): string {
+  return value.replace(/\.+$/u, '')
 }
 
 function renderAssistantCliOptionValueSuffix(

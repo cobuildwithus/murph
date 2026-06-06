@@ -128,7 +128,7 @@ describe('searchSupplementLabels', () => {
     assert.deepEqual(result, {
       source: 'murph-data-api',
       query: '82118',
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
       items: [
         {
@@ -298,7 +298,7 @@ describe('searchSupplementLabels', () => {
 
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(requestUrl.searchParams.get('q'), 'brand: creatine')
-    assert.equal(requestUrl.searchParams.get('limit'), '5')
+    assert.equal(requestUrl.searchParams.get('limit'), '1')
     assert.equal(requestUrl.searchParams.has('id'), false)
   })
 
@@ -599,7 +599,7 @@ describe('searchSupplementLabelsBatch', () => {
     )
   })
 
-  it('uses five matches per batch query by default', async () => {
+  it('uses one match per batch query by default', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       results: [
         {
@@ -624,11 +624,11 @@ describe('searchSupplementLabelsBatch', () => {
       },
     )
 
-    assert.equal(result.limit, 5)
+    assert.equal(result.limit, 1)
     const init = fetchMock.mock.calls[0]?.[1]
     assert.deepEqual(JSON.parse(String(init?.body)), {
       queries: ['creatine'],
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
     })
   })

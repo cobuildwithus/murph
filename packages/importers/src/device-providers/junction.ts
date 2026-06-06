@@ -59,7 +59,6 @@ import {
   normalizeJunctionRawIdentityKey,
   normalizeJunctionSleepStageValue,
   normalizeJunctionResourceName,
-  readJunctionTimeseriesRawArtifactMetadata,
   type JunctionSleepStageValue,
 } from "./junction-resources.ts";
 import {
@@ -85,13 +84,11 @@ export {
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  JUNCTION_KNOWN_TIMESERIES_RESOURCES,
   JUNCTION_OPT_IN_SUMMARY_RESOURCES,
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
   JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
-  JUNCTION_TIMESERIES_RESOURCE_POLICIES,
   normalizeJunctionResourceName,
-  readJunctionTimeseriesRawArtifactMetadata,
-  type JunctionTimeseriesRawArtifactMetadata,
   type JunctionTimeseriesResource,
 } from "./junction-resources.ts";
 
@@ -157,6 +154,10 @@ const junctionSnapshotSchema = z.object({
 
 const SUMMARY_RESOURCE_ALLOWLIST = new Set<string>(JUNCTION_ALLOWED_SUMMARY_RESOURCES);
 const TIMESERIES_RESOURCE_ALLOWLIST = new Set<string>(JUNCTION_ALLOWED_TIMESERIES_RESOURCES);
+const COMPACT_TIMESERIES_RESOURCE_ALLOWLIST = new Set<string>([
+  "blood_oxygen",
+  "stress_level",
+]);
 const FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS = new Set([
   "abbott-libreview",
   "abbott_libreview",
@@ -333,9 +334,11 @@ type JunctionSleepStage = JunctionSleepStageValue;
 interface JunctionDailyTimeseriesAggregate {
   dayKey: string;
   entry: PlainObject;
+  firstSampleAt: string;
   lastRecordedAt?: string;
   lastSampleAt: string;
   minValue: number;
+  rawArtifactRole: string;
   resourceContext: ResourceContext;
   sampleCount: number;
   sum: number;
@@ -451,18 +454,6 @@ function normalizeTimeseries(
 ): void {
   for (const [resource, payload] of allowedResourceEntries(timeseries, TIMESERIES_RESOURCE_ALLOWLIST)) {
     const resourceSlug = slugify(resource, "timeseries");
-    pushRawArtifact(
-      context.rawArtifacts,
-      withJunctionTimeseriesMetadata(
-        resource,
-        createRawArtifact(
-          `junction-timeseries-${resourceSlug}`,
-          `junction-timeseries-${resourceSlug}.json`,
-          buildRawResourcePayload(resource, payload, context.connectionsByKey),
-        ),
-      ),
-    );
-
     if (resource === "blood_oxygen") {
       pushBloodOxygenDailyObservations(payload, resource, resourceSlug, context);
     } else if (resource === "stress_level") {
@@ -527,7 +518,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
   resourceSlug: string;
   valuePaths: readonly string[];
 }): JunctionDailyTimeseriesAggregate[] {
-  const fallbackArtifactRole = `junction-timeseries-${input.resourceSlug}`;
+  const rawArtifactRole = `junction-timeseries-daily-${input.resourceSlug}`;
   const aggregates = new Map<string, JunctionDailyTimeseriesAggregate>();
 
   for (const [index, { entry, originFallback }] of timeseriesResourceEntries(input.payload).entries()) {
@@ -538,7 +529,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       resourceSlug: input.resourceSlug,
       identityKind: "timeseries",
       index,
-      fallbackArtifactRole,
+      fallbackArtifactRole: rawArtifactRole,
       context: input.context,
     });
 
@@ -569,9 +560,11 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       aggregates.set(key, {
         dayKey,
         entry,
+        firstSampleAt: sampleAt,
         lastRecordedAt: recordedAt,
         lastSampleAt: sampleAt,
         minValue: value,
+        rawArtifactRole,
         resourceContext,
         sampleCount: 1,
         sum: value,
@@ -583,6 +576,9 @@ function buildJunctionDailyTimeseriesAggregates(input: {
 
     existing.sampleCount += 1;
     existing.sum += value;
+    if (sampleAt < existing.firstSampleAt) {
+      existing.firstSampleAt = sampleAt;
+    }
 
     if (sampleAt >= existing.lastSampleAt) {
       existing.lastSampleAt = sampleAt;
@@ -595,7 +591,123 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     }
   }
 
-  return [...aggregates.values()].sort(compareJunctionDailyTimeseriesAggregates);
+  const sortedAggregates = [...aggregates.values()].sort(compareJunctionDailyTimeseriesAggregates);
+  if (sortedAggregates.length === 0) {
+    pushJunctionEmptyDailyTimeseriesAggregateArtifact(input.context, input.resource, input.resourceSlug);
+    return sortedAggregates;
+  }
+
+  pushJunctionDailyTimeseriesAggregateArtifacts(input.context, input.resource, sortedAggregates);
+  return sortedAggregates;
+}
+
+function pushJunctionEmptyDailyTimeseriesAggregateArtifact(
+  context: NormalizationContext,
+  resource: string,
+  resourceSlug: string,
+): void {
+  const role = `junction-timeseries-daily-${resourceSlug}:no-valid-samples`;
+  pushRawArtifact(
+    context.rawArtifacts,
+    withJunctionCompactTimeseriesMetadata(
+      resource,
+      createRawArtifact(
+        role,
+        `${role}.json`,
+        {
+          schema: "junction.timeseries_daily_aggregate.v1",
+          provider: "junction",
+          resource,
+          sampleCount: 0,
+          status: "no_valid_samples",
+        },
+      ),
+    ),
+  );
+}
+
+function pushJunctionDailyTimeseriesAggregateArtifacts(
+  context: NormalizationContext,
+  resource: string,
+  aggregates: readonly JunctionDailyTimeseriesAggregate[],
+): void {
+  aggregates.forEach((aggregate, index) => {
+    const role = `${aggregate.rawArtifactRole}:${aggregate.dayKey}:${shortHash([
+      aggregate.resourceContext.sourceProviderSlug,
+      aggregate.resourceContext.origin.sourceType ?? "",
+      aggregate.resourceContext.origin.sourceInstanceId ?? "",
+      String(index),
+    ])}`;
+
+    aggregate.rawArtifactRole = role;
+
+    pushRawArtifact(
+      context.rawArtifacts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createRawArtifact(
+          role,
+          `${role}.json`,
+          stripUndefined({
+            schema: "junction.timeseries_daily_aggregate.v1",
+            provider: "junction",
+            resource,
+            dayKey: aggregate.dayKey,
+            sourceProviderSlug: aggregate.resourceContext.sourceProviderSlug,
+            sourceType: aggregate.resourceContext.origin.sourceType,
+            sourceInstanceId: aggregate.resourceContext.origin.sourceInstanceId,
+            sampleCount: aggregate.sampleCount,
+            firstSampleAt: aggregate.firstSampleAt,
+            lastSampleAt: aggregate.lastSampleAt,
+            lastRecordedAt: aggregate.lastRecordedAt,
+            meanValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.sum / aggregate.sampleCount),
+            minValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.minValue),
+            unit: junctionDailyTimeseriesAggregateUnit(resource),
+          }),
+        ),
+      ),
+    );
+  });
+}
+
+function roundJunctionTimeseriesAggregateValue(resource: string, value: number): number {
+  if (resource === "blood_oxygen") {
+    return roundBloodOxygenValue(value);
+  }
+  if (resource === "stress_level") {
+    return roundStressLevelValue(value);
+  }
+  return value;
+}
+
+function junctionDailyTimeseriesAggregateUnit(resource: string): string | undefined {
+  if (resource === "blood_oxygen") {
+    return "%";
+  }
+  if (resource === "stress_level") {
+    return "score";
+  }
+  return undefined;
+}
+
+function withJunctionCompactTimeseriesMetadata(
+  resource: string,
+  artifact: DeviceRawArtifactPayload | null,
+): DeviceRawArtifactPayload | null {
+  if (!artifact) {
+    return null;
+  }
+
+  return {
+    ...artifact,
+    metadata: {
+      artifactClass: "compact_provider_timeseries_aggregate",
+      provider: "junction",
+      resource,
+      resourceCategory: "timeseries_daily_aggregate",
+      retentionClass: "provider_evidence",
+    },
+  };
 }
 
 function pushBloodOxygenDailyObservation(
@@ -622,7 +734,7 @@ function pushBloodOxygenDailyObservation(
     timeZone: aggregate.timeZone,
     source: "device",
     title: observation.title,
-    rawArtifactRoles: aggregate.resourceContext.rawArtifactRoles,
+    rawArtifactRoles: [aggregate.rawArtifactRole],
     externalRef: makeJunctionExternalRef(aggregate.resourceContext, aggregate.entry, timestamp, observation.metric),
     dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
     fields: {
@@ -656,7 +768,7 @@ function pushStressLevelDailyObservation(
     timeZone: aggregate.timeZone,
     source: "device",
     title: "Junction stress level average",
-    rawArtifactRoles: aggregate.resourceContext.rawArtifactRoles,
+    rawArtifactRoles: [aggregate.rawArtifactRole],
     externalRef: makeJunctionExternalRef(aggregate.resourceContext, aggregate.entry, timestamp, "stress-level"),
     dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
     fields: {
@@ -666,21 +778,6 @@ function pushStressLevelDailyObservation(
       unit: "score",
     },
   }));
-}
-
-function withJunctionTimeseriesMetadata(
-  resource: string,
-  artifact: DeviceRawArtifactPayload | null,
-): DeviceRawArtifactPayload | null {
-  if (!artifact) {
-    return null;
-  }
-
-  const metadata = readJunctionTimeseriesRawArtifactMetadata(resource);
-  return {
-    ...artifact,
-    ...(metadata ? { metadata } : {}),
-  };
 }
 
 function buildRawResourcePayload(
@@ -727,7 +824,7 @@ function sanitizeJunctionRawSnapshot(snapshot: JunctionSnapshotInput): unknown {
   );
   const timeseries = sanitizeJunctionRawResourceMap(
     snapshot.timeseries,
-    TIMESERIES_RESOURCE_ALLOWLIST,
+    COMPACT_TIMESERIES_RESOURCE_ALLOWLIST,
     connectionsByKey,
   );
 

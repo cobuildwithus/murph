@@ -1,6 +1,6 @@
 {
   "id": "supplement-save",
-  "command": "vault-cli supplement save <title> --vault <path> [--id <regimenId>] [--slug <slug>] [--status <status>] [--started-on <date>] [--stopped-on <date>] [--schedule <text>] [--group <text>] [--substance <text>] [--dose <number>] [--dose-unit <unit>] [--brand <text>] [--manufacturer <text>] [--serving-size <text>] [--compound <text>] [--ingredient-label <text>] [--amount <number>] [--unit <unit>] [--ingredient-active] [--note <text>] [--related-goal-id <id> ...] [--related-condition-id <id> ...] [--related-regimen-id <id> ...] [--request-id <id>]",
+  "command": "vault-cli supplement save <title> --vault <path> [--id <regimenId>] [--slug <slug>] [--status <status>] [--started-on <date>] [--stopped-on <date>] [--schedule <text>] [--group <text>] [--substance <text>] [--dose <number>] [--dose-unit <unit>] [--brand <text>] [--manufacturer <text>] [--serving-size <text>] [--ingredient <json> ...] [--related-goal-id <id> ...] [--related-condition-id <id> ...] [--related-regimen-id <id> ...] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"
