@@ -11,7 +11,7 @@ import {
   type BiomarkerBrowsePrivateValue,
 } from "@/src/components/biomarkers/biomarker-browse-card";
 import { CategoryFilter } from "@/src/components/experiments/category-filter";
-import { OnboardingSteps } from "@/src/components/home/onboarding-steps";
+import { BrowserVaultOnboardingStepsContent } from "@/src/components/home/browser-vault-onboarding-steps";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { PageHeader } from "@/src/components/ui/page-header";
 import {
@@ -100,7 +100,7 @@ function BiomarkersPageContent({
       />
 
       {showDeviceStep ? (
-        <OnboardingSteps
+        <BrowserVaultOnboardingStepsContent
           showDeviceStep
           hideExperimentStep
           uploadLabsAction={uploadLabsAction}

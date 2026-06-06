@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { DeviceSyncCompletionDialog } from "./device-sync-completion-dialog";
 
 import { FeatureHighlights } from "@/src/components/home/feature-highlights";
-import { OnboardingSteps } from "@/src/components/home/onboarding-steps";
+import { BrowserVaultOnboardingSteps } from "@/src/components/home/browser-vault-onboarding-steps";
 import { PageHeader } from "@/src/components/ui/page-header";
 import { UsageLimitBanner } from "@/src/components/home/usage-limit-banner";
 import {
@@ -82,7 +82,7 @@ export default async function HomePage({
         />
       ) : null}
 
-      <OnboardingSteps
+      <BrowserVaultOnboardingSteps
         showDeviceStep={showDeviceStep}
         uploadLabsAction={
           <Suspense fallback={<UploadLabsActionFallback />}>

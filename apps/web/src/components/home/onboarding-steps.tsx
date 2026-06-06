@@ -44,6 +44,13 @@ const steps: {
   },
 ];
 
+export interface OnboardingStepsProps {
+  hideExperimentStep?: boolean;
+  hideLabsStep?: boolean;
+  showDeviceStep?: boolean;
+  uploadLabsAction?: ReactNode;
+}
+
 export function getOnboardingStepActionClass(isPrimary: boolean): string {
   return isPrimary
     ? "inline-flex items-center gap-2.5 rounded-2xl bg-[#5a6e32] px-6 py-3 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#7a8c6e] focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2"
@@ -53,15 +60,13 @@ export function getOnboardingStepActionClass(isPrimary: boolean): string {
 export function OnboardingSteps({
   showDeviceStep = true,
   hideExperimentStep = false,
+  hideLabsStep = false,
   uploadLabsAction = null,
-}: {
-  showDeviceStep?: boolean;
-  hideExperimentStep?: boolean;
-  uploadLabsAction?: ReactNode;
-}) {
+}: OnboardingStepsProps) {
   const visibleSteps = steps.filter((step) => {
     if (step.id === "devices" && !showDeviceStep) return false;
     if (step.id === "experiments" && hideExperimentStep) return false;
+    if (step.id === "labs" && hideLabsStep) return false;
     return true;
   });
   const gridColsClass =

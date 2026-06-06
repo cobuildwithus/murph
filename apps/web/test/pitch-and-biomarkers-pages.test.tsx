@@ -6,6 +6,8 @@ import { beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getGeneratedHealthCommonsWebBiomarkerIndex: vi.fn(),
+  getHostedPageAuthSnapshot: vi.fn(),
+  shouldShowHomeDeviceSyncStep: vi.fn(),
   useBrowserVault: vi.fn(),
 }));
 
@@ -38,18 +40,33 @@ vi.mock("@murphai/health-commons/runtime", () => ({
     mocks.getGeneratedHealthCommonsWebBiomarkerIndex,
 }));
 
+vi.mock("@/src/lib/device-sync/home-onboarding", () => ({
+  shouldShowHomeDeviceSyncStep: mocks.shouldShowHomeDeviceSyncStep,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
+  getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
+}));
+
 import BiomarkersPage, {
   metadata as biomarkersMetadata,
 } from "../app/(dashboard)/biomarkers/page";
 import PitchPage, { metadata as pitchMetadata } from "../app/pitch/page";
 
 beforeEach(() => {
+  vi.clearAllMocks();
   mocks.useBrowserVault.mockReturnValue({
     client: null,
     deviceSyncImportPending: false,
     refreshPending: false,
     status: "ready",
   });
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+  mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(false);
   mocks.getGeneratedHealthCommonsWebBiomarkerIndex.mockReturnValue({
     biomarkers: [
       {
@@ -121,7 +138,7 @@ test("PitchPage metadata and route entrypoint render the deck landmark", () => {
   assert.match(markup, /01 \/ 13/);
 });
 
-test("BiomarkersPage metadata and route entrypoint filter generated biomarkers", () => {
+test("BiomarkersPage metadata and route entrypoint filter generated biomarkers", async () => {
   assert.equal(biomarkersMetadata.title, "Biomarkers — Murph");
   assert.equal(
     biomarkersMetadata.description,
@@ -137,7 +154,7 @@ test("BiomarkersPage metadata and route entrypoint filter generated biomarkers",
     },
   ]);
 
-  const markup = renderToStaticMarkup(createElement(BiomarkersPage));
+  const markup = renderToStaticMarkup(await BiomarkersPage());
 
   assert.match(markup, /Library/);
   assert.match(markup, /Biomarkers/);
@@ -150,7 +167,7 @@ test("BiomarkersPage metadata and route entrypoint filter generated biomarkers",
   assert.doesNotMatch(markup, /Draft Marker/);
 });
 
-test("BiomarkersPage does not show card syncing text when no device import is pending", () => {
+test("BiomarkersPage does not show card syncing text when no device import is pending", async () => {
   mocks.useBrowserVault.mockReturnValue({
     client: null,
     deviceSyncImportPending: false,
@@ -158,12 +175,12 @@ test("BiomarkersPage does not show card syncing text when no device import is pe
     status: "loading",
   });
 
-  const markup = renderToStaticMarkup(createElement(BiomarkersPage));
+  const markup = renderToStaticMarkup(await BiomarkersPage());
 
   assert.doesNotMatch(markup, /Syncing\.\.\./);
 });
 
-test("BiomarkersPage shows card syncing text when a device import is pending", () => {
+test("BiomarkersPage shows card syncing text when a device import is pending", async () => {
   mocks.useBrowserVault.mockReturnValue({
     client: null,
     deviceSyncImportPending: true,
@@ -171,7 +188,7 @@ test("BiomarkersPage shows card syncing text when a device import is pending", (
     status: "empty",
   });
 
-  const markup = renderToStaticMarkup(createElement(BiomarkersPage));
+  const markup = renderToStaticMarkup(await BiomarkersPage());
 
   assert.match(markup, /Syncing\.\.\./);
 });

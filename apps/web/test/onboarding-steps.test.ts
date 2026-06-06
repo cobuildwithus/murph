@@ -78,3 +78,17 @@ test("OnboardingSteps hides the connect devices card when the device step is com
   assert.match(markup, /Step 1/);
   assert.doesNotMatch(markup, /Step 3/);
 });
+
+test("OnboardingSteps hides the labs card when lab sync is complete", async () => {
+  const { OnboardingSteps } = await import("@/src/components/home/onboarding-steps");
+  const markup = renderToStaticMarkup(createElement(OnboardingSteps, {
+    hideLabsStep: true,
+  }));
+
+  assert.match(markup, /Connect devices/);
+  assert.doesNotMatch(markup, /Sync labs/);
+  assert.doesNotMatch(markup, /href="\/settings"/);
+  assert.match(markup, /Start an experiment/);
+  assert.match(markup, /Step 2/);
+  assert.doesNotMatch(markup, /Step 3/);
+});
