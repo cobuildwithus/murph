@@ -98,3 +98,66 @@ test('applyRecordPatch rejects malformed dotted.path=value assignments', async (
       error instanceof VaultCliError && error.code === 'invalid_payload',
   )
 })
+
+test('applyRecordPatch rejects same-field set and clear conflicts', async () => {
+  await assert.rejects(
+    () =>
+      applyRecordPatch({
+        record: {
+          ingredients: ['banana'],
+        },
+        set: ['ingredients=["banana","spinach"]'],
+        clear: ['ingredients'],
+        patchLabel: 'payload',
+      }),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'invalid_payload' &&
+      /--set ingredients/u.test(error.message) &&
+      /--clear ingredients/u.test(error.message),
+  )
+})
+
+test('applyRecordPatch rejects parent-child set and clear conflicts', async () => {
+  await assert.rejects(
+    () =>
+      applyRecordPatch({
+        record: {
+          nutrition: {
+            perServing: {
+              calories: 400,
+            },
+          },
+        },
+        set: ['nutrition.perServing.calories=430'],
+        clear: ['nutrition'],
+        patchLabel: 'payload',
+      }),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'invalid_payload' &&
+      /nutrition\.perServing\.calories/u.test(error.message) &&
+      /--clear nutrition/u.test(error.message),
+  )
+
+  await assert.rejects(
+    () =>
+      applyRecordPatch({
+        record: {
+          nutrition: {
+            perServing: {
+              calories: 400,
+            },
+          },
+        },
+        set: ['nutrition={"perServing":{"calories":430}}'],
+        clear: ['nutrition.perServing.calories'],
+        patchLabel: 'payload',
+      }),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'invalid_payload' &&
+      /--set nutrition/u.test(error.message) &&
+      /nutrition\.perServing\.calories/u.test(error.message),
+  )
+})

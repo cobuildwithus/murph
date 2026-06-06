@@ -367,7 +367,24 @@ function validateSupplementSaveInput(input: {
   }
 }
 
-function parseSupplementIngredient(spec: string): SupplementIngredientRecord {
+function formatSupplementIngredientValidationMessage(
+  index: number,
+  errors: readonly string[],
+): string {
+  const paths = [
+    ...new Set(
+      errors.map((error) => error.split(":", 1)[0]?.replace(/^\$\./u, "") ?? "$"),
+    ),
+  ];
+  const fieldSummary = paths.length > 0 ? ` (${paths.join(", ")})` : "";
+  const unitHint = paths.includes("unit")
+    ? ' Use compact units such as "mcg"; put qualifiers such as "DFE" in note.'
+    : "";
+
+  return `--ingredient #${index} failed validation${fieldSummary}.${unitHint}`;
+}
+
+function parseSupplementIngredient(spec: string, index: number): SupplementIngredientRecord {
   const trimmed = spec.trim();
 
   if (trimmed.startsWith("[")) {
@@ -396,7 +413,7 @@ function parseSupplementIngredient(spec: string): SupplementIngredientRecord {
 
   const result = safeParseContract(supplementIngredientPayloadSchema, value);
   if (!result.success) {
-    throw new VaultCliError("invalid_option", "--ingredient failed validation.", {
+    throw new VaultCliError("invalid_option", formatSupplementIngredientValidationMessage(index, result.errors), {
       issues: result.errors,
     });
   }
@@ -409,7 +426,7 @@ function parseSupplementIngredients(specs: string[] | undefined): SupplementIngr
     return undefined;
   }
 
-  return specs.map((spec) => parseSupplementIngredient(spec));
+  return specs.map((spec, index) => parseSupplementIngredient(spec, index + 1));
 }
 
 function buildRegimenSavePayload(input: RegimenSaveInput): { vaultRoot: string } & JsonObject {

@@ -231,6 +231,16 @@ test('food save payload builder maps every raw food import-json payload field', 
   ])
 })
 
+test('food save payload builder omits status when the caller omits status', () => {
+  const payload = buildFoodSavePayload({
+    foodId: 'food_01234567890123456789012345',
+    summary: 'Updated usual order.',
+    title: 'Regular Acai Bowl',
+  })
+
+  assert.equal('status' in payload, false)
+})
+
 test('food save writes its temporary payload file with 0o600 permissions', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-cli-food-save-mode-',
@@ -260,6 +270,10 @@ test('food save writes its temporary payload file with 0o600 permissions', async
     ])
 
     assert.equal(saveResult.exitCode, null)
+    const saved = requireData(saveResult.envelope)
+    const markdown = await readFile(path.join(vaultRoot, saved.path), 'utf8')
+    const document = parseFrontmatterDocument(markdown)
+    assert.equal(document.attributes.status, 'active')
 
     const payloadWriteCall = vi.mocked(writeFile).mock.calls.find(
       ([filePath]) =>
@@ -421,6 +435,60 @@ test('food save persists typed fields and can update an existing food id', async
     const updatedMarkdown = await readFile(path.join(vaultRoot, updated.path), 'utf8')
     const updatedDocument = parseFrontmatterDocument(updatedMarkdown)
     assert.equal(updatedDocument.attributes.summary, 'Updated usual order.')
+    assert.equal(updatedDocument.attributes.status, 'active')
+
+    const archivedResult = await runInProcessJsonCli<FoodSaveResult>(cli, [
+      'food',
+      'save',
+      'Regular Acai Bowl',
+      '--id',
+      saved.foodId,
+      '--status',
+      'archived',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(archivedResult.exitCode, null)
+
+    const preserveStatusResult = await runInProcessJsonCli<FoodSaveResult>(cli, [
+      'food',
+      'save',
+      'Regular Acai Bowl',
+      '--id',
+      saved.foodId,
+      '--summary',
+      'Archived usual order.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(preserveStatusResult.exitCode, null)
+    const preserved = requireData(preserveStatusResult.envelope)
+    const preservedMarkdown = await readFile(path.join(vaultRoot, preserved.path), 'utf8')
+    const preservedDocument = parseFrontmatterDocument(preservedMarkdown)
+    assert.equal(preservedDocument.attributes.summary, 'Archived usual order.')
+    assert.equal(preservedDocument.attributes.status, 'archived')
+
+    const conflictingEdit = await runInProcessJsonCli<{
+      entity: {
+        data: Record<string, unknown>
+      }
+    }>(cli, [
+      'food',
+      'edit',
+      saved.foodId,
+      '--ingredient',
+      'chia seeds',
+      '--clear-ingredients',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(conflictingEdit.exitCode, 1)
+    assert.equal(conflictingEdit.envelope.ok, false)
+    if (!conflictingEdit.envelope.ok) {
+      assert.equal(conflictingEdit.envelope.error.code, 'invalid_payload')
+      assert.match(conflictingEdit.envelope.error.message ?? '', /--set ingredients/u)
+      assert.match(conflictingEdit.envelope.error.message ?? '', /--clear ingredients/u)
+    }
   } finally {
     await rm(parentRoot, {
       force: true,

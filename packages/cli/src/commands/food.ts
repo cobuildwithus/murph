@@ -121,6 +121,10 @@ export interface FoodSavePayloadInput {
   vendor?: string
 }
 
+type FoodSavePayload = Omit<FoodUpsertPayload, 'status'> & {
+  status?: FoodUpsertPayload['status']
+}
+
 interface FoodSaveCommandOptions {
   alias?: string[]
   attachedRegimenId?: string[]
@@ -188,7 +192,7 @@ function buildFoodNutrition(input: FoodSavePayloadInput): FoodUpsertPayload['nut
   }
 }
 
-export function buildFoodSavePayload(input: FoodSavePayloadInput): FoodUpsertPayload {
+export function buildFoodSavePayload(input: FoodSavePayloadInput): FoodSavePayload {
   const attachedRegimenIds = normalizeRepeatableFlagOption(
     input.attachedRegimenId,
     'attached-regimen-id',
@@ -203,14 +207,14 @@ export function buildFoodSavePayload(input: FoodSavePayloadInput): FoodUpsertPay
       ...(linkRelatedRegimenIds ?? []),
     ]),
   ]
-  const payload: FoodUpsertPayload = {
+  const payload: FoodSavePayload = {
     title: input.title,
-    status: input.status ?? 'active',
   }
   const nutrition = buildFoodNutrition(input)
 
   if (input.foodId !== undefined) payload.foodId = input.foodId
   if (input.slug !== undefined) payload.slug = input.slug
+  if (input.status !== undefined) payload.status = input.status
   if (input.summary !== undefined) payload.summary = input.summary
   if (input.kind !== undefined) payload.kind = input.kind
   if (input.brand !== undefined) payload.brand = input.brand
@@ -240,10 +244,10 @@ export function buildFoodSavePayload(input: FoodSavePayloadInput): FoodUpsertPay
     })
   }
 
-  return parsed.data
+  return payload
 }
 
-async function writeFoodSavePayloadFile(payload: FoodUpsertPayload) {
+async function writeFoodSavePayloadFile(payload: FoodSavePayload) {
   const directory = await mkdtemp(path.join(tmpdir(), 'murph-food-save-'))
   const payloadPath = path.join(directory, 'payload.json')
   await writeFile(payloadPath, `${JSON.stringify(payload)}\n`, {

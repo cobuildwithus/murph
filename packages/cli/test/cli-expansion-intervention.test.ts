@@ -211,8 +211,11 @@ test('experiment session attach schema exposes repair flags', async () => {
 
 test('intervention add help uses a positional text argument', async () => {
   const help = await runSliceCliRaw(['intervention', 'add', '--help'])
+  const llms = await runSliceCliRaw(['intervention', 'add', '--llms-full'])
 
   assert.match(help, /Usage: vault-cli intervention add <text> \[options\]/u)
+  assert.match(llms, /intervention add '20 min sauna after lifting\.'/u)
+  assert.doesNotMatch(llms, /intervention add 20 min sauna after lifting\./u)
 })
 
 test.sequential(

@@ -484,7 +484,9 @@ test('supplement save rejects malformed and schema-invalid ingredient objects wi
       'save',
       'Vitamin D3',
       '--ingredient',
-      '{"compound":"Do Not Echo Label","amount":-1}',
+      '{"compound":"Vitamin D3","amount":50,"unit":"mcg"}',
+      '--ingredient',
+      '{"compound":"Do Not Echo Label","amount":400,"unit":"mcg DFE"}',
       '--vault',
       vaultRoot,
     ])
@@ -493,7 +495,10 @@ test('supplement save rejects malformed and schema-invalid ingredient objects wi
     if (!schemaInvalid.envelope.ok) {
       const serialized = JSON.stringify(schemaInvalid.envelope)
       assert.equal(serialized.includes('Do Not Echo Label'), false)
-      assert.match(schemaInvalid.envelope.error.message ?? '', /failed validation/u)
+      assert.match(schemaInvalid.envelope.error.message ?? '', /--ingredient #2 failed validation/u)
+      assert.match(schemaInvalid.envelope.error.message ?? '', /unit/u)
+      assert.match(schemaInvalid.envelope.error.message ?? '', /compact units such as "mcg"/u)
+      assert.match(schemaInvalid.envelope.error.message ?? '', /qualifiers such as "DFE" in note/u)
     }
   } finally {
     await rm(parentRoot, {

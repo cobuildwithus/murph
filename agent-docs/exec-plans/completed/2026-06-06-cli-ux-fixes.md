@@ -1,6 +1,6 @@
 # CLI UX fixes for assistant-facing command use
 
-Status: active
+Status: completed
 Created: 2026-06-06
 Updated: 2026-06-06
 
@@ -264,3 +264,4 @@ Owner boundary:
   - `packages/vault-usecases/test/**`
   - `packages/cli/test/food-save-typed-parity.test.ts`
   - `packages/cli/test/cli-expansion-intervention.test.ts`
+Completed: 2026-06-06

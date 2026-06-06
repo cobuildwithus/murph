@@ -19,6 +19,15 @@ interface ApplyRecordPatchResult {
   touchedTopLevelFields: ReadonlySet<string>
 }
 
+interface ParsedSetPatch {
+  path: string[]
+  value: JsonValue
+}
+
+interface ParsedClearPatch {
+  path: string[]
+}
+
 export async function applyRecordPatch(
   input: ApplyRecordPatchInput,
 ): Promise<ApplyRecordPatchResult> {
@@ -37,6 +46,12 @@ export async function applyRecordPatch(
     typeof input.inputFile === 'string'
       ? (await loadJsonInputObject(input.inputFile, input.patchLabel)) as JsonObject
       : null
+  const setPatches = (input.set ?? []).map(parsePathAssignment)
+  const clearPatches = (input.clear ?? []).map((clearPath) => ({
+    path: parsePathSegments(clearPath),
+  }))
+
+  rejectConflictingSetClearPatches(setPatches, clearPatches)
 
   let nextRecord: JsonObject = structuredClone(input.record)
   const touchedTopLevelFields = new Set<string>()
@@ -48,14 +63,12 @@ export async function applyRecordPatch(
     nextRecord = mergeObject(nextRecord, filePatch)
   }
 
-  for (const assignment of input.set ?? []) {
-    const { path, value } = parsePathAssignment(assignment)
+  for (const { path, value } of setPatches) {
     touchedTopLevelFields.add(path[0] as string)
     nextRecord = setPathValue(nextRecord, path, value) as JsonObject
   }
 
-  for (const clearPath of input.clear ?? []) {
-    const path = parsePathSegments(clearPath)
+  for (const { path } of clearPatches) {
     touchedTopLevelFields.add(path[0] as string)
     nextRecord = clearPathValue(nextRecord, path) as JsonObject
   }
@@ -132,6 +145,39 @@ function parsePathSegments(input: string): string[] {
   }
 
   return segments
+}
+
+function rejectConflictingSetClearPatches(
+  setPatches: readonly ParsedSetPatch[],
+  clearPatches: readonly ParsedClearPatch[],
+) {
+  for (const setPatch of setPatches) {
+    for (const clearPatch of clearPatches) {
+      if (!pathsOverlap(setPatch.path, clearPatch.path)) {
+        continue
+      }
+
+      throw new VaultCliError(
+        'invalid_payload',
+        `Cannot combine --set ${formatPatchPath(setPatch.path)} with --clear ${formatPatchPath(clearPatch.path)}; they target the same field.`,
+      )
+    }
+  }
+}
+
+function pathsOverlap(left: readonly string[], right: readonly string[]): boolean {
+  return isPathPrefix(left, right) || isPathPrefix(right, left)
+}
+
+function isPathPrefix(candidate: readonly string[], path: readonly string[]): boolean {
+  return (
+    candidate.length <= path.length &&
+    candidate.every((segment, index) => segment === path[index])
+  )
+}
+
+function formatPatchPath(path: readonly string[]): string {
+  return path.join('.')
 }
 
 function parseAssignmentValue(input: string): JsonValue {

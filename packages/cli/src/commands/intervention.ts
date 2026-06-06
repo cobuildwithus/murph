@@ -58,7 +58,7 @@ export function registerInterventionCommands(
       {
         description: 'Capture a sauna session directly from one note.',
         args: {
-          text: '20 min sauna after lifting.',
+          text: "'20 min sauna after lifting.'",
         },
         options: {
           vault: './vault',
@@ -67,7 +67,7 @@ export function registerInterventionCommands(
       {
         description: 'Capture an HBOT clinic session and link it to a regimen.',
         args: {
-          text: 'HBOT session at the clinic.',
+          text: "'HBOT session at the clinic.'",
         },
         options: {
           vault: './vault',

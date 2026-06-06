@@ -363,11 +363,29 @@ export async function preparePatchedUpsertPayload<TPayload extends JsonObject>(i
   clearedFields: ReadonlySet<string>
   allowSlugRename: boolean
 }> {
+  const set = input.set?.filter((assignment) => !pathAssignmentTargetsField(assignment, input.entityIdField))
+  const clear = input.clear?.filter((path) => path.trim() !== input.entityIdField)
+  const clearedEntityId = input.clear?.some((path) => path.trim() === input.entityIdField) ?? false
+  if (
+    typeof input.inputFile !== "string" &&
+    (set?.length ?? 0) === 0 &&
+    (clear?.length ?? 0) === 0
+  ) {
+    return {
+      payload: input.parsePayload({
+        ...input.record,
+        [input.entityIdField]: input.entityId,
+      }),
+      clearedFields: clearedEntityId ? new Set<string>([input.entityIdField]) : new Set<string>(),
+      allowSlugRename: false,
+    }
+  }
+
   const patched = await applyRecordPatch({
     record: structuredClone(input.record) as RecordMutationJsonObject,
     inputFile: input.inputFile,
-    set: input.set,
-    clear: input.clear,
+    set,
+    clear,
     patchLabel: input.patchLabel,
   })
   const payload = input.parsePayload({
@@ -377,9 +395,16 @@ export async function preparePatchedUpsertPayload<TPayload extends JsonObject>(i
 
   return {
     payload,
-    clearedFields: patched.clearedFields,
+    clearedFields: clearedEntityId
+      ? new Set<string>([...patched.clearedFields, input.entityIdField])
+      : patched.clearedFields,
     allowSlugRename: patched.touchedTopLevelFields.has("slug"),
   }
+}
+
+function pathAssignmentTargetsField(assignment: string, field: string): boolean {
+  const separatorIndex = assignment.indexOf("=")
+  return separatorIndex > 0 && assignment.slice(0, separatorIndex).trim() === field
 }
 
 export function assertNoReservedPayloadKeys(payload: JsonObject) {

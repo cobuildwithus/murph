@@ -126,7 +126,9 @@ interface FoodCoreRuntime {
   }): Promise<FoodReadModel>
 }
 
-export type FoodPayload = z.infer<typeof foodUpsertPayloadSchema>
+export type FoodPayload = Omit<FoodUpsertPayload, 'status'> & {
+  status?: FoodUpsertPayload['status']
+}
 
 export function scaffoldFoodPayload() {
   return parseFoodPayload({
@@ -160,7 +162,12 @@ export function scaffoldFoodPayload() {
   })
 }
 
-export function parseFoodPayload(value: unknown) {
+export function parseFoodPayload(value: unknown): FoodPayload {
+  const statusProvided =
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.hasOwn(value, 'status')
   const result = foodUpsertPayloadSchema.safeParse(value)
 
   if (!result.success) {
@@ -169,7 +176,13 @@ export function parseFoodPayload(value: unknown) {
     })
   }
 
-  return result.data
+  if (statusProvided) {
+    return result.data
+  }
+
+  const payload: FoodPayload = { ...result.data }
+  delete payload.status
+  return payload
 }
 
 export async function upsertFoodRecord(input: {
