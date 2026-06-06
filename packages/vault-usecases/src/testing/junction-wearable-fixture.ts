@@ -674,6 +674,13 @@ function normalizeHostedReplayOptions(
   if (size !== "smoke" && size !== "full") {
     throw new TypeError("replaySize must be smoke or full.");
   }
+  if (
+    size === "full"
+    && input.maxRecordsPerProviderResource !== undefined
+    && input.maxRecordsPerProviderResource !== null
+  ) {
+    throw new TypeError("full replay cannot set maxRecordsPerProviderResource.");
+  }
 
   const recordLimitPerProviderResource = normalizeHostedReplayRecordLimit(
     input.maxRecordsPerProviderResource,
@@ -760,12 +767,7 @@ function buildHostedReplayRecordGroups(
       continue;
     }
 
-    for (const entry of readArray(artifact.content)) {
-      const record = readRecord(entry);
-      if (!record) {
-        continue;
-      }
-
+    for (const record of readReplayArtifactRecords(artifact)) {
       const sourceProviderSlug = readSingleRecordProviderSlug(record);
       if (!sourceProviderSlug) {
         continue;
@@ -803,6 +805,46 @@ function buildHostedReplayRecordGroups(
         left.resource.localeCompare(right.resource),
       ].find((comparison) => comparison !== 0) ?? 0
     );
+}
+
+function readReplayArtifactRecords(artifact: FixtureArtifact): Record<string, unknown>[] {
+  if (Array.isArray(artifact.content)) {
+    return artifact.content.flatMap((entry) => {
+      const record = readRecord(entry);
+      return record ? [record] : [];
+    });
+  }
+
+  const root = readRecord(artifact.content);
+  if (!root) {
+    if (hasNonEmptyPrimitive(artifact.content)) {
+      throw new TypeError(
+        `Hosted Junction replay artifact ${artifact.relativePath} must contain record objects.`,
+      );
+    }
+    return [];
+  }
+
+  for (const key of ["data", "records", "items", "results"] as const) {
+    if (!(key in root)) {
+      continue;
+    }
+    const value = root[key];
+    if (!Array.isArray(value)) {
+      throw new TypeError(
+        `Hosted Junction replay artifact ${artifact.relativePath} wrapper field ${key} must be an array.`,
+      );
+    }
+    return value.flatMap((entry) => {
+      const record = readRecord(entry);
+      return record ? [record] : [];
+    });
+  }
+
+  if (Object.keys(root).length > 0) {
+    return [root];
+  }
+  return [];
 }
 
 function hostedReplayResourceFromRelativePath(

@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -41,6 +41,10 @@ import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
+import {
+  buildSignedJunctionWebhookBody,
+  createSignedJunctionSvixWebhook,
+} from "./helpers/junction-webhook-replay.js";
 import {
   expectJunctionWearableBiomarkerExpectationsToMatchProduction,
 } from "./helpers/junction-wearable-biomarker-contract.js";
@@ -216,6 +220,11 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       status: deviceSyncStatus,
       userId: signedWebhookUserId,
     });
+    await assertNoHostedDeviceSyncJobFailures({
+      scenario: activeScenario,
+      status: deviceSyncStatus,
+      userId: signedWebhookUserId,
+    });
 
     const drainStatus = await activeScenario.readJunctionDeviceSyncReplayDrainStatus({
       connectionId: seed.connectionId,
@@ -305,6 +314,11 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     }
 
     await assertHostedDeviceSyncReplayProcessed({
+      scenario: activeScenario,
+      status: deviceSyncStatus,
+      userId,
+    });
+    await assertNoHostedDeviceSyncJobFailures({
       scenario: activeScenario,
       status: deviceSyncStatus,
       userId,
@@ -425,6 +439,7 @@ async function postSignedJunctionWebhook(input: {
   const webhook = createSignedJunctionSvixWebhook({
     body: buildSignedJunctionWebhookBody(input),
     messageId: input.messageId,
+    webhookSecret: junctionWebhookSecret,
   });
   const headers = new Headers(webhook.headers);
   headers.set("content-type", "application/json; charset=utf-8");
@@ -434,59 +449,6 @@ async function postSignedJunctionWebhook(input: {
     headers,
     method: "POST",
   });
-}
-
-function buildSignedJunctionWebhookBody(input: {
-  dirtyResource: JunctionWearableHostedReplayDirtyResource;
-  externalAccountId: string;
-}): Record<string, unknown> {
-  const webhookDataJson = readRequiredString(
-    input.dirtyResource.payload.webhookDataJson,
-    "dirtyResource.payload.webhookDataJson",
-  );
-  const record = readJsonRecord(JSON.parse(webhookDataJson));
-  const objectId = readRequiredString(
-    input.dirtyResource.payload.objectId,
-    "dirtyResource.payload.objectId",
-  );
-  const eventType = readRequiredString(
-    input.dirtyResource.payload.eventType,
-    "dirtyResource.payload.eventType",
-  );
-
-  return {
-    data: {
-      ...record,
-      id: objectId,
-      resource: input.dirtyResource.resource,
-      source: {
-        provider: input.dirtyResource.sourceProviderSlug,
-      },
-    },
-    event_type: eventType,
-    user_id: input.externalAccountId,
-  };
-}
-
-function createSignedJunctionSvixWebhook(input: {
-  body: Record<string, unknown>;
-  messageId: string;
-}): { headers: Headers; rawBody: Buffer } {
-  const timestamp = Math.floor(Date.now() / 1000).toString();
-  const rawBody = Buffer.from(JSON.stringify(input.body));
-  const key = Buffer.from(junctionWebhookSecret.slice("whsec_".length), "base64");
-  const signature = createHmac("sha256", key)
-    .update(Buffer.concat([Buffer.from(`${input.messageId}.${timestamp}.`), rawBody]))
-    .digest("base64");
-
-  return {
-    headers: new Headers({
-      "svix-id": input.messageId,
-      "svix-signature": `v1,${signature}`,
-      "svix-timestamp": timestamp,
-    }),
-    rawBody,
-  };
 }
 
 async function readBrowserVaultReplica(input: {
@@ -560,10 +522,9 @@ async function assertHostedDeviceSyncReplayProcessed(input: {
     && (entry.status === "processed" || entry.status === "recorded")
     && (entry.recordFailed ?? 0) === 0
   );
-  const recordedInAggregate = prepared >= 1 && recorded >= 1;
 
   if (
-    (!recordedDeviceSyncLog && !recordedInAggregate)
+    !recordedDeviceSyncLog
     || retryableLog
     || retryableFailed > 0
     || recordFailed > 0
@@ -585,6 +546,28 @@ async function assertHostedDeviceSyncReplayProcessed(input: {
       `system mailbox logs: ${JSON.stringify(systemMailboxLogs)}`,
     ]));
   }
+}
+
+async function assertNoHostedDeviceSyncJobFailures(input: {
+  scenario: HostedLocalFullStackScenario;
+  status: HostedRunnerStatusResponse;
+  userId: string;
+}): Promise<void> {
+  const failureLogs = (Array.isArray(input.status.recentLogs) ? input.status.recentLogs : [])
+    .filter((log) => log.eventCode === "device-sync.job_failed")
+    .map((log) => ({
+      errorCode: log.errorCode ?? null,
+      redactedJson: log.redactedJson ?? {},
+    }));
+
+  if (failureLogs.length === 0) {
+    return;
+  }
+
+  throw new Error(await input.scenario.buildFailureMessage(input.userId, [
+    "Hosted Junction wearable replay produced dead or failed device-sync job diagnostics.",
+    `device-sync failure logs: ${JSON.stringify(failureLogs)}`,
+  ]));
 }
 
 function collectHostedSystemMailboxLogSummaries(
@@ -744,13 +727,6 @@ function readJsonRecord(value: unknown): Record<string, unknown> {
     throw new TypeError("Expected JSON object.");
   }
   return value as Record<string, unknown>;
-}
-
-function readRequiredString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
-  }
-  return value;
 }
 
 function extractHostedStatusFromFailureMessage(message: string): unknown {

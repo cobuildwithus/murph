@@ -120,6 +120,69 @@ describe("Junction wearable fixture testing helpers", () => {
       fixturePath: "unused.json",
       maxRecordsPerProviderResource: Number.NaN,
     })).rejects.toThrow(/positive integer/u);
+    await expect(buildJunctionWearableHostedReplayPlan({
+      fixturePath: "unused.json",
+      maxRecordsPerProviderResource: 24,
+      replaySize: "full",
+    })).rejects.toThrow(/full replay/u);
+  });
+
+  it("reads common hosted replay artifact wrapper shapes explicitly", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-fixture-"));
+    const fixturePath = path.join(tempRoot, "junction-wearables-hosted-smoke.json");
+
+    try {
+      await writeFile(
+        fixturePath,
+        JSON.stringify(buildSafeFixture({
+          content: {
+            data: [
+              {
+                calendar_date: "2026-04-01",
+                date: "2026-04-01",
+                resource: "activity",
+                sourceProviderSlug: "garmin",
+                steps: 1,
+              },
+            ],
+          },
+          recordCount: 0,
+        })),
+        "utf8",
+      );
+
+      const plan = await buildJunctionWearableHostedReplayPlan({ fixturePath });
+      expect(plan.dirtyResources).toHaveLength(1);
+      expect(plan.resources[0]?.recordCount).toBe(1);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("fails explicitly when hosted replay wrapper fields are not arrays", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-fixture-"));
+    const fixturePath = path.join(tempRoot, "junction-wearables-hosted-smoke.json");
+
+    try {
+      await writeFile(
+        fixturePath,
+        JSON.stringify(buildSafeFixture({
+          content: {
+            data: {
+              calendar_date: "2026-04-01",
+              sourceProviderSlug: "garmin",
+            },
+          },
+          recordCount: 0,
+        })),
+        "utf8",
+      );
+
+      await expect(buildJunctionWearableHostedReplayPlan({ fixturePath }))
+        .rejects.toThrow(/wrapper field data must be an array/u);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
   });
 
   it("fails closed when hosted replay records would be dropped", async () => {
@@ -196,6 +259,7 @@ function buildUnsafeFixture() {
 }
 
 function buildSafeFixture(input: {
+  content?: unknown;
   oversizedRecord?: boolean;
   recordCount: number;
 }) {
@@ -204,7 +268,7 @@ function buildSafeFixture(input: {
     generatedAt: "2026-04-30T12:00:00.000Z",
     rawArtifacts: [
       {
-        content: Array.from({ length: input.recordCount }, (_, index) => ({
+        content: input.content ?? Array.from({ length: input.recordCount }, (_, index) => ({
           calendar_date: `2026-04-${String(index + 1).padStart(2, "0")}`,
           date: `2026-04-${String(index + 1).padStart(2, "0")}`,
           resource: "activity",

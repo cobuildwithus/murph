@@ -405,13 +405,25 @@ export async function startHostedLocalFullStackScenario(input: {
           sources: seedInput.sources,
         }),
       stop: async () => {
-        await harness?.stop();
+        const cleanupResults = await Promise.allSettled([
+          harness?.stop() ?? Promise.resolve(),
+          oidcFixture?.stop() ?? Promise.resolve(),
+          stopHttpStubServer(assistantProviderServer),
+          localDatabase.cleanup(),
+        ]);
         harness = null;
-        await oidcFixture?.stop();
         oidcFixture = null;
-        await stopHttpStubServer(assistantProviderServer);
         assistantProviderServer = null;
-        await localDatabase.cleanup();
+
+        const failures = cleanupResults.flatMap((result) =>
+          result.status === "rejected" ? [result.reason] : []
+        );
+        if (failures.length === 1) {
+          throw failures[0];
+        }
+        if (failures.length > 1) {
+          throw new AggregateError(failures, "Hosted local scenario cleanup failed.");
+        }
       },
       waitForHostedCompletion: async (userId, waitInput) =>
         await scenarioHarness.waitForHostedCompletion(userId, waitInput),
