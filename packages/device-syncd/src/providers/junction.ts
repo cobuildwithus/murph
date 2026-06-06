@@ -111,7 +111,7 @@ interface JunctionDirectResourceJobInput {
   estimatedBytes: number;
   record: Record<string, unknown>;
   resource: string;
-  resourceCategory: JunctionResourceCategory;
+  resourceCategory: "summary";
   sourceProviderSlug: string;
   windowEnd: string;
   windowStart: string;
@@ -399,13 +399,13 @@ export function createJunctionDeviceSyncProvider(
 ): DeviceSyncProvider {
   assertValidJunctionClientUserIdSecret(config.clientUserIdSecret);
   const client = new JunctionClient(toClientConfig(config));
-  const summaryResources = normalizeResourceList(
+  const summaryResources = normalizeRequiredResourceList(
     config.summaryResources,
     JUNCTION_DEFAULT_SUMMARY_RESOURCES,
     JUNCTION_ALLOWED_SUMMARY_RESOURCES,
     "summary",
   );
-  const timeseriesResources = normalizeResourceList(
+  const timeseriesResources = normalizeOptionalResourceList(
     config.timeseriesResources,
     JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
     JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
@@ -713,7 +713,6 @@ export function createJunctionDeviceSyncProvider(
       first.windowStart,
       first.windowEnd,
       first.resource,
-      first.resourceCategory,
       batchInputs.map((entry) => entry.record),
     );
     return {
@@ -755,7 +754,7 @@ export function createJunctionDeviceSyncProvider(
       return null;
     }
 
-    if (resource === "stress_level") {
+    if (resourceCategory !== "summary") {
       return null;
     }
 
@@ -1131,6 +1130,9 @@ export function createJunctionDeviceSyncProvider(
           resource,
           resourceCategory: inferredCategory,
         });
+        return {
+          nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+        };
       } else {
         const directInput = readJunctionDirectResourceJobInput(job, window);
         if (directInput) {
@@ -1140,7 +1142,6 @@ export function createJunctionDeviceSyncProvider(
             directInput.windowStart,
             directInput.windowEnd,
             directInput.resource,
-            directInput.resourceCategory,
             [directInput.record],
           );
           return {
@@ -1235,10 +1236,7 @@ export function createJunctionDeviceSyncProvider(
     resource: string,
   ): "summary" | "timeseries" {
     const explicitCategory = resourceCategory?.toLowerCase();
-    if (
-      (explicitCategory === "summary" || explicitCategory === "timeseries")
-      && isConfiguredJunctionResource(explicitCategory, resource)
-    ) {
+    if (explicitCategory === "summary" || explicitCategory === "timeseries") {
       return explicitCategory;
     }
 
@@ -1544,7 +1542,6 @@ export function createJunctionDeviceSyncProvider(
     windowStart: string,
     windowEnd: string,
     resource: string,
-    resourceCategory: "summary" | "timeseries",
     records: readonly Record<string, unknown>[],
   ): Promise<void> {
     const redactedRecords = records.map((record) =>
@@ -1564,12 +1561,8 @@ export function createJunctionDeviceSyncProvider(
       windowStart,
       windowEnd,
       connections: sanitizeJunctionImportConnections(sourceProviders),
-      summaries: resourceCategory === "summary"
-        ? sanitizeJunctionImportSnapshots(snapshots, sourceProviders)
-        : {},
-      timeseries: resourceCategory === "timeseries"
-        ? sanitizeJunctionImportSnapshots(snapshots, sourceProviders)
-        : {},
+      summaries: sanitizeJunctionImportSnapshots(snapshots, sourceProviders),
+      timeseries: {},
     });
   }
 
@@ -3057,7 +3050,7 @@ function toClientConfig(config: JunctionDeviceSyncProviderConfig): JunctionClien
   };
 }
 
-function normalizeResourceList(
+function normalizeRequiredResourceList(
   value: string[] | undefined,
   defaults: readonly string[],
   allowedResources: readonly string[],
@@ -3077,6 +3070,27 @@ function normalizeResourceList(
 
   if (normalized.length === 0) {
     throw new TypeError(`Junction ${label} resources must include at least one supported resource.`);
+  }
+
+  return [...new Set(normalized)];
+}
+
+function normalizeOptionalResourceList(
+  value: string[] | undefined,
+  defaults: readonly string[],
+  allowedResources: readonly string[],
+  label: string,
+): string[] {
+  const normalized = (value === undefined ? defaults : value)
+    .map(normalizeJunctionResourceName)
+    .filter((entry): entry is string => entry !== null);
+  const allowedResourceSet = new Set<string>(allowedResources);
+  const unsupportedResources = normalized.filter((entry) => !allowedResourceSet.has(entry));
+
+  if (unsupportedResources.length > 0) {
+    throw new TypeError(
+      `Junction ${label} resources include unsupported resource(s): ${[...new Set(unsupportedResources)].join(", ")}.`,
+    );
   }
 
   return [...new Set(normalized)];
@@ -4235,7 +4249,7 @@ function buildJunctionWebhookDataJobJsons(input: {
     return [];
   }
 
-  if (input.resource.name === "stress_level") {
+  if (input.resource.category === "timeseries") {
     return [];
   }
 
@@ -4259,11 +4273,7 @@ function buildJunctionWebhookDataJobJsons(input: {
     return [directJson];
   }
 
-  if (input.resource.category !== "timeseries") {
-    return [];
-  }
-
-  return chunkJunctionWebhookTimeseriesDataJobRecords(withSource);
+  return [];
 }
 
 function serializeJunctionWebhookDataJobRecord(record: Record<string, unknown>): string | null {
@@ -4271,68 +4281,6 @@ function serializeJunctionWebhookDataJobRecord(record: Record<string, unknown>):
   return Buffer.byteLength(json, "utf8") <= JUNCTION_WEBHOOK_DATA_JOB_JSON_MAX_BYTES
     ? json
     : null;
-}
-
-function chunkJunctionWebhookTimeseriesDataJobRecords(
-  record: Record<string, unknown>,
-): string[] {
-  const data = readJunctionRecordArray(record.data).flatMap((entry) => {
-    const entryRecord = readPlainObject(entry);
-    return entryRecord ? [entryRecord] : [];
-  });
-  if (data.length === 0) {
-    return [];
-  }
-
-  const metadata = Object.fromEntries(
-    Object.entries(record).filter(([key]) => key !== "data"),
-  );
-  const chunks: string[] = [];
-  let pending: Record<string, unknown>[] = [];
-
-  for (const entry of data) {
-    const candidate = [...pending, entry];
-    const candidateJson = serializeJunctionWebhookDataJobRecord({
-      ...metadata,
-      data: candidate,
-    });
-    if (candidateJson) {
-      pending = candidate;
-      continue;
-    }
-
-    if (pending.length === 0) {
-      return [];
-    }
-
-    const pendingJson = serializeJunctionWebhookDataJobRecord({
-      ...metadata,
-      data: pending,
-    });
-    if (!pendingJson) {
-      return [];
-    }
-
-    chunks.push(pendingJson);
-    pending = [entry];
-
-    if (!serializeJunctionWebhookDataJobRecord({ ...metadata, data: pending })) {
-      return [];
-    }
-  }
-
-  if (pending.length > 0) {
-    const pendingJson = serializeJunctionWebhookDataJobRecord({
-      ...metadata,
-      data: pending,
-    });
-    if (!pendingJson) {
-      return [];
-    }
-    chunks.push(pendingJson);
-  }
-
-  return chunks;
 }
 
 function parseJunctionWebhookDataJobRecord(value: unknown): Record<string, unknown> | null {

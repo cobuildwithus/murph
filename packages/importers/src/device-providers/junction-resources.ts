@@ -32,8 +32,9 @@ export interface JunctionTimeseriesRawArtifactMetadata extends Record<string, un
 }
 
 export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
-  ...JUNCTION_TIMESERIES_RESOURCE_POLICIES.map((policy) => policy.resource),
-]);
+  "blood_oxygen",
+  "stress_level",
+] as const);
 
 export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([] as const);
 

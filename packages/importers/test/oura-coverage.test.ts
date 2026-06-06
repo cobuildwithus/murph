@@ -16,7 +16,7 @@ function workoutMetricsFromEvent(
   return result.data.metrics;
 }
 
-test("normalizeOuraSnapshot covers dailySpo2 aliasing, heartRate aliasing, and provenance fallbacks", () => {
+test("normalizeOuraSnapshot covers dailySpo2 aliasing", () => {
   const payload = normalizeOuraSnapshot({
     importedAt: "2026-03-16T10:00:00.000Z",
     personalInfo: {
@@ -37,29 +37,17 @@ test("normalizeOuraSnapshot covers dailySpo2 aliasing, heartRate aliasing, and p
         score: 78,
       },
     ],
-    heartRate: [
-      {
-        timestamp: "2026-03-15T12:00:00.000Z",
-        bpm: 61,
-        source: "Resting HR",
-      },
-      {
-        timestamp: "2026-03-15T12:05:00.000Z",
-        bpm: 63,
-      },
-    ],
   });
 
   const spo2Event = payload.events?.find((event) => event.externalRef?.facet === "spo2-average");
   const readinessEvent = payload.events?.find((event) => event.externalRef?.facet === "readiness-score");
-  const heartRateArtifacts = payload.rawArtifacts?.filter((artifact) => artifact.role === "heartrate") ?? [];
 
   assert.equal(payload.accountId, "oura-user-user-id");
   assert.equal(payload.provenance?.ouraUserId, "oura-user-user-id");
   assert.equal(spo2Event?.fields?.metric, "spo2");
   assert.equal(spo2Event?.fields?.value, 97.6);
   assert.equal(readinessEvent?.fields?.value, 78);
-  assert.equal(heartRateArtifacts.length, 1);
+  assert.equal("heartrate" in (payload.provenance?.importedSections as Record<string, unknown>), false);
   assert.equal(payload.samples?.length ?? 0, 0);
 });
 

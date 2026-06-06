@@ -16,7 +16,6 @@ export const OURA_DEFAULT_WEBHOOK_DATA_TYPES = Object.freeze([
   "daily_readiness",
   "daily_sleep",
   "daily_spo2",
-  "heartrate",
   "session",
   "sleep",
   "workout",

@@ -215,7 +215,7 @@ describe("deviceSyncProviderManifests", () => {
         webhookTimestampToleranceMs: 300_000,
         providerFilter: ["oura", "withings"],
         summaryResources: ["profile", "activity"],
-        timeseriesResources: ["steps", "heartrate"],
+        timeseriesResources: ["blood_oxygen", "stress_level"],
         summaryBackfillDays: 180,
         timeseriesBackfillDays: 14,
         reconcileDays: 7,
