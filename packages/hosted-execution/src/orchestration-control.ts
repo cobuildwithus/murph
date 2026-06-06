@@ -31,7 +31,6 @@ export const HOSTED_RUNTIME_SIGNAL_KINDS = [
   "mailbox_appended",
   "manual_run_requested",
   "browser_vault_refresh_requested",
-  "device_sync_recovery_requested",
   "mailbox_lag_observed",
   "runtime_recheck_requested",
   "runtime_prewarm_requested",
@@ -66,9 +65,6 @@ export type HostedRuntimeSignal =
       kind: "browser_vault_refresh_requested";
     }
   | {
-      kind: "device_sync_recovery_requested";
-    }
-  | {
       kind: "mailbox_lag_observed";
     }
   | {
@@ -90,7 +86,6 @@ export interface HostedRuntimeMailboxPointer {
 
 export interface HostedRuntimeDemandRequest {
   browserVaultRefreshRequested?: boolean;
-  deviceSyncRecoveryRequested?: boolean;
   lagRecoveryObserved?: boolean;
   manualRunRequested?: boolean;
   userId: string;
@@ -108,7 +103,6 @@ export const HOSTED_RUNTIME_DEMAND_RUN_SOURCES = [
   "mailbox_backlog",
   "manual",
   "browser_vault_refresh",
-  "device_sync_recovery",
   "workspace_wake",
   "lag_recovery",
 ] as const;
@@ -256,7 +250,6 @@ export interface HostedRuntimeWorkflowState {
   browserVaultRefreshRequested: boolean;
   currentWaitReason: HostedRuntimeCurrentWaitReason;
   currentWaitUntil: string | null;
-  deviceSyncRecoveryRequested: boolean;
   invalidSignalCount: number;
   lagRecoveryObserved: boolean;
   lastOrchestrationAttemptId: string | null;
@@ -279,7 +272,6 @@ export interface HostedRuntimeWorkflowState {
   lastPrewarmResult: HostedRuntimeLastPrewarmResult;
   prewarmRequested: boolean;
   prewarmSignalCount: number;
-  sameRuntimeWakeAcceptedCount: number;
   signalVersion: number;
   userId: string;
 }

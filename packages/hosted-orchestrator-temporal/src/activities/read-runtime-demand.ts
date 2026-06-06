@@ -20,7 +20,9 @@ const HOSTED_RUNTIME_DEMAND_PATH_SUFFIX = "/demand";
 export async function readRuntimeDemand(
   request: HostedRuntimeDemandRequest,
 ): Promise<HostedRuntimeDemand> {
-  const parsedRequest = parseHostedRuntimeDemandRequest(request);
+  const parsedRequest = parseHostedRuntimeDemandRequest(
+    stripLegacyDeviceSyncRecoveryRequest(request),
+  );
   const environment = readHostedOrchestratorTemporalWebEnvironment();
 
   return observeHostedTemporalActivity({
@@ -41,6 +43,20 @@ export async function readRuntimeDemand(
   );
 }
 
+function stripLegacyDeviceSyncRecoveryRequest(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+
+  const stripped: Record<string, unknown> = {};
+  for (const [key, property] of Object.entries(value)) {
+    if (key !== "deviceSyncRecoveryRequested") {
+      stripped[key] = property;
+    }
+  }
+  return stripped;
+}
+
 function buildHostedRuntimeDemandPath(userId: string): string {
   return `${HOSTED_RUNTIME_DEMAND_PATH_PREFIX}${encodeURIComponent(userId)}${
     HOSTED_RUNTIME_DEMAND_PATH_SUFFIX
@@ -57,9 +73,6 @@ function buildHostedRuntimeDemandSearch(
   }
   if (request.browserVaultRefreshRequested === true) {
     params.set("browserVaultRefreshRequested", "1");
-  }
-  if (request.deviceSyncRecoveryRequested === true) {
-    params.set("deviceSyncRecoveryRequested", "1");
   }
   if (request.lagRecoveryObserved === true) {
     params.set("lagRecoveryObserved", "1");

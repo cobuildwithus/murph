@@ -23,7 +23,7 @@ type HostedDeviceSyncRecoverySweepRoute =
 
 let route: HostedDeviceSyncRecoverySweepRoute;
 
-describe("hosted device-sync recovery sweep route", () => {
+describe("hosted device-sync scheduled wake sweep route", () => {
   beforeAll(async () => {
     route = await import("../app/api/internal/device-sync/recovery-sweep/route");
   });
@@ -36,17 +36,17 @@ describe("hosted device-sync recovery sweep route", () => {
     mocks.runHostedDeviceSyncRecoverySweep.mockResolvedValue({
       dueReconcileSweeper: {
         dueConnections: 1,
-        recoveryAttempted: 1,
-        recoveryFailed: 0,
-        recoveryLimit: 25,
-        recoveryNotRequested: 0,
-        recoveryRequested: 1,
         skippedDueConnections: 0,
+        wakeAccepted: 1,
+        wakeAttempted: 1,
+        wakeFailed: 0,
+        wakeLimit: 25,
+        wakeNotAccepted: 0,
       },
     });
   });
 
-  it("requires a signed Temporal callback identity and runs the recovery sweep", async () => {
+  it("requires a signed Temporal callback identity and runs the scheduled wake sweep", async () => {
     const request = new Request(
       "https://join.example.test/api/internal/device-sync/recovery-sweep",
       {
@@ -68,12 +68,12 @@ describe("hosted device-sync recovery sweep route", () => {
     await expect(response.json()).resolves.toEqual({
       dueReconcileSweeper: {
         dueConnections: 1,
-        recoveryAttempted: 1,
-        recoveryFailed: 0,
-        recoveryLimit: 25,
-        recoveryNotRequested: 0,
-        recoveryRequested: 1,
         skippedDueConnections: 0,
+        wakeAccepted: 1,
+        wakeAttempted: 1,
+        wakeFailed: 0,
+        wakeLimit: 25,
+        wakeNotAccepted: 0,
       },
     });
   });

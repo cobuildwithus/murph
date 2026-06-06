@@ -301,6 +301,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026052700_hosted_runtime_log_event_cooldown_index",
       "2026052800_hosted_signup_welcome_email_attempt",
       "2026060300_hosted_latency_milestones",
+      "2026060501_device_sync_source_confirmed_backfill",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -626,6 +627,41 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(schema).not.toContain("model HostedRevnetIssuance");
     expect(schema).not.toContain("enum HostedRevnetIssuanceStatus");
+  });
+
+  it("makes eligible stuck device connections due even when their reconcile is scheduled in the future", () => {
+    const sourceConfirmedBackfillMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026060501_device_sync_source_confirmed_backfill/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(sourceConfirmedBackfillMigrationSql).toContain(
+      '"setup_phase" = \'source_confirmed\',\n  "setup_expires_at" = NULL',
+    );
+    expect(sourceConfirmedBackfillMigrationSql).toContain(
+      'WHERE "status" = \'active\'\n  AND "setup_phase" IN (\'pending_link\', \'link_returned\')',
+    );
+    expect(sourceConfirmedBackfillMigrationSql).toContain(
+      '"next_reconcile_at" = LEAST(COALESCE("connection"."next_reconcile_at", NOW()), NOW())',
+    );
+    expect(sourceConfirmedBackfillMigrationSql).toContain(
+      'WHERE "connection"."status" = \'active\'',
+    );
+    expect(sourceConfirmedBackfillMigrationSql).toContain(
+      '"connection"."last_sync_started_at" IS NULL',
+    );
+    expect(sourceConfirmedBackfillMigrationSql).toContain(
+      '"connection"."credential_kind" = \'oauth_tokens\'\n      AND "connection"."access_token_encrypted" IS NOT NULL',
+    );
+    expect(sourceConfirmedBackfillMigrationSql).toContain(
+      '"connection"."credential_kind" = \'provider_config\'\n      AND "connection"."provider_config_key" IS NOT NULL',
+    );
+    expect(sourceConfirmedBackfillMigrationSql).not.toContain(
+      '"credential_kind" = \'none\'',
+    );
   });
 
   it("keeps hosted-member models on the reviewed owner-table set", () => {

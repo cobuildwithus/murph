@@ -66,15 +66,6 @@ export interface SignalHostedMailboxAppendInput {
   source: string;
 }
 
-export interface SignalHostedDeviceSyncRecoveryInput {
-  client?: HostedRuntimeTemporalSignalClient | null;
-  environment?: NodeJS.ProcessEnv;
-  eventId?: string | null;
-  occurredAt?: string | null;
-  prisma?: PrismaClient;
-  userId: string;
-}
-
 export interface SignalHostedBrowserVaultRefreshInput {
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
@@ -104,14 +95,11 @@ export interface SignalHostedRuntimePrewarmInput {
   userId: string;
 }
 
-export type HostedDeviceSyncRecoverySignalIntent = "device-sync-reconcile-recovery";
-
 export interface SignalHostedDeviceSyncMailboxInput {
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   mailboxItemId: string;
   prisma?: PrismaClient;
-  recoveryIntent?: HostedDeviceSyncRecoverySignalIntent | null;
 }
 
 export function hostedUserRuntimeWorkflowId(userId: string): string {
@@ -152,37 +140,6 @@ export async function signalHostedMailboxAppendRuntime(
       source: sanitizeHostedRuntimeSignalSource(input.source),
     }),
     userId: mailboxItem.userId,
-  });
-}
-
-export async function signalHostedDeviceSyncRecoveryRuntime(
-  input: SignalHostedDeviceSyncRecoveryInput,
-): Promise<HostedRuntimeSignalResult> {
-  return signalHostedRuntimeControlMailboxRequest({
-    client: input.client,
-    environment: input.environment,
-    eventId: input.eventId ?? null,
-    kind: "runtime.device-sync-recovery-requested",
-    occurredAt: input.occurredAt ?? null,
-    prisma: input.prisma,
-    runtimeSignalKind: "device_sync_recovery_requested",
-    source: "device-sync-recovery",
-    userId: input.userId,
-  });
-}
-
-export async function signalHostedDeviceSyncBackgroundMaintenanceRuntime(
-  input: SignalHostedDeviceSyncRecoveryInput,
-): Promise<HostedRuntimeSignalResult> {
-  return signalHostedUserRuntimeWorkflow({
-    client: input.client,
-    environment: input.environment,
-    ensureWorkspace: true,
-    prisma: input.prisma,
-    signal: parseHostedRuntimeSignal({
-      kind: "device_sync_recovery_requested",
-    }),
-    userId: input.userId,
   });
 }
 
@@ -276,23 +233,6 @@ export async function signalHostedDeviceSyncMailboxRuntime(
     throw new Error("Hosted device-sync mailbox item is missing for runtime signal.");
   }
 
-  const shouldSignalRecovery = shouldSignalHostedDeviceSyncRecovery(
-    input.recoveryIntent ?? null,
-  );
-  if (shouldSignalRecovery) {
-    return signalHostedDeviceSyncRecoveryRuntime({
-      client: input.client,
-      environment: input.environment,
-      eventId: buildHostedDeviceSyncRecoveryRuntimeControlEventId({
-        mailboxItemId: mailboxItem.id,
-        recoveryIntent: input.recoveryIntent ?? null,
-      }),
-      occurredAt: mailboxItem.occurredAt,
-      prisma: input.prisma,
-      userId: mailboxItem.userId,
-    });
-  }
-
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
     environment: input.environment,
@@ -316,7 +256,6 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
   kind: HostedExecutionRuntimeControlWakeKind;
   occurredAt?: string | null;
   prisma?: PrismaClient;
-  runtimeSignalKind?: "device_sync_recovery_requested" | null;
   source: string;
   userId: string;
 }): Promise<HostedRuntimeSignalResult> {
@@ -343,38 +282,18 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
     environment: input.environment,
     ensureWorkspace: false,
     prisma,
-    signal: input.runtimeSignalKind === "device_sync_recovery_requested"
-      ? parseHostedRuntimeSignal({
-        kind: "device_sync_recovery_requested",
-      })
-      : parseHostedRuntimeSignal({
-        kind: "mailbox_appended",
-        lane: mailboxItem.lane,
-        laneSeq: mailboxItem.laneSeq,
-        mailboxItemId: mailboxItem.id,
-        source: sanitizeHostedRuntimeSignalSource(input.source),
-      }),
+    signal: parseHostedRuntimeSignal({
+      kind: "mailbox_appended",
+      lane: mailboxItem.lane,
+      laneSeq: mailboxItem.laneSeq,
+      mailboxItemId: mailboxItem.id,
+      source: sanitizeHostedRuntimeSignalSource(input.source),
+    }),
     userId: input.userId,
   });
 }
 
 const HOSTED_RUNTIME_CONTROL_DETERMINISTIC_OCCURRED_AT = "1970-01-01T00:00:00.000Z";
-
-function buildHostedDeviceSyncRecoveryRuntimeControlEventId(input: {
-  mailboxItemId: string;
-  recoveryIntent: HostedDeviceSyncRecoverySignalIntent | null;
-}): string {
-  const fingerprint = createHash("sha256")
-    .update(JSON.stringify({
-      mailboxItemId: input.mailboxItemId,
-      recoveryIntent: input.recoveryIntent,
-      version: 1,
-    }))
-    .digest("hex")
-    .slice(0, 32);
-
-  return `runtime-control:device-sync-recovery:${fingerprint}`;
-}
 
 const BROWSER_VAULT_REFRESH_CONTROL_DEDUPE_WINDOW_MS = 60_000;
 
@@ -519,20 +438,5 @@ function assertExpectedHostedMailboxOwner(input: {
 
   if (input.expectedUserId !== input.mailboxItem.userId) {
     throw new Error("Hosted mailbox item owner does not match runtime signal user.");
-  }
-}
-
-function shouldSignalHostedDeviceSyncRecovery(
-  intent: HostedDeviceSyncRecoverySignalIntent | null,
-): boolean {
-  switch (intent) {
-    case "device-sync-reconcile-recovery":
-      return true;
-    case null:
-      return false;
-    default: {
-      const exhaustive: never = intent;
-      throw new Error(`Unsupported hosted device-sync recovery intent: ${String(exhaustive)}`);
-    }
   }
 }

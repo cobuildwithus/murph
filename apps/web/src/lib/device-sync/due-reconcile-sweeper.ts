@@ -1,128 +1,135 @@
 import { getPrisma } from "../prisma";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
-import { requestHostedDeviceSyncScheduledReconcileRecovery } from "./wake-service";
+import {
+  appendHostedDeviceSyncScheduledReconcileWake,
+  buildHostedDeviceSyncScheduledReconcileWakeEventId,
+} from "./wake-service";
 
-const DEFAULT_RECOVERY_LIMIT = 25;
-const DUE_RECONCILE_RECOVERY_BUCKET_MS = 5 * 60_000;
-const MAX_RECOVERY_LIMIT = 250;
-const RECOVERY_CONCURRENCY = 5;
+const DEFAULT_WAKE_LIMIT = 25;
+const DUE_RECONCILE_WAKE_BUCKET_MS = 5 * 60_000;
+const MAX_WAKE_LIMIT = 250;
+const WAKE_CONCURRENCY = 5;
 
 export interface HostedDeviceSyncDueReconcileSweeperResult {
   dueConnections: number;
-  recoveryAttempted: number;
-  recoveryFailed: number;
-  recoveryLimit: number;
-  recoveryNotRequested: number;
-  recoveryRequested: number;
+  wakeAccepted: number;
+  wakeAttempted: number;
+  wakeFailed: number;
+  wakeLimit: number;
+  wakeNotAccepted: number;
   skippedDueConnections: number;
 }
 
 type HostedDeviceSyncDueReconcileSweeperLogger = Pick<Console, "info" | "warn">;
-type HostedDeviceSyncScheduledReconcileRecoveryRequest =
-  typeof requestHostedDeviceSyncScheduledReconcileRecovery;
+type HostedDeviceSyncScheduledReconcileWakeRequest =
+  typeof appendHostedDeviceSyncScheduledReconcileWake;
 
 export async function runHostedDeviceSyncDueReconcileSweeper(input: {
   logger?: HostedDeviceSyncDueReconcileSweeperLogger;
   now?: Date;
-  nudgeLimit?: number;
-  requestRecovery?: HostedDeviceSyncScheduledReconcileRecoveryRequest;
+  requestWake?: HostedDeviceSyncScheduledReconcileWakeRequest;
   store?: Pick<PrismaDeviceSyncControlPlaneStore, "listDueReconcileConnectionsForSweep">;
+  wakeLimit?: number;
 } = {}): Promise<HostedDeviceSyncDueReconcileSweeperResult> {
   const logger = input.logger ?? console;
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
-  const recoveryBucketStartedAt = new Date(
-    Math.floor(now.getTime() / DUE_RECONCILE_RECOVERY_BUCKET_MS) * DUE_RECONCILE_RECOVERY_BUCKET_MS,
+  const wakeBucketStartedAt = new Date(
+    Math.floor(now.getTime() / DUE_RECONCILE_WAKE_BUCKET_MS) * DUE_RECONCILE_WAKE_BUCKET_MS,
   );
-  const recoveryBucketStartedAtIso = recoveryBucketStartedAt.toISOString();
-  const recoveryLimit = normalizeLimit(input.nudgeLimit, DEFAULT_RECOVERY_LIMIT, MAX_RECOVERY_LIMIT);
+  const wakeBucketStartedAtIso = wakeBucketStartedAt.toISOString();
+  const wakeLimit = normalizeLimit(input.wakeLimit, DEFAULT_WAKE_LIMIT, MAX_WAKE_LIMIT);
   const store = input.store ?? new PrismaDeviceSyncControlPlaneStore({
     prisma: getPrisma(),
   });
-  const requestRecovery = input.requestRecovery ?? requestHostedDeviceSyncScheduledReconcileRecovery;
+  const requestWake = input.requestWake ?? appendHostedDeviceSyncScheduledReconcileWake;
   const dueConnections = await store.listDueReconcileConnectionsForSweep({
     dueAt: now,
-    limit: recoveryLimit + 1,
-    recoveryBucketStartedAt,
+    limit: wakeLimit + 1,
+    recoveryBucketStartedAt: wakeBucketStartedAt,
   });
-  const selectedDueConnections = dueConnections.slice(0, recoveryLimit);
+  const selectedDueConnections = dueConnections.slice(0, wakeLimit);
 
   logger.info("Hosted device-sync due reconcile sweeper scanned due connections.", {
     dueAt: nowIso,
     dueConnections: dueConnections.length,
-    recoveryBucketStartedAt: recoveryBucketStartedAtIso,
-    recoveryLimit,
+    wakeBucketStartedAt: wakeBucketStartedAtIso,
+    wakeLimit,
     selectedDueConnections: selectedDueConnections.length,
   });
 
-  let recoveryAttempted = 0;
-  let recoveryFailed = 0;
-  let recoveryNotRequested = 0;
-  let recoveryRequested = 0;
+  let wakeAccepted = 0;
+  let wakeAttempted = 0;
+  let wakeFailed = 0;
+  let wakeNotAccepted = 0;
 
   await runWithConcurrency(
     selectedDueConnections,
-    RECOVERY_CONCURRENCY,
+    WAKE_CONCURRENCY,
     async (dueConnection) => {
-      recoveryAttempted += 1;
+      wakeAttempted += 1;
 
-      let recovery;
+      let wake;
       try {
-        recovery = await requestRecovery({
+        wake = await requestWake({
           connectionId: dueConnection.connectionId,
           createdAt: nowIso,
+          eventId: buildHostedDeviceSyncScheduledReconcileWakeEventId({
+            connectionId: dueConnection.connectionId,
+            nextReconcileAt: dueConnection.nextReconcileAt,
+          }),
           nextReconcileAt: dueConnection.nextReconcileAt,
           provider: dueConnection.provider,
           traceId: null,
           userId: dueConnection.userId,
         });
       } catch (error) {
-        recoveryFailed += 1;
-        recoveryNotRequested += 1;
-        logger.warn("Hosted device-sync due reconcile sweeper background recovery request failed.", {
+        wakeFailed += 1;
+        wakeNotAccepted += 1;
+        logger.warn("Hosted device-sync due reconcile sweeper wake request failed.", {
           errorName: error instanceof Error ? error.name : "unknown",
         });
         return;
       }
 
-      if (recovery.recoveryRequested) {
-        recoveryRequested += 1;
+      if (wake.wakeAccepted) {
+        wakeAccepted += 1;
         return;
       }
 
-      recoveryFailed += 1;
-      recoveryNotRequested += 1;
-      logger.warn("Hosted device-sync due reconcile sweeper background recovery was not requested.", {
-        reason: recovery.reason ?? null,
+      wakeFailed += 1;
+      wakeNotAccepted += 1;
+      logger.warn("Hosted device-sync due reconcile sweeper wake was not accepted.", {
+        reason: wake.reason ?? null,
       });
     },
   );
 
   const skippedDueConnections = Math.max(0, dueConnections.length - selectedDueConnections.length);
   if (skippedDueConnections > 0) {
-    logger.warn("Hosted device-sync due reconcile sweeper skipped due connections after recovery limit.", {
-      recoveryLimit,
+    logger.warn("Hosted device-sync due reconcile sweeper skipped due connections after wake limit.", {
+      wakeLimit,
       skippedDueConnections,
     });
   }
 
   logger.info("Hosted device-sync due reconcile sweeper finished.", {
     dueConnections: dueConnections.length,
-    recoveryAttempted,
-    recoveryFailed,
-    recoveryLimit,
-    recoveryNotRequested,
-    recoveryRequested,
+    wakeAccepted,
+    wakeAttempted,
+    wakeFailed,
+    wakeLimit,
+    wakeNotAccepted,
     skippedDueConnections,
   });
 
   return {
     dueConnections: dueConnections.length,
-    recoveryAttempted,
-    recoveryFailed,
-    recoveryLimit,
-    recoveryNotRequested,
-    recoveryRequested,
+    wakeAccepted,
+    wakeAttempted,
+    wakeFailed,
+    wakeLimit,
+    wakeNotAccepted,
     skippedDueConnections,
   };
 }

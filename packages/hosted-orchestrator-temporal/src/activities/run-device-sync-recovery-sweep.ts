@@ -15,14 +15,16 @@ export interface HostedDeviceSyncRecoverySweepResult {
 
 export interface HostedDeviceSyncDueReconcileSweeperResult {
   dueConnections: number;
-  recoveryAttempted: number;
-  recoveryFailed: number;
-  recoveryLimit: number;
-  recoveryNotRequested: number;
-  recoveryRequested: number;
   skippedDueConnections: number;
+  wakeAccepted: number;
+  wakeAttempted: number;
+  wakeFailed: number;
+  wakeLimit: number;
+  wakeNotAccepted: number;
 }
 
+// The route/activity name is legacy compatibility. The current behavior asks
+// web to append bounded scheduled-reconcile mailbox wakes.
 export async function runHostedDeviceSyncRecoverySweep(): Promise<
   HostedDeviceSyncRecoverySweepResult
 > {
@@ -30,14 +32,14 @@ export async function runHostedDeviceSyncRecoverySweep(): Promise<
 
   return observeHostedTemporalActivity({
     activity: "runHostedDeviceSyncRecoverySweep",
-    reason: "device_sync_recovery",
+    reason: "device_sync_scheduled_wake",
     userId: "",
   }, async () =>
     requestHostedOrchestratorJson(environment.hostedWebBaseUrl, {
       body: "{}",
       boundUserId: HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID,
       fetchImpl: fetch,
-      label: "device-sync recovery sweep",
+      label: "device-sync scheduled wake sweep",
       method: "POST",
       parse: parseHostedDeviceSyncRecoverySweepResult,
       path: HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH,
@@ -50,7 +52,7 @@ export async function runHostedDeviceSyncRecoverySweep(): Promise<
 function parseHostedDeviceSyncRecoverySweepResult(
   value: unknown,
 ): HostedDeviceSyncRecoverySweepResult {
-  const record = requireRecord(value, "Hosted device-sync recovery sweep response");
+  const record = requireRecord(value, "Hosted device-sync scheduled wake sweep response");
   return {
     dueReconcileSweeper: parseDueReconcileSweeperResult(
       record.dueReconcileSweeper,
@@ -67,15 +69,15 @@ function parseDueReconcileSweeperResult(
   );
   return {
     dueConnections: requireCount(record.dueConnections, "dueConnections"),
-    recoveryAttempted: requireCount(record.recoveryAttempted, "recoveryAttempted"),
-    recoveryFailed: requireCount(record.recoveryFailed, "recoveryFailed"),
-    recoveryLimit: requireCount(record.recoveryLimit, "recoveryLimit"),
-    recoveryNotRequested: requireCount(record.recoveryNotRequested, "recoveryNotRequested"),
-    recoveryRequested: requireCount(record.recoveryRequested, "recoveryRequested"),
     skippedDueConnections: requireCount(
       record.skippedDueConnections,
       "skippedDueConnections",
     ),
+    wakeAccepted: requireCount(record.wakeAccepted, "wakeAccepted"),
+    wakeAttempted: requireCount(record.wakeAttempted, "wakeAttempted"),
+    wakeFailed: requireCount(record.wakeFailed, "wakeFailed"),
+    wakeLimit: requireCount(record.wakeLimit, "wakeLimit"),
+    wakeNotAccepted: requireCount(record.wakeNotAccepted, "wakeNotAccepted"),
   };
 }
 
@@ -97,7 +99,7 @@ function requireCount(value: unknown, label: string): number {
     || value < 0
   ) {
     throw new TypeError(
-      `Hosted device-sync recovery sweep ${label} must be a non-negative integer.`,
+      `Hosted device-sync scheduled wake sweep ${label} must be a non-negative integer.`,
     );
   }
 

@@ -88,7 +88,6 @@ describe("hosted orchestration status route", () => {
     );
     expect(mocks.readHostedRuntimeDemand).toHaveBeenCalledWith({
       browserVaultRefreshRequested: false,
-      deviceSyncRecoveryRequested: true,
       decisionSource: "status",
       lagRecoveryObserved: true,
       manualRunRequested: true,
@@ -145,7 +144,6 @@ describe("hosted orchestration status route", () => {
     });
     expect(mocks.readHostedRuntimeDemand).toHaveBeenCalledWith({
       browserVaultRefreshRequested: false,
-      deviceSyncRecoveryRequested: false,
       decisionSource: "status",
       lagRecoveryObserved: false,
       manualRunRequested: false,
@@ -234,7 +232,6 @@ describe("hosted orchestration status route", () => {
     delete oldStatus.lastPrewarmResult;
     delete oldStatus.prewarmRequested;
     delete oldStatus.prewarmSignalCount;
-    delete oldStatus.sameRuntimeWakeAcceptedCount;
     mocks.queryWorkflowStatus.mockResolvedValue(oldStatus);
 
     const response = await statusRoute.GET(
@@ -257,7 +254,6 @@ describe("hosted orchestration status route", () => {
       latestPrewarmRequestedAt: null,
       prewarmRequested: false,
       prewarmSignalCount: 0,
-      sameRuntimeWakeAcceptedCount: 0,
     });
   });
 
@@ -347,7 +343,6 @@ describe("hosted orchestration status route", () => {
     });
     expect(mocks.readHostedRuntimeDemand).toHaveBeenCalledWith({
       browserVaultRefreshRequested: false,
-      deviceSyncRecoveryRequested: false,
       decisionSource: "status",
       lagRecoveryObserved: false,
       manualRunRequested: false,
@@ -482,7 +477,6 @@ function buildWorkflowStatus() {
     browserVaultRefreshRequested: false,
     currentWaitReason: "runtime_wake_recheck",
     currentWaitUntil: "2026-05-21T12:04:00.000Z",
-    deviceSyncRecoveryRequested: true,
     invalidSignalCount: 0,
     lagRecoveryObserved: true,
     lastDemandKind: "run",
@@ -510,7 +504,6 @@ function buildWorkflowStatus() {
     manualRunRequested: true,
     prewarmRequested: false,
     prewarmSignalCount: 1,
-    sameRuntimeWakeAcceptedCount: 0,
     signalVersion: 4,
     userId: MEMBER_ID,
   };

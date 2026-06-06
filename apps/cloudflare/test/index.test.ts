@@ -1714,7 +1714,7 @@ describe("cloudflare worker routes", () => {
             body: JSON.stringify({
               orchestrationAttemptId: "orchestration-attempt-test",
               reason: "nudge",
-              source: "device_sync_recovery",
+              source: "workspace_wake",
             }),
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -1738,7 +1738,7 @@ describe("cloudflare worker routes", () => {
         orchestrationAttemptId: "orchestration-attempt-test",
         commandTimeoutMs: 10_000,
         reason: "nudge",
-        source: "device_sync_recovery",
+        source: "workspace_wake",
         userId: "test-user",
       });
     });
@@ -1857,7 +1857,7 @@ describe("cloudflare worker routes", () => {
             body: JSON.stringify({
               orchestrationAttemptId: "orchestration-attempt-test",
               reason: "nudge",
-              source: "device_sync_recovery",
+              source: "workspace_wake",
             }),
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -1879,7 +1879,7 @@ describe("cloudflare worker routes", () => {
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
         orchestrationAttemptId: "orchestration-attempt-test",
         reason: "nudge",
-        source: "device_sync_recovery",
+        source: "workspace_wake",
         userId: "test-user",
       });
     });
@@ -1903,7 +1903,7 @@ describe("cloudflare worker routes", () => {
               body: JSON.stringify({
                 orchestrationAttemptId: "orchestration-attempt-test",
                 reason: "nudge",
-                source: "device_sync_recovery",
+                source: "workspace_wake",
               }),
               headers: {
                 "content-type": "application/json; charset=utf-8",

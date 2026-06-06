@@ -11,7 +11,7 @@ const continueAsNew = vi.fn(async () => {
 });
 const defineQuery = vi.fn((name: string) => ({ name, type: "query" }));
 const defineSignal = vi.fn((name: string) => ({ name, type: "signal" }));
-const patched = vi.fn(() => true);
+const patched = vi.fn((_patchId: string) => true);
 const setHandler = vi.fn();
 const uuid4 = vi.fn(() => "orchestration-attempt-test");
 const workflowInfo = vi.fn(() => ({
@@ -109,13 +109,33 @@ describe("hostedUserRuntimeWorkflow entrypoint", () => {
     })).rejects.toBe(continueAsNewError);
 
     expect(patched).toHaveBeenCalledWith(
+      "hosted-user-runtime-drop-device-sync-recovery-v1",
+    );
+    expect(patched).toHaveBeenCalledWith(
       "hosted-user-runtime-ensure-runtime-processing-v1",
     );
-    expect(patched.mock.invocationCallOrder[0]).toBeGreaterThan(
+    const recoveryDeletionPatchOrder = readPatchInvocationOrder(
+      "hosted-user-runtime-drop-device-sync-recovery-v1",
+    );
+    const ensureProcessingPatchOrder = readPatchInvocationOrder(
+      "hosted-user-runtime-ensure-runtime-processing-v1",
+    );
+    expect(recoveryDeletionPatchOrder).toBeLessThan(
       readRuntimeDemand.mock.invocationCallOrder[0],
     );
-    expect(patched.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(ensureProcessingPatchOrder).toBeGreaterThan(
+      readRuntimeDemand.mock.invocationCallOrder[0],
+    );
+    expect(ensureProcessingPatchOrder).toBeLessThan(
       ensureRuntimeProcessing.mock.invocationCallOrder[0],
     );
   });
 });
+
+function readPatchInvocationOrder(patchId: string): number {
+  const callIndex = patched.mock.calls.findIndex((call) => call[0] === patchId);
+  if (callIndex < 0) {
+    throw new Error(`Missing patch call ${patchId}.`);
+  }
+  return patched.mock.invocationCallOrder[callIndex];
+}

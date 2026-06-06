@@ -6994,7 +6994,7 @@ describe("hosted workspace runtime entrypoint", () => {
       label: "explicit device-sync",
       nextWakeReason: "device-sync.reconcile" as const,
     },
-  ])("e2e clears stale $label device-sync recovery wake when no dirty work remains", async (input) => {
+  ])("e2e clears stale $label scheduled device-sync wake when no dirty work remains", async (input) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -7093,8 +7093,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_device_sync_first",
-            reason: "nudge",
-            source: "device_sync_recovery",
+            reason: "alarm",
             workspaceVersion: "0",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),
@@ -7111,7 +7110,7 @@ describe("hosted workspace runtime entrypoint", () => {
             };
           },
           async importItem() {
-            throw new Error("Device-sync recovery nudges should not import mailbox items.");
+            throw new Error("Scheduled device-sync wakes should not import mailbox items.");
           },
           platform: createPlatform({
             deviceSyncPort: firstDeviceSyncPort,
@@ -7122,7 +7121,11 @@ describe("hosted workspace runtime entrypoint", () => {
             workspacePort: createWorkspacePort({
               checkpointRequests: firstCheckpointRequests,
               events,
-              workspace: createWorkspaceState({ version: "0" }),
+              workspace: createWorkspaceState({
+                nextWakeAt: firstNow,
+                nextWakeReason: "device-sync.reconcile",
+                version: "0",
+              }),
             }),
           }),
           vaultRoot,
@@ -7239,13 +7242,13 @@ describe("hosted workspace runtime entrypoint", () => {
     });
     assert.equal(browserVaultRefreshParsed.request.reason, "browser_vault_refresh");
 
-    const deviceSyncRecoveryParsed = parseHostedAssistantWorkspaceRuntimeJobInput({
+    const workspaceWakeParsed = parseHostedAssistantWorkspaceRuntimeJobInput({
       request: {
         ...createWorkspaceRunRequest(),
-        source: "device_sync_recovery",
+        source: "workspace_wake",
       },
     });
-    assert.equal(deviceSyncRecoveryParsed.request.source, "device_sync_recovery");
+    assert.equal(workspaceWakeParsed.request.source, "workspace_wake");
 
     expect(() =>
       parseHostedAssistantWorkspaceRuntimeJobInput({

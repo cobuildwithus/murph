@@ -945,8 +945,8 @@ test("public ingress completes external-link callbacks with sanitized state meta
   });
   assert.equal(callbackSeededExternalAccountId, "external-account-1");
   assert.equal(Object.prototype.hasOwnProperty.call(callbackStateMetadata ?? {}, "ownerId"), false);
-  assert.equal(completed.account.setupPhase, "link_returned");
-  assert.equal(completed.account.setupExpiresAt, seeded.setupExpiresAt);
+  assert.equal(completed.account.setupPhase, "source_confirmed");
+  assert.equal(completed.account.setupExpiresAt, null);
   assert.equal(completed.account.externalAccountId, "external-account-1");
   assert.equal(Object.values(callbackStateMetadata ?? {}).includes(completed.account.id), false);
 });

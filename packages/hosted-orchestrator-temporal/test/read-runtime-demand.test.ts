@@ -38,7 +38,6 @@ describe("readRuntimeDemand", () => {
 
     await expect(readRuntimeDemand({
       browserVaultRefreshRequested: true,
-      deviceSyncRecoveryRequested: true,
       lagRecoveryObserved: true,
       manualRunRequested: true,
       userId: "member_test",
@@ -55,8 +54,8 @@ describe("readRuntimeDemand", () => {
     );
     expect(url.searchParams.get("manualRunRequested")).toBe("1");
     expect(url.searchParams.get("browserVaultRefreshRequested")).toBe("1");
-    expect(url.searchParams.get("deviceSyncRecoveryRequested")).toBe("1");
     expect(url.searchParams.get("lagRecoveryObserved")).toBe("1");
+    expect(url.searchParams.has("deviceSyncRecoveryRequested")).toBe(false);
     expect(request.init?.method).toBe("GET");
     expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_test");
     expect(headers.get(HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER)).toBe("test-key");
@@ -87,6 +86,31 @@ describe("readRuntimeDemand", () => {
 
     const url = new URL(observedRequests[0].url);
     expect(url.search).toBe("");
+  });
+
+  it("drops legacy device-sync recovery flags from old Activity inputs", async () => {
+    await stubHostedWebEnvironment();
+
+    const demand: HostedRuntimeDemand = {
+      kind: "idle",
+      mailboxLag: [],
+      nextWakeAt: null,
+      workspace: null,
+    };
+    const observedRequests: ObservedRequest[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      observedRequests.push({ init, url: String(url) });
+      return jsonResponse(demand);
+    }));
+
+    const legacyRequest = {
+      deviceSyncRecoveryRequested: true,
+      userId: "member_test",
+    };
+    await expect(readRuntimeDemand(legacyRequest)).resolves.toEqual(demand);
+
+    const url = new URL(observedRequests[0].url);
+    expect(url.searchParams.has("deviceSyncRecoveryRequested")).toBe(false);
   });
 
   it("rejects invalid hosted web demand responses", async () => {

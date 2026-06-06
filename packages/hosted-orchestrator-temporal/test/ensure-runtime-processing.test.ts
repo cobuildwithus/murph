@@ -47,7 +47,7 @@ describe("ensureRuntimeProcessing", () => {
     await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
-      source: "device_sync_recovery",
+      source: "workspace_wake",
       userId: "member_test",
     })).resolves.toEqual(response);
 
@@ -67,7 +67,7 @@ describe("ensureRuntimeProcessing", () => {
     expect(JSON.parse(String(request.init?.body))).toEqual({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
-      source: "device_sync_recovery",
+      source: "workspace_wake",
     });
     expect(String(request.init?.body)).not.toContain("requiresAiUsageDecision");
     expect(String(request.init?.body)).not.toContain("aiUsageAllowDecision");
@@ -132,7 +132,7 @@ describe("ensureRuntimeProcessing", () => {
     await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
-      source: "device_sync_recovery",
+      source: "workspace_wake",
       userId: "member_test",
     })).resolves.toEqual({
       kind: "retry_later",
@@ -143,7 +143,35 @@ describe("ensureRuntimeProcessing", () => {
     expect(JSON.parse(String(observedRequests[0].init?.body))).toEqual({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
+      source: "workspace_wake",
+    });
+  });
+
+  it("drops legacy device-sync recovery source from old Activity inputs", async () => {
+    await stubCloudflareEnvironment();
+
+    const response: HostedRuntimeEnsureProcessingResponse = {
+      action: "started",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-05-20T12:02:30.000Z",
+      runtimeAttemptId: "runtime_attempt_test",
+    };
+    const observedRequests: ObservedRequest[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      observedRequests.push({ init, url: String(url) });
+      return jsonResponse(response);
+    }));
+
+    await expect(ensureRuntimeProcessing({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "nudge",
       source: "device_sync_recovery",
+      userId: "member_test",
+    })).resolves.toEqual(response);
+
+    expect(JSON.parse(String(observedRequests[0].init?.body))).toEqual({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "nudge",
     });
   });
 
@@ -159,7 +187,7 @@ describe("ensureRuntimeProcessing", () => {
     await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
-      source: "device_sync_recovery",
+      source: "workspace_wake",
       userId: "member_test",
     })).rejects.toMatchObject({
       message: "Hosted orchestrator runtime ensure processing failed with HTTP 400.",

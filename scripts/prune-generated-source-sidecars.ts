@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scanRoots = ["packages", "apps", "e2e"] as const;
+const gitListMaxBuffer = 16 * 1024 * 1024;
 export const generatedArtifactDirectories = [
   "apps/cloudflare/.deploy/.deploy",
   "apps/cloudflare/.deploy/dry-run",
@@ -130,7 +131,10 @@ export function getGeneratedSourceSidecarSourcePath(
 }
 
 async function listGitFiles(args: string[]): Promise<string[]> {
-  const { stdout } = await execFileAsync("git", args, { cwd: repoRoot });
+  const { stdout } = await execFileAsync("git", args, {
+    cwd: repoRoot,
+    maxBuffer: gitListMaxBuffer,
+  });
   return stdout
     .split("\n")
     .map((line) => line.trim())

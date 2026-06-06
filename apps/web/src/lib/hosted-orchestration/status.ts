@@ -97,8 +97,6 @@ export async function readHostedOrchestrationUserStatus(input: {
   const demand = await readHostedRuntimeDemand({
     browserVaultRefreshRequested:
       temporalStatusResult.status?.browserVaultRefreshRequested === true,
-    deviceSyncRecoveryRequested:
-      temporalStatusResult.status?.deviceSyncRecoveryRequested === true,
     decisionSource: "status",
     lagRecoveryObserved:
       temporalStatusResult.status?.lagRecoveryObserved === true,
@@ -314,9 +312,6 @@ function parseHostedRuntimeWorkflowStatusForWeb(
     currentWaitReason:
       readNullableCurrentWaitReason(record.currentWaitReason ?? null),
     currentWaitUntil: readNullableString(record.currentWaitUntil ?? null),
-    deviceSyncRecoveryRequested: requireBoolean(
-      record.deviceSyncRecoveryRequested,
-    ),
     invalidSignalCount: requireSafeInteger(record.invalidSignalCount),
     lagRecoveryObserved: requireBoolean(record.lagRecoveryObserved),
     lastDemandKind: readNullableDemandKind(record.lastDemandKind),
@@ -348,10 +343,6 @@ function parseHostedRuntimeWorkflowStatusForWeb(
     manualRunRequested: requireBoolean(record.manualRunRequested),
     prewarmRequested: readOptionalBoolean(record.prewarmRequested, false),
     prewarmSignalCount: readOptionalSafeInteger(record.prewarmSignalCount, 0),
-    sameRuntimeWakeAcceptedCount: readOptionalSafeInteger(
-      record.sameRuntimeWakeAcceptedCount,
-      0,
-    ),
     signalVersion: requireSafeInteger(record.signalVersion),
     userId: requireString(record.userId),
   };

@@ -131,7 +131,7 @@ function buildHostedDeviceSyncReconcilerScheduleOptions(
     action: buildHostedDeviceSyncReconcilerScheduleAction(config),
     memo: {
       owner: "hosted-orchestrator-temporal",
-      purpose: "device-sync-recovery",
+      purpose: "device-sync-scheduled-wake",
     },
     policies: {
       catchupWindow: "5 minutes",
@@ -147,8 +147,8 @@ function buildHostedDeviceSyncReconcilerScheduleOptions(
     state: {
       paused: !config.enabled,
       note: config.enabled
-        ? "Temporal-owned hosted device-sync recovery sweep."
-        : "Device-sync Temporal recovery sweep disabled by feature flag.",
+        ? "Temporal-owned hosted device-sync scheduled wake sweep."
+        : "Device-sync Temporal scheduled wake sweep disabled by feature flag.",
     },
   };
 }

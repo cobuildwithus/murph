@@ -11,6 +11,8 @@ type HostedDeviceSyncRecoverySweepLogger = Pick<Console, "warn">;
 type HostedDeviceSyncDueReconcileSweepRunner =
   typeof runHostedDeviceSyncDueReconcileSweeper;
 
+// The route/API name is legacy compatibility. The current behavior is a bounded
+// scheduled-reconcile mailbox wake sweep, not recovery-signal production.
 export async function runHostedDeviceSyncRecoverySweep(input: {
   logger?: HostedDeviceSyncRecoverySweepLogger;
   runDueReconcileSweeper?: HostedDeviceSyncDueReconcileSweepRunner;
@@ -23,30 +25,30 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
   try {
     dueReconcileSweep = await runDueReconcileSweeper();
   } catch (error) {
-    logger.warn("Hosted device-sync recovery sweep failed.", {
-      dueReconcileRecoveryFailed: null,
-      dueReconcileRecoveryNotRequested: null,
-      dueReconcileRecoveryRequestFailed: false,
+    logger.warn("Hosted device-sync scheduled wake sweep failed.", {
+      dueReconcileWakeFailed: null,
+      dueReconcileWakeNotAccepted: null,
+      dueReconcileWakeRequestFailed: false,
       dueReconcileSweeperErrorName: describeErrorName(error),
       dueReconcileSweeperFailed: true,
     });
     throw error;
   }
 
-  const dueReconcileRecoveryRequestFailed =
-    dueReconcileSweep.recoveryFailed > 0
-    || dueReconcileSweep.recoveryNotRequested > 0;
+  const dueReconcileWakeRequestFailed =
+    dueReconcileSweep.wakeFailed > 0
+    || dueReconcileSweep.wakeNotAccepted > 0;
 
-  if (dueReconcileRecoveryRequestFailed) {
-    logger.warn("Hosted device-sync recovery sweep failed.", {
-      dueReconcileRecoveryFailed: dueReconcileSweep.recoveryFailed,
-      dueReconcileRecoveryNotRequested: dueReconcileSweep.recoveryNotRequested,
-      dueReconcileRecoveryRequestFailed,
+  if (dueReconcileWakeRequestFailed) {
+    logger.warn("Hosted device-sync scheduled wake sweep failed.", {
+      dueReconcileWakeFailed: dueReconcileSweep.wakeFailed,
+      dueReconcileWakeNotAccepted: dueReconcileSweep.wakeNotAccepted,
+      dueReconcileWakeRequestFailed,
       dueReconcileSweeperErrorName: null,
       dueReconcileSweeperFailed: false,
     });
 
-    throw new Error("Hosted device-sync due reconcile sweeper failed to request one or more recoveries.");
+    throw new Error("Hosted device-sync due reconcile sweeper failed to request one or more wakes.");
   }
 
   return {
