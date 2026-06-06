@@ -1,8 +1,8 @@
 # Fix hosted-local runner base image resolution
 
-Status: active
+Status: completed
 Created: 2026-06-05
-Updated: 2026-06-05
+Updated: 2026-06-06
 
 ## Goal
 
@@ -73,3 +73,4 @@ Updated: 2026-06-05
 - Expected outcomes:
   - Docker app-layer image exports without `insufficient_scope`.
   - Diff-aware Cloudflare checks pass for the touched contract surface.
+Completed: 2026-06-06
