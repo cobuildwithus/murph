@@ -868,6 +868,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stagedDeviceSyncDirtyAcks = [];
       suppressDirtyPendingFetchUntilCheckpoint = false;
     };
+    let browserVaultReplicaRefreshRequested = false;
+    const recordBrowserVaultReplicaRefreshIntent = (
+      passResult: HostedWorkspaceRunnerResult,
+    ): void => {
+      browserVaultReplicaRefreshRequested ||=
+        passResult.assistantPhaseResult?.browserVaultReplicaRefreshRequested === true;
+    };
     const runForegroundPass = async (passInput: {
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
       requestId: string;
@@ -938,6 +945,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           status: "done",
         });
         stageDeviceSyncDirtyAcks(passResult.assistantPhaseResult?.stagedDirtyAcks);
+        recordBrowserVaultReplicaRefreshIntent(passResult);
         return passResult;
       } catch (error) {
         emitPhaseLog({
@@ -967,7 +975,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "start",
       });
       const refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
-        force: input.request.reason === "browser_vault_refresh",
+        force:
+          browserVaultReplicaRefreshRequested
+          || input.request.reason === "browser_vault_refresh",
         generatedAt: new Date().toISOString(),
         platform: guardedRuntime.platform,
         runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -1350,8 +1360,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       result,
       workspace: workspaceRead.workspace,
     });
+    const shouldRunNoProgressBrowserVaultRefresh =
+      browserVaultReplicaRefreshRequested
+      || input.request.reason === "browser_vault_refresh";
     const noProgressBrowserVaultRefresh =
-      input.request.reason === "browser_vault_refresh"
+      shouldRunNoProgressBrowserVaultRefresh
         ? await runBrowserVaultRefreshMaintenance({
             workspace: projection.committedWorkspace ?? workspaceRead.workspace,
           })

@@ -762,6 +762,9 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
     input.systemMailboxResult.stagedDirtyAcks,
     input.assistantResult.stagedDirtyAcks,
   );
+  const browserVaultReplicaRefreshRequested =
+    input.systemMailboxResult.browserVaultReplicaRefreshRequested === true
+    || input.assistantResult.browserVaultReplicaRefreshRequested === true;
   const afterCheckpoint = composeHostedAssistantPhaseAfterCheckpoint({
     baseNextWake: hasNextWakeAt ? nextWake : null,
     callbacks: [
@@ -778,6 +781,9 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
   if (progressedResult) {
     return {
       ...(afterCheckpoint ? { afterCheckpoint } : {}),
+      ...(browserVaultReplicaRefreshRequested
+        ? { browserVaultReplicaRefreshRequested: true }
+        : {}),
       checkpointReason: progressedResult.checkpointReason,
       ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
       ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
@@ -790,6 +796,9 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
   }
 
   return {
+    ...(browserVaultReplicaRefreshRequested
+      ? { browserVaultReplicaRefreshRequested: true }
+      : {}),
     ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
     ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
       ? { nextWakeReason: nextWake.reason }
@@ -1030,6 +1039,15 @@ type HostedSystemMailboxPreparation = NonNullable<
 type HostedTerminalLinqCleanupEvidence = Awaited<
   ReturnType<typeof listPendingAssistantAutoReplyLinqCleanupEvidence>
 >;
+
+function isBrowserVaultReplicaRefreshSystemMailboxPreparation(
+  systemMailboxPreparation: HostedSystemMailboxPreparation,
+): boolean {
+  return "item" in systemMailboxPreparation
+    && systemMailboxPreparation.status === "processed"
+    && systemMailboxPreparation.item.routeAction === "apply-runtime-control-request"
+    && systemMailboxPreparation.item.wake.kind === "runtime.browser-vault-refresh-requested";
+}
 
 function mergeHostedDeviceSyncStagedDirtyAcks(
   ...groups: readonly (readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null | undefined)[]
@@ -1439,6 +1457,8 @@ async function runSystemMailboxMaintenancePhase(input: {
   const nextWakeAt = nextWake.at;
   const shouldRecordSystemMailbox = systemMailboxPreparation.status === "processed"
     || systemMailboxPreparation.status === "recording";
+  const browserVaultReplicaRefreshRequested =
+    isBrowserVaultReplicaRefreshSystemMailboxPreparation(systemMailboxPreparation);
   const shouldRunPostSystemCheckpoint = shouldRecordSystemMailbox
     || initialProviderCleanupDue
     || (dirtyDeviceSyncMetrics?.postCheckpointRecord ?? null) !== null;
@@ -1475,6 +1495,9 @@ async function runSystemMailboxMaintenancePhase(input: {
       || shouldContinueAssistantLaneAfterSystemMailboxPreparation(systemMailboxPreparation),
     initialProviderCleanupCheckpoint,
     result: {
+      ...(browserVaultReplicaRefreshRequested
+        ? { browserVaultReplicaRefreshRequested: true }
+        : {}),
       ...(shouldRunPostSystemCheckpoint
         ? {
             afterCheckpoint: async () => {
@@ -1505,15 +1528,20 @@ async function runSystemMailboxMaintenancePhase(input: {
         ? { nextWakeReason: nextWake.reason }
         : {}),
       progressed: true,
-      redactedStatus: buildHostedWorkspaceAssistantPhaseRedactedStatus({
-        deliveryEffectCount: systemMailboxDeliveryEffects.length,
-        nextWakeAt,
-        outboxTerminalizedSendingCount: 0,
-        progressed: true,
-        systemMailboxPrepared: systemMailboxPreparation.status === "retryable_failed" ? 0 : 1,
-        systemMailboxRetryableFailed:
-          systemMailboxPreparation.status === "retryable_failed" ? 1 : 0,
-      }),
+      redactedStatus: {
+        ...buildHostedWorkspaceAssistantPhaseRedactedStatus({
+          deliveryEffectCount: systemMailboxDeliveryEffects.length,
+          nextWakeAt,
+          outboxTerminalizedSendingCount: 0,
+          progressed: true,
+          systemMailboxPrepared: systemMailboxPreparation.status === "retryable_failed" ? 0 : 1,
+          systemMailboxRetryableFailed:
+            systemMailboxPreparation.status === "retryable_failed" ? 1 : 0,
+        }),
+        ...(browserVaultReplicaRefreshRequested
+          ? { hostedBrowserVaultReplicaRefreshRequested: true }
+          : {}),
+      },
       ...withHostedDeviceSyncStagedDirtyAcks(
         mergeHostedDeviceSyncStagedDirtyAcks(
           dirtyDeviceSyncMetrics?.stagedDirtyAcks,

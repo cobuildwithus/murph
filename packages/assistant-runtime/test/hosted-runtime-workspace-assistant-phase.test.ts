@@ -591,6 +591,31 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
   });
 
+  it("keeps browser-vault refresh control work behind fresh conversation input", async () => {
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createBrowserVaultRefreshSystemMailboxItem(),
+      itemId: "system_mailbox_item_browser_vault_refresh",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      reason: "nudge",
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(result).not.toHaveProperty("browserVaultReplicaRefreshRequested");
+    expectAssistantLaneCallWithoutDeviceSyncOptions({
+      preferredInputIds: ["ain_00000000000000000000000000000001"],
+    });
+  });
+
   it("keeps non-device system mailbox nudges out of idle device-sync maintenance", async () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       item: createSystemMailboxItem(),
@@ -3274,18 +3299,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   });
 
   it("does not continue non-manual runtime-control receipts into assistant automation", async () => {
-    const browserVaultRefreshItem = {
-      ...createSystemMailboxItem(),
-      itemId: "system_mailbox_item_browser_vault_refresh",
-      mailboxDedupeKey: "dedupe_system_mailbox_item_browser_vault_refresh",
-      routeAction: "apply-runtime-control-request" as const,
-      wake: {
-        eventId: "evt_runtime_browser_vault_refresh_requested",
-        kind: "runtime.browser-vault-refresh-requested" as const,
-        occurredAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-      },
-    };
+    const browserVaultRefreshItem = createBrowserVaultRefreshSystemMailboxItem();
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       item: browserVaultRefreshItem,
       itemId: "system_mailbox_item_browser_vault_refresh",
@@ -3310,9 +3324,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       vaultRoot: "/tmp/murph-vault",
     });
     expect(result).toEqual(expect.objectContaining({
+      browserVaultReplicaRefreshRequested: true,
       checkpointReason: "system_mailbox_receipt",
       progressed: true,
       redactedStatus: expect.objectContaining({
+        hostedBrowserVaultReplicaRefreshRequested: true,
         hostedSystemMailboxPrepared: 1,
       }),
     }));
@@ -4283,6 +4299,21 @@ function createSystemMailboxItem() {
       notification: {
         delivery: null,
       },
+    },
+  };
+}
+
+function createBrowserVaultRefreshSystemMailboxItem() {
+  return {
+    ...createSystemMailboxItem(),
+    itemId: "system_mailbox_item_browser_vault_refresh",
+    mailboxDedupeKey: "dedupe_system_mailbox_item_browser_vault_refresh",
+    routeAction: "apply-runtime-control-request" as const,
+    wake: {
+      eventId: "evt_runtime_browser_vault_refresh_requested",
+      kind: "runtime.browser-vault-refresh-requested" as const,
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      userId: "member_synthetic_phase",
     },
   };
 }

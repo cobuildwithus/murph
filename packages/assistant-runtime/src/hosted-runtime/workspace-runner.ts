@@ -165,6 +165,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
 
 interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   afterCheckpoint?: (() => Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void>) | null;
+  browserVaultReplicaRefreshRequested?: true;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;

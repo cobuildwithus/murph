@@ -55,6 +55,7 @@ import { describe, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   createHostedWorkspaceSnapshotCheckpointRequestBuilder: vi.fn(),
   ensureHostedInboxSidecarReady: vi.fn(),
+  refreshHostedBrowserVaultReplicaFromRuntime: vi.fn(),
   snapshotHostedPortableWorkspaceDelta: vi.fn(),
 }));
 
@@ -78,6 +79,18 @@ vi.mock("../src/hosted-runtime/context.ts", async (importOriginal) => {
     ensureHostedInboxSidecarReady: mocks.ensureHostedInboxSidecarReady.mockImplementation(
       actual.ensureHostedInboxSidecarReady,
     ),
+  };
+});
+
+vi.mock("../src/hosted-runtime/browser-vault-replica.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/hosted-runtime/browser-vault-replica.ts")>();
+
+  return {
+    ...actual,
+    refreshHostedBrowserVaultReplicaFromRuntime:
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(
+        actual.refreshHostedBrowserVaultReplicaFromRuntime,
+      ),
   };
 });
 
@@ -6977,6 +6990,68 @@ describe("hosted workspace runtime entrypoint", () => {
         status: "idle",
       });
     } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("forces browser-vault refresh maintenance from assistant phase refresh intent", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+
+    mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
+    mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockResolvedValueOnce({
+      status: "skipped_no_port",
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_browser_vault_marker_force",
+            reason: "nudge",
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Browser-vault marker force test should not checkpoint.");
+          },
+          async importItem() {
+            throw new Error("Import should not run when no mailbox items are fetched.");
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            return {
+              browserVaultReplicaRefreshRequested: true,
+              progressed: false,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).toHaveBeenCalledTimes(1);
+      expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).toHaveBeenCalledWith(
+        expect.objectContaining({
+          force: true,
+          vaultRoot,
+          workspace: expect.objectContaining({
+            version: "0",
+          }),
+        }),
+      );
+      expect(result.status).toBe("idle");
+    } finally {
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       await removeTempRoot(vaultRoot);
     }
   });
