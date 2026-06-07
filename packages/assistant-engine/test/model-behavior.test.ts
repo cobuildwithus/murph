@@ -360,6 +360,35 @@ describe('assistant consumption lookup guidance', () => {
       'Do not add inline source links after ingredient or nutrition facts unless the user asks for links',
     )
   })
+
+  it('grounds specific movement recommendations in the exercise catalog CLI', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'When recommending or explaining a specific exercise, stretch, mobility drill, or movement routine',
+    )
+    expect(prompt).toContain(
+      'first use `vault-cli exercise list ... --format json` to find catalog candidates',
+    )
+    expect(prompt).toContain(
+      'then `vault-cli exercise show <id-or-slug> --format json` for final movements',
+    )
+    expect(prompt).toContain(
+      'catalog steps, tips, equipment, level, targets, and source-backed safety notes',
+    )
+    expect(prompt).toContain(
+      'If the catalog has no useful match, say so plainly and keep the suggestion conservative',
+    )
+    expect(prompt).toContain(
+      'When walking the user through exercises, therapy-style drills, or multi-step movement protocols',
+    )
+    expect(prompt).toContain(
+      'default to one exercise at a time',
+    )
+    expect(prompt).toContain(
+      'continue only after the user asks, confirms completion, or explicitly wants the full set',
+    )
+  })
 })
 
 describe('assistant user-facing wording guidance', () => {
@@ -584,7 +613,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'b1e66e1e8fb1093d1df863fdcd8096dba196d4fe1a142dded1e22970b954933c',
+      'dac07877c91adb5eae7009730a16b45e43a1fb2939e00982429c5cd6929a4714',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
