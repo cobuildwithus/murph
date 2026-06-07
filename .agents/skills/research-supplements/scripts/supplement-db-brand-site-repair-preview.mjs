@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import {
   buildSearchText,
   getDbUrl,
+  normalizeItem,
   runPsql,
 } from "./supplement-db-brand-site-labels.mjs";
 
@@ -18,7 +19,7 @@ const AMOUNT_VALUE_PATTERN = String.raw`(?<![\d,./])(?:<\s*)?\d(?:[\d,./]*)(?:\.
 const UNIT_PATTERN = String.raw`mcg\s+RAE|mcg\s+DFE|(?:µ|μ)g\s+RAE|(?:µ|μ)g\s+DFE|mg\s+NE|billion\s+CFUs?|million\s+CFUs?|CFUs?|IU|mcgt|mgt|mlt|mca|mg|mcg|(?:µ|μ)g|gt|g(?!\.[A-Za-z])|ml|kcal|calories?`;
 const AMOUNT_WITH_UNIT_PATTERN = String.raw`${AMOUNT_VALUE_PATTERN}\s*(?:${UNIT_PATTERN})`;
 const SERVING_AMOUNT_PATTERN = String.raw`(?:about\s*)?(?:\d+(?:[.,]\d+)?(?:\s*-\s*\d+(?:[.,]\d+)?)?|\d+\s*/\s*\d+|one|two|three|four|five|six|seven|eight|nine|ten|un|una|dos|tres|quatre)`;
-const SERVING_FORM_PATTERN = String.raw`(?:(?:quick\s+release|vegetarian|vegan|veggie|vegetable|coated|chewable|rounded|level|heaping|heaped|liquid|effervescent)\s+)*(?:g(?![A-Za-z])|grams?|mg|mcg|mL|ml|milliliters?|fl\.?\s*oz\.?|fluid\s+ounces?|oz|tsp|teaspoons?|tbsp|tablespoons?|scoops?|capsules?(?:\(s\))?|tabletten?|tablety|(?!tablet[tky])tablets?(?:\(s\))?|caplets?|soft\s*-?\s*gels?|softgels?|gumm(?:y|ies)(?:\(ies\))?|chews?|chewables?|wafers?|lozenges?|packets?|stick\s+packs?|sticks?|VegCaps?|servings?|drops?(?:\(s\))?|gouttes?|gotas?|pumps?|bars?|sachets?|vials?|latas?|l[aá]hev|s[aá]č(?:ek|ky|ků)?|shots?|shota|cps|tbl|porcje?|porcj[ęea]?|kapsu[lł]ki|kapsu[lł]ka|kapsle|kapsl[iíe]|kapseln?|tabletk[ęeai]?|miark[ęea]?(?:\s+proszku)?|cacitos?|comprimidos?|comprim[eé]s?|g[eé]lules?|capsulas?|c[aá]psulas?|perlas?|pipettes?|cuill[eè]res?|כמוס(?:ה|ות)|טבלי(?:ה|ות)|קפסול(?:ה|ות))`;
+const SERVING_FORM_PATTERN = String.raw`(?:(?:quick\s+release|vegetarian|vegan|veggie|vegetable|coated|chewable|rounded|level|heaping|heaped|liquid|effervescent|oil\s*-?\s*infused|biodegradable)\s+)*(?:g(?![A-Za-z])|grams?|mg|mcg|mL|ml|milliliters?|fl\.?\s*oz\.?|fluid\s+ounces?|oz|tsp|teaspoons?|tbsp|tablespoons?|scoops?|capsules?(?:\(s\))?|tabletten?|tablety|(?!tablet[tky])tablets?(?:\(s\))?|caplets?|soft\s*-?\s*gels?|softgels?|gumm(?:y|ies)(?:\(ies\))?|chews?|chewables?|wafers?|lozenges?|packets?|stick\s+packs?|sticks?|VegCaps?|servings?|drops?(?:\(s\))?|gouttes?|gotas?|pumps?|bars?|sachets?|vials?|latas?|l[aá]hev|s[aá]č(?:ek|ky|ků)?|shots?|shota|cps|tbl|porcje?|porcj[ęea]?|kapsu[lł]ki|kapsu[lł]ka|kapsle|kapsl[iíe]|kapseln?|tabletk[ęeai]?|miark[ęea]?(?:\s+proszku)?|cacitos?|comprimidos?|comprim[eé]s?|g[eé]lules?|capsulas?|c[aá]psulas?|perlas?|pipettes?|cuill[eè]res?|כמוס(?:ה|ות)|טבלי(?:ה|ות)|קפסול(?:ה|ות))`;
 
 function parseArgs(argv) {
   const options = {
@@ -201,6 +202,21 @@ function repairPreviewForRow(row) {
   const removableFieldCandidates = findRemovableFieldCandidates(label, {
     allowRawEvidenceRemoval: automatedBackfillReady,
   });
+  const productionCandidate = automatedBackfillReady
+    ? normalizeItem({
+      id: row.dataOriginId,
+      dataOrigin: "brand_site",
+      dataOriginId: row.dataOriginId,
+      dataOriginUrl: row.dataOriginUrl,
+      source,
+      sourceId,
+      name: row.name,
+      brand: row.brand,
+      upc: row.upc,
+      offMarket: row.offMarket,
+      label: removeLabelFields(proposedLabel, removableFieldCandidates),
+    })
+    : null;
   const parsedIngredientRowSources = uniqueStrings(parsedIngredientRows.map((ingredientRow) => ingredientRow.source));
   const evidenceRecoveryHint = evidenceRecoveryHintForRow(label, {
     parserStatus: currentParserStatus,
@@ -229,6 +245,7 @@ function repairPreviewForRow(row) {
     parsedIngredientRowSources,
     removableFieldCandidates,
     dataOriginUrl: row.dataOriginUrl,
+    productionCandidate,
     proposedSearchTextPreview: proposedSearchText.slice(0, 500),
   };
 }
@@ -424,6 +441,12 @@ function findRemovableFieldCandidates(label, state) {
     candidates.push("allProductFactsText");
   }
   return candidates;
+}
+
+function removeLabelFields(label, fields) {
+  const output = { ...label };
+  for (const field of fields) delete output[field];
+  return output;
 }
 
 function extractServingSizes(label, context = {}) {
@@ -1850,13 +1873,18 @@ function writeArtifacts(outputDir, previews, summary) {
   const jsonPath = join(outputDir, "brand_site_repair_preview.json");
   const summaryPath = join(outputDir, "brand_site_repair_preview_summary.json");
   const csvPath = join(outputDir, "brand_site_repair_preview.csv");
+  const backfillCandidates = previews
+    .map((row) => row.productionCandidate)
+    .filter(Boolean);
+  const backfillCandidatesPath = join(outputDir, "brand_site_repair_backfill_candidates.json");
   const recoveryQueue = buildEvidenceRecoveryQueue(previews);
   const recoveryByBrand = buildEvidenceRecoveryByBrand(recoveryQueue);
   const recoveryQueuePath = join(outputDir, "brand_site_evidence_recovery_queue.json");
   const recoveryByBrandPath = join(outputDir, "brand_site_evidence_recovery_by_brand.json");
   const recoveryQueueCsvPath = join(outputDir, "brand_site_evidence_recovery_queue.csv");
-  writeFileSync(jsonPath, `${JSON.stringify(previews, null, 2)}\n`);
+  writeFileSync(jsonPath, `${JSON.stringify(previews.map(previewForDiagnosticArtifact), null, 2)}\n`);
   writeFileSync(summaryPath, `${JSON.stringify(summary, null, 2)}\n`);
+  writeFileSync(backfillCandidatesPath, `${JSON.stringify(backfillCandidates, null, 2)}\n`);
   writeFileSync(recoveryQueuePath, `${JSON.stringify(recoveryQueue, null, 2)}\n`);
   writeFileSync(recoveryByBrandPath, `${JSON.stringify(recoveryByBrand, null, 2)}\n`);
   const headers = [
@@ -1909,10 +1937,16 @@ function writeArtifacts(outputDir, previews, summary) {
     jsonPath,
     summaryPath,
     csvPath,
+    backfillCandidatesPath,
     recoveryQueuePath,
     recoveryByBrandPath,
     recoveryQueueCsvPath,
   };
+}
+
+function previewForDiagnosticArtifact(preview) {
+  const { productionCandidate, ...diagnosticPreview } = preview;
+  return diagnosticPreview;
 }
 
 async function main() {

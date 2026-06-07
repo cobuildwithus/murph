@@ -132,6 +132,22 @@ function shopifyJsonUrlForProductUrl(value) {
   return url.toString();
 }
 
+function shopifyPageUrlForProductUrl(value) {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  const match = url.pathname.match(/^(.*\/products\/[^/.?#/]+)(?:\/)?$/u);
+  if (!match) return null;
+  url.pathname = match[1];
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
 async function fetchJson(url, timeoutMs) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -154,11 +170,47 @@ async function fetchJson(url, timeoutMs) {
   }
 }
 
+async function fetchText(url, timeoutMs) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      headers: {
+        accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
+        "user-agent": USER_AGENT,
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const error = new Error(`HTTP ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+    return await response.text();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function fetchJsonWithRetry(url, options) {
   let lastError = null;
   for (let attempt = 0; attempt <= options.retries; attempt += 1) {
     try {
       return await fetchJson(url, options.timeoutMs);
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableFetchError(error) || attempt >= options.retries) break;
+      await sleep(Math.max(1000, options.delayMs * 4) * (attempt + 1));
+    }
+  }
+  throw lastError;
+}
+
+async function fetchTextWithRetry(url, options) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= options.retries; attempt += 1) {
+    try {
+      return await fetchText(url, options.timeoutMs);
     } catch (error) {
       lastError = error;
       if (!isRetryableFetchError(error) || attempt >= options.retries) break;
@@ -194,10 +246,21 @@ async function buildRefetchPreview(options) {
 
     let productResult = productCache.get(jsonUrl);
     if (!productResult) {
+      const pageUrl = shopifyPageUrlForProductUrl(row.dataOriginUrl);
       try {
         const waitMs = nextFetchAt - Date.now();
         if (waitMs > 0) await sleep(waitMs);
-        productResult = { ok: true, product: await fetchJsonWithRetry(jsonUrl, options) };
+        const product = await fetchJsonWithRetry(jsonUrl, options);
+        let pageHtml = null;
+        let pageHtmlError = null;
+        if (pageUrl) {
+          try {
+            pageHtml = await fetchTextWithRetry(pageUrl, options);
+          } catch (error) {
+            pageHtmlError = error instanceof Error ? error.message : String(error);
+          }
+        }
+        productResult = { ok: true, product, pageUrl, pageHtml, pageHtmlError };
       } catch (error) {
         productResult = {
           ok: false,
@@ -214,7 +277,7 @@ async function buildRefetchPreview(options) {
       continue;
     }
 
-    const candidate = buildShopifyEvidenceCandidate(row, productResult.product);
+    const candidate = buildShopifyEvidenceCandidate(row, productResult.product, productResult.pageHtml);
     if (candidate) {
       candidates.push(candidate);
     } else {
@@ -229,6 +292,8 @@ async function buildRefetchPreview(options) {
     rowsReviewed: rows.length,
     productUrlsFetched: [...productCache.values()].filter((entry) => entry.ok).length,
     productFetchFailures: [...productCache.values()].filter((entry) => !entry.ok).length,
+    productPageUrlsFetched: [...productCache.values()].filter((entry) => entry.ok && entry.pageHtml).length,
+    productPageFetchFailures: [...productCache.values()].filter((entry) => entry.ok && entry.pageHtmlError).length,
     candidates: hydratedCandidates,
     failures,
     dsldUpcHydrationEnabled: options.hydrateDsldUpc,
@@ -250,7 +315,7 @@ function failureForRow(row, reason, detail) {
   };
 }
 
-function buildShopifyEvidenceCandidate(queueRow, product, fetchedAt = new Date().toISOString()) {
+function buildShopifyEvidenceCandidate(queueRow, product, pageHtml = null, fetchedAt = new Date().toISOString()) {
   const variant = matchShopifyVariantForQueueRow(queueRow, product);
   if (!variant) return null;
 
@@ -263,7 +328,9 @@ function buildShopifyEvidenceCandidate(queueRow, product, fetchedAt = new Date()
     productName: queueRow.name,
     ingredientRows,
   }) : [];
-  const factsMedia = selectShopifyFactsMedia(product, variant);
+  const productFactsMedia = selectShopifyFactsMedia(product, variant);
+  const htmlFactsMedia = extractHtmlFactsMedia(pageHtml, variant);
+  const factsMedia = mergeFactsMedia(productFactsMedia, htmlFactsMedia);
   const needsManualReview = Boolean(productFactsPromotionBlockedReason) || ingredientRows.length === 0 || servingSizes.length === 0;
   const source = requireQueueString(queueRow.source, "source");
   const sourceId = requireQueueString(queueRow.sourceId, "sourceId");
@@ -303,7 +370,10 @@ function buildShopifyEvidenceCandidate(queueRow, product, fetchedAt = new Date()
       inputEvidenceRecoveryHint: queueRow.evidenceRecoveryHint ?? null,
       inputParserBlockers: Array.isArray(queueRow.parserBlockers) ? queueRow.parserBlockers : [],
       productJsonUrl: shopifyJsonUrlForProductUrl(queueRow.dataOriginUrl),
+      productPageUrl: shopifyPageUrlForProductUrl(queueRow.dataOriginUrl),
       factsMediaCount: factsMedia.length,
+      productFactsMediaCount: productFactsMedia.length,
+      htmlFactsMediaCount: htmlFactsMedia.length,
       productFactsPromotionBlockedReason,
     },
   };
@@ -469,7 +539,7 @@ function matchShopifyVariantForQueueRow(queueRow, product) {
     if (fuzzy) return fuzzy;
   }
 
-  if (variants.length === 1 && candidates.length === 0) return variants[0];
+  if (variants.length === 1) return variants[0];
   return null;
 }
 
@@ -572,6 +642,121 @@ function selectShopifyFactsMedia(product, variant) {
     .slice(0, 3);
 }
 
+function extractHtmlFactsMedia(html, variant) {
+  if (typeof html !== "string" || html.trim() === "") return [];
+  const variantTextsForMatch = variantTexts(variant).map(normalizeMatchText).filter(Boolean);
+  const variantId = variant?.id === undefined || variant?.id === null ? null : String(variant.id);
+  const requiresVariantMatch = Boolean(variantId || variantTextsForMatch.length > 0) && /data-variant-sfp|variant-title|variant-meta/iu.test(html);
+  const scored = [];
+
+  for (const match of html.matchAll(/<img\b[^>]*>/giu)) {
+    const tag = match[0];
+    const start = Math.max(0, match.index - 260);
+    const end = Math.min(html.length, match.index + tag.length);
+    const context = decodeHtmlText(html.slice(start, end));
+    for (const url of imageUrlsFromHtmlTag(tag)) {
+      const rawHaystack = `${context} ${url}`.toLowerCase();
+      const haystack = normalizeMatchText(`${context} ${url}`);
+      let score = 0;
+      const hasSupplementFactsSignal = /\bsupp(?:lement)?[\s_-]*facts?\b/u.test(rawHaystack) || /[_-]supp[_-]/u.test(rawHaystack);
+      const hasFactsPanelSignal = /\bfacts?\s*panel\b/u.test(rawHaystack);
+      const hasNutritionFactsSignal = /\bnutrition[\s_-]*facts?\b/u.test(rawHaystack);
+      const hasSfpSignal = /(?:^|[\s_/-])sfp(?:[\s_./-]|$)/u.test(rawHaystack) || /\b(?:media--sfp|main-product-sfp|data-variant-sfp|variant-meta)\b/u.test(rawHaystack);
+      const hasFactsSignal = hasSupplementFactsSignal || hasFactsPanelSignal || hasNutritionFactsSignal || hasSfpSignal;
+      const variantIdMatched = variantId ? rawHaystack.includes(`data-variant-sfp="${variantId}"`) || rawHaystack.includes(`data-variant-sfp='${variantId}'`) : false;
+      const variantTextMatched = variantTextsForMatch.length === 0 || variantTextsForMatch.some((text) => haystack.includes(text));
+      const variantMatched = variantIdMatched || variantTextMatched;
+      if (!hasFactsSignal || (requiresVariantMatch && !variantMatched)) continue;
+      if (hasSupplementFactsSignal) score += 8;
+      if (hasFactsPanelSignal) score += 5;
+      if (hasNutritionFactsSignal) score += 4;
+      if (hasSfpSignal) score += 8;
+      if (variantMatched) score += 3;
+      if (variantIdMatched) score += 4;
+      if (score > 0) {
+        scored.push({
+          url,
+          alt: htmlAttribute(tag, "alt"),
+          position: null,
+          width: parseNumericHtmlAttribute(tag, "width"),
+          height: parseNumericHtmlAttribute(tag, "height"),
+          score,
+        });
+      }
+    }
+  }
+
+  return mergeFactsMedia(scored)
+    .sort((a, b) => b.score - a.score)
+    .filter((entry, index, entries) => index === 0 || entry.score === entries[0].score)
+    .slice(0, 3);
+}
+
+function imageUrlsFromHtmlTag(tag) {
+  const values = [
+    htmlAttribute(tag, "src"),
+    htmlAttribute(tag, "variant-meta"),
+    htmlAttribute(tag, "data-src"),
+  ];
+  const srcset = htmlAttribute(tag, "srcset");
+  if (srcset) {
+    for (const part of srcset.split(",")) {
+      const value = part.trim().split(/\s+/u)[0];
+      if (value) values.push(value);
+    }
+  }
+  return uniqueStrings(values.map(normalizeHtmlMediaUrl).filter(Boolean))
+    .filter((url) => /\.(?:avif|gif|jpe?g|png|webp)(?:[?#]|$)/iu.test(url));
+}
+
+function htmlAttribute(tag, name) {
+  const pattern = new RegExp(String.raw`\b${name}\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>` + "`" + String.raw`]+))`, "iu");
+  const match = tag.match(pattern);
+  return decodeHtmlText(match?.[1] ?? match?.[2] ?? match?.[3] ?? "");
+}
+
+function parseNumericHtmlAttribute(tag, name) {
+  const value = Number.parseInt(htmlAttribute(tag, name), 10);
+  return Number.isFinite(value) ? value : null;
+}
+
+function normalizeHtmlMediaUrl(value) {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  let text = decodeHtmlText(value.trim()).replace(/\\\//gu, "/");
+  if (text.startsWith("//")) text = `https:${text}`;
+  if (text.startsWith("http://")) text = `https://${text.slice("http://".length)}`;
+  if (!/^https:\/\//iu.test(text)) return null;
+  try {
+    const url = new URL(text);
+    if (url.hostname !== "cdn.shopify.com" && !url.hostname.endsWith(".myshopify.com") && !url.pathname.startsWith("/cdn/shop/")) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function decodeHtmlText(value) {
+  if (typeof value !== "string" || value === "") return "";
+  return value
+    .replace(/\\u0026/giu, "&")
+    .replace(/&amp;/giu, "&")
+    .replace(/&quot;/giu, "\"")
+    .replace(/&#39;|&apos;/giu, "'")
+    .replace(/&nbsp;/giu, " ");
+}
+
+function mergeFactsMedia(...groups) {
+  const byUrl = new Map();
+  for (const group of groups) {
+    for (const entry of Array.isArray(group) ? group : []) {
+      if (!entry?.url) continue;
+      const current = byUrl.get(entry.url);
+      if (!current || (entry.score ?? 0) > (current.score ?? 0)) byUrl.set(entry.url, entry);
+    }
+  }
+  return [...byUrl.values()].sort((a, b) => b.score - a.score || (a.position ?? 9999) - (b.position ?? 9999));
+}
+
 function mediaUrl(entry) {
   const value = entry?.src ?? entry?.preview_image?.src;
   if (typeof value !== "string" || value.trim() === "") return null;
@@ -621,7 +806,16 @@ function htmlToText(value) {
     .trim();
 }
 
-function summarizePreview({ rowsReviewed, productUrlsFetched, productFetchFailures, candidates, failures, dsldUpcHydrationEnabled = false }) {
+function summarizePreview({
+  rowsReviewed,
+  productUrlsFetched,
+  productFetchFailures,
+  productPageUrlsFetched = 0,
+  productPageFetchFailures = 0,
+  candidates,
+  failures,
+  dsldUpcHydrationEnabled = false,
+}) {
   const productionReadyCandidates = candidates.filter((candidate) => candidate.reviewIssues.length === 0).length;
   const needsManualReviewCandidates = candidates.filter((candidate) => candidate.label?.needsManualReview === true).length;
   const factsImageCandidates = candidates.filter((candidate) => Array.isArray(candidate.label?.factsImageUrls) && candidate.label.factsImageUrls.length > 0).length;
@@ -635,6 +829,8 @@ function summarizePreview({ rowsReviewed, productUrlsFetched, productFetchFailur
     rowsReviewed,
     productUrlsFetched,
     productFetchFailures,
+    productPageUrlsFetched,
+    productPageFetchFailures,
     candidates: candidates.length,
     productionReadyCandidates,
     needsManualReviewCandidates,
@@ -676,6 +872,7 @@ export {
   buildRefetchPreview,
   buildShopifyEvidenceCandidate,
   buildDsldStructuredFactsByUpcSql,
+  extractHtmlFactsMedia,
   extractFactsTextFromShopifyProduct,
   factsTextContaminationReason,
   hydrateCandidatesWithDsldFacts,
@@ -684,5 +881,6 @@ export {
   selectQueueRows,
   selectShopifyFactsMedia,
   shopifyJsonUrlForProductUrl,
+  shopifyPageUrlForProductUrl,
   variantCandidateTexts,
 };

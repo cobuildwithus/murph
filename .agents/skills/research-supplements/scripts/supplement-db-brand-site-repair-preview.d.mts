@@ -30,6 +30,16 @@ export interface ProposedRepairPreview {
   parsedIngredientRowSources: string[];
   removableFieldCandidates: string[];
   dataOriginUrl?: string | null;
+  productionCandidate: {
+    label: {
+      bodyText?: unknown;
+      servingSizes?: Array<Record<string, unknown>>;
+      ingredientRows?: Array<Record<string, unknown>>;
+      [key: string]: unknown;
+    };
+    reviewIssues: string[];
+    [key: string]: unknown;
+  } | null;
   proposedSearchTextPreview: string;
 }
 

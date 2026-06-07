@@ -39,6 +39,15 @@ export interface ShopifyMedia {
   };
 }
 
+export interface FactsMedia {
+  url: string;
+  alt: string | null;
+  position: number | null;
+  width: number | null;
+  height: number | null;
+  score: number;
+}
+
 export interface ShopifyProduct {
   title?: string;
   vendor?: string;
@@ -87,8 +96,13 @@ export function buildDsldStructuredFactsByUpcSql(upcs: string[]): string;
 export function buildShopifyEvidenceCandidate(
   queueRow: RecoveryQueueRow,
   product: ShopifyProduct,
+  pageHtml?: string | null,
   fetchedAt?: string,
 ): RefetchEvidenceCandidate | null;
+export function extractHtmlFactsMedia(
+  html: string | null | undefined,
+  variant: ShopifyVariant,
+): FactsMedia[];
 export function extractFactsTextFromShopifyProduct(product: ShopifyProduct): string | null;
 export function factsTextContaminationReason(text: string): string | null;
 export function hydrateCandidatesWithDsldFacts(
@@ -110,6 +124,7 @@ export function selectQueueRows(
 export function selectShopifyFactsMedia(
   product: ShopifyProduct,
   variant: ShopifyVariant,
-): Array<Record<string, unknown>>;
+): FactsMedia[];
 export function shopifyJsonUrlForProductUrl(value: string): string | null;
+export function shopifyPageUrlForProductUrl(value: string): string | null;
 export function variantCandidateTexts(queueRow: RecoveryQueueRow): string[];

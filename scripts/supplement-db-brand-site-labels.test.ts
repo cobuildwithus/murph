@@ -19,14 +19,22 @@ import {
 import {
   buildDsldStructuredFactsByUpcSql,
   buildShopifyEvidenceCandidate,
+  extractHtmlFactsMedia,
   factsTextContaminationReason,
   hydrateCandidatesWithDsldFacts,
   matchShopifyVariantForQueueRow,
   productFactsPromotionBlockedReasonForProduct,
   selectShopifyFactsMedia,
   shopifyJsonUrlForProductUrl,
+  shopifyPageUrlForProductUrl,
   variantCandidateTexts,
 } from "../.agents/skills/research-supplements/scripts/supplement-db-brand-site-refetch-preview.mjs";
+import {
+  buildOcrCandidate,
+  buildOpenAiOcrRequest,
+  parseOcrJson,
+  selectOcrInputRows,
+} from "../.agents/skills/research-supplements/scripts/supplement-db-brand-site-ocr-preview.mjs";
 
 describe("supplement brand-site DB helper", () => {
   test("builds compact search text from normalized product facts instead of page body JSON", () => {
@@ -234,7 +242,12 @@ describe("supplement brand-site refetch preview", () => {
       shopifyJsonUrlForProductUrl("https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules?variant=1"),
       "https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules.js",
     );
+    assert.equal(
+      shopifyPageUrlForProductUrl("https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules?variant=1"),
+      "https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules",
+    );
     assert.equal(shopifyJsonUrlForProductUrl("https://example.test/pages/about"), null);
+    assert.equal(shopifyPageUrlForProductUrl("https://example.test/pages/about"), null);
   });
 
   test("matches queue rows to Shopify variants without using product-page body text", () => {
@@ -245,6 +258,28 @@ describe("supplement brand-site refetch preview", () => {
 
     assert.deepEqual(variantCandidateTexts(row), ["120 count"]);
     assert.equal(matchShopifyVariantForQueueRow(row, bluebonnetProduct)?.barcode, "743715000537");
+  });
+
+  test("uses the only Shopify variant when queue suffix text does not match variant text", () => {
+    const product = {
+      variants: [
+        {
+          id: 700110602,
+          title: "Default Title",
+          public_title: "Default Title",
+          option1: "Default Title",
+          barcode: "810030513416",
+        },
+      ],
+    };
+
+    assert.equal(
+      matchShopifyVariantForQueueRow({
+        sourceId: "energy-sticks-breezeberry",
+        name: "Energy Sticks - Breezeberry",
+      }, product),
+      product.variants[0],
+    );
   });
 
   test("selects facts media for the matched variant only", () => {
@@ -316,6 +351,67 @@ describe("supplement brand-site refetch preview", () => {
     ]);
   });
 
+  test("selects variant-specific SFP images embedded in official product HTML", () => {
+    const variants = [
+      { id: 39503883108445, title: "Sweet Vanilla", option1: "Sweet Vanilla" },
+      { id: 43367436320861, title: "Chocolate Peanut Butter", option1: "Chocolate Peanut Butter" },
+      { id: 39827283640413, title: "Chocolate Glaze Donut", option1: "Chocolate Glaze Donut" },
+    ];
+    const html = `
+      <div class="main-product-sfp">
+        <img src="//brand.example.test/cdn/shop/files/Mass_Gainer-Sweet_Vanilla_SFP.png?crop=center&amp;height=800&amp;width=800" alt="Sweet Vanilla">
+      </div>
+      <div class="variant_meta_image hidden" data-variant-sfp="43367436320861" variant-title="Chocolate Peanut Butter">
+        <img src="//brand.example.test/cdn/shop/files/Mass_Gainer-Chocolate_PB_SFP.png?crop=center&height=800&width=800" alt="Chocolate Peanut Butter">
+      </div>
+      <div class="variant_meta_image hidden" data-variant-sfp="39827283640413" variant-title="Chocolate Glaze Donut">
+        <img src="//brand.example.test/cdn/shop/files/Mass_Gainer_-_Chocolate_Glaze_SFP.png?crop=center&height=800&width=800" alt="Chocolate Glaze Donut">
+      </div>
+    `;
+
+    assert.deepEqual(extractHtmlFactsMedia(html, variants[2]).map((media) => media.url), [
+      "https://brand.example.test/cdn/shop/files/Mass_Gainer_-_Chocolate_Glaze_SFP.png?crop=center&height=800&width=800",
+    ]);
+  });
+
+  test("adds official HTML facts images to image-only candidates", () => {
+    const product = {
+      title: "Mass Gainer",
+      vendor: "Transparent Labs",
+      type: "Protein",
+      description: "<p>Nutrition & Supplement Facts</p>",
+      variants: [
+        { id: 1, title: "Sweet Vanilla", option1: "Sweet Vanilla", barcode: "111" },
+        { id: 2, title: "Chocolate Glaze Donut", option1: "Chocolate Glaze Donut", barcode: "222" },
+      ],
+      media: [],
+    };
+    const html = `
+      <div class="variant_meta_image hidden" data-variant-sfp="2" variant-title="Chocolate Glaze Donut">
+        <img src="//brand.example.test/cdn/shop/files/Mass_Gainer_-_Chocolate_Glaze_SFP.png?crop=center&height=800&width=800" alt="Chocolate Glaze Donut">
+      </div>
+    `;
+
+    const candidate = buildShopifyEvidenceCandidate({
+      source: "transparent-labs",
+      sourceId: "mass-gainer--chocolate-glaze-donut",
+      dataOriginId: "transparent-labs:mass-gainer--chocolate-glaze-donut",
+      dataOriginUrl: "https://www.transparentlabs.com/products/proteinseries-mass-gainer",
+      name: "Mass Gainer - Chocolate Glaze Donut",
+      brand: "Transparent Labs",
+    }, product, html, "2026-06-07T00:00:00.000Z");
+
+    assert.deepEqual(candidate?.label.factsImageUrls, [
+      "https://brand.example.test/cdn/shop/files/Mass_Gainer_-_Chocolate_Glaze_SFP.png?crop=center&height=800&width=800",
+    ]);
+    assert.equal(candidate?.refetchPreview.htmlFactsMediaCount, 1);
+    assert.deepEqual(candidate?.reviewIssues, [
+      "missing_ingredient_rows",
+      "missing_serving_sizes",
+      "needs_manual_review",
+    ]);
+  });
+
   test("emits image-only candidates as manual-review rows blocked from production", () => {
     const candidate = buildShopifyEvidenceCandidate({
       source: "bluebonnet-nutrition",
@@ -327,7 +423,7 @@ describe("supplement brand-site refetch preview", () => {
       brand: "Bluebonnet Nutrition",
       action: "refetch_official_label_or_ocr",
       parserBlockers: ["missing_ingredient_rows", "missing_serving_sizes"],
-    }, bluebonnetProduct, "2026-06-07T00:00:00.000Z");
+    }, bluebonnetProduct, null, "2026-06-07T00:00:00.000Z");
 
     assert.equal(candidate?.upc, "743715000537");
     assert.deepEqual(candidate?.label.factsImageUrls, [
@@ -361,7 +457,7 @@ describe("supplement brand-site refetch preview", () => {
       dataOriginUrl: "https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules",
       name: "5-HTP 100 mg",
       brand: "Bluebonnet Nutrition",
-    }, product, "2026-06-07T00:00:00.000Z");
+    }, product, null, "2026-06-07T00:00:00.000Z");
 
     assert.deepEqual(candidate?.label.servingSizes, [
       { text: "1 Capsule", source: "factsText" },
@@ -402,7 +498,7 @@ describe("supplement brand-site refetch preview", () => {
       dataOriginUrl: "https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules",
       name: "5-HTP 100 mg - 120 count",
       brand: "Bluebonnet Nutrition",
-    }, product, "2026-06-07T00:00:00.000Z");
+    }, product, null, "2026-06-07T00:00:00.000Z");
 
     assert.equal(candidate?.label.needsManualReview, true);
     assert.equal(candidate?.refetchPreview.productFactsPromotionBlockedReason, "shared_product_facts_for_multiple_variants");
@@ -432,7 +528,7 @@ describe("supplement brand-site refetch preview", () => {
       dataOriginUrl: "https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules",
       name: "5-HTP 100 mg",
       brand: "Bluebonnet Nutrition",
-    }, product, "2026-06-07T00:00:00.000Z");
+    }, product, null, "2026-06-07T00:00:00.000Z");
 
     assert.equal(candidate?.label.needsManualReview, true);
     assert.equal(candidate?.refetchPreview.productFactsPromotionBlockedReason, "facts_text_page_body_marker");
@@ -453,7 +549,7 @@ describe("supplement brand-site refetch preview", () => {
       dataOriginUrl: "https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules",
       name: "5-HTP 100 mg - 120 count",
       brand: "Bluebonnet Nutrition",
-    }, bluebonnetProduct, "2026-06-07T00:00:00.000Z");
+    }, bluebonnetProduct, null, "2026-06-07T00:00:00.000Z");
 
     assert.ok(candidate);
     const [hydrated] = hydrateCandidatesWithDsldFacts([candidate], {
@@ -504,7 +600,7 @@ describe("supplement brand-site refetch preview", () => {
       dataOriginUrl: "https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules",
       name: "5-HTP 100 mg - 120 count",
       brand: "Bluebonnet Nutrition",
-    }, bluebonnetProduct, "2026-06-07T00:00:00.000Z");
+    }, bluebonnetProduct, null, "2026-06-07T00:00:00.000Z");
 
     assert.ok(candidate);
     const [notHydrated] = hydrateCandidatesWithDsldFacts([candidate], {
@@ -534,6 +630,123 @@ describe("supplement brand-site refetch preview", () => {
     assert.match(sql, /s\.upc = i\.upc/u);
     assert.match(sql, /jsonb_array_length\(s\.label->'ingredientRows'\) > 0/u);
     assert.equal((sql.match(/743715000537/gu) ?? []).length, 1);
+  });
+
+  test("parses fenced OCR JSON into a normalized OCR payload", () => {
+    assert.deepEqual(parseOcrJson([
+      "```json",
+      JSON.stringify({
+        imageContainsFactsPanel: true,
+        confidence: "high",
+        factsText: "Supplement Facts Serving Size 1 Capsule Amount Per Serving Magnesium 200 mg 48%",
+        servingSize: "1 Capsule",
+        servingsPerContainer: null,
+        otherIngredients: "Vegetable cellulose capsule.",
+        warnings: ["small print"],
+      }),
+      "```",
+    ].join("\n")), {
+      imageContainsFactsPanel: true,
+      confidence: "high",
+      factsText: "Supplement Facts Serving Size 1 Capsule Amount Per Serving Magnesium 200 mg 48%",
+      servingSize: "1 Capsule",
+      servingsPerContainer: null,
+      otherIngredients: "Vegetable cellulose capsule.",
+      warnings: ["small print"],
+    });
+  });
+
+  test("builds production-ready OCR candidates only when parsed rows and servings are complete", () => {
+    const candidate = buildShopifyEvidenceCandidate({
+      source: "bluebonnet-nutrition",
+      sourceId: "5-htp-100-mg-vegetable-capsules--120-count",
+      dataOriginId: "bluebonnet-nutrition:5-htp-100-mg-vegetable-capsules--120-count",
+      dataOriginUrl: "https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules",
+      name: "5-HTP 100 mg - 120 count",
+      brand: "Bluebonnet Nutrition",
+    }, bluebonnetProduct, null, "2026-06-07T00:00:00.000Z");
+
+    assert.ok(candidate);
+    const ocrCandidate = buildOcrCandidate(candidate, {
+      imageContainsFactsPanel: true,
+      confidence: "high",
+      factsText: "Supplement Facts Serving Size 1 Capsule Amount Per Serving 5-HTP 100 mg *",
+      servingSize: "1 Capsule",
+      servingsPerContainer: "120",
+      otherIngredients: "Vegetable cellulose capsule.",
+      warnings: [],
+    }, "https://cdn.example.test/743715000537F_supp-side.jpg", "2026-06-07T00:00:00.000Z");
+
+    assert.equal(ocrCandidate.label.needsManualReview, false);
+    assert.equal(ocrCandidate.label.evidenceStatus, "structured_facts_from_official_facts_image_ocr");
+    assert.deepEqual(ocrCandidate.reviewIssues, []);
+    assert.deepEqual(ocrCandidate.label.servingSizes, [
+      { text: "1 Capsule", source: "factsText" },
+    ]);
+    assert.deepEqual(ocrCandidate.label.ingredientRows, [
+      {
+        name: "5-HTP",
+        amount: "100",
+        unit: "mg",
+        dailyValue: "*",
+        source: "factsText",
+      },
+    ]);
+    assert.equal(ocrCandidate.label.otherIngredients, "Vegetable cellulose capsule.");
+    assert.equal(ocrCandidate.ocrPreview.promoted, true);
+  });
+
+  test("keeps low-confidence OCR candidates blocked from production", () => {
+    const candidate = buildShopifyEvidenceCandidate({
+      source: "bluebonnet-nutrition",
+      sourceId: "5-htp-100-mg-vegetable-capsules--120-count",
+      dataOriginId: "bluebonnet-nutrition:5-htp-100-mg-vegetable-capsules--120-count",
+      dataOriginUrl: "https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules",
+      name: "5-HTP 100 mg - 120 count",
+      brand: "Bluebonnet Nutrition",
+    }, bluebonnetProduct, null, "2026-06-07T00:00:00.000Z");
+
+    assert.ok(candidate);
+    const ocrCandidate = buildOcrCandidate(candidate, {
+      imageContainsFactsPanel: true,
+      confidence: "low",
+      factsText: "Supplement Facts Serving Size 1 Capsule Amount Per Serving 5-HTP 100 mg *",
+      servingSize: "1 Capsule",
+      servingsPerContainer: "120",
+      otherIngredients: null,
+      warnings: ["blurry image"],
+    }, "https://cdn.example.test/743715000537F_supp-side.jpg", "2026-06-07T00:00:00.000Z");
+
+    assert.equal(ocrCandidate.label.needsManualReview, true);
+    assert.equal(ocrCandidate.ocrPreview.promoted, false);
+    assert.deepEqual(ocrCandidate.reviewIssues, ["needs_manual_review"]);
+  });
+
+  test("selects OCR input rows by source and ignores exact-DSLD hydrated rows", () => {
+    const rows = [
+      { source: "transparent-labs", label: { factsImageUrls: ["https://cdn.example.test/a.png"] } },
+      { source: "transparent-labs", refetchPreview: { dsldUpcHydrated: true }, label: { factsImageUrls: ["https://cdn.example.test/b.png"] } },
+      { source: "bluebonnet-nutrition", label: { factsImageUrls: ["https://cdn.example.test/c.png"] } },
+      { source: "transparent-labs", label: {} },
+    ];
+
+    assert.deepEqual(selectOcrInputRows(rows, { source: "transparent-labs", limit: 10 }), [
+      rows[0],
+    ]);
+  });
+
+  test("builds OpenAI OCR requests with image URL input and strict JSON schema", () => {
+    const request = buildOpenAiOcrRequest({
+      model: "gpt-5-mini",
+      imageUrl: "https://cdn.example.test/facts.png",
+      candidate: { name: "Example Magnesium", label: { variant: { title: "60 count" } } },
+    });
+
+    assert.equal(request.model, "gpt-5-mini");
+    assert.equal(request.input[0].content[1].type, "input_image");
+    assert.equal(request.input[0].content[1].image_url, "https://cdn.example.test/facts.png");
+    assert.equal(request.text.format.type, "json_schema");
+    assert.equal(request.text.format.schema.properties.factsText.type[0], "string");
   });
 });
 
@@ -660,6 +873,24 @@ describe("supplement brand-site repair preview", () => {
       factsText: "Supplement Facts Serving Size 1 Rounded Scoop (approx. 8.5 grams) Servings Per Container 30 Amount Per Serving Protein 8 g",
     }), [
       { text: "1 Rounded Scoop (approx. 8.5 grams)", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      factsText: "Supplement Facts Serving Size: 3 Oil-Infused Capsules Servings Per Container: 48 Amount Per Serving Niacin 25.5 mg",
+    }), [
+      { text: "3 Oil-Infused Capsules", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      factsText: [
+        "Supplement Facts",
+        "Serving Size 1 Biodegradable Sachet (2.5 g)",
+        "(Makes 8 fl oz)",
+        "Servings Per Container 30",
+        "Amount Per Serving Proprietary Blend 2.5 g",
+      ].join("\n"),
+    }), [
+      { text: "1 Biodegradable Sachet (2.5 g)", source: "factsText" },
     ]);
 
     assert.deepEqual(extractServingSizes({
@@ -1648,6 +1879,11 @@ describe("supplement brand-site repair preview", () => {
     assert.deepEqual(preview.removableFieldCandidates, ["bodyText"]);
     assert.match(preview.proposedSearchTextPreview, /Magnesium 200 mg/u);
     assert.doesNotMatch(preview.proposedSearchTextPreview, /page copy page copy/u);
+    assert.equal(preview.productionCandidate?.label.bodyText, undefined);
+    assert.deepEqual(preview.productionCandidate?.label.servingSizes, [
+      { text: "2 Capsules", source: "factsText" },
+    ]);
+    assert.deepEqual(preview.productionCandidate?.reviewIssues, []);
   });
 
   test("repair preview does not remove raw evidence from partial rows", () => {
