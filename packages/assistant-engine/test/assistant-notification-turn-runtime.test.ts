@@ -51,6 +51,7 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/turns.js')
   vi.doUnmock('../src/assistant/channel-adapters.js')
   vi.doUnmock('../src/assistant/turn-lock.js')
+  vi.doUnmock('../src/assistant/response-media.js')
 })
 
 test('sendAssistantNotificationLocal persists the turn before outbound delivery and forwards the dedupe token', async () => {
@@ -1046,6 +1047,151 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     assistantNotificationProviderModel: 'gpt-5.5-primary',
     assistantNotificationRouteId: 'route-primary',
     assistantNotificationStage: 'delivery',
+  })
+})
+
+test('sendAssistantNotificationLocal clears staged response media when delivery throws', async () => {
+  const providerSession = createAssistantSession()
+  const sharedPlan = createSharedPlan()
+  const primaryRoute = createRoute({
+    providerOptions: {
+      model: 'gpt-5.5-primary',
+    },
+    routeId: 'route-primary',
+  })
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      text: 'Needs delivery',
+      privateSummary: 'deliver',
+    }),
+    route: primaryRoute,
+    session: providerSession,
+  })
+  const deliveryError = new Error('delivery exploded')
+  const readAssistantResponseMedia = vi.fn(async () => [
+    {
+      kind: 'image' as const,
+      url: 'https://cdn.example.test/notification.png',
+      alt: 'notification',
+      source: 'notification',
+    },
+  ])
+  const clearAssistantResponseMediaBestEffort = vi.fn(async () => undefined)
+  const mocks = {
+    createAssistantRuntimeStateService: vi.fn(() => ({
+      outbox: {
+        deliverMessage: vi.fn(async () => {
+          throw deliveryError
+        }),
+      },
+      status: {
+        refreshSnapshot: vi.fn(async () => undefined),
+      },
+      turns: {
+        createReceipt: vi.fn(async () => undefined),
+        finalizeReceipt: vi.fn(async () => undefined),
+      },
+      diagnostics: {
+        recordEvent: vi.fn(async () => undefined),
+      },
+    })),
+    executeCodexTurnWithRecovery: vi.fn(async () => ({
+      kind: 'succeeded',
+      providerTurn: providerResult,
+    })),
+    normalizeAssistantExecutionContext: vi.fn((value) => value),
+    resolveAssistantExecutionDefaultTarget: vi.fn((input) =>
+      input.executionContext?.hosted?.defaultTarget ?? input.fallbackTarget,
+    ),
+    resolveAssistantExecutionOperatorDefaults: vi.fn((input) =>
+      input.executionContext?.hosted?.defaultTarget
+        ? {
+            ...(input.defaults ?? {}),
+            backend: input.executionContext.hosted.defaultTarget,
+          }
+        : (input.defaults ?? null),
+    ),
+    persistAssistantTurnAndSession: vi.fn(async () => providerSession),
+    recordAssistantUsageEvent: vi.fn(async () => undefined),
+    resolveAssistantOperatorDefaults: vi.fn(async () => ({
+      timezone: 'Australia/Sydney',
+    })),
+    resolveAssistantSessionForMessage: vi.fn(async () => ({
+      session: providerSession,
+    })),
+    resolveAssistantTurnRoute: vi.fn(() => primaryRoute),
+    resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
+    withAssistantTurnLock: vi.fn(
+      async (input: { run(): Promise<unknown> }) => await input.run(),
+    ),
+  }
+
+  vi.doMock('@murphai/operator-config/operator-config', () => ({
+    resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
+  }))
+  vi.doMock('@murphai/operator-config/assistant-backend', () => ({
+    createDefaultLocalAssistantModelTarget: () => createCodexTarget(),
+  }))
+  vi.doMock('../src/assistant/runtime-state-service.js', () => ({
+    createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
+  }))
+  vi.doMock('../src/assistant/execution-context.js', () => ({
+    normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
+    resolveAssistantExecutionDefaultTarget:
+      mocks.resolveAssistantExecutionDefaultTarget,
+    resolveAssistantExecutionOperatorDefaults:
+      mocks.resolveAssistantExecutionOperatorDefaults,
+  }))
+  vi.doMock('../src/assistant/session-resolution.js', () => ({
+    resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+  }))
+  vi.doMock('../src/assistant/turn-plan.js', () => ({
+    resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
+  }))
+  vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
+    executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
+  }))
+  vi.doMock('../src/assistant/service-usage.js', () => ({
+    recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
+  }))
+  vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+  }))
+  vi.doMock('../src/assistant/service-turn-routes.js', () => ({
+    resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
+  }))
+  vi.doMock('../src/assistant/turns.js', () => ({
+    createAssistantTurnId: () => 'turn-notification-delivery-throw',
+  }))
+  vi.doMock('../src/assistant/turn-lock.js', () => ({
+    withAssistantTurnLock: mocks.withAssistantTurnLock,
+  }))
+  vi.doMock('../src/assistant/response-media.js', () => ({
+    clearAssistantResponseMediaBestEffort,
+    readAssistantResponseMedia,
+  }))
+
+  const { sendAssistantNotificationLocal } = await import(
+    '../src/assistant/notification-turn.ts'
+  )
+
+  await expect(
+    sendAssistantNotificationLocal({
+      executionContext: {
+        hosted: null,
+      },
+      instructions: 'Deliver this',
+      vault: '/vaults/delivery-throw',
+    }),
+  ).rejects.toThrow('delivery exploded')
+  expect(readAssistantResponseMedia).toHaveBeenCalledWith({
+    vault: '/vaults/delivery-throw',
+    turnId: 'turn-notification-delivery-throw',
+  })
+  expect(clearAssistantResponseMediaBestEffort).toHaveBeenCalledWith({
+    vault: '/vaults/delivery-throw',
+    turnId: 'turn-notification-delivery-throw',
   })
 })
 

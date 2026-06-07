@@ -604,31 +604,36 @@ async function deliverAssistantNotificationMessage(input: {
     vault: input.input.vault,
     turnId: input.turnId,
   })
-  const outcome = await state.outbox.deliverMessage({
-    turnId: input.turnId,
-    sessionId: input.session.sessionId,
-    message: input.message,
-    dedupeToken: input.dedupeToken,
-    deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
-    deliverySource: input.input.deliverySource ?? null,
-    deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
-    channel: deliveryChannel,
-    identityId: audience.identityId ?? input.session.binding.identityId,
-    actorId: audience.actorId ?? input.session.binding.actorId,
-    threadId: audience.threadId ?? input.session.binding.threadId,
-    threadIsDirect: audience.threadIsDirect ?? input.session.binding.threadIsDirect,
-    bindingDelivery: audience.bindingDelivery ?? input.session.binding.delivery,
-    explicitTarget,
-    media,
-    replyToMessageId:
-      audience.replyToMessageId ?? input.input.deliveryReplyToMessageId ?? null,
-    subject,
-    dispatchMode: input.input.deliveryDispatchMode,
-  })
-  await clearAssistantResponseMediaBestEffort({
-    vault: input.input.vault,
-    turnId: input.turnId,
-  })
+  let outcome: Awaited<ReturnType<typeof state.outbox.deliverMessage>>
+  try {
+    outcome = await state.outbox.deliverMessage({
+      turnId: input.turnId,
+      sessionId: input.session.sessionId,
+      message: input.message,
+      dedupeToken: input.dedupeToken,
+      deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+      deliverySource: input.input.deliverySource ?? null,
+      deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
+      channel: deliveryChannel,
+      identityId: audience.identityId ?? input.session.binding.identityId,
+      actorId: audience.actorId ?? input.session.binding.actorId,
+      threadId: audience.threadId ?? input.session.binding.threadId,
+      threadIsDirect:
+        audience.threadIsDirect ?? input.session.binding.threadIsDirect,
+      bindingDelivery: audience.bindingDelivery ?? input.session.binding.delivery,
+      explicitTarget,
+      media,
+      replyToMessageId:
+        audience.replyToMessageId ?? input.input.deliveryReplyToMessageId ?? null,
+      subject,
+      dispatchMode: input.input.deliveryDispatchMode,
+    })
+  } finally {
+    await clearAssistantResponseMediaBestEffort({
+      vault: input.input.vault,
+      turnId: input.turnId,
+    })
+  }
 
   switch (outcome.kind) {
     case 'sent':

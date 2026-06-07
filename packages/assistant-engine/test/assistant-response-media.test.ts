@@ -177,6 +177,68 @@ describe('assistant response media', () => {
     ).resolves.toEqual([])
   })
 
+  it('replaces media for one assistant turn instead of accumulating stale staged media', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-response-media-replace-',
+    )
+    tempRoots.push(parentRoot)
+
+    await stageAssistantResponseMedia({
+      vault: vaultRoot,
+      turnId: 'turn-media-replace',
+      sessionId: 'session-media-replace',
+      media: [
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/one.png',
+          alt: 'one',
+          source: 'one',
+        },
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/two.png',
+          alt: 'two',
+          source: 'two',
+        },
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/three.png',
+          alt: 'three',
+          source: 'three',
+        },
+      ],
+    })
+
+    const staged = await stageAssistantResponseMedia({
+      vault: vaultRoot,
+      turnId: 'turn-media-replace',
+      sessionId: 'session-media-replace',
+      media: [
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/one.png',
+          alt: 'one',
+          source: 'one',
+        },
+      ],
+    })
+
+    expect(staged).toEqual([
+      {
+        kind: 'image',
+        url: 'https://cdn.example.test/one.png',
+        alt: 'one',
+        source: 'one',
+      },
+    ])
+    await expect(
+      readAssistantResponseMedia({
+        vault: vaultRoot,
+        turnId: 'turn-media-replace',
+      }),
+    ).resolves.toEqual(staged)
+  })
+
   it('normalizes active turn context from env without inventing missing values', () => {
     expect(
       resolveAssistantActiveTurnContextFromEnv({

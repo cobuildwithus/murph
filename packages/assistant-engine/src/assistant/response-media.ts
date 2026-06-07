@@ -118,11 +118,7 @@ export async function stageAssistantResponseMedia(input: {
       turnId,
       vault: input.vault,
     })
-    const existing = await readAssistantResponseMedia({
-      turnId,
-      vault: input.vault,
-    })
-    const media = normalizeAssistantResponseMediaList([...existing, ...input.media])
+    const media = normalizeAssistantResponseMediaList(input.media)
 
     await mkdir(path.dirname(filePath), { recursive: true })
     await writeJsonFileAtomic(
