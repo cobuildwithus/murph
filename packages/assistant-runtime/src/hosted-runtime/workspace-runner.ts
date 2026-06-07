@@ -526,6 +526,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }
     await foregroundMailboxImportLoop.stop();
     if (foregroundConversationWorkObserved) {
+      // stop() drains any foreground import already in flight, so re-read pending
+      // assistant input here before post-cleanup null/later wakes can hide it.
       await mergePendingForegroundAssistantInputWake({
         now: input.now,
         result: assistantPhaseResult,
