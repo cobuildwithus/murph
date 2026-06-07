@@ -90,6 +90,10 @@ assert(
   'package.json must depend on @murphai/health-commons so the published @murphai/murph package ships the public Health Commons catalog.',
 )
 assert(
+  packageJson.dependencies?.['@murphai/exercise-library'] === 'workspace:*',
+  'package.json must depend on @murphai/exercise-library so the published @murphai/murph package ships the public exercise catalog.',
+)
+assert(
   packageJson.dependencies?.['@murphai/assistant-cli'] === 'workspace:*',
   'package.json must depend on @murphai/assistant-cli so the published @murphai/murph shell can delegate assistant UI and daemon-aware wrappers cleanly.',
 )
@@ -116,6 +120,10 @@ assert(
 assert(
   packageJson.bundleDependencies?.includes('@murphai/health-commons') === true,
   'package.json bundleDependencies must include @murphai/health-commons so published installs ship the generated Health Commons catalog.',
+)
+assert(
+  packageJson.bundleDependencies?.includes('@murphai/exercise-library') === true,
+  'package.json bundleDependencies must include @murphai/exercise-library so published installs ship the generated exercise catalog.',
 )
 assert(
   packageJson.bin?.['vault-cli'] === 'dist/bin.js',
@@ -172,7 +180,7 @@ assert(
     packageJson.scripts?.['test:source:coverage'] ===
       'pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage' &&
     packageJson.scripts?.['verify:prepared-runtime'] ===
-      'pnpm --dir ../.. health-commons:generate && pnpm --dir ../.. build:test-runtime:prepared' &&
+      'pnpm --dir ../.. exercise-library:generate && pnpm --dir ../.. health-commons:generate && pnpm --dir ../.. build:test-runtime:prepared' &&
     packageJson.scripts?.build ===
       'node ../../scripts/rm-paths.mjs dist .tsbuildinfo && tsc -b tsconfig.build.json' &&
     packageJson.scripts?.['verify:package-shape'] ===

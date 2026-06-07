@@ -43,6 +43,7 @@
     "test:diff": "bash scripts/workspace-verify.sh test:diff",
     "verify:acceptance": "bash scripts/workspace-verify.sh verify:acceptance",
     "generate:watch": "pnpm health-commons:generate:watch",
+    "exercise-library:generate": "pnpm --dir packages/exercise-library generate",
     "health-commons:generate": "node scripts/ensure-health-commons-generated.mjs",
     "health-commons:generate:watch": "node scripts/watch-health-commons-generated.mjs",
     "test:scenario-integrity": "tsx e2e/smoke/verify-scenario-integrity.ts",

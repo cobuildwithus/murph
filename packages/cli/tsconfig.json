@@ -50,6 +50,9 @@
       "path": "../hosted-execution"
     },
     {
+      "path": "../exercise-library"
+    },
+    {
       "path": "../health-commons"
     },
     {

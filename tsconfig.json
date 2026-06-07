@@ -8,6 +8,9 @@
       "path": "./packages/health-commons"
     },
     {
+      "path": "./packages/exercise-library"
+    },
+    {
       "path": "./packages/hosted-execution"
     },
     {

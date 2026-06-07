@@ -704,6 +704,7 @@ export const workoutTemplateSetSchema = z
 export const workoutTemplateExerciseSchema = z
   .object({
     name: boundedString(1, 160),
+    sourceExerciseId: boundedString(1, 200).optional(),
     order: integerSchema(1),
     groupId: boundedString(1, 80).optional(),
     mode: workoutExerciseModeSchema.optional(),

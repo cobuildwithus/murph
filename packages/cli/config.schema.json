@@ -1308,6 +1308,138 @@
             }
           }
         },
+        "exercise": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "commands": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "list": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "query": {
+                          "description": "Optional text search over movement names, targets, categories, modality, and description.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "kind": {
+                          "description": "Optional movement kind filter. Repeat --kind for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "exercise",
+                              "stretch",
+                              "mobility",
+                              "breathing"
+                            ]
+                          }
+                        },
+                        "environment": {
+                          "description": "Optional environment filter. Repeat --environment for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "at_home",
+                              "gym"
+                            ]
+                          }
+                        },
+                        "category": {
+                          "description": "Optional category filter. Repeat --category for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "target": {
+                          "description": "Optional target-area filter. Repeat --target for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "level": {
+                          "description": "Optional level filter. Repeat --level for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "beginner",
+                              "intermediate",
+                              "advanced"
+                            ]
+                          }
+                        },
+                        "equipment": {
+                          "description": "Optional equipment filter. Use none for no-equipment movements. Repeat --equipment for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "position": {
+                          "description": "Optional position filter. Repeat --position for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "modality": {
+                          "description": "Optional modality filter. Repeat --modality for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "commonness": {
+                          "description": "Optional commonness filter. Repeat --commonness for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "very_common",
+                              "common",
+                              "variant"
+                            ]
+                          }
+                        },
+                        "limit": {
+                          "default": 10,
+                          "description": "Maximum number of catalog items to return.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 500
+                        }
+                      }
+                    }
+                  }
+                },
+                "show": {
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "facets": {
+                  "type": "object",
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        },
         "scheduled-log": {
           "type": "object",
           "additionalProperties": false,
@@ -4876,7 +5008,7 @@
                                   "maxLength": 4000
                                 },
                                 "exercise": {
-                                  "description": "Compact exercise grammar: order=...;name=... with optional groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Supported keys: order, name, groupId, mode, unitOverride, note. Repeat --exercise for multiple exercises.",
+                                  "description": "Compact exercise grammar: order=...;name=... with optional groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Supported keys: order, name, sourceExerciseId, groupId, mode, unitOverride, note. Repeat --exercise for multiple exercises.",
                                   "type": "array",
                                   "items": {
                                     "type": "string",

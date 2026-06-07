@@ -913,6 +913,7 @@ export function registerWorkoutCommands(
     note?: string
     order: number
     plannedSets: Array<Record<string, unknown>>
+    sourceExerciseId?: string
     unitOverride?: string
   }
 
@@ -948,6 +949,7 @@ export function registerWorkoutCommands(
   const workoutFormatExerciseFields = new Set([
     'order',
     'name',
+    'sourceExerciseId',
     'groupId',
     'mode',
     'unitOverride',
@@ -991,6 +993,7 @@ export function registerWorkoutCommands(
       name: requireCompactString(fields, 'name', 'exercise', invalidWorkoutFormatOption),
       order: requireCompactInteger(fields, 'order', 'exercise', invalidWorkoutFormatOption),
       plannedSets: [],
+      ...(fields.has('sourceExerciseId') ? { sourceExerciseId: fields.get('sourceExerciseId') } : {}),
       ...(fields.has('groupId') ? { groupId: fields.get('groupId') } : {}),
       ...(fields.has('mode') ? { mode: fields.get('mode') } : {}),
       ...(fields.has('unitOverride') ? { unitOverride: fields.get('unitOverride') } : {}),

@@ -8,6 +8,9 @@ import {
   type HealthCommandDescriptorEntry,
 } from '@murphai/vault-usecases'
 import {
+  exerciseFacetsResultSchema,
+  exerciseListResultSchema,
+  exerciseShowResultSchema,
   listResultSchema,
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
@@ -34,6 +37,7 @@ import {
 import { registerDeviceCommands } from './commands/device.js'
 import { registerDocumentCommands } from './commands/document.js'
 import { registerEventCommands } from './commands/event.js'
+import { registerExerciseCommands } from './commands/exercise.js'
 import { registerExperimentCommands } from './commands/experiment.js'
 import { registerInterventionCommands } from './commands/intervention.js'
 import { registerExportCommands } from './commands/export.js'
@@ -433,6 +437,31 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['automation'],
     register({ cli }) {
       registerAutomationCommands(cli)
+    },
+  },
+  {
+    id: 'exercise',
+    bindingMode: 'none',
+    rootCommandNames: ['exercise'],
+    leafCommands: [
+      {
+        path: ['exercise', 'list'],
+        description: 'List public catalog movements with optional search and filter fields.',
+        output: exerciseListResultSchema,
+      },
+      {
+        path: ['exercise', 'show'],
+        description: 'Show one public catalog movement by id, slug, or exact name.',
+        output: exerciseShowResultSchema,
+      },
+      {
+        path: ['exercise', 'facets'],
+        description: 'List available public exercise catalog filters.',
+        output: exerciseFacetsResultSchema,
+      },
+    ],
+    register({ cli }) {
+      registerExerciseCommands(cli)
     },
   },
   {

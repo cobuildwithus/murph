@@ -17,6 +17,7 @@ const BUILD_ARTIFACTS = {
   "packages/setup-cli": ".tsbuildinfo",
   "packages/gateway-core": ".tsbuildinfo",
   "packages/health-commons": ".tsbuildinfo",
+  "packages/exercise-library": ".tsbuildinfo",
   "packages/health-metrics": ".tsbuildinfo",
   "packages/core": "tsconfig.build.tsbuildinfo",
   "packages/importers": [
@@ -52,6 +53,7 @@ const CLEAN_GROUPS = {
     "packages/setup-cli",
     "packages/gateway-core",
     "packages/health-commons",
+    "packages/exercise-library",
     "packages/health-metrics",
     "packages/core",
     "packages/importers",
@@ -78,6 +80,7 @@ const CLEAN_GROUPS = {
     "packages/setup-cli",
     "packages/gateway-core",
     "packages/health-commons",
+    "packages/exercise-library",
     "packages/health-metrics",
     "packages/core",
     "packages/importers",

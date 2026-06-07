@@ -85,6 +85,8 @@ const baseSmokeImportPaths = [
   "packages/messaging-ingress/dist/telegram-webhook.js",
   "packages/messaging-ingress/dist/telegram-webhook-payload.js",
   "packages/runtime-state/dist/index.js",
+  "packages/exercise-library/dist/index.js",
+  "packages/exercise-library/dist/runtime.js",
   "packages/assistant-engine/dist/index.js",
   "packages/core/dist/index.js",
   "packages/importers/dist/index.js",

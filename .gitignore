@@ -51,6 +51,7 @@ vault/
 !.env.example
 agent-docs/generated/doc-inventory.md
 packages/health-commons/generated/
+packages/exercise-library/generated/
 
 # Local Cloudflare runner secrets
 apps/cloudflare/.dev.vars*
