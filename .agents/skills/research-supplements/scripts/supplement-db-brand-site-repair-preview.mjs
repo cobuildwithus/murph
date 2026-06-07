@@ -18,7 +18,7 @@ const AMOUNT_VALUE_PATTERN = String.raw`(?<![\d,./])(?:<\s*)?\d(?:[\d,./]*)(?:\.
 const UNIT_PATTERN = String.raw`mcg\s+RAE|mcg\s+DFE|(?:µ|μ)g\s+RAE|(?:µ|μ)g\s+DFE|mg\s+NE|billion\s+CFUs?|million\s+CFUs?|CFUs?|IU|mcgt|mgt|mlt|mca|mg|mcg|(?:µ|μ)g|gt|g(?!\.[A-Za-z])|ml|kcal|calories?`;
 const AMOUNT_WITH_UNIT_PATTERN = String.raw`${AMOUNT_VALUE_PATTERN}\s*(?:${UNIT_PATTERN})`;
 const SERVING_AMOUNT_PATTERN = String.raw`(?:about\s*)?(?:\d+(?:[.,]\d+)?(?:\s*-\s*\d+(?:[.,]\d+)?)?|\d+\s*/\s*\d+|one|two|three|four|five|six|seven|eight|nine|ten|un|una|dos|tres|quatre)`;
-const SERVING_FORM_PATTERN = String.raw`(?:(?:quick\s+release|vegetarian|veggie|vegetable|coated|chewable|rounded|level|heaping|heaped|liquid|effervescent)\s+)*(?:g(?![A-Za-z])|grams?|mg|mcg|mL|ml|milliliters?|fl\.?\s*oz|fluid\s+ounces?|oz|tsp|teaspoons?|tbsp|tablespoons?|scoops?|capsules?(?:\(s\))?|(?!tabletk)tablets?(?:\(s\))?|caplets?|soft\s*-?\s*gels?|softgels?|gumm(?:y|ies)(?:\(ies\))?|chews?|chewables?|wafers?|lozenges?|packets?|stick\s+packs?|sticks?|VegCaps?|servings?|drops?(?:\(s\))?|gouttes?|gotas?|pumps?|bars?|sachets?|vials?|latas?|shots?|shota|cps|tbl|porcje?|porcja|kapsu[lł]ki|kapsu[lł]ka|kapsle|kapsl[iíe]|kapseln?|tabletk[ęeai]?|miark[ęea]?(?:\s+proszku)?|cacitos?|comprimidos?|comprim[eé]s?|g[eé]lules?|capsulas?|c[aá]psulas?|perlas?|pipettes?|cuill[eè]res?|כמוס(?:ה|ות)|טבלי(?:ה|ות)|קפסול(?:ה|ות))`;
+const SERVING_FORM_PATTERN = String.raw`(?:(?:quick\s+release|vegetarian|vegan|veggie|vegetable|coated|chewable|rounded|level|heaping|heaped|liquid|effervescent)\s+)*(?:g(?![A-Za-z])|grams?|mg|mcg|mL|ml|milliliters?|fl\.?\s*oz\.?|fluid\s+ounces?|oz|tsp|teaspoons?|tbsp|tablespoons?|scoops?|capsules?(?:\(s\))?|tabletten?|tablety|(?!tablet[tky])tablets?(?:\(s\))?|caplets?|soft\s*-?\s*gels?|softgels?|gumm(?:y|ies)(?:\(ies\))?|chews?|chewables?|wafers?|lozenges?|packets?|stick\s+packs?|sticks?|VegCaps?|servings?|drops?(?:\(s\))?|gouttes?|gotas?|pumps?|bars?|sachets?|vials?|latas?|l[aá]hev|s[aá]č(?:ek|ky|ků)?|shots?|shota|cps|tbl|porcje?|porcj[ęea]?|kapsu[lł]ki|kapsu[lł]ka|kapsle|kapsl[iíe]|kapseln?|tabletk[ęeai]?|miark[ęea]?(?:\s+proszku)?|cacitos?|comprimidos?|comprim[eé]s?|g[eé]lules?|capsulas?|c[aá]psulas?|perlas?|pipettes?|cuill[eè]res?|כמוס(?:ה|ות)|טבלי(?:ה|ות)|קפסול(?:ה|ות))`;
 
 function parseArgs(argv) {
   const options = {
@@ -507,6 +507,8 @@ function extractStructuredServingSizes(label) {
 
 function usageTexts(label) {
   return [
+    label.dosageText,
+    label.servingDirectionsText,
     label.servingRecommendationText,
     label.directions,
     label.directionsText,
@@ -525,16 +527,28 @@ function servingSizesFromUsageText(input) {
   if (!text) return [];
   const servingSizes = [];
   const pattern = new RegExp(String.raw`(?:^|[.;,:\s(])(${SERVING_AMOUNT_PATTERN}\s*${SERVING_FORM_PATTERN}(?:\s*\([^)]{1,70}\))?)`, "giu");
+  const polishPortionPattern = new RegExp(String.raw`\b(?:Porcj[ęea]|Dawk[ęea])\s*\(\s*(${SERVING_AMOUNT_PATTERN}\s*${SERVING_FORM_PATTERN})(?:\s*[-–]\s*[^)]{1,60})?\)`, "giu");
   for (const windowText of usageDoseWindows(text)) {
     const normalized = windowText
       .replace(/\b(?:Recommended\s+Usage\s+Level|Serving\/directions|Serving\s+dose|Serving\/dose|Dosage|Suggested\s+Use)\s*(?:\([^)]*\))?\s*[:：-]?\s*/giu, " ")
-      .replace(/\b(?:Take|Use|Consume|Mix|Dissolve|Dilute|Tomar|Prendre|Prenez|Consommer|Przyjmowa[cć]|Stosowa[cć])\s+/giu, " ");
+      .replace(/\b(?:Take|Use|Consume|Mix|Dissolve|Dilute|Tomar|Prendre|Prenez|Consommer|Nehmen|Verzehren|Täglich|Taeglich|Przyjmowa[cć]|Stosowa[cć]|Stosowa[cć]\s+raz\s+dziennie)\s+/giu, " ");
     for (const segment of normalized.split(/\n|[.;](?=\s|$)/u).map(cleanValue).filter(Boolean)) {
       if (hasUsageTextExclusion(segment)) continue;
+      let hasExplicitPortion = false;
+      for (const match of segment.matchAll(polishPortionPattern)) {
+        servingSizes.push(match[1]);
+        hasExplicitPortion = true;
+      }
+      if (hasExplicitPortion) continue;
       for (const match of segment.matchAll(/((?:כמוס(?:ה|ות)|טבלי(?:ה|ות)|קפסול(?:ה|ות))\s+אחת)/gu)) {
         servingSizes.push(match[1]);
       }
+      const germanDescribedDosePattern = /\b(\d+(?:[.,]\d+)?)\s+(?:[\p{L}\d+®™.-]+\s+){1,5}(kapseln?|tabletten?)\b/giu;
+      for (const match of segment.matchAll(germanDescribedDosePattern)) {
+        servingSizes.push(`${match[1]} ${match[2]}`);
+      }
       for (const match of segment.matchAll(pattern)) {
+        if (shouldSkipUsageServingMatch(segment, match)) continue;
         servingSizes.push(match[1]);
       }
     }
@@ -542,9 +556,20 @@ function servingSizesFromUsageText(input) {
   return servingSizes;
 }
 
+function shouldSkipUsageServingMatch(segment, match) {
+  const value = cleanValue(match[1]);
+  const prefix = cleanValue(segment.slice(Math.max(0, match.index - 18), match.index));
+  if (/^(?:\d+(?:[.,]\d+)?)\s*(?:mg|mcg)$/iu.test(value)) return true;
+  if (/^(?:\d+(?:[.,]\d+)?)\s*(?:mL|ml|milliliters?|fl\.?\s*oz\.?|fluid\s+ounces?|oz)$/iu.test(value)
+    && /\b(?:with|in|into|of|water|w|z|do|po|dans|de|con)\s*$/iu.test(prefix)) {
+    return true;
+  }
+  return false;
+}
+
 function usageDoseWindows(text) {
   const windows = [];
-  const markerPattern = /\b(?:Recommended\s+Usage\s+Level|Serving\/directions|Serving\s+dose|Serving\/dose|Dosage|Directions?|Suggested\s+Use)\b/giu;
+  const markerPattern = /\b(?:Recommended\s+Usage\s+Level|Serving\/directions|Serving\s+dose|Serving\/dose|Dosage|Directions?|Suggested\s+Use|Verzehrempfehlung|Einnahmeempfehlung|STOSOWANIE|Stosowa[cć])\b/giu;
   const matches = [...text.matchAll(markerPattern)];
   if (matches.length === 0) return [text];
   for (const match of matches) {
@@ -557,11 +582,11 @@ function usageDoseWindows(text) {
 }
 
 function hasUsageDoseMarker(value) {
-  return /\b(?:Recommended\s+Usage\s+Level|Serving\/directions|Serving\s+dose|Serving\/dose|Dosage|Suggested\s+Use\s*:\s*(?:Take|Use|Consume|Mix|Dissolve|Dilute|Prendre|Tomar)|Directions?\s*:\s*(?:Take|Use|Consume|Mix|Dissolve|Dilute))\b/iu.test(value);
+  return /\b(?:Recommended\s+Usage\s+Level|Serving\/directions|Serving\s+dose|Serving\/dose|Dosage|Suggested\s+Use\s*:\s*(?:Take|Use|Consume|Mix|Dissolve|Dilute|Prendre|Tomar)|Directions?\s*:\s*(?:Take|Use|Consume|Mix|Dissolve|Dilute)|Verzehrempfehlung|Einnahmeempfehlung|STOSOWANIE|Stosowa[cć])\b/iu.test(value);
 }
 
 function hasUsageTextExclusion(value) {
-  return /\b(?:store|storage|keep out of reach|warning|caution|not to exceed|do not exceed|manufactured by|batch no|lic\.?\s*no|à consommer dans les|conserver|aufbewahren)\b/iu.test(cleanValue(value));
+  return /\b(?:store|storage|keep out of reach|warning|caution|not to exceed|do not exceed|manufactured by|batch no|lic\.?\s*no|net\s+contents?|contents?|inhalt|à consommer dans les|conserver|aufbewahren)\b/iu.test(cleanValue(value));
 }
 
 function inferServingSizesFromProductName(productName, ingredientRows) {
@@ -647,6 +672,7 @@ function labelTexts(label) {
   return [
     label.factsText,
     label.nutritionFactsText,
+    label.servingText,
     label.activeIngredientText,
   ].flatMap(textValues).map(cleanText).filter(Boolean);
 }
@@ -684,6 +710,7 @@ function extractIngredientRowsFromText(input) {
   rows.push(...ingredientRowsByPipeDelimitedTable(input));
   rows.push(...ingredientRowsByTransposedTable(input));
   rows.push(...ingredientRowsByLeadingAmountTable(input));
+  rows.push(...ingredientRowsByEachServingProvides(input));
   rows.push(...ingredientRowsByNameAmountBlockTable(input));
   rows.push(...ingredientRowsByInlineNameAmountBlock(input));
   rows.push(...ingredientRowsBySupplementFactsLines(input));
@@ -1031,6 +1058,33 @@ function ingredientRowsByNameAmountBlockTable(text) {
       source: "factsText_table",
     };
   });
+}
+
+function ingredientRowsByEachServingProvides(text) {
+  const normalized = cleanText(text).replace(/\s+/gu, " ");
+  const markerMatch = normalized.match(/\bEACH\s+SERVING\s+PROVIDES\s*:?\s*/iu);
+  if (!markerMatch || markerMatch.index === undefined) return [];
+  let section = cleanValue(normalized.slice(markerMatch.index + markerMatch[0].length));
+  const boundaryIndex = section.search(/\b(?:Recommended\s+Usage|Directions?|Suggested\s+Use|Other\s+Ingredients?|Ingredients?:|Nutritional\s+Information|Nutrition\s+Facts|Supplement\s+Facts|Servings?\s+per\s+container|Serving\s+Size|NOT\s+FOR|FOR\s+MFR|MFG\.?\s*UNIT|Store|Storage|Warning|Caution)\b/iu);
+  if (boundaryIndex > 20) section = cleanValue(section.slice(0, boundaryIndex));
+  if (!section || section.length > 1200) return [];
+
+  const rows = [];
+  const amountPattern = new RegExp(String.raw`(${AMOUNT_VALUE_PATTERN})\s*(${UNIT_PATTERN})\b`, "giu");
+  let cursor = 0;
+  for (const match of section.matchAll(amountPattern)) {
+    const nameSegment = cleanValue(section.slice(cursor, match.index));
+    cursor = (match.index ?? 0) + match[0].length;
+    const name = cleanIngredientName(nameSegment);
+    if (!name) continue;
+    rows.push({
+      name,
+      amount: cleanValue(match[1]),
+      unit: cleanParsedUnit(match[2]),
+      source: "factsText_table",
+    });
+  }
+  return rows;
 }
 
 function ingredientRowsByInlineNameAmountBlock(text) {
@@ -1396,12 +1450,16 @@ function cleanServingSize(value) {
     .replace(/^(?:Adults|Children|Infants|Adolescents|Teenagers|Seniors)\s*;\s*(?:age\s+[^:;]+:\s*)?/iu, "")
     .replace(/^(?:serving\s+size|dosis(?:\s+diaria\s+recomendada)?|diaria\s+recomendada|dose|dávka|davka|pour|dosage\s+pour|par|per|por)\s*[:–-]?\s*/iu, "")
     .replace(/^(?:journali[eè]re|daily)\s*\(\s*/iu, "")
+    .replace(/^(?:t[aä]glich|taeglich)\s+/iu, "")
+    .replace(/^(\d+(?:[.,]\d+)?)\s*(g|grams?)\s*[–-]\s*(1\s+s[aá]č(?:ek|ky|ků)?).*$/iu, "$3 ($1 $2)")
+    .replace(/^(\d+(?:[.,]\d+)?)\s+(?:[\p{L}\d+®™.-]+\s+){1,5}(kapseln?|tabletten?)\b.*$/iu, "$1 $2")
+    .replace(/^(\d+(?:[.,]\d+)?)\s+(kapseln?|tabletten?)\b.*$/iu, "$1 $2")
     .replace(/^((?:כמוס(?:ה|ות)|טבלי(?:ה|ות)|קפסול(?:ה|ות))\s+)אחת(?:\s|$)/u, "1 $1")
     .replace(/^(?:un|una)\s+/iu, "1 ")
     .replace(/^dos\s+/iu, "2 ")
     .replace(/^tres\s+/iu, "3 ")
     .replace(/[,"']?\s+"?Servings?\s+Per\s+Container\b.*$/iu, "")
-    .replace(/\.(?![^()]*\))\s+.*$/u, "")
+    .replace(/(?<!\bfl)\.(?!\s*\()(?![^()]*\))\s+.*$/iu, "")
     .replace(/\s+Servings?:.*$/iu, "")
     .replace(/\s*:\s*\d+(?:[.,]\d+)?\s*(?:daily|times\s+daily|per\s+day)\b.*$/iu, "")
     .replace(/\s*\/\s*(?:tablets?(?:\(s\))?|capsules?(?:\(s\))?|tbl|caps?)\b/iu, "")
@@ -1414,7 +1472,7 @@ function cleanServingSize(value) {
     .replace(/\s+אחרי\s+האוכל.*$/u, "")
     .replace(/\s+dosis\s+por\s+envase\b.*$/iu, "")
     .replace(/\s+(?:rozpu[sś]ci[cć]|wymiesza[cć]|przyjmowa[cć]|stosowa[cć]).*$/iu, "")
-    .replace(/\s+(?:le\s+matin|au\s+cours|[aà]\s+avaler|avec|de\s+pr[eé]f[eé]rence|preferably|antes|before|after|con|with)\b.*$/iu, "")
+    .replace(/\s+(?:am\s+morgen|mit(?:\s+reichlich)?|le\s+matin|au\s+cours|[aà]\s+avaler|avec|de\s+pr[eé]f[eé]rence|preferably|antes|before|after|con|with)\b.*$/iu, "")
     .replace(/\s+per\s+day\b.*$/iu, "")
     .replace(/\s+(?:or\s+as\s+directed|daily\b|as\s+a\s+dietary|of\s+water\b|with\s+\d|your\s+preferred|mix\s+\d|shake\s+or\s+stir|by\s+your\s+health|healthcare\s+professional|third\s+party|non-gmo|gluten-free|warning\b|notice\b).*$/iu, "")
     .replace(/(\([^)]{1,70})$/u, "$1)")
@@ -1437,7 +1495,7 @@ function isUsefulServingSize(value) {
   if (/\b(add to cart|buy now|notify me|view full details|copy link|shopify|reviews?|quantity|faq|shipping)\b/iu.test(text)) {
     return false;
   }
-  return hasBoundedServingSizeShape(text);
+  return hasBoundedServingSizeShape(text, value);
 }
 
 function servingSizeRawText(value) {
@@ -1463,19 +1521,20 @@ function hasServingSizeBodyMarkers(value) {
   return false;
 }
 
-function hasBoundedServingSizeShape(value) {
+function hasBoundedServingSizeShape(value, originalValue = null) {
   const text = cleanValue(value);
   const servingPattern = new RegExp(String.raw`^${SERVING_AMOUNT_PATTERN}\s*${SERVING_FORM_PATTERN}(?:\s*\([^)]{1,70}\))?$`, "iu");
-  if (servingPattern.test(text)) return !isLikelyContainerCountServingSize(text);
+  if (servingPattern.test(text)) return !isLikelyContainerCountServingSize(text, originalValue);
   return new RegExp(String.raw`^(?:\d+(?:[.,]\d+)?|\d+\s*/\s*\d+)\s*[\p{Script=Han}]{1,4}$`, "u").test(text);
 }
 
-function isLikelyContainerCountServingSize(value) {
+function isLikelyContainerCountServingSize(value, originalValue = null) {
   const text = cleanValue(value);
   const match = text.match(/^(\d+(?:[.,]\d+)?)\s*(.+)$/u);
   if (!match) return false;
   const amount = Number.parseFloat(match[1].replace(",", "."));
   const unitText = cleanValue(match[2]);
+  if (isOfficialServingColumnServingSize(originalValue) && !/^100\s*(?:g|grams?|mL|ml|milliliters?)$/iu.test(text)) return false;
   if (/\([^)]*(?:scoop|teaspoon|tablespoon|tsp|tbsp|packet|stick\s+pack|capsule|tablet)[^)]*\)/iu.test(text)) {
     return false;
   }
@@ -1484,7 +1543,11 @@ function isLikelyContainerCountServingSize(value) {
   if (amount >= 100 && /^(?:mL|ml|milliliters?)$/u.test(unitText)) return true;
   if (amount >= 8 && /^(?:fl\.?\s*oz|fluid\s+ounces?)$/iu.test(unitText)) return true;
   return amount >= 10
-    && /\b(?:servings?|sv|packets?|stick\s+packs?|capsules?(?:\(s\))?|tablets?|caplets?|softgels?|gummies?|chews?|chewables?|wafers?|lozenges?)\b/iu.test(unitText);
+    && /\b(?:servings?|sv|packets?|stick\s+packs?|capsules?(?:\(s\))?|tablets?|caplets?|softgels?|gummies?|chews?|chewables?|wafers?|lozenges?|kapseln?|tabletten?)\b/iu.test(unitText);
+}
+
+function isOfficialServingColumnServingSize(value) {
+  return Boolean(value && typeof value === "object" && cleanValue(value.source) === "official_nutrition_table");
 }
 
 function cleanIngredientName(value) {

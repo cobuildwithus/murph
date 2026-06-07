@@ -364,6 +364,30 @@ describe("supplement brand-site repair preview", () => {
     ]);
 
     assert.deepEqual(extractServingSizes({
+      factsText: "Supplement Facts Serving Size: 2 Vegan Capsules Servings Per Container: 30 Amount Per Serving Apple Cider Vinegar 1,200 mg *",
+    }), [
+      { text: "2 Vegan Capsules", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      factsText: "Nutrition Facts about 8 servings per container Serving size 4 fl. oz. (118 mL) Amount per serving Calories 0 Total Fat 0g",
+    }), [
+      { text: "4 fl. oz. (118 mL)", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      factsText: "STOSOWANIE\nPorcję (31,5 g - 1 miarka) rozpuścić w bidonie z 500 ml wody.",
+    }), [
+      { text: "31,5 g", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      factsText: "STOSOWANIE\n30 g (1½ płaskiej miarki) rozpuścić w 200 ml wody.",
+    }), [
+      { text: "30 g (1½ płaskiej miarki)", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
       servingRecommendationText: "2 comprimés par jour, à avaler avec un verre d'eau",
     }), [
       { text: "2 comprimés", source: "factsText" },
@@ -385,6 +409,30 @@ describe("supplement brand-site repair preview", () => {
       servingRecommendationText: "Tomar 1 lata (500 ml) al día",
     }), [
       { text: "1 lata (500 ml)", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingDirectionsText: "Täglich 1 Tablette am Morgen",
+    }), [
+      { text: "1 Tablette", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingDirectionsText: "Täglich 1 Kapsel mit reichlich Flüssigkeit (z. B. Wasser) einnehmen.",
+    }), [
+      { text: "1 Kapsel", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingDirectionsText: "Verzehrsempfehlung: Täglich 1 Augen Vital Kapsel am besten nach einer Mahlzeit mit reichlich Flüssigkeit schlucken.\nInhalt: 20,3 g 30 Kapseln",
+    }), [
+      { text: "1 Kapsel", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingDirectionsText: "Verzehrsempfehlung für Jugendliche und Erwachsene: Täglich 1 Tablette Magnesium 400 mit reichlich Flüssigkeit schlucken.\nInhalt: 39,5 g 30 Tabletten",
+    }), [
+      { text: "1 Tablette", source: "factsText" },
     ]);
 
     assert.deepEqual(extractServingSizes({
@@ -612,6 +660,35 @@ describe("supplement brand-site repair preview", () => {
         unit: "g",
         dailyValue: "†",
         source: "factsText",
+      },
+    ]);
+  });
+
+  test("parses each-serving-provides OCR ingredient blocks", () => {
+    const factsText = [
+      "Servings per container: 30 Nutritional Information (Approx. Values)",
+      "EACH SERVING PROVIDES: Berberine HCL 98% 500mg Milk Thistle Extract 200 mg Cinnamon Powder 100 mg",
+      "Recommended Usage Level (for Adults): Take 2 capsules daily after any one meal.",
+    ].join(" ");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Berberine HCL 98%",
+        amount: "500",
+        unit: "mg",
+        source: "factsText_table",
+      },
+      {
+        name: "Milk Thistle Extract",
+        amount: "200",
+        unit: "mg",
+        source: "factsText_table",
+      },
+      {
+        name: "Cinnamon Powder",
+        amount: "100",
+        unit: "mg",
+        source: "factsText_table",
       },
     ]);
   });
@@ -1381,6 +1458,8 @@ describe("supplement brand-site repair preview", () => {
       { text: "1 effervescent tablet per day, preferably with a meal", source: "directions_serving" },
       { text: "1 Tablet/tablets per day, preferably with a meal", source: "directions_serving" },
       { text: "4 kapsułki", source: "official_facts_table" },
+      { text: "4 tablety", source: "official_nutrition_table" },
+      { text: "1 láhev (750 ml)", source: "official_nutrition_table" },
       { text: "1 Gummy(ies) per day, preferably with a meal", source: "directions_serving" },
       { text: "2 kapsle", source: "official_nutrition_table" },
       { text: "1 Kapsel", source: "table_header_unit" },
@@ -1438,6 +1517,61 @@ describe("supplement brand-site repair preview", () => {
     assert.deepEqual(preview.parserBlockers, []);
     assert.deepEqual(preview.parsedServingSizesPreview, [
       { text: "35 g", source: "official_nutrition_table" },
+    ]);
+
+    const packetPreview = repairPreviewForRow({
+      id: "example-brand:mixed-packet-serving-sizes",
+      dataOriginId: "example-brand:mixed-packet-serving-sizes",
+      dataOriginUrl: "https://example.test/products/mixed-packet-serving-sizes",
+      name: "Example Packet Gel",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "mixed-packet-serving-sizes",
+        ingredientRows: [{ name: "Caffeine", amount: "50", unit: "mg" }],
+        servingSizes: [
+          { text: "100 g", source: "official_nutrition_table" },
+          { text: "200 g - 4 sáčky", source: "official_nutrition_table" },
+          { text: "50 g - 1 sáček", source: "official_nutrition_table" },
+        ],
+      },
+    });
+
+    assert.equal(packetPreview.parserStatus, "structured_ready");
+    assert.deepEqual(packetPreview.parserBlockers, []);
+    assert.deepEqual(packetPreview.parsedServingSizesPreview, [
+      { text: "1 sáček (50 g)", source: "official_nutrition_table" },
+    ]);
+  });
+
+  test("repair preview accepts official serving-column volumes while rejecting table bases", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:drink-serving-column",
+      dataOriginId: "example-brand:drink-serving-column",
+      dataOriginUrl: "https://example.test/products/drink-serving-column",
+      name: "Example Energy Drink",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "drink-serving-column",
+        ingredientRows: [{ name: "Caffeine", amount: "100", unit: "mg" }],
+        servingSizes: [
+          { text: "100 ml", source: "table_amount_basis" },
+          { text: "330 ml", source: "official_nutrition_table" },
+        ],
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.deepEqual(preview.parserBlockers, []);
+    assert.deepEqual(preview.parsedServingSizesPreview, [
+      { text: "330 ml", source: "official_nutrition_table" },
     ]);
   });
 
