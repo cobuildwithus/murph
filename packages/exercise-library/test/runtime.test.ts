@@ -12,6 +12,7 @@ import {
 } from "../src/build.js";
 import {
   createExerciseCatalogReader,
+  getGeneratedExerciseCatalogReader,
   loadGeneratedExerciseCatalog,
 } from "../src/runtime.js";
 
@@ -19,12 +20,13 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const seedPaths = [
   path.join(packageRoot, "content", "seed", "at-home-exercise-stretch.csv"),
   path.join(packageRoot, "content", "seed", "at-home-exercise-stretch-addon-500.csv"),
+  path.join(packageRoot, "content", "seed", "at-home-exercise-strength-addon-250.csv"),
 ];
 
 describe("exercise-library runtime", () => {
   it("builds the seed catalog into compact generated artifacts", async () => {
     const catalog = await readSeedCatalog(seedPaths);
-    expect(catalog.items).toHaveLength(1500);
+    expect(catalog.items).toHaveLength(1750);
     expect(catalog.sources.length).toBeGreaterThan(0);
     const items = catalog.items;
     expect(items[0]).toMatchObject({
@@ -35,6 +37,19 @@ describe("exercise-library runtime", () => {
         "Stand with feet about shoulder-width apart and toes slightly turned out if comfortable.",
       ]),
     });
+    expect(catalog.items.find((item) => item.id === "EX751")).toMatchObject({
+      name: "Dumbbell Goblet Squat",
+      steps: [
+        "Stand with feet about shoulder-width apart and hold one dumbbell vertically at chest height.",
+        "Brace your trunk, sit your hips back, and bend your knees until you reach a comfortable squat depth.",
+        "Press through your whole foot to stand tall without letting the dumbbell pull you forward.",
+        "Reset your position before the next rep, or keep the same position if you are holding for time.",
+      ],
+      tips: [
+        "Keep the dumbbell close to your chest, knees tracking over toes, and ribs stacked over hips.",
+        "Keep the movement controlled, breathe steadily, and stop or regress the exercise if you feel sharp pain or lose form.",
+      ],
+    });
 
     const artifacts = buildArtifacts(catalog);
     expect(artifacts.index.items[0]).not.toHaveProperty("steps");
@@ -44,6 +59,7 @@ describe("exercise-library runtime", () => {
     expect(artifacts.details.sources).toEqual(catalog.sources);
     expect(artifacts.facets.facets.kinds).toEqual(["exercise", "stretch"]);
     expect(artifacts.facets.facets.equipment).toContain("none");
+    expect(findCaseInsensitiveDuplicates(artifacts.facets.facets.targets)).toEqual([]);
   });
 
   it("lists, filters, searches, and resolves exact lookups", async () => {
@@ -75,6 +91,26 @@ describe("exercise-library runtime", () => {
     if (lookup.kind === "found") {
       expect(lookup.item.steps.length).toBeGreaterThan(0);
       expect(reader.sourcesForItem(lookup.item).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("loads the generated runtime catalog with the strength addon rows", () => {
+    const reader = getGeneratedExerciseCatalogReader();
+    expect(reader.listExercises({ limit: 1 }).total).toBe(1750);
+
+    const firstAddon = reader.findByLookup("EX751");
+    expect(firstAddon.kind).toBe("found");
+    if (firstAddon.kind === "found") {
+      expect(firstAddon.item.name).toBe("Dumbbell Goblet Squat");
+      expect(firstAddon.item.kind).toBe("exercise");
+      expect(reader.sourcesForItem(firstAddon.item).length).toBeGreaterThan(0);
+    }
+
+    const lastAddon = reader.findByLookup("EX1000");
+    expect(lastAddon.kind).toBe("found");
+    if (lastAddon.kind === "found") {
+      expect(lastAddon.item.name).toBe("Seated Dumbbell Knee Tuck");
+      expect(lastAddon.item.steps.length).toBeGreaterThan(0);
     }
   });
 
@@ -121,6 +157,48 @@ describe("exercise-library runtime", () => {
       generatedRoot,
       seedPaths,
     })).rejects.toThrow(/out of date/u);
+
+    await writeFile(
+      path.join(generatedRoot, "exercise-facets.json"),
+      (await readFile(path.join(generatedRoot, "exercise-facets.json"), "utf8"))
+        .replace("murph.exercise-facets.v1", "murph.exercise-facets.invalid"),
+      "utf8",
+    );
+    expect(() => loadGeneratedExerciseCatalog({
+      detailsPath: path.join(generatedRoot, "exercise-details.json"),
+      facetsPath: path.join(generatedRoot, "exercise-facets.json"),
+      indexPath,
+    })).toThrow("Unexpected exercise facets schema version.");
+  });
+
+  it("rejects malformed seed inputs before artifacts are written", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "murph-exercise-seed-errors-"));
+    await expect(readSeedCatalog([])).rejects.toThrow("no source CSV files");
+
+    const badHeaderPath = path.join(tempRoot, "bad-header.csv");
+    await writeFile(badHeaderPath, "Library,ID,Name\nExercise,EX_BAD,Bad\n", "utf8");
+    await expect(readSeedCatalog([badHeaderPath])).rejects.toThrow("Unexpected exercise seed headers");
+
+    const duplicatePath = path.join(tempRoot, "duplicate.csv");
+    await writeFile(
+      duplicatePath,
+      [
+        seedHeader(),
+        seedRow({ id: "EX_DUP", name: "Duplicate A" }),
+        seedRow({ id: "EX_DUP", name: "Duplicate B" }),
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await expect(readSeedCatalog([duplicatePath])).rejects.toThrow("Duplicate exercise id EX_DUP");
+
+    const badUrlPath = path.join(tempRoot, "bad-url.csv");
+    await writeFile(
+      badUrlPath,
+      [seedHeader(), seedRow({ id: "EX_BAD_URL", sourceUrls: "http://example.com" }), ""].join("\n"),
+      "utf8",
+    );
+    await expect(readSeedCatalog([badUrlPath])).rejects.toThrow("non-HTTPS source URL");
   });
 });
 
@@ -131,4 +209,63 @@ function findDuplicateName(items: readonly { name: string }[]): string {
     names.set(key, (names.get(key) ?? 0) + 1);
   }
   return [...names.entries()].find(([, count]) => count > 1)?.[0] ?? "";
+}
+
+function findCaseInsensitiveDuplicates(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const value of values) {
+    const key = value.toLowerCase();
+    if (seen.has(key)) {
+      duplicates.add(key);
+    }
+    seen.add(key);
+  }
+  return [...duplicates].sort();
+}
+
+function seedHeader(): string {
+  return [
+    "Library",
+    "ID",
+    "Name",
+    "Category",
+    "Target Area",
+    "Level",
+    "Equipment",
+    "Position",
+    "Modality",
+    "Commonness Tier",
+    "Short Description",
+    "Source URL(s)",
+    "Steps",
+    "Best Practices",
+  ].join(",");
+}
+
+function seedRow(input: {
+  id: string;
+  name?: string;
+  sourceUrls?: string;
+}): string {
+  return [
+    "Exercise",
+    input.id,
+    input.name ?? "Test Exercise",
+    "Strength",
+    "hips",
+    "Beginner",
+    "None",
+    "Standing",
+    "Strength",
+    "Common",
+    "A short test exercise description.",
+    input.sourceUrls ?? "https://example.com/source",
+    "1) Set up. 2) Move with control.",
+    "1) Keep it easy.",
+  ].map(csvField).join(",");
+}
+
+function csvField(value: string): string {
+  return /[",\n\r]/u.test(value) ? `"${value.replace(/"/gu, "\"\"")}"` : value;
 }

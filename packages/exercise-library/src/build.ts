@@ -197,7 +197,7 @@ function normalizeSeedRow(row: SeedRow, rowLabel: string, sourceRegistry: Source
 
   const kind = normalizeKind(row.Library, rowLabel);
   const category = required(row.Category, "Category", rowLabel);
-  const targets = splitList(row["Target Area"]);
+  const targets = splitNormalizedList(row["Target Area"]);
   const equipment = splitList(row.Equipment);
   const steps = parseNumberedList(row.Steps, "Steps", rowLabel);
   const tips = parseNumberedList(row["Best Practices"], "Best Practices", rowLabel);
@@ -286,6 +286,10 @@ function splitList(value: string): string[] {
     return [];
   }
   return uniqueSorted(trimmed.split(",").map((entry) => entry.trim()).filter(Boolean));
+}
+
+function splitNormalizedList(value: string): string[] {
+  return uniqueSorted(splitList(value).map((entry) => entry.toLowerCase()));
 }
 
 function splitSourceUrls(value: string): string[] {
