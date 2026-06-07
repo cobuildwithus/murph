@@ -2,46 +2,9 @@ name: Cloudflare Hosted Device Sync E2E
 
 on:
   pull_request:
-    paths:
-      - ".github/workflows/cloudflare-hosted-device-sync-e2e.yml"
-      - "Dockerfile.cloudflare-hosted-runner"
-      - "Dockerfile.cloudflare-hosted-runner-base"
-      - "Dockerfile.cloudflare-whisper-model"
-      - "package.json"
-      - "apps/cloudflare/**"
-      - "apps/web/app/(dashboard)/biomarkers/**"
-      - "apps/web/app/api/device-sync/**"
-      - "apps/web/app/api/internal/device-sync/**"
-      - "apps/web/app/api/settings/device-sync/**"
-      - "apps/web/app/device-sync/**"
-      - "apps/web/src/components/biomarkers/**"
-      - "apps/web/src/components/settings/hosted-device-sync-*.tsx"
-      - "apps/web/src/lib/device-sync/**"
-      - "apps/web/src/lib/health-commons/**"
-      - "apps/web/src/lib/hosted-orchestration/**"
-      - "apps/web/test/biomarker*"
-      - "apps/web/test/device-sync*"
-      - "apps/web/test/health-commons-biomarker*"
-      - "apps/web/test/hosted-device-sync*"
-      - "apps/web/test/support/**"
-      - "packages/assistant-runtime/**"
-      - "packages/cloudflare-hosted-control/**"
-      - "packages/contracts/**"
-      - "packages/core/**"
-      - "packages/device-syncd/**"
-      - "packages/health-metrics/**"
-      - "packages/health-commons/**"
-      - "packages/hosted-execution/**"
-      - "packages/hosted-local-harness/**"
-      - "packages/hosted-orchestrator-temporal/**"
-      - "packages/importers/**"
-      - "packages/query/**"
-      - "packages/vault-usecases/**"
-      - "render.yaml"
-      - "scripts/dev-hosted-local.ts"
-      - "scripts/hosted-local.ts"
-      - "scripts/setup-temporal-cli.sh"
-      - "scripts/temporal-dev-server.sh"
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
