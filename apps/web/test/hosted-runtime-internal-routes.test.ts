@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   publishLegacySourceHashBrowserVaultReplicaRef: vi.fn(),
   publishLatestBrowserVaultReplicaRef: vi.fn(),
   readAcceptedRuntimeAttemptFailureSignalOwnerLogId: vi.fn(),
+  readHostedMailboxItemById: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedWorkspace: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   fetchHostedMailboxItemsAfterLaneCursors: mocks.fetchHostedMailboxItemsAfterLaneCursors,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
   fetchHostedMailboxPayload: mocks.fetchHostedMailboxPayload,
+  readHostedMailboxItemById: mocks.readHostedMailboxItemById,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -137,6 +139,7 @@ describe("hosted runtime internal web routes", () => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue({ kind: "prisma" });
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_routes_1");
+    mocks.readHostedMailboxItemById.mockResolvedValue(null);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveHostedMemberRecord());
     mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(null);
     mocks.resolveHostedRuntimeAiUsageDemandGate.mockResolvedValue({
@@ -462,6 +465,74 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
+  });
+
+  it("rejects conversation mailbox payload fetches when the AI usage gate denies runtime consumption", async () => {
+    mocks.readHostedMailboxItemById.mockResolvedValueOnce({
+      id: "mailbox_item_2",
+      kind: "conversation.message",
+      lane: "conversation",
+      userId: "member_routes_1",
+    });
+    mocks.resolveHostedRuntimeAiUsageDemandGate.mockResolvedValueOnce({
+      status: "denied",
+    });
+
+    const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/payload/fetch",
+      {
+        dedupeKey: "dedupe_item_2",
+        mailboxItemId: "mailbox_item_2",
+        payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+        requestId: "request_payload_fetch_usage_denied",
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(mocks.resolveHostedRuntimeAiUsageDemandGate).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
+    expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
+  });
+
+  it("does not AI-gate non-manual system mailbox payload fetches", async () => {
+    mocks.readHostedMailboxItemById.mockResolvedValueOnce({
+      id: "mailbox_browser_vault",
+      kind: "runtime.browser-vault-refresh-requested",
+      lane: "system",
+      userId: "member_routes_1",
+    });
+    mocks.fetchHostedMailboxPayload.mockResolvedValue({
+      fetchedAt: FIXED_NOW,
+      payload: {
+        createdAt: FIXED_NOW,
+        mailboxItemId: "mailbox_browser_vault",
+        payloadCiphertext: "cipher_ref_browser_vault",
+        payloadSchema: "murph.hosted-mailbox-payload.v1",
+        userId: "member_routes_1",
+      },
+      unavailable: null,
+    });
+
+    const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/payload/fetch",
+      {
+        dedupeKey: "dedupe_browser_vault",
+        mailboxItemId: "mailbox_browser_vault",
+        payloadRef: "hosted-mailbox-payload:mailbox_browser_vault",
+        requestId: "request_payload_fetch_browser_vault",
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveHostedRuntimeAiUsageDemandGate).not.toHaveBeenCalled();
+    expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
+      dedupeKey: "dedupe_browser_vault",
+      mailboxItemId: "mailbox_browser_vault",
+      payloadRef: "hosted-mailbox-payload:mailbox_browser_vault",
+      requestId: "request_payload_fetch_browser_vault",
+      userId: "member_routes_1",
+    });
   });
 
   it("reads workspace state and checkpoints with the workspace CAS fence", async () => {
