@@ -36,6 +36,14 @@ import {
   selectOcrInputRows,
 } from "../.agents/skills/research-supplements/scripts/supplement-db-brand-site-ocr-preview.mjs";
 
+function ingredientRowName(row: unknown): string {
+  assert.ok(row && typeof row === "object");
+  assert.ok("name" in row);
+  const name = (row as Record<string, unknown>).name;
+  if (typeof name !== "string") assert.fail("ingredient row name must be a string");
+  return name;
+}
+
 describe("supplement brand-site DB helper", () => {
   test("builds compact search text from normalized product facts instead of page body JSON", () => {
     const searchText = buildSearchText({
@@ -2922,5 +2930,83 @@ describe("supplement brand-site repair preview", () => {
       "Taurine",
       "SenActiv Tienchi Ginseng (Panax notoginseng) Root Extract & Chestnut Rose Fruit Extract",
     ]);
+  });
+
+  test("repair preview fixes legacy source brand and keeps prominent inline nutrients", () => {
+    const preview = repairPreviewForRow({
+      id: "new-chapter:every-mans-one-daily-40-multivitamin--30-day",
+      dataOriginId: "new-chapter:every-mans-one-daily-40-multivitamin--30-day",
+      dataOriginUrl: "https://www.newchapter.com/products/every-mans-one-daily-40-multivitamin",
+      name: "Every Man's One Daily 40+ Multivitamin - 30 Day",
+      brand: "Men's Wellness",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "new-chapter",
+        sourceId: "every-mans-one-daily-40-multivitamin--30-day",
+        bodyText: "Legacy page body",
+        allProductFactsText: ["legacy whole product facts"],
+        ingredientText: "Ingredients Supplement Facts Amount per 1 Tablet % Daily Value Vitamin A 900 mcg 100%",
+        factsText: [
+          "Ingredients Supplement Facts Amount per 1 Tablet % Daily Value",
+          "Vitamin A (100% as beta-carotene and from ferment media) 900 mcg 100%",
+          "Vitamin C (as ascorbic acid and from ferment media) 90 mg 100%",
+          "Vitamin D3 (as cholecalciferol and from ferment media) 25 (1000 mcg IU) 125%",
+          "Folate (as 118 mcg folic acid from ferment media) 200 mcg DFE 50%",
+          "Vitamin B12 (as cyanocobalamin from ferment media) 10 mcg 417%",
+          "Zinc (as zinc oxide from ferment media) 7.4 mg 67%",
+        ].join(" "),
+      },
+    });
+
+    assert.equal(preview.automatedBackfillReady, true);
+    assert.ok(preview.productionCandidate);
+    const ingredientRows = preview.productionCandidate.label.ingredientRows;
+    assert.ok(Array.isArray(ingredientRows));
+    assert.equal(preview.productionCandidate.brand, "New Chapter");
+    assert.deepEqual(preview.removableFieldCandidates, [
+      "bodyText",
+      "allProductFactsText",
+      "ingredientText",
+    ]);
+    assert.deepEqual(ingredientRows.map(ingredientRowName), [
+      "Vitamin A (100% as beta-carotene and from ferment media)",
+      "Vitamin C (as ascorbic acid and from ferment media)",
+      "Vitamin D3 (as cholecalciferol and from ferment media)",
+      "Folate",
+      "Vitamin B12 (as cyanocobalamin from ferment media)",
+      "Zinc (as zinc oxide from ferment media)",
+    ]);
+    assert.deepEqual(ingredientRows.find((row) => ingredientRowName(row).startsWith("Vitamin D3")), {
+      name: "Vitamin D3 (as cholecalciferol and from ferment media)",
+      amount: "25",
+      unit: "mcg",
+      dailyValue: "125%",
+      source: "factsText",
+    });
+  });
+
+  test("repair serving parser ignores nutrient amounts in liquid multivitamin facts panels", () => {
+    const factsText = [
+      "Ingredients Supplement Facts Serving size (Adult Dosage Ages 14+) 14+ years 30ml (2 tbsp.)",
+      "Serving per container About 30 Amount per serving %DV for 14+ years",
+      "Calories 30 Total Carbohydrates 7 g 3%**",
+      "Vitamin A (100% as beta-carotene) 900 mcg 100%",
+      "Vitamin D3 (as cholecalciferol from lichen) 14 mcg (560 IU) 70%",
+    ].join(" ");
+
+    const servingSizes = extractServingSizes({ factsText });
+
+    assert.deepEqual(servingSizes, [
+      { text: "30ml (2 tbsp.)", source: "factsText" },
+    ]);
+    assert.deepEqual(extractIngredientRowsFromText(factsText).find((row) => ingredientRowName(row).startsWith("Vitamin D3")), {
+      name: "Vitamin D3 (as cholecalciferol from lichen)",
+      amount: "14",
+      unit: "mcg",
+      dailyValue: "70%",
+      source: "factsText",
+    });
   });
 });

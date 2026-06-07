@@ -50,9 +50,16 @@ const PROMINENT_FACTS_ROW_NAMES = [
   "Sodium",
   "Potassium",
   "Total Carbohydrate",
+  "Total Carbohydrates",
   "Dietary Fiber",
   "Protein",
 ];
+const REPAIR_SOURCE_BRAND_OVERRIDES = new Map([
+  ["bird-and-be", "Bird&Be"],
+  ["lemme", "Lemme"],
+  ["new-chapter", "New Chapter"],
+  ["swolverine", "Swolverine"],
+]);
 
 function parseArgs(argv) {
   const options = {
@@ -185,6 +192,10 @@ function sourceIdFromOriginId(dataOriginId) {
   return String(dataOriginId).includes(":") ? String(dataOriginId).slice(String(dataOriginId).indexOf(":") + 1) : String(dataOriginId);
 }
 
+function repairBrandForSource(source, fallbackBrand) {
+  return REPAIR_SOURCE_BRAND_OVERRIDES.get(cleanValue(source)) ?? fallbackBrand;
+}
+
 function hasArray(value) {
   return Array.isArray(value) && value.length > 0;
 }
@@ -218,13 +229,14 @@ function repairPreviewForRow(row) {
   };
   const source = label.source || sourceFromOriginId(row.dataOriginId);
   const sourceId = label.sourceId || sourceIdFromOriginId(row.dataOriginId);
+  const brand = repairBrandForSource(source, row.brand);
   const proposedSearchText = buildSearchText({
     source,
     sourceId,
     dataOrigin: "brand_site",
     dataOriginId: row.dataOriginId,
     name: row.name,
-    brand: row.brand,
+    brand,
     upc: row.upc,
     dataOriginUrl: row.dataOriginUrl,
     label: proposedLabel,
@@ -244,7 +256,7 @@ function repairPreviewForRow(row) {
       source,
       sourceId,
       name: row.name,
-      brand: row.brand,
+      brand,
       upc: row.upc,
       offMarket: row.offMarket,
       label: removeLabelFields(proposedLabel, removableFieldCandidates),
@@ -262,7 +274,7 @@ function repairPreviewForRow(row) {
     id: row.id,
     dataOriginId: row.dataOriginId,
     name: row.name,
-    brand: row.brand,
+    brand,
     oldSearchTextLength: String(row.searchText ?? "").length,
     proposedSearchTextLength: proposedSearchText.length,
     searchTextWouldChange: proposedSearchText !== row.searchText,
@@ -331,6 +343,7 @@ function parserBlockersForRow(row, label, ingredientRows, servingSizes, state) {
   }
   if (maxFactsPanelLength(label) > 6000) blockers.push("facts_panel_too_long");
   if (hasLikelyMissingProminentFactsRows(label, ingredientRows)) blockers.push("likely_missing_facts_rows");
+  if (hasMissingProminentFactsRows(label, ingredientRows)) blockers.push("missing_prominent_facts_rows");
   if (ingredientRows.some((row) => !isUsefulIngredientRow(row))) blockers.push("invalid_parsed_ingredient_row");
   if (isLikelyFoodOrNonSupplementRow(row, label)) blockers.push("likely_food_or_non_supplement");
   if (ingredientRows.some((row) => row.source === "factsText_amount_pattern")) blockers.push("fallback_amount_pattern_rows");
@@ -459,6 +472,32 @@ function hasLikelyMissingProminentFactsRows(label, ingredientRows) {
   return false;
 }
 
+function hasMissingProminentFactsRows(label, ingredientRows) {
+  if (!Array.isArray(ingredientRows) || ingredientRows.length === 0) return false;
+  const parsedNames = new Set(ingredientRows.map((row) => baseIngredientName(row.name)).filter(Boolean));
+  for (const text of labelTexts(label)) {
+    const expectedNames = prominentFactsRowNamesFromText(text);
+    if (expectedNames.length < 5) continue;
+    if (expectedNames.some((name) => !parsedNames.has(name.toLowerCase()))) return true;
+  }
+  return false;
+}
+
+function prominentFactsRowNamesFromText(text) {
+  const names = [];
+  const rowNamePattern = prominentFactsRowNamePattern();
+  const matches = [...factsPanelText(text, { preserveLeadingTableRows: true }).matchAll(rowNamePattern)];
+  for (let index = 0; index < matches.length; index += 1) {
+    const match = matches[index];
+    const name = cleanValue(match[1]);
+    const segmentEnd = matches[index + 1]?.index ?? undefined;
+    const segment = cleanValue(factsPanelText(text, { preserveLeadingTableRows: true }).slice(match.index, segmentEnd));
+    if (!new RegExp(String.raw`\b(?:${AMOUNT_VALUE_PATTERN})(?:\s*${UNIT_PATTERN}|\s*\([^)]*\b${UNIT_PATTERN}\b[^)]*\))`, "iu").test(segment)) continue;
+    names.push(name.replace(/s$/u, ""));
+  }
+  return uniqueStrings(names);
+}
+
 function hasStackedTableContinuationRisk(label) {
   return labelTexts(label).some((text) => {
     const lines = factsPanelText(text)
@@ -502,6 +541,9 @@ function findRemovableFieldCandidates(label, state) {
   if (hasArray(label.allProductFactsText)) {
     candidates.push("allProductFactsText");
   }
+  if (hasContaminatedIngredientText(label)) {
+    candidates.push("ingredientText");
+  }
   return candidates;
 }
 
@@ -511,6 +553,17 @@ function removeLabelFields(label, fields) {
   return output;
 }
 
+function hasContaminatedIngredientText(label) {
+  const values = textValues(label.ingredientText ?? label.ingredients).map(cleanText).filter(Boolean);
+  if (values.length === 0) return false;
+  return values.some((text) => {
+    if (/\b(other ingredients?|inactive ingredients?)\s*:/iu.test(text)) return false;
+    if (/^\s*ingredients\s+supplement facts\b/iu.test(text)) return true;
+    return text.length > 600
+      && /\b(?:faq|reviews?|notify me|add to cart|buy now|why choose|benefits?|product gallery)\b/iu.test(text);
+  });
+}
+
 function extractServingSizes(label, context = {}) {
   const servingSizes = [];
   for (const servingSize of extractStructuredServingSizes(label)) addServingSizeCandidate(servingSizes, servingSize);
@@ -518,6 +571,10 @@ function extractServingSizes(label, context = {}) {
     addServingSizeCandidate(servingSizes, value);
   }
   for (const text of labelTexts(label)) {
+    const ageQualifiedServingPattern = new RegExp(String.raw`\bServings?\s+Size\s*(?:\([^)]{1,80}\))?\s*(?:\d+\+?\s+years?\s+)?(${SERVING_AMOUNT_PATTERN}\s*${SERVING_FORM_PATTERN}(?:\s*\([^)]{1,70}\))?)`, "giu");
+    for (const match of text.matchAll(ageQualifiedServingPattern)) {
+      addServingSizeCandidate(servingSizes, match[1]);
+    }
     const boundedServingPattern = new RegExp(String.raw`\bServings?\s+Size\s*:?\s*(${SERVING_AMOUNT_PATTERN}\s*${SERVING_FORM_PATTERN}(?:\s*\([^)]{1,70}\))?)`, "giu");
     for (const match of text.matchAll(boundedServingPattern)) {
       addServingSizeCandidate(servingSizes, match[1]);
@@ -538,7 +595,7 @@ function extractServingSizes(label, context = {}) {
     for (const match of text.matchAll(amountPerFormPattern)) {
       addServingSizeCandidate(servingSizes, `1 ${match[1]}`);
     }
-    if (hasUsageDoseMarker(text)) {
+    if (hasUsageDoseMarker(text) && !isFactsPanelWithAmountRows(text)) {
       for (const servingSize of servingSizesFromUsageText(text)) {
         addServingSizeCandidate(servingSizes, servingSize);
       }
@@ -553,6 +610,12 @@ function extractServingSizes(label, context = {}) {
     addServingSizeCandidate(servingSizes, servingSize);
   }
   return uniqueStrings(servingSizes).map((text) => ({ text, source: "factsText" })).slice(0, 8);
+}
+
+function isFactsPanelWithAmountRows(text) {
+  const factsText = factsPanelText(text, { preserveLeadingTableRows: true });
+  return /\b(?:Supplement|Nutrition)\s+Facts\b/iu.test(factsText)
+    && /\bAmount\s+Per\b|\bAmount\s+per\s+serving\b|\b%?\s*Daily\s+Value\b|\b%DV\b/iu.test(factsText);
 }
 
 function addServingSizeCandidate(servingSizes, value) {
@@ -800,6 +863,7 @@ function extractIngredientRowsFromText(input) {
   rows.push(...ingredientRowsByEachServingProvides(input));
   rows.push(...ingredientRowsByNameAmountBlockTable(input));
   rows.push(...ingredientRowsByInlineNameAmountBlock(input));
+  rows.push(...ingredientRowsByProminentInlineFacts(input));
   rows.push(...ingredientRowsByMultiDailyValueLines(input));
   rows.push(...ingredientRowsBySupplementFactsLines(input));
 
@@ -852,6 +916,9 @@ function ingredientRowFromTextSegment(segment, source) {
     .replace(/^Supplement Facts\s*/iu, ""));
   if (!text || isHeaderText(text)) return null;
 
+  const parentheticalUnitAmountRow = ingredientRowFromParentheticalUnitAmountTextSegment(text, source);
+  if (parentheticalUnitAmountRow) return parentheticalUnitAmountRow;
+
   const sourceParentheticalRow = ingredientRowFromSourceParentheticalTextSegment(text, source);
   if (sourceParentheticalRow) return sourceParentheticalRow;
 
@@ -888,6 +955,34 @@ function ingredientRowFromTextSegment(segment, source) {
   };
 }
 
+function ingredientRowFromParentheticalUnitAmountTextSegment(segment, source) {
+  const text = cleanValue(segment);
+  const primaryAmountMatch = text.match(new RegExp(String.raw`^(.+?)\s+(${AMOUNT_VALUE_PATTERN})\s*(${UNIT_PATTERN})\s*\(\s*\d[\d,.]*\s*IU\s*\)\s*(\d[\d,]{0,6}%[†‡*+]?|<\s*\d[\d,]{0,6}%[†‡*+]?|\*{1,2}|†|‡|\+)?$`, "iu"));
+  if (primaryAmountMatch) {
+    const name = cleanIngredientName(primaryAmountMatch[1]);
+    if (!name) return null;
+    return {
+      name,
+      amount: cleanValue(primaryAmountMatch[2]),
+      unit: cleanParsedUnit(primaryAmountMatch[3]),
+      ...(primaryAmountMatch[4] ? { dailyValue: cleanDailyValue(primaryAmountMatch[4]) } : {}),
+      source,
+    };
+  }
+
+  const match = text.match(new RegExp(String.raw`^(.+?)\s+(${AMOUNT_VALUE_PATTERN})\s*\(\s*\d[\d,.]*\s*(${UNIT_PATTERN})\s+IU\s*\)\s*(\d[\d,]{0,6}%[†‡*+]?|<\s*\d[\d,]{0,6}%[†‡*+]?|\*{1,2}|†|‡|\+)?$`, "iu"));
+  if (!match) return null;
+  const name = cleanIngredientName(match[1]);
+  if (!name) return null;
+  return {
+    name,
+    amount: cleanValue(match[2]),
+    unit: cleanParsedUnit(match[3]),
+    ...(match[4] ? { dailyValue: cleanDailyValue(match[4]) } : {}),
+    source,
+  };
+}
+
 function ingredientRowFromSourceParentheticalTextSegment(segment, source) {
   const text = cleanValue(segment);
   const prominentNamePattern = PROMINENT_FACTS_ROW_NAMES.map(escapeRegExp).join("|");
@@ -907,6 +1002,24 @@ function ingredientRowFromSourceParentheticalTextSegment(segment, source) {
   };
 }
 
+function ingredientRowsByProminentInlineFacts(text) {
+  const factsText = factsPanelText(text, { preserveLeadingTableRows: true });
+  if (factsText.includes("\n")) return [];
+  const matches = [...factsText.matchAll(prominentFactsRowNamePattern())];
+  const rows = [];
+  for (let index = 0; index < matches.length; index += 1) {
+    const match = matches[index];
+    const segmentEnd = matches[index + 1]?.index ?? undefined;
+    const segment = cleanValue(factsText.slice(match.index, segmentEnd));
+    if (!segment || segment.length > 260) continue;
+    const amountMentions = [...segment.matchAll(new RegExp(AMOUNT_WITH_UNIT_PATTERN, "giu"))].length;
+    if (amountMentions > 2) continue;
+    const row = ingredientRowFromTextSegment(segment, "factsText");
+    if (row) rows.push(row);
+  }
+  return rows;
+}
+
 function ingredientRowFromMultiDailyValueTextSegment(segment, source) {
   const text = cleanValue(segment);
   const pattern = new RegExp(String.raw`^(.+?)\s+(${AMOUNT_VALUE_PATTERN})\s*(${UNIT_PATTERN})(?:\s+(?:RAE|DFE|NE))?(?:\s*\[[^\]]{1,40}\])?(?:\s+\([^)]+\))?\s+((?:(?:<\s*)?\d[\d,]{0,6}%[†‡*+]?|\*{1,2}|†|‡|\+)(?:\s+(?:(?:<\s*)?\d[\d,]{0,6}%[†‡*+]?|\*{1,2}|†|‡|\+))*)$`, "iu");
@@ -923,6 +1036,15 @@ function ingredientRowFromMultiDailyValueTextSegment(segment, source) {
     ...(dailyValues.length > 0 ? { dailyValue: dailyValues.join(" / ") } : {}),
     source,
   };
+}
+
+function prominentFactsRowNamePattern() {
+  const prominentNamePattern = PROMINENT_FACTS_ROW_NAMES
+    .slice()
+    .sort((left, right) => right.length - left.length)
+    .map(escapeRegExp)
+    .join("|");
+  return new RegExp(String.raw`\b(${prominentNamePattern})\b(?=\s+(?:\(|${AMOUNT_VALUE_PATTERN}\b))`, "giu");
 }
 
 function ingredientRowsByMultiDailyValueLines(text) {
