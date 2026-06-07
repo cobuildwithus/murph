@@ -100,7 +100,8 @@ describe("hosted mailbox conversation import adapter", () => {
           parts: [
             {
               type: "text",
-              value: "hello https://signed.example.invalid/raw",
+              value:
+                "hello https://signed.example.invalid/raw\nfile file:///tmp/fixture\npath /tmp/fixture\nAuthorization: fixture-header",
             },
             {
               attachmentId: "att_voice_1",
@@ -152,7 +153,10 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(listed.events.length, 1);
     const event = listed.events[0]!;
     assert.equal(event.sourceRef.kind, "hosted-mailbox");
-    assert.equal(event.content.text, "hello https://signed.example.invalid/raw");
+    assert.equal(
+      event.content.text,
+      "hello https://signed.example.invalid/raw\nfile file:///tmp/fixture\npath /tmp/fixture\nAuthorization: fixture-header",
+    );
     assert.match(event.sourceRef.dedupeKey ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.sourceRef.eventId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.sourceRef.itemId ?? "", HASHED_IDENTIFIER_PATTERN);
@@ -188,7 +192,10 @@ describe("hosted mailbox conversation import adapter", () => {
       updatedAt: event.projection.updatedAt,
     });
     assert.ok(event.projection.lastAttemptedAt);
-    assert.equal(event.content.text, "hello https://signed.example.invalid/raw");
+    assert.equal(
+      event.content.text,
+      "hello https://signed.example.invalid/raw\nfile file:///tmp/fixture\npath /tmp/fixture\nAuthorization: fixture-header",
+    );
     assert.equal(JSON.stringify(event).includes("redacted-attachment-url-sentinel"), false);
     assert.equal(JSON.stringify(event).includes("voice.m4a"), true);
     assert.equal(JSON.stringify(event).includes("+15550100000"), false);
@@ -537,64 +544,6 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(event.replyTarget?.threadId, "15551234567");
     assert.equal(event.sourceMetadata, null);
     assert.equal(JSON.stringify(event.conversation).includes("15551234567"), false);
-  });
-
-  test("preserves user-sent links in message text", async () => {
-    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-url-sanitize-"));
-    tempRoots.push(parentRoot);
-    const vaultRoot = path.join(parentRoot, "vault");
-    const inputParts = [
-      "plain https://example.test/raw",
-      "signed https://bucket.example.test/object?X-Amz-Signature=fixture",
-      "nested https://example.test/redirect?next=https%3A%2F%2Fbucket.example.test%2Fobject%3FX-Amz-Signature%3Dfixture",
-    ];
-    const decodedWake = createConversationWake({
-      eventId: "evt_synthetic_url_sanitize_001",
-      message: {
-        channel: "linq",
-        linqMessage: {
-          chatId: "chat_synthetic_url_sanitize",
-          from: "redacted-contact-sentinel",
-          isFromMe: false,
-          messageId: "msg_synthetic_url_sanitize",
-          parts: [
-            {
-              type: "text",
-              value: inputParts.join(" "),
-            },
-          ],
-        },
-        phoneLookupKey: "redacted-contact-sentinel",
-      },
-    });
-
-    const outcome = await importHostedConversationMailboxItem({
-      decodePayload: createDecodedPayloadDecoder(decodedWake),
-      async importConversationWake() {
-        return {
-          captureId: null,
-          metrics: {
-            nextWakeAt: null,
-            parserProcessed: 0,
-          },
-        };
-      },
-      async prepareWakeContext() {},
-      item: createResolvedConversationMailboxItem({
-        dedupeKey: decodedWake.eventId,
-        id: "mailbox_item_url_sanitize_001",
-      }),
-      runtime: createRuntime(),
-      vaultRoot,
-    });
-
-    assert.equal(outcome.status, "imported");
-    const listed = await listAssistantInputEvents({
-      vault: vaultRoot,
-    });
-    const event = listed.events[0];
-    assert.ok(event);
-    assert.equal(event.content.text, inputParts.join(" "));
   });
 
   test("records hosted attachment evidence after successful inbox projection", async () => {

@@ -1436,6 +1436,7 @@ function safeAssistantInputTextSchema(fieldName: string) {
     .max(ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH)
     .superRefine((value, context) => {
       assertSafeAssistantInputText(value, context, fieldName, {
+        allowAuthHeaderTokens: true,
         allowPathOrUrlTokens: true,
       })
     })
@@ -1532,27 +1533,30 @@ function assertSafeAssistantInputText(
   context: z.RefinementCtx,
   fieldName: string,
   options: {
+    allowAuthHeaderTokens?: boolean
     allowPathOrUrlTokens?: boolean
   } = {},
 ): void {
-  const lines = text.split(/\r?\n/u)
-  const lowerText = text.toLowerCase()
-  const forbiddenLinePatterns = [
-    /^authorization\s*:/iu,
-    /^cookie\s*:/iu,
-    /^set-cookie\s*:/iu,
-    /^x-api-key\s*:/iu,
-  ]
+  if (!options.allowAuthHeaderTokens) {
+    const forbiddenLinePatterns = [
+      /^authorization\s*:/iu,
+      /^cookie\s*:/iu,
+      /^set-cookie\s*:/iu,
+      /^x-api-key\s*:/iu,
+    ]
 
-  for (const line of lines) {
-    if (forbiddenLinePatterns.some((pattern) => pattern.test(line))) {
-      context.addIssue({
-        code: 'custom',
-        message: `${fieldName} must be minimized and must not contain auth headers.`,
-      })
-      return
+    for (const line of text.split(/\r?\n/u)) {
+      if (forbiddenLinePatterns.some((pattern) => pattern.test(line))) {
+        context.addIssue({
+          code: 'custom',
+          message: `${fieldName} must be minimized and must not contain auth headers.`,
+        })
+        return
+      }
     }
   }
+
+  const lowerText = text.toLowerCase()
 
   if (!options.allowPathOrUrlTokens && containsPathOrUrlToken(text)) {
     context.addIssue({
