@@ -15,6 +15,8 @@ import {
   automationStatusValues,
   type AutomationRoute,
   type AutomationScaffoldPayload,
+  type AutomationDeviceActivityKind,
+  type AutomationDeviceActivitySource,
   type AutomationSchedule,
   type AutomationScheduleKind,
 } from "@murphai/contracts";
@@ -47,11 +49,18 @@ const automationSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 
 interface AutomationScheduleOptions {
+  activityKind?: AutomationDeviceActivityKind;
+  deviceSource?: AutomationDeviceActivitySource;
   scheduleAt?: string;
   scheduleCron?: string;
   scheduleEveryMs?: number;
-  scheduleKind: AutomationScheduleKind;
+  scheduleKind?: AutomationScheduleKind;
   scheduleLocalTime?: string;
+  triggerAt?: string;
+  triggerCron?: string;
+  triggerEveryMs?: number;
+  triggerKind?: AutomationScheduleKind;
+  triggerLocalTime?: string;
 }
 
 export const automationRecordSchema = z
@@ -129,29 +138,48 @@ function requireNumberOption(
   return invalidAutomationOption(`--${optionName} is required for this automation save mode.`);
 }
 
+function resolveAutomationTriggerKind(options: AutomationScheduleOptions): AutomationScheduleKind {
+  if (options.triggerKind && options.scheduleKind && options.triggerKind !== options.scheduleKind) {
+    return invalidAutomationOption("--trigger-kind and --schedule-kind must match when both are provided.");
+  }
+
+  return options.triggerKind ?? options.scheduleKind ?? invalidAutomationOption(
+    "--trigger-kind is required. Legacy --schedule-kind is still accepted as an alias.",
+  );
+}
+
 function buildAutomationScheduleFromOptions(
   options: AutomationScheduleOptions,
+  defaults: { now: string },
 ): AutomationSchedule {
-  switch (options.scheduleKind) {
+  const kind = resolveAutomationTriggerKind(options);
+  switch (kind) {
     case "at":
       return automationScheduleSchema.parse({
         kind: "at",
-        at: requireStringOption(options.scheduleAt, "schedule-at"),
+        at: requireStringOption(options.triggerAt ?? options.scheduleAt, "trigger-at"),
       });
     case "every":
       return automationScheduleSchema.parse({
         kind: "every",
-        everyMs: requireNumberOption(options.scheduleEveryMs, "schedule-every-ms"),
+        everyMs: requireNumberOption(options.triggerEveryMs ?? options.scheduleEveryMs, "trigger-every-ms"),
       });
     case "cron":
       return automationScheduleSchema.parse({
         kind: "cron",
-        expression: requireStringOption(options.scheduleCron, "schedule-cron"),
+        expression: requireStringOption(options.triggerCron ?? options.scheduleCron, "trigger-cron"),
       });
     case "dailyLocal":
       return automationScheduleSchema.parse({
         kind: "dailyLocal",
-        localTime: requireStringOption(options.scheduleLocalTime, "schedule-local-time"),
+        localTime: requireStringOption(options.triggerLocalTime ?? options.scheduleLocalTime, "trigger-local-time"),
+      });
+    case "deviceActivity":
+      return automationScheduleSchema.parse({
+        kind: "deviceActivity",
+        after: defaults.now,
+        ...(options.deviceSource ? { source: options.deviceSource } : {}),
+        ...(options.activityKind ? { activityKind: options.activityKind } : {}),
       });
   }
 }
@@ -360,7 +388,31 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         .string()
         .min(1)
         .describe("Automation instructions to run on the schedule."),
-      scheduleKind: z.enum(automationScheduleKindValues).describe("Schedule discriminator."),
+      triggerKind: z.enum(automationScheduleKindValues).optional().describe("Automation trigger discriminator."),
+      triggerAt: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Required timestamp when --trigger-kind=at."),
+      triggerEveryMs: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Required positive millisecond interval when --trigger-kind=every."),
+      triggerCron: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Required cron expression when --trigger-kind=cron."),
+      triggerLocalTime: z
+        .string()
+        .regex(dailyLocalTimePattern, "Expected a 24-hour HH:MM time.")
+        .optional()
+        .describe("Required HH:MM local time when --trigger-kind=dailyLocal."),
+      deviceSource: z.enum(["whoop", "whoop_v2"]).optional().describe("Optional device activity source filter."),
+      activityKind: z.enum(["walk"]).optional().describe("Optional device activity kind filter."),
+      scheduleKind: z.enum(automationScheduleKindValues).optional().describe("Legacy alias for --trigger-kind."),
       scheduleAt: z
         .string()
         .min(1)
@@ -406,6 +458,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     }),
     output: automationSaveResultSchema,
     async run(context) {
+      const now = new Date().toISOString();
       const input: AutomationScaffoldPayload = automationScaffoldPayloadSchema.parse({
         automationId: context.options.id,
         continuityPolicy: context.options.continuityPolicy,
@@ -417,7 +470,20 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           participantId: context.options.participantId,
           threadId: context.options.threadId,
         }),
-        schedule: buildAutomationScheduleFromOptions(context.options),
+        schedule: buildAutomationScheduleFromOptions({
+          activityKind: context.options.activityKind,
+          deviceSource: context.options.deviceSource,
+          scheduleAt: context.options.scheduleAt,
+          scheduleCron: context.options.scheduleCron,
+          scheduleEveryMs: context.options.scheduleEveryMs,
+          scheduleKind: context.options.scheduleKind,
+          scheduleLocalTime: context.options.scheduleLocalTime,
+          triggerAt: context.options.triggerAt,
+          triggerCron: context.options.triggerCron,
+          triggerEveryMs: context.options.triggerEveryMs,
+          triggerKind: context.options.triggerKind,
+          triggerLocalTime: context.options.triggerLocalTime,
+        }, { now }),
         slug: context.options.slug,
         status: context.options.status,
         summary: context.options.summary,

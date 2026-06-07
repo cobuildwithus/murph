@@ -7,6 +7,8 @@ import {
   automationScheduleEverySchema,
   automationScheduleKindValues,
   automationScheduleSchema,
+  automationTimeScheduleKindValues,
+  automationTimeScheduleSchema,
 } from '@murphai/contracts'
 
 import {
@@ -269,12 +271,13 @@ describe('assistant CLI delivery contracts', () => {
 
 describe('assistant CLI automation shape ownership', () => {
   it('keeps assistant cron schedules on the canonical automation owners', () => {
-    expect(assistantCronScheduleKindValues).toBe(automationScheduleKindValues)
+    expect(automationScheduleKindValues).toContain('deviceActivity')
+    expect(assistantCronScheduleKindValues).toBe(automationTimeScheduleKindValues)
     expect(assistantCronAtScheduleSchema).toBe(automationScheduleAtSchema)
     expect(assistantCronEveryScheduleSchema).toBe(automationScheduleEverySchema)
     expect(assistantCronExpressionScheduleSchema).toBe(automationScheduleCronSchema)
     expect(assistantCronDailyLocalScheduleSchema).toBe(automationScheduleDailyLocalSchema)
-    expect(assistantCronScheduleSchema).toBe(automationScheduleSchema)
+    expect(assistantCronScheduleSchema).toBe(automationTimeScheduleSchema)
 
     expect(
       assistantCronExpressionScheduleSchema.parse({
@@ -294,6 +297,23 @@ describe('assistant CLI automation shape ownership', () => {
     ).toEqual({
       kind: 'dailyLocal',
       localTime: '09:00',
+    })
+
+    expect(() =>
+      assistantCronScheduleSchema.parse({
+        kind: 'deviceActivity',
+        after: '2026-06-07T12:00:00.000Z',
+      }),
+    ).toThrow()
+
+    expect(
+      automationScheduleSchema.parse({
+        kind: 'deviceActivity',
+        after: '2026-06-07T12:00:00.000Z',
+      }),
+    ).toEqual({
+      kind: 'deviceActivity',
+      after: '2026-06-07T12:00:00.000Z',
     })
   })
 

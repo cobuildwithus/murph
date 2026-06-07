@@ -347,6 +347,10 @@ function normalizeCanonicalAssistantCronRecord(
     return null
   }
 
+  if (record.schedule.kind === 'deviceActivity') {
+    return null
+  }
+
   const instructions =
     typeof record.instructions === 'string' ? record.instructions : record.prompt
   if (typeof instructions !== 'string') {

@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AUTOMATION_SCHEMA_VERSION,
   automationScheduleSchema,
+  automationTimeScheduleSchema,
+  automationTriggerSchema,
   automationScaffoldPayloadSchema,
 } from "../src/automation.ts";
 import {
@@ -123,6 +125,19 @@ describe("automation contract seams", () => {
         timeZone: "UTC",
       }),
     ).toThrow(/Unrecognized key/u);
+  });
+
+  it("keeps device activity in the canonical trigger schema but out of time schedules", () => {
+    const schedule = {
+      activityKind: "walk",
+      after: "2026-06-07T12:00:00.000Z",
+      kind: "deviceActivity",
+      source: "whoop_v2",
+    } as const;
+
+    expect(automationScheduleSchema.parse(schedule)).toEqual(schedule);
+    expect(automationTriggerSchema.parse(schedule)).toEqual(schedule);
+    expect(() => automationTimeScheduleSchema.parse(schedule)).toThrow();
   });
 });
 

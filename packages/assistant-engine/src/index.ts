@@ -12,6 +12,7 @@ export * from './assistant-context-snapshot.js'
 export {
   readAssistantCliSurfaceBootstrapContext,
 } from './assistant/cli-surface-bootstrap.js'
+export * from './assistant/device-activity-automations.js'
 export * from './assistant-cron.js'
 export * from './assistant-outbox.js'
 export * from './assistant-runtime.js'

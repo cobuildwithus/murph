@@ -13,6 +13,7 @@ import type {
 import {
   buildHostedAssistantContextFingerprintDetails,
   sendAssistantNotification,
+  runDeviceActivityTriggeredAutomations,
   type AssistantExecutionContext,
   type AssistantTurnEnvironment,
 } from "@murphai/assistant-engine";
@@ -501,6 +502,17 @@ async function executeHostedSystemWake(input: {
         timeoutMs: input.runtime.commitTimeoutMs,
         vaultRoot: input.vaultRoot,
         wake: input.wake,
+      });
+      await runDeviceActivityTriggeredAutomations({
+        deliveryDispatchMode: "queue-only",
+        executionContext: input.executionContext,
+        signal: undefined,
+        turnEnvironment: createHostedAssistantTurnEnvironment({
+          operatorHomeRoot: input.operatorHomeRoot,
+          runtimeEnv: input.runtimeEnv,
+          vaultRoot: input.vaultRoot,
+        }),
+        vault: input.vaultRoot,
       });
       return createNoopMailboxEffect({
         conversationMetrics: null,

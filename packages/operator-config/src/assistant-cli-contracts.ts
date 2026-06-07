@@ -6,10 +6,10 @@ import {
   automationScheduleCronSchema,
   automationScheduleDailyLocalSchema,
   automationScheduleEverySchema,
-  automationScheduleKindValues,
-  automationScheduleSchema,
+  automationTimeScheduleKindValues,
+  automationTimeScheduleSchema,
   type AutomationRoute,
-  type AutomationScheduleKind,
+  type AutomationTimeScheduleKind,
 } from '@murphai/contracts'
 import { normalizeAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
 import {
@@ -86,7 +86,7 @@ export const assistantTurnEventKindValues = [
   'failed',
   'completed',
 ] as const
-export const assistantCronScheduleKindValues = automationScheduleKindValues
+export const assistantCronScheduleKindValues = automationTimeScheduleKindValues
 export const assistantCronTriggerValues = ['manual', 'scheduled'] as const
 export const assistantCronRunStatusValues = [
   'succeeded',
@@ -855,9 +855,9 @@ export const assistantCronExpressionScheduleInputSchema = assistantCronExpressio
 
 export const assistantCronDailyLocalScheduleSchema = automationScheduleDailyLocalSchema
 
-export const assistantCronScheduleSchema = automationScheduleSchema
+export const assistantCronScheduleSchema = automationTimeScheduleSchema
 
-export const assistantCronScheduleInputSchema = automationScheduleSchema
+export const assistantCronScheduleInputSchema = automationTimeScheduleSchema
 
 const assistantCronRouteSchema = automationRouteSchema
   .omit({ channel: true, threadId: true })
@@ -1393,7 +1393,7 @@ export type AssistantTurnEventKind =
   (typeof assistantTurnEventKindValues)[number]
 export type AssistantOutboxIntentStatus =
   (typeof assistantOutboxIntentStatusValues)[number]
-export type AssistantCronScheduleKind = AutomationScheduleKind
+export type AssistantCronScheduleKind = AutomationTimeScheduleKind
 export type AssistantCronTrigger = (typeof assistantCronTriggerValues)[number]
 export type AssistantCronRunStatus =
   (typeof assistantCronRunStatusValues)[number]

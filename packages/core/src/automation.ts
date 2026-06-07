@@ -4,10 +4,14 @@ import {
   MIN_AUTOMATION_EVERY_MS,
   automationFrontmatterSchema,
   automationContinuityPolicyValues,
+  automationDeviceActivityKindValues,
+  automationDeviceActivitySourceValues,
   automationScheduleKindValues,
   automationStatusValues,
   isValidAutomationCronExpression,
   type AutomationContinuityPolicy,
+  type AutomationDeviceActivityKind,
+  type AutomationDeviceActivitySource,
   type AutomationRoute,
   type AutomationSchedule,
   type AutomationScheduleKind,
@@ -146,6 +150,22 @@ function normalizeAutomationContinuityPolicy(
   return optionalEnum(value, automationContinuityPolicyValues, "continuityPolicy") ?? "preserve";
 }
 
+function normalizeAutomationDeviceActivitySource(value: unknown): AutomationDeviceActivitySource | undefined {
+  return optionalEnum(value, automationDeviceActivitySourceValues, "schedule.source") ?? undefined;
+}
+
+function normalizeAutomationDeviceActivityKind(value: unknown): AutomationDeviceActivityKind | undefined {
+  return optionalEnum(value, automationDeviceActivityKindValues, "schedule.activityKind") ?? undefined;
+}
+
+function normalizeAutomationIsoTimestamp(value: unknown, fieldName: string): string {
+  const timestamp = requireString(value, fieldName, 64);
+  if (Number.isNaN(Date.parse(timestamp))) {
+    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must be a valid ISO timestamp.`);
+  }
+  return timestamp;
+}
+
 function normalizeAutomationSchedule(
   value: unknown,
 ): AutomationSchedule {
@@ -202,6 +222,17 @@ function normalizeAutomationSchedule(
       return {
         kind,
         localTime,
+      };
+    }
+    case "deviceActivity": {
+      const source = normalizeAutomationDeviceActivitySource(object.source);
+      const activityKind = normalizeAutomationDeviceActivityKind(object.activityKind);
+
+      return {
+        kind,
+        after: normalizeAutomationIsoTimestamp(object.after, "schedule.after"),
+        ...(source ? { source } : {}),
+        ...(activityKind ? { activityKind } : {}),
       };
     }
   }
@@ -296,6 +327,13 @@ function buildAutomationScheduleFrontmatter(schedule: AutomationSchedule): Front
       return {
         kind: schedule.kind,
         localTime: schedule.localTime,
+      };
+    case "deviceActivity":
+      return {
+        kind: schedule.kind,
+        after: schedule.after,
+        ...(schedule.source ? { source: schedule.source } : {}),
+        ...(schedule.activityKind ? { activityKind: schedule.activityKind } : {}),
       };
   }
 

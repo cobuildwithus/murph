@@ -805,7 +805,7 @@ test("automation commands round-trip save, import-json, show, and list through t
   }
 });
 
-test("automation save maps each flattened schedule discriminator", async () => {
+test("automation save maps trigger flags and keeps legacy schedule flags working", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-automation-schedules-",
   );
@@ -818,10 +818,11 @@ test("automation save maps each flattened schedule discriminator", async () => {
     registerAutomationCommands(cli);
 
     const schedules = [
-      ["at", "one-shot-check", ["--schedule-at", "2026-04-26T08:00:00.000Z"]],
-      ["every", "hourly-check", ["--schedule-every-ms", "3600000"]],
-      ["cron", "weekly-check", ["--schedule-cron", "0 9 * * 1"]],
-      ["dailyLocal", "daily-check", ["--schedule-local-time", "08:30"]],
+      ["at", "one-shot-check", ["--trigger-at", "2026-04-26T08:00:00.000Z"]],
+      ["every", "hourly-check", ["--trigger-every-ms", "3600000"]],
+      ["cron", "weekly-check", ["--trigger-cron", "0 9 * * 1"]],
+      ["dailyLocal", "daily-check", ["--trigger-local-time", "08:30"]],
+      ["every", "legacy-hourly-check", ["--schedule-every-ms", "3600000"]],
     ] as const;
 
     for (const [kind, slug, scheduleArgs] of schedules) {
@@ -836,7 +837,7 @@ test("automation save maps each flattened schedule discriminator", async () => {
         slug,
         "--instructions",
         `Run ${slug}.`,
-        "--schedule-kind",
+        slug.startsWith("legacy-") ? "--schedule-kind" : "--trigger-kind",
         kind,
         ...scheduleArgs,
         "--channel",
@@ -850,6 +851,62 @@ test("automation save maps each flattened schedule discriminator", async () => {
       assert.equal(saved.envelope.ok, true);
       assert.equal(saved.envelope.data?.lookupId, slug);
     }
+
+    const deviceActivity = await runInProcessJsonCli<{
+      lookupId: string;
+    }>(cli, [
+      "automation",
+      "save",
+      "after-walk-check",
+      "--slug",
+      "after-walk-check",
+      "--instructions",
+      "Ask how the walk felt.",
+      "--trigger-kind",
+      "deviceActivity",
+      "--device-source",
+      "whoop",
+      "--activity-kind",
+      "walk",
+      "--channel",
+      "telegram",
+      "--delivery-target",
+      "telegram-thread-walk",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(deviceActivity.exitCode, null);
+    assert.equal(deviceActivity.envelope.ok, true);
+    assert.equal(deviceActivity.envelope.data?.lookupId, "after-walk-check");
+
+    const shownDeviceActivity = await runInProcessJsonCli<{
+      automation: {
+        schedule: {
+          activityKind?: string;
+          after: string;
+          kind: string;
+          source?: string;
+        };
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "after-walk-check",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(shownDeviceActivity.exitCode, null);
+    assert.equal(shownDeviceActivity.envelope.ok, true);
+    assert.notEqual(shownDeviceActivity.envelope.data?.automation, null);
+    assert.equal(shownDeviceActivity.envelope.data?.automation?.schedule.kind, "deviceActivity");
+    assert.equal(shownDeviceActivity.envelope.data?.automation?.schedule.source, "whoop");
+    assert.equal(shownDeviceActivity.envelope.data?.automation?.schedule.activityKind, "walk");
+    assert.match(
+      shownDeviceActivity.envelope.data?.automation?.schedule.after ?? "",
+      /^\d{4}-\d{2}-\d{2}T/u,
+    );
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
   }
