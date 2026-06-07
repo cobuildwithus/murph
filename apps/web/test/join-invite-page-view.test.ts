@@ -196,6 +196,33 @@ test("JoinInvitePageView keeps the desktop invite rail sticky", () => {
   });
 });
 
+test("JoinInvitePageView renders Pulse Trial allowance and billing disclosure", () => {
+  const markup = renderToStaticMarkup(
+    createElement(JoinInvitePageView, {
+      model: createModel({
+        launchConsent: {
+          gateActive: false,
+          initialStatus: createConsentStatus({ launchGranted: true }),
+          status: "granted",
+        },
+        status: createStatus({
+          session: {
+            authenticated: true,
+            expiresAt: null,
+            matchesInvite: true,
+          },
+          stage: "checkout",
+        }),
+      }),
+    }),
+  );
+
+  assert.match(markup, /Pulse Trial/);
+  assert.match(markup, /Includes \$4\.50 hosted AI usage during trial/);
+  assert.match(markup, /Card required\. Then \$8\/month unless canceled\./);
+  assert.doesNotMatch(markup, /\$2\.50/);
+});
+
 test("JoinInvitePageView hides pricing behind the server launch-consent gate", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInvitePageView, {

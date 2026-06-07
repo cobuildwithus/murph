@@ -40,8 +40,9 @@ const MURPH_GITHUB_URL = "https://github.com/cobuildwithus/murph";
 
 const PULSE_TRIAL_FEATURES = [
   "Full Pulse access for 7 days",
+  "Includes $4.50 hosted AI usage during trial",
+  "Card required. Then $8/month unless canceled.",
   "Cancel anytime",
-  "Then $8/month",
 ];
 
 const PULSE_FEATURES = [
@@ -260,7 +261,7 @@ function JoinInviteCheckoutPanel({
       <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-4">
         <PricingTierCard
           tier="free"
-          name="Free"
+          name="Pulse Trial"
           description="Try Murph for 7 days, no charge."
           price="$0"
           priceUnit="for 7 days"
