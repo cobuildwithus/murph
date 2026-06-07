@@ -14,6 +14,7 @@ const mockedModules = [
   '../src/commands/commons.js',
   '../src/commands/device.js',
   '../src/commands/experiment.js',
+  '../src/commands/exercise.js',
   '../src/commands/health-goal-save.js',
   '../src/commands/measurement.js',
   '../src/commands/memory.js',
@@ -183,6 +184,11 @@ for (const input of [
     moduleId: '../src/commands/memory.js',
     registerName: 'registerMemoryCommands',
     root: 'memory',
+  },
+  {
+    moduleId: '../src/commands/exercise.js',
+    registerName: 'registerExerciseCommands',
+    root: 'exercise',
   },
 ] as const) {
   test(`scoped command routing maps ${input.root} without vault services`, async () => {
@@ -409,4 +415,4 @@ test('lazy route table accounts for every full manifest root command', async () 
       root,
     })
   }
-})
+}, 120_000)

@@ -68,6 +68,11 @@ export async function registerScopedVaultCliCommand(input: {
       registerExperimentCommands(input.cli, services)
       return
     }
+    case 'exercise': {
+      const { registerExerciseCommands } = await import('./commands/exercise.js')
+      registerExerciseCommands(input.cli)
+      return
+    }
     case 'goal': {
       const [
         { registerGoalCommands },
