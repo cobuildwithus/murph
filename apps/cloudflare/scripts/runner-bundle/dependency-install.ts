@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { access, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -20,11 +20,25 @@ interface WorkspacePackageManifest {
   version?: string;
 }
 
+const runnerBundlePlatformTarget = {
+  cpu: "x64",
+  libc: "glibc",
+  os: "linux",
+} as const;
+
 const runnerBundleSupportedArchitectures = {
-  cpu: ["current", "x64"],
-  libc: ["current", "glibc"],
-  os: ["current", "linux"],
+  cpu: [runnerBundlePlatformTarget.cpu],
+  libc: [runnerBundlePlatformTarget.libc],
+  os: [runnerBundlePlatformTarget.os],
 };
+const runnerBundleForbiddenInstallArtifactPaths = [
+  "apps/web",
+  "node_modules/next",
+  "node_modules/@next",
+  "node_modules/@privy-io/react-auth",
+  "node_modules/@wagmi",
+  "node_modules/@walletconnect",
+] as const;
 
 export async function installPackedRunnerDependencies(
   bundleDir: string,
@@ -237,11 +251,14 @@ async function installPinnedProductionDependencies(
   await writeRunnerBundlePnpmInstallConfigFromPolicy(installRoot, input.policy, {
     minimumReleaseAgeExclusions: input.minimumReleaseAgeExclusions,
   });
-  await seedRunnerBundleLockfileFromRoot(installRoot, input.repoRoot);
+  await seedRunnerBundleResolutionLockfileFromRoot(installRoot, input.repoRoot);
   await runPnpmCommand(["install", "--prod", "--lockfile-only"], {
     cwd: installRoot,
     env: installEnv,
   });
+  await assertRunnerBundleLockfileUsesOnlyBundleImporter(
+    path.join(installRoot, "pnpm-lock.yaml"),
+  );
   await assertRunnerBundleLockfileUsesCommittedResolutions({
     bundleLockfilePath: path.join(installRoot, "pnpm-lock.yaml"),
     rootLockfilePath: path.join(input.repoRoot, "pnpm-lock.yaml"),
@@ -250,16 +267,218 @@ async function installPinnedProductionDependencies(
     cwd: installRoot,
     env: installEnv,
   });
+  await pruneRunnerBundleUnsupportedPlatformPackages(installRoot);
+  await assertRunnerBundleHasNoForbiddenInstallArtifacts(installRoot);
 }
 
-async function seedRunnerBundleLockfileFromRoot(
+async function seedRunnerBundleResolutionLockfileFromRoot(
   installRoot: string,
   repoRoot: string,
 ): Promise<void> {
+  const rootLockfile = await readFile(path.join(repoRoot, "pnpm-lock.yaml"), "utf8");
+
   await writeFile(
     path.join(installRoot, "pnpm-lock.yaml"),
-    await readFile(path.join(repoRoot, "pnpm-lock.yaml"), "utf8"),
+    stripPnpmLockfileImporters(rootLockfile),
     "utf8",
+  );
+}
+
+export function stripPnpmLockfileImporters(lockfile: string): string {
+  const lines = lockfile.split(/\r?\n/u);
+  const outputLines: string[] = [];
+  let skippingImporters = false;
+
+  for (const line of lines) {
+    const isTopLevelSection = /^\S[^:]*:\s*$/u.test(line);
+
+    if (isTopLevelSection) {
+      skippingImporters = line === "importers:";
+    }
+
+    if (!skippingImporters) {
+      outputLines.push(line);
+    }
+  }
+
+  return outputLines.join("\n");
+}
+
+export async function pruneRunnerBundleUnsupportedPlatformPackages(
+  bundleDir: string,
+): Promise<void> {
+  const nodeModulesDir = path.join(bundleDir, "node_modules");
+
+  for (const packageDir of await listTopLevelPackageDirs(nodeModulesDir)) {
+    const packageJsonPath = path.join(packageDir, "package.json");
+    let rawPackageJson: string;
+
+    try {
+      rawPackageJson = await readFile(packageJsonPath, "utf8");
+    } catch (error) {
+      if (isMissingFileError(error)) {
+        continue;
+      }
+
+      throw error;
+    }
+
+    const packageJson = JSON.parse(rawPackageJson) as {
+      cpu?: unknown;
+      libc?: unknown;
+      os?: unknown;
+    };
+
+    if (isRunnerBundlePlatformCompatible(packageJson)) {
+      continue;
+    }
+
+    await rm(packageDir, { force: true, recursive: true });
+  }
+}
+
+async function listTopLevelPackageDirs(nodeModulesDir: string): Promise<string[]> {
+  let entries;
+
+  try {
+    entries = await readdir(nodeModulesDir, { withFileTypes: true });
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  const packageDirs: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) {
+      continue;
+    }
+
+    const entryPath = path.join(nodeModulesDir, entry.name);
+    if (!entry.name.startsWith("@")) {
+      packageDirs.push(entryPath);
+      continue;
+    }
+
+    for (const scopedEntry of await readdir(entryPath, { withFileTypes: true })) {
+      if (scopedEntry.isDirectory()) {
+        packageDirs.push(path.join(entryPath, scopedEntry.name));
+      }
+    }
+  }
+
+  return packageDirs;
+}
+
+function isRunnerBundlePlatformCompatible(packageJson: {
+  cpu?: unknown;
+  libc?: unknown;
+  os?: unknown;
+}): boolean {
+  return (
+    packageManifestFieldAllowsTarget(packageJson.cpu, runnerBundlePlatformTarget.cpu) &&
+    packageManifestFieldAllowsTarget(packageJson.libc, runnerBundlePlatformTarget.libc) &&
+    packageManifestFieldAllowsTarget(packageJson.os, runnerBundlePlatformTarget.os)
+  );
+}
+
+function packageManifestFieldAllowsTarget(value: unknown, target: string): boolean {
+  const constraints = normalizePackageManifestPlatformField(value);
+
+  if (constraints.includes(`!${target}`)) {
+    return false;
+  }
+
+  const allowedValues = constraints.filter((constraint) => !constraint.startsWith("!"));
+
+  return allowedValues.length === 0 || allowedValues.includes(target);
+}
+
+function normalizePackageManifestPlatformField(value: unknown): readonly string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+export async function assertRunnerBundleLockfileUsesOnlyBundleImporter(
+  lockfilePath: string,
+): Promise<void> {
+  const lockfile = await readFile(lockfilePath, "utf8");
+  const importers = extractPnpmLockfileImporterNames(lockfile);
+  const foreignImporters = importers.filter((importer) => importer !== ".");
+
+  if (foreignImporters.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    [
+      "Runner bundle lockfile included workspace importers outside the bundle artifact.",
+      `Foreign importers: ${foreignImporters.slice(0, 10).join(", ")}`,
+    ].join(" "),
+  );
+}
+
+function extractPnpmLockfileImporterNames(lockfile: string): string[] {
+  const importers: string[] = [];
+  let inImportersSection = false;
+
+  for (const line of lockfile.split(/\r?\n/u)) {
+    const isTopLevelSection = /^\S[^:]*:\s*$/u.test(line);
+
+    if (isTopLevelSection) {
+      inImportersSection = line === "importers:";
+      continue;
+    }
+
+    if (!inImportersSection) {
+      continue;
+    }
+
+    const match = /^  (\S.*):\s*$/u.exec(line);
+    if (match) {
+      importers.push(stripYamlStringQuotes(match[1]!.trim()));
+    }
+  }
+
+  return importers;
+}
+
+export async function assertRunnerBundleHasNoForbiddenInstallArtifacts(
+  bundleDir: string,
+): Promise<void> {
+  const presentPaths: string[] = [];
+
+  for (const relativePath of runnerBundleForbiddenInstallArtifactPaths) {
+    try {
+      await access(path.join(bundleDir, relativePath));
+      presentPaths.push(relativePath);
+    } catch (error) {
+      if (isMissingFileError(error)) {
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  if (presentPaths.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    [
+      "Runner bundle installed web-only dependency artifacts.",
+      `Forbidden paths: ${presentPaths.join(", ")}`,
+    ].join(" "),
   );
 }
 
@@ -674,4 +893,13 @@ async function runNodeImportProbe(
 
 function toPosixPath(value: string): string {
   return value.replaceAll(path.sep, "/");
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
 }

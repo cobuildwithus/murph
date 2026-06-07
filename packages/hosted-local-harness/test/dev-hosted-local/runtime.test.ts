@@ -9,6 +9,7 @@ import {
   resolveHostedLocalWorkerPortMode,
   spawnChildProcess,
   terminateChildProcessAndWait,
+  waitForFirstChildExit,
   waitForHealthyHttpEndpoint,
 } from "../../src/dev-hosted-local/runtime.ts";
 
@@ -200,6 +201,31 @@ describe("terminateChildProcessAndWait", () => {
 
     expect(groupSignals).toContain("SIGTERM");
     expect(child.kill).not.toHaveBeenCalled();
+  });
+});
+
+describe("waitForFirstChildExit", () => {
+  it("observes a child that exited before listeners were attached", async () => {
+    const child = new EventEmitter() as EventEmitter & {
+      exitCode: number | null;
+      kill: (signal?: NodeJS.Signals | number) => boolean;
+      once: EventEmitter["once"];
+      pid: number;
+      signalCode: NodeJS.Signals | null;
+    };
+    child.exitCode = 1;
+    child.signalCode = null;
+    child.pid = 4242;
+    child.kill = () => true;
+
+    await expect(waitForFirstChildExit([
+      {
+        child,
+        name: "web",
+      },
+    ])).resolves.toMatchObject({
+      name: "web",
+    });
   });
 });
 
