@@ -17,8 +17,8 @@ const MAX_PARSED_ROWS = 150;
 const AMOUNT_VALUE_PATTERN = String.raw`(?<![\d,./])(?:<\s*)?\d(?:[\d,./]*)(?:\.\d+)?(?:\s*x\s*10\^?\d+)?(?:\s*\([^)]+\))?`;
 const UNIT_PATTERN = String.raw`mcg\s+RAE|mcg\s+DFE|(?:µ|μ)g\s+RAE|(?:µ|μ)g\s+DFE|mg\s+NE|billion\s+CFUs?|million\s+CFUs?|CFUs?|IU|mcgt|mgt|mlt|mca|mg|mcg|(?:µ|μ)g|gt|g(?!\.[A-Za-z])|ml|kcal|calories?`;
 const AMOUNT_WITH_UNIT_PATTERN = String.raw`${AMOUNT_VALUE_PATTERN}\s*(?:${UNIT_PATTERN})`;
-const SERVING_AMOUNT_PATTERN = String.raw`(?:about\s*)?(?:\d+(?:\.\d+)?|\d+\s*/\s*\d+|one|two|three|four|five|six|seven|eight|nine|ten)`;
-const SERVING_FORM_PATTERN = String.raw`(?:(?:quick\s+release|vegetarian|veggie|vegetable|coated|chewable)\s+)*(?:g|mg|mcg|mL|ml|fl\.?\s*oz|oz|tsp|teaspoons?|tbsp|tablespoons?|scoops?|capsules?(?:\(s\))?|tablets?|caplets?|softgels?|gummies?|chews?|chewables?|wafers?|lozenges?|packets?|stick\s+packs?|VegCaps?|servings?|drops?|pumps?|bars?|sachets?)`;
+const SERVING_AMOUNT_PATTERN = String.raw`(?:about\s*)?(?:\d+(?:[.,]\d+)?|\d+\s*/\s*\d+|one|two|three|four|five|six|seven|eight|nine|ten|un|una|dos|tres|quatre)`;
+const SERVING_FORM_PATTERN = String.raw`(?:(?:quick\s+release|vegetarian|veggie|vegetable|coated|chewable|rounded|level|heaping|heaped|liquid|effervescent)\s+)*(?:g|grams?|mg|mcg|mL|ml|milliliters?|fl\.?\s*oz|fluid\s+ounces?|oz|tsp|teaspoons?|tbsp|tablespoons?|scoops?|capsules?(?:\(s\))?|tablets?(?:\(s\))?|caplets?|soft\s*-?\s*gels?|softgels?|gumm(?:y|ies)(?:\(ies\))?|chews?|chewables?|wafers?|lozenges?|packets?|stick\s+packs?|sticks?|VegCaps?|servings?|drops?|pumps?|bars?|sachets?|vials?|shots?|shota|cps|tbl|porcje?|porcja|kapsu[lł]ki|kapsu[lł]ka|kapsle|kapsl[iíe]|kapseln?|tabletk[ęeai]?|miark[ęea]?(?:\s+proszku)?|cacitos?|comprimidos?|comprim[eé]s?|g[eé]lules?|capsulas?|c[aá]psulas?|perlas?|pipettes?|cuill[eè]res?)`;
 
 function parseArgs(argv) {
   const options = {
@@ -155,11 +155,26 @@ function hasArray(value) {
 
 function repairPreviewForRow(row) {
   const label = row.label && typeof row.label === "object" && !Array.isArray(row.label) ? row.label : {};
-  const parsedIngredientRows = hasArray(label.ingredientRows) ? [] : extractIngredientRows(label);
-  const parsedServingSizes = hasArray(label.servingSizes) ? [] : extractServingSizes(label, {
+  const existingIngredientRows = existingIngredientRowsState(label);
+  const existingServingSizes = existingServingSizesState(label);
+  const parserState = {
+    existingIngredientRows,
+    existingServingSizes,
+    parsedRowsAreCompleteEnough: false,
+  };
+  const shouldParseIngredientRows = !hasArray(label.ingredientRows) || existingIngredientRows.invalidRows.length > 0;
+  const shouldParseServingSizes = !hasArray(label.servingSizes) || existingServingSizes.invalidServingSizes.length > 0;
+  const parsedIngredientRows = shouldParseIngredientRows ? extractIngredientRows(label) : [];
+  parserState.parsedRowsAreCompleteEnough = hasHighConfidenceParsedIngredientRows(label, parsedIngredientRows);
+  const servingSizeIngredientRows = parsedIngredientRows.length > 0 ? parsedIngredientRows : existingIngredientRows.validRows;
+  const extractedServingSizes = shouldParseServingSizes ? extractServingSizes(label, {
     productName: row.name,
-    ingredientRows: parsedIngredientRows,
-  });
+    ingredientRows: servingSizeIngredientRows,
+  }) : [];
+  const existingServingSizeReplacements = existingServingSizes.invalidServingSizes.length > 0
+    ? existingServingSizes.validServingSizes.map(normalizedServingSizeRow).filter(Boolean)
+    : [];
+  const parsedServingSizes = extractedServingSizes.length > 0 ? extractedServingSizes : existingServingSizeReplacements;
   const proposedLabel = {
     ...label,
     ...(parsedServingSizes.length > 0 ? { servingSizes: parsedServingSizes } : {}),
@@ -178,8 +193,8 @@ function repairPreviewForRow(row) {
     dataOriginUrl: row.dataOriginUrl,
     label: proposedLabel,
   });
-  const parserBlockers = parserBlockersForRow(label, parsedIngredientRows, parsedServingSizes);
-  const currentParserStatus = parserStatus(label, parsedIngredientRows, parsedServingSizes);
+  const parserBlockers = parserBlockersForRow(label, parsedIngredientRows, parsedServingSizes, parserState);
+  const currentParserStatus = parserStatus(parsedIngredientRows, parsedServingSizes, parserState);
   const removableFieldCandidates = findRemovableFieldCandidates(label, {
     allowRawEvidenceRemoval: currentParserStatus === "structured_ready" && parserBlockers.length === 0,
   });
@@ -203,6 +218,7 @@ function repairPreviewForRow(row) {
     parsedIngredientRows: parsedIngredientRows.length,
     existingServingSizes: Array.isArray(label.servingSizes) ? label.servingSizes.length : 0,
     parsedServingSizes: parsedServingSizes.length,
+    parsedServingSizesPreview: parsedServingSizes.slice(0, 10),
     parserStatus: currentParserStatus,
     parserBlockers,
     evidenceRecoveryHint,
@@ -229,12 +245,10 @@ function evidenceRecoveryHintForRow(label, state) {
   return "parser_or_manual_review";
 }
 
-function parserStatus(label, ingredientRows, servingSizes) {
-  const existingIngredientRows = existingIngredientRowsState(label);
-  const existingServingSizes = existingServingSizesState(label);
+function parserStatus(ingredientRows, servingSizes, state) {
+  const { existingIngredientRows, existingServingSizes, parsedRowsAreCompleteEnough } = state;
   const hasExistingRows = existingIngredientRows.validRows.length > 0 && existingIngredientRows.invalidRows.length === 0;
-  const hasExistingServing = existingServingSizes.validServingSizes.length > 0 && existingServingSizes.invalidServingSizes.length === 0;
-  const parsedRowsAreCompleteEnough = hasHighConfidenceParsedIngredientRows(label, ingredientRows);
+  const hasExistingServing = existingServingSizes.validServingSizes.length > 0;
   if ((hasExistingRows || parsedRowsAreCompleteEnough) && (hasExistingServing || servingSizes.length > 0)) {
     return "structured_ready";
   }
@@ -244,12 +258,15 @@ function parserStatus(label, ingredientRows, servingSizes) {
   return "needs_better_parser";
 }
 
-function parserBlockersForRow(label, ingredientRows, servingSizes) {
+function parserBlockersForRow(label, ingredientRows, servingSizes, state) {
   const blockers = [];
-  const existingIngredientRows = existingIngredientRowsState(label);
-  const existingServingSizes = existingServingSizesState(label);
-  if (existingIngredientRows.invalidRows.length > 0) blockers.push("invalid_existing_ingredient_rows");
-  if (existingServingSizes.invalidServingSizes.length > 0) blockers.push("invalid_existing_serving_sizes");
+  const { existingIngredientRows, existingServingSizes, parsedRowsAreCompleteEnough } = state;
+  if (existingIngredientRows.invalidRows.length > 0 && !parsedRowsAreCompleteEnough) {
+    blockers.push("invalid_existing_ingredient_rows");
+  }
+  if (existingServingSizes.invalidServingSizes.length > 0 && existingServingSizes.validServingSizes.length === 0 && servingSizes.length === 0) {
+    blockers.push("invalid_existing_serving_sizes");
+  }
   if (existingIngredientRows.validRows.length === 0 && ingredientRows.length === 0) blockers.push("missing_ingredient_rows");
   if (existingServingSizes.validServingSizes.length === 0 && servingSizes.length === 0) blockers.push("missing_serving_sizes");
   if (hasPageBodyContamination(label)) blockers.push("page_body_contamination");
@@ -395,7 +412,7 @@ function extractServingSizes(label, context = {}) {
     addServingSizeCandidate(servingSizes, value);
   }
   for (const text of labelTexts(label)) {
-    const boundedServingPattern = /\bServings?\s+Size\s*:?\s*((?:about\s*)?(?:\d+(?:\.\d+)?|\d+\s*\/\s*\d+|one|two|three|four|five|six)\s*(?:(?:quick\s+release|vegetarian|veggie|coated|chewable)\s+)?(?:g|mg|mcg|mL|ml|fl oz|oz|tsp|teaspoons?|tbsp|tablespoons?|scoops?|capsules?|tablets?|caplets?|softgels?|gummies?|chews?|wafers?|lozenges?|packets?|stick packs?|VegCaps?)(?:\s*\([^)]{1,70}\))?)/giu;
+    const boundedServingPattern = new RegExp(String.raw`\bServings?\s+Size\s*:?\s*(${SERVING_AMOUNT_PATTERN}\s*${SERVING_FORM_PATTERN}(?:\s*\([^)]{1,70}\))?)`, "giu");
     for (const match of text.matchAll(boundedServingPattern)) {
       addServingSizeCandidate(servingSizes, match[1]);
     }
@@ -423,8 +440,23 @@ function extractServingSizes(label, context = {}) {
 }
 
 function addServingSizeCandidate(servingSizes, value) {
-  if (!isUsefulServingSize(value)) return;
-  servingSizes.push(cleanServingSize(typeof value === "string" ? value : value?.text));
+  const text = normalizedServingSizeText(value);
+  if (!text) return;
+  servingSizes.push(text);
+}
+
+function normalizedServingSizeRow(value) {
+  const text = normalizedServingSizeText(value);
+  if (!text) return null;
+  return {
+    text,
+    source: typeof value === "object" && value?.source ? cleanValue(value.source) : "existing_serving_size",
+  };
+}
+
+function normalizedServingSizeText(value) {
+  if (!isUsefulServingSize(value)) return "";
+  return cleanServingSize(servingSizeRawText(value));
 }
 
 function extractStructuredServingSizes(label) {
@@ -598,13 +630,13 @@ function factsPanelText(input, options = {}) {
   let text = factsIndex >= 0 ? cleaned.slice(factsIndex) : cleaned;
   const startIndex = text.search(/(?:\bAmount\s+Per\s+%?\s*Daily\s+Serving\s+Value\b|\bAmount\s*(?:Per\s+\w+|\/\s*Serving)\b|%DV\b|%?\s*Daily\s+Value\b)/iu);
   if (startIndex >= 0 && !options.preserveLeadingTableRows) text = text.slice(startIndex);
-  const endIndex = text.search(/\b(Other Ingredients?|Directions?|Suggested Use|Warning|Caution|Contains:)\b/iu);
+  const endIndex = text.search(/\b(Other Ingredients?|Directions?|Suggested Use|Warning|Caution)\b/iu);
   if (endIndex > 20) text = text.slice(0, endIndex);
   return text;
 }
 
 function ingredientRowFromTextSegment(segment, source) {
-  const text = cleanValue(cleanValue(segment)
+  const text = cleanValue(stripServingPrefixFromIngredientName(cleanValue(segment))
     .replace(/\s+\+\s+Contains\b.*$/iu, "")
     .replace(/\s+([†‡+*])\s+\1(?=\s+(?:Daily Value|DV)\b)/giu, " $1")
     .replace(/^(?:Amount\s+Per\s+)?%?\s*Daily\s+Serving\s+Value\*?\s*/iu, "")
@@ -617,7 +649,7 @@ function ingredientRowFromTextSegment(segment, source) {
   if (pipeParts.length >= 2) {
     const [namePart, amountPart, dailyValuePart] = pipeParts;
     const amount = parseAmount(amountPart);
-    const name = cleanIngredientName(namePart);
+    const name = cleanIngredientName(stripServingPrefixFromIngredientName(namePart));
     if (name && amount) {
       return {
         name,
@@ -698,7 +730,7 @@ function ingredientRowsByPipeDelimitedTable(text) {
   let pendingNameCells = [];
   for (let index = 0; index < cells.length; index += 1) {
     const cell = cells[index];
-    if (isHeaderText(cell) || isFootnoteText(cell)) {
+    if (isHeaderText(cell) || isIngredientTableHeaderCell(cell) || isFootnoteText(cell)) {
       pendingNameCells = [];
       continue;
     }
@@ -722,7 +754,7 @@ function ingredientRowsByPipeDelimitedTable(text) {
     }
 
     if (pendingNameCells.length === 0) continue;
-    const name = cleanIngredientName(pendingNameCells.join(" "));
+    const name = cleanIngredientName(stripServingPrefixFromIngredientName(pendingNameCells.join(" ")));
     pendingNameCells = [];
     if (!name) continue;
     const nextCell = cleanValue(cells[index + 1]);
@@ -1012,9 +1044,12 @@ function ingredientRowsByColonDelimited(text) {
   const rows = [];
   const normalized = factsPanelText(text)
     .replace(/\s+\+\s+Contains\b[^\n]*/giu, "")
+    .replace(/\b(?:Nutritional\s+Information|Nutrition\s+Information|Active\s+Ingredients?)\s+(?:Per|Each)\s+[^:]{1,80}:\s*/giu, "")
+    .replace(/\b(?:Per|Each)\s+[^:]{1,80}\s+contains:\s*/giu, "")
+    .replace(/\b(?:Per|Each)\s+[^:]{1,80}:\s*/giu, "")
     .replace(/\s+/gu, " ");
   if (normalized.includes("|")) return rows;
-  const pattern = new RegExp(String.raw`(?:^|\s)([^:\n|]{2,220}?)\s*:\s*(${AMOUNT_VALUE_PATTERN})\s*(${UNIT_PATTERN})\b(?:\s+(?:NE|RAE|DFE))?\s*(\*{1,2}|†|‡|\+|\d[\d,]{0,6}%\*?)?`, "giu");
+  const pattern = new RegExp(String.raw`(?:^|\s)([A-Z][A-Za-z0-9,()\-+.'’/&:®™≥≤\s]{2,220}?)\s*:\s*(${AMOUNT_VALUE_PATTERN})\s*(${UNIT_PATTERN})\b(?:\s+(?:NE|RAE|DFE))?\s*(\*{1,2}|†|‡|\+|\d[\d,]{0,6}%\*?)?`, "giu");
   for (const match of normalized.matchAll(pattern)) {
     const name = cleanIngredientName(match[1]);
     if (!name) continue;
@@ -1132,6 +1167,10 @@ function isUsefulIngredientRow(row) {
   if (/\b(supplement facts panel|facts panel|label showing|panel for|of gummies|detailing|gmo-free|gluten-free|third party tested)\b/iu.test(name)) {
     return false;
   }
+  if (/^(?:ingredients?\s+per\s+(?:daily\s+)?dose|nutritional\s+value|active\s+ingredients?|nutrition\s+information|nutritional\s+information)(?:\s*\/\s*|\b)/iu.test(name)) {
+    return false;
+  }
+  if (/^(?:\d+\s*)?kJ\s*\/?$/iu.test(name)) return false;
   if (/\b(provides|deliver|offers|designed|taking|supports?)\b/iu.test(name) && name.length > 40) return false;
   if (/^(?:and|or|for|showing|close|providing|capsules?|tablets?|softgels?|soft chews?|gummies|powder)\b/iu.test(name)) return false;
   if (/\b(natural and artificial flavor|artificial flavor|citric acid|malic acid|tartaric acid|sucralose|silicon dioxide|red 40|blue 2)\b/iu.test(name)) {
@@ -1202,6 +1241,7 @@ function cleanParsedUnit(value) {
   if (/^mlt$/iu.test(unit)) return "mL";
   if (/^mca$/iu.test(unit)) return "mcg";
   if (/^gt$/iu.test(unit)) return "g";
+  if (/^cfu$/iu.test(unit)) return "CFU";
   if (/^cfus$/iu.test(unit)) return "CFU";
   if (/^billion\s+cfus$/iu.test(unit)) return "billion CFU";
   if (/^million\s+cfus$/iu.test(unit)) return "million CFU";
@@ -1215,6 +1255,10 @@ function isHeaderText(text) {
   }
   return /\b(Serving Size|Servings Per Container|Amount Per Serving|Daily Value|Calories|Total Fat|Total Carbohydrate)\b/iu.test(value)
     && !/\b\d[\d,.]*\s*(mcg|mg|g|IU|CFU|ml)\b/iu.test(text);
+}
+
+function isIngredientTableHeaderCell(text) {
+  return /^(?:nutritional\s+value|active\s+ingredients?|nutrition\s+information|nutritional\s+information)(?:\s*\/\s*|\b|:)/iu.test(cleanValue(text));
 }
 
 function isFootnoteText(text) {
@@ -1257,15 +1301,36 @@ function cleanValue(value) {
 
 function cleanServingSize(value) {
   return cleanValue(value)
+    .replace(/^(?:serving\s+size|dosis(?:\s+diaria\s+recomendada)?|diaria\s+recomendada|dose|dávka|davka|pour|dosage\s+pour|par|per|por)\s*[:–-]?\s*/iu, "")
+    .replace(/^(?:journali[eè]re|daily)\s*\(\s*/iu, "")
+    .replace(/^(?:un|una)\s+/iu, "1 ")
+    .replace(/^dos\s+/iu, "2 ")
+    .replace(/^tres\s+/iu, "3 ")
     .replace(/[,"']?\s+"?Servings?\s+Per\s+Container\b.*$/iu, "")
     .replace(/\.(?![^()]*\))\s+.*$/u, "")
     .replace(/\s+Servings?:.*$/iu, "")
+    .replace(/\s*\/\s*(?:tablets?(?:\(s\))?|capsules?(?:\(s\))?|tbl|caps?)\b/iu, "")
+    .replace(/(\([^)]{1,70}\))\s+\d.*$/u, "$1")
+    .replace(/\s+(?:\d+\s+)?(?:times|veces|fois)\s+(?:al|a|per|par)\s+(?:día|dia|jour|day)\b.*$/iu, "")
+    .replace(/\s+\d+\s+razy\s+dziennie\b.*$/iu, "")
+    .replace(/\s+(?:par|al|por)\s+(?:jour|día|dia|day)\b.*$/iu, "")
+    .replace(/\s+dosis\s+por\s+envase\b.*$/iu, "")
+    .replace(/\s+(?:rozpu[sś]ci[cć]|wymiesza[cć]|przyjmowa[cć]|stosowa[cć]).*$/iu, "")
+    .replace(/\s+(?:le\s+matin|au\s+cours|[aà]\s+avaler|avec|de\s+pr[eé]f[eé]rence|preferably|antes|before|after|con|with)\b.*$/iu, "")
+    .replace(/\s+per\s+day\b.*$/iu, "")
     .replace(/\s+(?:or\s+as\s+directed|daily\b|as\s+a\s+dietary|of\s+water\b|with\s+\d|your\s+preferred|mix\s+\d|shake\s+or\s+stir|by\s+your\s+health|healthcare\s+professional|third\s+party|non-gmo|gluten-free|warning\b|notice\b).*$/iu, "")
+    .replace(/(\([^)]{1,70})$/u, "$1)")
+    .trim();
+}
+
+function stripServingPrefixFromIngredientName(value) {
+  return cleanValue(value)
+    .replace(new RegExp(String.raw`^${SERVING_AMOUNT_PATTERN}\s*${SERVING_FORM_PATTERN}(?:\s*/\s*(?:tablets?(?:\(s\))?|capsules?(?:\(s\))?|tbl|caps?))?(?:\s*\([^)]{1,70}\))?\s+`, "iu"), "")
     .trim();
 }
 
 function isUsefulServingSize(value) {
-  const rawText = typeof value === "string" ? cleanText(value) : cleanText(value?.text);
+  const rawText = servingSizeRawText(value);
   if (!rawText) return false;
   if (hasServingSizeBodyMarkers(rawText)) return false;
   const text = cleanServingSize(rawText);
@@ -1275,6 +1340,13 @@ function isUsefulServingSize(value) {
     return false;
   }
   return hasBoundedServingSizeShape(text);
+}
+
+function servingSizeRawText(value) {
+  if (typeof value === "string") return cleanText(value);
+  if (!value || typeof value !== "object") return "";
+  if (value.amount !== undefined && value.unit) return cleanText(`${value.amount} ${value.unit}`);
+  return cleanText(value.text ?? value.servingSize ?? value.description ?? value.value);
 }
 
 function hasServingSizeBodyMarkers(value) {
@@ -1292,18 +1364,19 @@ function hasBoundedServingSizeShape(value) {
   const text = cleanValue(value);
   const servingPattern = new RegExp(String.raw`^${SERVING_AMOUNT_PATTERN}\s*${SERVING_FORM_PATTERN}(?:\s*\([^)]{1,70}\))?$`, "iu");
   if (servingPattern.test(text)) return !isLikelyContainerCountServingSize(text);
-  return new RegExp(String.raw`^(?:\d+(?:\.\d+)?|\d+\s*/\s*\d+)\s*[\p{Script=Han}]{1,4}$`, "u").test(text);
+  return new RegExp(String.raw`^(?:\d+(?:[.,]\d+)?|\d+\s*/\s*\d+)\s*[\p{Script=Han}]{1,4}$`, "u").test(text);
 }
 
 function isLikelyContainerCountServingSize(value) {
   const text = cleanValue(value);
-  const match = text.match(/^(\d+(?:\.\d+)?)\s*(.+)$/u);
+  const match = text.match(/^(\d+(?:[.,]\d+)?)\s*(.+)$/u);
   if (!match) return false;
-  const amount = Number.parseFloat(match[1]);
+  const amount = Number.parseFloat(match[1].replace(",", "."));
   const unitText = cleanValue(match[2]);
   if (/\([^)]*(?:scoop|teaspoon|tablespoon|tsp|tbsp|packet|stick\s+pack|capsule|tablet)[^)]*\)/iu.test(text)) {
     return false;
   }
+  if (/\([^)]*\b1\s+serving\b[^)]*\)/iu.test(text)) return false;
   if (amount >= 50 && /^(?:g|grams?)$/iu.test(unitText)) return true;
   if (amount >= 100 && /^(?:mL|ml|milliliters?)$/u.test(unitText)) return true;
   if (amount >= 8 && /^(?:fl\.?\s*oz|fluid\s+ounces?)$/iu.test(unitText)) return true;
@@ -1312,7 +1385,7 @@ function isLikelyContainerCountServingSize(value) {
 }
 
 function cleanIngredientName(value) {
-  const name = cleanValue(value)
+  const name = cleanIngredientEquivalenceNotes(value)
     .replace(/\b(Amount Per \w+|Daily Value|Supplement Facts|Nutrition Facts|%?\s*DV)\b/giu, "")
     .replace(/^(?:Amount\s+Per\s+)?%?\s*Daily\s+Serving\s+Value\*?\s*/iu, "")
     .replace(/^%\s+/u, "")
@@ -1328,6 +1401,15 @@ function cleanIngredientName(value) {
   if ((name.length < 2 && !/\p{Script=Han}/u.test(name)) || name.length > 180) return null;
   if (isKnownNonIngredientName(name)) return null;
   return name;
+}
+
+function cleanIngredientEquivalenceNotes(value) {
+  return cleanValue(value)
+    .replace(/\s*\(([^)]*\b(?:equivalent|providing|yielding|supplying)[^)]*)\)/giu, (_match, body) => {
+      const kept = cleanValue(String(body).split(/\s*,\s*(?=\b(?:equivalent|providing|yielding|supplying)\b)/iu)[0]);
+      if (!kept || new RegExp(String.raw`\b${AMOUNT_WITH_UNIT_PATTERN}\b`, "iu").test(kept)) return "";
+      return ` (${kept})`;
+    });
 }
 
 function cleanChineseIngredientName(value) {
@@ -1369,6 +1451,17 @@ function dedupeIngredientRows(rows) {
   const deduped = [];
   for (const row of rows) {
     const name = cleanIngredientName(row.name);
+    const nameWithoutExtractRatio = cleanTrailingExtractRatioName(name);
+    if (name && nameWithoutExtractRatio !== name && rows.some((other) => {
+      if (other === row) return false;
+      const otherName = cleanIngredientName(other.name);
+      return otherName === nameWithoutExtractRatio
+        && cleanValue(other.amount) === cleanValue(row.amount)
+        && cleanParsedUnit(other.unit) === cleanParsedUnit(row.unit)
+        && cleanDailyValue(other.dailyValue) === cleanDailyValue(row.dailyValue);
+    })) {
+      continue;
+    }
     if (name && rows.some((other) => {
       if (other === row) return false;
       const otherName = cleanIngredientName(other.name);
@@ -1409,6 +1502,10 @@ function dedupeIngredientRows(rows) {
     deduped.push(row);
   }
   return deduped;
+}
+
+function cleanTrailingExtractRatioName(value) {
+  return cleanValue(value).replace(/\s*\([^)]*\b\d+\s*:\s*\d+\s*extract[^)]*\)$/iu, "");
 }
 
 function summarize(previews) {

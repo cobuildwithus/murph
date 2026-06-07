@@ -22,6 +22,7 @@ export interface ProposedRepairPreview {
   parsedIngredientRows: number;
   existingServingSizes: number;
   parsedServingSizes: number;
+  parsedServingSizesPreview: Array<Record<string, unknown>>;
   parserStatus: "structured_ready" | "partial_parse" | "needs_better_parser";
   parserBlockers: string[];
   evidenceRecoveryHint: string;

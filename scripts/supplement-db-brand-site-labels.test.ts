@@ -222,6 +222,93 @@ describe("supplement brand-site repair preview", () => {
     }), [
       { text: "5g (approx. 1 scoop)", source: "factsText" },
     ]);
+
+    assert.deepEqual(extractServingSizes({
+      factsText: "Supplement Facts Serving Size: 2 Soft Gels Servings Per Container: 30 Amount Per Serving DHA 500 mg",
+    }), [
+      { text: "2 Soft Gels", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      factsText: "Supplement Facts Serving Size 1 Rounded Scoop (approx. 8.5 grams) Servings Per Container 30 Amount Per Serving Protein 8 g",
+    }), [
+      { text: "1 Rounded Scoop (approx. 8.5 grams)", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingSize: "1 capsule per day, preferably with a meal",
+    }), [
+      { text: "1 capsule", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingSize: "7,5 g (1 serving)",
+    }), [
+      { text: "7,5 g (1 serving)", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingSize: "1 Tablet/tablets per day, preferably with a meal",
+    }), [
+      { text: "1 Tablet", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingSize: "4 kapsułki",
+    }), [
+      { text: "4 kapsułki", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingSize: "10 g (1 serving)",
+    }), [
+      { text: "10 g (1 serving)", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingSize: "1 Gummy(ies) per day, preferably with a meal",
+    }), [
+      { text: "1 Gummy(ies)", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingSize: "1 comprimido Dosis por envase: 60",
+    }), [
+      { text: "1 comprimido", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingSize: "1 miarkę proszku (10 g) rozpuścić w 250 ml wody",
+    }), [
+      { text: "1 miarkę proszku (10 g)", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingSize: "2 kapsle",
+    }), [
+      { text: "2 kapsle", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingSize: "1 Kapsel",
+    }), [
+      { text: "1 Kapsel", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingSize: "2 cacitos (13 g",
+    }), [
+      { text: "2 cacitos (13 g)", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingSize: "journalière (1 gélule",
+    }), [
+      { text: "1 gélule", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({ servingSize: "100 g" }), []);
+    assert.deepEqual(extractServingSizes({ servingSize: "250 ml" }), []);
   });
 
   test("splits same-line ingredient rows before lowercase Greek-prefix names", () => {
@@ -1057,6 +1144,77 @@ describe("supplement brand-site repair preview", () => {
     assert.deepEqual(preview.removableFieldCandidates, []);
   });
 
+  test("repair preview reparses invalid existing normalized rows from clean facts text", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:reparse-existing",
+      dataOriginId: "example-brand:reparse-existing",
+      dataOriginUrl: "https://example.test/products/reparse-existing",
+      name: "Example Reparse Existing",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "reparse-existing",
+        ingredientRows: [{ name: "Serving Size 1 Capsule Magnesium", amount: "200", unit: "mg" }],
+        servingSizes: ["1 Capsule"],
+        factsText: "Supplement Facts Serving Size 1 Capsule Amount Per Serving Magnesium 200 mg 48%",
+        bodyText: "Raw page evidence can be removed only after clean replacement rows are parsed.",
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.deepEqual(preview.parserBlockers, []);
+    assert.equal(preview.parsedIngredientRows, 1);
+    assert.deepEqual(preview.removableFieldCandidates, ["bodyText"]);
+  });
+
+  test("ingredient parser rejects nutritional-value header rows", () => {
+    const rows = extractIngredientRowsFromText([
+      "Nutritional Value / Active Ingredients: | 3 g (1 serving) Creatine malate | 2400 mg",
+      "Taurine | 10000 mg",
+    ].join(" | "));
+
+    assert.deepEqual(rows.map((row) => row.name), [
+      "Creatine malate",
+      "Taurine",
+    ]);
+  });
+
+  test("ingredient parser handles colon-delimited facts after per-tablet prefixes", () => {
+    assert.deepEqual(extractIngredientRowsFromText([
+      "Nutritional Information Per Tablet:",
+      "Aloe Vera Leaf Gel Extract (200:1 extract, equivalent to 10,000mg Aloe Vera Leaf Gel): 50mg",
+    ].join(" ")), [
+      {
+        name: "Aloe Vera Leaf Gel Extract (200:1 extract)",
+        amount: "50",
+        unit: "mg",
+        source: "factsText",
+      },
+    ]);
+
+    assert.deepEqual(extractIngredientRowsFromText([
+      "Nutritional Information Each tablet contains:",
+      "Lactobacillus acidophilus: 1.00cfu",
+      "Bifidobacterium animalis subsp. Lactis.: 1.00cfu",
+    ].join(" ")), [
+      {
+        name: "Lactobacillus acidophilus",
+        amount: "1.00",
+        unit: "CFU",
+        source: "factsText",
+      },
+      {
+        name: "Bifidobacterium animalis subsp. Lactis.",
+        amount: "1.00",
+        unit: "CFU",
+        source: "factsText",
+      },
+    ]);
+  });
+
   test("repair preview rejects facts-panel text stored as an existing serving size", () => {
     const preview = repairPreviewForRow({
       id: "example-brand:malformed-serving-size",
@@ -1106,6 +1264,74 @@ describe("supplement brand-site repair preview", () => {
     assert.equal(preview.parserStatus, "partial_parse");
     assert.deepEqual(preview.parserBlockers, ["missing_serving_sizes"]);
     assert.deepEqual(preview.removableFieldCandidates, []);
+  });
+
+  test("repair preview accepts existing serving-size object shapes", () => {
+    const servingSizes = [
+      { amount: 1, unit: "tablet", servingSize: "Per tablet" },
+      { servingSize: "Pour 2 comprimés", source: "official_facts_table" },
+      { servingSize: "Dávka – 35 g", source: "official_nutrition_table" },
+      { servingSize: "7,5 g (1 serving)", source: "one_serving_parenthetical" },
+      { servingSize: "10 g (1 serving)", source: "one_serving_parenthetical" },
+      { text: "4 capsule / tablet (1 serving)", source: "one_serving_parenthetical" },
+      { text: "1 effervescent tablet per day, preferably with a meal", source: "directions_serving" },
+      { text: "1 Tablet/tablets per day, preferably with a meal", source: "directions_serving" },
+      { text: "4 kapsułki", source: "official_facts_table" },
+      { text: "1 Gummy(ies) per day, preferably with a meal", source: "directions_serving" },
+      { text: "2 kapsle", source: "official_nutrition_table" },
+      { text: "1 Kapsel", source: "table_header_unit" },
+      { text: "2 cacitos (13 g", source: "dose_text" },
+      { text: "journalière (1 gélule", source: "dose_text" },
+    ];
+    for (const [index, servingSize] of servingSizes.entries()) {
+      const preview = repairPreviewForRow({
+        id: `example-brand:existing-serving-size-${index}`,
+        dataOriginId: `example-brand:existing-serving-size-${index}`,
+        dataOriginUrl: "https://example.test/products/existing-serving-size",
+        name: "Example Existing Serving Size",
+        brand: "Example Brand",
+        upc: null,
+        offMarket: false,
+        searchText: "",
+        label: {
+          source: "example-brand",
+          sourceId: "existing-serving-size",
+          ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg" }],
+          servingSizes: [servingSize],
+        },
+      });
+
+      assert.equal(preview.parserStatus, "structured_ready");
+      assert.deepEqual(preview.parserBlockers, []);
+    }
+  });
+
+  test("repair preview replaces mixed existing serving sizes with valid serving subset", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:mixed-serving-sizes",
+      dataOriginId: "example-brand:mixed-serving-sizes",
+      dataOriginUrl: "https://example.test/products/mixed-serving-sizes",
+      name: "Example Mixed Serving Sizes",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "mixed-serving-sizes",
+        ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg" }],
+        servingSizes: [
+          { text: "Dávka – 35 g", source: "official_nutrition_table" },
+          { text: "Poměr ředění: 35 g/250 ml vody", source: "official_nutrition_table" },
+        ],
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.deepEqual(preview.parserBlockers, []);
+    assert.deepEqual(preview.parsedServingSizesPreview, [
+      { text: "35 g", source: "official_nutrition_table" },
+    ]);
   });
 
   test("repair preview rejects net-content counts stored as existing serving sizes", () => {
