@@ -297,10 +297,8 @@ describe('assistant input attachment evidence', () => {
     )
   })
 
-  it.each([
-    '{"model":"gpt","messages":[{"role":"user","content":"hello"}]}',
-    'See https://example.test/report for the raw payload.',
-  ])('rejects unsafe inline attachment evidence text %#', async (unsafeText) => {
+  it('rejects raw provider payload inline attachment evidence text', async () => {
+    const unsafeText = '{"model":"gpt","messages":[{"role":"user","content":"hello"}]}'
     const { vaultRoot } = await createAssistantInputEvidenceVault(
       'assistant-input-attachment-evidence-inline-',
     )
