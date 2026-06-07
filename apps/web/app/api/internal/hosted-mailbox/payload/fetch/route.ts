@@ -8,7 +8,7 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
   fetchHostedMailboxPayload,
-  readHostedMailboxItemById,
+  readHostedMailboxItemByDedupeKey,
 } from "@/src/lib/hosted-mailbox/store";
 import {
   hasHostedMemberActiveAccess,
@@ -34,11 +34,12 @@ export const POST = withJsonError(async (request: Request) => {
   });
   await requireHostedRuntimeMailboxPayloadActiveAccess(userId);
   const body = parseHostedMailboxPayloadFetchRequest(await readOptionalJsonObject(request));
-  const mailboxItem = await readHostedMailboxItemById({
-    mailboxItemId: body.mailboxItemId,
+  const mailboxItem = await readHostedMailboxItemByDedupeKey({
+    dedupeKey: body.dedupeKey,
+    userId,
   });
   await requireHostedRuntimeMailboxPayloadAiUsageAccess({
-    item: mailboxItem,
+    item: mailboxItem?.id === body.mailboxItemId ? mailboxItem : null,
     userId,
   });
   const response = await fetchHostedMailboxPayload({

@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({
   publishLegacySourceHashBrowserVaultReplicaRef: vi.fn(),
   publishLatestBrowserVaultReplicaRef: vi.fn(),
   readAcceptedRuntimeAttemptFailureSignalOwnerLogId: vi.fn(),
-  readHostedMailboxItemById: vi.fn(),
+  readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedWorkspace: vi.fn(),
@@ -44,7 +44,7 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   fetchHostedMailboxItemsAfterLaneCursors: mocks.fetchHostedMailboxItemsAfterLaneCursors,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
   fetchHostedMailboxPayload: mocks.fetchHostedMailboxPayload,
-  readHostedMailboxItemById: mocks.readHostedMailboxItemById,
+  readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -139,7 +139,7 @@ describe("hosted runtime internal web routes", () => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue({ kind: "prisma" });
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_routes_1");
-    mocks.readHostedMailboxItemById.mockResolvedValue(null);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveHostedMemberRecord());
     mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(null);
     mocks.resolveHostedRuntimeAiUsageDemandGate.mockResolvedValue({
@@ -468,7 +468,7 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("rejects conversation mailbox payload fetches when the AI usage gate denies runtime consumption", async () => {
-    mocks.readHostedMailboxItemById.mockResolvedValueOnce({
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
       id: "mailbox_item_2",
       kind: "conversation.message",
       lane: "conversation",
@@ -495,8 +495,45 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
   });
 
+  it("does not AI-gate mismatched mailbox payload metadata", async () => {
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
+      id: "mailbox_item_other",
+      kind: "conversation.message",
+      lane: "conversation",
+      userId: "member_routes_1",
+    });
+    mocks.fetchHostedMailboxPayload.mockResolvedValue({
+      fetchedAt: FIXED_NOW,
+      payload: null,
+      unavailable: {
+        code: "not_found",
+        retryable: false,
+      },
+    });
+
+    const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/payload/fetch",
+      {
+        dedupeKey: "dedupe_item_2",
+        mailboxItemId: "mailbox_item_2",
+        payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+        requestId: "request_payload_fetch_mismatched_metadata",
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveHostedRuntimeAiUsageDemandGate).not.toHaveBeenCalled();
+    expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
+      dedupeKey: "dedupe_item_2",
+      mailboxItemId: "mailbox_item_2",
+      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+      requestId: "request_payload_fetch_mismatched_metadata",
+      userId: "member_routes_1",
+    });
+  });
+
   it("does not AI-gate non-manual system mailbox payload fetches", async () => {
-    mocks.readHostedMailboxItemById.mockResolvedValueOnce({
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
       id: "mailbox_browser_vault",
       kind: "runtime.browser-vault-refresh-requested",
       lane: "system",

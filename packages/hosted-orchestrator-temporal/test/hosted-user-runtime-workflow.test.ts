@@ -77,6 +77,64 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     ]);
   });
 
+  it("reads demand for carried mailbox pointers after continue-as-new", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({
+      mailboxLag: [mailboxLag()],
+      source: "mailbox_backlog",
+    }));
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      state: {
+        ...emptyCarryForwardState(),
+        latestMailboxPointer: {
+          lane: "conversation",
+          laneSeq: "7",
+          mailboxItemId: "mailbox_item_test",
+          source: "test",
+        },
+        mailboxSignalCount: 1,
+      },
+      userId: "member_test",
+    });
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests).toHaveLength(1);
+    expect(runtime.executionRequests).toHaveLength(1);
+  });
+
+  it("reads demand for system mailbox signals because web owns system item-kind routing", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal({
+      lane: "system",
+      laneSeq: "3",
+      mailboxItemId: "mailbox_system_manual",
+      source: "manual",
+    }));
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests).toHaveLength(1);
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        reason: "manual",
+        source: "manual",
+        userId: "member_test",
+      },
+    ]);
+  });
+
   it("waits for a future idle nextWakeAt with a signal-or-timer condition", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(idleDemand(isoAfter(60_000)));

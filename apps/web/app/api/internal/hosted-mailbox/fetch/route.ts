@@ -116,6 +116,8 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
 function hostedRuntimeMailboxItemsNeedAiUsageGate(
   items: readonly { kind: string; lane: string }[],
 ): boolean {
+  // Gate the whole fetch batch: runtime imports lanes together, and all-or-nothing
+  // watermarks are simpler than returning partial lane output around denied AI work.
   return items.some((item) =>
     item.lane === "conversation"
     || item.kind === "runtime.manual-requested"
