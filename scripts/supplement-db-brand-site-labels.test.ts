@@ -16,6 +16,15 @@ import {
   repairPreviewForRow,
   summarize,
 } from "../.agents/skills/research-supplements/scripts/supplement-db-brand-site-repair-preview.mjs";
+import {
+  buildShopifyEvidenceCandidate,
+  factsTextContaminationReason,
+  matchShopifyVariantForQueueRow,
+  productFactsPromotionBlockedReasonForProduct,
+  selectShopifyFactsMedia,
+  shopifyJsonUrlForProductUrl,
+  variantCandidateTexts,
+} from "../.agents/skills/research-supplements/scripts/supplement-db-brand-site-refetch-preview.mjs";
 
 describe("supplement brand-site DB helper", () => {
   test("builds compact search text from normalized product facts instead of page body JSON", () => {
@@ -159,6 +168,246 @@ describe("supplement brand-site DB helper", () => {
     });
 
     assert.deepEqual(supplementPowder.reviewIssues, []);
+  });
+});
+
+describe("supplement brand-site refetch preview", () => {
+  const bluebonnetProduct = {
+    title: "5-HTP 100 mg",
+    vendor: "Bluebonnet Nutrition",
+    type: "Amino Acids",
+    description: "<p>Supports relaxation.</p>",
+    variants: [
+      {
+        id: 1,
+        title: "60 count",
+        public_title: "60 count",
+        option1: "60 count",
+        sku: "51",
+        barcode: "743715000513",
+        available: true,
+        name: "5-HTP 100 mg - 60 count",
+        options: ["60 count"],
+      },
+      {
+        id: 2,
+        title: "120 count",
+        public_title: "120 count",
+        option1: "120 count",
+        sku: "53",
+        barcode: "743715000537",
+        available: true,
+        name: "5-HTP 100 mg - 120 count",
+        options: ["120 count"],
+      },
+    ],
+    media: [
+      {
+        alt: "Front panel. #size_60 count",
+        position: 1,
+        media_type: "image",
+        src: "https://cdn.example.test/743715000513F_afront_side.jpg",
+      },
+      {
+        alt: "Supplement facts panel. #size_60 count",
+        position: 2,
+        media_type: "image",
+        src: "https://cdn.example.test/743715000513F_supp_side.jpg",
+        width: 1500,
+        height: 1575,
+      },
+      {
+        alt: "Supplement facts panel. #size_120 count",
+        position: 5,
+        media_type: "image",
+        src: "https://cdn.example.test/743715000537F_supp-side.jpg",
+        width: 1500,
+        height: 1575,
+      },
+    ],
+  };
+
+  test("maps Shopify product URLs to official product JSON endpoints", () => {
+    assert.equal(
+      shopifyJsonUrlForProductUrl("https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules?variant=1"),
+      "https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules.js",
+    );
+    assert.equal(shopifyJsonUrlForProductUrl("https://example.test/pages/about"), null);
+  });
+
+  test("matches queue rows to Shopify variants without using product-page body text", () => {
+    const row = {
+      sourceId: "5-htp-100-mg-vegetable-capsules--120-count",
+      name: "5-HTP 100 mg - 120 count",
+    };
+
+    assert.deepEqual(variantCandidateTexts(row), ["120 count"]);
+    assert.equal(matchShopifyVariantForQueueRow(row, bluebonnetProduct)?.barcode, "743715000537");
+  });
+
+  test("selects facts media for the matched variant only", () => {
+    const variant = bluebonnetProduct.variants[1];
+    assert.deepEqual(selectShopifyFactsMedia(bluebonnetProduct, variant), [
+      {
+        url: "https://cdn.example.test/743715000537F_supp-side.jpg",
+        alt: "Supplement facts panel. #size_120 count",
+        position: 5,
+        width: 1500,
+        height: 1575,
+        score: 16,
+      },
+    ]);
+  });
+
+  test("does not select another variant's facts image or a matching front panel", () => {
+    const product = {
+      ...bluebonnetProduct,
+      media: [
+        {
+          alt: "Front panel. #size_120 count",
+          position: 1,
+          media_type: "image",
+          src: "https://cdn.example.test/743715000537F_afront-side.jpg",
+        },
+        {
+          alt: "Supplement facts panel. #size_60 count",
+          position: 2,
+          media_type: "image",
+          src: "https://cdn.example.test/743715000513F_supp_side.jpg",
+        },
+      ],
+    };
+
+    assert.deepEqual(selectShopifyFactsMedia(product, bluebonnetProduct.variants[1]), []);
+  });
+
+  test("emits image-only candidates as manual-review rows blocked from production", () => {
+    const candidate = buildShopifyEvidenceCandidate({
+      source: "bluebonnet-nutrition",
+      sourceId: "5-htp-100-mg-vegetable-capsules--120-count",
+      id: "bluebonnet-nutrition:5-htp-100-mg-vegetable-capsules--120-count",
+      dataOriginId: "bluebonnet-nutrition:5-htp-100-mg-vegetable-capsules--120-count",
+      dataOriginUrl: "https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules",
+      name: "5-HTP 100 mg - 120 count",
+      brand: "Bluebonnet Nutrition",
+      action: "refetch_official_label_or_ocr",
+      parserBlockers: ["missing_ingredient_rows", "missing_serving_sizes"],
+    }, bluebonnetProduct, "2026-06-07T00:00:00.000Z");
+
+    assert.equal(candidate?.upc, "743715000537");
+    assert.deepEqual(candidate?.label.factsImageUrls, [
+      "https://cdn.example.test/743715000537F_supp-side.jpg",
+    ]);
+    assert.equal(candidate?.label.needsManualReview, true);
+    assert.deepEqual(candidate?.reviewIssues, [
+      "missing_ingredient_rows",
+      "missing_serving_sizes",
+      "needs_manual_review",
+    ]);
+    assert.doesNotMatch(JSON.stringify(candidate?.label), /Supports relaxation/u);
+  });
+
+  test("promotes clean official facts text only when structured rows and servings parse", () => {
+    const product = {
+      ...bluebonnetProduct,
+      description: [
+        "<h2>Supplement Facts</h2>",
+        "<p>Serving Size 1 Capsule</p>",
+        "<p>Amount Per Serving 5-HTP (from Griffonia simplicifolia seed extract) 100 mg *</p>",
+      ].join(""),
+      variants: [bluebonnetProduct.variants[0]],
+      media: [],
+    };
+
+    const candidate = buildShopifyEvidenceCandidate({
+      source: "bluebonnet-nutrition",
+      sourceId: "5-htp-100-mg-vegetable-capsules",
+      dataOriginId: "bluebonnet-nutrition:5-htp-100-mg-vegetable-capsules",
+      dataOriginUrl: "https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules",
+      name: "5-HTP 100 mg",
+      brand: "Bluebonnet Nutrition",
+    }, product, "2026-06-07T00:00:00.000Z");
+
+    assert.deepEqual(candidate?.label.servingSizes, [
+      { text: "1 Capsule", source: "factsText" },
+    ]);
+    assert.deepEqual(candidate?.label.ingredientRows, [
+      {
+        name: "5-HTP (from Griffonia simplicifolia seed extract)",
+        amount: "100",
+        unit: "mg",
+        dailyValue: "*",
+        source: "factsText",
+      },
+    ]);
+    assert.equal(candidate?.label.needsManualReview, false);
+    assert.deepEqual(candidate?.reviewIssues, []);
+  });
+
+  test("keeps shared product-description facts blocked for multi-variant products", () => {
+    const product = {
+      ...bluebonnetProduct,
+      description: [
+        "<h2>Supplement Facts</h2>",
+        "<p>Serving Size 1 Capsule</p>",
+        "<p>Amount Per Serving 5-HTP 100 mg *</p>",
+      ].join(""),
+      media: [],
+    };
+
+    assert.equal(
+      productFactsPromotionBlockedReasonForProduct(product, "Supplement Facts Serving Size 1 Capsule Amount Per Serving 5-HTP 100 mg *"),
+      "shared_product_facts_for_multiple_variants",
+    );
+
+    const candidate = buildShopifyEvidenceCandidate({
+      source: "bluebonnet-nutrition",
+      sourceId: "5-htp-100-mg-vegetable-capsules--120-count",
+      dataOriginId: "bluebonnet-nutrition:5-htp-100-mg-vegetable-capsules--120-count",
+      dataOriginUrl: "https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules",
+      name: "5-HTP 100 mg - 120 count",
+      brand: "Bluebonnet Nutrition",
+    }, product, "2026-06-07T00:00:00.000Z");
+
+    assert.equal(candidate?.label.needsManualReview, true);
+    assert.equal(candidate?.refetchPreview.productFactsPromotionBlockedReason, "shared_product_facts_for_multiple_variants");
+    assert.equal(candidate?.label.ingredientRows, undefined);
+    assert.equal(candidate?.label.servingSizes, undefined);
+    assert.deepEqual(candidate?.reviewIssues, [
+      "missing_ingredient_rows",
+      "missing_serving_sizes",
+      "needs_manual_review",
+    ]);
+  });
+
+  test("keeps page-body-contaminated facts text out of candidate labels", () => {
+    const contaminated = "Supplement Facts Serving Size 1 Capsule Amount Per Serving 5-HTP 100 mg * Add to cart Reviews Shipping";
+    assert.equal(factsTextContaminationReason(contaminated), "facts_text_page_body_marker");
+
+    const product = {
+      ...bluebonnetProduct,
+      description: `<p>${contaminated}</p>`,
+      variants: [bluebonnetProduct.variants[0]],
+      media: [],
+    };
+    const candidate = buildShopifyEvidenceCandidate({
+      source: "bluebonnet-nutrition",
+      sourceId: "5-htp-100-mg-vegetable-capsules",
+      dataOriginId: "bluebonnet-nutrition:5-htp-100-mg-vegetable-capsules",
+      dataOriginUrl: "https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules",
+      name: "5-HTP 100 mg",
+      brand: "Bluebonnet Nutrition",
+    }, product, "2026-06-07T00:00:00.000Z");
+
+    assert.equal(candidate?.label.needsManualReview, true);
+    assert.equal(candidate?.refetchPreview.productFactsPromotionBlockedReason, "facts_text_page_body_marker");
+    assert.equal(candidate?.label.factsText, undefined);
+    assert.equal(candidate?.label.ingredientRows, undefined);
+    assert.deepEqual(candidate?.reviewIssues, [
+      "missing_ingredient_rows",
+      "missing_serving_sizes",
+      "needs_manual_review",
+    ]);
   });
 });
 
