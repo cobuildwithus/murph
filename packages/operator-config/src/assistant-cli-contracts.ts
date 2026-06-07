@@ -332,7 +332,7 @@ export function normalizeAssistantResponseMediaUrl(value: string): string {
   if (!isPublicAssistantResponseMediaHost(parsed.hostname)) {
     throw new Error('Assistant response media URLs must use public hosts.')
   }
-  if (!hasAssistantResponseMediaImageExtension(parsed.pathname)) {
+  if (!hasAssistantResponseMediaImageExtension(parsed.pathname) && !isCloudflareImagesDeliveryUrl(parsed)) {
     throw new Error('Assistant response media URLs must point to image files.')
   }
 
@@ -341,6 +341,11 @@ export function normalizeAssistantResponseMediaUrl(value: string): string {
 
 function hasAssistantResponseMediaImageExtension(pathname: string): boolean {
   return /\.(?:avif|gif|jpe?g|png|webp)$/iu.test(pathname)
+}
+
+function isCloudflareImagesDeliveryUrl(url: URL): boolean {
+  return url.hostname.toLowerCase().replace(/\.$/u, '') === 'imagedelivery.net'
+    && url.pathname.split('/').filter(Boolean).length >= 3
 }
 
 function isPublicAssistantResponseMediaHost(hostname: string): boolean {

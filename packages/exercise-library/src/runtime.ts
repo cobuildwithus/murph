@@ -300,7 +300,7 @@ function levelRank(value: ExerciseCatalogLevel): number {
 }
 
 function toSummary(item: ExerciseCatalogItem): ExerciseCatalogSummary {
-  const { image: _image, sourceIds: _sourceIds, steps: _steps, tips: _tips, ...summary } = item;
+  const { images: _images, sourceIds: _sourceIds, steps: _steps, tips: _tips, ...summary } = item;
   return summary;
 }
 

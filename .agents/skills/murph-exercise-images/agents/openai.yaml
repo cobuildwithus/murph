@@ -1,0 +1,4 @@
+interface:
+  display_name: "Murph Exercise Images"
+  short_description: "Generate precise Murph-style exercise visuals"
+  default_prompt: "Use $murph-exercise-images to generate a clear Murph-style exercise carousel."
