@@ -15,7 +15,7 @@ import {
   MURPH_ASSISTANT_ACTIVE_SESSION_ID_ENV,
   MURPH_ASSISTANT_ACTIVE_TURN_ID_ENV,
   MURPH_ASSISTANT_MEDIA_CATALOG_URL_ENV,
-} from './assistant/response-media.js'
+} from './assistant/response-media-env.js'
 
 const DEFAULT_USER_BIN_SEGMENTS = ['.local', 'bin'] as const
 export const HOSTED_RUNTIME_PROCESS_ENV_MARKER =

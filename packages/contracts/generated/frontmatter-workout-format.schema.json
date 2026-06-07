@@ -68,6 +68,11 @@
                 "minLength": 1,
                 "maxLength": 160
               },
+              "sourceExerciseId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
               "order": {
                 "type": "integer",
                 "minimum": 1

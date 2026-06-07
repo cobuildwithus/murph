@@ -104,6 +104,26 @@ describe('assistant response media', () => {
     }
   })
 
+  it('times out catalog requests that do not resolve', async () => {
+    await expect(
+      listAssistantMediaCatalog({
+        env: {},
+        fetchImplementation: async (_url, init) =>
+          await new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              'abort',
+              () => reject(new DOMException('aborted', 'AbortError')),
+              { once: true },
+            )
+          }),
+        productBaseUrl: 'https://app.example.test',
+        requestTimeoutMs: 1,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_MEDIA_CATALOG_REQUEST_TIMEOUT',
+    })
+  })
+
   it('stages, dedupes, reads, and clears media for one assistant turn', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'assistant-response-media-',

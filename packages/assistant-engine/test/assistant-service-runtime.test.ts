@@ -769,14 +769,31 @@ describe("assistant usage recording seam", () => {
 
 describe("assistant delivery orchestration seam", () => {
   it("returns not-requested without touching the outbox when delivery is disabled", async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      "assistant-delivery-no-response-media-",
+    );
+    tempRoots.push(parentRoot);
     const session = createAssistantSession();
+    await stageAssistantResponseMedia({
+      media: [
+        {
+          kind: "image",
+          url: "https://cdn.example.test/dead-bug/no-delivery.png",
+          alt: null,
+          source: null,
+        },
+      ],
+      sessionId: session.sessionId,
+      turnId: "turn-1",
+      vault: vaultRoot,
+    });
 
     await expect(
       deliverAssistantReply({
         input: {
           deliverResponse: false,
           prompt: "hello",
-          vault: "/vault",
+          vault: vaultRoot,
         },
         response: "reply",
         session,
@@ -790,6 +807,12 @@ describe("assistant delivery orchestration seam", () => {
     });
 
     expect(runtimeState.outbox.deliverMessage).not.toHaveBeenCalled();
+    await expect(
+      readAssistantResponseMedia({
+        turnId: "turn-1",
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual([]);
   });
 
   it("does not resolve hosted idempotency when final delivery is disabled", async () => {

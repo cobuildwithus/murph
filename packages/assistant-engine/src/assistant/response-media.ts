@@ -18,14 +18,16 @@ import {
   resolveAssistantStatePaths,
 } from './store/paths.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
-
-export const MURPH_ASSISTANT_ACTIVE_TURN_ID_ENV = 'MURPH_ASSISTANT_ACTIVE_TURN_ID'
-export const MURPH_ASSISTANT_ACTIVE_SESSION_ID_ENV = 'MURPH_ASSISTANT_ACTIVE_SESSION_ID'
-export const MURPH_ASSISTANT_MEDIA_CATALOG_URL_ENV = 'MURPH_ASSISTANT_MEDIA_CATALOG_URL'
+import {
+  MURPH_ASSISTANT_ACTIVE_SESSION_ID_ENV,
+  MURPH_ASSISTANT_ACTIVE_TURN_ID_ENV,
+  MURPH_ASSISTANT_MEDIA_CATALOG_URL_ENV,
+} from './response-media-env.js'
 
 const ASSISTANT_RESPONSE_MEDIA_STORE_SCHEMA = 'murph.assistant-response-media.v1'
 const ASSISTANT_MEDIA_CATALOG_SCHEMA = 'murph.assistant-media-catalog.v1'
 const DEFAULT_ASSISTANT_MEDIA_CATALOG_PATH = '/assistant-media/catalog.json'
+const DEFAULT_ASSISTANT_MEDIA_CATALOG_REQUEST_TIMEOUT_MS = 5_000
 const MAX_ASSISTANT_RESPONSE_MEDIA = 40
 
 const assistantResponseMediaStoreSchema = z
@@ -171,6 +173,13 @@ export async function clearAssistantResponseMedia(input: {
   })
 }
 
+export async function clearAssistantResponseMediaBestEffort(input: {
+  turnId: string
+  vault: string
+}): Promise<void> {
+  await clearAssistantResponseMedia(input).catch(() => undefined)
+}
+
 export function resolveAssistantResponseMediaPath(input: {
   turnId: string
   vault: string
@@ -193,6 +202,7 @@ export async function listAssistantMediaCatalog(input: {
   fetchImplementation?: typeof fetch
   productBaseUrl?: string | null
   query?: string | null
+  requestTimeoutMs?: number | null
 } = {}): Promise<{
   catalogUrl: string
   items: AssistantMediaCatalogItem[]
@@ -207,27 +217,47 @@ export async function listAssistantMediaCatalog(input: {
     )
   }
 
-  const response = await fetchImplementation(catalogUrl)
-  if (!response.ok) {
-    throw new VaultCliError(
-      'ASSISTANT_MEDIA_CATALOG_REQUEST_FAILED',
-      `Assistant media catalog request failed with HTTP ${response.status}.`,
-    )
-  }
+  const requestTimeoutMs = normalizeAssistantMediaCatalogRequestTimeoutMs(
+    input.requestTimeoutMs,
+  )
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs)
 
-  const catalog = assistantMediaCatalogSchema.parse(await response.json())
-  const queryTokens = normalizeMediaCatalogQueryTokens(input.query)
-  const items = catalog.items
-    .map((item) => ({
-      ...item,
-      url: resolveCatalogItemUrl(catalogUrl, item.url),
-    }))
-    .filter((item) => mediaCatalogItemMatchesQuery(item, queryTokens))
+  try {
+    const response = await fetchImplementation(catalogUrl, {
+      signal: controller.signal,
+    })
+    if (!response.ok) {
+      throw new VaultCliError(
+        'ASSISTANT_MEDIA_CATALOG_REQUEST_FAILED',
+        `Assistant media catalog request failed with HTTP ${response.status}.`,
+      )
+    }
 
-  return {
-    catalogUrl,
-    items,
-    updatedAt: catalog.updatedAt,
+    const catalog = assistantMediaCatalogSchema.parse(await response.json())
+    const queryTokens = normalizeMediaCatalogQueryTokens(input.query)
+    const items = catalog.items
+      .map((item) => ({
+        ...item,
+        url: resolveCatalogItemUrl(catalogUrl, item.url),
+      }))
+      .filter((item) => mediaCatalogItemMatchesQuery(item, queryTokens))
+
+    return {
+      catalogUrl,
+      items,
+      updatedAt: catalog.updatedAt,
+    }
+  } catch (error) {
+    if (controller.signal.aborted || isAbortError(error)) {
+      throw new VaultCliError(
+        'ASSISTANT_MEDIA_CATALOG_REQUEST_TIMEOUT',
+        'Assistant media catalog request timed out.',
+      )
+    }
+    throw error
+  } finally {
+    clearTimeout(timeout)
   }
 }
 
@@ -317,6 +347,29 @@ function mediaCatalogItemMatchesQuery(
     ...item.tags,
   ].join(' ').toLowerCase()
   return queryTokens.every((token) => haystack.includes(token))
+}
+
+function normalizeAssistantMediaCatalogRequestTimeoutMs(
+  value: number | null | undefined,
+): number {
+  if (value === undefined || value === null) {
+    return DEFAULT_ASSISTANT_MEDIA_CATALOG_REQUEST_TIMEOUT_MS
+  }
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new VaultCliError(
+      'ASSISTANT_MEDIA_CATALOG_TIMEOUT_INVALID',
+      'Assistant media catalog request timeout must be a positive number of milliseconds.',
+    )
+  }
+  return Math.floor(value)
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    error instanceof DOMException && error.name === 'AbortError'
+  ) || (
+    error instanceof Error && error.name === 'AbortError'
+  )
 }
 
 function normalizeAssistantResponseMediaTurnId(value: string): string {

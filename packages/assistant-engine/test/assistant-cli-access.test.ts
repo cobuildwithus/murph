@@ -21,7 +21,7 @@ import {
   MURPH_ASSISTANT_ACTIVE_SESSION_ID_ENV,
   MURPH_ASSISTANT_ACTIVE_TURN_ID_ENV,
   MURPH_ASSISTANT_MEDIA_CATALOG_URL_ENV,
-} from "../src/assistant/response-media.js";
+} from "../src/assistant/response-media-env.js";
 
 describe("prepareAssistantDirectCliEnv", () => {
   it("aliases the hosted runtime marker from the bridge owner", () => {

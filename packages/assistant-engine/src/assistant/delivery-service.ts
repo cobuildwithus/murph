@@ -20,7 +20,7 @@ import type {
 } from './service-contracts.js'
 import { normalizeNullableString } from './shared.js'
 import {
-  clearAssistantResponseMedia,
+  clearAssistantResponseMediaBestEffort,
   readAssistantResponseMedia,
 } from './response-media.js'
 
@@ -96,6 +96,10 @@ export async function deliverAssistantReply(input: {
   turnId: string
 }): Promise<AssistantDeliveryOutcome> {
   if (!input.input.deliverResponse) {
+    await clearAssistantResponseMediaBestEffort({
+      vault: input.input.vault,
+      turnId: input.turnId,
+    })
     return {
       kind: 'not-requested',
       media: [],
@@ -231,6 +235,10 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   turnId: string
 }): Promise<AssistantDeliveryOutcome> {
   if (!input.input.deliverResponse) {
+    await clearAssistantResponseMediaBestEffort({
+      vault: input.input.vault,
+      turnId: input.turnId,
+    })
     return {
       kind: 'not-requested',
       media: [],
@@ -258,10 +266,10 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     dependencies: undefined,
     dispatchMode: input.input.deliveryDispatchMode,
   })
-  await clearAssistantResponseMedia({
+  await clearAssistantResponseMediaBestEffort({
     vault: input.input.vault,
     turnId: input.turnId,
-  }).catch(() => undefined)
+  })
   const session = outcome.session ?? input.session
 
   switch (outcome.kind) {

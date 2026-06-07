@@ -43,7 +43,7 @@ import {
   emitHostedAssistantContextSessionResolvedTrace,
 } from './hosted-context-diagnostics.js'
 import {
-  clearAssistantResponseMedia,
+  clearAssistantResponseMediaBestEffort,
   readAssistantResponseMedia,
 } from './response-media.js'
 import {
@@ -211,6 +211,10 @@ export async function sendAssistantNotificationLocal(
           turnId,
         })
         if (providerOutcome.kind === 'failed_terminal') {
+          await clearAssistantResponseMediaBestEffort({
+            vault: input.vault,
+            turnId,
+          })
           await recordAssistantUsageEvent({
             executionContext,
             providerRequestOutcome: providerOutcome.providerRequestOutcome,
@@ -621,10 +625,10 @@ async function deliverAssistantNotificationMessage(input: {
     subject,
     dispatchMode: input.input.deliveryDispatchMode,
   })
-  await clearAssistantResponseMedia({
+  await clearAssistantResponseMediaBestEffort({
     vault: input.input.vault,
     turnId: input.turnId,
-  }).catch(() => undefined)
+  })
 
   switch (outcome.kind) {
     case 'sent':

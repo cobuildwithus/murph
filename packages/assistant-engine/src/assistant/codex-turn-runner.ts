@@ -70,7 +70,7 @@ import type {
 import {
   MURPH_ASSISTANT_ACTIVE_SESSION_ID_ENV,
   MURPH_ASSISTANT_ACTIVE_TURN_ID_ENV,
-} from './response-media.js'
+} from './response-media-env.js'
 
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
