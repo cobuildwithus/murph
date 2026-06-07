@@ -54,17 +54,27 @@ export function isHostedLinqDeliverableFirstContact(input: {
   return isHostedLinqIMessageService(input.event.data.service);
 }
 
-export function hostedLinqFirstContactContainsBlockedContent(
-  event: HostedLinqMessageReceivedEvent,
-): boolean {
-  return event.data.message.parts.some((part) => {
+export function hostedLinqFirstContactContainsBlockedContent(input: {
+  event: HostedLinqMessageReceivedEvent;
+  participantContact: HostedLinqParticipantContact;
+}): boolean {
+  const blocksStandaloneSmsOptOutCommand = shouldBlockStandaloneSmsOptOutCommand({
+    participantContact: input.participantContact,
+    service: input.event.data.service,
+  });
+
+  return input.event.data.message.parts.some((part) => {
     if (part.type === "link") {
       return true;
     }
 
     if (part.type === "text") {
       return containsUrlLikeText(part.value)
-        || containsSmsOptOutBoilerplate(part.value);
+        || containsSmsOptOutBoilerplate(part.value)
+        || (
+          blocksStandaloneSmsOptOutCommand
+          && containsStandaloneSmsOptOutCommand(part.value)
+        );
     }
 
     return false;
@@ -303,4 +313,27 @@ function containsSmsOptOutBoilerplate(value: string): boolean {
 
   return /\b(?:text|reply)\s+['"]?stop['"]?\s+(?:to\s+)?(?:quit|stop|end|cancel|unsubscribe|opt(?:\s*|-)?out)\b/u
     .test(normalized);
+}
+
+function shouldBlockStandaloneSmsOptOutCommand(input: {
+  participantContact: HostedLinqParticipantContact;
+  service: string | null | undefined;
+}): boolean {
+  const service = normalizeHostedLinqService(input.service);
+
+  if (service === "sms" || service === "rcs") {
+    return true;
+  }
+
+  return service === null && input.participantContact.kind === "phone";
+}
+
+function containsStandaloneSmsOptOutCommand(value: string): boolean {
+  const normalized = value
+    .replace(/[\u2010-\u2015]/gu, "-")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toLowerCase();
+
+  return /^(?:stop|unsubscribe|cancel|end|quit|opt\s*-?\s*out)$/u.test(normalized);
 }

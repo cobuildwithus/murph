@@ -8,7 +8,11 @@ import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption"
 import {
   buildHostedInviteReply,
   buildHostedLinqConversationHomeRedirectReply,
+  parseHostedLinqWebhookEvent,
+  requireHostedLinqMessageReceivedEvent,
 } from "@/src/lib/hosted-onboarding/linq";
+import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
+import { hostedLinqFirstContactContainsBlockedContent } from "@/src/lib/hosted-onboarding/webhook-provider-linq-shared";
 
 const mocks = vi.hoisted(() => {
   const state = {
@@ -2417,7 +2421,71 @@ https://join.example.test/join/code_first_text`);
         },
       ],
     },
-  ])("ignores first-contact SMS with $label before invite side effects", async ({ parts }) => {
+    {
+      label: "standalone STOP opt-out command",
+      parts: [
+        {
+          type: "text",
+          value: "STOP",
+        },
+      ],
+    },
+    {
+      label: "standalone lowercase stop opt-out command",
+      parts: [
+        {
+          type: "text",
+          value: "stop",
+        },
+      ],
+    },
+    {
+      label: "standalone UNSUBSCRIBE opt-out command",
+      parts: [
+        {
+          type: "text",
+          value: "UNSUBSCRIBE",
+        },
+      ],
+    },
+    {
+      label: "standalone CANCEL opt-out command",
+      parts: [
+        {
+          type: "text",
+          value: "CANCEL",
+        },
+      ],
+    },
+    {
+      label: "standalone END opt-out command",
+      parts: [
+        {
+          type: "text",
+          value: "END",
+        },
+      ],
+    },
+    {
+      label: "standalone QUIT opt-out command",
+      parts: [
+        {
+          type: "text",
+          value: "QUIT",
+        },
+      ],
+    },
+    {
+      label: "standalone STOP opt-out command over RCS",
+      parts: [
+        {
+          type: "text",
+          value: "STOP",
+        },
+      ],
+      service: "RCS",
+    },
+  ])("ignores first-contact phone message with $label before invite side effects", async ({ parts, service }) => {
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedWebhookReceipt: {
@@ -2451,6 +2519,7 @@ https://join.example.test/join/code_first_text`);
           parts,
         },
         eventId: "evt_blocked_first_contact",
+        service,
       }),
       signature: null,
       timestamp: null,
@@ -2470,6 +2539,54 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
+
+  it("applies standalone opt-out blocking only to SMS-like or unknown phone first-contact services", () => {
+    const phoneContact = createHostedLinqParticipantContact({
+      kind: "phone",
+      value: "+15551234567",
+    });
+    const emailContact = createHostedLinqParticipantContact({
+      kind: "email",
+      value: "buddy@example.test",
+    });
+    if (!phoneContact || !emailContact) {
+      throw new Error("Expected valid Linq participant contacts.");
+    }
+
+    const messageEvent = requireHostedLinqMessageReceivedEvent(parseHostedLinqWebhookEvent(
+      buildHostedLinqWebhookBody({
+        data: {
+          parts: [
+            {
+              type: "text",
+              value: "STOP",
+            },
+          ],
+        },
+        service: "iMessage",
+      }),
+    ));
+    const messageEventWithoutService = {
+      ...messageEvent,
+      data: {
+        ...messageEvent.data,
+        service: undefined,
+      },
+    };
+
+    expect(hostedLinqFirstContactContainsBlockedContent({
+      event: messageEventWithoutService,
+      participantContact: phoneContact,
+    })).toBe(true);
+    expect(hostedLinqFirstContactContainsBlockedContent({
+      event: messageEventWithoutService,
+      participantContact: emailContact,
+    })).toBe(false);
+    expect(hostedLinqFirstContactContainsBlockedContent({
+      event: messageEvent,
+      participantContact: phoneContact,
+    })).toBe(false);
   });
 
   it("keeps first-contact signup replies inline", async () => {

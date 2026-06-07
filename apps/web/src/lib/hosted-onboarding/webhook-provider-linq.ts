@@ -471,7 +471,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
-  if (hostedLinqFirstContactContainsBlockedContent(messageEvent)) {
+  if (hostedLinqFirstContactContainsBlockedContent({
+    event: messageEvent,
+    participantContact,
+  })) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("blocked-first-contact-content"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
