@@ -67,6 +67,10 @@ import type {
   AssistantCodexTurnExecutionProfile,
   AssistantCodexTurnThreadScopeProfile,
 } from './codex-turn/planning.js'
+import {
+  MURPH_ASSISTANT_ACTIVE_SESSION_ID_ENV,
+  MURPH_ASSISTANT_ACTIVE_TURN_ID_ENV,
+} from './response-media.js'
 
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
@@ -363,7 +367,11 @@ async function executeAssistantCodexAttempt(input: {
       fault: 'provider',
       message: 'Injected assistant provider failure.',
     })
-    const attemptEnv = attemptPlan.routePlan.cliEnv
+    const attemptEnv = {
+      ...attemptPlan.routePlan.cliEnv,
+      [MURPH_ASSISTANT_ACTIVE_SESSION_ID_ENV]: attemptPlan.session.sessionId,
+      [MURPH_ASSISTANT_ACTIVE_TURN_ID_ENV]: executionPlan.turnId,
+    }
     usageAttribution = createAssistantProviderUsageAttribution({
       attemptPlan,
       env: attemptEnv,

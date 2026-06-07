@@ -17,6 +17,7 @@ import {
   assistantSandboxValues,
   assistantReasoningEffortValues,
   assistantSessionListResultSchema,
+  assistantResponseMediaSchema,
   assistantSessionShowResultSchema,
   assistantStopResultSchema,
   assistantStatusResultSchema,
@@ -47,6 +48,9 @@ import {
   resolveAssistantOnboardingStatePath,
   listAssistantSessions,
   resolveAssistantStatePaths,
+  listAssistantMediaCatalog,
+  resolveAssistantActiveTurnContextFromEnv,
+  stageAssistantResponseMedia,
 } from '@murphai/assistant-engine/assistant-state'
 import {
   emptyArgsSchema,
@@ -206,6 +210,31 @@ const assistantSelfDeliveryTargetOptionFields = {
   deliveryTarget: optionalNonEmptyStringOption(
     assistantSavedDeliveryTargetRoutingDescription,
   ),
+}
+
+const assistantMediaListResultSchema = z.object({
+  catalogUrl: z.string().url(),
+  updatedAt: z.string().nullable(),
+  items: z.array(z.object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    description: z.string().min(1),
+    url: z.string().url(),
+    alt: z.string().min(1).nullable(),
+    tags: z.array(z.string().min(1)),
+  })),
+})
+
+const assistantMediaAttachResultSchema = z.object({
+  vault: z.string().min(1),
+  turnId: z.string().min(1),
+  sessionId: z.string().min(1).nullable(),
+  media: z.array(assistantResponseMediaSchema),
+  stagedCount: z.number().int().nonnegative(),
+})
+
+function arrayOptionValue(value: string[] | undefined, index: number): string | null {
+  return value?.[index]?.trim() || null
 }
 
 function assertAssistantSelfDeliveryTargetInput(input: {
@@ -1135,6 +1164,104 @@ export function registerAssistantCommands(
     assistant.command(session)
   }
 
+  const registerMediaCommands = () => {
+    const media = Cli.create('media', {
+      description:
+        'List and stage pre-generated assistant response media. Staged media is attached to the current assistant reply through the normal outbox; it does not send directly.',
+    })
+
+    media.command('list', {
+      args: z.object({
+        query: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional search text such as an exercise name, stretch, body region, or step.'),
+      }),
+      description:
+        'List pre-generated media from the hosted assistant media catalog, including stable ids, descriptions, tags, and HTTPS URLs that can be attached later.',
+      options: withBaseOptions({
+        catalogUrl: z
+          .string()
+          .url()
+          .optional()
+          .describe('Optional assistant media catalog URL. Defaults to MURPH_ASSISTANT_MEDIA_CATALOG_URL or MURPH_PRODUCT_BASE_URL/assistant-media/catalog.json.'),
+      }),
+      output: assistantMediaListResultSchema,
+      async run(context) {
+        return listAssistantMediaCatalog({
+          catalogUrl: context.options.catalogUrl ?? null,
+          env: process.env,
+          query: context.args.query ?? null,
+        })
+      },
+    })
+
+    media.command('attach', {
+      args: emptyArgsSchema,
+      description:
+        'Stage one or more HTTPS media URLs for the current assistant turn. Use this after `assistant media list`; the final reply delivery sends the staged media.',
+      hint:
+        'This is safe inside an assistant turn because it only stages response media. It does not call provider delivery directly.',
+      options: withBaseOptions({
+        url: z
+          .array(z.string().url())
+          .min(1)
+          .max(40)
+          .describe('HTTPS media URL to attach. Repeat to preserve order.'),
+        alt: z
+          .array(z.string().min(1))
+          .optional()
+          .describe('Optional alt text entries matching --url order.'),
+        source: z
+          .array(z.string().min(1))
+          .optional()
+          .describe('Optional catalog item ids or source labels matching --url order.'),
+        turn: optionalNonEmptyStringOption(
+          'Optional explicit assistant turn id. Normally inferred from the current assistant runtime environment.',
+        ),
+        session: optionalNonEmptyStringOption(
+          'Optional explicit assistant session id. Normally inferred from the current assistant runtime environment.',
+        ),
+      }),
+      output: assistantMediaAttachResultSchema,
+      async run(context) {
+        const active = resolveAssistantActiveTurnContextFromEnv(process.env)
+        const turnId = context.options.turn ?? active.turnId
+        if (!turnId) {
+          throw new VaultCliError(
+            'ASSISTANT_ACTIVE_TURN_REQUIRED',
+            'assistant media attach must run inside an assistant turn or receive --turn.',
+          )
+        }
+        const sessionId = context.options.session ?? active.sessionId
+        const media = context.options.url.map((url, index) =>
+          assistantResponseMediaSchema.parse({
+            kind: 'image',
+            url,
+            alt: arrayOptionValue(context.options.alt, index),
+            source: arrayOptionValue(context.options.source, index),
+          }),
+        )
+        const staged = await stageAssistantResponseMedia({
+          vault: context.options.vault,
+          turnId,
+          sessionId,
+          media,
+        })
+        return {
+          vault: buildAssistantVaultResultPath(context.options.vault).vault,
+          turnId,
+          sessionId: sessionId ?? null,
+          media: staged,
+          stagedCount: staged.length,
+        }
+      },
+    })
+
+    assistant.command(media)
+  }
+
   const registerRootAliases = () => {
     cli.command(
       'chat',
@@ -1185,6 +1312,7 @@ export function registerAssistantCommands(
 
   registerConversationCommands()
   registerSelfTargetCommands()
+  registerMediaCommands()
   registerObservabilityCommands()
   registerOnboardingCommands()
   registerSessionCommands()

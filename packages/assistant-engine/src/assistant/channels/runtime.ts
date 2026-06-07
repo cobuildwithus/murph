@@ -39,6 +39,7 @@ import type {
   TelegramRuntimeDependencies,
   WhatsAppRuntimeDependencies,
 } from './types.js'
+import type { AssistantResponseMedia } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeOptionalText } from './helpers.js'
 
 const TELEGRAM_MAX_TEXT_LENGTH = 4096
@@ -115,6 +116,7 @@ export async function sendLinqMessage(
   input: {
     fromPhoneNumber?: string | null
     idempotencyKey?: string | null
+    media?: readonly AssistantResponseMedia[] | null
     message: string
     replyToMessageId?: string | null
     target: string
@@ -136,6 +138,7 @@ export async function sendLinqMessage(
   }
 
   const target = input.target.trim()
+  const media = input.media && input.media.length > 0 ? input.media : undefined
   if (target.length === 0) {
     throw new VaultCliError(
       'ASSISTANT_CHANNEL_TARGET_REQUIRED',
@@ -157,6 +160,7 @@ export async function sendLinqMessage(
         from: fromPhoneNumber,
         idempotencyKey: input.idempotencyKey ?? null,
         message: input.message,
+        ...(media ? { media } : {}),
         to: [target],
       },
       {
@@ -178,6 +182,7 @@ export async function sendLinqMessage(
       chatId: target,
       idempotencyKey: input.idempotencyKey ?? null,
       message: input.message,
+      ...(media ? { media } : {}),
       replyToMessageId: input.replyToMessageId ?? null,
     },
     {

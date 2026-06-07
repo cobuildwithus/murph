@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto'
 import path from 'node:path'
-import type { AssistantOutboxIntent } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantOutboxIntent,
+  AssistantResponseMedia,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { resolveAssistantBindingDelivery } from '../bindings.js'
 import { normalizeNullableString } from '../shared.js'
 import { resolveAssistantOpaqueStateFilePath } from '../state-ids.js'
@@ -103,6 +106,7 @@ export function hashAssistantOutboxIdentity(input: {
   dedupeToken?: string | null
   explicitTarget?: string | null
   identityId?: string | null
+  media?: readonly AssistantResponseMedia[] | null
   message: string
   subject?: string | null
   replyToMessageId?: string | null
@@ -121,6 +125,7 @@ export function hashAssistantOutboxIdentity(input: {
     .update(
       JSON.stringify({
         message: input.message,
+        media: input.media ?? [],
         subject: normalizeNullableString(input.subject),
         sessionId: input.sessionId,
         dedupeToken: null,

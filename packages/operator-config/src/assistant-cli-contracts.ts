@@ -163,6 +163,8 @@ export const assistantQuarantineArtifactKindValues = [
   'cron-run',
 ] as const
 
+export const assistantResponseMediaKindValues = ['image'] as const
+
 export const assistantRuntimeEventKindValues = [
   'session.upserted',
   'session.quarantined',
@@ -299,6 +301,24 @@ export const assistantSessionBindingSchema = z.object({
   threadIsDirect: z.boolean().nullable(),
   delivery: assistantBindingDeliverySchema.nullable(),
 })
+
+export const assistantResponseMediaSchema = z
+  .object({
+    kind: z.enum(assistantResponseMediaKindValues).default('image'),
+    url: z
+      .string()
+      .url()
+      .refine((value) => {
+        try {
+          return new URL(value).protocol === 'https:'
+        } catch {
+          return false
+        }
+      }, 'Assistant response media URLs must be HTTPS.'),
+    alt: z.string().trim().min(1).max(500).nullable().default(null),
+    source: z.string().trim().min(1).max(200).nullable().default(null),
+  })
+  .strict()
 
 const assistantPersistedSessionV1Schema = z
   .object({
@@ -546,6 +566,7 @@ export const assistantOutboxIntentSchema = z
     attemptCount: z.number().int().nonnegative(),
     status: z.enum(assistantOutboxIntentStatusValues),
     message: z.string().min(1),
+    media: z.array(assistantResponseMediaSchema).max(40).default([]),
     subject: z.string().trim().min(1).nullable().default(null),
     dedupeKey: z.string().min(1),
     targetFingerprint: z.string().min(1),
@@ -899,6 +920,7 @@ export const assistantAskResultSchema = z.object({
   status: z.enum(assistantAskResultStatusValues).default('completed'),
   prompt: z.string().min(1),
   response: z.string(),
+  media: z.array(assistantResponseMediaSchema).default([]),
   session: assistantSessionOutputSchema,
   delivery: assistantChannelDeliverySchema.nullable(),
   deliveryDeferred: z.boolean().default(false),
@@ -918,6 +940,7 @@ export const assistantDeliverResultSchema = z.object({
   vault: pathSchema,
   message: z.string().min(1),
   session: assistantSessionOutputSchema,
+  media: z.array(assistantResponseMediaSchema).default([]),
   delivery: assistantChannelDeliverySchema,
 })
 
@@ -1126,6 +1149,9 @@ export type AssistantDeliverySource = z.infer<
 >
 export type AssistantSessionBinding = z.infer<
   typeof assistantSessionBindingSchema
+>
+export type AssistantResponseMedia = z.infer<
+  typeof assistantResponseMediaSchema
 >
 export type AssistantCodexModelProviderConfig = z.infer<
   typeof assistantCodexModelProviderConfigSchema

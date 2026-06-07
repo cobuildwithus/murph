@@ -309,6 +309,7 @@ test('assistant command registration exposes the owned subcommands and root alia
     'deliver',
     'run',
     'self-target',
+    'media',
     'status',
     'doctor',
     'stop',

@@ -19,6 +19,10 @@ import type {
   AssistantTurnSharedPlan,
 } from './service-contracts.js'
 import { normalizeNullableString } from './shared.js'
+import {
+  clearAssistantResponseMedia,
+  readAssistantResponseMedia,
+} from './response-media.js'
 
 export function resolveHostedAssistantDeliveryTransportIdempotentOverride(input: {
   channel?: string | null
@@ -94,6 +98,7 @@ export async function deliverAssistantReply(input: {
   if (!input.input.deliverResponse) {
     return {
       kind: 'not-requested',
+      media: [],
       session: input.session,
     }
   }
@@ -228,6 +233,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   if (!input.input.deliverResponse) {
     return {
       kind: 'not-requested',
+      media: [],
       session: input.session,
     }
   }
@@ -238,8 +244,13 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     session: input.session,
     sharedPlan: input.sharedPlan,
   })
+  const media = await readAssistantResponseMedia({
+    vault: input.input.vault,
+    turnId: input.turnId,
+  }).catch(() => [])
   const outcome = await state.outbox.deliverMessage({
     ...deliveryFields,
+    media,
     message: input.message,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
@@ -247,6 +258,10 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     dependencies: undefined,
     dispatchMode: input.input.deliveryDispatchMode,
   })
+  await clearAssistantResponseMedia({
+    vault: input.input.vault,
+    turnId: input.turnId,
+  }).catch(() => undefined)
   const session = outcome.session ?? input.session
 
   switch (outcome.kind) {
@@ -255,6 +270,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
         kind: 'sent',
         delivery: outcome.delivery!,
         intentId: outcome.intent.intentId,
+        media,
         session,
       }
     case 'queued':
@@ -262,6 +278,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
         kind: 'queued',
         error: outcome.deliveryError,
         intentId: outcome.intent.intentId,
+        media,
         session,
       }
     case 'failed':
@@ -269,6 +286,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
         kind: 'failed',
         error: outcome.deliveryError,
         intentId: outcome.intent.intentId,
+        media,
         session,
       }
     default:
@@ -278,6 +296,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
           new Error('Assistant outbound delivery failed.'),
         ),
         intentId: 'unknown',
+        media,
         session,
       }
   }

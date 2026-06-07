@@ -497,6 +497,7 @@ describe('assistant service-result seam', () => {
       status: 'completed',
       prompt: 'Hello',
       response: 'Hi there',
+      media: [],
       session: parseAssistantSessionRecord({
         schema: 'murph.assistant-session.v1',
         sessionId: 'session-service-result',

@@ -512,7 +512,7 @@ test('session and outbox helpers parse item, list, and null payloads', async () 
   )
 
   assert.equal(session?.sessionId, TEST_SESSION.sessionId)
-  assert.deepEqual(list, [TEST_OUTBOX_INTENT])
+  assert.deepEqual(list, [{ ...TEST_OUTBOX_INTENT, media: [] }])
   assert.equal(intent?.intentId, TEST_OUTBOX_INTENT.intentId)
   assert.equal(emptyIntent, null)
   assert.equal(

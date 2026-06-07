@@ -766,6 +766,7 @@ describe("assistant delivery orchestration seam", () => {
       })
     ).resolves.toEqual({
       kind: "not-requested",
+      media: [],
       session,
     });
 
@@ -808,6 +809,7 @@ describe("assistant delivery orchestration seam", () => {
       })
     ).resolves.toEqual({
       kind: "not-requested",
+      media: [],
       session,
     });
 
@@ -1112,6 +1114,7 @@ describe("assistant delivery orchestration seam", () => {
       },
       intentId: "intent-1",
       kind: "sent",
+      media: [],
       session,
     });
 
@@ -1129,6 +1132,7 @@ describe("assistant delivery orchestration seam", () => {
       dispatchMode: "immediate",
       explicitTarget: "explicit-audience-target",
       identityId: "audience-identity",
+      media: [],
       message: "reply body",
       replyToMessageId: "reply-input",
       sessionId: session.sessionId,
@@ -1496,6 +1500,7 @@ describe("assistant delivery orchestration seam", () => {
       error: null,
       intentId: "intent-queued",
       kind: "queued",
+      media: [],
       session: expect.objectContaining({
         sessionId: "session-queued",
       }),
@@ -1530,6 +1535,7 @@ describe("assistant delivery orchestration seam", () => {
       error: deliveryError,
       intentId: "intent-failed",
       kind: "failed",
+      media: [],
       session,
     });
 
@@ -1560,6 +1566,7 @@ describe("assistant delivery orchestration seam", () => {
       }),
       intentId: "unknown",
       kind: "failed",
+      media: [],
       session,
     });
 
@@ -1574,6 +1581,7 @@ describe("assistant delivery orchestration seam", () => {
         completedAt: "2026-04-08T12:00:00.000Z",
         outcome: {
           kind: "not-requested",
+          media: [],
           session,
         },
         response: "reply",
@@ -1608,6 +1616,7 @@ describe("assistant delivery orchestration seam", () => {
           },
           intentId: "intent-sent",
           kind: "sent",
+          media: [],
           session,
         },
         response: "reply",
@@ -1636,6 +1645,7 @@ describe("assistant delivery orchestration seam", () => {
           error: retryableError,
           intentId: "intent-queued",
           kind: "queued",
+          media: [],
           session,
         },
         response: "reply",
@@ -1663,6 +1673,7 @@ describe("assistant delivery orchestration seam", () => {
           }),
           intentId: null,
           kind: "failed",
+          media: [],
           session,
         },
         response: "reply",
@@ -1701,6 +1712,7 @@ describe("assistant delivery orchestration seam", () => {
         },
         intentId: "intent-3",
         kind: "sent",
+        media: [],
         session: createAssistantSession({
           sessionId: "session-sent",
         }),
@@ -1742,6 +1754,7 @@ describe("assistant delivery orchestration seam", () => {
         error: null,
         intentId: "intent-queued",
         kind: "queued",
+        media: [],
         session: createAssistantSession({
           sessionId: "session-queued",
         }),
@@ -1775,6 +1788,7 @@ describe("assistant delivery orchestration seam", () => {
         },
         intentId: "intent-not-welcome",
         kind: "sent",
+        media: [],
         session: createAssistantSession({
           sessionId: "session-not-welcome",
         }),

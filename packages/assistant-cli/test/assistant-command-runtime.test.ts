@@ -123,6 +123,7 @@ const TEST_ASK_RESULT = {
   status: 'completed',
   prompt: 'hello from daemon',
   response: 'daemon response',
+  media: [],
   session: TEST_SESSION,
   delivery: null,
   deliveryDeferred: false,

@@ -158,22 +158,26 @@ export type AssistantDeliveryOutcome =
       kind: 'failed'
       error: AssistantDeliveryError
       intentId: string | null
+      media: AssistantAskResult['media']
       session: AssistantSession
     }
   | {
       kind: 'not-requested'
+      media: AssistantAskResult['media']
       session: AssistantSession
     }
   | {
       kind: 'queued'
       error: AssistantDeliveryError | null
       intentId: string
+      media: AssistantAskResult['media']
       session: AssistantSession
     }
   | {
       kind: 'sent'
       delivery: NonNullable<AssistantAskResult['delivery']>
       intentId: string | null
+      media: AssistantAskResult['media']
       session: AssistantSession
     }
 

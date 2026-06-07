@@ -721,6 +721,7 @@ describe('outbound channel runtime', () => {
         explicitTarget: 'thread-2',
         idempotencyKey: 'idem-1',
         identityId: 'identity-1',
+        media: [],
         message: 'hello binding',
         replyToMessageId: 'reply-over-binding',
         subject: null,

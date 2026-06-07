@@ -10,7 +10,10 @@ import {
   resolveAssistantAcceptedTurnInputJournalPath,
   type AssistantCodexContinuation,
 } from '../src/assistant/active-turn-input-journal.ts'
-import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.ts'
+import type {
+  AssistantDeliveryOutcome,
+  AssistantTurnSharedPlan,
+} from '../src/assistant/service-contracts.ts'
 import {
   AssistantActiveTurnInputCheckpointRejectedError,
   AssistantActiveTurnInputUnavailableError,
@@ -112,6 +115,7 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
     deliveryDeferred: false,
     deliveryError: null,
     deliveryIntentId: 'intent-1',
+    media: [],
     prompt: 'Summarize my inbox',
     response: 'assistant response',
     session,
@@ -4444,6 +4448,7 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
       },
       intentId: 'intent-queued',
       kind: 'queued',
+      media: [],
       session: queuedSession,
     },
   })
@@ -4474,6 +4479,7 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
       retryable: true,
     },
     deliveryIntentId: 'intent-queued',
+    media: [],
     prompt: 'Queue this reply',
     response: 'assistant response',
     session: queuedSession,
@@ -4499,6 +4505,7 @@ test('sendAssistantMessageLocal reports failed delivery outcomes after provider 
     },
     intentId: 'intent-failed',
     kind: 'failed' as const,
+    media: [],
     session: failedSession,
   }
   const { sendAssistantMessageLocal } = await loadLocalServiceModule({
@@ -4520,6 +4527,7 @@ test('sendAssistantMessageLocal reports failed delivery outcomes after provider 
       retryable: false,
     },
     deliveryIntentId: 'intent-failed',
+    media: [],
     prompt: 'Deliver this reply',
     response: 'assistant response',
     session: failedSession,
@@ -4956,6 +4964,7 @@ async function loadLocalServiceModule(input?: {
     } | null
     intentId: string
     kind: 'failed' | 'not-requested' | 'queued' | 'sent'
+    media?: AssistantDeliveryOutcome['media']
     session: AssistantSession
   }
   route?: {
@@ -4998,6 +5007,7 @@ async function loadLocalServiceModule(input?: {
       },
       intentId: 'intent-1',
       kind: 'sent' as const,
+      media: [],
       session,
     }
   const acceptedInputIds: string[] = []

@@ -619,6 +619,7 @@ async function deliverAssistantNotificationMessage(input: {
         kind: 'sent',
         delivery: outcome.delivery,
         intentId: outcome.intent.intentId,
+        media: [],
         session: outcome.session ?? input.session,
       }
     case 'queued':
@@ -626,6 +627,7 @@ async function deliverAssistantNotificationMessage(input: {
         kind: 'queued',
         error: outcome.deliveryError,
         intentId: outcome.intent.intentId,
+        media: [],
         session: outcome.session ?? input.session,
       }
     case 'failed':
@@ -633,6 +635,7 @@ async function deliverAssistantNotificationMessage(input: {
         kind: 'failed',
         error: outcome.deliveryError,
         intentId: outcome.intent.intentId,
+        media: [],
         session: outcome.session ?? input.session,
       }
     default:
@@ -645,6 +648,7 @@ async function deliverAssistantNotificationMessage(input: {
           ),
         ),
         intentId: null,
+        media: [],
         session: input.session,
       }
   }

@@ -719,6 +719,7 @@ export async function sendAssistantMessageLocal(
           status: 'completed',
           prompt: currentInput.prompt,
           response: providerResult.response,
+          media: deliveryOutcome.media,
           session: deliveryOutcome.session,
           delivery: deliveryOutcome.kind === 'sent' ? deliveryOutcome.delivery : null,
           deliveryDeferred: deliveryOutcome.kind === 'queued',
