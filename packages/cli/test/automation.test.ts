@@ -936,6 +936,27 @@ test("automation save maps trigger flags and keeps legacy schedule flags working
       rejectedDeviceFlag.envelope.error.message ?? "",
       /--device-source and --activity-kind/u,
     );
+
+    const rejectedLegacyScheduleKindDeviceActivity = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "schedule-kind-device-activity",
+      "--slug",
+      "schedule-kind-device-activity",
+      "--instructions",
+      "Ask how the walk felt.",
+      "--schedule-kind",
+      "deviceActivity",
+      "--channel",
+      "telegram",
+      "--delivery-target",
+      "telegram-thread-legacy-device",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(rejectedLegacyScheduleKindDeviceActivity.exitCode, 1);
+    assert.equal(rejectedLegacyScheduleKindDeviceActivity.envelope.ok, false);
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
   }

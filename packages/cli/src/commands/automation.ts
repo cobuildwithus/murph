@@ -12,6 +12,7 @@ import {
   automationScaffoldPayloadSchema,
   automationScheduleSchema,
   automationScheduleKindValues,
+  automationTimeScheduleKindValues,
   automationStatusValues,
   type AutomationRoute,
   type AutomationScaffoldPayload,
@@ -19,6 +20,7 @@ import {
   type AutomationDeviceActivitySource,
   type AutomationSchedule,
   type AutomationScheduleKind,
+  type AutomationTimeScheduleKind,
 } from "@murphai/contracts";
 import {
   looksLikePrivateAssistantRoutePlaceholder,
@@ -54,7 +56,7 @@ interface AutomationScheduleOptions {
   scheduleAt?: string;
   scheduleCron?: string;
   scheduleEveryMs?: number;
-  scheduleKind?: AutomationScheduleKind;
+  scheduleKind?: AutomationTimeScheduleKind;
   scheduleLocalTime?: string;
   triggerAt?: string;
   triggerCron?: string;
@@ -418,7 +420,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         .describe("Required HH:MM local time when --trigger-kind=dailyLocal."),
       deviceSource: z.enum(["whoop", "whoop_v2"]).optional().describe("Optional device activity source filter."),
       activityKind: z.enum(["walk"]).optional().describe("Optional device activity kind filter."),
-      scheduleKind: z.enum(automationScheduleKindValues).optional().describe("Legacy alias for --trigger-kind."),
+      scheduleKind: z.enum(automationTimeScheduleKindValues).optional().describe("Legacy alias for time-based --trigger-kind values."),
       scheduleAt: z
         .string()
         .min(1)
