@@ -34,10 +34,11 @@ import type {
   AssistantSessionResolutionFields,
 } from './service-contracts.js'
 import {
-  filterAssistantResponseMediaForChannel,
+  dropUnsupportedAssistantResponseMediaForChannel,
   finalizeAssistantTurnFromDeliveryOutcome,
   resolveAssistantHostedDeliveryIdempotency,
 } from './delivery-service.js'
+import { normalizeAssistantResponseMediaList } from './response-media.js'
 import {
   hasAssistantSeenFirstContact,
   markAssistantFirstContactSeen,
@@ -598,9 +599,10 @@ async function deliverAssistantNotificationMessage(input: {
     input: input.input,
     session: input.session,
   })
-  const media = filterAssistantResponseMediaForChannel({
+  const requestedMedia = normalizeAssistantResponseMediaList(input.media ?? [])
+  const media = dropUnsupportedAssistantResponseMediaForChannel({
     channel: deliveryChannel,
-    media: input.media,
+    media: requestedMedia,
   })
   const outcome = await state.outbox.deliverMessage({
     turnId: input.turnId,

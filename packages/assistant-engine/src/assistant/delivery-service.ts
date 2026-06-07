@@ -91,17 +91,16 @@ export function resolveAssistantHostedDeliveryIdempotency(input: {
   }
 }
 
-export function filterAssistantResponseMediaForChannel(input: {
+export function dropUnsupportedAssistantResponseMediaForChannel(input: {
   channel?: string | null
-  media?: readonly AssistantResponseMedia[] | null
+  media: readonly AssistantResponseMedia[]
 }): AssistantResponseMedia[] {
-  const media = normalizeAssistantResponseMediaList(input.media ?? [])
-  if (media.length === 0) {
+  if (input.media.length === 0) {
     return []
   }
 
   return getAssistantChannelAdapter(input.channel)?.supportsResponseMedia === true
-    ? media
+    ? [...input.media]
     : []
 }
 
@@ -245,30 +244,21 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   deliveryIdempotencyKey: string | null
   deliveryTransportIdempotent: boolean | undefined
   input: AssistantMessageInput
-  media?: readonly AssistantResponseMedia[] | null
+  media: readonly AssistantResponseMedia[]
   message: string
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
 }): Promise<AssistantDeliveryOutcome> {
-  const requestedMedia = normalizeAssistantResponseMediaList(input.media ?? [])
-  if (!input.input.deliverResponse) {
-    return {
-      kind: 'not-requested',
-      media: requestedMedia,
-      session: input.session,
-    }
-  }
-
   const state = createAssistantRuntimeStateService(input.input.vault)
   const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
     input: input.input,
     session: input.session,
     sharedPlan: input.sharedPlan,
   })
-  const media = filterAssistantResponseMediaForChannel({
+  const media = dropUnsupportedAssistantResponseMediaForChannel({
     channel: deliveryFields.channel,
-    media: requestedMedia,
+    media: input.media,
   })
   const outcome = await state.outbox.deliverMessage({
     ...deliveryFields,
