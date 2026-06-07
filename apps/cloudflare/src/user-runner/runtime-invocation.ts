@@ -2,9 +2,6 @@ import {
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
-import type {
-  HostedRuntimeDemandRunSource,
-} from "@murphai/hosted-execution/orchestration-control";
 import {
   parseHostedRuntimeLogResponse,
 } from "@murphai/hosted-execution/parsers";
@@ -66,7 +63,6 @@ const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_TEXT_ENCODER = new TextEncoder();
 export type RuntimeInvocationInput = {
   orchestrationAttemptId: string;
   reason: HostedWorkspaceInvocationReason;
-  source?: HostedRuntimeDemandRunSource;
   userId: string;
 };
 
@@ -123,7 +119,6 @@ export class RuntimeInvocationService {
       commandBudget: input.commandBudget,
       token,
       reason: input.input.reason,
-      ...(input.input.source ? { source: input.input.source } : {}),
       userId: input.input.userId,
       workspace: workspaceRead.workspace,
       workspaceVersion,
@@ -446,7 +441,6 @@ export class RuntimeInvocationService {
     commandBudget?: RuntimeProcessingCommandBudget;
     token: RunnerWriteFenceToken;
     reason: HostedWorkspaceInvocationReason;
-    source?: HostedRuntimeDemandRunSource;
     userId: string;
     workspace: HostedWorkspaceState | null;
     workspaceVersion: string;
@@ -494,7 +488,6 @@ export class RuntimeInvocationService {
         leaseGeneration: input.token.generation,
         providerEgressToken: input.token.providerEgressToken,
         reason: input.reason,
-        ...(input.source ? { source: input.source } : {}),
         userId: input.userId,
         workspace: input.workspace,
         workspaceVersion: input.workspaceVersion,

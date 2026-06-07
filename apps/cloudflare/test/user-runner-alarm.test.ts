@@ -364,7 +364,7 @@ describe("HostedUserRunner execution coordination", () => {
       waitUntilSettled = true;
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-    expect(invoke.mock.calls[0]?.[0].job.request.source).toBe("workspace_wake");
+    expect(invoke.mock.calls[0]?.[0].job.request).not.toHaveProperty("source");
     await Promise.resolve();
     expect(waitUntilSettled).toBe(false);
     expect(readRunnerMeta(sql)).toMatchObject({

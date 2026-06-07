@@ -39,7 +39,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       {
         orchestrationAttemptId: "orchestration-attempt-1",
         reason: "nudge",
-        source: "mailbox_backlog",
         userId: "member_test",
       },
     ]);
@@ -71,7 +70,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       {
         orchestrationAttemptId: "orchestration-attempt-1",
         reason: "nudge",
-        source: "mailbox_backlog",
         userId: "member_test",
       },
     ]);
@@ -129,7 +127,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       {
         orchestrationAttemptId: "orchestration-attempt-1",
         reason: "manual",
-        source: "manual",
         userId: "member_test",
       },
     ]);
@@ -358,7 +355,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       {
         orchestrationAttemptId: "orchestration-attempt-2",
         reason: "nudge",
-        source: "mailbox_backlog",
         userId: "member_test",
       },
     ]);
@@ -585,13 +581,11 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       {
         orchestrationAttemptId: "orchestration-attempt-1",
         reason: "nudge",
-        source: "mailbox_backlog",
         userId: "member_test",
       },
       {
         orchestrationAttemptId: "orchestration-attempt-2",
         reason: "manual",
-        source: "manual",
         userId: "member_test",
       },
     ]);
@@ -622,13 +616,11 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       {
         orchestrationAttemptId: "orchestration-attempt-1",
         reason: "nudge",
-        source: "mailbox_backlog",
         userId: "member_test",
       },
       {
         orchestrationAttemptId: "orchestration-attempt-2",
         reason: "nudge",
-        source: "mailbox_backlog",
         userId: "member_test",
       },
     ]);
@@ -769,7 +761,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       {
         orchestrationAttemptId: "orchestration-attempt-1",
         reason: "manual",
-        source: "manual",
         userId: "member_test",
       },
     ]);
@@ -779,11 +770,12 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests[0]).not.toHaveProperty(
       "requiresAiUsageDecision",
     );
+    expect(runtime.executionRequests[0]).not.toHaveProperty("source");
   });
 
-  it("preserves the old ensure-processing source shape before the source patch", async () => {
+  it("preserves the old ensure-processing source shape before the drop-source patch", async () => {
     const runtime = new FakeWorkflowRuntime();
-    runtime.ensureProcessingSourcePatchEnabled = false;
+    runtime.dropEnsureProcessingSourcePatchEnabled = false;
     runtime.demands.push(runDemand({ source: "manual" }));
     runtime.executions.push(processingAccepted());
 
@@ -799,6 +791,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       {
         orchestrationAttemptId: "orchestration-attempt-1",
         reason: "manual",
+        source: "manual",
         userId: "member_test",
       },
     ]);
@@ -825,9 +818,8 @@ describe("hostedUserRuntimeWorkflow loop", () => {
 
     await runUntilContinueAsNew(machine);
 
-    expect(runtime.executionRequests[0]).toMatchObject({
-      source: "workspace_wake",
-    });
+    expect(runtime.executionRequests[0]?.reason).toBe("nudge");
+    expect(runtime.executionRequests[0]).not.toHaveProperty("source");
     expect(runtime.demandRequests[1]).toMatchObject({
       userId: "member_test",
     });
@@ -1019,7 +1011,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       {
         orchestrationAttemptId: "orchestration-attempt-1",
         reason: "nudge",
-        source: "device_sync_recovery",
         userId: "member_test",
       },
     ]);
@@ -1060,7 +1051,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       {
         orchestrationAttemptId: "orchestration-attempt-1",
         reason: "manual",
-        source: "manual",
         userId: "member_test",
       },
     ]);
@@ -1104,11 +1094,10 @@ describe("hostedUserRuntimeWorkflow loop", () => {
 
     const continued = await runUntilContinueAsNew(machine);
 
-    expect(runtime.executionRequests.map((request) => request.source)).toEqual([
-      "device_sync_recovery",
-      "device_sync_recovery",
-      "device_sync_recovery",
-    ]);
+    expect(runtime.executionRequests).toHaveLength(3);
+    expect(runtime.executionRequests.every((request) =>
+      !Object.hasOwn(request, "source")
+    )).toBe(true);
     expect(continued.state).toMatchObject({
       deviceSyncRecoveryRequested: false,
       sameRuntimeWakeAcceptedCount: 3,
@@ -1642,7 +1631,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       {
         orchestrationAttemptId: "orchestration-attempt-1",
         reason: "nudge",
-        source: "mailbox_backlog",
         userId: "member_test",
       },
     ]);
@@ -1903,6 +1891,7 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   prewarmSignalPatchEnabled = true;
   deviceSyncRecoveryDeletionPatchEnabled = true;
   directMailboxProcessingPatchEnabled = true;
+  dropEnsureProcessingSourcePatchEnabled = true;
   now = BASE_TIME_MS;
   onWait: (() => void) | null = null;
   coalescedPendingSignalPatchEnabled = true;
@@ -2050,6 +2039,10 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
 
   useDirectMailboxProcessingPatch(): boolean {
     return this.directMailboxProcessingPatchEnabled;
+  }
+
+  useDropEnsureProcessingSourcePatch(): boolean {
+    return this.dropEnsureProcessingSourcePatchEnabled;
   }
 
   useRuntimeRecheckSignalPatch(): boolean {

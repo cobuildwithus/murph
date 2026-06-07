@@ -28,7 +28,7 @@ describe("ensureRuntimeProcessing", () => {
     vi.restoreAllMocks();
   });
 
-  it("posts a parsed Cloudflare ensure-processing request without usage fields when not required", async () => {
+  it("posts a source-less Cloudflare ensure-processing request even for legacy source inputs", async () => {
     await stubCloudflareEnvironment();
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
 
@@ -67,8 +67,8 @@ describe("ensureRuntimeProcessing", () => {
     expect(JSON.parse(String(request.init?.body))).toEqual({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
-      source: "workspace_wake",
     });
+    expect(String(request.init?.body)).not.toContain("source");
     expect(String(request.init?.body)).not.toContain("requiresAiUsageDecision");
     expect(String(request.init?.body)).not.toContain("aiUsageAllowDecision");
     expect(timeoutSpy).toHaveBeenCalledWith(10_000);
@@ -116,35 +116,6 @@ describe("ensureRuntimeProcessing", () => {
       /orchestrationAttemptId|mailbox|reason|usage/u,
     );
     expect(timeoutSpy).toHaveBeenCalledWith(5_000);
-  });
-
-  it("keeps source demands pending when Cloudflare has not deployed source parsing", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-05-20T12:00:00.000Z"));
-    await stubCloudflareEnvironment();
-
-    const observedRequests: ObservedRequest[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
-      observedRequests.push({ init, url: String(url) });
-      return jsonResponse({ error: "Invalid request." }, 400);
-    }));
-
-    await expect(ensureRuntimeProcessing({
-      orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
-      source: "workspace_wake",
-      userId: "member_test",
-    })).resolves.toEqual({
-      kind: "retry_later",
-      retryAt: "2026-05-20T12:00:30.000Z",
-    });
-
-    expect(observedRequests).toHaveLength(1);
-    expect(JSON.parse(String(observedRequests[0].init?.body))).toEqual({
-      orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
-      source: "workspace_wake",
-    });
   });
 
   it("drops legacy device-sync recovery source from old Activity inputs", async () => {
@@ -213,26 +184,6 @@ describe("ensureRuntimeProcessing", () => {
       message: "Hosted orchestrator runtime ensure processing failed with HTTP 400.",
       nonRetryable: true,
       type: "hosted_orchestrator_http_non_retryable",
-    });
-  });
-
-  it("keeps non-recovery source demands pending when Cloudflare has not deployed source parsing", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-05-20T12:00:00.000Z"));
-    await stubCloudflareEnvironment();
-
-    vi.stubGlobal("fetch", vi.fn(async () =>
-      jsonResponse({ error: "Invalid request." }, 400)
-    ));
-
-    await expect(ensureRuntimeProcessing({
-      orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "manual",
-      source: "manual",
-      userId: "member_test",
-    })).resolves.toEqual({
-      kind: "retry_later",
-      retryAt: "2026-05-20T12:00:30.000Z",
     });
   });
 

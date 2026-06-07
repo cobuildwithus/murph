@@ -1,5 +1,4 @@
 import type {
-  HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
 } from "../index.js";
 import {
@@ -19,7 +18,6 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
-  HostedOrchestratorHttpResponseError,
   observeHostedTemporalActivity,
   readHostedOrchestratorTemporalCloudflareEnvironment,
   requestHostedOrchestratorJson,
@@ -41,77 +39,41 @@ type EnsureRuntimeProcessingInputSource =
 const CLOUDFLARE_RUNTIME_ENSURE_PROCESSING_PATH_PREFIX = "/internal/users/";
 const CLOUDFLARE_RUNTIME_ENSURE_PROCESSING_PATH_SUFFIX =
   "/runtime/ensure-processing";
-const ENSURE_PROCESSING_SOURCE_DEPLOY_SKEW_RETRY_DELAY_MS = 30_000;
 
 export async function ensureRuntimeProcessing(
   request: EnsureRuntimeProcessingInput,
 ): Promise<HostedRuntimeEnsureProcessingResponse> {
   const parsedRequest = parseEnsureRuntimeProcessingInput(request);
   const cloudflareEnvironment = readHostedOrchestratorTemporalCloudflareEnvironment();
-  const cloudflareSource = parsedRequest.source === LEGACY_DEVICE_SYNC_RECOVERY_SOURCE
-    ? null
-    : parsedRequest.source ?? null;
   const cloudflareRequest = parseHostedRuntimeEnsureProcessingRequest({
     orchestrationAttemptId: parsedRequest.orchestrationAttemptId,
     reason: parsedRequest.reason,
-    ...(cloudflareSource ? { source: cloudflareSource } : {}),
-  } satisfies HostedRuntimeEnsureProcessingRequest);
+  });
 
   return observeHostedTemporalActivity({
     activity: "ensureRuntimeProcessing",
     orchestrationAttemptId: parsedRequest.orchestrationAttemptId,
     reason: parsedRequest.reason,
     userId: parsedRequest.userId,
-  }, async () => {
-    try {
-      return await requestHostedOrchestratorJson(
-        cloudflareEnvironment.cloudflareHostedControlBaseUrl,
-        {
-          body: JSON.stringify(cloudflareRequest),
-          boundUserId: parsedRequest.userId,
-          unsignedHeaders: {
-            [HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER]:
-              String(cloudflareEnvironment.ensureRuntimeProcessingHttpTimeoutMs),
-          },
-          label: "runtime ensure processing",
-          method: "POST",
-          parse: parseHostedRuntimeEnsureProcessingResponse,
-          path: buildCloudflareRuntimeEnsureProcessingPath(parsedRequest.userId),
-          signing: cloudflareEnvironment.cloudflareHostedControlSigning,
-          timeoutMs: cloudflareEnvironment.ensureRuntimeProcessingHttpTimeoutMs,
+  }, async () =>
+    await requestHostedOrchestratorJson(
+      cloudflareEnvironment.cloudflareHostedControlBaseUrl,
+      {
+        body: JSON.stringify(cloudflareRequest),
+        boundUserId: parsedRequest.userId,
+        unsignedHeaders: {
+          [HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER]:
+            String(cloudflareEnvironment.ensureRuntimeProcessingHttpTimeoutMs),
         },
-      );
-    } catch (error) {
-      if (!cloudflareSource || !isEnsureProcessingSourceDeploySkewRejection(error)) {
-        throw error;
-      }
-
-      // Deploy-skew only: old Cloudflare workers reject the new optional
-      // `source` key. Keep sourced demand pending until the consumer
-      // deployment can accept it instead of silently running without source.
-      return {
-        kind: "retry_later",
-        retryAt: new Date(
-          Date.now() + ENSURE_PROCESSING_SOURCE_DEPLOY_SKEW_RETRY_DELAY_MS,
-        ).toISOString(),
-      };
-    }
-  });
-}
-
-function isEnsureProcessingSourceDeploySkewRejection(error: unknown): boolean {
-  const visited = new Set<unknown>();
-  let current: unknown = error;
-
-  while (current && typeof current === "object" && !visited.has(current)) {
-    visited.add(current);
-    if (current instanceof HostedOrchestratorHttpResponseError) {
-      return current.status === 400 && current.code === undefined;
-    }
-    current = (current as { cause?: unknown }).cause;
-  }
-
-  return false;
+        label: "runtime ensure processing",
+        method: "POST",
+        parse: parseHostedRuntimeEnsureProcessingResponse,
+        path: buildCloudflareRuntimeEnsureProcessingPath(parsedRequest.userId),
+        signing: cloudflareEnvironment.cloudflareHostedControlSigning,
+        timeoutMs: cloudflareEnvironment.ensureRuntimeProcessingHttpTimeoutMs,
+      },
+    )
+  );
 }
 
 function parseEnsureRuntimeProcessingInput(
