@@ -253,6 +253,7 @@ describe("runner bundle runtime artifact staging", () => {
     const binDir = path.join(rootDir, "bin");
     const packageDir = path.join(rootDir, "packages", "contracts");
     const tarballsDir = path.join(rootDir, "tarballs");
+    const npmLogPath = path.join(rootDir, "npm.log");
     const pnpmLogPath = path.join(rootDir, "pnpm.log");
 
     temporaryDirectories.push(rootDir);
@@ -291,9 +292,11 @@ describe("runner bundle runtime artifact staging", () => {
       path.join(binDir, "npm"),
       [
         "#!/usr/bin/env node",
-        "import { mkdirSync, writeFileSync } from 'node:fs';",
+        "import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';",
         "import path from 'node:path';",
         "const args = process.argv.slice(2);",
+        `const logPath = ${JSON.stringify(npmLogPath)};`,
+        "appendFileSync(logPath, `${args.join(' ')}\\n`, 'utf8');",
         "const destinationIndex = args.indexOf('--pack-destination');",
         "const destination = destinationIndex >= 0 ? args[destinationIndex + 1] : null;",
         "if (!destination) process.exit(2);",
@@ -323,6 +326,10 @@ describe("runner bundle runtime artifact staging", () => {
 
     await expect(readFile(pnpmLogPath, "utf8")).resolves.toBe(
       "store path --silent\n",
+    );
+    await expect(readFile(npmLogPath, "utf8")).resolves.toBe(
+      "pack --ignore-scripts --silent --pack-destination "
+        + `${path.join(tarballsDir, "01-_murphai_contracts")}\n`,
     );
   });
 
