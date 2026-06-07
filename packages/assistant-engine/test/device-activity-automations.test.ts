@@ -35,7 +35,7 @@ vi.mock('@murphai/query', async (importOriginal) => {
     ...actual,
     listAutomations: vi.fn(async () => deviceActivityMocks.automations),
     listScheduledLogs: vi.fn(async () => []),
-    readVault: vi.fn(async () => {
+    readVaultRawTolerant: vi.fn(async () => {
       if (!deviceActivityMocks.readModel) {
         throw new Error('Missing mocked read model.')
       }
@@ -101,6 +101,7 @@ describe('device activity triggered automations', () => {
     ).resolves.toEqual({
       fired: 1,
       matched: 1,
+      nextWakeAt: expect.any(String),
     })
 
     expect(deviceActivityMocks.sendAssistantNotificationLocal).toHaveBeenCalledTimes(1)
@@ -110,6 +111,7 @@ describe('device activity triggered automations', () => {
         deliveryDedupeToken: 'automation-device-activity|auto_walk|evt_walk|2026-06-07T12:00:00.000Z|walk',
         deliveryTarget: 'linq-target-walk',
         instructions: expect.stringContaining('Lunch walk'),
+        responsePolicy: { kind: 'require_send' },
       }),
     )
     expect(deviceActivityMocks.upsertAutomation).toHaveBeenCalledWith(
@@ -149,6 +151,7 @@ describe('device activity triggered automations', () => {
     ).resolves.toEqual({
       fired: 0,
       matched: 0,
+      nextWakeAt: null,
     })
 
     expect(deviceActivityMocks.sendAssistantNotificationLocal).not.toHaveBeenCalled()

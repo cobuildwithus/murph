@@ -39,6 +39,12 @@ import type {
   HostedConversationWakeMetrics,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
+import {
+  HOSTED_ASSISTANT_WAKE_REASON,
+  HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+  createHostedRuntimeWakeCandidate,
+  selectHostedRuntimeWakeCandidate,
+} from "./wake-candidates.ts";
 
 type HostedMailboxOutcome = HostedMailboxEffect & {
   mailboxLane: HostedMailboxLane;
@@ -503,24 +509,40 @@ async function executeHostedSystemWake(input: {
         vaultRoot: input.vaultRoot,
         wake: input.wake,
       });
-      await runDeviceActivityTriggeredAutomations({
-        deliveryDispatchMode: "queue-only",
-        executionContext: input.executionContext,
-        signal: undefined,
-        turnEnvironment: createHostedAssistantTurnEnvironment({
-          operatorHomeRoot: input.operatorHomeRoot,
-          runtimeEnv: input.runtimeEnv,
-          vaultRoot: input.vaultRoot,
-        }),
-        vault: input.vaultRoot,
-      });
+      const activityAutomation = input.shouldYieldDeviceSync?.() === true
+        ? { fired: 0, matched: 0, nextWakeAt: null }
+        : await runDeviceActivityTriggeredAutomations({
+          deliveryDispatchMode: "queue-only",
+          executionContext: input.executionContext,
+          signal: undefined,
+          turnEnvironment: createHostedAssistantTurnEnvironment({
+            operatorHomeRoot: input.operatorHomeRoot,
+            runtimeEnv: input.runtimeEnv,
+            vaultRoot: input.vaultRoot,
+          }),
+          vault: input.vaultRoot,
+        }).catch((error: unknown) => {
+          emitHostedDeviceActivityAutomationFailureLog({
+            error,
+            wake: input.wake,
+          });
+          return { fired: 0, matched: 0, nextWakeAt: null };
+        });
+      const nextWake = selectHostedRuntimeWakeCandidate([
+        createHostedRuntimeWakeCandidate(
+          deviceSyncMetrics.nextWakeAt,
+          deviceSyncMetrics.nextWakeReason ?? HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+        ),
+        createHostedRuntimeWakeCandidate(
+          activityAutomation.fired > 0 ? activityAutomation.nextWakeAt : null,
+          HOSTED_ASSISTANT_WAKE_REASON,
+        ),
+      ]);
       return createNoopMailboxEffect({
         conversationMetrics: null,
         mailboxLane: "device-sync",
-        nextWakeAt: deviceSyncMetrics.nextWakeAt,
-        ...(deviceSyncMetrics.nextWakeAt
-          ? { nextWakeReason: "device-sync.reconcile" }
-          : {}),
+        nextWakeAt: nextWake.at,
+        ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
         postCheckpointRecord: deviceSyncMetrics.postCheckpointRecord ?? null,
       });
     case "runtime.manual-requested":
@@ -536,6 +558,23 @@ async function executeHostedSystemWake(input: {
   const exhaustiveWake: never = input.wake;
   void exhaustiveWake;
   throw new TypeError('Unsupported hosted system wake kind.');
+}
+
+function emitHostedDeviceActivityAutomationFailureLog(input: {
+  error: unknown;
+  wake: HostedExecutionSystemWake;
+}): void {
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      eventCode: "assistant.device_activity_automation_failed",
+    },
+    error: input.error,
+    level: "warn",
+    message: "Hosted device activity automation pass failed; continuing device-sync wake.",
+    phase: "wake.running",
+    wake: input.wake,
+  });
 }
 
 export async function executeHostedAssistantNotificationWake(input: {

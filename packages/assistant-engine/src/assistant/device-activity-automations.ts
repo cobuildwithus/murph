@@ -1,7 +1,7 @@
 import { upsertAutomation } from '@murphai/core'
 import {
   listAutomations,
-  readVault,
+  readVaultRawTolerant,
   type AutomationQueryRecord,
   type VaultReadModel,
 } from '@murphai/query'
@@ -42,6 +42,7 @@ export interface RunDeviceActivityTriggeredAutomationsInput {
 export interface RunDeviceActivityTriggeredAutomationsResult {
   fired: number
   matched: number
+  nextWakeAt: string | null
 }
 
 export async function runDeviceActivityTriggeredAutomations(
@@ -51,10 +52,10 @@ export async function runDeviceActivityTriggeredAutomations(
   const deviceActivityAutomations = automations.filter(isDeviceActivityAutomation)
 
   if (deviceActivityAutomations.length === 0) {
-    return { fired: 0, matched: 0 }
+    return { fired: 0, matched: 0, nextWakeAt: null }
   }
 
-  const vault = await readVault(input.vault)
+  const vault = await readVaultRawTolerant(input.vault)
   const activityCandidates = listDeviceActivityCandidates(vault)
   let matched = 0
   let fired = 0
@@ -86,7 +87,11 @@ export async function runDeviceActivityTriggeredAutomations(
     fired += 1
   }
 
-  return { fired, matched }
+  return {
+    fired,
+    matched,
+    nextWakeAt: fired > 0 ? new Date().toISOString() : null,
+  }
 }
 
 function isDeviceActivityAutomation(record: AutomationQueryRecord): record is DeviceActivityAutomation {
@@ -295,6 +300,7 @@ async function sendDeviceActivityAutomationNotification(input: {
     instructions: buildDeviceActivityAutomationInstructions(input.automation, input.activity),
     operatorAuthority: 'direct-operator',
     participantId: route.participantId,
+    responsePolicy: { kind: 'require_send' },
     sessionId: null,
     threadId: route.threadId,
     workingDirectory: input.input.vault,
