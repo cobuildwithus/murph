@@ -279,9 +279,11 @@ describe("runner bundle runtime artifact staging", () => {
       [
         "#!/usr/bin/env node",
         "import { appendFileSync } from 'node:fs';",
-        "const logPath = process.env.MURPH_FAKE_PNPM_LOG;",
-        "if (!logPath) process.exit(2);",
+        `const logPath = ${JSON.stringify(pnpmLogPath)};`,
         "appendFileSync(logPath, `${process.argv.slice(2).join(' ')}\\n`, 'utf8');",
+        "if (process.argv.slice(2).join(' ') === 'store path --silent') {",
+        `  console.log(${JSON.stringify(path.join(rootDir, "pnpm-store"))});`,
+        "}",
       ].join("\n"),
       "utf8",
     );
@@ -304,7 +306,6 @@ describe("runner bundle runtime artifact staging", () => {
     await chmod(path.join(binDir, "npm"), 0o755);
 
     vi.stubEnv("PATH", `${binDir}${path.delimiter}${process.env.PATH ?? ""}`);
-    vi.stubEnv("MURPH_FAKE_PNPM_LOG", pnpmLogPath);
 
     const tarballs = await packWorkspacePackageArtifacts(
       ["@murphai/contracts"],
@@ -320,9 +321,9 @@ describe("runner bundle runtime artifact staging", () => {
       throw new Error("Contracts tarball was not packed.");
     }
 
-    await expect(readFile(pnpmLogPath, "utf8")).rejects.toMatchObject({
-      code: "ENOENT",
-    });
+    await expect(readFile(pnpmLogPath, "utf8")).resolves.toBe(
+      "store path --silent\n",
+    );
   });
 
   it("includes the workspace package name when npm pack fails", async () => {
