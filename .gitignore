@@ -28,6 +28,12 @@ apps/web/next-env.d.ts
 !/.agents/skills/health-commons-research/SKILL.md
 !/.agents/skills/work-with-pro/
 !/.agents/skills/work-with-pro/SKILL.md
+!/.agents/skills/murph-exercise-images/
+!/.agents/skills/murph-exercise-images/SKILL.md
+!/.agents/skills/murph-exercise-images/agents/
+!/.agents/skills/murph-exercise-images/agents/openai.yaml
+!/.agents/skills/murph-exercise-images/scripts/
+!/.agents/skills/murph-exercise-images/scripts/upload_cloudflare_image.py
 .claude/
 .windsurf/
 /skills/

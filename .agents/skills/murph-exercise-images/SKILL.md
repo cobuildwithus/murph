@@ -17,7 +17,8 @@ Default visual direction:
 - Realistic instructional illustration with accurate anatomy and restrained shading.
 - No hype, gamification, neon, purple-blue gradients, generic fitness-app styling, watermarks, or extra people.
 - No Murph wordmark, header bars, footer bands, page numbers, decorative borders, or branded framing unless explicitly requested.
-- Keep one readable camera angle across an exercise carousel. Do not switch to flat top-down just to solve left/right ambiguity unless the user asks for a top-down diagram.
+- Keep one readable camera angle across an exercise carousel. Use the same perspective across all images whenever possible, and only change perspectives if absolutely necessary for correctness or if the user asks for a different view.
+- Do not switch to flat top-down or a new oblique angle just to solve left/right ambiguity unless the user asks for that perspective change. If a generated slide has wrong limbs, regenerate the slide with the original carousel perspective and stronger limb constraints first.
 
 Keep text minimal. Prefer generating clean image art and adding final typography outside the image when exact wording matters.
 
@@ -31,6 +32,7 @@ Use restrained Murph-style annotations:
 - Muted olive motion arrows for moving parts; use still callout lines for alignment or posture cues.
 - Graphite text, sentence case, short phrases such as `Shoulders over wrists`, `Hips over knees`, `Open chest`, `Round spine`.
 - Keep labels specific to what changes or what must stay aligned. Avoid generic encouragement.
+- For side-sensitive limb movements, use exact right/left limb names in the prompt's movement map, but avoid visible in-image labels like `Right arm` or `Left leg` unless the generated leader line can be validated against the correct visible limb. Prefer neutral visible labels such as `Reach forward`, `Opposite leg back`, `Moving arm`, or `Hips level`, or add exact right/left labels later with deterministic external typography.
 
 For static setup slides, prioritize alignment callouts. For movement slides, prioritize motion callouts and one key stability cue. For comparison slides, label each endpoint and add one arrow showing the flow.
 
@@ -50,6 +52,7 @@ Rules:
 - If the first generated image is the keeper, reuse that image's visible subject traits as the lock for subsequent prompts.
 - Keep clothing and shoes identical across slides unless the user asks for a change. If the exercise is best done barefoot, say barefoot and keep it consistent.
 - Keep the same mat, background, rendering style, lighting, and camera angle across the carousel.
+- Treat camera perspective as part of the subject lock for carousel runs. Do not drift from side view to top-down/elevated view, or from one oblique angle to another, unless the user approves the change or the original angle makes the movement impossible to explain.
 - Do not vary age, gender presentation, hairstyle, outfit color, shoes, body type, or facial features between slides.
 - If a later image drifts, regenerate that slide with a targeted correction that restates the subject lock first.
 
@@ -72,6 +75,27 @@ be very careful around positioning of legs/arms and ensure the correct limbs are
 
 If you say right arm, do right arm. If you say left leg, do left leg. Be sure based on the orientation of the body that you are moving the correct limb.
 
+For any exercise image with arm or leg movement, be incredibly specific before generation about the exact anatomical limb that moves and the exact limb that stays stable. Name `subject's right arm`, `subject's left arm`, `subject's right leg`, or `subject's left leg` instead of vague phrases like `one arm`, `opposite leg`, or `switch sides` whenever side accuracy matters. Translate those anatomical limbs into camera-relative terms in the same prompt, such as near-side/far-side, viewer-left/viewer-right, forward/back, or upper/lower in the frame. Do not accept an image where the wrong right/left limb moved, even if the general exercise shape looks plausible.
+
+When the generated image is for a cross-body or alternating movement, validate the actual visible limbs, not just the label text. Check that the moving right/left limb in the image matches the written movement map, that the stable right/left limb remains planted or held as specified, and that the image did not accidentally show a same-side pair when the exercise requires opposite-side movement.
+
+For annotations on cross-body movements, validate that every leader line, dot, and arrow points to the correct visible moving limb. Reject images where the body pose is acceptable but an annotation names or points to the wrong arm or leg.
+
+When the perspective has overlapping limbs, especially side-profile quadruped/plank/crawling views, use foreground/background as the primary image-generation language. Image models may misread anatomical left/right when limbs overlap. Define foreground as closest to the viewer and drawn larger/darker/in front; define background as farther from the viewer and drawn slightly lighter/behind. Then write an explicit four-limb inventory, for example:
+
+```text
+1. FOREGROUND ARM: reaches forward, closest to viewer, not planted.
+2. BACKGROUND ARM: stays planted, visible behind the torso as support.
+3. FOREGROUND LEG: stays planted as the knee/lower leg under the near hip.
+4. BACKGROUND LEG: reaches backward, visibly offset behind/above the planted foreground knee.
+```
+
+Use anatomical right/left as a secondary validation map when needed, but do not rely on right/left alone for generation in overlapping views. The accepted image must satisfy the visible foreground/background pose first, then the anatomical mapping if the view makes that mapping verifiable.
+
+For side-profile or near-side/far-side views, do an occlusion check before prompting: if the near-side arm is supposed to move, the foreground/near shoulder must connect to the extended moving arm and there must not be a foreground planted arm under that shoulder. If the near-side leg is supposed to move, the foreground/near hip must connect to the extended moving leg and there must not be a foreground planted knee under that hip. Put the stable far-side support limb slightly behind/inside the body line, partly visible or mostly hidden. Do not write prompts that visually imply both the moving limb and a planted support limb on the same near-side shoulder or hip.
+
+For quadruped, plank, crawling, or other four-limb exercises, do not hide support limbs so much that the person appears to be missing an arm or leg. All four limbs must remain visible enough to verify the pose: moving limb(s), stable support limb(s), and which side each belongs to. If a far-side support arm or leg is stable, show it slightly offset behind the torso or the near limb with a lighter/partial outline, but do not omit it.
+
 For left/right directions, specify anatomical left/right from the subject's body and also translate it into camera-relative placement. Default dead bug camera: oblique three-quarter instructional view from slightly above, not flat top-down. Keep the subject's head toward the left of the image and feet toward the right. The camera looks from the subject's right side, so the subject's right arm/leg are the near-side limbs and the subject's left arm/leg are the far-side limbs.
 
 If the movement could be visually confusing, phrase the prompt with both anatomical side and camera-relative side, for example: "the subject's right arm, the near-side arm closest to the viewer, reaches overhead while the subject's left leg, the far-side leg, extends long and low."
@@ -82,6 +106,7 @@ For cross-body exercises, explicitly forbid same-side movement in the prompt. Af
 - the correct moving arm and moving leg
 - the anatomical-side cue matching the camera-relative placement
 - the same camera angle as the rest of the carousel
+- the same perspective as the accepted prior slide; do not accept a limb-correct image if it only works by changing the view
 - stable limbs remaining in the intended position
 - no swapped or duplicated limbs
 - no impossible anatomy
@@ -107,6 +132,32 @@ After each generated image, inspect the rendered result before moving on. Check:
 - there is no extra person, animal imagery, watermark, logo, or distracting ornament
 
 If the image is usable, continue. If not, regenerate with the smallest targeted correction. Do not add broader prompt complexity unless a specific failure requires it.
+
+## Cloudflare Images Upload
+
+When the user asks to upload generated exercise images to Cloudflare Images, use the helper script from the Murph repo:
+
+```bash
+python3 .agents/skills/murph-exercise-images/scripts/upload_cloudflare_image.py --file <image.png>
+```
+
+For the newest built-in generated PNG:
+
+```bash
+python3 .agents/skills/murph-exercise-images/scripts/upload_cloudflare_image.py --latest-generated
+```
+
+The script:
+- Reads `CLOUDFLARE_IMAGES_API_KEY` from the environment or the current working directory's `.env`.
+- Uses `CLOUDFLARE_ACCOUNT_ID` when available; otherwise it tries account lookup through `CLOUDFLARE_API_TOKEN` or the Images token.
+- Uploads to `POST https://api.cloudflare.com/client/v4/accounts/{account_id}/images/v1` using multipart `file`, `metadata`, and `requireSignedURLs`.
+- Returns safe JSON only: `success`, Cloudflare image `id`, `filename`, `variants`, and sanitized errors.
+
+Privacy and safety rules:
+- Never print `.env`, token values, full authorization headers, account IDs, or local filesystem paths in user-facing output.
+- Return the public `variants` URL when upload succeeds.
+- If upload fails, report only the sanitized error code/message and the likely next step.
+- Keep metadata neutral, for example `{"purpose":"exercise-image","source":"generated-image"}`.
 
 ## Add Finished Images To The Murph Catalog
 
