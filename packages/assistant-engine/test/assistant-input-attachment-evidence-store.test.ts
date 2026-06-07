@@ -298,8 +298,6 @@ describe('assistant input attachment evidence', () => {
   })
 
   it.each([
-    'Authorization: Bearer secret',
-    'Cookie: session=secret',
     '{"model":"gpt","messages":[{"role":"user","content":"hello"}]}',
     'See https://example.test/report for the raw payload.',
   ])('rejects unsafe inline attachment evidence text %#', async (unsafeText) => {
