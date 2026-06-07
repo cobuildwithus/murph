@@ -64,6 +64,8 @@ function printHelp() {
   console.log(`Usage: node .agents/skills/research-supplements/scripts/supplement-db-brand-site-repair-preview.mjs [options]
 
 Build a read-only repair preview for brand_site supplement rows.
+Writes local preview artifacts including compact search-text proposals,
+automated-backfill readiness, and prioritized official refetch/OCR queues.
 
 Options:
   --batch-size <n>       Rows per DB read batch. Default: ${DEFAULT_BATCH_SIZE}.
@@ -1674,6 +1676,141 @@ function cleanTrailingExtractRatioName(value) {
   return cleanValue(value).replace(/\s*\([^)]*\b\d+\s*:\s*\d+\s*extract[^)]*\)$/iu, "");
 }
 
+const EVIDENCE_RECOVERY_ACTIONS = {
+  official_refetch_or_ocr: {
+    priority: 10,
+    action: "refetch_official_label_or_ocr",
+    reason: "Saved row does not contain enough structured facts evidence; fetch official facts HTML, product JSON/media, label image, or PDF.",
+  },
+  official_refetch_page_body: {
+    priority: 20,
+    action: "refetch_official_page_body",
+    reason: "Saved facts evidence looks like full page/body copy; refetch the official product label and replace with bounded label-only evidence.",
+  },
+  parser_serving_size_review: {
+    priority: 30,
+    action: "review_serving_size_parser",
+    reason: "Ingredient rows are present but serving size is missing or malformed; inspect official label serving-size evidence before backfill.",
+  },
+  parser_or_manual_review: {
+    priority: 40,
+    action: "review_parser_or_manual",
+    reason: "Some evidence exists, but parser confidence is not high enough for automated backfill.",
+  },
+  manual_review_fallback_rows: {
+    priority: 50,
+    action: "manual_review_fallback_amount_rows",
+    reason: "Only broad amount-pattern ingredient rows were recovered; manually verify the label table before writing.",
+  },
+  not_standalone_supplement_review: {
+    priority: 90,
+    action: "review_non_standalone_or_delete",
+    reason: "Row appears to be food, flavoring, bundle, or another non-standalone supplement candidate.",
+  },
+};
+
+function evidenceRecoveryAction(hint) {
+  return EVIDENCE_RECOVERY_ACTIONS[hint] ?? {
+    priority: 80,
+    action: "manual_review",
+    reason: "Row is not ready for automated backfill and needs manual review.",
+  };
+}
+
+function buildEvidenceRecoveryQueue(previews) {
+  const unreadyRows = previews.filter((row) => !row.automatedBackfillReady);
+  const brandVolumes = new Map();
+  for (const row of unreadyRows) {
+    const source = sourceFromOriginId(row.dataOriginId);
+    brandVolumes.set(source, (brandVolumes.get(source) ?? 0) + 1);
+  }
+
+  return unreadyRows
+    .map((row) => {
+      const source = sourceFromOriginId(row.dataOriginId);
+      const action = evidenceRecoveryAction(row.evidenceRecoveryHint);
+      const parserBlockers = Array.isArray(row.parserBlockers) ? row.parserBlockers : [];
+      return {
+        priority: action.priority,
+        action: action.action,
+        evidenceRecoveryHint: row.evidenceRecoveryHint,
+        reason: action.reason,
+        source,
+        sourceId: sourceIdFromOriginId(row.dataOriginId),
+        brandUnreadyRows: brandVolumes.get(source) ?? 0,
+        id: row.id,
+        dataOriginId: row.dataOriginId,
+        name: row.name,
+        brand: row.brand,
+        dataOriginUrl: row.dataOriginUrl,
+        parserStatus: row.parserStatus,
+        parserBlockers,
+        missingIngredientRows: parserBlockers.includes("missing_ingredient_rows"),
+        missingServingSizes: parserBlockers.includes("missing_serving_sizes"),
+        existingIngredientRows: row.existingIngredientRows,
+        parsedIngredientRows: row.parsedIngredientRows,
+        existingServingSizes: row.existingServingSizes,
+        parsedServingSizes: row.parsedServingSizes,
+        oldSearchTextLength: row.oldSearchTextLength,
+        proposedSearchTextLength: row.proposedSearchTextLength,
+        proposedSearchTextPreview: row.proposedSearchTextPreview,
+      };
+    })
+    .sort((a, b) => (
+      a.priority - b.priority
+      || b.brandUnreadyRows - a.brandUnreadyRows
+      || a.source.localeCompare(b.source)
+      || String(a.dataOriginUrl ?? "").localeCompare(String(b.dataOriginUrl ?? ""))
+      || String(a.name ?? "").localeCompare(String(b.name ?? ""))
+      || String(a.id ?? "").localeCompare(String(b.id ?? ""))
+    ));
+}
+
+function buildEvidenceRecoveryByBrand(queue) {
+  const byBrand = new Map();
+  for (const row of queue) {
+    const current = byBrand.get(row.source) ?? {
+      source: row.source,
+      rows: 0,
+      sourceUrls: 0,
+      actions: {},
+      hints: {},
+      blockers: {},
+      sampleRows: [],
+      _sourceUrls: new Set(),
+    };
+    current.rows += 1;
+    current._sourceUrls.add(row.dataOriginUrl);
+    current.actions[row.action] = (current.actions[row.action] ?? 0) + 1;
+    current.hints[row.evidenceRecoveryHint] = (current.hints[row.evidenceRecoveryHint] ?? 0) + 1;
+    for (const blocker of row.parserBlockers) {
+      current.blockers[blocker] = (current.blockers[blocker] ?? 0) + 1;
+    }
+    if (current.sampleRows.length < 8) {
+      current.sampleRows.push({
+        id: row.id,
+        dataOriginId: row.dataOriginId,
+        name: row.name,
+        action: row.action,
+        parserStatus: row.parserStatus,
+        parserBlockers: row.parserBlockers,
+        dataOriginUrl: row.dataOriginUrl,
+      });
+    }
+    byBrand.set(row.source, current);
+  }
+
+  return [...byBrand.values()]
+    .map((entry) => {
+      const { _sourceUrls, ...publicEntry } = entry;
+      return {
+        ...publicEntry,
+        sourceUrls: _sourceUrls.size,
+      };
+    })
+    .sort((a, b) => b.rows - a.rows || a.source.localeCompare(b.source));
+}
+
 function summarize(previews) {
   const summary = {
     rowsReviewed: previews.length,
@@ -1713,8 +1850,15 @@ function writeArtifacts(outputDir, previews, summary) {
   const jsonPath = join(outputDir, "brand_site_repair_preview.json");
   const summaryPath = join(outputDir, "brand_site_repair_preview_summary.json");
   const csvPath = join(outputDir, "brand_site_repair_preview.csv");
+  const recoveryQueue = buildEvidenceRecoveryQueue(previews);
+  const recoveryByBrand = buildEvidenceRecoveryByBrand(recoveryQueue);
+  const recoveryQueuePath = join(outputDir, "brand_site_evidence_recovery_queue.json");
+  const recoveryByBrandPath = join(outputDir, "brand_site_evidence_recovery_by_brand.json");
+  const recoveryQueueCsvPath = join(outputDir, "brand_site_evidence_recovery_queue.csv");
   writeFileSync(jsonPath, `${JSON.stringify(previews, null, 2)}\n`);
   writeFileSync(summaryPath, `${JSON.stringify(summary, null, 2)}\n`);
+  writeFileSync(recoveryQueuePath, `${JSON.stringify(recoveryQueue, null, 2)}\n`);
+  writeFileSync(recoveryByBrandPath, `${JSON.stringify(recoveryByBrand, null, 2)}\n`);
   const headers = [
     "parserStatus",
     "automatedBackfillReady",
@@ -1737,7 +1881,38 @@ function writeArtifacts(outputDir, previews, summary) {
     "proposedSearchTextPreview",
   ];
   writeFileSync(csvPath, `${headers.join(",")}\n${previews.map((row) => headers.map((header) => csvEscape(row[header])).join(",")).join("\n")}\n`);
-  return { jsonPath, summaryPath, csvPath };
+  const recoveryHeaders = [
+    "priority",
+    "action",
+    "evidenceRecoveryHint",
+    "source",
+    "sourceId",
+    "brandUnreadyRows",
+    "id",
+    "dataOriginId",
+    "name",
+    "brand",
+    "dataOriginUrl",
+    "parserStatus",
+    "parserBlockers",
+    "existingIngredientRows",
+    "parsedIngredientRows",
+    "existingServingSizes",
+    "parsedServingSizes",
+    "oldSearchTextLength",
+    "proposedSearchTextLength",
+    "proposedSearchTextPreview",
+    "reason",
+  ];
+  writeFileSync(recoveryQueueCsvPath, `${recoveryHeaders.join(",")}\n${recoveryQueue.map((row) => recoveryHeaders.map((header) => csvEscape(row[header])).join(",")).join("\n")}\n`);
+  return {
+    jsonPath,
+    summaryPath,
+    csvPath,
+    recoveryQueuePath,
+    recoveryByBrandPath,
+    recoveryQueueCsvPath,
+  };
 }
 
 async function main() {
@@ -1765,6 +1940,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 }
 
 export {
+  buildEvidenceRecoveryByBrand,
+  buildEvidenceRecoveryQueue,
   extractIngredientRows,
   extractIngredientRowsFromText,
   extractServingSizes,

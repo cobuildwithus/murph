@@ -42,6 +42,7 @@ Never print `.env`, `.env.local`, database URLs, credentials, tokens, or raw con
    - Treat dry-run `productionBlockedRows` as blockers. The helper blocks production upserts for missing `ingredientRows`, missing `servingSizes`, manual-review rows, obvious non-standalone products, oversized page-body text, raw page text, or oversized search text.
    - For existing-row cleanup, run `supplement-db-brand-site-repair-preview.mjs` first. It is read-only and writes review artifacts showing proposed compact search text, parser coverage, normalized row additions, and superfluous field candidates. Do not write repair updates until the preview has been reviewed.
    - Treat repair preview `automatedBackfillReady: true` rows as the only candidates for automated backfill. `structured_ready` is diagnostic parser state and can still have blockers; do not use it alone as a write/delete gate. Keep blocked, `partial_parse`, and `needs_better_parser` rows in manual review/refetch/OCR queues, even when some facts were recovered.
+   - Use the preview's `brand_site_evidence_recovery_queue.json` / `.csv` and `brand_site_evidence_recovery_by_brand.json` artifacts to prioritize remaining blocked rows. Process `refetch_official_label_or_ocr` and `refetch_official_page_body` rows from official sources before adding more parser regex; these rows usually lack trustworthy saved label evidence.
    - Before deleting raw evidence fields such as `bodyText`, `rawPageText`, or `allProductFactsText`, confirm the row has `automatedBackfillReady: true` with production-quality `label.ingredientRows` and `label.servingSizes`; preserve raw evidence for blocked, partial, uncertain, image-only, OCR-fragmented, or whole-page evidence rows.
    - For image-only labels, OCR-fragmented facts, or saved text that is just page captions/alt text, prefer a fresh official-page refetch/OCR pass over guessing from marketing copy.
    - If the saved row has no real facts text, refetch official evidence instead of expanding parser regexes. Prefer official HTML facts tables first, then official product JSON/media (`/products/<handle>.js` on Shopify when available), official Supplement Facts/Nutrition Facts images, and PDFs. Store only the resulting normalized single-product facts, plus concise provenance; do not store full HTML/page bodies.
@@ -85,6 +86,6 @@ Report skipped products and why.
 ## Resources
 
 - `scripts/supplement-db-brand-site-labels.mjs`: DB schema inspect, dry-run, and upsert helper for `supplements` rows where `data_origin = 'brand_site'`.
-- `scripts/supplement-db-brand-site-repair-preview.mjs`: read-only existing-row repair preview for compact search text and normalized facts parsing.
+- `scripts/supplement-db-brand-site-repair-preview.mjs`: read-only existing-row repair preview for compact search text, normalized facts parsing, automated-backfill readiness, and official refetch/OCR queue artifacts.
 - `references/database-contract.md`: current supplement DB table contract and write rules.
 - `references/source-quality.md`: source hierarchy and extraction quality rules.

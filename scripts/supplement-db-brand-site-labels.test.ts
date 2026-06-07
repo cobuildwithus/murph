@@ -9,6 +9,8 @@ import {
   normalizeItem,
 } from "../.agents/skills/research-supplements/scripts/supplement-db-brand-site-labels.mjs";
 import {
+  buildEvidenceRecoveryByBrand,
+  buildEvidenceRecoveryQueue,
   extractIngredientRowsFromText,
   extractServingSizes,
   repairPreviewForRow,
@@ -1658,6 +1660,121 @@ describe("supplement brand-site repair preview", () => {
         },
       },
     });
+  });
+
+  test("repair preview builds a prioritized evidence recovery queue without raw label bodies", () => {
+    const refetch = repairPreviewForRow({
+      id: "large-brand:caption-only",
+      dataOriginId: "large-brand:caption-only",
+      dataOriginUrl: "https://example.test/products/caption-only",
+      name: "Caption Only",
+      brand: "Large Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "large-brand",
+        sourceId: "caption-only",
+        factsText: "Supplement Facts",
+        bodyText: "raw body text must not appear in queue",
+      },
+    });
+    const servingReview = repairPreviewForRow({
+      id: "small-brand:serving-review",
+      dataOriginId: "small-brand:serving-review",
+      dataOriginUrl: "https://example.test/products/serving-review",
+      name: "Serving Review",
+      brand: "Small Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "small-brand",
+        sourceId: "serving-review",
+        factsText: "Supplement Facts Amount Per Serving Magnesium 200 mg 48%",
+      },
+    });
+    const safe = repairPreviewForRow({
+      id: "large-brand:ready",
+      dataOriginId: "large-brand:ready",
+      dataOriginUrl: "https://example.test/products/ready",
+      name: "Ready",
+      brand: "Large Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "large-brand",
+        sourceId: "ready",
+        ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg" }],
+        servingSizes: [{ text: "1 capsule", source: "official_label" }],
+      },
+    });
+
+    const queue = buildEvidenceRecoveryQueue([servingReview, safe, refetch]);
+
+    assert.equal(queue.length, 2);
+    assert.deepEqual(queue.map((row) => row.action), [
+      "refetch_official_label_or_ocr",
+      "review_serving_size_parser",
+    ]);
+    assert.equal(queue[0].source, "large-brand");
+    assert.equal(queue[0].brandUnreadyRows, 1);
+    assert.equal(queue[0].missingIngredientRows, true);
+    assert.equal(queue[0].missingServingSizes, true);
+    assert.equal(Object.hasOwn(queue[0], "bodyText"), false);
+    assert.equal(JSON.stringify(queue).includes("raw body text must not appear"), false);
+
+    assert.deepEqual(buildEvidenceRecoveryByBrand(queue), [
+      {
+        source: "large-brand",
+        rows: 1,
+        sourceUrls: 1,
+        actions: { refetch_official_label_or_ocr: 1 },
+        hints: { official_refetch_or_ocr: 1 },
+        blockers: {
+          missing_ingredient_rows: 1,
+          missing_serving_sizes: 1,
+        },
+        sampleRows: [
+          {
+            id: "large-brand:caption-only",
+            dataOriginId: "large-brand:caption-only",
+            name: "Caption Only",
+            action: "refetch_official_label_or_ocr",
+            parserStatus: "needs_better_parser",
+            parserBlockers: [
+              "missing_ingredient_rows",
+              "missing_serving_sizes",
+            ],
+            dataOriginUrl: "https://example.test/products/caption-only",
+          },
+        ],
+      },
+      {
+        source: "small-brand",
+        rows: 1,
+        sourceUrls: 1,
+        actions: { review_serving_size_parser: 1 },
+        hints: { parser_serving_size_review: 1 },
+        blockers: {
+          missing_serving_sizes: 1,
+        },
+        sampleRows: [
+          {
+            id: "small-brand:serving-review",
+            dataOriginId: "small-brand:serving-review",
+            name: "Serving Review",
+            action: "review_serving_size_parser",
+            parserStatus: "partial_parse",
+            parserBlockers: [
+              "missing_serving_sizes",
+            ],
+            dataOriginUrl: "https://example.test/products/serving-review",
+          },
+        ],
+      },
+    ]);
   });
 
   test("repair preview rejects net-content counts stored as existing serving sizes", () => {

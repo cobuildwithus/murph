@@ -54,6 +54,52 @@ export interface RepairPreviewSummary {
   }>;
 }
 
+export interface EvidenceRecoveryQueueRow {
+  priority: number;
+  action: string;
+  evidenceRecoveryHint: string;
+  reason: string;
+  source: string;
+  sourceId: string;
+  brandUnreadyRows: number;
+  id: string;
+  dataOriginId: string;
+  name: string;
+  brand?: string | null;
+  dataOriginUrl?: string | null;
+  parserStatus: "structured_ready" | "partial_parse" | "needs_better_parser";
+  parserBlockers: string[];
+  missingIngredientRows: boolean;
+  missingServingSizes: boolean;
+  existingIngredientRows: number;
+  parsedIngredientRows: number;
+  existingServingSizes: number;
+  parsedServingSizes: number;
+  oldSearchTextLength: number;
+  proposedSearchTextLength: number;
+  proposedSearchTextPreview: string;
+}
+
+export interface EvidenceRecoveryBrandQueue {
+  source: string;
+  rows: number;
+  sourceUrls: number;
+  actions: Record<string, number>;
+  hints: Record<string, number>;
+  blockers: Record<string, number>;
+  sampleRows: Array<{
+    id: string;
+    dataOriginId: string;
+    name: string;
+    action: string;
+    parserStatus: "structured_ready" | "partial_parse" | "needs_better_parser";
+    parserBlockers: string[];
+    dataOriginUrl?: string | null;
+  }>;
+}
+
+export function buildEvidenceRecoveryByBrand(queue: EvidenceRecoveryQueueRow[]): EvidenceRecoveryBrandQueue[];
+export function buildEvidenceRecoveryQueue(previews: ProposedRepairPreview[]): EvidenceRecoveryQueueRow[];
 export function extractIngredientRows(label: Record<string, unknown>): Array<Record<string, unknown>>;
 export function extractIngredientRowsFromText(input: string): Array<Record<string, unknown>>;
 export function extractServingSizes(
