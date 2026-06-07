@@ -296,6 +296,7 @@ describe("hosted runner container image contract", () => {
       "@murphai/contracts",
       "@murphai/core",
       "@murphai/device-syncd",
+      "@murphai/exercise-library",
       "@murphai/gateway-core",
       "@murphai/health-commons",
       "@murphai/health-metrics",
