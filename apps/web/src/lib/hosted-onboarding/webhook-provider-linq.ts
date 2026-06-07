@@ -60,7 +60,8 @@ import {
   buildIgnoredLinqWebhookPlan,
   buildQuotaReplyResponse,
   buildSignupLinkResponse,
-  isHostedLinqIMessageFirstContact,
+  hostedLinqFirstContactContainsBlockedContent,
+  isHostedLinqDeliverableFirstContact,
   resolveHostedOnboardingLinqMessageContext,
 } from "./webhook-provider-linq-shared";
 export type {
@@ -455,14 +456,29 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
-  if (!isHostedLinqIMessageFirstContact(messageEvent)) {
+  if (!isHostedLinqDeliverableFirstContact({
+    event: messageEvent,
+    participantContact,
+  })) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildIgnoredLinqWebhookPlan("non-imessage-first-contact"),
+      buildIgnoredLinqWebhookPlan("undeliverable-first-contact"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
         existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
         existingMemberMatch,
-        reason: "non-imessage-first-contact",
-        routeStage: "ignored-non-imessage-first-contact",
+        reason: "undeliverable-first-contact",
+        routeStage: "ignored-undeliverable-first-contact",
+      }),
+    );
+  }
+
+  if (hostedLinqFirstContactContainsBlockedContent(messageEvent)) {
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("blocked-first-contact-content"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
+        existingMemberMatch,
+        reason: "blocked-first-contact-content",
+        routeStage: "ignored-blocked-first-contact-content",
       }),
     );
   }

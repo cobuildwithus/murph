@@ -43,10 +43,32 @@ export type HostedOnboardingLinqMessageContext = {
   summary: ReturnType<typeof summarizeHostedLinqMessage>;
 };
 
-export function isHostedLinqIMessageFirstContact(
+export function isHostedLinqDeliverableFirstContact(input: {
+  event: HostedLinqMessageReceivedEvent;
+  participantContact: HostedLinqParticipantContact;
+}): boolean {
+  if (input.participantContact.kind === "phone") {
+    return true;
+  }
+
+  return isHostedLinqIMessageService(input.event.data.service);
+}
+
+export function hostedLinqFirstContactContainsBlockedContent(
   event: HostedLinqMessageReceivedEvent,
 ): boolean {
-  return isHostedLinqIMessageService(event.data.service);
+  return event.data.message.parts.some((part) => {
+    if (part.type === "link") {
+      return true;
+    }
+
+    if (part.type === "text") {
+      return containsUrlLikeText(part.value)
+        || containsSmsOptOutBoilerplate(part.value);
+    }
+
+    return false;
+  });
 }
 
 export function isHostedLinqIMessageService(
@@ -257,4 +279,28 @@ function normalizeHostedLinqService(value: string | null | undefined): string | 
   const normalized = value.trim().toLowerCase();
 
   return normalized.length > 0 ? normalized : null;
+}
+
+function containsUrlLikeText(value: string): boolean {
+  if (/\b(?:[a-z][a-z\d+.-]*:\/\/|www\.)\S+/iu.test(value)) {
+    return true;
+  }
+
+  return /(?:^|[\s([<{])(?:[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?\.)+(?:[a-z]{2,63}|xn--[a-z\d-]{2,59})(?::\d{2,5})?(?:[/?#][^\s<>)\]}]*)?(?=$|[\s).,!?;:>\]}])/iu
+    .test(value);
+}
+
+function containsSmsOptOutBoilerplate(value: string): boolean {
+  const normalized = value
+    .replace(/[\u2018\u2019]/gu, "'")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toLowerCase();
+
+  if (/\b(?:(?:standard|std)\s+)?(?:(?:(?:msg|message)s?\s*(?:(?:&|and|\/)\s*|\s+)?)?data|(?:msg|message)s?)\s+rates?\s+(?:may\s+)?apply\b/u.test(normalized)) {
+    return true;
+  }
+
+  return /\b(?:text|reply)\s+['"]?stop['"]?\s+(?:to\s+)?(?:quit|stop|end|cancel|unsubscribe|opt(?:\s*|-)?out)\b/u
+    .test(normalized);
 }

@@ -2045,7 +2045,379 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("ignores non-iMessage first-contact texts without sending signup links", async () => {
+  it("sends the signup link on the first inbound SMS phone message", async () => {
+    const invite = {
+      channel: "linq",
+      id: "invite_sms",
+      inviteCode: "code_sms",
+      memberId: "member_123",
+      sentAt: null,
+      status: "pending",
+    };
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          id: "invite_sms",
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          phoneLookupKey: "+15551234567",
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_sms_first_contact",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      inviteCode: "code_sms",
+      joinUrl: "https://join.example.test/join/code_sms",
+      ok: true,
+      reason: "sent-signup-link",
+    });
+    expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
+      memberId: "member_123",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: buildHostedInviteReply({
+          joinUrl: "https://join.example.test/join/code_sms",
+        }),
+        replyToMessageId: "msg_123",
+      }),
+    );
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
+
+  it("ignores non-phone SMS first contact before invite side effects", async () => {
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberEmailAuthorization: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      hostedMemberRouting: {
+        findMany: vi.fn().mockResolvedValue([]),
+        upsert: vi.fn(),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn(),
+        updateMany: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          sender_handle: {
+            handle: "buddy@example.test",
+            id: "handle_sender_email_sms",
+            service: "sms",
+          },
+        },
+        eventId: "evt_sms_email_first_contact",
+        service: "sms",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "undeliverable-first-contact",
+    });
+    expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
+
+  it.each(["sms", "RCS"] as const)(
+    "sends signup links for existing inactive phone first-contact %s texts",
+    async (service) => {
+      const invite = {
+        channel: "linq",
+        id: `invite_${service.toLowerCase()}`,
+        inviteCode: `code_${service.toLowerCase()}`,
+        memberId: "member_123",
+        sentAt: null,
+        status: "pending",
+      };
+      const prismaMocks = {
+        $queryRaw: vi.fn().mockResolvedValue([]),
+        hostedWebhookReceipt: {
+          create: vi.fn().mockResolvedValue({}),
+          findUnique: vi.fn().mockResolvedValue({
+            payloadJson: {
+              eventType: "message.received",
+              receiptAttemptCount: 1,
+              receiptStatus: "processing",
+            },
+          }),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        hostedInvite: {
+          create: vi.fn().mockResolvedValue(invite),
+          findFirst: vi.fn().mockResolvedValue(null),
+          findUnique: vi.fn().mockResolvedValue(invite),
+          update: vi.fn().mockResolvedValue({
+            id: invite.id,
+            sentAt: new Date("2026-03-26T12:00:01.000Z"),
+          }),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        hostedMember: {
+          create: vi.fn(),
+          findUnique: vi.fn().mockResolvedValue({
+            billingStatus: HostedBillingStatus.not_started,
+            id: "member_123",
+            invites: [],
+            phoneLookupKey: "+15551234567",
+            suspendedAt: null,
+          }),
+          update: vi.fn(),
+        },
+      };
+      const prisma = asPrismaTransactionClient(prismaMocks);
+
+      const response = await handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          eventId: `evt_${service.toLowerCase()}_inactive_first_contact`,
+          service,
+        }),
+        signature: null,
+        timestamp: null,
+      });
+
+      expect(response).toMatchObject({
+        inviteCode: invite.inviteCode,
+        joinUrl: `https://join.example.test/join/${invite.inviteCode}`,
+        ok: true,
+        reason: "sent-signup-link",
+      });
+      expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
+      expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
+      expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
+      expect(readHostedMemberRoutingUpsertMock(prisma)).toHaveBeenCalled();
+      expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
+        memberId: "member_123",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        prisma,
+      });
+      expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
+        memberId: "member_123",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        prisma,
+      });
+      expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: "chat_123",
+          message: buildHostedInviteReply({
+            joinUrl: `https://join.example.test/join/${invite.inviteCode}`,
+          }),
+          replyToMessageId: "msg_123",
+        }),
+      );
+      expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+      expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    {
+      label: "URL text",
+      parts: [
+        {
+          type: "text",
+          value: "Check this out https://spam.example.test",
+        },
+      ],
+    },
+    {
+      label: "bare domain URL text",
+      parts: [
+        {
+          type: "text",
+          value: "Open example.com/join for details",
+        },
+      ],
+    },
+    {
+      label: "short bare domain URL text",
+      parts: [
+        {
+          type: "text",
+          value: "bit.ly/foo",
+        },
+      ],
+    },
+    {
+      label: "unlisted short bare domain URL text",
+      parts: [
+        {
+          type: "text",
+          value: "rb.gy/foo",
+        },
+      ],
+    },
+    {
+      label: "unlisted bare domain URL text",
+      parts: [
+        {
+          type: "text",
+          value: "example.xyz/join",
+        },
+      ],
+    },
+    {
+      label: "shopping bare domain URL text",
+      parts: [
+        {
+          type: "text",
+          value: "site.shop/path",
+        },
+      ],
+    },
+    {
+      label: "punctuation-wrapped bare domain URL text",
+      parts: [
+        {
+          type: "text",
+          value: "(example.com/path).",
+        },
+      ],
+    },
+    {
+      label: "link part",
+      parts: [
+        {
+          type: "link",
+          value: "https://spam.example.test",
+        },
+      ],
+    },
+    {
+      label: "message/data rates boilerplate",
+      parts: [
+        {
+          type: "text",
+          value: "Msg&data rates may apply. Text 'STOP' to quit.",
+        },
+      ],
+    },
+    {
+      label: "slash-separated message/data rates boilerplate",
+      parts: [
+        {
+          type: "text",
+          value: "Msg/data rates apply.",
+        },
+      ],
+    },
+    {
+      label: "standard message rates boilerplate",
+      parts: [
+        {
+          type: "text",
+          value: "Standard message rates apply.",
+        },
+      ],
+    },
+    {
+      label: "STOP opt-out boilerplate",
+      parts: [
+        {
+          type: "text",
+          value: "Reply STOP to unsubscribe",
+        },
+      ],
+    },
+    {
+      label: "hyphenated STOP opt-out boilerplate",
+      parts: [
+        {
+          type: "text",
+          value: "Text STOP to opt-out",
+        },
+      ],
+    },
+    {
+      label: "STOP end boilerplate",
+      parts: [
+        {
+          type: "text",
+          value: "Text STOP to end",
+        },
+      ],
+    },
+  ])("ignores first-contact SMS with $label before invite side effects", async ({ parts }) => {
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedWebhookReceipt: {
@@ -2075,7 +2447,10 @@ https://join.example.test/join/code_first_text`);
     const response = await handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
-        eventId: "evt_sms_first_contact",
+        data: {
+          parts,
+        },
+        eventId: "evt_blocked_first_contact",
       }),
       signature: null,
       timestamp: null,
@@ -2084,7 +2459,7 @@ https://join.example.test/join/code_first_text`);
     expect(response).toMatchObject({
       ignored: true,
       ok: true,
-      reason: "non-imessage-first-contact",
+      reason: "blocked-first-contact-content",
     });
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
@@ -2096,68 +2471,6 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
-
-  it.each(["sms", "RCS"] as const)(
-    "ignores existing inactive non-iMessage first-contact %s texts without sending signup links",
-    async (service) => {
-      const prismaMocks = {
-        $queryRaw: vi.fn().mockResolvedValue([]),
-        hostedWebhookReceipt: {
-          create: vi.fn().mockResolvedValue({}),
-          findUnique: vi.fn().mockResolvedValue({
-            payloadJson: {
-              eventType: "message.received",
-              receiptAttemptCount: 1,
-              receiptStatus: "processing",
-            },
-          }),
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        },
-        hostedInvite: {
-          create: vi.fn(),
-          findFirst: vi.fn(),
-          updateMany: vi.fn(),
-        },
-        hostedMember: {
-          create: vi.fn(),
-          findUnique: vi.fn().mockResolvedValue({
-            billingStatus: HostedBillingStatus.not_started,
-            id: "member_123",
-            invites: [],
-            phoneLookupKey: "+15551234567",
-            suspendedAt: null,
-          }),
-          update: vi.fn(),
-        },
-      };
-      const prisma = asPrismaTransactionClient(prismaMocks);
-
-      const response = await handleHostedOnboardingLinqWebhook({
-        prisma,
-        rawBody: buildHostedLinqWebhookBody({
-          eventId: `evt_${service.toLowerCase()}_inactive_first_contact`,
-          service,
-        }),
-        signature: null,
-        timestamp: null,
-      });
-
-      expect(response).toMatchObject({
-        ignored: true,
-        ok: true,
-        reason: "non-imessage-first-contact",
-      });
-      expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
-      expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
-      expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
-      expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
-      expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-      expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
-      expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-      expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-      expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
-    },
-  );
 
   it("keeps first-contact signup replies inline", async () => {
     const invite = {
