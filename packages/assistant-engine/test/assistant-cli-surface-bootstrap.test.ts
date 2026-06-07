@@ -655,7 +655,7 @@ test('generate-cli-surface-contract builds the prebuilt artifact from the full m
   assert.equal(readAssistantCliLlmsFullManifest.mock.calls.length, 1)
   assert.match(
     readAssistantCliLlmsFullManifest.mock.calls[0]?.[0]?.workingDirectory ?? '',
-    /murph$/u,
+    /murph(?:-[^/]+)?$/u,
   )
   assert.equal(writeFileMock.mock.calls.length, 1)
 

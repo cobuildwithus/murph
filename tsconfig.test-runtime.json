@@ -8,6 +8,9 @@
       "path": "./packages/hosted-execution"
     },
     {
+      "path": "./packages/exercise-library"
+    },
+    {
       "path": "./packages/cloudflare-hosted-control"
     },
     {

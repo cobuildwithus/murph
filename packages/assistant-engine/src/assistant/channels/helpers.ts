@@ -61,12 +61,20 @@ export function createAssistantChannelAdapter(
         }
       : {}),
     supportsIdempotencyKey: spec.supportsIdempotencyKey,
+    supportsResponseMedia: spec.supportsResponseMedia === true,
     async send(input, dependencies) {
       const candidate = resolveRequiredDeliveryCandidate(
         input,
         spec.targetRequiredMessage,
       )
       const idempotencyKey = normalizeOptionalText(input.idempotencyKey)
+      const media = input.media ?? []
+      if (media.length > 0 && spec.supportsResponseMedia !== true) {
+        throw new VaultCliError(
+          'ASSISTANT_CHANNEL_MEDIA_UNSUPPORTED',
+          `Outbound media delivery is not supported for ${spec.channel}.`,
+        )
+      }
       const delivered = await spec.sendMessage({
         actorId: normalizeOptionalText(input.actorId),
         candidate,
@@ -74,6 +82,7 @@ export function createAssistantChannelAdapter(
         dependencies,
         idempotencyKey,
         identityId: normalizeOptionalText(input.identityId),
+        media,
         message: input.message,
         replyToMessageId: normalizeOptionalText(input.replyToMessageId),
         subject: normalizeOptionalText(input.subject),

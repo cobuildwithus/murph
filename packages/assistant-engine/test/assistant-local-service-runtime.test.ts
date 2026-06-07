@@ -10,7 +10,10 @@ import {
   resolveAssistantAcceptedTurnInputJournalPath,
   type AssistantCodexContinuation,
 } from '../src/assistant/active-turn-input-journal.ts'
-import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.ts'
+import type {
+  AssistantDeliveryOutcome,
+  AssistantTurnSharedPlan,
+} from '../src/assistant/service-contracts.ts'
 import {
   AssistantActiveTurnInputCheckpointRejectedError,
   AssistantActiveTurnInputUnavailableError,
@@ -112,6 +115,7 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
     deliveryDeferred: false,
     deliveryError: null,
     deliveryIntentId: 'intent-1',
+    media: [],
     prompt: 'Summarize my inbox',
     response: 'assistant response',
     session,
@@ -4402,6 +4406,15 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
   )
   assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls.length, 2)
   assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls[1]?.[0]?.kind, 'turn.failed')
+  assert.deepEqual(
+    mocks.clearAssistantResponseMediaBestEffort.mock.calls.map((call) => call[0]),
+    [
+      {
+        turnId: 'turn-1',
+        vault: '/vaults/test',
+      },
+    ],
+  )
   assert.equal(mocks.normalizeAssistantDeliveryError.mock.calls.length, 1)
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
 })
@@ -4456,6 +4469,7 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
       },
       intentId: 'intent-queued',
       kind: 'queued',
+      media: [],
       session: queuedSession,
     },
   })
@@ -4486,6 +4500,7 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
       retryable: true,
     },
     deliveryIntentId: 'intent-queued',
+    media: [],
     prompt: 'Queue this reply',
     response: 'assistant response',
     session: queuedSession,
@@ -4511,6 +4526,7 @@ test('sendAssistantMessageLocal reports failed delivery outcomes after provider 
     },
     intentId: 'intent-failed',
     kind: 'failed' as const,
+    media: [],
     session: failedSession,
   }
   const { sendAssistantMessageLocal } = await loadLocalServiceModule({
@@ -4532,6 +4548,7 @@ test('sendAssistantMessageLocal reports failed delivery outcomes after provider 
       retryable: false,
     },
     deliveryIntentId: 'intent-failed',
+    media: [],
     prompt: 'Deliver this reply',
     response: 'assistant response',
     session: failedSession,
@@ -4968,6 +4985,7 @@ async function loadLocalServiceModule(input?: {
     } | null
     intentId: string
     kind: 'failed' | 'not-requested' | 'queued' | 'sent'
+    media?: AssistantDeliveryOutcome['media']
     session: AssistantSession
   }
   route?: {
@@ -5010,6 +5028,7 @@ async function loadLocalServiceModule(input?: {
       },
       intentId: 'intent-1',
       kind: 'sent' as const,
+      media: [],
       session,
     }
   const acceptedInputIds: string[] = []
@@ -5080,6 +5099,9 @@ async function loadLocalServiceModule(input?: {
       ) => ({
         turnId: 'turn-1',
       }),
+    ),
+    clearAssistantResponseMediaBestEffort: vi.fn(
+      async (_input: { turnId: string; vault: string }) => undefined,
     ),
     deliverAssistantProgressUpdate: vi.fn(
       async (
@@ -5367,6 +5389,9 @@ async function loadLocalServiceModule(input?: {
     deliverAssistantReply: mocks.dispatchAssistantReply,
     deliverAssistantProgressUpdate: mocks.deliverAssistantProgressUpdate,
     finalizeAssistantTurnFromDeliveryOutcome: mocks.finalizeDeliveredAssistantTurn,
+  }))
+  vi.doMock('../src/assistant/response-media.js', () => ({
+    clearAssistantResponseMediaBestEffort: mocks.clearAssistantResponseMediaBestEffort,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     persistAssistantTurnAndSession: mocks.finalizeAssistantTurnArtifacts,

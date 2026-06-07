@@ -55,6 +55,7 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     return resolveTelegramBotToken(env) !== null
   },
   supportsIdempotencyKey: false,
+  supportsResponseMedia: false,
   targetRequiredMessage:
     'Telegram delivery requires an explicit target or a stored delivery binding.',
   async startTypingIndicator({ candidate, dependencies }) {
@@ -103,6 +104,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     return resolveLinqApiToken(env) !== null && resolveLinqWebhookSecret(env) !== null
   },
   supportsIdempotencyKey: true,
+  supportsResponseMedia: true,
   targetRequiredMessage:
     'iMessage delivery requires an explicit chat id or a stored thread binding.',
   async startTypingIndicator({ candidate, dependencies }) {
@@ -111,14 +113,16 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       target: candidate.target,
     })) ?? null
   },
-  async sendMessage({ actorId, candidate, deliverySource, dependencies, idempotencyKey, message, replyToMessageId }) {
+  async sendMessage({ actorId, candidate, deliverySource, dependencies, idempotencyKey, media, message, replyToMessageId }) {
     let delivered
+    const mediaInput = media.length > 0 ? media : undefined
     const request = {
       fromPhoneNumber: deliverySource?.kind === 'linq' ? deliverySource.fromPhoneNumber : null,
       idempotencyKey: idempotencyKey ?? null,
       target: candidate.target,
       targetKind: candidate.kind,
       message,
+      ...(mediaInput ? { media: mediaInput } : {}),
       replyToMessageId: replyToMessageId ?? null,
       ...(dependencies.signal ? { signal: dependencies.signal } : {}),
     }
@@ -127,6 +131,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
         ? await dependencies.sendLinq({
             ...request,
             directRecipientPhoneNumber: normalizeDirectLinqRecipient(actorId),
+            ...(mediaInput ? { media: mediaInput } : {}),
           })
         : await sendLinqMessage(request, dependencies.signal ? { signal: dependencies.signal } : {})
     } catch (error) {
@@ -136,6 +141,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
         dependencies,
         error,
         idempotencyKey,
+        media,
         message,
         replyToMessageId,
       })
@@ -194,6 +200,7 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     return resolveAgentmailApiKey(env) !== null
   },
   supportsIdempotencyKey: false,
+  supportsResponseMedia: false,
   targetRequiredMessage:
     'Email delivery requires an explicit recipient or a stored delivery binding.',
   async sendMessage({ candidate, dependencies, idempotencyKey, identityId, message, replyToMessageId, subject }) {
@@ -241,6 +248,7 @@ const WHATSAPP_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       && resolveWhatsAppPhoneNumberId(env) !== null
   },
   supportsIdempotencyKey: false,
+  supportsResponseMedia: false,
   targetRequiredMessage:
     'WhatsApp delivery requires an explicit wa_id or a stored delivery binding.',
   async sendMessage({ candidate, dependencies, message, replyToMessageId }) {
@@ -286,6 +294,7 @@ async function maybeRecoverMissingLinqDirectThread(input: {
   dependencies: AssistantChannelDependencies
   error: unknown
   idempotencyKey?: string | null
+  media?: readonly import('@murphai/operator-config/assistant-cli-contracts').AssistantResponseMedia[] | null
   message: string
   replyToMessageId?: string | null
 }): Promise<
@@ -326,6 +335,7 @@ async function maybeRecoverMissingLinqDirectThread(input: {
         target: recipient,
         targetKind: 'participant',
         message: input.message,
+        ...(input.media && input.media.length > 0 ? { media: input.media } : {}),
         replyToMessageId: input.replyToMessageId ?? null,
       }, input.dependencies.signal ? { signal: input.dependencies.signal } : {})
     } catch (error) {

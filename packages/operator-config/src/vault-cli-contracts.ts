@@ -225,6 +225,7 @@ const workoutTemplateSetResultSchema = z.object({
 
 const workoutTemplateExerciseResultSchema = z.object({
   name: z.string().min(1),
+  sourceExerciseId: z.string().min(1).optional(),
   order: z.number().int().positive(),
   groupId: z.string().min(1).optional(),
   mode: z
@@ -245,6 +246,101 @@ const workoutTemplateExerciseResultSchema = z.object({
 export const workoutTemplateResultSchema = z.object({
   routineNote: z.string().min(1).optional(),
   exercises: z.array(workoutTemplateExerciseResultSchema).min(1).max(100),
+})
+
+const exerciseCatalogKindResultSchema = z.enum([
+  'exercise',
+  'stretch',
+  'mobility',
+  'breathing',
+])
+
+const exerciseCatalogEnvironmentResultSchema = z.enum(['at_home', 'gym'])
+
+const exerciseCatalogLevelResultSchema = z.enum([
+  'beginner',
+  'intermediate',
+  'advanced',
+])
+
+const exerciseCatalogCommonnessResultSchema = z.enum([
+  'very_common',
+  'common',
+  'variant',
+])
+
+const exerciseCatalogSummaryResultSchema = z.object({
+  id: z.string().min(1),
+  slug: slugSchema,
+  name: z.string().min(1),
+  kind: exerciseCatalogKindResultSchema,
+  environment: z.array(exerciseCatalogEnvironmentResultSchema),
+  category: z.string().min(1),
+  targets: z.array(z.string().min(1)),
+  level: exerciseCatalogLevelResultSchema,
+  equipment: z.array(z.string().min(1)),
+  position: z.string().min(1).nullable(),
+  modality: z.string().min(1),
+  commonness: exerciseCatalogCommonnessResultSchema,
+  description: z.string().min(1),
+})
+
+const exerciseCatalogItemResultSchema = exerciseCatalogSummaryResultSchema.extend({
+  sourceIds: z.array(z.number().int().positive()),
+  steps: z.array(z.string().min(1)),
+  tips: z.array(z.string().min(1)),
+  image: z.object({
+    url: z.string().url(),
+    alt: z.string().min(1),
+  }).nullable(),
+})
+
+const exerciseCatalogSourceResultSchema = z.object({
+  id: z.number().int().positive(),
+  url: z.string().url(),
+})
+
+const exerciseCatalogFiltersResultSchema = z.object({
+  query: z.string().min(1).nullable(),
+  kind: z.array(exerciseCatalogKindResultSchema),
+  environment: z.array(exerciseCatalogEnvironmentResultSchema),
+  category: z.array(z.string().min(1)),
+  target: z.array(z.string().min(1)),
+  level: z.array(exerciseCatalogLevelResultSchema),
+  equipment: z.array(z.string().min(1)),
+  position: z.array(z.string().min(1)),
+  modality: z.array(z.string().min(1)),
+  commonness: z.array(exerciseCatalogCommonnessResultSchema),
+  limit: z.number().int().positive().max(500),
+})
+
+export const exerciseListResultSchema = z.object({
+  catalogHash: z.string().min(1),
+  filters: exerciseCatalogFiltersResultSchema,
+  total: z.number().int().nonnegative(),
+  items: z.array(exerciseCatalogSummaryResultSchema),
+})
+
+export const exerciseShowResultSchema = z.object({
+  catalogHash: z.string().min(1),
+  lookup: z.string().min(1),
+  item: exerciseCatalogItemResultSchema,
+  sources: z.array(exerciseCatalogSourceResultSchema),
+})
+
+export const exerciseFacetsResultSchema = z.object({
+  catalogHash: z.string().min(1),
+  facets: z.object({
+    kinds: z.array(exerciseCatalogKindResultSchema),
+    environments: z.array(exerciseCatalogEnvironmentResultSchema),
+    categories: z.array(z.string().min(1)),
+    targets: z.array(z.string().min(1)),
+    levels: z.array(exerciseCatalogLevelResultSchema),
+    equipment: z.array(z.string().min(1)),
+    positions: z.array(z.string().min(1)),
+    modalities: z.array(z.string().min(1)),
+    commonness: z.array(exerciseCatalogCommonnessResultSchema),
+  }),
 })
 
 export const workoutAddResultSchema = z.object({

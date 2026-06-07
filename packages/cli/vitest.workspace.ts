@@ -42,6 +42,8 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/core": "../core/src/index.ts",
   "@murphai/device-syncd": "../device-syncd/src/index.ts",
   "@murphai/device-syncd/client": "../device-syncd/src/client.ts",
+  "@murphai/exercise-library": "../exercise-library/src/index.ts",
+  "@murphai/exercise-library/runtime": "../exercise-library/src/runtime.ts",
   "@murphai/gateway-core": "../gateway-core/src/index.ts",
   "@murphai/hosted-execution": "../hosted-execution/src/index.ts",
   "@murphai/importers": "../importers/src/index.ts",

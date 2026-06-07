@@ -1,3 +1,5 @@
+import { rm } from "node:fs/promises";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -16,6 +18,11 @@ import type {
   ExecutedAssistantProviderTurnResult,
 } from "../src/assistant/service-contracts.ts";
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from "../src/assistant/first-contact-welcome.ts";
+import {
+  readAssistantResponseMedia,
+  stageAssistantResponseMedia,
+} from "../src/assistant/response-media.ts";
+import { createTempVaultContext } from "./test-helpers.ts";
 
 const seamMocks = vi.hoisted(() => ({
   buildAssistantCliGuidanceText: vi.fn(),
@@ -139,6 +146,7 @@ import { persistAssistantTurnAndSession } from "../src/assistant/turn-finalizer.
 type RuntimeStateStub = ReturnType<typeof createRuntimeStateStub>;
 
 let runtimeState: RuntimeStateStub;
+const tempRoots: string[] = [];
 
 beforeEach(() => {
   vi.useRealTimers();
@@ -218,6 +226,17 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
+});
+
+afterEach(async () => {
+  await Promise.all(
+    tempRoots.splice(0).map((rootPath) =>
+      rm(rootPath, {
+        force: true,
+        recursive: true,
+      }),
+    ),
+  );
 });
 
 describe("assistant service wrapper seam", () => {
@@ -750,14 +769,31 @@ describe("assistant usage recording seam", () => {
 
 describe("assistant delivery orchestration seam", () => {
   it("returns not-requested without touching the outbox when delivery is disabled", async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      "assistant-delivery-no-response-media-",
+    );
+    tempRoots.push(parentRoot);
     const session = createAssistantSession();
+    await stageAssistantResponseMedia({
+      media: [
+        {
+          kind: "image",
+          url: "https://cdn.example.test/dead-bug/no-delivery.png",
+          alt: null,
+          source: null,
+        },
+      ],
+      sessionId: session.sessionId,
+      turnId: "turn-1",
+      vault: vaultRoot,
+    });
 
     await expect(
       deliverAssistantReply({
         input: {
           deliverResponse: false,
           prompt: "hello",
-          vault: "/vault",
+          vault: vaultRoot,
         },
         response: "reply",
         session,
@@ -766,10 +802,62 @@ describe("assistant delivery orchestration seam", () => {
       })
     ).resolves.toEqual({
       kind: "not-requested",
+      media: [],
       session,
     });
 
     expect(runtimeState.outbox.deliverMessage).not.toHaveBeenCalled();
+    await expect(
+      readAssistantResponseMedia({
+        turnId: "turn-1",
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual([]);
+  });
+
+  it("clears staged response media when final delivery is disabled", async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      "assistant-delivery-response-media-disabled-",
+    );
+    tempRoots.push(parentRoot);
+    const session = createAssistantSession();
+
+    await stageAssistantResponseMedia({
+      vault: vaultRoot,
+      turnId: "turn-media-not-delivered",
+      sessionId: session.sessionId,
+      media: [{
+        kind: "image",
+        url: "https://cdn.example.test/dead-bug/setup.png",
+        alt: "Dead bug setup",
+        source: "dead-bug-setup",
+      }],
+    });
+
+    await expect(
+      deliverAssistantReply({
+        input: {
+          deliverResponse: false,
+          prompt: "hello",
+          vault: vaultRoot,
+        },
+        response: "reply",
+        session,
+        sharedPlan: createSharedPlan(),
+        turnId: "turn-media-not-delivered",
+      })
+    ).resolves.toEqual({
+      kind: "not-requested",
+      media: [],
+      session,
+    });
+
+    await expect(
+      readAssistantResponseMedia({
+        vault: vaultRoot,
+        turnId: "turn-media-not-delivered",
+      }),
+    ).resolves.toEqual([]);
   });
 
   it("does not resolve hosted idempotency when final delivery is disabled", async () => {
@@ -808,6 +896,7 @@ describe("assistant delivery orchestration seam", () => {
       })
     ).resolves.toEqual({
       kind: "not-requested",
+      media: [],
       session,
     });
 
@@ -1112,6 +1201,7 @@ describe("assistant delivery orchestration seam", () => {
       },
       intentId: "intent-1",
       kind: "sent",
+      media: [],
       session,
     });
 
@@ -1129,6 +1219,7 @@ describe("assistant delivery orchestration seam", () => {
       dispatchMode: "immediate",
       explicitTarget: "explicit-audience-target",
       identityId: "audience-identity",
+      media: [],
       message: "reply body",
       replyToMessageId: "reply-input",
       sessionId: session.sessionId,
@@ -1137,6 +1228,147 @@ describe("assistant delivery orchestration seam", () => {
       threadIsDirect: false,
       turnId: "turn-2",
     });
+  });
+
+  it("passes staged response media to final delivery and clears it after outbox creation", async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      "assistant-delivery-response-media-",
+    );
+    tempRoots.push(parentRoot);
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "linq",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "participant",
+          target: "binding-delivery",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
+    });
+    const media = [
+      {
+        kind: "image" as const,
+        url: "https://cdn.example.test/dead-bug/setup.png",
+        alt: "Dead bug setup",
+        source: "dead-bug-setup",
+      },
+    ];
+    await stageAssistantResponseMedia({
+      vault: vaultRoot,
+      turnId: "turn-media-delivery",
+      sessionId: session.sessionId,
+      media,
+    });
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "linq",
+        idempotencyKey: "idem-media",
+        messageLength: 10,
+        providerMessageId: "provider-media",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "binding-delivery",
+        targetKind: "participant",
+      },
+      intent: {
+        intentId: "intent-media",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    await expect(
+      deliverAssistantReply({
+        input: {
+          deliverResponse: true,
+          deliveryDispatchMode: "immediate",
+          prompt: "hello",
+          vault: vaultRoot,
+        },
+        response: "reply body",
+        session,
+        sharedPlan: createSharedPlan(),
+        turnId: "turn-media-delivery",
+      }),
+    ).resolves.toEqual({
+      delivery: {
+        channel: "linq",
+        idempotencyKey: "idem-media",
+        messageLength: 10,
+        providerMessageId: "provider-media",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "binding-delivery",
+        targetKind: "participant",
+      },
+      intentId: "intent-media",
+      kind: "sent",
+      media,
+      session,
+    });
+
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        media,
+        message: "reply body",
+        turnId: "turn-media-delivery",
+      }),
+    );
+    await expect(
+      readAssistantResponseMedia({
+        vault: vaultRoot,
+        turnId: "turn-media-delivery",
+      }),
+    ).resolves.toEqual([]);
+  });
+
+  it("clears staged response media when final outbox delivery throws", async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      "assistant-delivery-response-media-throw-",
+    );
+    tempRoots.push(parentRoot);
+    const session = createAssistantSession();
+
+    await stageAssistantResponseMedia({
+      vault: vaultRoot,
+      turnId: "turn-media-delivery-throws",
+      sessionId: session.sessionId,
+      media: [{
+        kind: "image",
+        url: "https://cdn.example.test/dead-bug/setup.png",
+        alt: "Dead bug setup",
+        source: "dead-bug-setup",
+      }],
+    });
+    runtimeState.outbox.deliverMessage.mockRejectedValueOnce(
+      new Error("outbox unavailable"),
+    );
+
+    await expect(
+      deliverAssistantReply({
+        input: {
+          deliverResponse: true,
+          deliveryDispatchMode: "immediate",
+          prompt: "hello",
+          vault: vaultRoot,
+        },
+        response: "reply body",
+        session,
+        sharedPlan: createSharedPlan(),
+        turnId: "turn-media-delivery-throws",
+      }),
+    ).rejects.toThrow(/outbox unavailable/u);
+
+    await expect(
+      readAssistantResponseMedia({
+        vault: vaultRoot,
+        turnId: "turn-media-delivery-throws",
+      }),
+    ).resolves.toEqual([]);
   });
 
   it("marks hosted Linq deliveries with deterministic keys idempotent before outbox dispatch", async () => {
@@ -1496,6 +1728,7 @@ describe("assistant delivery orchestration seam", () => {
       error: null,
       intentId: "intent-queued",
       kind: "queued",
+      media: [],
       session: expect.objectContaining({
         sessionId: "session-queued",
       }),
@@ -1530,6 +1763,7 @@ describe("assistant delivery orchestration seam", () => {
       error: deliveryError,
       intentId: "intent-failed",
       kind: "failed",
+      media: [],
       session,
     });
 
@@ -1560,6 +1794,7 @@ describe("assistant delivery orchestration seam", () => {
       }),
       intentId: "unknown",
       kind: "failed",
+      media: [],
       session,
     });
 
@@ -1574,6 +1809,7 @@ describe("assistant delivery orchestration seam", () => {
         completedAt: "2026-04-08T12:00:00.000Z",
         outcome: {
           kind: "not-requested",
+          media: [],
           session,
         },
         response: "reply",
@@ -1608,6 +1844,7 @@ describe("assistant delivery orchestration seam", () => {
           },
           intentId: "intent-sent",
           kind: "sent",
+          media: [],
           session,
         },
         response: "reply",
@@ -1636,6 +1873,7 @@ describe("assistant delivery orchestration seam", () => {
           error: retryableError,
           intentId: "intent-queued",
           kind: "queued",
+          media: [],
           session,
         },
         response: "reply",
@@ -1663,6 +1901,7 @@ describe("assistant delivery orchestration seam", () => {
           }),
           intentId: null,
           kind: "failed",
+          media: [],
           session,
         },
         response: "reply",
@@ -1701,6 +1940,7 @@ describe("assistant delivery orchestration seam", () => {
         },
         intentId: "intent-3",
         kind: "sent",
+        media: [],
         session: createAssistantSession({
           sessionId: "session-sent",
         }),
@@ -1742,6 +1982,7 @@ describe("assistant delivery orchestration seam", () => {
         error: null,
         intentId: "intent-queued",
         kind: "queued",
+        media: [],
         session: createAssistantSession({
           sessionId: "session-queued",
         }),
@@ -1775,6 +2016,7 @@ describe("assistant delivery orchestration seam", () => {
         },
         intentId: "intent-not-welcome",
         kind: "sent",
+        media: [],
         session: createAssistantSession({
           sessionId: "session-not-welcome",
         }),

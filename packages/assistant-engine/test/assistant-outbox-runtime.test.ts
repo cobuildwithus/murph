@@ -194,6 +194,71 @@ describe('assistant outbox runtime', () => {
     ).toHaveLength(1)
   })
 
+  it('includes response media in outbox persistence and dedupe identity', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-media-dedupe-')
+
+    const first = await createIntent(vaultRoot, {
+      channel: 'linq',
+      dedupeToken: 'stable-media-token',
+      media: [
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/dead-bug/setup.png',
+          alt: 'Dead bug setup',
+          source: 'dead-bug-setup',
+        },
+      ],
+      message: 'same text',
+      sessionId: 'session-media-dedupe',
+      turnId: 'turn-media-dedupe',
+    })
+    const sameTextDifferentMedia = await createIntent(vaultRoot, {
+      channel: 'linq',
+      dedupeToken: 'stable-media-token',
+      media: [
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/dead-bug/extend.png',
+          alt: 'Dead bug extension',
+          source: 'dead-bug-extend',
+        },
+      ],
+      message: 'same text',
+      sessionId: 'session-media-dedupe',
+      turnId: 'turn-media-dedupe',
+    })
+    const sameTextSameMedia = await createIntent(vaultRoot, {
+      channel: 'linq',
+      dedupeToken: 'stable-media-token',
+      media: [
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/dead-bug/setup.png',
+          alt: 'Dead bug setup',
+          source: 'dead-bug-setup',
+        },
+      ],
+      message: 'same text',
+      sessionId: 'session-media-dedupe',
+      turnId: 'turn-media-dedupe',
+    })
+
+    expect(first.media).toEqual([
+      {
+        kind: 'image',
+        url: 'https://cdn.example.test/dead-bug/setup.png',
+        alt: 'Dead bug setup',
+        source: 'dead-bug-setup',
+      },
+    ])
+    expect(sameTextDifferentMedia.intentId).not.toBe(first.intentId)
+    expect(sameTextSameMedia.intentId).toBe(first.intentId)
+    await expect(readAssistantOutboxIntent(vaultRoot, first.intentId)).resolves
+      .toMatchObject({
+        media: first.media,
+      })
+  })
+
   it('lists intents oldest-first and quarantines malformed inventory files', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T12:00:00.000Z'))
@@ -1854,6 +1919,7 @@ async function createIntent(
     identityId: string | null
     message: string
     replyToMessageId: string | null
+    media: AssistantOutboxIntent['media']
     sessionId: string
     threadId: string | null
     threadIsDirect: boolean | null
@@ -1873,6 +1939,7 @@ async function createIntent(
         : overrides.dedupeToken,
     explicitTarget: overrides.explicitTarget ?? null,
     identityId: overrides.identityId ?? 'participant-1',
+    media: overrides.media ?? [],
     message: overrides.message ?? `${sessionId}:${turnId}:message`,
     replyToMessageId: overrides.replyToMessageId ?? null,
     sessionId,

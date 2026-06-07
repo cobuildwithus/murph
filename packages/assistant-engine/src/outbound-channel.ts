@@ -3,6 +3,7 @@ import {
   type AssistantChannelDelivery,
   type AssistantDeliverResult,
   type AssistantDeliverySource,
+  type AssistantResponseMedia,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
@@ -53,6 +54,7 @@ export interface DeliverAssistantMessageInput {
   channel?: string | null
   conversation?: ConversationRef | null
   identityId?: string | null
+  media?: readonly AssistantResponseMedia[] | null
   message: string
   participantId?: string | null
   replyToMessageId?: string | null
@@ -94,6 +96,7 @@ export async function deliverAssistantMessage(
       vault: input.vault,
       turnId: receipt.turnId,
       sessionId: resolved.session.sessionId,
+      media: input.media ?? [],
       message: normalizedMessage,
       channel: resolved.session.binding.channel,
       identityId: resolved.session.binding.identityId,
@@ -136,6 +139,7 @@ export async function deliverAssistantMessage(
       vault: redactAssistantDisplayPath(input.vault),
       message: normalizedMessage,
       session: redactAssistantSessionForDisplay(updatedSession),
+      media: outcome.intent.media,
       delivery,
     })
   } catch (error) {
@@ -277,6 +281,7 @@ export async function deliverAssistantMessageOverBinding(
     deliverySource?: AssistantDeliverySource | null
     idempotencyKey?: string | null
     identityId?: string | null
+    media?: readonly AssistantResponseMedia[] | null
     message: string
     replyToMessageId?: string | null
     subject?: string | null
@@ -335,6 +340,7 @@ export async function deliverAssistantMessageOverBinding(
       explicitTarget,
       idempotencyKey: input.idempotencyKey ?? null,
       identityId: binding.identityId,
+      media: input.media ?? [],
       message: input.message,
       replyToMessageId: input.replyToMessageId ?? null,
       subject,

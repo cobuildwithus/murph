@@ -876,6 +876,45 @@ test("hosted runtime launch env policy forwards the neutral hosted Codex command
   );
 });
 
+test("hosted runtime launch env policy forwards assistant media catalog env", () => {
+  for (const key of [
+    "MURPH_ASSISTANT_MEDIA_CATALOG_URL",
+    "MURPH_PRODUCT_BASE_URL",
+    "NEXT_PUBLIC_MURPH_PRODUCT_BASE_URL",
+  ]) {
+    assert.equal(
+      (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(key),
+      true,
+      key,
+    );
+    assert.equal(HOSTED_RUNTIME_ENV_KEY_NAMES.includes(key), true, key);
+  }
+
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(buildHostedRuntimeForwardedEnv({
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        MURPH_ASSISTANT_MEDIA_CATALOG_URL:
+          "https://app.example.test/assistant-media/catalog.json",
+        MURPH_PRODUCT_BASE_URL: "https://app.example.test",
+        NEXT_PUBLIC_MURPH_PRODUCT_BASE_URL: "https://public.example.test",
+        NODE_ENV: "test",
+        OPENAI_API_KEY: "openai-key",
+      })).filter(([key]) =>
+        key === "MURPH_ASSISTANT_MEDIA_CATALOG_URL"
+        || key === "MURPH_PRODUCT_BASE_URL"
+        || key === "NEXT_PUBLIC_MURPH_PRODUCT_BASE_URL"
+      ),
+    ),
+    {
+      MURPH_ASSISTANT_MEDIA_CATALOG_URL:
+        "https://app.example.test/assistant-media/catalog.json",
+      MURPH_PRODUCT_BASE_URL: "https://app.example.test",
+      NEXT_PUBLIC_MURPH_PRODUCT_BASE_URL: "https://public.example.test",
+    },
+  );
+});
+
 test("hosted runtime launch env policy does not forward E2E Codex app-server stub controls", () => {
   assert.equal(
     (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(

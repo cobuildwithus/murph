@@ -348,6 +348,7 @@ describe('channel helper seams', () => {
       dependencies: {},
       idempotencyKey: 'idem-7',
       identityId: 'identity-7',
+      media: [],
       message: 'hello there',
       replyToMessageId: 'reply-7',
       subject: null,

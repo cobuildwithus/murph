@@ -156,7 +156,7 @@ test('workout format save schema exposes typed routine-template parity fields', 
 
   assert.match(
     optionDescription(schema, 'exercise'),
-    /Supported keys: order, name, groupId, mode, unitOverride, note/u,
+    /Supported keys: order, name, sourceExerciseId, groupId, mode, unitOverride, note/u,
   )
   assert.match(optionDescription(schema, 'exercise'), /Shell-quote each semicolon-separated value/u)
   assert.match(
@@ -188,7 +188,7 @@ test('workout format save LLM schema exposes compact routine keys', async () => 
 
   assert.match(optionDescription(schema, 'exercise'), /Compact exercise grammar/u)
   assert.match(optionDescription(schema, 'exercise'), /Shell-quote each semicolon-separated value/u)
-  assert.match(optionDescription(schema, 'exercise'), /Supported keys: order, name/u)
+  assert.match(optionDescription(schema, 'exercise'), /Supported keys: order, name, sourceExerciseId/u)
   assert.match(optionDescription(schema, 'setTemplate'), /Compact setTemplate grammar/u)
   assert.match(optionDescription(schema, 'setTemplate'), /Shell-quote each semicolon-separated value/u)
   assert.match(optionDescription(schema, 'setTemplate'), /Prefer targetReps/u)
@@ -229,6 +229,7 @@ test.sequential('workout format save typed fields persist the same first-class d
       exercises: [
         {
           name: 'pushups',
+          sourceExerciseId: 'EX001',
           order: 1,
           groupId: 'push',
           mode: 'bodyweight',
@@ -301,7 +302,7 @@ test.sequential('workout format save typed fields persist the same first-class d
     '--routine-note',
     'Usual upper-body session.',
     '--exercise',
-    'order=1;name=pushups;groupId=push;mode=bodyweight;note=Slow reps',
+    'order=1;name=pushups;sourceExerciseId=EX001;groupId=push;mode=bodyweight;note=Slow reps',
     '--set-template',
     'exercise=1;order=1;type=normal;targetReps=20;targetRpe=7',
     '--exercise',

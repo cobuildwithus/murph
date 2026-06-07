@@ -1,0 +1,49 @@
+{
+  "name": "@murphai/exercise-library",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js",
+      "default": "./dist/runtime.js"
+    },
+    "./generated/*": "./generated/*"
+  },
+  "files": [
+    "content",
+    "generated",
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && tsc -b tsconfig.json --pretty false && node dist/build.js",
+    "typecheck": "pnpm generate && tsc -p tsconfig.typecheck.json --pretty false",
+    "generate": "pnpm --dir ../.. exec tsx --tsconfig packages/exercise-library/tsconfig.json packages/exercise-library/src/build.ts",
+    "generate:check": "pnpm generate --check",
+    "test:vitest": "pnpm generate && pnpm --dir ../.. exec vitest run --config packages/exercise-library/vitest.config.ts --no-coverage",
+    "test:coverage": "pnpm generate && pnpm --dir ../.. exec vitest run --config packages/exercise-library/vitest.config.ts --coverage",
+    "test": "pnpm test:vitest",
+    "verify": "pnpm typecheck && pnpm test && pnpm generate:check",
+    "prepack": "pnpm build"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.4",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.6"
+  },
+  "engines": {
+    "node": ">=24.14.1"
+  }
+}

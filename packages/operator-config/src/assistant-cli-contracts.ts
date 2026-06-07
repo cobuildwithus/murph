@@ -1,3 +1,4 @@
+import { isIP } from 'node:net'
 import { z } from 'zod'
 import {
   automationRouteSchema,
@@ -163,6 +164,8 @@ export const assistantQuarantineArtifactKindValues = [
   'cron-run',
 ] as const
 
+export const assistantResponseMediaKindValues = ['image'] as const
+
 export const assistantRuntimeEventKindValues = [
   'session.upserted',
   'session.quarantined',
@@ -299,6 +302,62 @@ export const assistantSessionBindingSchema = z.object({
   threadIsDirect: z.boolean().nullable(),
   delivery: assistantBindingDeliverySchema.nullable(),
 })
+
+export const assistantResponseMediaSchema = z
+  .object({
+    kind: z.enum(assistantResponseMediaKindValues).default('image'),
+    url: z
+      .string()
+      .url()
+      .transform((value) => normalizeAssistantResponseMediaUrl(value)),
+    alt: z.string().trim().min(1).max(500).nullable().default(null),
+    source: z.string().trim().min(1).max(200).nullable().default(null),
+  })
+  .strict()
+
+export function normalizeAssistantResponseMediaUrl(value: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(value.trim())
+  } catch {
+    throw new Error('Assistant response media URLs must be valid URLs.')
+  }
+
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Assistant response media URLs must use HTTPS.')
+  }
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error('Assistant response media URLs must be public image URLs without credentials, query strings, or fragments.')
+  }
+  if (!isPublicAssistantResponseMediaHost(parsed.hostname)) {
+    throw new Error('Assistant response media URLs must use public hosts.')
+  }
+  if (!hasAssistantResponseMediaImageExtension(parsed.pathname)) {
+    throw new Error('Assistant response media URLs must point to image files.')
+  }
+
+  return parsed.toString()
+}
+
+function hasAssistantResponseMediaImageExtension(pathname: string): boolean {
+  return /\.(?:avif|gif|jpe?g|png|webp)$/iu.test(pathname)
+}
+
+function isPublicAssistantResponseMediaHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/\.$/u, '')
+  if (!normalized || normalized === 'localhost' || normalized.endsWith('.localhost') || normalized.endsWith('.local')) {
+    return false
+  }
+
+  const ipLiteral = normalized.startsWith('[') && normalized.endsWith(']')
+    ? normalized.slice(1, -1)
+    : normalized
+  if (isIP(ipLiteral) !== 0) {
+    return false
+  }
+
+  return true
+}
 
 const assistantPersistedSessionV1Schema = z
   .object({
@@ -546,6 +605,7 @@ export const assistantOutboxIntentSchema = z
     attemptCount: z.number().int().nonnegative(),
     status: z.enum(assistantOutboxIntentStatusValues),
     message: z.string().min(1),
+    media: z.array(assistantResponseMediaSchema).max(40).default([]),
     subject: z.string().trim().min(1).nullable().default(null),
     dedupeKey: z.string().min(1),
     targetFingerprint: z.string().min(1),
@@ -899,6 +959,7 @@ export const assistantAskResultSchema = z.object({
   status: z.enum(assistantAskResultStatusValues).default('completed'),
   prompt: z.string().min(1),
   response: z.string(),
+  media: z.array(assistantResponseMediaSchema).default([]),
   session: assistantSessionOutputSchema,
   delivery: assistantChannelDeliverySchema.nullable(),
   deliveryDeferred: z.boolean().default(false),
@@ -918,6 +979,7 @@ export const assistantDeliverResultSchema = z.object({
   vault: pathSchema,
   message: z.string().min(1),
   session: assistantSessionOutputSchema,
+  media: z.array(assistantResponseMediaSchema).default([]),
   delivery: assistantChannelDeliverySchema,
 })
 
@@ -1126,6 +1188,9 @@ export type AssistantDeliverySource = z.infer<
 >
 export type AssistantSessionBinding = z.infer<
   typeof assistantSessionBindingSchema
+>
+export type AssistantResponseMedia = z.infer<
+  typeof assistantResponseMediaSchema
 >
 export type AssistantCodexModelProviderConfig = z.infer<
   typeof assistantCodexModelProviderConfigSchema

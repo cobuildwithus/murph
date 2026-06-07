@@ -121,13 +121,14 @@ function formatTemplateSet(set: WorkoutTemplate["exercises"][number]["plannedSet
 function formatTemplateExerciseLine(exercise: WorkoutTemplate["exercises"][number]): string {
   const group = exercise.groupId ? ` [${exercise.groupId}]` : "";
   const mode = exercise.mode ? ` (${exercise.mode})` : "";
+  const source = exercise.sourceExerciseId ? ` {${exercise.sourceExerciseId}}` : "";
   const setSummary = exercise.plannedSets
     .slice()
     .sort((left, right) => left.order - right.order)
     .map(formatTemplateSet)
     .join("; ");
 
-  return `${exercise.name}${group}${mode}: ${setSummary}`;
+  return `${exercise.name}${source}${group}${mode}: ${setSummary}`;
 }
 
 function validateWorkoutFormatFrontmatter(

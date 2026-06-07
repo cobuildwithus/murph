@@ -276,6 +276,14 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
     directRecipientPhoneNumber: "+15550000001",
     fromPhoneNumber: "+15550000002",
     idempotencyKey: "progress-key",
+    media: [
+      {
+        kind: "image",
+        url: "https://cdn.example.test/dead-bug/setup.png",
+        alt: "Dead bug setup",
+        source: "dead-bug-setup",
+      },
+    ],
     message: "Checking the current thread.",
     replyToMessageId: "linq-reply",
     target: "linq-thread",
@@ -290,6 +298,14 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
     directRecipientPhoneNumber: "+15550000001",
     fromPhoneNumber: "+15550000002",
     idempotencyKey: "progress-key",
+    media: [
+      {
+        kind: "image",
+        url: "https://cdn.example.test/dead-bug/setup.png",
+        alt: "Dead bug setup",
+        source: "dead-bug-setup",
+      },
+    ],
     message: "Checking the current thread.",
     replyToMessageId: "linq-reply",
     target: "linq-thread",
@@ -385,6 +401,7 @@ test("hosted progress Linq delivery recovers same-wake direct recipient only", a
     directRecipientPhoneNumber: "+15550000001",
     fromPhoneNumber: null,
     idempotencyKey: "progress-key",
+    media: null,
     message: "Checking the current thread.",
     replyToMessageId: null,
     target: "linq-thread",

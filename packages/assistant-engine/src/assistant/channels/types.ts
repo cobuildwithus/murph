@@ -10,6 +10,7 @@ import {
   type AssistantBindingDeliveryKind,
   type AssistantChannelDeliveryTargetKind,
   type AssistantDeliverySource,
+  type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { ConversationRef } from '../conversation-ref.js'
 
@@ -71,6 +72,7 @@ export interface AssistantChannelDependencies {
     directRecipientPhoneNumber?: string | null
     fromPhoneNumber?: string | null
     idempotencyKey?: string | null
+    media?: readonly AssistantResponseMedia[] | null
     message: string
     replyToMessageId?: string | null
     signal?: AbortSignal
@@ -156,12 +158,14 @@ export interface AssistantChannelAdapter {
       explicitTarget: string | null
       idempotencyKey?: string | null
       identityId: string | null
+      media?: readonly AssistantResponseMedia[] | null
       message: string
       replyToMessageId?: string | null
       subject?: string | null
     },
     dependencies: AssistantChannelDependencies,
   ) => Promise<ReturnType<typeof assistantChannelDeliverySchema.parse>>
+  supportsResponseMedia: boolean
 }
 
 export type AssistantChannelName = AssistantChannelAdapter['channel']
@@ -184,6 +188,7 @@ export interface AssistantChannelAdapterSpec {
     dependencies: AssistantChannelDependencies
     idempotencyKey?: string | null
     identityId: string | null
+    media: readonly AssistantResponseMedia[]
     message: string
     replyToMessageId?: string | null
     subject?: string | null
@@ -197,5 +202,6 @@ export interface AssistantChannelAdapterSpec {
       }
     | void
   >
+  supportsResponseMedia?: boolean
   targetRequiredMessage: string
 }

@@ -243,6 +243,7 @@ function createAssistantServiceMock(): AssistantLocalService {
       deliveryIntentId: null,
       prompt: 'noop',
       response: 'noop',
+      media: [],
       session: TEST_SESSION,
       status: 'completed',
       vault: '/tmp/vault',

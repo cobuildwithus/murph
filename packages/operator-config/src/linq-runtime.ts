@@ -17,6 +17,7 @@ import {
   errorMessage,
   normalizeNullableString,
 } from './text/shared.js'
+import { normalizeAssistantResponseMediaUrl } from './assistant-cli-contracts.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 const DEFAULT_LINQ_API_BASE_URL = 'https://api.linqapp.com/api/partner/v3'
@@ -25,6 +26,8 @@ const LINQ_HTTP_MAX_ATTEMPTS = 3
 const LINQ_HTTP_RETRY_DELAYS_MS = Object.freeze([1_000, 3_000])
 const LINQ_CHAT_NOT_FOUND_CODES = new Set(['CHAT_NOT_FOUND', 'chat_not_found'])
 const LINQ_CHAT_NOT_FOUND_MESSAGES = new Set(['Chat not found'])
+const LINQ_MAX_MESSAGE_PARTS = 100
+const LINQ_MAX_URL_MEDIA_PARTS = 40
 const LINQ_SAFE_RESPONSE_BODY_KEYS = new Set([
   'code',
   'detail',
@@ -134,6 +137,10 @@ export function resolveLinqWebhookSecret(env: NodeJS.ProcessEnv): string | null 
   return normalizeNullableString(env.LINQ_WEBHOOK_SECRET)
 }
 
+export interface LinqMessageMediaInput {
+  url: string
+}
+
 export async function probeLinqApi(
   dependencies: {
     env?: NodeJS.ProcessEnv
@@ -180,6 +187,7 @@ export async function sendLinqChatMessage(
   input: {
     chatId: string
     idempotencyKey?: string | null
+    media?: readonly LinqMessageMediaInput[] | null
     message: string
     replyToMessageId?: string | null
   },
@@ -205,8 +213,9 @@ export async function sendLinqChatMessage(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: `/chats/${encodeURIComponent(chatId)}/messages`,
-    body: buildLinqTextMessageBody({
+    body: buildLinqMessageBody({
       idempotencyKey: input.idempotencyKey,
+      media: input.media ?? [],
       message,
       replyToMessageId,
     }),
@@ -327,6 +336,7 @@ export async function createLinqChat(
   input: {
     from: string
     idempotencyKey?: string | null
+    media?: readonly LinqMessageMediaInput[] | null
     message: string
     to: readonly string[]
   },
@@ -352,8 +362,9 @@ export async function createLinqChat(
     path: '/chats',
     body: {
       from,
-      message: buildLinqTextMessageBody({
+      message: buildLinqMessageBody({
         idempotencyKey: input.idempotencyKey,
+        media: input.media ?? [],
         message: input.message,
       }).message,
       to: recipients,
@@ -925,17 +936,24 @@ function normalizeRequiredString(value: string | null | undefined, label: string
   return normalized
 }
 
-function buildLinqTextMessageBody(input: {
+function buildLinqMessageBody(input: {
   idempotencyKey?: string | null
+  media?: readonly LinqMessageMediaInput[] | null
   message: string
   replyToMessageId?: string | null
 }): {
   message: {
     idempotency_key?: string
-    parts: Array<{
-      type: 'text'
-      value: string
-    }>
+    parts: Array<
+      | {
+          type: 'text'
+          value: string
+        }
+      | {
+          type: 'media'
+          url: string
+        }
+    >
     reply_to?: {
       message_id: string
     }
@@ -943,15 +961,19 @@ function buildLinqTextMessageBody(input: {
 } {
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
   const replyToMessageId = normalizeNullableString(input.replyToMessageId)
+  const media = normalizeLinqMediaList(input.media ?? [])
+  const textPart = {
+    type: 'text' as const,
+    value: normalizeRequiredString(input.message, 'message'),
+  }
+  const parts = [textPart, ...media]
+  if (parts.length > LINQ_MAX_MESSAGE_PARTS) {
+    throw new VaultCliError('LINQ_INVALID_INPUT', `Linq message must contain at most ${LINQ_MAX_MESSAGE_PARTS} parts.`)
+  }
 
   return {
     message: {
-      parts: [
-        {
-          type: 'text',
-          value: normalizeRequiredString(input.message, 'message'),
-        },
-      ],
+      parts,
       ...(idempotencyKey
         ? {
             idempotency_key: idempotencyKey,
@@ -965,6 +987,41 @@ function buildLinqTextMessageBody(input: {
           }
         : {}),
     },
+  }
+}
+
+function normalizeLinqMediaList(values: readonly LinqMessageMediaInput[]): Array<{
+  type: 'media'
+  url: string
+}> {
+  const parts = values
+    .map((value) => ({
+      type: 'media' as const,
+      url: normalizeLinqHttpsUrl(value.url),
+    }))
+    .filter((value, index, array) =>
+      array.findIndex((candidate) => candidate.url === value.url) === index,
+    )
+
+  if (parts.length > LINQ_MAX_URL_MEDIA_PARTS) {
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      `Linq messages may contain at most ${LINQ_MAX_URL_MEDIA_PARTS} URL media parts.`,
+    )
+  }
+
+  return parts
+}
+
+function normalizeLinqHttpsUrl(value: string): string {
+  const normalized = normalizeRequiredString(value, 'media url')
+  try {
+    return normalizeAssistantResponseMediaUrl(normalized)
+  } catch (error) {
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      error instanceof Error ? error.message.replace(/^Assistant response media/u, 'Linq media') : 'Linq media URLs must be valid public image URLs.',
+    )
   }
 }
 

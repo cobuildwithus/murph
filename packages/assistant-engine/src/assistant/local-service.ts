@@ -105,6 +105,7 @@ import type {
   PersistedUserTurn,
 } from './service-contracts.js'
 import { withAssistantTurnLock } from './turn-lock.js'
+import { clearAssistantResponseMediaBestEffort } from './response-media.js'
 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 
@@ -719,6 +720,7 @@ export async function sendAssistantMessageLocal(
           status: 'completed',
           prompt: currentInput.prompt,
           response: providerResult.response,
+          media: deliveryOutcome.media,
           session: deliveryOutcome.session,
           delivery: deliveryOutcome.kind === 'sent' ? deliveryOutcome.delivery : null,
           deliveryDeferred: deliveryOutcome.kind === 'queued',
@@ -763,6 +765,13 @@ export async function sendAssistantMessageLocal(
             response: responseText,
             completedAt: failedAt,
             metadata: null,
+          }),
+        )
+
+        await runAssistantTurnBestEffort(() =>
+          clearAssistantResponseMediaBestEffort({
+            vault: input.vault,
+            turnId: receipt.turnId,
           }),
         )
 

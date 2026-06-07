@@ -43,6 +43,10 @@ import {
   emitHostedAssistantContextSessionResolvedTrace,
 } from './hosted-context-diagnostics.js'
 import {
+  clearAssistantResponseMediaBestEffort,
+  readAssistantResponseMedia,
+} from './response-media.js'
+import {
   startAssistantChannelTypingIndicator,
   stopAssistantChannelTypingIndicator,
 } from './channel-typing.js'
@@ -207,6 +211,10 @@ export async function sendAssistantNotificationLocal(
           turnId,
         })
         if (providerOutcome.kind === 'failed_terminal') {
+          await clearAssistantResponseMediaBestEffort({
+            vault: input.vault,
+            turnId,
+          })
           await recordAssistantUsageEvent({
             executionContext,
             providerRequestOutcome: providerOutcome.providerRequestOutcome,
@@ -592,6 +600,10 @@ async function deliverAssistantNotificationMessage(input: {
     input: input.input,
     session: input.session,
   })
+  const media = await readAssistantResponseMedia({
+    vault: input.input.vault,
+    turnId: input.turnId,
+  })
   const outcome = await state.outbox.deliverMessage({
     turnId: input.turnId,
     sessionId: input.session.sessionId,
@@ -607,10 +619,15 @@ async function deliverAssistantNotificationMessage(input: {
     threadIsDirect: audience.threadIsDirect ?? input.session.binding.threadIsDirect,
     bindingDelivery: audience.bindingDelivery ?? input.session.binding.delivery,
     explicitTarget,
+    media,
     replyToMessageId:
       audience.replyToMessageId ?? input.input.deliveryReplyToMessageId ?? null,
     subject,
     dispatchMode: input.input.deliveryDispatchMode,
+  })
+  await clearAssistantResponseMediaBestEffort({
+    vault: input.input.vault,
+    turnId: input.turnId,
   })
 
   switch (outcome.kind) {
@@ -619,6 +636,7 @@ async function deliverAssistantNotificationMessage(input: {
         kind: 'sent',
         delivery: outcome.delivery,
         intentId: outcome.intent.intentId,
+        media,
         session: outcome.session ?? input.session,
       }
     case 'queued':
@@ -626,6 +644,7 @@ async function deliverAssistantNotificationMessage(input: {
         kind: 'queued',
         error: outcome.deliveryError,
         intentId: outcome.intent.intentId,
+        media,
         session: outcome.session ?? input.session,
       }
     case 'failed':
@@ -633,6 +652,7 @@ async function deliverAssistantNotificationMessage(input: {
         kind: 'failed',
         error: outcome.deliveryError,
         intentId: outcome.intent.intentId,
+        media,
         session: outcome.session ?? input.session,
       }
     default:
@@ -645,6 +665,7 @@ async function deliverAssistantNotificationMessage(input: {
           ),
         ),
         intentId: null,
+        media,
         session: input.session,
       }
   }

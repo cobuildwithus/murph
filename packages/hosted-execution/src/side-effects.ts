@@ -42,6 +42,13 @@ export type HostedAssistantDeliveryRecordState =
 
 export const hostedAssistantBindingDeliveryKindValues = gatewayReplyRouteKindValues;
 
+export interface HostedAssistantDeliveryMedia {
+  alt: string | null;
+  kind: "image";
+  source: string | null;
+  url: string;
+}
+
 export interface HostedAssistantDeliveryPayload {
   actorId: string | null;
   bindingDeliveryKind: HostedAssistantBindingDeliveryKind | null;
@@ -50,6 +57,7 @@ export interface HostedAssistantDeliveryPayload {
   explicitTarget: string | null;
   idempotencyKey: string;
   identityId: string | null;
+  media: readonly HostedAssistantDeliveryMedia[];
   message: string;
   subject: string | null;
   replyToMessageId: string | null;
@@ -438,6 +446,21 @@ function requireString(value: unknown, label: string): string {
   return value;
 }
 
+function requireHttpsUrl(value: unknown, label: string): string {
+  const url = requireString(value, label);
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new TypeError(`${label} must be a valid HTTPS URL.`);
+  }
+  if (parsed.protocol !== "https:") {
+    throw new TypeError(`${label} must use HTTPS.`);
+  }
+
+  return parsed.toString();
+}
+
 function requireHostedAssistantDeliveryEffectId(
   record: Record<string, unknown>,
   label: string,
@@ -527,6 +550,7 @@ function parseHostedAssistantDeliveryPayload(
     ),
     idempotencyKey: requireString(record.idempotencyKey, `${label}.idempotencyKey`),
     identityId: requireNullableString(record.identityId ?? null, `${label}.identityId`),
+    media: parseHostedAssistantDeliveryMediaList(record.media ?? [], `${label}.media`),
     message: requireString(record.message, `${label}.message`),
     subject: requireNullableString(record.subject ?? null, `${label}.subject`),
     replyToMessageId: requireNullableString(
@@ -544,6 +568,41 @@ function parseHostedAssistantDeliveryPayload(
       `${label}.transportIdempotent`,
     ),
     turnId: requireString(record.turnId, `${label}.turnId`),
+  };
+}
+
+function parseHostedAssistantDeliveryMediaList(
+  value: unknown,
+  label: string,
+): HostedAssistantDeliveryMedia[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+
+  if (value.length > 40) {
+    throw new TypeError(`${label} must contain at most 40 entries.`);
+  }
+
+  return value.map((entry, index) =>
+    parseHostedAssistantDeliveryMedia(entry, `${label}[${index}]`)
+  );
+}
+
+function parseHostedAssistantDeliveryMedia(
+  value: unknown,
+  label: string,
+): HostedAssistantDeliveryMedia {
+  const record = requireObject(value, label);
+  const kind = record.kind ?? "image";
+  if (kind !== "image") {
+    throw new TypeError(`${label}.kind must be image.`);
+  }
+
+  return {
+    alt: requireNullableString(record.alt ?? null, `${label}.alt`),
+    kind,
+    source: requireNullableString(record.source ?? null, `${label}.source`),
+    url: requireHttpsUrl(record.url, `${label}.url`),
   };
 }
 

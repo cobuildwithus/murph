@@ -19,6 +19,10 @@ import type {
   AssistantTurnSharedPlan,
 } from './service-contracts.js'
 import { normalizeNullableString } from './shared.js'
+import {
+  clearAssistantResponseMediaBestEffort,
+  readAssistantResponseMedia,
+} from './response-media.js'
 
 export function resolveHostedAssistantDeliveryTransportIdempotentOverride(input: {
   channel?: string | null
@@ -92,8 +96,13 @@ export async function deliverAssistantReply(input: {
   turnId: string
 }): Promise<AssistantDeliveryOutcome> {
   if (!input.input.deliverResponse) {
+    await clearAssistantResponseMediaBestEffort({
+      vault: input.input.vault,
+      turnId: input.turnId,
+    })
     return {
       kind: 'not-requested',
+      media: [],
       session: input.session,
     }
   }
@@ -226,8 +235,13 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   turnId: string
 }): Promise<AssistantDeliveryOutcome> {
   if (!input.input.deliverResponse) {
+    await clearAssistantResponseMediaBestEffort({
+      vault: input.input.vault,
+      turnId: input.turnId,
+    })
     return {
       kind: 'not-requested',
+      media: [],
       session: input.session,
     }
   }
@@ -238,48 +252,65 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     session: input.session,
     sharedPlan: input.sharedPlan,
   })
-  const outcome = await state.outbox.deliverMessage({
-    ...deliveryFields,
-    message: input.message,
-    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
-    deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+  const media = await readAssistantResponseMedia({
+    vault: input.input.vault,
     turnId: input.turnId,
-    dependencies: undefined,
-    dispatchMode: input.input.deliveryDispatchMode,
   })
-  const session = outcome.session ?? input.session
 
-  switch (outcome.kind) {
-    case 'sent':
-      return {
-        kind: 'sent',
-        delivery: outcome.delivery!,
-        intentId: outcome.intent.intentId,
-        session,
-      }
-    case 'queued':
-      return {
-        kind: 'queued',
-        error: outcome.deliveryError,
-        intentId: outcome.intent.intentId,
-        session,
-      }
-    case 'failed':
-      return {
-        kind: 'failed',
-        error: outcome.deliveryError,
-        intentId: outcome.intent.intentId,
-        session,
-      }
-    default:
-      return {
-        kind: 'failed',
-        error: normalizeAssistantDeliveryError(
-          new Error('Assistant outbound delivery failed.'),
-        ),
-        intentId: 'unknown',
-        session,
-      }
+  try {
+    const outcome = await state.outbox.deliverMessage({
+      ...deliveryFields,
+      media,
+      message: input.message,
+      deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+      deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+      turnId: input.turnId,
+      dependencies: undefined,
+      dispatchMode: input.input.deliveryDispatchMode,
+    })
+    const session = outcome.session ?? input.session
+
+    switch (outcome.kind) {
+      case 'sent':
+        return {
+          kind: 'sent',
+          delivery: outcome.delivery!,
+          intentId: outcome.intent.intentId,
+          media,
+          session,
+        }
+      case 'queued':
+        return {
+          kind: 'queued',
+          error: outcome.deliveryError,
+          intentId: outcome.intent.intentId,
+          media,
+          session,
+        }
+      case 'failed':
+        return {
+          kind: 'failed',
+          error: outcome.deliveryError,
+          intentId: outcome.intent.intentId,
+          media,
+          session,
+        }
+      default:
+        return {
+          kind: 'failed',
+          error: normalizeAssistantDeliveryError(
+            new Error('Assistant outbound delivery failed.'),
+          ),
+          intentId: 'unknown',
+          media,
+          session,
+        }
+    }
+  } finally {
+    await clearAssistantResponseMediaBestEffort({
+      vault: input.input.vault,
+      turnId: input.turnId,
+    })
   }
 }
 

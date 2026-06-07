@@ -75,6 +75,7 @@ readonly typecheck_package_dirs=(
   "packages/core"
   "packages/importers"
   "packages/device-syncd"
+  "packages/exercise-library"
   "packages/health-metrics"
   "packages/query"
   "packages/inbox-services"
@@ -586,6 +587,7 @@ run_all_package_coverage() {
     # shared dist outputs that CLI built-runtime tests import.
     "packages/contracts"
     "packages/device-syncd"
+    "packages/exercise-library"
     "packages/gateway-core"
     "packages/health-metrics"
     "packages/hosted-execution"
@@ -612,6 +614,7 @@ run_all_package_coverage() {
     "Cloudflare hosted control package coverage"
     "Contracts package coverage"
     "Device syncd package coverage"
+    "Exercise library package coverage"
     "Gateway core package coverage"
     "Health metrics package coverage"
     "Hosted execution owner coverage"

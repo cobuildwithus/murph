@@ -913,6 +913,7 @@ export function registerWorkoutCommands(
     note?: string
     order: number
     plannedSets: Array<Record<string, unknown>>
+    sourceExerciseId?: string
     unitOverride?: string
   }
 
@@ -948,6 +949,7 @@ export function registerWorkoutCommands(
   const workoutFormatExerciseFields = new Set([
     'order',
     'name',
+    'sourceExerciseId',
     'groupId',
     'mode',
     'unitOverride',
@@ -991,6 +993,7 @@ export function registerWorkoutCommands(
       name: requireCompactString(fields, 'name', 'exercise', invalidWorkoutFormatOption),
       order: requireCompactInteger(fields, 'order', 'exercise', invalidWorkoutFormatOption),
       plannedSets: [],
+      ...(fields.has('sourceExerciseId') ? { sourceExerciseId: fields.get('sourceExerciseId') } : {}),
       ...(fields.has('groupId') ? { groupId: fields.get('groupId') } : {}),
       ...(fields.has('mode') ? { mode: fields.get('mode') } : {}),
       ...(fields.has('unitOverride') ? { unitOverride: fields.get('unitOverride') } : {}),
@@ -1284,7 +1287,7 @@ export function registerWorkoutCommands(
       exercise: z
         .array(z.string().min(1))
         .optional()
-        .describe(`Compact exercise grammar: order=...;name=... with optional groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Supported keys: ${workoutFormatExerciseFieldList}. Repeat --exercise for multiple exercises.`),
+        .describe(`Compact exercise grammar: order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Supported keys: ${workoutFormatExerciseFieldList}. Repeat --exercise for multiple exercises.`),
       setTemplate: z
         .array(z.string().min(1))
         .optional()

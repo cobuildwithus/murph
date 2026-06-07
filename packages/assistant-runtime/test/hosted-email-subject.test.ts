@@ -64,6 +64,7 @@ describe('hosted runtime email subject support', () => {
               explicitTarget: 'user@example.com',
               idempotencyKey: 'idempotency_123',
               identityId: 'assistant@example.com',
+              media: [],
               message: 'Hello from Murph',
               subject: 'Daily check-in',
               replyToMessageId: null,

@@ -244,6 +244,17 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
       {
         chatId: ' chat-123 ',
         idempotencyKey: ' idempotency-1 ',
+        media: [
+          {
+            url: ' https://cdn.example.test/dead-bug/setup.png ',
+          },
+          {
+            url: 'https://cdn.example.test/dead-bug/setup.png',
+          },
+          {
+            url: 'https://cdn.example.test/dead-bug/extend.png',
+          },
+        ],
         message: ' hello from Murph ',
         replyToMessageId: ' reply-1 ',
       },
@@ -306,10 +317,53 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
   assert.deepEqual(JSON.parse(chatMessageRequest.body ?? '{}'), {
     message: {
       idempotency_key: 'idempotency-1',
-      parts: [{ type: 'text', value: 'hello from Murph' }],
+      parts: [
+        { type: 'text', value: 'hello from Murph' },
+        {
+          type: 'media',
+          url: 'https://cdn.example.test/dead-bug/setup.png',
+        },
+        {
+          type: 'media',
+          url: 'https://cdn.example.test/dead-bug/extend.png',
+        },
+      ],
       reply_to: { message_id: 'reply-1' },
     },
   })
+})
+
+test('linq runtime rejects non-HTTPS media URLs before sending', async () => {
+  let called = false
+
+  await assert.rejects(
+    () =>
+      sendLinqChatMessage(
+        {
+          chatId: 'chat-123',
+          media: [
+            {
+              url: 'http://cdn.example.test/dead-bug/setup.png',
+            },
+          ],
+          message: 'hello',
+        },
+        {
+          env: {
+            LINQ_API_TOKEN: 'token',
+          },
+          fetchImplementation: async () => {
+            called = true
+            return createJsonResponse({})
+          },
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_INVALID_INPUT' &&
+      error.message === 'Linq media URLs must use HTTPS.',
+  )
+  assert.equal(called, false)
 })
 
 test('linq runtime preserves path-prefixed base urls when building requests', async () => {

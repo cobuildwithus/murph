@@ -6,6 +6,7 @@ import {
   type AssistantDeliveryError,
   type AssistantDeliverySource,
   type AssistantOutboxIntent,
+  type AssistantResponseMedia,
   type AssistantSession,
   type AssistantStatusOutboxSummary,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -65,6 +66,9 @@ import {
   writeJsonFileAtomic,
 } from './shared.js'
 import { sanitizeAssistantOutboxIntentForPersistence } from './redaction.js'
+import {
+  normalizeAssistantResponseMediaList,
+} from './response-media.js'
 
 const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v1'
 
@@ -91,6 +95,7 @@ export interface AssistantOutboxDispatchPayload {
   deliverySource?: AssistantDeliverySource | null
   explicitTarget?: string | null
   identityId?: string | null
+  media?: readonly AssistantResponseMedia[] | null
   message: string
   subject?: string | null
   replyToMessageId?: string | null
@@ -160,6 +165,7 @@ export async function createAssistantOutboxIntent(input: {
   deliveryTransportIdempotent?: boolean
   explicitTarget?: string | null
   identityId?: string | null
+  media?: readonly AssistantResponseMedia[] | null
   message: string
   subject?: string | null
   replyToMessageId?: string | null
@@ -173,6 +179,11 @@ export async function createAssistantOutboxIntent(input: {
     await ensureAssistantState(paths)
     const createdAt = input.createdAt ?? new Date().toISOString()
     const message = normalizeRequiredMessage(input.message)
+    const media = normalizeAssistantResponseMediaList(input.media ?? [])
+    assertAssistantOutboxResponseMediaSupported({
+      channel: input.channel ?? null,
+      media,
+    })
     const persistedTarget = buildAssistantOutboxPersistedTarget(input)
     const subject = normalizeAssistantDeliverySubject({
       bindingDelivery: persistedTarget.bindingDelivery,
@@ -184,6 +195,7 @@ export async function createAssistantOutboxIntent(input: {
     const dedupeKey = hashAssistantOutboxIdentity({
       dedupeToken: input.dedupeToken,
       message,
+      media,
       subject,
       sessionId: input.sessionId,
       turnId: input.turnId,
@@ -229,6 +241,7 @@ export async function createAssistantOutboxIntent(input: {
       attemptCount: 0,
       status: 'pending',
       message,
+      media,
       subject,
       dedupeKey,
       targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
@@ -617,6 +630,7 @@ export async function deliverAssistantOutboxMessage(input: {
   dispatchMode?: AssistantOutboxDispatchMode
   explicitTarget?: string | null
   identityId?: string | null
+  media?: readonly AssistantResponseMedia[] | null
   message: string
   subject?: string | null
   replyToMessageId?: string | null
@@ -637,6 +651,7 @@ export async function deliverAssistantOutboxMessage(input: {
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     explicitTarget: input.explicitTarget,
     identityId: input.identityId,
+    media: input.media ?? [],
     message: input.message,
     subject: input.subject,
     replyToMessageId: input.replyToMessageId,
@@ -727,6 +742,7 @@ export async function sendAssistantOutboxPayload(input: {
     delivered: await deliverAssistantMessageOverBinding({
       vault: input.vault,
       sessionId: input.payload.sessionId,
+      media: input.payload.media ?? [],
       message: input.payload.message,
       subject,
       channel: input.payload.channel,
@@ -1066,6 +1082,25 @@ function normalizeRequiredMessage(value: string): string {
   }
 
   return normalized
+}
+
+function assertAssistantOutboxResponseMediaSupported(input: {
+  channel: string | null
+  media: readonly AssistantResponseMedia[]
+}): void {
+  if (input.media.length === 0) {
+    return
+  }
+
+  const adapter = getAssistantChannelAdapter(input.channel)
+  if (adapter?.supportsResponseMedia === true) {
+    return
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_CHANNEL_MEDIA_UNSUPPORTED',
+    `Outbound media delivery is not supported for ${input.channel ?? 'unknown channel'}.`,
+  )
 }
 
 function buildAssistantOutboxDeliveredIntent(input: {

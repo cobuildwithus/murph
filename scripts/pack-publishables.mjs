@@ -185,17 +185,25 @@ async function materializeStage(entry, context, stageDir) {
 }
 
 async function ensureGeneratedPackageArtifacts(context) {
-  if (!context.workspacePackageByName.has('@murphai/health-commons')) {
-    return;
+  if (context.workspacePackageByName.has('@murphai/exercise-library')) {
+    await execFileAsync(
+      'pnpm',
+      ['--dir', 'packages/exercise-library', 'generate'],
+      {
+        cwd: context.repoRoot,
+      },
+    );
   }
 
-  await execFileAsync(
-    process.execPath,
-    ['scripts/ensure-health-commons-generated.mjs'],
-    {
-      cwd: context.repoRoot,
-    },
-  );
+  if (context.workspacePackageByName.has('@murphai/health-commons')) {
+    await execFileAsync(
+      process.execPath,
+      ['scripts/ensure-health-commons-generated.mjs'],
+      {
+        cwd: context.repoRoot,
+      },
+    );
+  }
 }
 
 const options = parseReleaseArgs(process.argv.slice(2), {

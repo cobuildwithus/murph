@@ -29,10 +29,12 @@ import {
   assistantBindingDeliveryKindValues,
   assistantChannelDeliveryTargetKindValues,
   assistantOutboxIntentSchema,
+  assistantResponseMediaSchema,
   assistantSessionSecretsSchema,
   assistantSessionIdSchema,
   assistantSelfDeliveryTargetSchema,
   assistantTurnReceiptSchema,
+  normalizeAssistantResponseMediaUrl,
 } from '../src/assistant-cli-contracts.ts'
 
 describe('assistant CLI delivery contracts', () => {
@@ -200,6 +202,46 @@ describe('assistant CLI delivery contracts', () => {
         },
       }),
     ).toThrow()
+  })
+
+  it('normalizes assistant response media URLs to public image URLs only', () => {
+    expect(
+      assistantResponseMediaSchema.parse({
+        kind: 'image',
+        url: ' https://cdn.example.test/dead-bug/setup.png ',
+        alt: 'Dead bug setup',
+        source: 'dead-bug-setup',
+      }),
+    ).toEqual({
+      kind: 'image',
+      url: 'https://cdn.example.test/dead-bug/setup.png',
+      alt: 'Dead bug setup',
+      source: 'dead-bug-setup',
+    })
+
+    for (const url of [
+      'http://cdn.example.test/dead-bug/setup.png',
+      'https://user:pass@cdn.example.test/dead-bug/setup.png',
+      'https://cdn.example.test/dead-bug/setup.png?token=secret',
+      'https://cdn.example.test/dead-bug/setup.png#step',
+      'https://localhost/dead-bug/setup.png',
+      'https://assets.local/dead-bug/setup.png',
+      'https://127.0.0.1/dead-bug/setup.png',
+      'https://8.8.8.8/dead-bug/setup.png',
+      'https://10.0.0.5/dead-bug/setup.png',
+      'https://172.16.0.5/dead-bug/setup.png',
+      'https://192.168.1.5/dead-bug/setup.png',
+      'https://169.254.169.254/dead-bug/setup.png',
+      'https://[::1]/dead-bug/setup.png',
+      'https://[fe80::1]/dead-bug/setup.png',
+      'https://[fd00::1]/dead-bug/setup.png',
+      'https://[2001:db8::1]/dead-bug/setup.png',
+      'https://[2606:4700:4700::1111]/dead-bug/setup.png',
+      'https://[::ffff:127.0.0.1]/dead-bug/setup.png',
+      'https://example.test/dead-bug/setup.txt',
+    ]) {
+      expect(() => normalizeAssistantResponseMediaUrl(url), url).toThrow()
+    }
   })
 
   it('rejects assistant ids with path separators or traversal segments', () => {
