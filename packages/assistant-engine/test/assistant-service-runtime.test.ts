@@ -18,10 +18,6 @@ import type {
   ExecutedAssistantProviderTurnResult,
 } from "../src/assistant/service-contracts.ts";
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from "../src/assistant/first-contact-welcome.ts";
-import {
-  readAssistantResponseMedia,
-  stageAssistantResponseMedia,
-} from "../src/assistant/response-media.ts";
 import { createTempVaultContext } from "./test-helpers.ts";
 
 const seamMocks = vi.hoisted(() => ({
@@ -774,19 +770,12 @@ describe("assistant delivery orchestration seam", () => {
     );
     tempRoots.push(parentRoot);
     const session = createAssistantSession();
-    await stageAssistantResponseMedia({
-      media: [
-        {
-          kind: "image",
-          url: "https://cdn.example.test/dead-bug/no-delivery.png",
-          alt: null,
-          source: null,
-        },
-      ],
-      sessionId: session.sessionId,
-      turnId: "turn-1",
-      vault: vaultRoot,
-    });
+    const media = [{
+      kind: "image" as const,
+      url: "https://cdn.example.test/dead-bug/no-delivery.png",
+      alt: null,
+      source: null,
+    }];
 
     await expect(
       deliverAssistantReply({
@@ -795,6 +784,7 @@ describe("assistant delivery orchestration seam", () => {
           prompt: "hello",
           vault: vaultRoot,
         },
+        media,
         response: "reply",
         session,
         sharedPlan: createSharedPlan(),
@@ -802,62 +792,11 @@ describe("assistant delivery orchestration seam", () => {
       })
     ).resolves.toEqual({
       kind: "not-requested",
-      media: [],
+      media,
       session,
     });
 
     expect(runtimeState.outbox.deliverMessage).not.toHaveBeenCalled();
-    await expect(
-      readAssistantResponseMedia({
-        turnId: "turn-1",
-        vault: vaultRoot,
-      }),
-    ).resolves.toEqual([]);
-  });
-
-  it("clears staged response media when final delivery is disabled", async () => {
-    const { parentRoot, vaultRoot } = await createTempVaultContext(
-      "assistant-delivery-response-media-disabled-",
-    );
-    tempRoots.push(parentRoot);
-    const session = createAssistantSession();
-
-    await stageAssistantResponseMedia({
-      vault: vaultRoot,
-      turnId: "turn-media-not-delivered",
-      sessionId: session.sessionId,
-      media: [{
-        kind: "image",
-        url: "https://cdn.example.test/dead-bug/setup.png",
-        alt: "Dead bug setup",
-        source: "dead-bug-setup",
-      }],
-    });
-
-    await expect(
-      deliverAssistantReply({
-        input: {
-          deliverResponse: false,
-          prompt: "hello",
-          vault: vaultRoot,
-        },
-        response: "reply",
-        session,
-        sharedPlan: createSharedPlan(),
-        turnId: "turn-media-not-delivered",
-      })
-    ).resolves.toEqual({
-      kind: "not-requested",
-      media: [],
-      session,
-    });
-
-    await expect(
-      readAssistantResponseMedia({
-        vault: vaultRoot,
-        turnId: "turn-media-not-delivered",
-      }),
-    ).resolves.toEqual([]);
   });
 
   it("does not resolve hosted idempotency when final delivery is disabled", async () => {
@@ -1230,11 +1169,7 @@ describe("assistant delivery orchestration seam", () => {
     });
   });
 
-  it("passes staged response media to final delivery and clears it after outbox creation", async () => {
-    const { parentRoot, vaultRoot } = await createTempVaultContext(
-      "assistant-delivery-response-media-",
-    );
-    tempRoots.push(parentRoot);
+  it("passes provider response media to final delivery", async () => {
     const session = createAssistantSession({
       binding: {
         actorId: "binding-actor",
@@ -1257,12 +1192,6 @@ describe("assistant delivery orchestration seam", () => {
         source: "dead-bug-setup",
       },
     ];
-    await stageAssistantResponseMedia({
-      vault: vaultRoot,
-      turnId: "turn-media-delivery",
-      sessionId: session.sessionId,
-      media,
-    });
     runtimeState.outbox.deliverMessage.mockResolvedValue({
       delivery: {
         channel: "linq",
@@ -1287,8 +1216,9 @@ describe("assistant delivery orchestration seam", () => {
           deliverResponse: true,
           deliveryDispatchMode: "immediate",
           prompt: "hello",
-          vault: vaultRoot,
+          vault: "/vault",
         },
+        media,
         response: "reply body",
         session,
         sharedPlan: createSharedPlan(),
@@ -1318,57 +1248,87 @@ describe("assistant delivery orchestration seam", () => {
         turnId: "turn-media-delivery",
       }),
     );
-    await expect(
-      readAssistantResponseMedia({
-        vault: vaultRoot,
-        turnId: "turn-media-delivery",
-      }),
-    ).resolves.toEqual([]);
   });
 
-  it("clears staged response media when final outbox delivery throws", async () => {
-    const { parentRoot, vaultRoot } = await createTempVaultContext(
-      "assistant-delivery-response-media-throw-",
-    );
-    tempRoots.push(parentRoot);
-    const session = createAssistantSession();
-
-    await stageAssistantResponseMedia({
-      vault: vaultRoot,
-      turnId: "turn-media-delivery-throws",
-      sessionId: session.sessionId,
-      media: [{
-        kind: "image",
-        url: "https://cdn.example.test/dead-bug/setup.png",
-        alt: "Dead bug setup",
-        source: "dead-bug-setup",
-      }],
+  it("drops provider response media for channels that cannot deliver media", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "telegram",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "thread",
+          target: "binding-thread",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
     });
-    runtimeState.outbox.deliverMessage.mockRejectedValueOnce(
-      new Error("outbox unavailable"),
-    );
+    const media = [
+      {
+        kind: "image" as const,
+        url: "https://cdn.example.test/dead-bug/telegram.png",
+        alt: "Telegram unsupported image",
+        source: "telegram-unsupported",
+      },
+    ];
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "telegram",
+        idempotencyKey: null,
+        messageLength: 10,
+        providerMessageId: "provider-text-only",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "binding-thread",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-text-only",
+      },
+      kind: "sent",
+      session: null,
+    });
 
     await expect(
       deliverAssistantReply({
         input: {
           deliverResponse: true,
-          deliveryDispatchMode: "immediate",
           prompt: "hello",
-          vault: vaultRoot,
+          vault: "/vault",
         },
+        media,
         response: "reply body",
         session,
         sharedPlan: createSharedPlan(),
-        turnId: "turn-media-delivery-throws",
+        turnId: "turn-media-unsupported",
       }),
-    ).rejects.toThrow(/outbox unavailable/u);
+    ).resolves.toEqual({
+      delivery: {
+        channel: "telegram",
+        idempotencyKey: null,
+        messageLength: 10,
+        providerMessageId: "provider-text-only",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "binding-thread",
+        targetKind: "thread",
+      },
+      intentId: "intent-text-only",
+      kind: "sent",
+      media: [],
+      session,
+    });
 
-    await expect(
-      readAssistantResponseMedia({
-        vault: vaultRoot,
-        turnId: "turn-media-delivery-throws",
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "telegram",
+        media: [],
+        message: "reply body",
+        turnId: "turn-media-unsupported",
       }),
-    ).resolves.toEqual([]);
+    );
   });
 
   it("marks hosted Linq deliveries with deterministic keys idempotent before outbox dispatch", async () => {

@@ -54,8 +54,27 @@ describe("exercise-library runtime", () => {
     const artifacts = buildArtifacts(catalog);
     expect(artifacts.index.items[0]).not.toHaveProperty("steps");
     expect(artifacts.index.items[0]).not.toHaveProperty("sourceIds");
+    expect(artifacts.index.items[0]).not.toHaveProperty("images");
     expect(artifacts.details.items[0]?.tips.length).toBeGreaterThan(0);
     expect(artifacts.details.items[0]?.sourceIds.length).toBeGreaterThan(0);
+    expect(artifacts.details.items.find((item) => item.slug === "stretch-cat-cow")?.images).toEqual([
+      expect.objectContaining({
+        step: "Tabletop setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/889a5f43-1d35-4eae-a98e-7ae69e96a800/public",
+      }),
+      expect.objectContaining({
+        step: "Cow position",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/47b67d0b-af6a-4700-62ed-c0b912662c00/public",
+      }),
+      expect.objectContaining({
+        step: "Cat position",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7f90ecd5-5f6b-4ddf-5997-c1d5893e0300/public",
+      }),
+      expect.objectContaining({
+        step: "Slow flow",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8d1a1b7c-6780-4345-b5e6-bffb32ec5a00/public",
+      }),
+    ]);
     expect(artifacts.details.sources).toEqual(catalog.sources);
     expect(artifacts.facets.facets.kinds).toEqual(["exercise", "stretch"]);
     expect(artifacts.facets.facets.equipment).toContain("none");
@@ -199,6 +218,21 @@ describe("exercise-library runtime", () => {
       "utf8",
     );
     await expect(readSeedCatalog([badUrlPath])).rejects.toThrow("non-HTTPS source URL");
+
+    const badImageUrlPath = path.join(tempRoot, "bad-image-url.csv");
+    await writeFile(
+      badImageUrlPath,
+      [
+        seedHeader(),
+        seedRow({
+          id: "EX_BAD_IMAGE_URL",
+          images: "Setup | Setup image | http://example.com/setup.png",
+        }),
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await expect(readSeedCatalog([badImageUrlPath])).rejects.toThrow("non-HTTPS image URL");
   });
 });
 
@@ -240,11 +274,13 @@ function seedHeader(): string {
     "Source URL(s)",
     "Steps",
     "Best Practices",
+    "Images",
   ].join(",");
 }
 
 function seedRow(input: {
   id: string;
+  images?: string;
   name?: string;
   sourceUrls?: string;
 }): string {
@@ -263,6 +299,7 @@ function seedRow(input: {
     input.sourceUrls ?? "https://example.com/source",
     "1) Set up. 2) Move with control.",
     "1) Keep it easy.",
+    input.images ?? "",
   ].map(csvField).join(",");
 }
 

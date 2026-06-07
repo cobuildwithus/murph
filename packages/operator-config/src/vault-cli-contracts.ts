@@ -285,14 +285,17 @@ const exerciseCatalogSummaryResultSchema = z.object({
   description: z.string().min(1),
 })
 
+const exerciseCatalogImageResultSchema = z.object({
+  url: z.string().url(),
+  step: z.string().min(1),
+  alt: z.string().min(1),
+})
+
 const exerciseCatalogItemResultSchema = exerciseCatalogSummaryResultSchema.extend({
   sourceIds: z.array(z.number().int().positive()),
   steps: z.array(z.string().min(1)),
   tips: z.array(z.string().min(1)),
-  image: z.object({
-    url: z.string().url(),
-    alt: z.string().min(1),
-  }).nullable(),
+  images: z.array(exerciseCatalogImageResultSchema),
 })
 
 const exerciseCatalogSourceResultSchema = z.object({

@@ -17,7 +17,6 @@ import {
   assistantSandboxValues,
   assistantReasoningEffortValues,
   assistantSessionListResultSchema,
-  assistantResponseMediaSchema,
   assistantSessionShowResultSchema,
   assistantStopResultSchema,
   assistantStatusResultSchema,
@@ -49,8 +48,6 @@ import {
   listAssistantSessions,
   resolveAssistantStatePaths,
   listAssistantMediaCatalog,
-  resolveAssistantActiveTurnContextFromEnv,
-  stageAssistantResponseMedia,
 } from '@murphai/assistant-engine/assistant-state'
 import {
   emptyArgsSchema,
@@ -224,18 +221,6 @@ const assistantMediaListResultSchema = z.object({
     tags: z.array(z.string().min(1)),
   })),
 })
-
-const assistantMediaAttachResultSchema = z.object({
-  vault: z.string().min(1),
-  turnId: z.string().min(1),
-  sessionId: z.string().min(1).nullable(),
-  media: z.array(assistantResponseMediaSchema),
-  stagedCount: z.number().int().nonnegative(),
-})
-
-function arrayOptionValue(value: string[] | undefined, index: number): string | null {
-  return value?.[index]?.trim() || null
-}
 
 function assertAssistantSelfDeliveryTargetInput(input: {
   channel: string
@@ -1167,7 +1152,7 @@ export function registerAssistantCommands(
   const registerMediaCommands = () => {
     const media = Cli.create('media', {
       description:
-        'List and stage pre-generated assistant response media. Staged media is attached to the current assistant reply through the normal outbox; it does not send directly.',
+        'List pre-generated assistant response media catalog entries. Codex attaches final response media through its turn-local runtime tool.',
     })
 
     media.command('list', {
@@ -1189,68 +1174,6 @@ export function registerAssistantCommands(
           env: process.env,
           query: context.args.query ?? null,
         })
-      },
-    })
-
-    media.command('attach', {
-      args: emptyArgsSchema,
-      description:
-        'Stage one or more HTTPS media URLs for the current assistant turn. Use this after `assistant media list`; the final reply delivery sends the staged media.',
-      hint:
-        'This is safe inside an assistant turn because it only stages response media. It does not call provider delivery directly.',
-      options: withBaseOptions({
-        url: z
-          .array(z.string().url())
-          .min(1)
-          .max(40)
-          .describe('HTTPS media URL to attach. Repeat to preserve order.'),
-        alt: z
-          .array(z.string().min(1))
-          .optional()
-          .describe('Optional alt text entries matching --url order.'),
-        source: z
-          .array(z.string().min(1))
-          .optional()
-          .describe('Optional catalog item ids or source labels matching --url order.'),
-      }),
-      output: assistantMediaAttachResultSchema,
-      async run(context) {
-        const active = resolveAssistantActiveTurnContextFromEnv(process.env)
-        const turnId = active.turnId
-        if (!turnId) {
-          throw new VaultCliError(
-            'ASSISTANT_ACTIVE_TURN_REQUIRED',
-            'assistant media attach must run inside an active assistant turn.',
-          )
-        }
-        const sessionId = active.sessionId
-        if (!sessionId) {
-          throw new VaultCliError(
-            'ASSISTANT_ACTIVE_SESSION_REQUIRED',
-            'assistant media attach must run inside an active assistant session.',
-          )
-        }
-        const media = context.options.url.map((url, index) =>
-          assistantResponseMediaSchema.parse({
-            kind: 'image',
-            url,
-            alt: arrayOptionValue(context.options.alt, index),
-            source: arrayOptionValue(context.options.source, index),
-          }),
-        )
-        const staged = await stageAssistantResponseMedia({
-          vault: context.options.vault,
-          turnId,
-          sessionId,
-          media,
-        })
-        return {
-          vault: buildAssistantVaultResultPath(context.options.vault).vault,
-          turnId,
-          sessionId: sessionId ?? null,
-          media: staged,
-          stagedCount: staged.length,
-        }
       },
     })
 

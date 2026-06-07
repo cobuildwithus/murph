@@ -169,13 +169,18 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
         assert.equal(progressTool.name, 'send_progress_update')
         assertDynamicToolDescription(progressTool)
         assertDynamicToolInputSchema(progressTool)
+        const responseMediaTool = readDynamicTool(threadStart, 1)
+        assert.equal(responseMediaTool.namespace, 'murph')
+        assert.equal(responseMediaTool.name, 'attach_response_media')
+        assertDynamicToolDescription(responseMediaTool)
+        assertDynamicToolInputSchema(responseMediaTool)
         assert.deepEqual(threadStart, {
           id: 2,
           method: 'thread/start',
           params: {
             approvalPolicy: 'never',
             cwd: expectedWorkingDirectory,
-            dynamicTools: [progressTool],
+            dynamicTools: [progressTool, responseMediaTool],
             model: 'gpt-5',
             sandbox: 'workspace-write',
             serviceName: 'murph',

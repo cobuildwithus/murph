@@ -1,30 +1,47 @@
-import { rm } from 'node:fs/promises'
-
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import {
-  clearAssistantResponseMedia,
   listAssistantMediaCatalog,
-  readAssistantResponseMedia,
-  resolveAssistantActiveTurnContextFromEnv,
-  stageAssistantResponseMedia,
+  normalizeAssistantResponseMediaList,
 } from '../src/assistant/response-media.ts'
-import { createTempVaultContext } from './test-helpers.ts'
-
-const tempRoots: string[] = []
-
-afterEach(async () => {
-  await Promise.all(
-    tempRoots.splice(0).map((rootPath) =>
-      rm(rootPath, {
-        force: true,
-        recursive: true,
-      }),
-    ),
-  )
-})
 
 describe('assistant response media', () => {
+  it('normalizes, dedupes, and preserves response media order without runtime state', () => {
+    expect(normalizeAssistantResponseMediaList([
+      {
+        kind: 'image',
+        url: 'https://cdn.example.test/dead-bug/setup.png',
+        alt: 'Dead bug setup',
+        source: 'dead-bug-setup',
+      },
+      {
+        kind: 'image',
+        url: 'https://cdn.example.test/dead-bug/setup.png',
+        alt: 'Duplicate should collapse by URL',
+        source: 'duplicate',
+      },
+      {
+        kind: 'image',
+        url: 'https://cdn.example.test/dead-bug/finish.png',
+        alt: null,
+        source: null,
+      },
+    ])).toEqual([
+      {
+        kind: 'image',
+        url: 'https://cdn.example.test/dead-bug/setup.png',
+        alt: 'Dead bug setup',
+        source: 'dead-bug-setup',
+      },
+      {
+        kind: 'image',
+        url: 'https://cdn.example.test/dead-bug/finish.png',
+        alt: null,
+        source: null,
+      },
+    ])
+  })
+
   it('lists catalog items by query and resolves relative HTTPS item URLs', async () => {
     const result = await listAssistantMediaCatalog({
       env: {},
@@ -121,143 +138,6 @@ describe('assistant response media', () => {
       }),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_MEDIA_CATALOG_REQUEST_TIMEOUT',
-    })
-  })
-
-  it('stages, dedupes, reads, and clears media for one assistant turn', async () => {
-    const { parentRoot, vaultRoot } = await createTempVaultContext(
-      'assistant-response-media-',
-    )
-    tempRoots.push(parentRoot)
-
-    const staged = await stageAssistantResponseMedia({
-      vault: vaultRoot,
-      turnId: 'turn-media-1',
-      sessionId: 'session-media-1',
-      media: [
-        {
-          kind: 'image',
-          url: 'https://cdn.example.test/dead-bug/setup.png',
-          alt: 'Dead bug setup',
-          source: 'dead-bug-setup',
-        },
-        {
-          kind: 'image',
-          url: 'https://cdn.example.test/dead-bug/setup.png',
-          alt: 'Duplicate should collapse by URL',
-          source: 'duplicate',
-        },
-      ],
-    })
-
-    expect(staged).toEqual([
-      {
-        kind: 'image',
-        url: 'https://cdn.example.test/dead-bug/setup.png',
-        alt: 'Dead bug setup',
-        source: 'dead-bug-setup',
-      },
-    ])
-    await expect(
-      readAssistantResponseMedia({
-        vault: vaultRoot,
-        turnId: 'turn-media-1',
-      }),
-    ).resolves.toEqual(staged)
-
-    await clearAssistantResponseMedia({
-      vault: vaultRoot,
-      turnId: 'turn-media-1',
-    })
-    await expect(
-      readAssistantResponseMedia({
-        vault: vaultRoot,
-        turnId: 'turn-media-1',
-      }),
-    ).resolves.toEqual([])
-  })
-
-  it('replaces media for one assistant turn instead of accumulating stale staged media', async () => {
-    const { parentRoot, vaultRoot } = await createTempVaultContext(
-      'assistant-response-media-replace-',
-    )
-    tempRoots.push(parentRoot)
-
-    await stageAssistantResponseMedia({
-      vault: vaultRoot,
-      turnId: 'turn-media-replace',
-      sessionId: 'session-media-replace',
-      media: [
-        {
-          kind: 'image',
-          url: 'https://cdn.example.test/one.png',
-          alt: 'one',
-          source: 'one',
-        },
-        {
-          kind: 'image',
-          url: 'https://cdn.example.test/two.png',
-          alt: 'two',
-          source: 'two',
-        },
-        {
-          kind: 'image',
-          url: 'https://cdn.example.test/three.png',
-          alt: 'three',
-          source: 'three',
-        },
-      ],
-    })
-
-    const staged = await stageAssistantResponseMedia({
-      vault: vaultRoot,
-      turnId: 'turn-media-replace',
-      sessionId: 'session-media-replace',
-      media: [
-        {
-          kind: 'image',
-          url: 'https://cdn.example.test/one.png',
-          alt: 'one',
-          source: 'one',
-        },
-        {
-          kind: 'image',
-          url: 'https://cdn.example.test/one.png',
-          alt: 'Duplicate replacement item should collapse by URL',
-          source: 'duplicate-replacement',
-        },
-      ],
-    })
-
-    expect(staged).toEqual([
-      {
-        kind: 'image',
-        url: 'https://cdn.example.test/one.png',
-        alt: 'one',
-        source: 'one',
-      },
-    ])
-    await expect(
-      readAssistantResponseMedia({
-        vault: vaultRoot,
-        turnId: 'turn-media-replace',
-      }),
-    ).resolves.toEqual(staged)
-  })
-
-  it('normalizes active turn context from env without inventing missing values', () => {
-    expect(
-      resolveAssistantActiveTurnContextFromEnv({
-        MURPH_ASSISTANT_ACTIVE_TURN_ID: ' turn-env-1 ',
-        MURPH_ASSISTANT_ACTIVE_SESSION_ID: ' session-env-1 ',
-      }),
-    ).toEqual({
-      turnId: 'turn-env-1',
-      sessionId: 'session-env-1',
-    })
-    expect(resolveAssistantActiveTurnContextFromEnv({})).toEqual({
-      turnId: null,
-      sessionId: null,
     })
   })
 })

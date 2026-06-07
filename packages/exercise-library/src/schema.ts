@@ -30,6 +30,7 @@ export type ExerciseCatalogCommonness = (typeof exerciseCatalogCommonnessValues)
 
 export interface ExerciseCatalogImage {
   alt: string;
+  step: string;
   url: string;
 }
 
@@ -55,7 +56,7 @@ export interface ExerciseCatalogSummary {
 }
 
 export interface ExerciseCatalogItem extends ExerciseCatalogSummary {
-  image: ExerciseCatalogImage | null;
+  images: ExerciseCatalogImage[];
   sourceIds: number[];
   steps: string[];
   tips: string[];

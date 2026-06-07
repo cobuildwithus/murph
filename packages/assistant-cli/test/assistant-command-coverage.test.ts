@@ -48,7 +48,6 @@ const commandMocks = vi.hoisted(() => ({
   runAssistantDoctor: vi.fn(),
   saveAssistantSelfDeliveryTarget: vi.fn(),
   sendAssistantMessage: vi.fn(),
-  stageAssistantResponseMedia: vi.fn(),
   stopAssistantAutomation: vi.fn(),
 }))
 
@@ -115,7 +114,6 @@ vi.mock('@murphai/assistant-engine/assistant-state', () => ({
   resolveAssistantOnboardingStatePath:
     commandMocks.resolveAssistantOnboardingStatePath,
   resolveAssistantStatePaths: commandMocks.resolveAssistantStatePaths,
-  stageAssistantResponseMedia: commandMocks.stageAssistantResponseMedia,
 }))
 
 vi.mock('@murphai/assistant-engine/assistant-runtime', () => ({
@@ -322,11 +320,10 @@ test('assistant command registration exposes the owned subcommands and root alia
     'session',
   ])
   assert.deepEqual([...selfTarget.commands.keys()], ['list', 'show', 'set', 'clear'])
-  assert.deepEqual([...media.commands.keys()], ['list', 'attach'])
+  assert.deepEqual([...media.commands.keys()], ['list'])
   assert.deepEqual([...session.commands.keys()], ['list', 'show'])
   assert.equal(Object.hasOwn(readCommand(media.commands, 'list').options?.shape ?? {}, 'vault'), false)
   assert.equal(Object.hasOwn(readCommand(media.commands, 'list').options?.shape ?? {}, 'requestId'), true)
-  assert.equal(Object.hasOwn(readCommand(media.commands, 'attach').options?.shape ?? {}, 'vault'), true)
   assert.equal(Object.hasOwn(run.options?.shape ?? {}, 'skipDaemon'), false)
   assert.equal(Object.hasOwn(ask.options?.shape ?? {}, 'provider'), false)
   assert.equal(Object.hasOwn(ask.options?.shape ?? {}, 'oss'), false)

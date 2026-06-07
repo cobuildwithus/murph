@@ -1308,25 +1308,10 @@ describe('assistant input event store', () => {
     ).rejects.toThrow(/path segment sentinel/iu)
   })
 
-  it('rejects raw provider payload, auth header, and oversized text', async () => {
+  it('rejects raw provider payload and oversized text', async () => {
     const { vaultRoot } = await createAssistantInputStoreVault(
       'assistant-input-store-text-guard-',
     )
-    await expect(
-      upsertAssistantInputEvent({
-        vault: vaultRoot,
-        event: {
-          content: {
-            text: `${Array.from({ length: 24 }, () => 'preamble').join('\n')}\nX-Api-Key: redacted\nhello`,
-          },
-          occurredAt: '2026-04-22T10:00:00.000Z',
-          sourceRef: createHostedMailboxSourceRef({
-            eventId: 'evt_auth_header',
-            laneSeq: '42',
-          }),
-        },
-      }),
-    ).rejects.toThrow(/auth headers/iu)
     await expect(
       upsertAssistantInputEvent({
         vault: vaultRoot,
@@ -1380,6 +1365,28 @@ describe('assistant input event store', () => {
         vault: vaultRoot,
         event: {
           content: {
+            text: 'Authorization: fixture-header\nCookie: fixture-cookie',
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceRef: createHostedMailboxSourceRef({
+            eventId: 'evt_text_header_lines',
+            laneSeq: '43',
+          }),
+        },
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        content: expect.objectContaining({
+          text: 'Authorization: fixture-header\nCookie: fixture-cookie',
+        }),
+      }),
+    )
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
             text: 'downloaded from https://example.invalid/raw-message',
           },
           occurredAt: '2026-04-22T10:00:00.000Z',
@@ -1408,7 +1415,7 @@ describe('assistant input event store', () => {
           occurredAt: '2026-04-22T10:00:00.000Z',
           sourceRef: createHostedMailboxSourceRef({
             eventId: 'evt_transcript_email',
-            laneSeq: '43',
+            laneSeq: '44',
           }),
         },
       }),
@@ -1429,7 +1436,7 @@ describe('assistant input event store', () => {
           occurredAt: '2026-04-22T10:00:00.000Z',
           sourceRef: createHostedMailboxSourceRef({
             eventId: 'evt_user_message_path',
-            laneSeq: '44',
+            laneSeq: '45',
           }),
         },
       }),
@@ -1456,7 +1463,7 @@ describe('assistant input event store', () => {
           occurredAt: '2026-04-22T10:00:00.000Z',
           sourceRef: createHostedMailboxSourceRef({
             eventId: 'evt_transcript_paths',
-            laneSeq: '45',
+            laneSeq: '46',
           }),
         },
       }),
