@@ -208,16 +208,19 @@ describe('assistant CLI delivery contracts', () => {
     expect(
       assistantResponseMediaSchema.parse({
         kind: 'image',
-        url: ' https://cdn.example.test/dead-bug/setup.png ',
+        url: ' https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/889a5f43-1d35-4eae-a98e-7ae69e96a800/public ',
         alt: 'Dead bug setup',
         source: 'dead-bug-setup',
       }),
     ).toEqual({
       kind: 'image',
-      url: 'https://cdn.example.test/dead-bug/setup.png',
+      url: 'https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/889a5f43-1d35-4eae-a98e-7ae69e96a800/public',
       alt: 'Dead bug setup',
       source: 'dead-bug-setup',
     })
+
+    expect(normalizeAssistantResponseMediaUrl('https://cdn.example.test/dead-bug/setup.png'))
+      .toBe('https://cdn.example.test/dead-bug/setup.png')
 
     for (const url of [
       'http://cdn.example.test/dead-bug/setup.png',
@@ -238,6 +241,7 @@ describe('assistant CLI delivery contracts', () => {
       'https://[2001:db8::1]/dead-bug/setup.png',
       'https://[2606:4700:4700::1111]/dead-bug/setup.png',
       'https://[::ffff:127.0.0.1]/dead-bug/setup.png',
+      'https://cdn.example.test/dead-bug/setup',
       'https://example.test/dead-bug/setup.txt',
     ]) {
       expect(() => normalizeAssistantResponseMediaUrl(url), url).toThrow()

@@ -53,7 +53,7 @@ test('exercise list show and facets expose the public movement catalog', async (
   const showResult = await runInProcessJsonCli<{
     item: {
       id: string
-      image: null | { url: string; alt: string }
+      images: Array<{ url: string; step: string; alt: string }>
       sourceIds: number[]
       steps: string[]
       tips: string[]
@@ -64,11 +64,25 @@ test('exercise list show and facets expose the public movement catalog', async (
   assert.equal(showResult.envelope.ok, true)
   const showData = requireData(showResult.envelope)
   assert.equal(showData.item.id, 'EX001')
-  assert.equal(showData.item.image, null)
+  assert.deepEqual(showData.item.images, [])
   assert.ok(showData.item.sourceIds.length > 0)
   assert.ok(showData.sources.length > 0)
   assert.ok(showData.item.steps.length > 0)
   assert.ok(showData.item.tips.length > 0)
+
+  const catCowResult = await runInProcessJsonCli<{
+    item: {
+      id: string
+      images: Array<{ url: string; step: string; alt: string }>
+    }
+  }>(cli, ['exercise', 'show', 'stretch-cat-cow'])
+
+  assert.equal(catCowResult.envelope.ok, true)
+  const catCowData = requireData(catCowResult.envelope)
+  assert.equal(catCowData.item.id, 'ST170')
+  assert.equal(catCowData.item.images.length, 4)
+  assert.equal(catCowData.item.images[0]?.step, 'Tabletop setup')
+  assert.match(catCowData.item.images[0]?.url ?? '', /^https:\/\/imagedelivery\.net\//u)
 
   const facetsResult = await runInProcessJsonCli<{
     facets: {
