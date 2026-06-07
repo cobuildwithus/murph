@@ -5,7 +5,6 @@ import {
   deliverAssistantProgressUpdate,
 } from './delivery-service.js'
 import {
-  MAX_PROGRESS_CHARS,
   MAX_PROGRESS_UPDATES_PER_TURN,
 } from './progress-constants.js'
 import {
@@ -147,9 +146,5 @@ export function normalizeAssistantProgressText(rawText: string): string | null {
   if (!normalized) {
     return null
   }
-  if (normalized.length <= MAX_PROGRESS_CHARS) {
-    return normalized
-  }
-
-  return `${normalized.slice(0, MAX_PROGRESS_CHARS - 3).trimEnd()}...`
+  return normalized
 }

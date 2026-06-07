@@ -21,7 +21,6 @@ import type {
   AssistantTurnSharedPlan,
 } from '../src/assistant/service-contracts.js'
 import {
-  MAX_PROGRESS_CHARS,
   MAX_PROGRESS_UPDATES_PER_TURN,
 } from '../src/assistant/progress-constants.js'
 import {
@@ -39,9 +38,8 @@ describe('assistant turn progress', () => {
       ),
     ).toBe('Reading the report and checking context.')
 
-    const longText = 'x'.repeat(MAX_PROGRESS_CHARS + 20)
-    expect(normalizeAssistantProgressText(longText)).toHaveLength(MAX_PROGRESS_CHARS)
-    expect(normalizeAssistantProgressText(longText)?.endsWith('...')).toBe(true)
+    const longText = 'x'.repeat(300)
+    expect(normalizeAssistantProgressText(longText)).toBe(longText)
   })
 
   it('dedupes and limits progress updates inside one turn', async () => {

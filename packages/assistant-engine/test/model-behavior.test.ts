@@ -101,22 +101,22 @@ describe('assistant execution prompt contract', () => {
       'A required `send_progress_update` call is not a final answer and does not conflict with acting directly',
     )
     expect(prompt).toContain(
-      'Use it for longer, multi-step, research, long parsing/scans, or non-audio content-inspection work',
+      'Use it for longer, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work',
     )
     expect(prompt).toContain(
       'If the turn remains long-running after substantial tool work, send another brief update so the user is not left hanging, up to three total progress updates in the turn',
     )
     expect(prompt).toContain(
-      'Keep the text brief, conversational, and specific to the immediate next step',
+      'Keep the text to one to three short conversational sentences, specific to the immediate next step',
     )
     expect(prompt).toContain(
-      '3. Use `send_progress_update` first for genuinely longer, multi-step, research, long parsing/scans, or non-audio content-inspection work. If the turn remains long-running after substantial tool work, send another brief update so the user is not left hanging, up to three total progress updates in the turn. Keep the progress text brief, conversational, and specific to the immediate next step; avoid stiff plan-recitation wording like "I\'m going to..." when a shorter "I\'ll..." or "Taking a look..." works.',
+      '3. Use `send_progress_update` first for genuinely longer, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work. If the turn remains long-running after substantial tool work, send another brief update so the user is not left hanging, up to three total progress updates in the turn. Keep the progress text to one to three short conversational sentences, specific to the immediate next step; avoid stiff plan-recitation wording like "I\'m going to..." when a shorter "I\'ll..." or "Taking a look..." works.',
     )
     expect(prompt).toContain(
       'avoid stiff plan-recitation wording like "I\'m going to..."',
     )
     expect(prompt).toContain(
-      'Skip it for skill-file reads, setup checks, routine single-command vault reads, quick replies, and automatically transcribed voice memo or audio content',
+      'Skip it for skill-file reads, setup checks, routine single-command vault reads, quick replies, straightforward one-shot logging/capture/memory saves, and automatically transcribed voice memo or audio content',
     )
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
@@ -228,7 +228,10 @@ describe('assistant local PDF evidence guidance', () => {
       'When the user sends or references a file, image, screenshot, PDF, CSV, audio/video file, large pasted text, lab report',
     )
     expect(prompt).toContain(
-      'If the current task requires inspecting non-audio user content, call `send_progress_update` first',
+      'If the current task requires substantial non-audio content inspection or multiple parse/import steps, call `send_progress_update` first',
+    )
+    expect(prompt).toContain(
+      'Do not use it for straightforward one-shot logging or capture writes',
     )
     expect(prompt).toContain(
       'For voice memos and audio/video, use transcript fragments directly when ingestion provides them',

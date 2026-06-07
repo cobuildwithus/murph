@@ -1,6 +1,5 @@
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
-import { MAX_PROGRESS_CHARS } from '../assistant/progress-constants.js'
 import type {
   CodexRpcMessage,
 } from './app-server-rpc.js'
@@ -9,7 +8,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
   name: 'send_progress_update',
   description:
-    'Send a brief, natural user-visible progress update to the current conversation before longer, tool-heavy, or user-content-inspection work. Use immediately as the first assistant action when the task may take more than a few seconds, require multiple tool steps, involve research or long vault scans, inspect/parse/render/import/save user-provided content, or recover data from PDFs, lab reports, images, screenshots, CSVs, large pasted text, meal/product/supplement labels, workout exports, wearable exports, or health documents. If the turn remains long-running after substantial tool work, you may send another brief update so the user is not left hanging, up to three total progress updates in the turn. Skip automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed. Do not use for skill-file reads alone, setup checks, routine single-command vault reads, quick single-step replies, or final conclusions.',
+    'Send a brief, natural user-visible progress update to the current conversation before longer, tool-heavy, or substantial user-content-inspection work. Use immediately as the first assistant action when the task may take more than a few seconds, require multiple tool steps, involve research or long vault scans, or recover substantial data from PDFs, lab reports, images, screenshots, CSVs, large pasted text, meal/product/supplement labels, workout exports, wearable exports, or health documents. If the turn remains long-running after substantial tool work, you may send another brief update so the user is not left hanging, up to three total progress updates in the turn. Skip automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed. Do not use for skill-file reads alone, setup checks, routine single-command vault reads, quick single-step replies, one-shot logging/capture/memory saves that only need a straightforward write, or final conclusions.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -17,9 +16,8 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
       text: {
         type: 'string',
         minLength: 1,
-        maxLength: MAX_PROGRESS_CHARS,
         description:
-          'One short conversational first-person sentence about the immediate next step, like a quick note to the user. Use contractions when natural. Avoid stiff plan-recitation wording like "I\'m going to..." when a shorter "I\'ll..." or "Taking a look..." works. No markdown links, final answers, lab interpretations, abnormalities, diagnoses, treatment recommendations, or claims not yet verified.',
+          'One to three short conversational first-person sentences about the immediate next step, like a quick note to the user. Use contractions when natural. Avoid stiff plan-recitation wording like "I\'m going to..." when a shorter "I\'ll..." or "Taking a look..." works. No markdown links, final answers, lab interpretations, abnormalities, diagnoses, treatment recommendations, or claims not yet verified.',
       },
     },
     required: ['text'],
@@ -118,7 +116,7 @@ function parseSendProgressUpdateArguments(
   }
 
   const text = normalizeNullableString(record.text)
-  if (!text || text.length > MAX_PROGRESS_CHARS) {
+  if (!text) {
     return { ok: false }
   }
 

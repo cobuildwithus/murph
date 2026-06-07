@@ -1,2 +1,1 @@
-export const MAX_PROGRESS_CHARS = 240
 export const MAX_PROGRESS_UPDATES_PER_TURN = 3

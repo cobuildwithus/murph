@@ -20,19 +20,19 @@ describe('assistant progress prompt contract', () => {
       'continue immediately with the first file, vault, web, skill, media, or CLI action',
     )
     expect(prompt).toContain(
-      'Use it for longer, multi-step, research, long parsing/scans, or non-audio content-inspection work',
+      'Use it for longer, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work',
     )
     expect(prompt).toContain(
       'If the turn remains long-running after substantial tool work, send another brief update so the user is not left hanging, up to three total progress updates in the turn',
     )
     expect(prompt).toContain(
-      'Keep the text brief, conversational, and specific to the immediate next step',
+      'Keep the text to one to three short conversational sentences, specific to the immediate next step',
     )
     expect(prompt).toContain(
       'avoid stiff plan-recitation wording like "I\'m going to..."',
     )
     expect(prompt).toContain(
-      'Skip it for skill-file reads, setup checks, routine single-command vault reads, quick replies, and automatically transcribed voice memo or audio content',
+      'Skip it for skill-file reads, setup checks, routine single-command vault reads, quick replies, straightforward one-shot logging/capture/memory saves, and automatically transcribed voice memo or audio content',
     )
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
@@ -41,7 +41,7 @@ describe('assistant progress prompt contract', () => {
   it('keeps the dynamic tool description aligned with the progress prompt rule', () => {
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.name).toBe('send_progress_update')
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'before longer, tool-heavy, or user-content-inspection work',
+      'before longer, tool-heavy, or substantial user-content-inspection work',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'If the turn remains long-running after substantial tool work',
@@ -79,6 +79,9 @@ describe('assistant progress prompt contract', () => {
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'Do not use for skill-file reads alone, setup checks, routine single-command vault reads',
     )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'one-shot logging/capture/memory saves that only need a straightforward write',
+    )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).not.toContain(
       'before the first non-progress tool call',
     )
@@ -94,8 +97,9 @@ describe('assistant progress prompt contract', () => {
 
     const textProperty =
       MURPH_SEND_PROGRESS_UPDATE_TOOL.inputSchema.properties.text
+    expect(textProperty).not.toHaveProperty('maxLength')
     expect(textProperty.description).toContain(
-      'One short conversational first-person sentence about the immediate next step',
+      'One to three short conversational first-person sentences about the immediate next step',
     )
     expect(textProperty.description).toContain('Use contractions when natural')
     expect(textProperty.description).toContain(

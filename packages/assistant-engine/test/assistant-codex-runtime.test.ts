@@ -5520,6 +5520,9 @@ describe('assistant codex runtime', () => {
   it('handles the Murph progress dynamic tool without changing the final response', async () => {
     const workingDirectory = await createTempDir('assistant-codex-progress-tool-')
     const progressDelivery = createProgressDeliveryMock()
+    const progressText =
+      'Got it. I\'ll pull out the lab values and check what is usable. I\'m also going to preserve this full progress update text instead of clipping it, because users should see the exact update the assistant sent when a longer note is still only a couple of sentences.'
+    expect(progressText.length).toBeGreaterThan(240)
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
@@ -5565,8 +5568,7 @@ describe('assistant codex runtime', () => {
                 namespace: 'murph',
                 tool: 'send_progress_update',
                 arguments: {
-                  text:
-                    'Got it. I\'ll pull out the lab values and check what is usable.',
+                  text: progressText,
                 },
               },
             }),
@@ -5628,7 +5630,7 @@ describe('assistant codex runtime', () => {
     })
 
     expect(progressDelivery.send).toHaveBeenCalledWith(
-      'Got it. I\'ll pull out the lab values and check what is usable.',
+      progressText,
       { source: 'model' },
     )
     expect(progressDelivery.send).not.toHaveBeenCalledWith('Provider-side status text')
