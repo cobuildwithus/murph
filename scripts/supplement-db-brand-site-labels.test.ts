@@ -17,8 +17,10 @@ import {
   summarize,
 } from "../.agents/skills/research-supplements/scripts/supplement-db-brand-site-repair-preview.mjs";
 import {
+  buildDsldStructuredFactsByUpcSql,
   buildShopifyEvidenceCandidate,
   factsTextContaminationReason,
+  hydrateCandidatesWithDsldFacts,
   matchShopifyVariantForQueueRow,
   productFactsPromotionBlockedReasonForProduct,
   selectShopifyFactsMedia,
@@ -408,6 +410,97 @@ describe("supplement brand-site refetch preview", () => {
       "missing_serving_sizes",
       "needs_manual_review",
     ]);
+  });
+
+  test("hydrates blocked candidates from exact UPC-matched DSLD structured facts", () => {
+    const candidate = buildShopifyEvidenceCandidate({
+      source: "bluebonnet-nutrition",
+      sourceId: "5-htp-100-mg-vegetable-capsules--120-count",
+      dataOriginId: "bluebonnet-nutrition:5-htp-100-mg-vegetable-capsules--120-count",
+      dataOriginUrl: "https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules",
+      name: "5-HTP 100 mg - 120 count",
+      brand: "Bluebonnet Nutrition",
+    }, bluebonnetProduct, "2026-06-07T00:00:00.000Z");
+
+    assert.ok(candidate);
+    const [hydrated] = hydrateCandidatesWithDsldFacts([candidate], {
+      "743715000537": {
+        id: "176487",
+        canonicalKey: "dsld:176487",
+        upc: "743715000537",
+        label: {
+          ingredientRows: [
+            { name: "5-Hydroxytryptophan", quantity: [{ quantity: 100, unit: "mg" }] },
+          ],
+          servingSizes: [
+            { minQuantity: 1, maxQuantity: 1, unit: "Capsule(s)" },
+          ],
+          netContents: [
+            { quantity: 120, unit: "Vegetable Capsule(s)" },
+          ],
+          otheringredients: "Vegetable cellulose capsule.",
+        },
+      },
+    });
+
+    assert.equal(hydrated.label.needsManualReview, false);
+    assert.equal(hydrated.label.evidenceStatus, "structured_facts_from_exact_dsld_upc_match");
+    assert.deepEqual(hydrated.reviewIssues, []);
+    assert.deepEqual(hydrated.label.ingredientRows, [
+      { name: "5-Hydroxytryptophan", quantity: [{ quantity: 100, unit: "mg" }] },
+    ]);
+    assert.deepEqual(hydrated.label.servingSizes, [
+      { minQuantity: 1, maxQuantity: 1, unit: "Capsule(s)" },
+    ]);
+    assert.deepEqual(hydrated.label.structuredFactsSource, {
+      dataOrigin: "dsld",
+      id: "176487",
+      canonicalKey: "dsld:176487",
+      upc: "743715000537",
+      matchedBy: "exact_upc",
+    });
+    assert.equal(hydrated.label.otherIngredients, "Vegetable cellulose capsule.");
+    assert.equal(hydrated.refetchPreview.dsldUpcHydrated, true);
+  });
+
+  test("does not hydrate candidates without complete DSLD structured facts", () => {
+    const candidate = buildShopifyEvidenceCandidate({
+      source: "bluebonnet-nutrition",
+      sourceId: "5-htp-100-mg-vegetable-capsules--120-count",
+      dataOriginId: "bluebonnet-nutrition:5-htp-100-mg-vegetable-capsules--120-count",
+      dataOriginUrl: "https://bluebonnetnutrition.com/products/5-htp-100-mg-vegetable-capsules",
+      name: "5-HTP 100 mg - 120 count",
+      brand: "Bluebonnet Nutrition",
+    }, bluebonnetProduct, "2026-06-07T00:00:00.000Z");
+
+    assert.ok(candidate);
+    const [notHydrated] = hydrateCandidatesWithDsldFacts([candidate], {
+      "743715000537": {
+        id: "176487",
+        canonicalKey: "dsld:176487",
+        upc: "743715000537",
+        label: {
+          ingredientRows: [{ name: "5-Hydroxytryptophan" }],
+          servingSizes: [],
+        },
+      },
+    });
+
+    assert.equal(notHydrated.label.needsManualReview, true);
+    assert.equal(notHydrated.refetchPreview.dsldUpcHydrated, undefined);
+    assert.deepEqual(notHydrated.reviewIssues, [
+      "missing_ingredient_rows",
+      "missing_serving_sizes",
+      "needs_manual_review",
+    ]);
+  });
+
+  test("builds DSLD hydration SQL for exact UPC rows only", () => {
+    const sql = buildDsldStructuredFactsByUpcSql(["743715000537", "743715000537", "743715000513"]);
+    assert.match(sql, /s\.data_origin = 'dsld'/u);
+    assert.match(sql, /s\.upc = i\.upc/u);
+    assert.match(sql, /jsonb_array_length\(s\.label->'ingredientRows'\) > 0/u);
+    assert.equal((sql.match(/743715000537/gu) ?? []).length, 1);
   });
 });
 

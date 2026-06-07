@@ -57,6 +57,7 @@ export interface RefetchPreviewOptions {
   timeoutMs: number;
   delayMs: number;
   retries: number;
+  hydrateDsldUpc?: boolean;
 }
 
 export interface RefetchEvidenceCandidate {
@@ -82,6 +83,7 @@ export interface RefetchEvidenceCandidate {
 }
 
 export function buildRefetchPreview(options: RefetchPreviewOptions): Promise<Record<string, unknown>>;
+export function buildDsldStructuredFactsByUpcSql(upcs: string[]): string;
 export function buildShopifyEvidenceCandidate(
   queueRow: RecoveryQueueRow,
   product: ShopifyProduct,
@@ -89,6 +91,10 @@ export function buildShopifyEvidenceCandidate(
 ): RefetchEvidenceCandidate | null;
 export function extractFactsTextFromShopifyProduct(product: ShopifyProduct): string | null;
 export function factsTextContaminationReason(text: string): string | null;
+export function hydrateCandidatesWithDsldFacts(
+  candidates: RefetchEvidenceCandidate[],
+  factsByUpc: Record<string, unknown>,
+): RefetchEvidenceCandidate[];
 export function matchShopifyVariantForQueueRow(
   queueRow: RecoveryQueueRow,
   product: ShopifyProduct,

@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { normalizeItem } from "./supplement-db-brand-site-labels.mjs";
+import { getDbUrl, normalizeItem, runPsql } from "./supplement-db-brand-site-labels.mjs";
 import {
   extractIngredientRows,
   extractServingSizes,
@@ -25,6 +25,7 @@ function parseArgs(argv) {
     timeoutMs: 20_000,
     delayMs: 250,
     retries: 2,
+    hydrateDsldUpc: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -53,6 +54,8 @@ function parseArgs(argv) {
     } else if (arg === "--retries") {
       options.retries = parseIntegerOption(argv, index, arg, 0);
       index += 1;
+    } else if (arg === "--hydrate-dsld-upc") {
+      options.hydrateDsldUpc = true;
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -91,6 +94,8 @@ Options:
   --timeout-ms <n>           Per-request timeout. Default: 20000.
   --delay-ms <n>             Delay between unique product JSON fetches. Default: 250.
   --retries <n>              Retries for temporary HTTP failures. Default: 2.
+  --hydrate-dsld-upc         Read-only DB lookup: copy structured DSLD facts into
+                             candidates when the current official variant has an exact UPC match.
 
 This helper is read-only. It fetches official source evidence and writes local
 preview artifacts only; it never writes the supplement database.
@@ -217,14 +222,18 @@ async function buildRefetchPreview(options) {
     }
   }
 
+  const hydratedCandidates = options.hydrateDsldUpc
+    ? hydrateCandidatesFromDsldByUpc(candidates, getDbUrl())
+    : candidates;
   const summary = summarizePreview({
     rowsReviewed: rows.length,
     productUrlsFetched: [...productCache.values()].filter((entry) => entry.ok).length,
     productFetchFailures: [...productCache.values()].filter((entry) => !entry.ok).length,
-    candidates,
+    candidates: hydratedCandidates,
     failures,
+    dsldUpcHydrationEnabled: options.hydrateDsldUpc,
   });
-  const artifacts = writeArtifacts(options.outputDir, { summary, candidates, failures });
+  const artifacts = writeArtifacts(options.outputDir, { summary, candidates: hydratedCandidates, failures });
   return { ...summary, artifacts };
 }
 
@@ -298,6 +307,127 @@ function buildShopifyEvidenceCandidate(queueRow, product, fetchedAt = new Date()
       productFactsPromotionBlockedReason,
     },
   };
+}
+
+function hydrateCandidatesFromDsldByUpc(candidates, dbUrl) {
+  const upcs = uniqueStrings(candidates.map((candidate) => candidate.upc).filter(Boolean));
+  if (upcs.length === 0) return candidates;
+  const output = runPsql(dbUrl, buildDsldStructuredFactsByUpcSql(upcs));
+  const factsByUpc = parsePsqlJsonObject(output, "dsld_facts");
+  return hydrateCandidatesWithDsldFacts(candidates, factsByUpc);
+}
+
+function buildDsldStructuredFactsByUpcSql(upcs) {
+  if (!Array.isArray(upcs) || upcs.length === 0) {
+    return "select '{}'::jsonb::text as dsld_facts;";
+  }
+  const values = uniqueStrings(upcs).map((upc) => `('${sqlString(upc)}')`).join(",\n    ");
+  return `with input(upc) as (
+    values
+    ${values}
+  ), matched as (
+    select distinct on (i.upc)
+      i.upc,
+      jsonb_build_object(
+        'id', s.id,
+        'canonicalKey', s.canonical_key,
+        'name', s.name,
+        'brand', s.brand,
+        'upc', s.upc,
+        'label', s.label
+      ) as payload
+    from input i
+    join supplements s on s.data_origin = 'dsld'
+      and s.upc = i.upc
+    where jsonb_typeof(s.label->'ingredientRows') = 'array'
+      and jsonb_array_length(s.label->'ingredientRows') > 0
+      and jsonb_typeof(s.label->'servingSizes') = 'array'
+      and jsonb_array_length(s.label->'servingSizes') > 0
+    order by i.upc, s.imported_at desc, s.id
+  )
+  select coalesce(jsonb_object_agg(upc, payload), '{}'::jsonb)::text as dsld_facts
+  from matched;`;
+}
+
+function hydrateCandidatesWithDsldFacts(candidates, factsByUpc) {
+  if (!factsByUpc || typeof factsByUpc !== "object" || Array.isArray(factsByUpc)) return candidates;
+  return candidates.map((candidate) => {
+    const facts = candidate.upc ? factsByUpc[candidate.upc] : null;
+    return applyDsldStructuredFacts(candidate, facts);
+  });
+}
+
+function applyDsldStructuredFacts(candidate, facts) {
+  if (!isHydratableDsldFacts(facts)) return candidate;
+  const dsldLabel = facts.label;
+  const otherIngredients = dsldLabel.otherIngredients ?? dsldLabel.otheringredients;
+  const label = {
+    ...candidate.label,
+    evidenceStatus: "structured_facts_from_exact_dsld_upc_match",
+    needsManualReview: false,
+    ingredientRows: dsldLabel.ingredientRows,
+    servingSizes: dsldLabel.servingSizes,
+    ...(otherIngredients !== undefined ? { otherIngredients } : {}),
+    ...(dsldLabel.servingsPerContainer !== undefined ? { servingsPerContainer: dsldLabel.servingsPerContainer } : {}),
+    ...(dsldLabel.percentDvFootnote !== undefined ? { percentDvFootnote: dsldLabel.percentDvFootnote } : {}),
+    ...(dsldLabel.netContents !== undefined ? { dsldNetContents: dsldLabel.netContents } : {}),
+    structuredFactsSource: {
+      dataOrigin: "dsld",
+      id: String(facts.id),
+      canonicalKey: facts.canonicalKey ?? null,
+      upc: facts.upc ?? candidate.upc ?? null,
+      matchedBy: "exact_upc",
+    },
+  };
+  const hydrated = normalizeItem({
+    id: candidate.id,
+    dataOrigin: candidate.dataOrigin,
+    dataOriginId: candidate.dataOriginId,
+    dataOriginUrl: candidate.dataOriginUrl,
+    source: candidate.source,
+    sourceId: candidate.sourceId,
+    name: candidate.name,
+    brand: candidate.brand,
+    upc: candidate.upc,
+    offMarket: candidate.offMarket,
+    label,
+  });
+  return {
+    ...hydrated,
+    refetchPreview: {
+      ...candidate.refetchPreview,
+      dsldUpcHydrated: true,
+      dsldStructuredFactsSource: label.structuredFactsSource,
+    },
+  };
+}
+
+function isHydratableDsldFacts(value) {
+  const label = value?.label;
+  return Boolean(
+    value
+      && typeof value === "object"
+      && !Array.isArray(value)
+      && label
+      && typeof label === "object"
+      && !Array.isArray(label)
+      && Array.isArray(label.ingredientRows)
+      && label.ingredientRows.length > 0
+      && Array.isArray(label.servingSizes)
+      && label.servingSizes.length > 0,
+  );
+}
+
+function parsePsqlJsonObject(output, columnName) {
+  const lines = String(output).split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+  const columnIndex = lines.indexOf(columnName);
+  const value = columnIndex >= 0 ? lines[columnIndex + 1] : lines.find((line) => line.startsWith("{"));
+  if (!value) throw new Error(`psql output did not include ${columnName}`);
+  return JSON.parse(value);
+}
+
+function sqlString(value) {
+  return String(value).replace(/'/gu, "''");
 }
 
 function requireQueueString(value, field) {
@@ -489,10 +619,11 @@ function htmlToText(value) {
     .trim();
 }
 
-function summarizePreview({ rowsReviewed, productUrlsFetched, productFetchFailures, candidates, failures }) {
+function summarizePreview({ rowsReviewed, productUrlsFetched, productFetchFailures, candidates, failures, dsldUpcHydrationEnabled = false }) {
   const productionReadyCandidates = candidates.filter((candidate) => candidate.reviewIssues.length === 0).length;
   const needsManualReviewCandidates = candidates.filter((candidate) => candidate.label?.needsManualReview === true).length;
   const factsImageCandidates = candidates.filter((candidate) => Array.isArray(candidate.label?.factsImageUrls) && candidate.label.factsImageUrls.length > 0).length;
+  const dsldUpcHydratedCandidates = candidates.filter((candidate) => candidate.refetchPreview?.dsldUpcHydrated === true).length;
   const byReason = {};
   for (const failure of failures) {
     byReason[failure.reason] = (byReason[failure.reason] ?? 0) + 1;
@@ -506,6 +637,8 @@ function summarizePreview({ rowsReviewed, productUrlsFetched, productFetchFailur
     productionReadyCandidates,
     needsManualReviewCandidates,
     factsImageCandidates,
+    dsldUpcHydrationEnabled,
+    dsldUpcHydratedCandidates,
     failures: failures.length,
     failureReasons: byReason,
   };
@@ -540,8 +673,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 export {
   buildRefetchPreview,
   buildShopifyEvidenceCandidate,
+  buildDsldStructuredFactsByUpcSql,
   extractFactsTextFromShopifyProduct,
   factsTextContaminationReason,
+  hydrateCandidatesWithDsldFacts,
   matchShopifyVariantForQueueRow,
   productFactsPromotionBlockedReasonForProduct,
   selectQueueRows,
