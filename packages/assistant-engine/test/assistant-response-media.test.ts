@@ -220,6 +220,12 @@ describe('assistant response media', () => {
           alt: 'one',
           source: 'one',
         },
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/one.png',
+          alt: 'Duplicate replacement item should collapse by URL',
+          source: 'duplicate-replacement',
+        },
       ],
     })
 
