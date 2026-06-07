@@ -130,13 +130,8 @@ describe('assistant local PDF evidence guidance', () => {
       'Hosted wearable connection links are available for Oura (`oura`) and WHOOP (`whoop`)',
     )
     expect(prompt).toContain(
-      'List only these supported choices when offering examples',
+      'When offering examples, mention about six supported choices from this list, not the full provider list',
     )
-    expect(prompt).toContain(
-      'During the onboarding wearable/app checkpoint, omit examples by default',
-    )
-    expect(prompt).toContain('name at most eight supported choices')
-    expect(prompt).toContain('do not show the full provider list')
     expect(prompt).toContain(
       'Do not add generic consumer-health app examples or proactively name unsupported sources as caveats',
     )
@@ -894,13 +889,8 @@ describe('assistant Murph onboarding guidance', () => {
       'Hosted wearable connection links are available for WHOOP (`whoop`)',
     )
     expect(prompt).toContain(
-      'List only these supported choices when offering examples',
+      'When offering examples, mention about six supported choices from this list, not the full provider list',
     )
-    expect(prompt).toContain(
-      'During the onboarding wearable/app checkpoint, omit examples by default',
-    )
-    expect(prompt).toContain('name at most eight supported choices')
-    expect(prompt).toContain('do not show the full provider list')
     expect(prompt).not.toContain('roughly 3-4 short assistant messages')
     expect(prompt).not.toContain(
       'Do not compress the whole orientation into one "send me things" reply',

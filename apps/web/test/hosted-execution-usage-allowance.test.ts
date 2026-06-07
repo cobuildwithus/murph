@@ -428,7 +428,7 @@ describe("resolveHostedAiUsageGate", () => {
     const prisma = createGatePrisma({
       billingPhase: "trial",
       checkoutOffer: "pulse_trial_7d",
-      limitUsdMicros: 2_500_000n,
+      limitUsdMicros: 4_500_000n,
       periodEnd: new Date("2026-04-08T12:00:00.000Z"),
       periodStart: new Date("2026-04-01T12:00:00.000Z"),
       pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
@@ -444,10 +444,10 @@ describe("resolveHostedAiUsageGate", () => {
     })).resolves.toMatchObject({
       allowed: true,
       billingPlanCode: "launch_monthly",
-      limitUsdMicros: 2_500_000n,
+      limitUsdMicros: 4_500_000n,
       periodEnd: new Date("2026-04-08T12:00:00.000Z"),
       periodStart: new Date("2026-04-01T12:00:00.000Z"),
-      remainingUsdMicros: 500_000n,
+      remainingUsdMicros: 2_500_000n,
       spentUsdMicros: 2_000_000n,
     });
   });
@@ -456,11 +456,11 @@ describe("resolveHostedAiUsageGate", () => {
     const prisma = createGatePrisma({
       billingPhase: "trial",
       checkoutOffer: "pulse_trial_7d",
-      limitUsdMicros: 2_500_000n,
+      limitUsdMicros: 4_500_000n,
       periodEnd: new Date("2026-04-08T12:00:00.000Z"),
       periodStart: new Date("2026-04-01T12:00:00.000Z"),
       pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
-      spentUsdMicros: 2_500_000n,
+      spentUsdMicros: 4_500_000n,
       trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
       trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
     });
@@ -485,7 +485,7 @@ describe("resolveHostedAiUsageGate", () => {
     const prisma = createGatePrisma({
       billingPhase: "trial",
       checkoutOffer: "pulse_trial_7d",
-      limitUsdMicros: 2_500_000n,
+      limitUsdMicros: 4_500_000n,
       periodEnd: new Date("2026-04-08T12:00:00.000Z"),
       periodStart: new Date("2026-04-01T12:00:00.000Z"),
       pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
@@ -500,7 +500,7 @@ describe("resolveHostedAiUsageGate", () => {
       prisma: prisma as never,
     })).resolves.toMatchObject({
       allowed: false,
-      limitUsdMicros: 2_500_000n,
+      limitUsdMicros: 4_500_000n,
       reason: "trial_expired_pending_billing",
       retryAfter: new Date("2026-04-08T12:15:01.000Z"),
       userNotice: {
@@ -527,7 +527,7 @@ describe("resolveHostedAiUsageGate", () => {
         trialEndsAt: null,
         trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
       },
-      2_500_000n,
+      4_500_000n,
     ],
     [
       "reversed trial bounds",
@@ -536,13 +536,13 @@ describe("resolveHostedAiUsageGate", () => {
         trialEndsAt: new Date("2026-04-01T12:00:00.000Z"),
         trialStartedAt: new Date("2026-04-08T12:00:00.000Z"),
       },
-      2_500_000n,
+      4_500_000n,
     ],
   ])("denies malformed Pulse Trial billing state for %s", async (_name, trialState, limitUsdMicros) => {
     const prisma = createGatePrisma({
       billingPhase: "trial",
       checkoutOffer: "pulse_trial_7d",
-      limitUsdMicros: 2_500_000n,
+      limitUsdMicros: 4_500_000n,
       periodEnd: new Date("2026-04-08T12:00:00.000Z"),
       periodStart: new Date("2026-04-01T12:00:00.000Z"),
       spentUsdMicros: 0n,
@@ -582,7 +582,7 @@ describe("resolveHostedAiUsageGate", () => {
       prisma: prisma as never,
     })).resolves.toMatchObject({
       allowed: false,
-      limitUsdMicros: 2_500_000n,
+      limitUsdMicros: 4_500_000n,
       reason: "trial_expired_pending_billing",
     });
     expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();

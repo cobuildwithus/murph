@@ -27,7 +27,7 @@ Success means:
 - The Pulse Trial CTA creates a Stripe Checkout subscription for the existing Pulse price with a seven-day trial.
 - Trial activation is metadata-gated and idempotent.
 - The hosted billing ref records the current billing phase and trial boundaries.
-- The existing hosted AI usage allowance resolver returns a 2.50 USD trial allowance during the trial and the normal Pulse allowance after Stripe converts the subscription to a paid cycle.
+- The existing hosted AI usage allowance resolver returns a 4.50 USD trial allowance during the trial and the normal Pulse allowance after Stripe converts the subscription to a paid cycle.
 - A stale trial phase never falls back to the normal monthly Pulse allowance.
 - No Cloudflare/runtime enforcement wiring is added by this plan. Cloudflare already checks the signed web usage gate before hosted runner invocation, so this plan treats the web gate response shape, denial reason, notice, and `retryAfter` as runtime-facing API.
 - The trial CTA is release-gated by `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`; the backend remains safe with the flag off.
@@ -117,7 +117,7 @@ Replace the current self-hosted "Free" card with a Pulse Trial card:
 - Name: `Pulse Trial`
 - Price: `$0 for 7 days`
 - Price detail: `Then $8/month`
-- Usage detail: `Includes $2.50 hosted AI usage during trial`
+- Usage detail: `Includes $4.50 hosted AI usage during trial`
 - Billing disclosure: `Card required. Then $8/month unless canceled.`
 - CTA: `Start 7-day trial`
 
@@ -201,7 +201,7 @@ export type HostedBillingPhase = (typeof HOSTED_BILLING_PHASES)[number];
 
 export const HOSTED_PULSE_TRIAL_OFFER = "pulse_trial_7d" as const;
 export const HOSTED_PULSE_TRIAL_DAYS = 7;
-export const HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS = 2_500_000n;
+export const HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS = 4_500_000n;
 export const HOSTED_PULSE_TRIAL_POLICY_VERSION =
   "pulse-trial-2026-05-05-v1";
 
@@ -311,7 +311,7 @@ const checkoutMetadata = {
   checkoutOffer: "pulse_trial_7d",
   trialPolicyVersion: "pulse-trial-2026-05-05-v1",
   trialDurationDays: "7",
-  trialUsageLimitUsdMicros: "2500000",
+  trialUsageLimitUsdMicros: "4500000",
 };
 ```
 
@@ -580,7 +580,7 @@ The resolver should require:
 
 If these checks fail because the trial is expired or malformed, fail closed. Do not return the normal Pulse allowance.
 
-The 2.50 USD trial allowance is a pre-invocation start gate after usage import, not an exact token-level prepaid cap. One allowed hosted run can exceed the remaining trial balance before its usage is imported; the next invocation must be denied once imported spend reaches or exceeds the limit.
+The 4.50 USD trial allowance is a pre-invocation start gate after usage import, not an exact token-level prepaid cap. One allowed hosted run can exceed the remaining trial balance before its usage is imported; the next invocation must be denied once imported spend reaches or exceeds the limit.
 
 ### Stale Trial Guard
 
@@ -620,7 +620,7 @@ userNotice: "Your trial has ended and billing is being updated. Try again shortl
 - trial period start is trial start
 - first paid period start is the Stripe period start after trial conversion
 
-Do not upgrade a trial period's limit from 2.50 USD to 10.00 USD. The paid conversion should create or resolve a distinct paid period.
+Do not upgrade a trial period's limit from 4.50 USD to 10.00 USD. The paid conversion should create or resolve a distinct paid period.
 
 ### Fallback Period Carryover
 
@@ -702,9 +702,9 @@ Focused tests to add or update:
 - `hosted-onboarding-member-store.test.ts`
   - billing-ref write helpers persist and project the new fields
 - `hosted-execution-usage-allowance.test.ts`
-  - active Pulse Trial receives 2.50 USD micros limit
+  - active Pulse Trial receives 4.50 USD micros limit
   - member-provided credentials still do not count against trial allowance
-  - trial usage over 2.50 USD is denied
+  - trial usage over 4.50 USD is denied
   - expired trial with stale billing phase is denied before period upsert and does not fall back to 10.00 USD
   - trial phase with unknown `pulseTrialPolicyVersion` is denied before period upsert
   - trial phase with missing trial end is denied before period upsert
@@ -737,7 +737,7 @@ Expected verification for the implementation change:
 7. Run one test-mode checkout against the production-like Stripe account with test keys or a staging environment.
 8. Confirm Stripe metadata on the Checkout Session and Subscription.
 9. Confirm `HostedMemberBillingRef` has phase `trial`, offer `pulse_trial_7d`, immutable redemption fields, trial start/end, and Pulse plan code.
-10. Confirm the usage gate returns the trial allowance before imported model spend reaches 2.50 USD.
+10. Confirm the usage gate returns the trial allowance before imported model spend reaches 4.50 USD.
 11. Confirm a synthetic over-limit period denies before the next invocation without granting paid Pulse allowance.
 12. Confirm the initial trial invoice does not activate paid access.
 13. Confirm the first real paid invoice updates phase to `paid` and resolves the normal Pulse allowance.
@@ -782,7 +782,7 @@ The implementation is complete when:
 - `checkout.session.completed` activates only valid Pulse Trial sessions.
 - initial trial invoices do not activate paid access, and only a real paid invoice converts trial phase to paid.
 - `HostedMemberBillingRef` persists plan, phase, offer, period, trial boundaries, and immutable Pulse Trial redemption.
-- The usage allowance resolver returns 2.50 USD micros for active trial periods and 10.00 USD micros only for paid Pulse periods or the explicit legacy paid-member branch.
+- The usage allowance resolver returns 4.50 USD micros for active trial periods and 10.00 USD micros only for paid Pulse periods or the explicit legacy paid-member branch.
 - Expired stale trial state denies before period upsert/carryover, returns a future retry, and never falls back to monthly Pulse.
 - The join page presents Pulse Trial, Pulse, and Edge as hosted choices, with self-hosting as a secondary GitHub link.
 - Durable docs and tests are updated with the final current-state behavior.

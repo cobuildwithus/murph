@@ -29,7 +29,7 @@ Pulse Trial already exists as a checkout offer on the normal Pulse plan:
 
 - plan: `launch_monthly`
 - offer: `pulse_trial_7d`
-- trial allowance: `2.50 USD` hosted AI usage
+- trial allowance: `4.50 USD` hosted AI usage
 - paid Pulse allowance: `10.00 USD` hosted AI usage per month
 
 The exhausted-trial path is implemented:

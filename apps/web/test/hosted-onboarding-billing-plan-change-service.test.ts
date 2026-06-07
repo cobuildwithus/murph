@@ -356,7 +356,7 @@ describe("upgradeHostedBillingPlan", () => {
       memberId: "member_123",
       trialDurationDays: "7",
       trialPolicyVersion: "pulse-trial-2026-05-05-v1",
-      trialUsageLimitUsdMicros: "2500000",
+      trialUsageLimitUsdMicros: "4500000",
     };
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       customer: "cus_123",
@@ -479,7 +479,7 @@ describe("upgradeHostedBillingPlan", () => {
       memberId: "member_123",
       trialDurationDays: "7",
       trialPolicyVersion: "pulse-trial-2026-05-05-v1",
-      trialUsageLimitUsdMicros: "2500000",
+      trialUsageLimitUsdMicros: "4500000",
     };
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       customer: "cus_123",
@@ -550,7 +550,7 @@ describe("upgradeHostedBillingPlan", () => {
       memberId: "member_123",
       trialDurationDays: "7",
       trialPolicyVersion: "pulse-trial-2026-05-05-v1",
-      trialUsageLimitUsdMicros: "2500000",
+      trialUsageLimitUsdMicros: "4500000",
     };
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       customer: "cus_123",
@@ -623,7 +623,7 @@ describe("upgradeHostedBillingPlan", () => {
       memberId: "member_123",
       trialDurationDays: "7",
       trialPolicyVersion: "pulse-trial-2026-05-05-v1",
-      trialUsageLimitUsdMicros: "2500000",
+      trialUsageLimitUsdMicros: "4500000",
     };
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       customer: "cus_123",

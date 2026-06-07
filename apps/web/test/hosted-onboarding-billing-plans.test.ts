@@ -51,7 +51,7 @@ describe("hosted billing launch plan Stripe configuration", () => {
     expect(parseHostedBillingPhase("paid")).toBe("paid");
     expect(requireHostedPulseTrialPolicy("pulse-trial-2026-05-05-v1")).toEqual({
       durationDays: 7,
-      usageLimitUsdMicros: 2_500_000n,
+      usageLimitUsdMicros: 4_500_000n,
     });
   });
 

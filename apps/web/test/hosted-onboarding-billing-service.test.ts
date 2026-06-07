@@ -317,7 +317,7 @@ describe("createHostedBillingCheckout", () => {
           memberId: "member_123",
           trialDurationDays: "7",
           trialPolicyVersion: "pulse-trial-2026-05-05-v1",
-          trialUsageLimitUsdMicros: "2500000",
+          trialUsageLimitUsdMicros: "4500000",
         },
         subscription_data: {
           metadata: {
@@ -326,13 +326,13 @@ describe("createHostedBillingCheckout", () => {
             memberId: "member_123",
             trialDurationDays: "7",
             trialPolicyVersion: "pulse-trial-2026-05-05-v1",
-            trialUsageLimitUsdMicros: "2500000",
+            trialUsageLimitUsdMicros: "4500000",
           },
           trial_period_days: 7,
         },
       }),
       {
-        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:b882350aa0ce:items:a071a65166f8:customer:none",
+        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:bfe998b7beb2:items:a071a65166f8:customer:none",
       },
     );
   });
