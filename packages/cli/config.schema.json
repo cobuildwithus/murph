@@ -5008,7 +5008,7 @@
                                   "maxLength": 4000
                                 },
                                 "exercise": {
-                                  "description": "Compact exercise grammar: order=...;name=... with optional groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Supported keys: order, name, sourceExerciseId, groupId, mode, unitOverride, note. Repeat --exercise for multiple exercises.",
+                                  "description": "Compact exercise grammar: order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Supported keys: order, name, sourceExerciseId, groupId, mode, unitOverride, note. Repeat --exercise for multiple exercises.",
                                   "type": "array",
                                   "items": {
                                     "type": "string",

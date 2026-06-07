@@ -21,18 +21,19 @@ import {
   type ExerciseCatalogItem,
   type ExerciseCatalogKind,
   type ExerciseCatalogLevel,
+  type ExerciseCatalogSource,
 } from "./schema.js";
 import { normalizeToken, sha256StableJson, slugify, stablePrettyJson } from "./normalize.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const defaultSeedPath = path.join(packageRoot, "content", "seed", "at-home-exercise-stretch.csv");
+const defaultSeedRoot = path.join(packageRoot, "content", "seed");
 const indexBudgetGzipBytes = 150 * 1024;
 const detailsBudgetGzipBytes = 1024 * 1024;
 
 interface CliOptions {
   check: boolean;
   generatedRoot: string;
-  seedPath: string;
+  seedPaths: string[];
 }
 
 interface SeedRow {
@@ -52,9 +53,14 @@ interface SeedRow {
   "Best Practices": string;
 }
 
+export interface ExerciseSeedCatalog {
+  items: ExerciseCatalogItem[];
+  sources: ExerciseCatalogSource[];
+}
+
 export async function writeExerciseGeneratedArtifacts(options: CliOptions): Promise<void> {
-  const items = await readSeedItems(options.seedPath);
-  const artifacts = buildArtifacts(items);
+  const catalog = await readSeedCatalog(options.seedPaths.length > 0 ? options.seedPaths : await listDefaultSeedPaths());
+  const artifacts = buildArtifacts(catalog);
   const files = buildGeneratedFiles(artifacts);
 
   if (options.check) {
@@ -66,12 +72,14 @@ export async function writeExerciseGeneratedArtifacts(options: CliOptions): Prom
 }
 
 export async function readSeedItems(seedPath: string): Promise<ExerciseCatalogItem[]> {
-  const rows = parseCsv(await readFile(seedPath, "utf8"));
-  if (rows.length === 0) {
-    throw new Error("Exercise seed CSV is empty.");
+  return (await readSeedCatalog([seedPath])).items;
+}
+
+export async function readSeedCatalog(seedPaths: readonly string[]): Promise<ExerciseSeedCatalog> {
+  if (seedPaths.length === 0) {
+    throw new Error("Exercise seed catalog has no source CSV files.");
   }
 
-  const [headers, ...records] = rows;
   const expectedHeaders = [
     "Library",
     "ID",
@@ -88,33 +96,59 @@ export async function readSeedItems(seedPath: string): Promise<ExerciseCatalogIt
     "Steps",
     "Best Practices",
   ];
-  if (headers.join("\0") !== expectedHeaders.join("\0")) {
-    throw new Error(`Unexpected exercise seed headers: ${headers.join(", ")}`);
+
+  const sourceRegistry = createSourceRegistry();
+  const items: ExerciseCatalogItem[] = [];
+
+  for (const seedPath of seedPaths) {
+    const rows = parseCsv(await readFile(seedPath, "utf8"));
+    if (rows.length === 0) {
+      throw new Error(`Exercise seed CSV is empty: ${path.basename(seedPath)}.`);
+    }
+
+    const [headers, ...records] = rows;
+    if (headers.join("\0") !== expectedHeaders.join("\0")) {
+      throw new Error(`Unexpected exercise seed headers in ${path.basename(seedPath)}: ${headers.join(", ")}`);
+    }
+
+    records
+      .filter((record) => record.some((value) => value.trim().length > 0))
+      .forEach((record, index) => {
+        if (record.length !== expectedHeaders.length) {
+          throw new Error(
+            `Exercise seed row ${path.basename(seedPath)}:${index + 2} has ${record.length} columns; expected ${expectedHeaders.length}.`,
+          );
+        }
+        const row = Object.fromEntries(expectedHeaders.map((header, column) => [header, record[column] ?? ""])) as unknown as SeedRow;
+        items.push(normalizeSeedRow(row, `${path.basename(seedPath)}:${index + 2}`, sourceRegistry));
+      });
   }
 
-  const items = records
-    .filter((record) => record.some((value) => value.trim().length > 0))
-    .map((record, index) => {
-      if (record.length !== expectedHeaders.length) {
-        throw new Error(`Exercise seed row ${index + 2} has ${record.length} columns; expected ${expectedHeaders.length}.`);
-      }
-      const row = Object.fromEntries(expectedHeaders.map((header, column) => [header, record[column] ?? ""])) as unknown as SeedRow;
-      return normalizeSeedRow(row, index + 2);
-    });
-
   validateItems(items);
-  return items;
+  return {
+    items,
+    sources: sourceRegistry.sources,
+  };
 }
 
-export function buildArtifacts(items: readonly ExerciseCatalogItem[]): {
+export function buildArtifacts(catalog: ExerciseSeedCatalog): {
   details: ExerciseCatalogDetailsArtifact;
   facets: ExerciseCatalogFacetsArtifact;
   index: ExerciseCatalogIndexArtifact;
 } {
-  const itemSummaries = items.map(({ image: _image, steps: _steps, tips: _tips, ...summary }) => summary);
+  const { items, sources } = catalog;
+  validateCatalogSources(catalog);
+  const itemSummaries = items.map(({
+    image: _image,
+    sourceIds: _sourceIds,
+    steps: _steps,
+    tips: _tips,
+    ...summary
+  }) => summary);
   const catalogHash = sha256StableJson({
     items: [...items],
     schemaVersion: EXERCISE_CATALOG_DETAILS_SCHEMA_VERSION,
+    sources: [...sources],
   });
   const index: ExerciseCatalogIndexArtifact = {
     schemaVersion: EXERCISE_CATALOG_INDEX_SCHEMA_VERSION,
@@ -127,6 +161,7 @@ export function buildArtifacts(items: readonly ExerciseCatalogItem[]): {
     catalogHash,
     generatedAt: null,
     items: [...items],
+    sources: [...sources],
   };
   const facets: ExerciseCatalogFacetsArtifact = {
     schemaVersion: EXERCISE_CATALOG_FACETS_SCHEMA_VERSION,
@@ -141,20 +176,31 @@ export function buildArtifacts(items: readonly ExerciseCatalogItem[]): {
   return { details, facets, index };
 }
 
-function normalizeSeedRow(row: SeedRow, lineNumber: number): ExerciseCatalogItem {
-  const id = required(row.ID, "ID", lineNumber);
-  const name = required(row.Name, "Name", lineNumber);
-  const description = required(row["Short Description"], "Short Description", lineNumber);
+function validateCatalogSources(catalog: ExerciseSeedCatalog): void {
+  const sourceIds = new Set(catalog.sources.map((source) => source.id));
+  for (const item of catalog.items) {
+    for (const sourceId of item.sourceIds) {
+      if (!sourceIds.has(sourceId)) {
+        throw new Error(`Exercise catalog item ${item.id} references missing source id ${sourceId}.`);
+      }
+    }
+  }
+}
+
+function normalizeSeedRow(row: SeedRow, rowLabel: string, sourceRegistry: SourceRegistry): ExerciseCatalogItem {
+  const id = required(row.ID, "ID", rowLabel);
+  const name = required(row.Name, "Name", rowLabel);
+  const description = required(row["Short Description"], "Short Description", rowLabel);
   if (description.length > 500) {
-    throw new Error(`Exercise seed row ${lineNumber} description exceeds 500 characters.`);
+    throw new Error(`Exercise seed row ${rowLabel} description exceeds 500 characters.`);
   }
 
-  const kind = normalizeKind(row.Library, lineNumber);
-  const category = required(row.Category, "Category", lineNumber);
+  const kind = normalizeKind(row.Library, rowLabel);
+  const category = required(row.Category, "Category", rowLabel);
   const targets = splitList(row["Target Area"]);
   const equipment = splitList(row.Equipment);
-  const steps = parseNumberedList(row.Steps, "Steps", lineNumber);
-  const tips = parseNumberedList(row["Best Practices"], "Best Practices", lineNumber);
+  const steps = parseNumberedList(row.Steps, "Steps", rowLabel);
+  const tips = parseNumberedList(row["Best Practices"], "Best Practices", rowLabel);
 
   for (const [label, values, limit] of [
     ["step", steps, 400],
@@ -162,14 +208,12 @@ function normalizeSeedRow(row: SeedRow, lineNumber: number): ExerciseCatalogItem
   ] as const) {
     for (const value of values) {
       if (value.length > limit) {
-        throw new Error(`Exercise seed row ${lineNumber} ${label} exceeds ${limit} characters.`);
+        throw new Error(`Exercise seed row ${rowLabel} ${label} exceeds ${limit} characters.`);
       }
     }
   }
 
-  for (const url of splitSourceUrls(row["Source URL(s)"])) {
-    validateUrl(url, lineNumber);
-  }
+  const sourceIds = splitSourceUrls(row["Source URL(s)"]).map((url) => sourceRegistry.getId(url, rowLabel));
 
   return {
     id,
@@ -179,13 +223,14 @@ function normalizeSeedRow(row: SeedRow, lineNumber: number): ExerciseCatalogItem
     environment: ["at_home"],
     category,
     targets,
-    level: normalizeEnum(row.Level, exerciseCatalogLevelValues, "Level", lineNumber),
+    level: normalizeEnum(row.Level, exerciseCatalogLevelValues, "Level", rowLabel),
     equipment,
     position: nullableTrim(row.Position),
-    modality: required(row.Modality, "Modality", lineNumber),
-    commonness: normalizeEnum(row["Commonness Tier"], exerciseCatalogCommonnessValues, "Commonness Tier", lineNumber),
+    modality: required(row.Modality, "Modality", rowLabel),
+    commonness: normalizeEnum(row["Commonness Tier"], exerciseCatalogCommonnessValues, "Commonness Tier", rowLabel),
     description,
     image: null,
+    sourceIds,
     steps,
     tips,
   };
@@ -195,7 +240,7 @@ function uniqueSlugPrefix(kind: ExerciseCatalogKind, baseSlug: string): string {
   return kind === "exercise" ? baseSlug : `${kind}-${baseSlug}`;
 }
 
-function normalizeKind(value: string, lineNumber: number): ExerciseCatalogKind {
+function normalizeKind(value: string, rowLabel: string): ExerciseCatalogKind {
   const normalized = normalizeToken(value).replace(/\//gu, "-");
   if (normalized === "stretch-mobility" || normalized === "stretch") {
     return "stretch";
@@ -206,20 +251,20 @@ function normalizeKind(value: string, lineNumber: number): ExerciseCatalogKind {
   if (isExerciseKind(normalized)) {
     return normalized;
   }
-  throw new Error(`Exercise seed row ${lineNumber} has unsupported Library "${value}".`);
+  throw new Error(`Exercise seed row ${rowLabel} has unsupported Library "${value}".`);
 }
 
 function normalizeEnum<const TValue extends string>(
   value: string,
   allowed: readonly TValue[],
   field: string,
-  lineNumber: number,
+  rowLabel: string,
 ): TValue {
   const normalized = normalizeToken(value).replace(/-/gu, "_");
   if (allowed.includes(normalized as TValue)) {
     return normalized as TValue;
   }
-  throw new Error(`Exercise seed row ${lineNumber} has unsupported ${field} "${value}".`);
+  throw new Error(`Exercise seed row ${rowLabel} has unsupported ${field} "${value}".`);
 }
 
 function nullableTrim(value: string): string | null {
@@ -227,10 +272,10 @@ function nullableTrim(value: string): string | null {
   return trimmed ? trimmed : null;
 }
 
-function required(value: string, field: string, lineNumber: number): string {
+function required(value: string, field: string, rowLabel: string): string {
   const trimmed = value.trim();
   if (!trimmed) {
-    throw new Error(`Exercise seed row ${lineNumber} is missing ${field}.`);
+    throw new Error(`Exercise seed row ${rowLabel} is missing ${field}.`);
   }
   return trimmed;
 }
@@ -247,22 +292,46 @@ function splitSourceUrls(value: string): string[] {
   return value.split(";").map((entry) => entry.trim()).filter(Boolean);
 }
 
-function parseNumberedList(value: string, field: string, lineNumber: number): string[] {
-  const trimmed = required(value, field, lineNumber);
+function parseNumberedList(value: string, field: string, rowLabel: string): string[] {
+  const trimmed = required(value, field, rowLabel);
   const parts = trimmed
     .split(/\s*\d+\)\s*/u)
     .map((part) => part.trim())
     .filter(Boolean);
   if (parts.length === 0) {
-    throw new Error(`Exercise seed row ${lineNumber} has no ${field}.`);
+    throw new Error(`Exercise seed row ${rowLabel} has no ${field}.`);
   }
   return parts;
 }
 
-function validateUrl(value: string, lineNumber: number): void {
+interface SourceRegistry {
+  readonly sources: ExerciseCatalogSource[];
+  getId(url: string, rowLabel: string): number;
+}
+
+function createSourceRegistry(): SourceRegistry {
+  const sources: ExerciseCatalogSource[] = [];
+  const idByUrl = new Map<string, number>();
+  return {
+    sources,
+    getId(url, rowLabel) {
+      validateUrl(url, rowLabel);
+      const existing = idByUrl.get(url);
+      if (existing !== undefined) {
+        return existing;
+      }
+      const id = sources.length + 1;
+      sources.push({ id, url });
+      idByUrl.set(url, id);
+      return id;
+    },
+  };
+}
+
+function validateUrl(value: string, rowLabel: string): void {
   const url = new URL(value);
   if (url.protocol !== "https:") {
-    throw new Error(`Exercise seed row ${lineNumber} has non-HTTPS source URL.`);
+    throw new Error(`Exercise seed row ${rowLabel} has non-HTTPS source URL.`);
   }
 }
 
@@ -284,11 +353,15 @@ function validateItems(items: readonly ExerciseCatalogItem[]): void {
 }
 
 function buildFacets(items: readonly ExerciseCatalogItem[]): ExerciseCatalogFacets {
+  const equipment = uniqueSorted([
+    ...items.flatMap((item) => item.equipment),
+    ...(items.some((item) => item.equipment.length === 0) ? ["none"] : []),
+  ]);
   return {
     categories: uniqueSorted(items.map((item) => item.category)),
     commonness: filterAllowedFacet(items.flatMap((item) => item.commonness), exerciseCatalogCommonnessValues),
     environments: filterAllowedFacet(items.flatMap((item) => item.environment), exerciseCatalogEnvironmentValues),
-    equipment: uniqueSorted(items.flatMap((item) => item.equipment)),
+    equipment,
     kinds: filterAllowedFacet(items.flatMap((item) => item.kind), exerciseCatalogKindValues),
     levels: filterAllowedFacet(items.flatMap((item) => item.level), exerciseCatalogLevelValues),
     modalities: uniqueSorted(items.map((item) => item.modality)),
@@ -531,7 +604,7 @@ function parseCliOptions(argv: readonly string[]): CliOptions {
   const options: CliOptions = {
     check: false,
     generatedRoot: path.join(packageRoot, "generated"),
-    seedPath: defaultSeedPath,
+    seedPaths: [],
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -541,7 +614,7 @@ function parseCliOptions(argv: readonly string[]): CliOptions {
       continue;
     }
     if (arg === "--seed") {
-      options.seedPath = path.resolve(requireNext(argv, index, arg));
+      options.seedPaths.push(path.resolve(requireNext(argv, index, arg)));
       index += 1;
       continue;
     }
@@ -554,6 +627,14 @@ function parseCliOptions(argv: readonly string[]): CliOptions {
   }
 
   return options;
+}
+
+async function listDefaultSeedPaths(): Promise<string[]> {
+  const entries = await readdir(defaultSeedRoot, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".csv"))
+    .map((entry) => path.join(defaultSeedRoot, entry.name))
+    .sort((left, right) => left.localeCompare(right));
 }
 
 function requireNext(argv: readonly string[], index: number, arg: string): string {

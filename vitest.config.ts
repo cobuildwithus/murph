@@ -6,6 +6,7 @@ import cloudflareHostedControlProject from "./packages/cloudflare-hosted-control
 import contractsProject from "./packages/contracts/vitest.config.ts";
 import coreProject from "./packages/core/vitest.config.ts";
 import deviceSyncdProject from "./packages/device-syncd/vitest.config.ts";
+import exerciseLibraryProject from "./packages/exercise-library/vitest.config.ts";
 import gatewayCoreProject from "./packages/gateway-core/vitest.config.ts";
 import healthMetricsProject from "./packages/health-metrics/vitest.config.ts";
 import hostedExecutionProject from "./packages/hosted-execution/vitest.config.ts";
@@ -81,6 +82,11 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
   {
     config: deviceSyncdProject,
     root: "packages/device-syncd",
+    include: ["test/**/*.test.ts"],
+  },
+  {
+    config: exerciseLibraryProject,
+    root: "packages/exercise-library",
     include: ["test/**/*.test.ts"],
   },
   {

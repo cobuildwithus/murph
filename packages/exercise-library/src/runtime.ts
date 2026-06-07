@@ -17,8 +17,10 @@ import {
   type ExerciseCatalogItem,
   type ExerciseCatalogKind,
   type ExerciseCatalogLevel,
+  type ExerciseCatalogListResult,
   type ExerciseCatalogListOptions,
   type ExerciseCatalogNormalizedListOptions,
+  type ExerciseCatalogSource,
   type ExerciseCatalogSummary,
 } from "./schema.js";
 
@@ -38,8 +40,9 @@ export interface ExerciseCatalogReader {
   readonly catalogHash: string;
   facets(): ExerciseCatalogFacets;
   findByLookup(lookup: string): ExerciseCatalogLookupResult;
-  listExercises(options?: ExerciseCatalogListOptions): ExerciseCatalogSummary[];
+  listExercises(options?: ExerciseCatalogListOptions): ExerciseCatalogListResult;
   normalizeListOptions(options?: ExerciseCatalogListOptions): ExerciseCatalogNormalizedListOptions;
+  sourcesForItem(item: ExerciseCatalogItem): ExerciseCatalogSource[];
 }
 
 export interface LoadGeneratedExerciseCatalogOptions {
@@ -86,6 +89,7 @@ export function createExerciseCatalogReader(input: {
   assertArtifactShape(input.index, input.details, input.facets);
   const detailsById = new Map(input.details.items.map((item) => [normalizeLookup(item.id), item]));
   const detailsBySlug = new Map(input.details.items.map((item) => [normalizeLookup(item.slug), item]));
+  const sourceById = new Map(input.details.sources.map((source) => [source.id, source]));
   const detailsByName = new Map<string, ExerciseCatalogItem[]>();
   for (const item of input.details.items) {
     const key = normalizeLookup(item.name);
@@ -129,9 +133,17 @@ export function createExerciseCatalogReader(input: {
           || left.item.id.localeCompare(right.item.id),
         );
 
-      return scored.slice(0, normalized.limit).map(({ item }) => item);
+      return {
+        total: scored.length,
+        items: scored.slice(0, normalized.limit).map(({ item }) => item),
+      };
     },
     normalizeListOptions,
+    sourcesForItem(item) {
+      return item.sourceIds
+        .map((sourceId) => sourceById.get(sourceId))
+        .filter((source): source is ExerciseCatalogSource => source !== undefined);
+    },
   };
 }
 
@@ -288,7 +300,7 @@ function levelRank(value: ExerciseCatalogLevel): number {
 }
 
 function toSummary(item: ExerciseCatalogItem): ExerciseCatalogSummary {
-  const { image: _image, steps: _steps, tips: _tips, ...summary } = item;
+  const { image: _image, sourceIds: _sourceIds, steps: _steps, tips: _tips, ...summary } = item;
   return summary;
 }
 

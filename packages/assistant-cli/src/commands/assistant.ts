@@ -1180,7 +1180,9 @@ export function registerAssistantCommands(
       }),
       description:
         'List pre-generated media from the hosted assistant media catalog, including stable ids, descriptions, tags, and HTTPS URLs that can be attached later.',
-      options: withBaseOptions({}),
+      options: z.object({
+        requestId: requestIdSchema,
+      }),
       output: assistantMediaListResultSchema,
       async run(context) {
         return listAssistantMediaCatalog({

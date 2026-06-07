@@ -286,12 +286,18 @@ const exerciseCatalogSummaryResultSchema = z.object({
 })
 
 const exerciseCatalogItemResultSchema = exerciseCatalogSummaryResultSchema.extend({
+  sourceIds: z.array(z.number().int().positive()),
   steps: z.array(z.string().min(1)),
   tips: z.array(z.string().min(1)),
   image: z.object({
     url: z.string().url(),
     alt: z.string().min(1),
   }).nullable(),
+})
+
+const exerciseCatalogSourceResultSchema = z.object({
+  id: z.number().int().positive(),
+  url: z.string().url(),
 })
 
 const exerciseCatalogFiltersResultSchema = z.object({
@@ -319,6 +325,7 @@ export const exerciseShowResultSchema = z.object({
   catalogHash: z.string().min(1),
   lookup: z.string().min(1),
   item: exerciseCatalogItemResultSchema,
+  sources: z.array(exerciseCatalogSourceResultSchema),
 })
 
 export const exerciseFacetsResultSchema = z.object({

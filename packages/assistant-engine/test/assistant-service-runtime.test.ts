@@ -815,6 +815,51 @@ describe("assistant delivery orchestration seam", () => {
     ).resolves.toEqual([]);
   });
 
+  it("clears staged response media when final delivery is disabled", async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      "assistant-delivery-response-media-disabled-",
+    );
+    tempRoots.push(parentRoot);
+    const session = createAssistantSession();
+
+    await stageAssistantResponseMedia({
+      vault: vaultRoot,
+      turnId: "turn-media-not-delivered",
+      sessionId: session.sessionId,
+      media: [{
+        kind: "image",
+        url: "https://cdn.example.test/dead-bug/setup.png",
+        alt: "Dead bug setup",
+        source: "dead-bug-setup",
+      }],
+    });
+
+    await expect(
+      deliverAssistantReply({
+        input: {
+          deliverResponse: false,
+          prompt: "hello",
+          vault: vaultRoot,
+        },
+        response: "reply",
+        session,
+        sharedPlan: createSharedPlan(),
+        turnId: "turn-media-not-delivered",
+      })
+    ).resolves.toEqual({
+      kind: "not-requested",
+      media: [],
+      session,
+    });
+
+    await expect(
+      readAssistantResponseMedia({
+        vault: vaultRoot,
+        turnId: "turn-media-not-delivered",
+      }),
+    ).resolves.toEqual([]);
+  });
+
   it("does not resolve hosted idempotency when final delivery is disabled", async () => {
     const session = createAssistantSession({
       binding: {
@@ -1277,6 +1322,51 @@ describe("assistant delivery orchestration seam", () => {
       readAssistantResponseMedia({
         vault: vaultRoot,
         turnId: "turn-media-delivery",
+      }),
+    ).resolves.toEqual([]);
+  });
+
+  it("clears staged response media when final outbox delivery throws", async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      "assistant-delivery-response-media-throw-",
+    );
+    tempRoots.push(parentRoot);
+    const session = createAssistantSession();
+
+    await stageAssistantResponseMedia({
+      vault: vaultRoot,
+      turnId: "turn-media-delivery-throws",
+      sessionId: session.sessionId,
+      media: [{
+        kind: "image",
+        url: "https://cdn.example.test/dead-bug/setup.png",
+        alt: "Dead bug setup",
+        source: "dead-bug-setup",
+      }],
+    });
+    runtimeState.outbox.deliverMessage.mockRejectedValueOnce(
+      new Error("outbox unavailable"),
+    );
+
+    await expect(
+      deliverAssistantReply({
+        input: {
+          deliverResponse: true,
+          deliveryDispatchMode: "immediate",
+          prompt: "hello",
+          vault: vaultRoot,
+        },
+        response: "reply body",
+        session,
+        sharedPlan: createSharedPlan(),
+        turnId: "turn-media-delivery-throws",
+      }),
+    ).rejects.toThrow(/outbox unavailable/u);
+
+    await expect(
+      readAssistantResponseMedia({
+        vault: vaultRoot,
+        turnId: "turn-media-delivery-throws",
       }),
     ).resolves.toEqual([]);
   });

@@ -33,6 +33,11 @@ export interface ExerciseCatalogImage {
   url: string;
 }
 
+export interface ExerciseCatalogSource {
+  id: number;
+  url: string;
+}
+
 export interface ExerciseCatalogSummary {
   category: string;
   commonness: ExerciseCatalogCommonness;
@@ -51,6 +56,7 @@ export interface ExerciseCatalogSummary {
 
 export interface ExerciseCatalogItem extends ExerciseCatalogSummary {
   image: ExerciseCatalogImage | null;
+  sourceIds: number[];
   steps: string[];
   tips: string[];
 }
@@ -67,6 +73,7 @@ export interface ExerciseCatalogDetailsArtifact {
   generatedAt: string | null;
   items: ExerciseCatalogItem[];
   schemaVersion: typeof EXERCISE_CATALOG_DETAILS_SCHEMA_VERSION;
+  sources: ExerciseCatalogSource[];
 }
 
 export interface ExerciseCatalogFacets {
@@ -114,4 +121,9 @@ export interface ExerciseCatalogNormalizedListOptions {
   position: string[];
   query: string | null;
   target: string[];
+}
+
+export interface ExerciseCatalogListResult {
+  items: ExerciseCatalogSummary[];
+  total: number;
 }

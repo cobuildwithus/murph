@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildArtifacts,
-  readSeedItems,
+  readSeedCatalog,
   writeExerciseGeneratedArtifacts,
 } from "../src/build.js";
 import {
@@ -16,12 +16,17 @@ import {
 } from "../src/runtime.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const seedPath = path.join(packageRoot, "content", "seed", "at-home-exercise-stretch.csv");
+const seedPaths = [
+  path.join(packageRoot, "content", "seed", "at-home-exercise-stretch.csv"),
+  path.join(packageRoot, "content", "seed", "at-home-exercise-stretch-addon-500.csv"),
+];
 
 describe("exercise-library runtime", () => {
   it("builds the seed catalog into compact generated artifacts", async () => {
-    const items = await readSeedItems(seedPath);
-    expect(items).toHaveLength(1000);
+    const catalog = await readSeedCatalog(seedPaths);
+    expect(catalog.items).toHaveLength(1500);
+    expect(catalog.sources.length).toBeGreaterThan(0);
+    const items = catalog.items;
     expect(items[0]).toMatchObject({
       id: "EX001",
       name: "Bodyweight Squat",
@@ -31,23 +36,29 @@ describe("exercise-library runtime", () => {
       ]),
     });
 
-    const artifacts = buildArtifacts(items);
+    const artifacts = buildArtifacts(catalog);
     expect(artifacts.index.items[0]).not.toHaveProperty("steps");
+    expect(artifacts.index.items[0]).not.toHaveProperty("sourceIds");
     expect(artifacts.details.items[0]?.tips.length).toBeGreaterThan(0);
+    expect(artifacts.details.items[0]?.sourceIds.length).toBeGreaterThan(0);
+    expect(artifacts.details.sources).toEqual(catalog.sources);
     expect(artifacts.facets.facets.kinds).toEqual(["exercise", "stretch"]);
+    expect(artifacts.facets.facets.equipment).toContain("none");
   });
 
   it("lists, filters, searches, and resolves exact lookups", async () => {
-    const items = await readSeedItems(seedPath);
-    const reader = createExerciseCatalogReader(buildArtifacts(items));
+    const catalog = await readSeedCatalog(seedPaths);
+    const reader = createExerciseCatalogReader(buildArtifacts(catalog));
 
     expect(reader.facets().targets).toContain("hips");
-    expect(reader.listExercises({
+    const squatMatches = reader.listExercises({
       equipment: ["none"],
       kind: ["exercise"],
       limit: 5,
       query: "bodyweight squat",
-    })).toEqual(expect.arrayContaining([expect.objectContaining({
+    });
+    expect(squatMatches.total).toBeGreaterThanOrEqual(squatMatches.items.length);
+    expect(squatMatches.items).toEqual(expect.arrayContaining([expect.objectContaining({
       id: "EX001",
       name: "Bodyweight Squat",
     })]));
@@ -56,19 +67,21 @@ describe("exercise-library runtime", () => {
       kind: ["stretch"],
       target: ["hips"],
       limit: 1,
-    })[0];
+    }).items[0];
     expect(stretch?.kind).toBe("stretch");
 
     const lookup = reader.findByLookup("EX001");
     expect(lookup.kind).toBe("found");
     if (lookup.kind === "found") {
       expect(lookup.item.steps.length).toBeGreaterThan(0);
+      expect(reader.sourcesForItem(lookup.item).length).toBeGreaterThan(0);
     }
   });
 
   it("returns ambiguity for duplicate exact names after id and slug lookup", async () => {
-    const items = await readSeedItems(seedPath);
-    const reader = createExerciseCatalogReader(buildArtifacts(items));
+    const catalog = await readSeedCatalog([seedPaths[0]!]);
+    const { items } = catalog;
+    const reader = createExerciseCatalogReader(buildArtifacts(catalog));
     const duplicateName = findDuplicateName(items);
     expect(duplicateName).toBeTruthy();
 
@@ -85,12 +98,12 @@ describe("exercise-library runtime", () => {
     await writeExerciseGeneratedArtifacts({
       check: false,
       generatedRoot,
-      seedPath,
+      seedPaths,
     });
     await writeExerciseGeneratedArtifacts({
       check: true,
       generatedRoot,
-      seedPath,
+      seedPaths,
     });
 
     const artifacts = loadGeneratedExerciseCatalog({
@@ -106,7 +119,7 @@ describe("exercise-library runtime", () => {
     await expect(writeExerciseGeneratedArtifacts({
       check: true,
       generatedRoot,
-      seedPath,
+      seedPaths,
     })).rejects.toThrow(/out of date/u);
   });
 });

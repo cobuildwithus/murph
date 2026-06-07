@@ -54,20 +54,25 @@ test('exercise list show and facets expose the public movement catalog', async (
     item: {
       id: string
       image: null | { url: string; alt: string }
+      sourceIds: number[]
       steps: string[]
       tips: string[]
     }
+    sources: Array<{ id: number; url: string }>
   }>(cli, ['exercise', 'show', 'EX001'])
 
   assert.equal(showResult.envelope.ok, true)
   const showData = requireData(showResult.envelope)
   assert.equal(showData.item.id, 'EX001')
   assert.equal(showData.item.image, null)
+  assert.ok(showData.item.sourceIds.length > 0)
+  assert.ok(showData.sources.length > 0)
   assert.ok(showData.item.steps.length > 0)
   assert.ok(showData.item.tips.length > 0)
 
   const facetsResult = await runInProcessJsonCli<{
     facets: {
+      equipment: string[]
       kinds: string[]
       targets: string[]
     }
@@ -76,6 +81,7 @@ test('exercise list show and facets expose the public movement catalog', async (
   assert.equal(facetsResult.envelope.ok, true)
   const facetsData = requireData(facetsResult.envelope)
   assert.deepEqual(facetsData.facets.kinds, ['exercise', 'stretch'])
+  assert.ok(facetsData.facets.equipment.includes('none'))
   assert.ok(facetsData.facets.targets.includes('hips'))
 })
 

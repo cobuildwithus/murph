@@ -1287,7 +1287,7 @@ export function registerWorkoutCommands(
       exercise: z
         .array(z.string().min(1))
         .optional()
-        .describe(`Compact exercise grammar: order=...;name=... with optional groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Supported keys: ${workoutFormatExerciseFieldList}. Repeat --exercise for multiple exercises.`),
+        .describe(`Compact exercise grammar: order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Supported keys: ${workoutFormatExerciseFieldList}. Repeat --exercise for multiple exercises.`),
       setTemplate: z
         .array(z.string().min(1))
         .optional()

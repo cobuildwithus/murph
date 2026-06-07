@@ -25,6 +25,7 @@ const commandMocks = vi.hoisted(() => ({
   deliverAssistantMessage: vi.fn(),
   getAssistantSession: vi.fn(),
   getAssistantStatus: vi.fn(),
+  listAssistantMediaCatalog: vi.fn(),
   listAssistantSelfDeliveryTargets: vi.fn(),
   listAssistantSessions: vi.fn(),
   readAssistantOnboardingState: vi.fn(),
@@ -47,6 +48,7 @@ const commandMocks = vi.hoisted(() => ({
   runAssistantDoctor: vi.fn(),
   saveAssistantSelfDeliveryTarget: vi.fn(),
   sendAssistantMessage: vi.fn(),
+  stageAssistantResponseMedia: vi.fn(),
   stopAssistantAutomation: vi.fn(),
 }))
 
@@ -107,11 +109,13 @@ vi.mock('@murphai/assistant-engine/assistant-state', () => ({
   readAssistantOnboardingState: commandMocks.readAssistantOnboardingState,
   redactAssistantDisplayPath: commandMocks.redactAssistantDisplayPath,
   getAssistantSession: commandMocks.getAssistantSession,
+  listAssistantMediaCatalog: commandMocks.listAssistantMediaCatalog,
   listAssistantSessions: commandMocks.listAssistantSessions,
   reopenAssistantOnboarding: commandMocks.reopenAssistantOnboarding,
   resolveAssistantOnboardingStatePath:
     commandMocks.resolveAssistantOnboardingStatePath,
   resolveAssistantStatePaths: commandMocks.resolveAssistantStatePaths,
+  stageAssistantResponseMedia: commandMocks.stageAssistantResponseMedia,
 }))
 
 vi.mock('@murphai/assistant-engine/assistant-runtime', () => ({
@@ -300,6 +304,7 @@ test('assistant command registration exposes the owned subcommands and root alia
   const ask = readCommand(assistant.commands, 'ask')
   const chat = readCommand(assistant.commands, 'chat')
   const selfTarget = readCommandGroup(assistant.commands, 'self-target')
+  const media = readCommandGroup(assistant.commands, 'media')
   const session = readCommandGroup(assistant.commands, 'session')
   const run = readCommand(commands, 'run')
 
@@ -317,7 +322,11 @@ test('assistant command registration exposes the owned subcommands and root alia
     'session',
   ])
   assert.deepEqual([...selfTarget.commands.keys()], ['list', 'show', 'set', 'clear'])
+  assert.deepEqual([...media.commands.keys()], ['list', 'attach'])
   assert.deepEqual([...session.commands.keys()], ['list', 'show'])
+  assert.equal(Object.hasOwn(readCommand(media.commands, 'list').options?.shape ?? {}, 'vault'), false)
+  assert.equal(Object.hasOwn(readCommand(media.commands, 'list').options?.shape ?? {}, 'requestId'), true)
+  assert.equal(Object.hasOwn(readCommand(media.commands, 'attach').options?.shape ?? {}, 'vault'), true)
   assert.equal(Object.hasOwn(run.options?.shape ?? {}, 'skipDaemon'), false)
   assert.equal(Object.hasOwn(ask.options?.shape ?? {}, 'provider'), false)
   assert.equal(Object.hasOwn(ask.options?.shape ?? {}, 'oss'), false)

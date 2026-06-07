@@ -256,57 +256,61 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     vault: input.input.vault,
     turnId: input.turnId,
   })
-  const outcome = await state.outbox.deliverMessage({
-    ...deliveryFields,
-    media,
-    message: input.message,
-    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
-    deliveryTransportIdempotent: input.deliveryTransportIdempotent,
-    turnId: input.turnId,
-    dependencies: undefined,
-    dispatchMode: input.input.deliveryDispatchMode,
-  })
-  await clearAssistantResponseMediaBestEffort({
-    vault: input.input.vault,
-    turnId: input.turnId,
-  })
-  const session = outcome.session ?? input.session
 
-  switch (outcome.kind) {
-    case 'sent':
-      return {
-        kind: 'sent',
-        delivery: outcome.delivery!,
-        intentId: outcome.intent.intentId,
-        media,
-        session,
-      }
-    case 'queued':
-      return {
-        kind: 'queued',
-        error: outcome.deliveryError,
-        intentId: outcome.intent.intentId,
-        media,
-        session,
-      }
-    case 'failed':
-      return {
-        kind: 'failed',
-        error: outcome.deliveryError,
-        intentId: outcome.intent.intentId,
-        media,
-        session,
-      }
-    default:
-      return {
-        kind: 'failed',
-        error: normalizeAssistantDeliveryError(
-          new Error('Assistant outbound delivery failed.'),
-        ),
-        intentId: 'unknown',
-        media,
-        session,
-      }
+  try {
+    const outcome = await state.outbox.deliverMessage({
+      ...deliveryFields,
+      media,
+      message: input.message,
+      deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+      deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+      turnId: input.turnId,
+      dependencies: undefined,
+      dispatchMode: input.input.deliveryDispatchMode,
+    })
+    const session = outcome.session ?? input.session
+
+    switch (outcome.kind) {
+      case 'sent':
+        return {
+          kind: 'sent',
+          delivery: outcome.delivery!,
+          intentId: outcome.intent.intentId,
+          media,
+          session,
+        }
+      case 'queued':
+        return {
+          kind: 'queued',
+          error: outcome.deliveryError,
+          intentId: outcome.intent.intentId,
+          media,
+          session,
+        }
+      case 'failed':
+        return {
+          kind: 'failed',
+          error: outcome.deliveryError,
+          intentId: outcome.intent.intentId,
+          media,
+          session,
+        }
+      default:
+        return {
+          kind: 'failed',
+          error: normalizeAssistantDeliveryError(
+            new Error('Assistant outbound delivery failed.'),
+          ),
+          intentId: 'unknown',
+          media,
+          session,
+        }
+    }
+  } finally {
+    await clearAssistantResponseMediaBestEffort({
+      vault: input.input.vault,
+      turnId: input.turnId,
+    })
   }
 }
 

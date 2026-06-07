@@ -76,13 +76,13 @@ export function registerExerciseCommands(cli: Cli.Cli) {
         target: options.target,
       }
       const filters = reader.normalizeListOptions(listOptions)
-      const items = reader.listExercises(listOptions)
+      const result = reader.listExercises(listOptions)
 
       return {
         catalogHash: reader.catalogHash,
         filters,
-        total: items.length,
-        items,
+        total: result.total,
+        items: result.items,
       }
     },
   })
@@ -130,6 +130,7 @@ export function registerExerciseCommands(cli: Cli.Cli) {
         catalogHash: reader.catalogHash,
         lookup: args.lookup,
         item: result.item,
+        sources: reader.sourcesForItem(result.item),
       }
     },
   })
