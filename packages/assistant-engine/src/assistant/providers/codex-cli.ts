@@ -429,6 +429,7 @@ export async function executeCodexAssistantTurnAttempt(
         : {}),
       codexThreadId: result.sessionId,
       response: result.finalMessage,
+      responseMedia: result.responseMedia,
       stderr: result.stderr,
       stdout: result.stdout,
       rawEvents: result.jsonEvents,

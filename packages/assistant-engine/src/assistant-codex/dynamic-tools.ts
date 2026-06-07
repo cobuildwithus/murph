@@ -1,5 +1,11 @@
+import { z } from 'zod'
+import {
+  assistantResponseMediaSchema,
+  type AssistantResponseMedia,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
+import { normalizeAssistantResponseMediaList } from '../assistant/response-media.js'
 import type {
   CodexRpcMessage,
 } from './app-server-rpc.js'
@@ -24,7 +30,69 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   },
 } as const
 
+export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
+  namespace: 'murph',
+  name: 'attach_response_media',
+  description:
+    'Attach image media to the current final assistant response. Replaces the current response media batch for this turn only. It does not send directly.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      media: {
+        type: 'array',
+        maxItems: 40,
+        description:
+          'The complete image batch for the final assistant reply. Passing an empty array clears the current reply media batch.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            kind: {
+              type: 'string',
+              enum: ['image'],
+              description: 'Only image response media is supported.',
+            },
+            url: {
+              type: 'string',
+              description:
+                'Public HTTPS image-file URL. URLs with credentials, query strings, fragments, localhost hosts, IP literals, or non-image extensions are rejected.',
+            },
+            alt: {
+              anyOf: [
+                { type: 'string', minLength: 1, maxLength: 500 },
+                { type: 'null' },
+              ],
+              description: 'Optional alt text for the image.',
+            },
+            source: {
+              anyOf: [
+                { type: 'string', minLength: 1, maxLength: 200 },
+                { type: 'null' },
+              ],
+              description: 'Optional catalog item id or source label.',
+            },
+          },
+          required: ['url'],
+        },
+      },
+    },
+    required: ['media'],
+  },
+} as const
+
+export const MURPH_DYNAMIC_TOOLS = [
+  MURPH_SEND_PROGRESS_UPDATE_TOOL,
+  MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
+] as const
+
 const CODEX_DYNAMIC_TOOL_CALL_METHOD = 'item/tool/call'
+
+const attachResponseMediaArgumentsSchema = z
+  .object({
+    media: z.array(assistantResponseMediaSchema).max(40),
+  })
+  .strict()
 
 interface ParsedDynamicToolCallRequest {
   arguments: unknown
@@ -33,6 +101,13 @@ interface ParsedDynamicToolCallRequest {
 }
 
 export type MurphDynamicToolRequest =
+  | {
+      kind: 'attach-response-media'
+      media: AssistantResponseMedia[]
+    }
+  | {
+      kind: 'invalid-response-media-arguments'
+    }
   | {
       kind: 'invalid-progress-arguments'
     }
@@ -46,6 +121,10 @@ export type MurphDynamicToolRequest =
       tool: string | null
     }
 
+function isMurphDynamicToolNamespace(namespace: string | null): boolean {
+  return namespace === MURPH_SEND_PROGRESS_UPDATE_TOOL.namespace
+}
+
 export function readMurphDynamicToolRequest(
   message: CodexRpcMessage,
 ): MurphDynamicToolRequest | null {
@@ -54,10 +133,7 @@ export function readMurphDynamicToolRequest(
     return null
   }
 
-  if (
-    request.namespace !== MURPH_SEND_PROGRESS_UPDATE_TOOL.namespace ||
-    request.tool !== MURPH_SEND_PROGRESS_UPDATE_TOOL.name
-  ) {
+  if (!isMurphDynamicToolNamespace(request.namespace)) {
     return {
       kind: 'unsupported-dynamic-tool',
       namespace: request.namespace,
@@ -65,16 +141,39 @@ export function readMurphDynamicToolRequest(
     }
   }
 
-  const parsed = parseSendProgressUpdateArguments(request.arguments)
-  if (!parsed.ok) {
-    return {
-      kind: 'invalid-progress-arguments',
+  switch (request.tool) {
+    case MURPH_SEND_PROGRESS_UPDATE_TOOL.name: {
+      const parsed = parseSendProgressUpdateArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-progress-arguments',
+        }
+      }
+
+      return {
+        kind: 'send-progress-update',
+        text: parsed.text,
+      }
+    }
+    case MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name: {
+      const parsed = parseAttachResponseMediaArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-response-media-arguments',
+        }
+      }
+
+      return {
+        kind: 'attach-response-media',
+        media: parsed.media,
+      }
     }
   }
 
   return {
-    kind: 'send-progress-update',
-    text: parsed.text,
+    kind: 'unsupported-dynamic-tool',
+    namespace: request.namespace,
+    tool: request.tool,
   }
 }
 
@@ -123,6 +222,24 @@ function parseSendProgressUpdateArguments(
   return {
     ok: true,
     text,
+  }
+}
+
+function parseAttachResponseMediaArguments(
+  value: unknown,
+): { ok: true; media: AssistantResponseMedia[] } | { ok: false } {
+  try {
+    const parsed = attachResponseMediaArgumentsSchema.safeParse(value)
+    if (!parsed.success) {
+      return { ok: false }
+    }
+
+    return {
+      ok: true,
+      media: normalizeAssistantResponseMediaList(parsed.data.media),
+    }
+  } catch {
+    return { ok: false }
   }
 }
 

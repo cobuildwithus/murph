@@ -11,7 +11,7 @@ import type {
 } from '../assistant-codex.js'
 import { stripUndefinedRpcParams } from './app-server-rpc.js'
 import {
-  MURPH_SEND_PROGRESS_UPDATE_TOOL,
+  MURPH_DYNAMIC_TOOLS,
 } from './dynamic-tools.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
@@ -91,10 +91,8 @@ export function buildCodexThreadContextParams(input: {
   })
 }
 
-function resolveCodexAppServerDynamicTools(): readonly [
-  typeof MURPH_SEND_PROGRESS_UPDATE_TOOL,
-] {
-  return [MURPH_SEND_PROGRESS_UPDATE_TOOL]
+function resolveCodexAppServerDynamicTools(): typeof MURPH_DYNAMIC_TOOLS {
+  return MURPH_DYNAMIC_TOOLS
 }
 
 export function buildCodexTurnStartParams(input: {

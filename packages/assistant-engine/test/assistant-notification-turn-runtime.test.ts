@@ -1050,8 +1050,21 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   })
 })
 
-test('sendAssistantNotificationLocal clears staged response media when delivery throws', async () => {
-  const providerSession = createAssistantSession()
+test('sendAssistantNotificationLocal forwards provider response media to delivery', async () => {
+  const providerSession = createAssistantSession({
+    binding: {
+      actorId: 'actor-notification-media',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'thread-notification-media',
+      },
+      identityId: 'identity-notification-media',
+      threadId: 'thread-notification-media',
+      threadIsDirect: true,
+    },
+  })
   const sharedPlan = createSharedPlan()
   const primaryRoute = createRoute({
     providerOptions: {
@@ -1065,25 +1078,25 @@ test('sendAssistantNotificationLocal clears staged response media when delivery 
       text: 'Needs delivery',
       privateSummary: 'deliver',
     }),
+    responseMedia: [
+      {
+        kind: 'image',
+        url: 'https://cdn.example.test/notification.png',
+        alt: 'notification',
+        source: 'notification',
+      },
+    ],
     route: primaryRoute,
     session: providerSession,
   })
   const deliveryError = new Error('delivery exploded')
-  const readAssistantResponseMedia = vi.fn(async () => [
-    {
-      kind: 'image' as const,
-      url: 'https://cdn.example.test/notification.png',
-      alt: 'notification',
-      source: 'notification',
-    },
-  ])
-  const clearAssistantResponseMediaBestEffort = vi.fn(async () => undefined)
+  const deliverMessage = vi.fn(async () => {
+    throw deliveryError
+  })
   const mocks = {
     createAssistantRuntimeStateService: vi.fn(() => ({
       outbox: {
-        deliverMessage: vi.fn(async () => {
-          throw deliveryError
-        }),
+        deliverMessage,
       },
       status: {
         refreshSnapshot: vi.fn(async () => undefined),
@@ -1167,10 +1180,6 @@ test('sendAssistantNotificationLocal clears staged response media when delivery 
   vi.doMock('../src/assistant/turn-lock.js', () => ({
     withAssistantTurnLock: mocks.withAssistantTurnLock,
   }))
-  vi.doMock('../src/assistant/response-media.js', () => ({
-    clearAssistantResponseMediaBestEffort,
-    readAssistantResponseMedia,
-  }))
 
   const { sendAssistantNotificationLocal } = await import(
     '../src/assistant/notification-turn.ts'
@@ -1185,14 +1194,19 @@ test('sendAssistantNotificationLocal clears staged response media when delivery 
       vault: '/vaults/delivery-throw',
     }),
   ).rejects.toThrow('delivery exploded')
-  expect(readAssistantResponseMedia).toHaveBeenCalledWith({
-    vault: '/vaults/delivery-throw',
-    turnId: 'turn-notification-delivery-throw',
-  })
-  expect(clearAssistantResponseMediaBestEffort).toHaveBeenCalledWith({
-    vault: '/vaults/delivery-throw',
-    turnId: 'turn-notification-delivery-throw',
-  })
+  expect(deliverMessage).toHaveBeenCalledWith(
+    expect.objectContaining({
+      media: [
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/notification.png',
+          alt: 'notification',
+          source: 'notification',
+        },
+      ],
+      turnId: 'turn-notification-delivery-throw',
+    }),
+  )
 })
 
 test('sendAssistantNotificationLocal annotates terminal provider failures with route context', async () => {
@@ -1627,6 +1641,7 @@ function createSharedPlan(): AssistantTurnSharedPlan {
 function createProviderResult(input?: {
   providerOptions?: AssistantProviderSessionOptions
   codexThreadId?: string | null
+  responseMedia?: ExecutedAssistantProviderTurnResult['responseMedia']
   response?: string
   route?: CodexThreadIdentity
   session?: AssistantSession
@@ -1660,6 +1675,7 @@ function createProviderResult(input?: {
     codexThreadId: input?.codexThreadId ?? 'provider-session-1',
     rawEvents: [],
     response: input?.response ?? 'provider response',
+    responseMedia: input?.responseMedia ?? [],
     route: input?.route ?? createRoute(),
     session,
     stderr: '',

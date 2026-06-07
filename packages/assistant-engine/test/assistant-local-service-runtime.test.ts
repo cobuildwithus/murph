@@ -4406,15 +4406,6 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
   )
   assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls.length, 2)
   assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls[1]?.[0]?.kind, 'turn.failed')
-  assert.deepEqual(
-    mocks.clearAssistantResponseMediaBestEffort.mock.calls.map((call) => call[0]),
-    [
-      {
-        turnId: 'turn-1',
-        vault: '/vaults/test',
-      },
-    ],
-  )
   assert.equal(mocks.normalizeAssistantDeliveryError.mock.calls.length, 1)
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
 })
@@ -5100,9 +5091,6 @@ async function loadLocalServiceModule(input?: {
         turnId: 'turn-1',
       }),
     ),
-    clearAssistantResponseMediaBestEffort: vi.fn(
-      async (_input: { turnId: string; vault: string }) => undefined,
-    ),
     deliverAssistantProgressUpdate: vi.fn(
       async (
         _input: Parameters<
@@ -5389,9 +5377,6 @@ async function loadLocalServiceModule(input?: {
     deliverAssistantReply: mocks.dispatchAssistantReply,
     deliverAssistantProgressUpdate: mocks.deliverAssistantProgressUpdate,
     finalizeAssistantTurnFromDeliveryOutcome: mocks.finalizeDeliveredAssistantTurn,
-  }))
-  vi.doMock('../src/assistant/response-media.js', () => ({
-    clearAssistantResponseMediaBestEffort: mocks.clearAssistantResponseMediaBestEffort,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     persistAssistantTurnAndSession: mocks.finalizeAssistantTurnArtifacts,

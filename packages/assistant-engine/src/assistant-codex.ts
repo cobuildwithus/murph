@@ -19,7 +19,10 @@ import {
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
-import type { AssistantSandbox } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantResponseMedia,
+  AssistantSandbox,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type {
   CodexNormalizedEvent,
   CodexProgressEvent,
@@ -404,6 +407,7 @@ export function readCodexAppServerTurnFailureContext(
 
 export interface CodexAppServerTurnResult {
   finalMessage: string
+  responseMedia: AssistantResponseMedia[]
   jsonEvents: unknown[]
   providerActionCount: number
   rolloutRelativePath: string | null
@@ -1461,6 +1465,7 @@ async function runCodexAppServerTurnOnProcess(
   let expectedTurnId: string | null = null
   let lastAgentMessage: string | null = null
   let lastEventError: string | null = null
+  let responseMedia: AssistantResponseMedia[] = []
   let rolloutRelativePath: string | null = null
   let providerActionCount = 0
   const providerActionItemIds = new Set<string>()
@@ -1477,6 +1482,7 @@ async function runCodexAppServerTurnOnProcess(
   let completeTurn: (() => void) | null = null
   let failTurn: ((error: unknown) => void) | null = null
   let liveTurnOpen = false
+  let turnTerminal = false
   let providerRequestStartedNotified = false
   let contextCompactionProgressNotified = false
   let releaseLiveTurn = () => {}
@@ -1851,6 +1857,22 @@ async function runCodexAppServerTurnOnProcess(
   ): void => {
     acceptJsonEvent(message)
 
+    if (turnTerminal) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'turn already completed',
+            },
+          ],
+        },
+      })
+      return
+    }
+
     const dynamicToolRequest = readMurphDynamicToolRequest(message)
     if (!dynamicToolRequest) {
       denyUnsupportedCodexServerRequest({
@@ -1883,6 +1905,41 @@ async function runCodexAppServerTurnOnProcess(
             {
               type: 'inputText',
               text: 'invalid progress update arguments',
+            },
+          ],
+        },
+      })
+      return
+    }
+
+    if (dynamicToolRequest.kind === 'invalid-response-media-arguments') {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'invalid response media arguments',
+            },
+          ],
+        },
+      })
+      return
+    }
+
+    if (dynamicToolRequest.kind === 'attach-response-media') {
+      responseMedia = dynamicToolRequest.media
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: true,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: responseMedia.length === 0
+                ? 'response media cleared'
+                : `${responseMedia.length} response image${responseMedia.length === 1 ? '' : 's'} attached`,
             },
           ],
         },
@@ -2008,6 +2065,7 @@ async function runCodexAppServerTurnOnProcess(
 
     const status = extractCodexTurnStatus(message)
     if (isFailedCodexTurnStatus(status)) {
+      turnTerminal = true
       failTurn?.(
         buildCodexTurnFailedError({
           fallback: lastEventError ?? extractCodexTurnErrorMessage(message),
@@ -2019,6 +2077,7 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    turnTerminal = true
     completeTurn?.()
   }
 
@@ -2393,6 +2452,7 @@ async function runCodexAppServerTurnOnProcess(
 
   return {
     finalMessage,
+    responseMedia,
     jsonEvents,
     providerActionCount,
     rolloutRelativePath,

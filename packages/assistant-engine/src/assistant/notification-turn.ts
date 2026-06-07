@@ -1,5 +1,8 @@
 import * as z from 'zod'
-import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantResponseMedia,
+  AssistantSession,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -31,6 +34,7 @@ import type {
   AssistantSessionResolutionFields,
 } from './service-contracts.js'
 import {
+  filterAssistantResponseMediaForChannel,
   finalizeAssistantTurnFromDeliveryOutcome,
   resolveAssistantHostedDeliveryIdempotency,
 } from './delivery-service.js'
@@ -42,10 +46,6 @@ import {
 import {
   emitHostedAssistantContextSessionResolvedTrace,
 } from './hosted-context-diagnostics.js'
-import {
-  clearAssistantResponseMediaBestEffort,
-  readAssistantResponseMedia,
-} from './response-media.js'
 import {
   startAssistantChannelTypingIndicator,
   stopAssistantChannelTypingIndicator,
@@ -211,10 +211,6 @@ export async function sendAssistantNotificationLocal(
           turnId,
         })
         if (providerOutcome.kind === 'failed_terminal') {
-          await clearAssistantResponseMediaBestEffort({
-            vault: input.vault,
-            turnId,
-          })
           await recordAssistantUsageEvent({
             executionContext,
             providerRequestOutcome: providerOutcome.providerRequestOutcome,
@@ -309,6 +305,7 @@ export async function sendAssistantNotificationLocal(
           dedupeToken: input.deliveryDedupeToken ?? null,
           decisionSubject: decision.subject ?? null,
           input: messageInput,
+          media: providerResult.responseMedia ?? [],
           message: responseText,
           session: savedSession,
           sharedPlan,
@@ -578,6 +575,7 @@ async function deliverAssistantNotificationMessage(input: {
   dedupeToken: string | null
   decisionSubject: string | null
   input: AssistantMessageInput
+  media?: readonly AssistantResponseMedia[] | null
   message: string
   session: AssistantSession
   sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
@@ -600,41 +598,32 @@ async function deliverAssistantNotificationMessage(input: {
     input: input.input,
     session: input.session,
   })
-  const media = await readAssistantResponseMedia({
-    vault: input.input.vault,
-    turnId: input.turnId,
+  const media = filterAssistantResponseMediaForChannel({
+    channel: deliveryChannel,
+    media: input.media,
   })
-  let outcome: Awaited<ReturnType<typeof state.outbox.deliverMessage>>
-  try {
-    outcome = await state.outbox.deliverMessage({
-      turnId: input.turnId,
-      sessionId: input.session.sessionId,
-      message: input.message,
-      dedupeToken: input.dedupeToken,
-      deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
-      deliverySource: input.input.deliverySource ?? null,
-      deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
-      channel: deliveryChannel,
-      identityId: audience.identityId ?? input.session.binding.identityId,
-      actorId: audience.actorId ?? input.session.binding.actorId,
-      threadId: audience.threadId ?? input.session.binding.threadId,
-      threadIsDirect:
-        audience.threadIsDirect ?? input.session.binding.threadIsDirect,
-      bindingDelivery: audience.bindingDelivery ?? input.session.binding.delivery,
-      explicitTarget,
-      media,
-      replyToMessageId:
-        audience.replyToMessageId ?? input.input.deliveryReplyToMessageId ?? null,
-      subject,
-      dispatchMode: input.input.deliveryDispatchMode,
-    })
-  } finally {
-    await clearAssistantResponseMediaBestEffort({
-      vault: input.input.vault,
-      turnId: input.turnId,
-    })
-  }
-
+  const outcome = await state.outbox.deliverMessage({
+    turnId: input.turnId,
+    sessionId: input.session.sessionId,
+    message: input.message,
+    dedupeToken: input.dedupeToken,
+    deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+    deliverySource: input.input.deliverySource ?? null,
+    deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
+    channel: deliveryChannel,
+    identityId: audience.identityId ?? input.session.binding.identityId,
+    actorId: audience.actorId ?? input.session.binding.actorId,
+    threadId: audience.threadId ?? input.session.binding.threadId,
+    threadIsDirect:
+      audience.threadIsDirect ?? input.session.binding.threadIsDirect,
+    bindingDelivery: audience.bindingDelivery ?? input.session.binding.delivery,
+    explicitTarget,
+    media,
+    replyToMessageId:
+      audience.replyToMessageId ?? input.input.deliveryReplyToMessageId ?? null,
+    subject,
+    dispatchMode: input.input.deliveryDispatchMode,
+  })
   switch (outcome.kind) {
     case 'sent':
       return {
