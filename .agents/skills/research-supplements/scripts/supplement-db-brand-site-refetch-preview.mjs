@@ -544,12 +544,14 @@ function selectShopifyFactsMedia(product, variant) {
     const hasSupplementFactsSignal = /\bsupp(?:lement)?[\s_-]*facts?\b/u.test(rawHaystack) || /[_-]supp[_-]/u.test(rawHaystack);
     const hasFactsPanelSignal = /\bfacts?\s*panel\b/u.test(rawHaystack);
     const hasNutritionFactsSignal = /\bnutrition[\s_-]*facts?\b/u.test(rawHaystack);
-    const hasFactsSignal = hasSupplementFactsSignal || hasFactsPanelSignal || hasNutritionFactsSignal;
+    const hasSfpFilenameSignal = /(?:^|[\s_/-])sfp(?:[\s_./-]|$)/u.test(rawHaystack);
+    const hasFactsSignal = hasSupplementFactsSignal || hasFactsPanelSignal || hasNutritionFactsSignal || hasSfpFilenameSignal;
     const variantMatched = variantTextsForMatch.length === 0 || variantTextsForMatch.some((text) => haystack.includes(text));
     if (!hasFactsSignal || (requiresVariantMatch && !variantMatched)) continue;
     if (hasSupplementFactsSignal) score += 8;
     if (hasFactsPanelSignal) score += 5;
     if (hasNutritionFactsSignal) score += 4;
+    if (hasSfpFilenameSignal) score += 7;
     if (variantMatched) score += 3;
     if (entry.media_type && entry.media_type !== "image") score -= 10;
     if (score > 0) {

@@ -283,6 +283,39 @@ describe("supplement brand-site refetch preview", () => {
     assert.deepEqual(selectShopifyFactsMedia(product, bluebonnetProduct.variants[1]), []);
   });
 
+  test("selects variant-specific SFP facts media without selecting front-panel images", () => {
+    const product = {
+      variants: [
+        { id: 1, title: "Blue Raspberry", option1: "Blue Raspberry", barcode: "874659001790" },
+        { id: 2, title: "Limeade", option1: "Limeade", barcode: "874659003442" },
+      ],
+      media: [
+        {
+          alt: "Blue Raspberry",
+          position: 1,
+          media_type: "image",
+          src: "https://cdn.example.test/TL_BCAA_30S_BR_1_3.png",
+        },
+        {
+          alt: "Limeade",
+          position: 2,
+          media_type: "image",
+          src: "https://cdn.example.test/Limeade_SFP.png",
+        },
+        {
+          alt: "Blue Raspberry",
+          position: 3,
+          media_type: "image",
+          src: "https://cdn.example.test/BCAA_Blue_Raspberry_SFP_09-12-25.png",
+        },
+      ],
+    };
+
+    assert.deepEqual(selectShopifyFactsMedia(product, product.variants[0]).map((media) => media.url), [
+      "https://cdn.example.test/BCAA_Blue_Raspberry_SFP_09-12-25.png",
+    ]);
+  });
+
   test("emits image-only candidates as manual-review rows blocked from production", () => {
     const candidate = buildShopifyEvidenceCandidate({
       source: "bluebonnet-nutrition",
