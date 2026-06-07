@@ -429,6 +429,7 @@ function findProductionReviewIssues(item) {
   if (!hasNonEmptyArray(label.servingSizes)) issues.push("missing_serving_sizes");
   if (label.needsManualReview === true) issues.push("needs_manual_review");
   if (isLikelyNonStandaloneProduct(item, label)) issues.push("non_standalone_product");
+  if (isLikelyFoodOrNonSupplement(item, label)) issues.push("likely_food_or_non_supplement");
   if (typeof label.bodyText === "string" && label.bodyText.trim().length > BODY_TEXT_MAX_LENGTH) {
     issues.push("page_body_text_too_large");
   }
@@ -458,6 +459,21 @@ function isLikelyNonStandaloneProduct(item, label) {
   return /\b(bundle|kit|regimen|combo pack|variety pack|support plan|supplement plan)\b/u.test(haystack)
     || /\b(sample|promo)\b/u.test(haystack)
     || /\b[2-9]\s*[- ]?\s*pack\b/u.test(haystack);
+}
+
+function isLikelyFoodOrNonSupplement(item, label) {
+  const haystack = [
+    item.sourceId,
+    item.dataOriginId,
+    item.dataOriginUrl,
+    item.name,
+    label.productType,
+    label.productKind,
+    label.classification,
+    label.itemType,
+    Array.isArray(label.tags) ? label.tags.join(" ") : label.tags,
+  ].filter(Boolean).join(" ").toLowerCase();
+  return /\b(?:oil\s+spray|flavou?r\s+drops?|chunky\s+flavou?r|seed\s+mix|cacao\s+powder|cocoa\s+powder|breakfast\s+(?:mix|cereal|porridge)|(?:protein\s+)?oatmeal(?:\s+\d|\s*[-–]\s*\d|\s*$)|muesli|granola)\b/u.test(haystack);
 }
 
 function assertProductionReady(items) {

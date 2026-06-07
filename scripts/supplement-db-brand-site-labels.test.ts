@@ -12,6 +12,7 @@ import {
   extractIngredientRowsFromText,
   extractServingSizes,
   repairPreviewForRow,
+  summarize,
 } from "../.agents/skills/research-supplements/scripts/supplement-db-brand-site-repair-preview.mjs";
 
 describe("supplement brand-site DB helper", () => {
@@ -107,6 +108,55 @@ describe("supplement brand-site DB helper", () => {
       "page_body_text_too_large",
     ]);
     assert.throws(() => assertProductionReady([blocked]), /Production upsert blocked/u);
+
+    const food = normalizeItem({
+      id: "example-brand:chunky-flavour",
+      dataOrigin: "brand_site",
+      dataOriginId: "example-brand:chunky-flavour",
+      source: "example-brand",
+      sourceId: "chunky-flavour",
+      name: "Chunky Flavour - Fudge Brownie",
+      brand: "Example Brand",
+      label: {
+        ingredientRows: [{ name: "Erythritol", amount: "2", unit: "g" }],
+        servingSizes: ["3 g"],
+      },
+    });
+
+    assert.deepEqual(food.reviewIssues, ["likely_food_or_non_supplement"]);
+    assert.throws(() => assertProductionReady([food]), /likely_food_or_non_supplement/u);
+
+    const flavoredProtein = normalizeItem({
+      id: "example-brand:protein-oatmeal-cookie",
+      dataOrigin: "brand_site",
+      dataOriginId: "example-brand:protein-oatmeal-cookie",
+      source: "example-brand",
+      sourceId: "protein-oatmeal-cookie",
+      name: "Vegan Protein - Oatmeal Cookie",
+      brand: "Example Brand",
+      label: {
+        ingredientRows: [{ name: "Protein blend", amount: "20", unit: "g" }],
+        servingSizes: ["1 scoop"],
+      },
+    });
+
+    assert.deepEqual(flavoredProtein.reviewIssues, []);
+
+    const supplementPowder = normalizeItem({
+      id: "example-brand:collagen-flavour-powder",
+      dataOrigin: "brand_site",
+      dataOriginId: "example-brand:collagen-flavour-powder",
+      source: "example-brand",
+      sourceId: "collagen-flavour-powder",
+      name: "UC-II Collagen Orange Flavour Powder",
+      brand: "Example Brand",
+      label: {
+        ingredientRows: [{ name: "Collagen", amount: "40", unit: "mg" }],
+        servingSizes: ["1 sachet"],
+      },
+    });
+
+    assert.deepEqual(supplementPowder.reviewIssues, []);
   });
 });
 
@@ -305,6 +355,60 @@ describe("supplement brand-site repair preview", () => {
       servingSize: "journalière (1 gélule",
     }), [
       { text: "1 gélule", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingRecommendationText: "1 tabletkę rozpuścić w 250 ml wody",
+    }), [
+      { text: "1 tabletkę", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingRecommendationText: "2 comprimés par jour, à avaler avec un verre d'eau",
+    }), [
+      { text: "2 comprimés", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingRecommendationText: "5 ml par prise, 3 fois par jour",
+    }), [
+      { text: "5 ml", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingRecommendationText: "6 gouttes en une prise",
+    }), [
+      { text: "6 gouttes", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingRecommendationText: "Tomar 1 lata (500 ml) al día",
+    }), [
+      { text: "1 lata (500 ml)", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      servingRecommendationText: "60 ml (1 vial) una vez al día",
+    }), [
+      { text: "60 ml (1 vial)", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      factsText: "Recommended Usage Level (for Adults): Take 2 tablets daily with a meal or as directed.",
+    }), [
+      { text: "2 tablets", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      factsText: "Suggested Use: Take 1 capsule daily with water. Supplement Facts: Magnesium 100 mg.",
+    }), [
+      { text: "1 capsule", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      factsText: "Serving/directions: כמוסה אחת ליום לפני האוכל\nPackage: 60 כמוסות\nשם הרכיב | כמות\nMagnesium | 200 mg",
+    }), [
+      { text: "1 כמוסה", source: "factsText" },
     ]);
 
     assert.deepEqual(extractServingSizes({ servingSize: "100 g" }), []);
@@ -1282,6 +1386,9 @@ describe("supplement brand-site repair preview", () => {
       { text: "1 Kapsel", source: "table_header_unit" },
       { text: "2 cacitos (13 g", source: "dose_text" },
       { text: "journalière (1 gélule", source: "dose_text" },
+      { text: "Adults; 1 tablet: 1 daily", source: "health_canada_dose" },
+      { text: "כמוסה אחת ליום לפני האוכל או בהתאם להוראות הרופא המטפל", source: "official_directions" },
+      { text: "1-3 כמוסות ביום אחרי האוכל", source: "official_directions" },
     ];
     for (const [index, servingSize] of servingSizes.entries()) {
       const preview = repairPreviewForRow({
@@ -1332,6 +1439,91 @@ describe("supplement brand-site repair preview", () => {
     assert.deepEqual(preview.parsedServingSizesPreview, [
       { text: "35 g", source: "official_nutrition_table" },
     ]);
+  });
+
+  test("repair preview blocks obvious food and flavoring rows from automated backfill", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:chunky-flavour",
+      dataOriginId: "example-brand:chunky-flavour",
+      dataOriginUrl: "https://example.test/products/chunky-flavour",
+      name: "Chunky Flavour - Fudge Brownie",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "chunky-flavour",
+        ingredientRows: [{ name: "Erythritol", amount: "2", unit: "g" }],
+        servingSizes: [{ text: "3 g", source: "official_nutrition_table" }],
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.deepEqual(preview.parserBlockers, ["likely_food_or_non_supplement"]);
+    assert.equal(preview.automatedBackfillReady, false);
+    assert.equal(preview.evidenceRecoveryHint, "not_standalone_supplement_review");
+    assert.deepEqual(preview.removableFieldCandidates, []);
+  });
+
+  test("repair preview summary separates parser readiness from automated backfill readiness", () => {
+    const safe = repairPreviewForRow({
+      id: "example-brand:magnesium",
+      dataOriginId: "example-brand:magnesium",
+      dataOriginUrl: "https://example.test/products/magnesium",
+      name: "Example Magnesium",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "magnesium",
+        ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg" }],
+        servingSizes: [{ text: "1 capsule", source: "official_label" }],
+      },
+    });
+    const blocked = repairPreviewForRow({
+      id: "example-brand:chunky-flavour",
+      dataOriginId: "example-brand:chunky-flavour",
+      dataOriginUrl: "https://example.test/products/chunky-flavour",
+      name: "Chunky Flavour - Fudge Brownie",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "chunky-flavour",
+        ingredientRows: [{ name: "Erythritol", amount: "2", unit: "g" }],
+        servingSizes: [{ text: "3 g", source: "official_nutrition_table" }],
+      },
+    });
+
+    assert.equal(safe.automatedBackfillReady, true);
+    assert.equal(blocked.automatedBackfillReady, false);
+    assert.deepEqual(summarize([safe, blocked]), {
+      rowsReviewed: 2,
+      searchTextWouldChange: 2,
+      oldOversizedSearchTextRows: 0,
+      proposedOversizedSearchTextRows: 0,
+      addIngredientRows: 0,
+      addServingSizes: 0,
+      structuredReady: 2,
+      automatedBackfillReady: 1,
+      structuredReadyWithBlockers: 1,
+      partialParse: 0,
+      needsBetterParser: 0,
+      removableFieldCandidateRows: 0,
+      byBrand: {
+        "example-brand": {
+          rows: 2,
+          structuredReady: 2,
+          automatedBackfillReady: 1,
+          needsBetterParser: 0,
+        },
+      },
+    });
   });
 
   test("repair preview rejects net-content counts stored as existing serving sizes", () => {
