@@ -2,27 +2,9 @@ name: Cloudflare Hosted E2E
 
 on:
   pull_request:
-    paths:
-      - ".github/workflows/cloudflare-hosted-e2e.yml"
-      - "Dockerfile.cloudflare-hosted-runner"
-      - "Dockerfile.cloudflare-hosted-runner-base"
-      - "Dockerfile.cloudflare-whisper-model"
-      - "package.json"
-      - "apps/cloudflare/**"
-      - "apps/web/src/lib/hosted-orchestration/**"
-      - "apps/web/test/hosted-orchestration-*.test.ts"
-      - "apps/web/test/support/**"
-      - "packages/assistant-engine/**"
-      - "packages/assistant-runtime/**"
-      - "packages/cloudflare-hosted-control/**"
-      - "packages/hosted-execution/**"
-      - "packages/hosted-local-harness/**"
-      - "packages/hosted-orchestrator-temporal/**"
-      - "render.yaml"
-      - "scripts/dev-hosted-local.ts"
-      - "scripts/hosted-local.ts"
-      - "scripts/setup-temporal-cli.sh"
-      - "scripts/temporal-dev-server.sh"
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
