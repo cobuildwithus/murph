@@ -34,6 +34,7 @@ import type {
 } from "../workflow-types.js";
 
 export const HOSTED_USER_RUNTIME_DEFAULT_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 500;
+export const HOSTED_USER_RUNTIME_DEFAULT_CONTINUE_AS_NEW_HISTORY_LENGTH = 750;
 export const HOSTED_USER_RUNTIME_DEFAULT_DEMAND_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS = 15_000;
@@ -41,6 +42,7 @@ export const HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOU
 // slack over the shared 5s prewarm HTTP/container budget unless versioned.
 export const HOSTED_USER_RUNTIME_DEFAULT_PREWARM_START_TO_CLOSE_TIMEOUT_MS = 6_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS = 10_000;
+export const HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_HISTORY_LENGTH = 10_000;
 export const HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 10_000;
 export const HOSTED_USER_RUNTIME_MAX_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS = 3_600_000;
 export const HOSTED_USER_RUNTIME_MAX_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS = 30_000;
@@ -63,6 +65,10 @@ const HOSTED_USER_RUNTIME_ENSURE_PROCESSING_SOURCE_PATCH =
   "hosted-user-runtime-ensure-processing-source-v1";
 const HOSTED_USER_RUNTIME_DROP_DEVICE_SYNC_RECOVERY_PATCH =
   "hosted-user-runtime-drop-device-sync-recovery-v1";
+const HOSTED_USER_RUNTIME_HISTORY_LENGTH_CONTINUE_AS_NEW_PATCH =
+  "hosted-user-runtime-history-length-continue-as-new-v1";
+const HOSTED_USER_RUNTIME_UNREAD_DEMAND_BEFORE_CONTINUE_AS_NEW_PATCH =
+  "hosted-user-runtime-unread-demand-before-continue-as-new-v1";
 const LEGACY_DEVICE_SYNC_RECOVERY_SOURCE = "device_sync_recovery";
 const HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT = 3;
 
@@ -129,6 +135,7 @@ export async function hostedUserRuntimeWorkflow(
       nextInput,
     ),
     continueAsNewSuggested: () => workflowInfo().continueAsNewSuggested,
+    currentHistoryLength: () => workflowInfo().historyLength,
     ensureRuntimeProcessing: processingActivities.ensureRuntimeProcessing,
     nowMs: () => Date.now(),
     readRuntimeDemand: demandActivities.readRuntimeDemand,
@@ -170,6 +177,10 @@ export async function hostedUserRuntimeWorkflow(
       patched(HOSTED_USER_RUNTIME_ENSURE_PROCESSING_SOURCE_PATCH),
     useDeviceSyncRecoveryDeletionPatch: () =>
       patched(HOSTED_USER_RUNTIME_DROP_DEVICE_SYNC_RECOVERY_PATCH),
+    useHistoryLengthContinueAsNewPatch: () =>
+      patched(HOSTED_USER_RUNTIME_HISTORY_LENGTH_CONTINUE_AS_NEW_PATCH),
+    useUnreadDemandBeforeContinueAsNewPatch: () =>
+      patched(HOSTED_USER_RUNTIME_UNREAD_DEMAND_BEFORE_CONTINUE_AS_NEW_PATCH),
     useSignalOnlyWaitForNonRetryableFailure: () =>
       patched(HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH),
     uuid: uuid4,
@@ -191,6 +202,7 @@ export async function hostedUserRuntimeWorkflow(
 export interface HostedUserRuntimeWorkflowRuntime {
   continueAsNew(input: HostedUserRuntimeWorkflowInput): Promise<never>;
   continueAsNewSuggested(): boolean;
+  currentHistoryLength(): number;
   ensureRuntimeProcessing(input: {
     orchestrationAttemptId: string;
     reason: HostedRuntimeRunDemand["reason"];
@@ -215,6 +227,8 @@ export interface HostedUserRuntimeWorkflowRuntime {
   useEnsureRuntimeProcessingSourcePatch(): boolean;
   preserveSameRuntimeWakeAcceptedCountPatchMarker(): boolean;
   useDeviceSyncRecoveryDeletionPatch(): boolean;
+  useHistoryLengthContinueAsNewPatch(): boolean;
+  useUnreadDemandBeforeContinueAsNewPatch(): boolean;
   useSignalOnlyWaitForNonRetryableFailure(): boolean;
   uuid(): string;
   waitForSignalOrTimeout(
@@ -261,6 +275,7 @@ export interface HostedUserRuntimeWorkflowMachine {
 }
 
 interface NormalizedWorkflowOptions {
+  continueAsNewAfterHistoryEvents: number;
   continueAsNewAfterIterations: number;
   ensureRuntimeProcessingStartToCloseTimeoutMs: number;
   prewarmTaskQueue: string;
@@ -280,6 +295,8 @@ export function createHostedUserRuntimeWorkflowMachine(
     readLegacyNonNegativeIntegerProperty(input.state, "sameRuntimeWakeAcceptedCount");
   let completedIterations = 0;
   let demandSignalVersion = 0;
+  let lastDemandSignalVersionRead =
+    hasPendingCurrentRuntimeDemand(state) ? -1 : demandSignalVersion;
 
   const readStatus = (): HostedRuntimeWorkflowState => ({ ...state });
 
@@ -394,10 +411,13 @@ export function createHostedUserRuntimeWorkflowMachine(
 
   const run = async (): Promise<void> => {
     for (;;) {
-      if (
-        runtime.continueAsNewSuggested()
-        || completedIterations >= options.continueAsNewAfterIterations
-      ) {
+      if (shouldContinueAsNewBeforeDemand({
+        completedIterations,
+        hasUnreadDemandSignal:
+          demandSignalVersion !== lastDemandSignalVersionRead,
+        options,
+        runtime,
+      })) {
         const deviceSyncRecoveryDeleted =
           runtime.useDeviceSyncRecoveryDeletionPatch();
         await runtime.continueAsNew({
@@ -438,6 +458,7 @@ export function createHostedUserRuntimeWorkflowMachine(
         if (state.signalVersion !== versionBeforeDemand) {
           continue;
         }
+        lastDemandSignalVersionRead = demandSignalVersion;
         const retryAt = readActivityFailureRetryAt({
           error,
           retryDelayMs: HOSTED_USER_RUNTIME_DEFAULT_DEMAND_FAILURE_RETRY_DELAY_MS,
@@ -456,6 +477,7 @@ export function createHostedUserRuntimeWorkflowMachine(
       if (state.signalVersion !== versionBeforeDemand) {
         continue;
       }
+      lastDemandSignalVersionRead = demandSignalVersion;
 
       recordDemandSummary(state, demand);
 
@@ -795,10 +817,53 @@ function clearPendingRuntimePrewarm(state: HostedRuntimeWorkflowState): void {
   state.prewarmRequested = false;
 }
 
+function shouldContinueAsNewBeforeDemand(input: {
+  completedIterations: number;
+  hasUnreadDemandSignal: boolean;
+  options: NormalizedWorkflowOptions;
+  runtime: HostedUserRuntimeWorkflowRuntime;
+}): boolean {
+  if (input.runtime.continueAsNewSuggested()) {
+    return true;
+  }
+
+  const iterationThresholdReached =
+    input.completedIterations >= input.options.continueAsNewAfterIterations;
+  const historyThresholdReached =
+    input.runtime.useHistoryLengthContinueAsNewPatch()
+    && input.runtime.currentHistoryLength()
+      >= input.options.continueAsNewAfterHistoryEvents;
+
+  if (!iterationThresholdReached && !historyThresholdReached) {
+    return false;
+  }
+
+  return !(
+    input.hasUnreadDemandSignal
+    && input.runtime.useUnreadDemandBeforeContinueAsNewPatch()
+  );
+}
+
+function hasPendingCurrentRuntimeDemand(
+  state: HostedRuntimeWorkflowState,
+): boolean {
+  return state.browserVaultRefreshRequested
+    || state.lagRecoveryObserved
+    || state.latestMailboxPointer !== null
+    || state.manualRunRequested
+    || state.prewarmRequested;
+}
+
 export function normalizeHostedUserRuntimeWorkflowOptions(
   options: HostedUserRuntimeWorkflowOptions | undefined,
 ): NormalizedWorkflowOptions {
   return {
+    continueAsNewAfterHistoryEvents: normalizePositiveIntegerOption({
+      fallback: HOSTED_USER_RUNTIME_DEFAULT_CONTINUE_AS_NEW_HISTORY_LENGTH,
+      max: HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_HISTORY_LENGTH,
+      min: 1,
+      value: options?.continueAsNewAfterHistoryEvents,
+    }),
     continueAsNewAfterIterations: normalizePositiveIntegerOption({
       fallback: HOSTED_USER_RUNTIME_DEFAULT_CONTINUE_AS_NEW_ITERATION_THRESHOLD,
       max: HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_ITERATION_THRESHOLD,
@@ -835,6 +900,8 @@ function normalizeContinueAsNewOptions(
     value: options?.ensureRuntimeProcessingStartToCloseTimeoutMs,
   });
   return {
+    continueAsNewAfterHistoryEvents:
+      normalized.continueAsNewAfterHistoryEvents,
     continueAsNewAfterIterations: normalized.continueAsNewAfterIterations,
     ensureRuntimeProcessingStartToCloseTimeoutMs,
     prewarmTaskQueue: normalized.prewarmTaskQueue,

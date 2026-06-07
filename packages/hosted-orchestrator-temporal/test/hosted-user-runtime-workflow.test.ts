@@ -1138,9 +1138,135 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(continued.state).not.toHaveProperty("aiUsageAllowDecision");
   });
 
-  it("continues as new when Temporal suggests it before the iteration threshold", async () => {
+  it("continues as new when history length reaches the configured threshold", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.historyLength = 750;
+
+    const machine = createMachine(runtime, {
+      options: {
+        continueAsNewAfterHistoryEvents: 750,
+        continueAsNewAfterIterations: 100,
+      },
+      userId: "member_test",
+    });
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests).toHaveLength(0);
+    expect(runtime.executionRequests).toHaveLength(0);
+    expect(continued).toEqual({
+      options: normalizedContinuedOptions({
+        continueAsNewAfterHistoryEvents: 750,
+        continueAsNewAfterIterations: 100,
+      }),
+      state: expect.objectContaining({ signalVersion: 0 }),
+      userId: "member_test",
+    });
+  });
+
+  it("processes pending mailbox demand before continuing as new for high history", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.historyLength = 750;
+    runtime.demands.push(runDemand({
+      mailboxLag: [mailboxLag()],
+      source: "mailbox_backlog",
+    }));
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: {
+        continueAsNewAfterHistoryEvents: 750,
+        continueAsNewAfterIterations: 100,
+      },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests).toHaveLength(1);
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        reason: "nudge",
+        source: "mailbox_backlog",
+        userId: "member_test",
+      },
+    ]);
+    expect(runtime.waits).toEqual([]);
+    expect(continued).toEqual({
+      options: normalizedContinuedOptions({
+        continueAsNewAfterHistoryEvents: 750,
+        continueAsNewAfterIterations: 100,
+      }),
+      state: expect.objectContaining({
+        mailboxSignalCount: 0,
+        latestMailboxPointer: null,
+        lastDemandSource: "mailbox_backlog",
+        lastExecutionKind: "runtime_processing_accepted",
+      }),
+      userId: "member_test",
+    });
+  });
+
+  it("preserves old iteration-threshold continue-as-new ordering before the unread-demand patch", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.unreadDemandBeforeContinueAsNewPatchEnabled = false;
+    runtime.demands.push(idleDemand(isoAfter(60_000)));
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    runtime.onWait = () => {
+      runtime.onWait = null;
+      machine.applySignal(mailboxSignal());
+    };
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests).toHaveLength(1);
+    expect(runtime.executionRequests).toHaveLength(0);
+    expect(runtime.waits).toEqual([60_000]);
+    expect(continued).toEqual({
+      options: normalizedContinuedOptions({ continueAsNewAfterIterations: 1 }),
+      state: expect.objectContaining({
+        mailboxSignalCount: 1,
+        latestMailboxPointer: expect.objectContaining({
+          mailboxItemId: "mailbox_item_test",
+        }),
+      }),
+      userId: "member_test",
+    });
+  });
+
+  it("continues as new when Temporal suggests it and no runtime demand is pending", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.suggestContinueAsNew = true;
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 100 },
+      userId: "member_test",
+    });
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests).toHaveLength(0);
+    expect(runtime.executionRequests).toHaveLength(0);
+    expect(continued).toEqual({
+      options: normalizedContinuedOptions({ continueAsNewAfterIterations: 100 }),
+      state: expect.objectContaining({ signalVersion: 0 }),
+      userId: "member_test",
+    });
+  });
+
+  it("honors Temporal continue-as-new suggestions even with unread demand", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.suggestContinueAsNew = true;
+    runtime.demands.push(runDemand({
+      mailboxLag: [mailboxLag()],
+      source: "mailbox_backlog",
+    }));
 
     const machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 100 },
@@ -1159,7 +1285,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
         latestMailboxPointer: expect.objectContaining({
           mailboxItemId: "mailbox_item_test",
         }),
-        signalVersion: 1,
       }),
       userId: "member_test",
     });
@@ -1171,6 +1296,7 @@ function normalizedContinuedOptions(
   overrides: Partial<NonNullable<HostedUserRuntimeWorkflowInput["options"]>>,
 ): NonNullable<HostedUserRuntimeWorkflowInput["options"]> {
   return {
+    continueAsNewAfterHistoryEvents: 750,
     continueAsNewAfterIterations: 500,
     ensureRuntimeProcessingStartToCloseTimeoutMs:
       HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
@@ -1230,6 +1356,8 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   sameRuntimeWakeAcceptedCountPatchMarkerCount = 0;
   signalOnlyNonRetryableFailureWaitEnabled = true;
   suggestContinueAsNew = false;
+  historyLength = 0;
+  unreadDemandBeforeContinueAsNewPatchEnabled = true;
   readonly waits: Array<number | null> = [];
   private uuidCounter = 0;
   private readonly signalWaits: Array<{
@@ -1246,6 +1374,10 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
 
   continueAsNewSuggested(): boolean {
     return this.suggestContinueAsNew;
+  }
+
+  currentHistoryLength(): number {
+    return this.historyLength;
   }
 
   async ensureRuntimeProcessing(
@@ -1346,6 +1478,14 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
 
   useDeviceSyncRecoveryDeletionPatch(): boolean {
     return this.deviceSyncRecoveryDeletionPatchEnabled;
+  }
+
+  useHistoryLengthContinueAsNewPatch(): boolean {
+    return true;
+  }
+
+  useUnreadDemandBeforeContinueAsNewPatch(): boolean {
+    return this.unreadDemandBeforeContinueAsNewPatchEnabled;
   }
 
   useRuntimeRecheckSignalPatch(): boolean {

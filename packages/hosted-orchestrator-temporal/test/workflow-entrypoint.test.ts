@@ -14,9 +14,11 @@ const defineSignal = vi.fn((name: string) => ({ name, type: "signal" }));
 const patched = vi.fn((_patchId: string) => true);
 const setHandler = vi.fn();
 const uuid4 = vi.fn(() => "orchestration-attempt-test");
-const workflowInfo = vi.fn(() => ({
+let workflowInfoResponse = {
   continueAsNewSuggested: false,
-}));
+  historyLength: 0,
+};
+const workflowInfo = vi.fn(() => workflowInfoResponse);
 const proxyActivities = vi.fn(() => ({
   ensureRuntimeProcessing,
   prewarmRuntimeContainer,
@@ -56,6 +58,10 @@ vi.mock("@temporalio/workflow", () => ({
 describe("hostedUserRuntimeWorkflow entrypoint", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    workflowInfoResponse = {
+      continueAsNewSuggested: false,
+      historyLength: 0,
+    };
   });
 
   it("registers handlers before running awaited workflow work", async () => {
@@ -129,6 +135,33 @@ describe("hostedUserRuntimeWorkflow entrypoint", () => {
     expect(ensureProcessingPatchOrder).toBeLessThan(
       ensureRuntimeProcessing.mock.invocationCallOrder[0],
     );
+  });
+
+  it("emits the history-length patch marker before history rollover", async () => {
+    vi.resetModules();
+    workflowInfoResponse = {
+      continueAsNewSuggested: false,
+      historyLength: 1,
+    };
+    const {
+      hostedUserRuntimeWorkflow,
+    } = await import("../src/workflows/hosted-user-runtime.js");
+
+    await expect(hostedUserRuntimeWorkflow({
+      options: {
+        continueAsNewAfterHistoryEvents: 1,
+        continueAsNewAfterIterations: 100,
+      },
+      userId: "member_test",
+    })).rejects.toBe(continueAsNewError);
+
+    expect(readRuntimeDemand).not.toHaveBeenCalled();
+    expect(patched).toHaveBeenCalledWith(
+      "hosted-user-runtime-history-length-continue-as-new-v1",
+    );
+    expect(readPatchInvocationOrder(
+      "hosted-user-runtime-history-length-continue-as-new-v1",
+    )).toBeLessThan(continueAsNew.mock.invocationCallOrder[0]);
   });
 });
 
