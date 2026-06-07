@@ -1,6 +1,5 @@
 import { z } from 'zod'
 import {
-  assistantResponseMediaSchema,
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
@@ -90,7 +89,7 @@ const CODEX_DYNAMIC_TOOL_CALL_METHOD = 'item/tool/call'
 
 const attachResponseMediaArgumentsSchema = z
   .object({
-    media: z.array(assistantResponseMediaSchema).max(40),
+    media: z.array(z.unknown()).max(40),
   })
   .strict()
 
