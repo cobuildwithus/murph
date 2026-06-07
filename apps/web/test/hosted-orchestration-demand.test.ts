@@ -181,6 +181,7 @@ describe("hosted orchestration demand", () => {
 
   it.each([
     ["runtime.manual-requested", "manual", "manual", true],
+    ["runtime.browser-vault-refresh-requested", "mailbox_backlog", "nudge", false],
     ["runtime.device-sync-recovery-requested", "mailbox_backlog", "nudge", false],
     ["runtime.mailbox-lag-observed", "lag_recovery", "nudge", false],
   ] as const)(
@@ -228,44 +229,6 @@ describe("hosted orchestration demand", () => {
       }
     },
   );
-
-  it("runs browser-vault refresh demand for pending browser-vault system mailbox control", async () => {
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      redactedStatusJson: {
-        conversationImportedSeq: "0",
-        systemImportedSeq: "0",
-      },
-    }));
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "conversation",
-        maxSeq: "0",
-      },
-      {
-        lane: "system",
-        maxSeq: "3",
-      },
-    ]);
-    mocks.readHostedMailboxFirstPendingSystemKind.mockResolvedValue(
-      "runtime.browser-vault-refresh-requested",
-    );
-
-    const response = await demandRoute.GET(requestForDemand(), routeContext());
-    const demand = parseHostedRuntimeDemand(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(demand).toMatchObject({
-      kind: "run",
-      reason: "browser_vault_refresh",
-      source: "browser_vault_refresh",
-    });
-    expect(mocks.readHostedMailboxFirstPendingSystemKind).toHaveBeenCalledWith({
-      afterSeq: "0",
-      prisma: { kind: "prisma" },
-      userId: MEMBER_ID,
-    });
-    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
-  });
 
   it("keeps conversation mailbox backlog ahead of pending device-sync system wakes", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({

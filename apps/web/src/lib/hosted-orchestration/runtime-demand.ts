@@ -370,11 +370,6 @@ function selectHostedRuntimeControlRunDemand(
         reason: "manual",
         source: "manual",
       };
-    case "runtime.browser-vault-refresh-requested":
-      return {
-        reason: "browser_vault_refresh",
-        source: "browser_vault_refresh",
-      };
     case "runtime.device-sync-recovery-requested":
       return null;
     case "runtime.mailbox-lag-observed":
