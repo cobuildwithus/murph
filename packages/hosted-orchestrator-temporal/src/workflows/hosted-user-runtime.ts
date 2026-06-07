@@ -309,6 +309,7 @@ export function createHostedUserRuntimeWorkflowMachine(
     readLegacyNonNegativeIntegerProperty(input.state, "sameRuntimeWakeAcceptedCount");
   let completedIterations = 0;
   let demandSignalVersion = 0;
+  let latestMailboxSignalDemandVersion: number | null = null;
   let lastDemandSignalVersionRead =
     hasPendingCurrentRuntimeDemand(state) ? -1 : demandSignalVersion;
 
@@ -382,6 +383,7 @@ export function createHostedUserRuntimeWorkflowMachine(
       case "mailbox_appended": {
         state.signalVersion += 1;
         demandSignalVersion += 1;
+        latestMailboxSignalDemandVersion = demandSignalVersion;
         state.mailboxSignalCount += 1;
         state.latestMailboxPointer = {
           lane: signal.lane,
@@ -577,13 +579,12 @@ export function createHostedUserRuntimeWorkflowMachine(
 
       if (
         state.latestMailboxPointer !== null
+        && latestMailboxSignalDemandVersion === demandSignalVersion
         && runtime.useDirectMailboxProcessingPatch()
       ) {
+        latestMailboxSignalDemandVersion = null;
         lastDemandSignalVersionRead = demandSignalVersion;
-        state.lastDemandKind = "run";
-        state.lastDemandNextWakeAt = null;
-        state.lastDemandSource = "mailbox_backlog";
-        state.lastMailboxLagLaneCount = 0;
+        recordDirectMailboxRunSummary(state);
         await executeRuntimeProcessingIntent({
           reason: "nudge",
           source: "mailbox_backlog",
@@ -1067,6 +1068,13 @@ function recordDemandSummary(
       throw new Error(`Unsupported hosted runtime demand ${String(exhaustive)}`);
     }
   }
+}
+
+function recordDirectMailboxRunSummary(state: HostedRuntimeWorkflowState): void {
+  state.lastDemandKind = "run";
+  state.lastDemandNextWakeAt = null;
+  state.lastDemandSource = "mailbox_backlog";
+  state.lastMailboxLagLaneCount = 0;
 }
 
 function clearSatisfiedFlags(

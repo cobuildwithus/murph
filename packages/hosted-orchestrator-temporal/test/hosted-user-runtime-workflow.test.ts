@@ -442,6 +442,140 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
   });
 
+  it("falls back to demand read after direct mailbox retry_later responses", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.executions.push(retryLater(isoAfter(22_000)));
+    runtime.demands.push(blockedDemand(null));
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toHaveLength(1);
+    expect(runtime.demandRequests).toHaveLength(1);
+    expect(runtime.waits).toEqual([22_000, null]);
+    expect(continued.state).toMatchObject({
+      lastDemandKind: "blocked",
+      lastDemandSource: "ai_usage_gate_unavailable",
+      latestMailboxPointer: expect.objectContaining({
+        mailboxItemId: "mailbox_item_test",
+      }),
+    });
+  });
+
+  it("falls back to demand read after direct mailbox execution failures", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.executions.push(() => {
+      const error = new Error("runtime preparation failed") as Error & {
+        code: string;
+      };
+      error.code = "container_rpc_error";
+      throw error;
+    });
+    runtime.demands.push(blockedDemand(null));
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toHaveLength(1);
+    expect(runtime.demandRequests).toHaveLength(1);
+    expect(runtime.waits).toEqual([
+      HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
+      null,
+    ]);
+    expect(continued.state).toMatchObject({
+      lastDemandKind: "blocked",
+      lastDemandSource: "ai_usage_gate_unavailable",
+      latestMailboxPointer: expect.objectContaining({
+        mailboxItemId: "mailbox_item_test",
+      }),
+    });
+  });
+
+  it("reads demand after a manual signal arrives during direct mailbox execution", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    let machine: HostedUserRuntimeWorkflowMachine | null = null;
+    runtime.executions.push(() => {
+      machine?.applySignal(manualSignal("manual-during-direct-mailbox"));
+      return processingAcceptedWithRecheck(isoAfter(30_000));
+    });
+    runtime.demands.push((request) => {
+      expect(request.manualRunRequested).toBe(true);
+      return runDemand({ source: "manual" });
+    });
+    runtime.executions.push(processingAccepted());
+
+    machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests).toHaveLength(1);
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        reason: "nudge",
+        source: "mailbox_backlog",
+        userId: "member_test",
+      },
+      {
+        orchestrationAttemptId: "orchestration-attempt-2",
+        reason: "manual",
+        source: "manual",
+        userId: "member_test",
+      },
+    ]);
+  });
+
+  it("direct-processes a new mailbox signal that arrives during direct mailbox execution", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    let machine: HostedUserRuntimeWorkflowMachine | null = null;
+    runtime.executions.push(() => {
+      machine?.applySignal(mailboxSignal({
+        mailboxItemId: "mailbox_item_new",
+        laneSeq: "8",
+      }));
+      return processingAcceptedWithRecheck(isoAfter(30_000));
+    });
+    runtime.executions.push(processingAccepted());
+
+    machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests).toEqual([]);
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        reason: "nudge",
+        source: "mailbox_backlog",
+        userId: "member_test",
+      },
+      {
+        orchestrationAttemptId: "orchestration-attempt-2",
+        reason: "nudge",
+        source: "mailbox_backlog",
+        userId: "member_test",
+      },
+    ]);
+  });
+
   it("waits signal-interruptibly after retry-later processing responses", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({ source: "manual" }));
@@ -1960,13 +2094,16 @@ function legacyCarryForwardState(input: {
   };
 }
 
-function mailboxSignal(): HostedRuntimeSignal {
+function mailboxSignal(
+  overrides: Partial<Extract<HostedRuntimeSignal, { kind: "mailbox_appended" }>> = {},
+): HostedRuntimeSignal {
   return {
     kind: "mailbox_appended",
     lane: "conversation",
     laneSeq: "7",
     mailboxItemId: "mailbox_item_test",
     source: "test",
+    ...overrides,
   };
 }
 
@@ -2046,6 +2183,20 @@ function idleDemand(nextWakeAt: string | null): HostedRuntimeDemand {
     kind: "idle",
     mailboxLag: [],
     nextWakeAt,
+    workspace: null,
+  };
+}
+
+function blockedDemand(
+  retryAt: string | null,
+  reason: Extract<HostedRuntimeDemand, { kind: "blocked" }>["reason"] =
+    "ai_usage_gate_unavailable",
+): HostedRuntimeDemand {
+  return {
+    kind: "blocked",
+    mailboxLag: [],
+    reason,
+    retryAt,
     workspace: null,
   };
 }
