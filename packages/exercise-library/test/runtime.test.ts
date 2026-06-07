@@ -75,6 +75,24 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8d1a1b7c-6780-4345-b5e6-bffb32ec5a00/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "bird-dog")?.images).toEqual([
+      expect.objectContaining({
+        step: "Tabletop setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/79a37dfb-073c-4b11-4698-de12aaf81b00/public",
+      }),
+      expect.objectContaining({
+        step: "Reach side A",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/77a9a44d-5c51-4f6b-66f1-678b58793400/public",
+      }),
+      expect.objectContaining({
+        step: "Reach side B",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a8dc06cf-82b5-43e0-2d7d-1be450eadd00/public",
+      }),
+      expect.objectContaining({
+        step: "Form check",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ab24a93b-6a01-4a4e-5c61-43b746baff00/public",
+      }),
+    ]);
     expect(artifacts.details.sources).toEqual(catalog.sources);
     expect(artifacts.facets.facets.kinds).toEqual(["exercise", "stretch"]);
     expect(artifacts.facets.facets.equipment).toContain("none");
