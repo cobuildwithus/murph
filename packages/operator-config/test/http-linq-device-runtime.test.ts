@@ -254,6 +254,9 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
           {
             url: 'https://cdn.example.test/dead-bug/extend.png',
           },
+          {
+            url: 'https://cdn.example.test/dead-bug/finish.png',
+          },
         ],
         message: ' hello from Murph ',
         replyToMessageId: ' reply-1 ',
@@ -326,6 +329,10 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
         {
           type: 'media',
           url: 'https://cdn.example.test/dead-bug/extend.png',
+        },
+        {
+          type: 'media',
+          url: 'https://cdn.example.test/dead-bug/finish.png',
         },
       ],
       reply_to: { message_id: 'reply-1' },
