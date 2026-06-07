@@ -100,7 +100,8 @@ describe("hosted mailbox conversation import adapter", () => {
           parts: [
             {
               type: "text",
-              value: "hello https://signed.example.invalid/raw",
+              value:
+                "hello https://signed.example.invalid/raw\nfile file:///tmp/fixture\npath /tmp/fixture\nAuthorization: fixture-header",
             },
             {
               attachmentId: "att_voice_1",
@@ -152,7 +153,10 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(listed.events.length, 1);
     const event = listed.events[0]!;
     assert.equal(event.sourceRef.kind, "hosted-mailbox");
-    assert.equal(event.content.text, "hello [link omitted]");
+    assert.equal(
+      event.content.text,
+      "hello https://signed.example.invalid/raw\nfile file:///tmp/fixture\npath /tmp/fixture\nAuthorization: fixture-header",
+    );
     assert.match(event.sourceRef.dedupeKey ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.sourceRef.eventId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.sourceRef.itemId ?? "", HASHED_IDENTIFIER_PATTERN);
@@ -188,7 +192,11 @@ describe("hosted mailbox conversation import adapter", () => {
       updatedAt: event.projection.updatedAt,
     });
     assert.ok(event.projection.lastAttemptedAt);
-    assert.equal(JSON.stringify(event).includes("https://signed.example.invalid"), false);
+    assert.equal(
+      event.content.text,
+      "hello https://signed.example.invalid/raw\nfile file:///tmp/fixture\npath /tmp/fixture\nAuthorization: fixture-header",
+    );
+    assert.equal(JSON.stringify(event).includes("redacted-attachment-url-sentinel"), false);
     assert.equal(JSON.stringify(event).includes("voice.m4a"), true);
     assert.equal(JSON.stringify(event).includes("+15550100000"), false);
 
@@ -526,7 +534,7 @@ describe("hosted mailbox conversation import adapter", () => {
     const event = listed.events[0];
     assert.ok(event);
 
-    assert.equal(event.content.text, "CHECKIN [link omitted]");
+    assert.equal(event.content.text, "CHECKIN https://signed.example.invalid/raw");
     assert.equal(event.conversation?.source, "whatsapp");
     assert.match(event.conversation?.accountId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.actorId ?? "", HASHED_IDENTIFIER_PATTERN);

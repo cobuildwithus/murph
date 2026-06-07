@@ -791,9 +791,9 @@ function createHostedConversationAssistantInputText(
     const textParts = wake.message.linqMessage.parts
       .filter((part) => part.type === "text")
       .map((part) => part.value);
-    const sanitized = sanitizeHostedAssistantInputText(textParts.join("\n"));
-    if (sanitized) {
-      return sanitized;
+    const text = normalizeHostedAssistantInputText(textParts.join("\n"));
+    if (text) {
+      return text;
     }
     const attachmentCount = wake.message.linqMessage.parts.filter((part) =>
       part.type === "media" || part.type === "voice_memo"
@@ -804,11 +804,11 @@ function createHostedConversationAssistantInputText(
   }
 
   if (isHostedTelegramConversationMessageWake(wake)) {
-    const sanitized = sanitizeHostedAssistantInputText(
+    const text = normalizeHostedAssistantInputText(
       wake.message.telegramMessage.text ?? "",
     );
-    if (sanitized) {
-      return sanitized;
+    if (text) {
+      return text;
     }
     const attachmentCount = wake.message.telegramMessage.attachments?.length ?? 0;
     return attachmentCount > 0
@@ -817,7 +817,7 @@ function createHostedConversationAssistantInputText(
   }
 
   if (isHostedWhatsAppConversationMessageWake(wake)) {
-    return sanitizeHostedAssistantInputText(
+    return normalizeHostedAssistantInputText(
       wake.message.whatsappMessage.text,
     ) ?? "Received a WhatsApp message.";
   }
@@ -837,7 +837,7 @@ function createHostedEmailConversationAssistantInputText(
     >;
   },
 ): string {
-  const bodyPreview = sanitizeHostedAssistantInputText(
+  const bodyPreview = normalizeHostedAssistantInputText(
     wake.message.textPreview ?? "",
   );
   if (!bodyPreview) {
@@ -849,7 +849,7 @@ function createHostedEmailConversationAssistantInputText(
       renderHostedEmailPromptLine("Email subject", wake.message.subject),
       "Email body unavailable.",
     ];
-    return sanitizeHostedAssistantInputText(
+    return normalizeHostedAssistantInputText(
       lines.filter((line): line is string => line !== null).join("\n"),
     ) ?? "Received an email message.\nEmail body unavailable.";
   }
@@ -862,7 +862,7 @@ function createHostedEmailConversationAssistantInputText(
     renderHostedEmailPromptLine("Email subject", wake.message.subject),
     `Email body preview - ${bodyPreview}`,
   ];
-  return sanitizeHostedAssistantInputText(
+  return normalizeHostedAssistantInputText(
     lines.filter((line): line is string => line !== null).join("\n"),
   ) ?? "Received an email message.";
 }
@@ -871,21 +871,21 @@ function renderHostedEmailPromptLine(
   label: string,
   value: string | null | undefined,
 ): string | null {
-  const sanitized = sanitizeHostedAssistantInputText(value ?? "");
-  return sanitized ? `${label} - ${sanitized}` : null;
+  const text = normalizeHostedAssistantInputText(value ?? "");
+  return text ? `${label} - ${text}` : null;
 }
 
 function renderHostedEmailPromptListLine(
   label: string,
   values: readonly string[] | null | undefined,
 ): string | null {
-  const sanitizedValues = (values ?? [])
-    .map((value) => sanitizeHostedAssistantInputText(value))
+  const textValues = (values ?? [])
+    .map((value) => normalizeHostedAssistantInputText(value))
     .filter((value): value is string => value !== null);
-  if (sanitizedValues.length === 0) {
+  if (textValues.length === 0) {
     return null;
   }
-  return `${label} - ${sanitizedValues.join(", ")}`;
+  return `${label} - ${textValues.join(", ")}`;
 }
 
 function createHostedConversationAssistantInputConversation(
@@ -1067,7 +1067,7 @@ function createHostedConversationAssistantInputSourceMetadata(
 ): UpsertAssistantInputEventInput["sourceMetadata"] {
   if (isHostedEmailConversationMessageWake(wake)) {
     const promptReady = Boolean(
-      sanitizeHostedAssistantInputText(wake.message.textPreview ?? ""),
+      normalizeHostedAssistantInputText(wake.message.textPreview ?? ""),
     );
     return {
       kind: "email",
@@ -1084,7 +1084,7 @@ function createHostedConversationAssistantInputSourceMetadata(
     identifierBlind,
     wake.message.telegramMessage.mediaGroupId,
   );
-  const replyContext = sanitizeHostedAssistantInputMetadataText(
+  const replyContext = normalizeHostedAssistantInputMetadataText(
     wake.message.telegramMessage.replyContextPreview ?? "",
   );
   if (!mediaGroupId && !replyContext) {
@@ -1269,30 +1269,25 @@ function isE164LikeHostedAssistantInputToken(value: string): boolean {
   return /^\+?[1-9]\d{7,14}$/u.test(value.replace(/[\s().-]/gu, ""));
 }
 
-function sanitizeHostedAssistantInputText(value: string): string | null {
-  const sanitized = value
-    .replace(/https?:\/\/[^\s"'<>]+/giu, "[link omitted]")
-    .replace(/file:\/\/[^\s"'<>]+/giu, "[path omitted]")
-    .replace(/(^|[\s("'=])(?:[A-Za-z]:[\\/]|\/[^\s"'<>]+|~\/|\.\.\/|\.\.\\)[^\s"'<>]*/gu, "$1[path omitted]")
-    .replace(/^\s*(authorization|cookie|set-cookie|x-api-key)\s*:.*$/gimu, "[secret omitted]")
-    .trim();
+function normalizeHostedAssistantInputText(value: string): string | null {
+  const text = value.trim();
 
-  if (sanitized.length === 0) {
+  if (text.length === 0) {
     return null;
   }
 
-  return sanitized.length > 20_000 ? sanitized.slice(0, 20_000) : sanitized;
+  return text.length > 20_000 ? text.slice(0, 20_000) : text;
 }
 
-function sanitizeHostedAssistantInputMetadataText(value: string): string | null {
-  const sanitized = sanitizeHostedAssistantInputText(value);
-  if (!sanitized) {
+function normalizeHostedAssistantInputMetadataText(value: string): string | null {
+  const text = normalizeHostedAssistantInputText(value);
+  if (!text) {
     return null;
   }
 
-  return sanitized.length > ASSISTANT_INPUT_SOURCE_METADATA_TEXT_MAX_LENGTH
-    ? sanitized.slice(0, ASSISTANT_INPUT_SOURCE_METADATA_TEXT_MAX_LENGTH)
-    : sanitized;
+  return text.length > ASSISTANT_INPUT_SOURCE_METADATA_TEXT_MAX_LENGTH
+    ? text.slice(0, ASSISTANT_INPUT_SOURCE_METADATA_TEXT_MAX_LENGTH)
+    : text;
 }
 
 function normalizeHostedAssistantInputMimeType(value: string | null | undefined): string | null {

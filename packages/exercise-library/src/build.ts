@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { isIP } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
@@ -17,6 +18,7 @@ import {
   type ExerciseCatalogEnvironment,
   type ExerciseCatalogFacets,
   type ExerciseCatalogFacetsArtifact,
+  type ExerciseCatalogImage,
   type ExerciseCatalogIndexArtifact,
   type ExerciseCatalogItem,
   type ExerciseCatalogKind,
@@ -51,6 +53,7 @@ interface SeedRow {
   "Commonness Tier": string;
   Steps: string;
   "Best Practices": string;
+  Images: string;
 }
 
 export interface ExerciseSeedCatalog {
@@ -80,7 +83,7 @@ export async function readSeedCatalog(seedPaths: readonly string[]): Promise<Exe
     throw new Error("Exercise seed catalog has no source CSV files.");
   }
 
-  const expectedHeaders = [
+  const baseExpectedHeaders = [
     "Library",
     "ID",
     "Name",
@@ -96,6 +99,7 @@ export async function readSeedCatalog(seedPaths: readonly string[]): Promise<Exe
     "Steps",
     "Best Practices",
   ];
+  const expectedHeaders = [...baseExpectedHeaders, "Images"];
 
   const sourceRegistry = createSourceRegistry();
   const items: ExerciseCatalogItem[] = [];
@@ -107,19 +111,25 @@ export async function readSeedCatalog(seedPaths: readonly string[]): Promise<Exe
     }
 
     const [headers, ...records] = rows;
-    if (headers.join("\0") !== expectedHeaders.join("\0")) {
+    const hasImagesColumn = headers.join("\0") === expectedHeaders.join("\0");
+    const hasBaseHeaders = headers.join("\0") === baseExpectedHeaders.join("\0");
+    if (!hasImagesColumn && !hasBaseHeaders) {
       throw new Error(`Unexpected exercise seed headers in ${path.basename(seedPath)}: ${headers.join(", ")}`);
     }
 
     records
       .filter((record) => record.some((value) => value.trim().length > 0))
       .forEach((record, index) => {
-        if (record.length !== expectedHeaders.length) {
+        const acceptsMissingTrailingImagesCell = hasImagesColumn && record.length === baseExpectedHeaders.length;
+        if (record.length !== headers.length && !acceptsMissingTrailingImagesCell) {
           throw new Error(
-            `Exercise seed row ${path.basename(seedPath)}:${index + 2} has ${record.length} columns; expected ${expectedHeaders.length}.`,
+            `Exercise seed row ${path.basename(seedPath)}:${index + 2} has ${record.length} columns; expected ${headers.length}.`,
           );
         }
-        const row = Object.fromEntries(expectedHeaders.map((header, column) => [header, record[column] ?? ""])) as unknown as SeedRow;
+        const row = Object.fromEntries(expectedHeaders.map((header, column) => {
+          const sourceColumn = header === "Images" && !hasImagesColumn ? -1 : column;
+          return [header, sourceColumn >= 0 ? record[sourceColumn] ?? "" : ""];
+        })) as unknown as SeedRow;
         items.push(normalizeSeedRow(row, `${path.basename(seedPath)}:${index + 2}`, sourceRegistry));
       });
   }
@@ -139,7 +149,7 @@ export function buildArtifacts(catalog: ExerciseSeedCatalog): {
   const { items, sources } = catalog;
   validateCatalogSources(catalog);
   const itemSummaries = items.map(({
-    image: _image,
+    images: _images,
     sourceIds: _sourceIds,
     steps: _steps,
     tips: _tips,
@@ -229,7 +239,7 @@ function normalizeSeedRow(row: SeedRow, rowLabel: string, sourceRegistry: Source
     modality: required(row.Modality, "Modality", rowLabel),
     commonness: normalizeEnum(row["Commonness Tier"], exerciseCatalogCommonnessValues, "Commonness Tier", rowLabel),
     description,
-    image: null,
+    images: parseImages(row.Images, rowLabel),
     sourceIds,
     steps,
     tips,
@@ -294,6 +304,68 @@ function splitNormalizedList(value: string): string[] {
 
 function splitSourceUrls(value: string): string[] {
   return value.split(";").map((entry) => entry.trim()).filter(Boolean);
+}
+
+function parseImages(value: string, rowLabel: string): ExerciseCatalogImage[] {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  return trimmed.split(/\s*;;\s*/u).map((entry, index) => {
+    const parts = entry.split("|").map((part) => part.trim());
+    if (parts.length !== 3) {
+      throw new Error(`Exercise seed row ${rowLabel} image ${index + 1} must use "step | alt | url".`);
+    }
+    const [step, alt, url] = parts;
+    return {
+      step: required(step ?? "", `Images ${index + 1} step`, rowLabel),
+      alt: required(alt ?? "", `Images ${index + 1} alt`, rowLabel),
+      url: validateImageUrl(required(url ?? "", `Images ${index + 1} url`, rowLabel), rowLabel),
+    };
+  });
+}
+
+function validateImageUrl(value: string, rowLabel: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`Exercise seed row ${rowLabel} has invalid image URL.`);
+  }
+  if (url.protocol !== "https:") {
+    throw new Error(`Exercise seed row ${rowLabel} has non-HTTPS image URL.`);
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error(`Exercise seed row ${rowLabel} image URL must not include credentials, query strings, or fragments.`);
+  }
+  if (!isPublicHost(url.hostname)) {
+    throw new Error(`Exercise seed row ${rowLabel} image URL must use a public host.`);
+  }
+  if (!hasImageExtension(url.pathname) && !isCloudflareImagesDeliveryUrl(url)) {
+    throw new Error(`Exercise seed row ${rowLabel} image URL must point to an image file or Cloudflare Images delivery URL.`);
+  }
+  return url.toString();
+}
+
+function hasImageExtension(pathname: string): boolean {
+  return /\.(?:avif|gif|jpe?g|png|webp)$/iu.test(pathname);
+}
+
+function isCloudflareImagesDeliveryUrl(url: URL): boolean {
+  return url.hostname.toLowerCase().replace(/\.$/u, "") === "imagedelivery.net"
+    && url.pathname.split("/").filter(Boolean).length >= 3;
+}
+
+function isPublicHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/\.$/u, "");
+  if (!normalized || normalized === "localhost" || normalized.endsWith(".localhost") || normalized.endsWith(".local")) {
+    return false;
+  }
+  const ipLiteral = normalized.startsWith("[") && normalized.endsWith("]")
+    ? normalized.slice(1, -1)
+    : normalized;
+  return isIP(ipLiteral) === 0;
 }
 
 function parseNumberedList(value: string, field: string, rowLabel: string): string[] {
