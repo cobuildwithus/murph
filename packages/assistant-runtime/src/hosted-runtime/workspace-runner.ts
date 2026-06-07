@@ -524,6 +524,14 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       }
     }
     await foregroundMailboxImportLoop.stop();
+    if (foregroundConversationWorkObserved) {
+      await mergePendingForegroundAssistantInputWake({
+        now: input.now,
+        result: assistantPhaseResult,
+        signal: input.signal ?? null,
+        vaultRoot: input.vaultRoot,
+      });
+    }
     mailboxPostCheckpointEffectsFinished = scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
@@ -1494,8 +1502,24 @@ function mergeDeferredPostCheckpointWake(input: {
     return;
   }
 
-  input.assistantPhaseResult.nextWakeAt = input.postCheckpoint.nextWakeAt ?? null;
-  input.assistantPhaseResult.nextWakeReason = input.postCheckpoint.nextWakeReason ?? null;
+  if (input.postCheckpoint.nextWakeAt === null || input.postCheckpoint.nextWakeAt === undefined) {
+    input.assistantPhaseResult.nextWakeAt = null;
+    input.assistantPhaseResult.nextWakeReason = null;
+    return;
+  }
+
+  const selectedWake = selectHostedRuntimeWakeCandidate([
+    createHostedRuntimeWakeCandidate(
+      input.assistantPhaseResult.nextWakeAt ?? null,
+      input.assistantPhaseResult.nextWakeReason ?? null,
+    ),
+    createHostedRuntimeWakeCandidate(
+      input.postCheckpoint.nextWakeAt ?? null,
+      input.postCheckpoint.nextWakeReason ?? null,
+    ),
+  ]);
+  input.assistantPhaseResult.nextWakeAt = selectedWake.at;
+  input.assistantPhaseResult.nextWakeReason = selectedWake.reason;
 }
 
 function appendHostedWorkspaceDurableCheckpointEffect(input: {

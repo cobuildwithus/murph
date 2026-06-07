@@ -3540,6 +3540,270 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("preserves earlier foreground assistant wake over later post-assistant cleanup wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_post_checkpoint_preserve_wake",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "3",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Import should not run without mailbox items.");
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          logRequests,
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_post_checkpoint_preserve_wake",
+        async runAssistantPhase() {
+          return {
+            afterCheckpoint: async () => ({
+              checkpointReason: "provider_cleanup",
+              nextWakeAt: "2026-04-26T00:05:00.000Z",
+              nextWakeReason: "assistant",
+            }),
+            checkpointReason: "canonical_runtime_commit",
+            nextWakeAt: "2026-04-26T00:00:00.000Z",
+            nextWakeReason: "assistant",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+      });
+
+      assert.deepEqual(checkpointRequests, []);
+      assert.equal(result.latestWorkspace?.version, "0");
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, "2026-04-26T00:00:00.000Z");
+      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
+      assert.deepEqual(
+        logRequests.flatMap((request) => request.entries)
+          .filter((entry) => entry.eventCode === "checkpoint.runtime_residue_deferred")
+          .map((entry) => entry.redactedJson),
+        [
+          {
+            checkpointPhase: "assistant",
+            checkpointReason: "canonical_runtime_commit",
+          },
+          {
+            checkpointPhase: "post_assistant",
+            checkpointReason: "provider_cleanup",
+          },
+        ],
+      );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("preserves foreground assistant wake imported during post-assistant cleanup", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items: HostedMailboxItem[] = [];
+    const importedSeqs: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+
+    try {
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: TEST_NOW,
+        }],
+        updatedAt: TEST_NOW,
+        version: 1,
+      });
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_post_checkpoint_late_input",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "3",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          importedSeqs.push(item.item.laneSeq);
+          const staged = await upsertAssistantInputEvent({
+            event: createStoredAssistantInputEventForMailboxItem(
+              item.item,
+              "late input during post-assistant cleanup",
+            ),
+            vault: vaultRoot,
+          });
+          return {
+            assistantInputId: staged.inputId,
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_post_checkpoint_late_input",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          return {
+            afterCheckpoint: async () => {
+              items.push(createMailboxItem({
+                id: "mailbox_item_runner_post_checkpoint_late_input",
+                laneSeq: "1",
+                occurredAt: "2026-04-26T00:00:02.000Z",
+              }));
+              runtimeWakeSignal.notify();
+              await waitForCondition(() => importedSeqs.includes("1"));
+              await waitForCondition(() =>
+                input.shouldYieldBackgroundMaintenance?.() === true
+              );
+              return {
+                checkpointReason: "provider_cleanup",
+                nextWakeAt: "2026-04-26T00:05:00.000Z",
+                nextWakeReason: "assistant",
+              };
+            },
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(importedSeqs, ["1"]);
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
+      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "1");
+      assert.deepEqual(checkpointRequests, []);
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "0", lane: "system" },
+        ],
+        [
+          { importedSeq: "0", lane: "conversation" },
+        ],
+      ]);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("preserves foreground assistant wake when post-assistant import drains during stop", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items: HostedMailboxItem[] = [];
+    const importedSeqs: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+
+    try {
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: TEST_NOW,
+        }],
+        updatedAt: TEST_NOW,
+        version: 1,
+      });
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_post_checkpoint_stop_late_input",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "3",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          importedSeqs.push(item.item.laneSeq);
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 0);
+          });
+          const staged = await upsertAssistantInputEvent({
+            event: createStoredAssistantInputEventForMailboxItem(
+              item.item,
+              "late input drained while stopping foreground import loop",
+            ),
+            vault: vaultRoot,
+          });
+          return {
+            assistantInputId: staged.inputId,
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_post_checkpoint_stop_late_input",
+        runtimeWakeSignal,
+        async runAssistantPhase() {
+          return {
+            afterCheckpoint: async () => {
+              items.push(createMailboxItem({
+                id: "mailbox_item_runner_post_checkpoint_stop_late_input",
+                laneSeq: "1",
+                occurredAt: "2026-04-26T00:00:02.000Z",
+              }));
+              runtimeWakeSignal.notify();
+              await waitForCondition(() => importedSeqs.includes("1"));
+              return {
+                checkpointReason: "provider_cleanup",
+                nextWakeAt: "2026-04-26T00:05:00.000Z",
+                nextWakeReason: "assistant",
+              };
+            },
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(importedSeqs, ["1"]);
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
+      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "1");
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("clears stale foreground wake when deferred post-checkpoint work drains it", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const { mailboxPort } = createMailboxPort({ items: [] });
