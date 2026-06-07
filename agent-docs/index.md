@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-06-05
+Last verified: 2026-06-07
 
 ## Purpose
 
@@ -56,15 +56,15 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/references/data-model-seams.md` | Current shared-owner notes for high-leverage data-model seams. | Data-model seam guidance | Medium | 2026-04-07 |
 | `agent-docs/references/giant-file-composability-seams.md` | Paused giant-file cleanup planning guidance and current worth-planning/keep-together notes for oversized multi-responsibility files. | Giant-file composability seam guidance | Medium | 2026-06-03 |
 | `agent-docs/research/murph-age-autoresearch.md` | Murph Age autoresearch operating rules, including the ReviewGPT-vs-Codex role split, transition gates, and source/privacy boundaries. | Murph Age research workflow | High | 2026-05-09 |
-| `agent-docs/operations/agent-workflow-routing.md` | Workflow router for task classes, plans, audits, verification, commit paths, and paused giant-file policy status. | Agent workflow routing | High | 2026-06-03 |
+| `agent-docs/operations/agent-workflow-routing.md` | Workflow router for task classes, plans, audits, verification, commit paths, and paused giant-file policy status. | Agent workflow routing | High | 2026-06-07 |
 | `agent-docs/operations/verification-and-runtime.md` | Verification rules, build command semantics, hosted Temporal guard coverage, runtime assumptions, and doc-gardening scope for repo work. | Verification policy | High | 2026-06-05 |
-| `agent-docs/operations/completion-workflow.md` | Required post-implementation audit and completion flow. | Completion workflow | High | 2026-04-09 |
+| `agent-docs/operations/completion-workflow.md` | Required post-implementation audit and completion flow. | Completion workflow | High | 2026-06-07 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |
 | `agent-docs/exec-plans/active/` | In-flight execution plans for current work. | Active work coordination | Medium | 2026-05-05 |
 | `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` | Active-work ledger for concurrent repo tasks. | Concurrency coordination | High | 2026-05-05 |
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |
-| `agent-docs/prompts/` | Reusable review and audit prompt templates for the completion workflow. | Workflow prompt library | Low | 2026-04-23 |
+| `agent-docs/prompts/` | Reusable review and audit prompt templates for the completion workflow, including the prompt-primary `prompt-review` pass. | Workflow prompt library | Low | 2026-06-07 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke audit prompts for the major repo seams used in broad risk and simplification review sweeps. | Seam-audit prompt library | Low | 2026-04-23 |
 | `apps/web/README.md` | Hosted web control-plane overview, env/runtime contract, hosted AI usage allowance ownership, Temporal demand gating boundary, and app-source/testkit ownership split. | `apps/web/**` | Medium | 2026-06-03 |
 | `apps/cloudflare/README.md` | Hosted execution-plane overview and runtime contract. | `apps/cloudflare/**` | Medium | 2026-05-11 |
