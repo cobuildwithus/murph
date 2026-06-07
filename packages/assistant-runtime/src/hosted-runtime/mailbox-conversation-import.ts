@@ -1271,7 +1271,6 @@ function isE164LikeHostedAssistantInputToken(value: string): boolean {
 
 function sanitizeHostedAssistantInputText(value: string): string | null {
   const sanitized = value
-    .replace(/https?:\/\/[^\s"'<>]+/giu, "[link omitted]")
     .replace(/file:\/\/[^\s"'<>]+/giu, "[path omitted]")
     .replace(/(^|[\s("'=])(?:[A-Za-z]:[\\/]|\/[^\s"'<>]+|~\/|\.\.\/|\.\.\\)[^\s"'<>]*/gu, "$1[path omitted]")
     .replace(/^\s*(authorization|cookie|set-cookie|x-api-key)\s*:.*$/gimu, "[secret omitted]")
