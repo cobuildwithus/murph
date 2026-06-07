@@ -7,15 +7,10 @@ import {
 } from '@murphai/query'
 import type { AutomationSchedule } from '@murphai/contracts'
 
-import { sendAssistantNotificationLocal } from '../assistant-service.js'
-import { buildAssistantAutomationTurnEnvelope } from './automation/turn-envelope.js'
-import type { AssistantExecutionContext } from './execution-context.js'
-import type { AssistantOutboxDispatchMode } from './outbox.js'
-import type { AssistantTurnEnvironment } from './service-contracts.js'
-
 type DeviceActivitySchedule = Extract<AutomationSchedule, { kind: 'deviceActivity' }>
 type DeviceActivityAutomation = AutomationQueryRecord & { schedule: DeviceActivitySchedule }
 type ActivityEntity = VaultReadModel['events'][number]
+const ASSISTANT_REQUIRE_SEND_TAG = 'assistant-require-send'
 
 interface DeviceActivityCandidate {
   activityKind: string
@@ -27,38 +22,45 @@ interface DeviceActivityCandidate {
 }
 
 interface MatchedDeviceActivity extends DeviceActivityCandidate {
-  eventKey: string
   summary: string
 }
 
-export interface RunDeviceActivityTriggeredAutomationsInput {
-  deliveryDispatchMode?: AssistantOutboxDispatchMode
-  executionContext?: AssistantExecutionContext | null
+export interface ScheduleDeviceActivityTriggeredAutomationsInput {
+  now?: () => string
   signal?: AbortSignal
-  turnEnvironment?: AssistantTurnEnvironment | null
   vault: string
 }
 
-export interface RunDeviceActivityTriggeredAutomationsResult {
-  fired: number
+export interface ScheduleDeviceActivityTriggeredAutomationsResult {
   matched: number
   nextWakeAt: string | null
+  scheduled: number
 }
 
-export async function runDeviceActivityTriggeredAutomations(
-  input: RunDeviceActivityTriggeredAutomationsInput,
-): Promise<RunDeviceActivityTriggeredAutomationsResult> {
+export async function scheduleDeviceActivityTriggeredAutomations(
+  input: ScheduleDeviceActivityTriggeredAutomationsInput,
+): Promise<ScheduleDeviceActivityTriggeredAutomationsResult> {
+  const nowIso = input.now?.() ?? new Date().toISOString()
+  return await scheduleDeviceActivityTriggeredAutomationsAt({
+    ...input,
+    nowIso,
+  })
+}
+
+async function scheduleDeviceActivityTriggeredAutomationsAt(
+  input: ScheduleDeviceActivityTriggeredAutomationsInput & { nowIso: string },
+): Promise<ScheduleDeviceActivityTriggeredAutomationsResult> {
   const automations = await listAutomations(input.vault, { status: ['active'] })
   const deviceActivityAutomations = automations.filter(isDeviceActivityAutomation)
 
   if (deviceActivityAutomations.length === 0) {
-    return { fired: 0, matched: 0, nextWakeAt: null }
+    return { matched: 0, nextWakeAt: null, scheduled: 0 }
   }
 
   const vault = await readVaultRawTolerant(input.vault)
   const activityCandidates = listDeviceActivityCandidates(vault)
   let matched = 0
-  let fired = 0
+  let scheduled = 0
 
   for (const automation of deviceActivityAutomations) {
     if (input.signal?.aborted) {
@@ -75,22 +77,19 @@ export async function runDeviceActivityTriggeredAutomations(
     }
 
     matched += 1
-    await sendDeviceActivityAutomationNotification({
+    await scheduleDeviceActivityAutomationNotification({
       activity,
       automation,
-      input,
-    })
-    await archiveDeviceActivityAutomation({
-      automation,
+      nowIso: input.nowIso,
       vault: input.vault,
     })
-    fired += 1
+    scheduled += 1
   }
 
   return {
-    fired,
     matched,
-    nextWakeAt: fired > 0 ? new Date().toISOString() : null,
+    nextWakeAt: scheduled > 0 ? input.nowIso : null,
+    scheduled,
   }
 }
 
@@ -144,13 +143,6 @@ function buildMatchedDeviceActivity(
   return {
     ...candidate,
     activityKind,
-    eventKey: [
-      'automation-device-activity',
-      automation.automationId,
-      candidate.entityId,
-      candidate.occurredAt,
-      activityKind,
-    ].join('|'),
     summary: summaryParts.join('\n'),
   }
 }
@@ -206,8 +198,6 @@ function deviceActivityKindMatches(
   switch (activityKind) {
     case 'walk':
       return candidate.activityKind === 'walk' || isWalkText(candidate.title)
-    case undefined:
-      return true
   }
 }
 
@@ -225,8 +215,6 @@ function deviceActivitySourceMatches(
       return provider === 'whoop' || provider === 'whoop-v2'
     case 'whoop_v2':
       return provider === 'whoop-v2'
-    case undefined:
-      return true
   }
 }
 
@@ -258,52 +246,27 @@ function isWalkText(value: string | null | undefined): boolean {
   return Boolean(normalized && /\bwalk(?:ing)?\b/u.test(normalized))
 }
 
-async function sendDeviceActivityAutomationNotification(input: {
+async function scheduleDeviceActivityAutomationNotification(input: {
   activity: MatchedDeviceActivity
   automation: DeviceActivityAutomation
-  input: RunDeviceActivityTriggeredAutomationsInput
+  nowIso: string
+  vault: string
 }): Promise<void> {
-  const route = input.automation.route
-  const turn = buildAssistantAutomationTurnEnvelope({
-    deliveryDispatchMode: input.input.deliveryDispatchMode ?? 'queue-only',
-    executionContext: input.input.executionContext,
-    signal: input.input.signal,
-    turnEnvironment: input.input.turnEnvironment ?? null,
-    turnTrigger: 'automation-cron',
-  })
-
-  await sendAssistantNotificationLocal({
-    vault: input.input.vault,
-    ...turn,
-    allowBindingRebind: false,
-    channel: route.channel,
-    deliveryDedupeToken: input.activity.eventKey,
-    deliveryTarget: route.deliveryTarget,
-    hostedDeliveryIdempotency: {
-      assistantTurnOrdinal: 'automation-device-activity:1',
-      conversationId: stringifyDeviceActivityDeliveryKeyParts([
-        route.channel,
-        route.identityId,
-        route.participantId,
-        route.threadId,
-      ]),
-      inboundMailboxItemIds: [input.activity.eventKey],
-      recipientKey: stringifyDeviceActivityDeliveryKeyParts([
-        route.channel,
-        route.deliveryTarget,
-        route.identityId,
-        route.participantId,
-        route.threadId,
-      ]),
-    },
-    identityId: route.identityId,
+  await upsertAutomation({
+    vaultRoot: input.vault,
+    automationId: input.automation.automationId,
+    continuityPolicy: input.automation.continuityPolicy,
     instructions: buildDeviceActivityAutomationInstructions(input.automation, input.activity),
-    operatorAuthority: 'direct-operator',
-    participantId: route.participantId,
-    responsePolicy: { kind: 'require_send' },
-    sessionId: null,
-    threadId: route.threadId,
-    workingDirectory: input.input.vault,
+    route: input.automation.route,
+    schedule: {
+      kind: 'at',
+      at: input.nowIso,
+    },
+    slug: input.automation.slug,
+    status: 'active',
+    ...(input.automation.summary ? { summary: input.automation.summary } : {}),
+    tags: mergeAutomationTags(input.automation.tags, [ASSISTANT_REQUIRE_SEND_TAG]),
+    title: input.automation.title,
   })
 }
 
@@ -321,27 +284,15 @@ function buildDeviceActivityAutomationInstructions(
   ].join('\n')
 }
 
-async function archiveDeviceActivityAutomation(input: {
-  automation: DeviceActivityAutomation
-  vault: string
-}): Promise<void> {
-  await upsertAutomation({
-    vaultRoot: input.vault,
-    automationId: input.automation.automationId,
-    continuityPolicy: input.automation.continuityPolicy,
-    instructions: input.automation.instructions,
-    route: input.automation.route,
-    schedule: input.automation.schedule,
-    slug: input.automation.slug,
-    status: 'archived',
-    ...(input.automation.summary ? { summary: input.automation.summary } : {}),
-    tags: input.automation.tags,
-    title: input.automation.title,
-  })
-}
-
 function readEntityTitle(entity: ActivityEntity): string | null {
   return readString(entity.title) ?? readString(entity.attributes.title)
+}
+
+function mergeAutomationTags(
+  existing: readonly string[],
+  added: readonly string[],
+): string[] {
+  return [...new Set([...existing, ...added])]
 }
 
 function readString(value: unknown): string | null {
@@ -369,10 +320,4 @@ function normalizeTimestamp(value: string | null): string | null {
 function normalizeSourceToken(value: string | null | undefined): string | null {
   const normalized = value?.trim().toLowerCase().replace(/_/gu, '-')
   return normalized && normalized.length > 0 ? normalized : null
-}
-
-function stringifyDeviceActivityDeliveryKeyParts(
-  parts: readonly (null | string | undefined)[],
-): string {
-  return JSON.stringify(parts.map((part) => part ?? null))
 }

@@ -13,7 +13,7 @@ import type {
 import {
   buildHostedAssistantContextFingerprintDetails,
   sendAssistantNotification,
-  runDeviceActivityTriggeredAutomations,
+  scheduleDeviceActivityTriggeredAutomations,
   type AssistantExecutionContext,
   type AssistantTurnEnvironment,
 } from "@murphai/assistant-engine";
@@ -510,23 +510,15 @@ async function executeHostedSystemWake(input: {
         wake: input.wake,
       });
       const activityAutomation = input.shouldYieldDeviceSync?.() === true
-        ? { fired: 0, matched: 0, nextWakeAt: null }
-        : await runDeviceActivityTriggeredAutomations({
-          deliveryDispatchMode: "queue-only",
-          executionContext: input.executionContext,
-          signal: undefined,
-          turnEnvironment: createHostedAssistantTurnEnvironment({
-            operatorHomeRoot: input.operatorHomeRoot,
-            runtimeEnv: input.runtimeEnv,
-            vaultRoot: input.vaultRoot,
-          }),
+        ? { matched: 0, nextWakeAt: null, scheduled: 0 }
+        : await scheduleDeviceActivityTriggeredAutomations({
           vault: input.vaultRoot,
         }).catch((error: unknown) => {
           emitHostedDeviceActivityAutomationFailureLog({
             error,
             wake: input.wake,
           });
-          return { fired: 0, matched: 0, nextWakeAt: null };
+          return { matched: 0, nextWakeAt: null, scheduled: 0 };
         });
       const nextWake = selectHostedRuntimeWakeCandidate([
         createHostedRuntimeWakeCandidate(
@@ -534,7 +526,7 @@ async function executeHostedSystemWake(input: {
           deviceSyncMetrics.nextWakeReason ?? HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
         ),
         createHostedRuntimeWakeCandidate(
-          activityAutomation.fired > 0 ? activityAutomation.nextWakeAt : null,
+          activityAutomation.scheduled > 0 ? activityAutomation.nextWakeAt : null,
           HOSTED_ASSISTANT_WAKE_REASON,
         ),
       ]);

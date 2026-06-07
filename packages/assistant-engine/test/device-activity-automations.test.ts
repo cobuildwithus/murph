@@ -16,7 +16,6 @@ import {
 const deviceActivityMocks = vi.hoisted(() => ({
   automations: [] as AutomationQueryRecord[],
   readModel: null as VaultReadModel | null,
-  sendAssistantNotificationLocal: vi.fn(),
   upsertAutomation: vi.fn(),
 }))
 
@@ -44,11 +43,7 @@ vi.mock('@murphai/query', async (importOriginal) => {
   }
 })
 
-vi.mock('../src/assistant-service.ts', () => ({
-  sendAssistantNotificationLocal: deviceActivityMocks.sendAssistantNotificationLocal,
-}))
-
-import { runDeviceActivityTriggeredAutomations } from '../src/assistant/device-activity-automations.ts'
+import { scheduleDeviceActivityTriggeredAutomations } from '../src/assistant/device-activity-automations.ts'
 import { listCanonicalAssistantCronRecords } from '../src/assistant/cron/canonical-jobs.ts'
 
 describe('device activity triggered automations', () => {
@@ -57,10 +52,6 @@ describe('device activity triggered automations', () => {
     deviceActivityMocks.readModel = createVaultReadModel({
       entities: [],
       vaultRoot: '/vault',
-    })
-    deviceActivityMocks.sendAssistantNotificationLocal.mockReset()
-    deviceActivityMocks.sendAssistantNotificationLocal.mockResolvedValue({
-      delivered: true,
     })
     deviceActivityMocks.upsertAutomation.mockReset()
     deviceActivityMocks.upsertAutomation.mockResolvedValue({
@@ -94,31 +85,26 @@ describe('device activity triggered automations', () => {
     })
 
     await expect(
-      runDeviceActivityTriggeredAutomations({
-        deliveryDispatchMode: 'queue-only',
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:01:00.000Z',
         vault: '/vault',
       }),
     ).resolves.toEqual({
-      fired: 1,
       matched: 1,
-      nextWakeAt: expect.any(String),
+      nextWakeAt: '2026-06-07T12:01:00.000Z',
+      scheduled: 1,
     })
 
-    expect(deviceActivityMocks.sendAssistantNotificationLocal).toHaveBeenCalledTimes(1)
-    expect(deviceActivityMocks.sendAssistantNotificationLocal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: 'linq',
-        deliveryDedupeToken: 'automation-device-activity|auto_walk|evt_walk|2026-06-07T12:00:00.000Z|walk',
-        deliveryTarget: 'linq-target-walk',
-        instructions: expect.stringContaining('Lunch walk'),
-        responsePolicy: { kind: 'require_send' },
-      }),
-    )
     expect(deviceActivityMocks.upsertAutomation).toHaveBeenCalledWith(
       expect.objectContaining({
         automationId: 'auto_walk',
-        schedule: automation.schedule,
-        status: 'archived',
+        instructions: expect.stringContaining('Lunch walk'),
+        schedule: {
+          kind: 'at',
+          at: '2026-06-07T12:01:00.000Z',
+        },
+        status: 'active',
+        tags: ['assistant-require-send'],
         vaultRoot: '/vault',
       }),
     )
@@ -145,16 +131,15 @@ describe('device activity triggered automations', () => {
     })
 
     await expect(
-      runDeviceActivityTriggeredAutomations({
+      scheduleDeviceActivityTriggeredAutomations({
         vault: '/vault',
       }),
     ).resolves.toEqual({
-      fired: 0,
       matched: 0,
       nextWakeAt: null,
+      scheduled: 0,
     })
 
-    expect(deviceActivityMocks.sendAssistantNotificationLocal).not.toHaveBeenCalled()
     expect(deviceActivityMocks.upsertAutomation).not.toHaveBeenCalled()
   })
 

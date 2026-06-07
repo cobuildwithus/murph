@@ -63,6 +63,7 @@ export const ASSISTANT_CRON_ONE_SHOT_NOTIFICATION_EXPIRES_AFTER_MS =
   30 * 60 * 1000
 const ASSISTANT_CRON_ONE_SHOT_NOTIFICATION_EXPIRED_ERROR =
   'Assistant cron one-shot notification expired before delivery.'
+const ASSISTANT_CRON_REQUIRE_SEND_TAG = 'assistant-require-send'
 
 export interface ExpiredAssistantCronJobResult {
   job: AssistantCronJob
@@ -401,6 +402,7 @@ export async function executeClaimedAssistantCronJob(input: {
         identityId: claimedJob.target.identityId,
         onTraceEvent: input.onTraceEvent,
         participantId: claimedJob.target.participantId,
+        responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
         threadId: claimedJob.target.threadId,
         deliveryTarget: claimedJob.target.deliveryTarget,
         operatorAuthority: 'direct-operator',
@@ -587,6 +589,16 @@ export async function executeClaimedAssistantCronJob(input: {
 
 function buildAssistantCronExecutionInstructions(job: AssistantCronJob): string {
   return job.prompt
+}
+
+function resolveAssistantCronNotificationResponsePolicy(
+  job: ResolvedAssistantCronJob,
+): { kind: 'require_send' } | null {
+  return job.kind === 'canonical' &&
+    job.source.kind === 'automation' &&
+    job.source.tags.includes(ASSISTANT_CRON_REQUIRE_SEND_TAG)
+    ? { kind: 'require_send' }
+    : null
 }
 
 function finalizeAssistantCronJobAfterRun(input: {

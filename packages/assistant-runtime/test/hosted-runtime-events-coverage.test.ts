@@ -10,7 +10,7 @@ import {
 const mocks = vi.hoisted(() => ({
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   prepareHostedWakeContext: vi.fn(),
-  runDeviceActivityTriggeredAutomations: vi.fn(),
+  scheduleDeviceActivityTriggeredAutomations: vi.fn(),
   runHostedDeviceSyncWakeLane: vi.fn(),
   sendAssistantNotification: vi.fn(),
 }));
@@ -27,7 +27,7 @@ vi.mock("@murphai/assistant-engine", async () => {
 
   return {
     ...actual,
-    runDeviceActivityTriggeredAutomations: mocks.runDeviceActivityTriggeredAutomations,
+    scheduleDeviceActivityTriggeredAutomations: mocks.scheduleDeviceActivityTriggeredAutomations,
     sendAssistantNotification: mocks.sendAssistantNotification,
   };
 });
@@ -74,10 +74,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
   mocks.prepareHostedWakeContext.mockResolvedValue(null);
-  mocks.runDeviceActivityTriggeredAutomations.mockResolvedValue({
-    fired: 0,
+  mocks.scheduleDeviceActivityTriggeredAutomations.mockResolvedValue({
     matched: 0,
     nextWakeAt: null,
+    scheduled: 0,
   });
   mocks.runHostedDeviceSyncWakeLane.mockResolvedValue({
     deviceSyncProcessed: 1,
@@ -158,10 +158,8 @@ describe("hosted runtime event coverage", () => {
       vaultRoot: "/tmp/assistant-runtime-events-coverage",
       wake: deviceSyncWake,
     });
-    expect(mocks.runDeviceActivityTriggeredAutomations).toHaveBeenCalledWith(
+    expect(mocks.scheduleDeviceActivityTriggeredAutomations).toHaveBeenCalledWith(
       expect.objectContaining({
-        deliveryDispatchMode: "queue-only",
-        executionContext,
         vault: "/tmp/assistant-runtime-events-coverage",
       }),
     );
@@ -191,10 +189,10 @@ describe("hosted runtime event coverage", () => {
         shouldYieldDeviceSync,
       }),
     );
-    expect(mocks.runDeviceActivityTriggeredAutomations).not.toHaveBeenCalled();
+    expect(mocks.scheduleDeviceActivityTriggeredAutomations).not.toHaveBeenCalled();
   });
 
-  it("returns an assistant wake when a device activity automation queues notification", async () => {
+  it("returns an assistant wake when a device activity automation schedules notification work", async () => {
     const runtime = createRuntime();
     const deviceSyncWake = buildHostedExecutionDeviceSyncWake({
       eventId: "evt_wake_activity",
@@ -208,10 +206,10 @@ describe("hosted runtime event coverage", () => {
       nextWakeAt: "2026-04-08T00:20:00.000Z",
       parserProcessed: 0,
     });
-    mocks.runDeviceActivityTriggeredAutomations.mockResolvedValueOnce({
-      fired: 1,
+    mocks.scheduleDeviceActivityTriggeredAutomations.mockResolvedValueOnce({
       matched: 1,
       nextWakeAt: "2026-04-08T00:10:05.000Z",
+      scheduled: 1,
     });
 
     await expect(
@@ -230,7 +228,7 @@ describe("hosted runtime event coverage", () => {
     });
   });
 
-  it("does not fail the device-sync wake when device activity automation matching fails", async () => {
+  it("does not fail the device-sync wake when device activity automation scheduling fails", async () => {
     const runtime = createRuntime();
     const deviceSyncWake = buildHostedExecutionDeviceSyncWake({
       eventId: "evt_wake_activity_failure",
@@ -249,8 +247,8 @@ describe("hosted runtime event coverage", () => {
         processedRevision: "rev_123",
       },
     });
-    mocks.runDeviceActivityTriggeredAutomations.mockRejectedValueOnce(
-      new Error("notification unavailable"),
+    mocks.scheduleDeviceActivityTriggeredAutomations.mockRejectedValueOnce(
+      new Error("automation handoff unavailable"),
     );
 
     await expect(

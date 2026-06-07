@@ -907,6 +907,35 @@ test("automation save maps trigger flags and keeps legacy schedule flags working
       shownDeviceActivity.envelope.data?.automation?.schedule.after ?? "",
       /^\d{4}-\d{2}-\d{2}T/u,
     );
+
+    const rejectedDeviceFlag = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "misplaced-device-filter",
+      "--slug",
+      "misplaced-device-filter",
+      "--instructions",
+      "Run the ordinary reminder.",
+      "--trigger-kind",
+      "at",
+      "--trigger-at",
+      "2026-04-26T08:00:00.000Z",
+      "--device-source",
+      "whoop",
+      "--channel",
+      "telegram",
+      "--delivery-target",
+      "telegram-thread-device-filter",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(rejectedDeviceFlag.exitCode, 1);
+    assert.equal(rejectedDeviceFlag.envelope.ok, false);
+    assert.match(
+      rejectedDeviceFlag.envelope.error.message ?? "",
+      /--device-source and --activity-kind/u,
+    );
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
   }

@@ -153,6 +153,12 @@ function buildAutomationScheduleFromOptions(
   defaults: { now: string },
 ): AutomationSchedule {
   const kind = resolveAutomationTriggerKind(options);
+  if (kind !== "deviceActivity" && (options.deviceSource || options.activityKind)) {
+    return invalidAutomationOption(
+      "--device-source and --activity-kind can only be used with --trigger-kind=deviceActivity.",
+    );
+  }
+
   switch (kind) {
     case "at":
       return automationScheduleSchema.parse({
