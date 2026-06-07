@@ -156,7 +156,6 @@ export async function signalHostedBrowserVaultRefreshRuntime(
   return signalHostedRuntimeControlMailboxRequest({
     client: input.client,
     environment: input.environment,
-    ensureWorkspace: false,
     eventId: control.eventId,
     kind: "runtime.browser-vault-refresh-requested",
     occurredAt: control.occurredAt,
@@ -244,7 +243,6 @@ export async function signalHostedDeviceSyncMailboxRuntime(
 async function signalHostedRuntimeControlMailboxRequest(input: {
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
-  ensureWorkspace?: boolean;
   eventId?: string | null;
   kind: HostedExecutionRuntimeControlWakeKind;
   occurredAt?: string | null;
@@ -253,9 +251,7 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
   userId: string;
 }): Promise<HostedRuntimeSignalResult> {
   const prisma = input.prisma ?? getPrisma();
-  if (input.ensureWorkspace !== false) {
-    await ensureHostedRuntimeWorkspaceForActiveUser(input.userId, prisma);
-  }
+  await ensureHostedRuntimeWorkspaceForActiveUser(input.userId, prisma);
   const deterministicEventId = normalizeHostedRuntimeControlEventId(input.eventId);
   const occurredAt = normalizeHostedRuntimeControlOccurredAt(input.occurredAt)
     ?? (deterministicEventId ? HOSTED_RUNTIME_CONTROL_DETERMINISTIC_OCCURRED_AT : new Date().toISOString());

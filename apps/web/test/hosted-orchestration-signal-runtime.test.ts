@@ -369,6 +369,8 @@ describe("hosted runtime Temporal signaling", () => {
     vi.setSystemTime(new Date("2026-05-28T08:15:31.000Z"));
     mocks.ensureHostedWorkspace
       .mockResolvedValueOnce(buildHostedWorkspaceRecord({ version: "10" }))
+      .mockResolvedValueOnce(buildHostedWorkspaceRecord({ version: "10" }))
+      .mockResolvedValueOnce(buildHostedWorkspaceRecord({ version: "11" }))
       .mockResolvedValueOnce(buildHostedWorkspaceRecord({ version: "11" }));
     try {
       await signalHostedBrowserVaultRefreshRuntime({
