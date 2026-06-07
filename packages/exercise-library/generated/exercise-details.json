@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:c7b4b645bedb54bd66f001761185ee4c410d90d2f41a5a19d7402d6187700f74",
+  "catalogHash": "sha256:fd5527a2292d24de94830d83585b8f0bfa5a7977cadaaa2bc18d2b9a8d006da6",
   "generatedAt": null,
   "items": [
     {
@@ -41692,7 +41692,28 @@
       ],
       "equipment": [],
       "id": "EX288",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person in bird dog tabletop setup with shoulders over wrists, hips over knees, and neck long.",
+          "step": "Tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/79a37dfb-073c-4b11-4698-de12aaf81b00/public"
+        },
+        {
+          "alt": "Person reaching one arm forward and the opposite leg back with hips level.",
+          "step": "Reach side A",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/77a9a44d-5c51-4f6b-66f1-678b58793400/public"
+        },
+        {
+          "alt": "Person switching to the other diagonal bird dog reach with hips square.",
+          "step": "Reach side B",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a8dc06cf-82b5-43e0-2d7d-1be450eadd00/public"
+        },
+        {
+          "alt": "Person holding bird dog with a long spine, quiet ribs, and the extended leg not too high.",
+          "step": "Form check",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ab24a93b-6a01-4a4e-5c61-43b746baff00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
