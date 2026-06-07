@@ -1,4 +1,5 @@
 import type {
+  AssistantResponseMedia,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -11,6 +12,9 @@ import {
   sendAssistantOutboxPayload,
 } from './outbox.js'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
+import {
+  getAssistantChannelAdapter,
+} from './channel-adapters.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
   AssistantDeliveryOutcome,
@@ -20,8 +24,7 @@ import type {
 } from './service-contracts.js'
 import { normalizeNullableString } from './shared.js'
 import {
-  clearAssistantResponseMediaBestEffort,
-  readAssistantResponseMedia,
+  normalizeAssistantResponseMediaList,
 } from './response-media.js'
 
 export function resolveHostedAssistantDeliveryTransportIdempotentOverride(input: {
@@ -88,21 +91,32 @@ export function resolveAssistantHostedDeliveryIdempotency(input: {
   }
 }
 
+export function dropUnsupportedAssistantResponseMediaForChannel(input: {
+  channel?: string | null
+  media: readonly AssistantResponseMedia[]
+}): AssistantResponseMedia[] {
+  if (input.media.length === 0) {
+    return []
+  }
+
+  return getAssistantChannelAdapter(input.channel)?.supportsResponseMedia === true
+    ? [...input.media]
+    : []
+}
+
 export async function deliverAssistantReply(input: {
   input: AssistantMessageInput
+  media?: readonly AssistantResponseMedia[] | null
   response: string
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
 }): Promise<AssistantDeliveryOutcome> {
+  const requestedMedia = normalizeAssistantResponseMediaList(input.media ?? [])
   if (!input.input.deliverResponse) {
-    await clearAssistantResponseMediaBestEffort({
-      vault: input.input.vault,
-      turnId: input.turnId,
-    })
     return {
       kind: 'not-requested',
-      media: [],
+      media: requestedMedia,
       session: input.session,
     }
   }
@@ -123,6 +137,7 @@ export async function deliverAssistantReply(input: {
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
     input: input.input,
+    media: requestedMedia,
     message: input.response,
     session: input.session,
     sharedPlan: input.sharedPlan,
@@ -229,88 +244,69 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   deliveryIdempotencyKey: string | null
   deliveryTransportIdempotent: boolean | undefined
   input: AssistantMessageInput
+  media: readonly AssistantResponseMedia[]
   message: string
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
 }): Promise<AssistantDeliveryOutcome> {
-  if (!input.input.deliverResponse) {
-    await clearAssistantResponseMediaBestEffort({
-      vault: input.input.vault,
-      turnId: input.turnId,
-    })
-    return {
-      kind: 'not-requested',
-      media: [],
-      session: input.session,
-    }
-  }
-
   const state = createAssistantRuntimeStateService(input.input.vault)
   const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
     input: input.input,
     session: input.session,
     sharedPlan: input.sharedPlan,
   })
-  const media = await readAssistantResponseMedia({
-    vault: input.input.vault,
-    turnId: input.turnId,
+  const media = dropUnsupportedAssistantResponseMediaForChannel({
+    channel: deliveryFields.channel,
+    media: input.media,
   })
+  const outcome = await state.outbox.deliverMessage({
+    ...deliveryFields,
+    media,
+    message: input.message,
+    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+    deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+    turnId: input.turnId,
+    dependencies: undefined,
+    dispatchMode: input.input.deliveryDispatchMode,
+  })
+  const session = outcome.session ?? input.session
 
-  try {
-    const outcome = await state.outbox.deliverMessage({
-      ...deliveryFields,
-      media,
-      message: input.message,
-      deliveryIdempotencyKey: input.deliveryIdempotencyKey,
-      deliveryTransportIdempotent: input.deliveryTransportIdempotent,
-      turnId: input.turnId,
-      dependencies: undefined,
-      dispatchMode: input.input.deliveryDispatchMode,
-    })
-    const session = outcome.session ?? input.session
-
-    switch (outcome.kind) {
-      case 'sent':
-        return {
-          kind: 'sent',
-          delivery: outcome.delivery!,
-          intentId: outcome.intent.intentId,
-          media,
-          session,
-        }
-      case 'queued':
-        return {
-          kind: 'queued',
-          error: outcome.deliveryError,
-          intentId: outcome.intent.intentId,
-          media,
-          session,
-        }
-      case 'failed':
-        return {
-          kind: 'failed',
-          error: outcome.deliveryError,
-          intentId: outcome.intent.intentId,
-          media,
-          session,
-        }
-      default:
-        return {
-          kind: 'failed',
-          error: normalizeAssistantDeliveryError(
-            new Error('Assistant outbound delivery failed.'),
-          ),
-          intentId: 'unknown',
-          media,
-          session,
-        }
-    }
-  } finally {
-    await clearAssistantResponseMediaBestEffort({
-      vault: input.input.vault,
-      turnId: input.turnId,
-    })
+  switch (outcome.kind) {
+    case 'sent':
+      return {
+        kind: 'sent',
+        delivery: outcome.delivery!,
+        intentId: outcome.intent.intentId,
+        media,
+        session,
+      }
+    case 'queued':
+      return {
+        kind: 'queued',
+        error: outcome.deliveryError,
+        intentId: outcome.intent.intentId,
+        media,
+        session,
+      }
+    case 'failed':
+      return {
+        kind: 'failed',
+        error: outcome.deliveryError,
+        intentId: outcome.intent.intentId,
+        media,
+        session,
+      }
+    default:
+      return {
+        kind: 'failed',
+        error: normalizeAssistantDeliveryError(
+          new Error('Assistant outbound delivery failed.'),
+        ),
+        intentId: 'unknown',
+        media,
+        session,
+      }
   }
 }
 

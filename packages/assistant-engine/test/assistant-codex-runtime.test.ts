@@ -54,7 +54,7 @@ import {
   stopCodexAppServerChild,
 } from '../src/assistant-codex/app-server-rpc.ts'
 import {
-  MURPH_SEND_PROGRESS_UPDATE_TOOL,
+  MURPH_DYNAMIC_TOOLS,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   executeCodexAssistantTurnAttempt,
@@ -120,6 +120,127 @@ afterEach(async () => {
     ),
   )
 })
+
+async function runCodexResponseMediaToolTurn(
+  toolCalls: Array<{
+    expectedText: string
+    id: number
+    media: readonly unknown[]
+  }>,
+) {
+  const workingDirectory = await createTempDir('assistant-codex-response-media-tool-work-')
+  const codexHome = await createTempDir('assistant-codex-response-media-tool-home-')
+
+  codexMocks.spawn.mockImplementation((_command, args, options) => {
+    const child = new MockChildProcess()
+
+    expect(args).toEqual(['-s', 'workspace-write', '-a', 'never', 'app-server'])
+    expect(options).toMatchObject({
+      cwd: path.resolve(workingDirectory),
+      env: {
+        CODEX_HOME: codexHome,
+        PATH: '/custom/bin',
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+
+    queueMicrotask(() => {
+      void (async () => {
+        const initialize = await waitForRpcMethod(child, 'initialize')
+        child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+        const threadStart = await waitForRpcMethod(child, 'thread/start')
+        child.stdout.write(jsonLine({
+          id: threadStart.id,
+          result: {
+            thread: {
+              id: 'thread-response-media-tool',
+            },
+          },
+        }))
+
+        const turnStart = await waitForRpcMethod(child, 'turn/start')
+        child.stdout.write(jsonLine({
+          id: turnStart.id,
+          result: {
+            turn: {
+              id: 'turn-response-media-tool',
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'turn/started',
+          params: {
+            turn: {
+              id: 'turn-response-media-tool',
+            },
+          },
+        }))
+
+        for (const toolCall of toolCalls) {
+          child.stdout.write(jsonLine({
+            id: toolCall.id,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: 'attach_response_media',
+              arguments: {
+                media: toolCall.media,
+              },
+              turnId: 'turn-response-media-tool',
+            },
+          }))
+          await expect(waitForRpcResponse(child, toolCall.id)).resolves.toEqual({
+            id: toolCall.id,
+            result: {
+              success: true,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: toolCall.expectedText,
+                },
+              ],
+            },
+          })
+        }
+
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'assistant-response-media-tool',
+              type: 'assistant_message',
+              message: 'Tool media complete',
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-response-media-tool',
+              status: 'completed',
+            },
+          },
+        }))
+      })()
+    })
+
+    return child
+  })
+
+  return await executeCodexAppServerTurn({
+    approvalPolicy: 'never',
+    codexCommand: 'codex',
+    codexHome,
+    env: {
+      PATH: '/custom/bin',
+    },
+    prompt: 'Attach response media',
+    sandbox: 'workspace-write',
+    workingDirectory,
+  })
+}
 
 describe('assistant codex runtime', () => {
   it('builds Codex app-server args for configured turns', () => {
@@ -204,7 +325,7 @@ describe('assistant codex runtime', () => {
       baseInstructions: 'Do not use this in normal Murph config.',
       cwd: '/workspace',
       developerInstructions: 'Stable Murph instructions.',
-      dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+      dynamicTools: MURPH_DYNAMIC_TOOLS,
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
       sandbox: 'workspace-write',
@@ -224,7 +345,7 @@ describe('assistant codex runtime', () => {
         ...baseInput,
       }),
     ).toMatchObject({
-      dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+      dynamicTools: MURPH_DYNAMIC_TOOLS,
     })
     expect(
       buildCodexThreadStartParams({
@@ -236,7 +357,7 @@ describe('assistant codex runtime', () => {
         },
       }),
     ).toMatchObject({
-      dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+      dynamicTools: MURPH_DYNAMIC_TOOLS,
     })
     expect(
       buildCodexThreadStartParams({
@@ -248,7 +369,7 @@ describe('assistant codex runtime', () => {
         },
       }),
     ).toMatchObject({
-      dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+      dynamicTools: MURPH_DYNAMIC_TOOLS,
     })
 
     expect(
@@ -257,7 +378,7 @@ describe('assistant codex runtime', () => {
         codexThreadId: 'thread-1',
       }),
     ).toEqual({
-      dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+      dynamicTools: MURPH_DYNAMIC_TOOLS,
       excludeTurns: true,
       threadId: 'thread-1',
     })
@@ -274,7 +395,7 @@ describe('assistant codex runtime', () => {
         codexThreadId: 'thread-1',
       }),
     ).toEqual({
-      dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+      dynamicTools: MURPH_DYNAMIC_TOOLS,
       excludeTurns: true,
       threadId: 'thread-1',
     })
@@ -289,7 +410,7 @@ describe('assistant codex runtime', () => {
       }),
     ).toEqual({
       developerInstructions: 'Stable Murph instructions.',
-      dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+      dynamicTools: MURPH_DYNAMIC_TOOLS,
       excludeTurns: true,
       threadId: 'thread-1',
     })
@@ -405,7 +526,7 @@ describe('assistant codex runtime', () => {
             params: {
               approvalPolicy: 'never',
               cwd: expectedWorkingDirectory,
-              dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+              dynamicTools: MURPH_DYNAMIC_TOOLS,
               model: 'gpt-5',
               modelProvider: 'vercel-ai-gateway',
               sandbox: 'workspace-write',
@@ -471,6 +592,70 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
+          child.stdout.write(
+            jsonLine({
+              id: 17,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'attach_response_media',
+                arguments: {
+                  media: [
+                    {
+                      url: 'https://cdn.example.test/assistant/cat.png',
+                      alt: 'A cat image',
+                      source: 'cat-catalog-item',
+                    },
+                  ],
+                },
+                turnId: 'turn-1',
+              },
+            }),
+          )
+          messages = await waitForRpcMessages(child, 5)
+          expect(messages[4]).toEqual({
+            id: 17,
+            result: {
+              success: true,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: '1 response image attached',
+                },
+              ],
+            },
+          })
+          child.stdout.write(
+            jsonLine({
+              id: 18,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'attach_response_media',
+                arguments: {
+                  media: [
+                    {
+                      url: 'http://cdn.example.test/assistant/not-https.png',
+                    },
+                  ],
+                },
+                turnId: 'turn-1',
+              },
+            }),
+          )
+          messages = await waitForRpcMessages(child, 6)
+          expect(messages[5]).toEqual({
+            id: 18,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'invalid response media arguments',
+                },
+              ],
+            },
+          })
           child.stderr.write('Retrying after timeout\n')
           child.stdout.write(
             jsonLine({
@@ -531,6 +716,37 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
+          child.stdout.write(
+            jsonLine({
+              id: 19,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'attach_response_media',
+                arguments: {
+                  media: [
+                    {
+                      url: 'https://cdn.example.test/assistant/late.png',
+                    },
+                  ],
+                },
+                turnId: 'turn-1',
+              },
+            }),
+          )
+          messages = await waitForRpcMessages(child, 7)
+          expect(messages[6]).toEqual({
+            id: 19,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'turn already completed',
+                },
+              ],
+            },
+          })
         })()
       })
 
@@ -574,6 +790,14 @@ describe('assistant codex runtime', () => {
       }),
     ).resolves.toMatchObject({
       finalMessage: 'Hello world',
+      responseMedia: [
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/assistant/cat.png',
+          alt: 'A cat image',
+          source: 'cat-catalog-item',
+        },
+      ],
       providerActionCount: 1,
       rolloutRelativePath,
       sessionId: threadId,
@@ -628,6 +852,76 @@ describe('assistant codex runtime', () => {
         updates: [],
       }),
     )
+  })
+
+  it('uses the latest valid attach_response_media batch for final response media', async () => {
+    const firstMedia = [
+      {
+        kind: 'image' as const,
+        url: 'https://cdn.example.test/assistant/first.png',
+        alt: 'First image',
+        source: 'first-source',
+      },
+    ]
+    const replacementMedia = [
+      {
+        kind: 'image' as const,
+        url: 'https://cdn.example.test/assistant/replacement-one.png',
+        alt: 'Replacement one',
+        source: 'replacement-one',
+      },
+      {
+        kind: 'image' as const,
+        url: 'https://cdn.example.test/assistant/replacement-two.png',
+        alt: 'Replacement two',
+        source: 'replacement-two',
+      },
+    ]
+
+    await expect(
+      runCodexResponseMediaToolTurn([
+        {
+          id: 41,
+          media: firstMedia,
+          expectedText: '1 response image attached',
+        },
+        {
+          id: 42,
+          media: replacementMedia,
+          expectedText: '2 response images attached',
+        },
+      ]),
+    ).resolves.toMatchObject({
+      finalMessage: 'Tool media complete',
+      responseMedia: replacementMedia,
+    })
+  })
+
+  it('clears response media when attach_response_media receives an empty batch', async () => {
+    await expect(
+      runCodexResponseMediaToolTurn([
+        {
+          id: 51,
+          media: [
+            {
+              kind: 'image',
+              url: 'https://cdn.example.test/assistant/to-clear.png',
+              alt: 'Cleared image',
+              source: 'clear-source',
+            },
+          ],
+          expectedText: '1 response image attached',
+        },
+        {
+          id: 52,
+          media: [],
+          expectedText: 'response media cleared',
+        },
+      ]),
+    ).resolves.toMatchObject({
+      finalMessage: 'Tool media complete',
+      responseMedia: [],
+    })
   })
 
   it('reuses the warm Codex app-server across stable local turns', async () => {
@@ -5413,11 +5707,11 @@ describe('assistant codex runtime', () => {
 
       expect(asRecord(threadRequests[0]?.params)).toEqual({
         ...expectedThreadContext,
-        dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+        dynamicTools: MURPH_DYNAMIC_TOOLS,
         serviceName: 'murph',
       })
       expect(asRecord(threadRequests[1]?.params)).toEqual({
-        dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+        dynamicTools: MURPH_DYNAMIC_TOOLS,
         excludeTurns: true,
         threadId: 'thread-resume-request',
       })
@@ -5533,7 +5827,7 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadStart = await waitForRpcMethod(child, 'thread/start')
           expect(asRecord(threadStart.params)).toMatchObject({
-            dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+            dynamicTools: MURPH_DYNAMIC_TOOLS,
           })
           child.stdout.write(
             jsonLine({
@@ -6218,7 +6512,7 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadStart = await waitForRpcMethod(child, 'thread/start')
           expect(asRecord(threadStart.params)).toMatchObject({
-            dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+            dynamicTools: MURPH_DYNAMIC_TOOLS,
           })
           child.stdout.write(
             jsonLine({
@@ -6639,7 +6933,7 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadResume = await waitForRpcMethod(child, 'thread/resume')
           expect(asRecord(threadResume.params)).toMatchObject({
-            dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+            dynamicTools: MURPH_DYNAMIC_TOOLS,
           })
           child.stdout.write(
             jsonLine({

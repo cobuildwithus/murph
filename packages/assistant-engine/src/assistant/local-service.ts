@@ -105,7 +105,6 @@ import type {
   PersistedUserTurn,
 } from './service-contracts.js'
 import { withAssistantTurnLock } from './turn-lock.js'
-import { clearAssistantResponseMediaBestEffort } from './response-media.js'
 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 
@@ -699,6 +698,7 @@ export async function sendAssistantMessageLocal(
         })
         const deliveryOutcome = await dispatchAssistantReply({
           input: currentInput,
+          media: providerResult.responseMedia ?? [],
           response: providerResult.response,
           session,
           sharedPlan,
@@ -765,13 +765,6 @@ export async function sendAssistantMessageLocal(
             response: responseText,
             completedAt: failedAt,
             metadata: null,
-          }),
-        )
-
-        await runAssistantTurnBestEffort(() =>
-          clearAssistantResponseMediaBestEffort({
-            vault: input.vault,
-            turnId: receipt.turnId,
           }),
         )
 

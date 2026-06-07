@@ -1,5 +1,3 @@
-import path from 'node:path'
-import { mkdir, rm } from 'node:fs/promises'
 import { isIP } from 'node:net'
 import { z } from 'zod'
 import {
@@ -10,37 +8,15 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   normalizeNullableString,
-  readAssistantJsonFile,
-  writeJsonFileAtomic,
 } from './shared.js'
 import {
-  redactAssistantDisplayPath,
-  resolveAssistantStatePaths,
-} from './store/paths.js'
-import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
-import {
-  MURPH_ASSISTANT_ACTIVE_SESSION_ID_ENV,
-  MURPH_ASSISTANT_ACTIVE_TURN_ID_ENV,
   MURPH_ASSISTANT_MEDIA_CATALOG_URL_ENV,
 } from './response-media-env.js'
 
-const ASSISTANT_RESPONSE_MEDIA_STORE_SCHEMA = 'murph.assistant-response-media.v1'
 const ASSISTANT_MEDIA_CATALOG_SCHEMA = 'murph.assistant-media-catalog.v1'
 const DEFAULT_ASSISTANT_MEDIA_CATALOG_PATH = '/assistant-media/catalog.json'
 const DEFAULT_ASSISTANT_MEDIA_CATALOG_REQUEST_TIMEOUT_MS = 5_000
 const MAX_ASSISTANT_RESPONSE_MEDIA = 40
-
-const assistantResponseMediaStoreSchema = z
-  .object({
-    schema: z.literal(ASSISTANT_RESPONSE_MEDIA_STORE_SCHEMA),
-    turnId: z.string().min(1),
-    sessionId: z.string().min(1).nullable(),
-    updatedAt: z.string().min(1),
-    media: z.array(assistantResponseMediaSchema).max(MAX_ASSISTANT_RESPONSE_MEDIA),
-  })
-  .strict()
-
-type AssistantResponseMediaStore = z.infer<typeof assistantResponseMediaStoreSchema>
 
 const assistantMediaCatalogItemSchema = z
   .object({
@@ -92,104 +68,6 @@ export function normalizeAssistantResponseMediaList(
   }
 
   return media
-}
-
-export function resolveAssistantActiveTurnContextFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
-): {
-  sessionId: string | null
-  turnId: string | null
-} {
-  return {
-    sessionId: normalizeNullableString(env[MURPH_ASSISTANT_ACTIVE_SESSION_ID_ENV]),
-    turnId: normalizeNullableString(env[MURPH_ASSISTANT_ACTIVE_TURN_ID_ENV]),
-  }
-}
-
-export async function stageAssistantResponseMedia(input: {
-  media: readonly AssistantResponseMedia[]
-  sessionId?: string | null
-  turnId: string
-  vault: string
-}): Promise<AssistantResponseMedia[]> {
-  return await withAssistantRuntimeWriteLock(input.vault, async () => {
-    const turnId = normalizeAssistantResponseMediaTurnId(input.turnId)
-    const filePath = resolveAssistantResponseMediaPath({
-      turnId,
-      vault: input.vault,
-    })
-    const media = normalizeAssistantResponseMediaList(input.media)
-
-    await mkdir(path.dirname(filePath), { recursive: true })
-    await writeJsonFileAtomic(
-      filePath,
-      assistantResponseMediaStoreSchema.parse({
-        schema: ASSISTANT_RESPONSE_MEDIA_STORE_SCHEMA,
-        turnId,
-        sessionId: normalizeNullableString(input.sessionId),
-        updatedAt: new Date().toISOString(),
-        media,
-      }),
-    )
-
-    return media
-  })
-}
-
-export async function readAssistantResponseMedia(input: {
-  turnId: string
-  vault: string
-}): Promise<AssistantResponseMedia[]> {
-  const turnId = normalizeAssistantResponseMediaTurnId(input.turnId)
-  const filePath = resolveAssistantResponseMediaPath({
-    turnId,
-    vault: input.vault,
-  })
-  const read = await readAssistantJsonFile<AssistantResponseMediaStore>({
-    filePath,
-    createDefault: () => ({
-      schema: ASSISTANT_RESPONSE_MEDIA_STORE_SCHEMA,
-      turnId,
-      sessionId: null,
-      updatedAt: new Date(0).toISOString(),
-      media: [],
-    }),
-    parse: (value) => assistantResponseMediaStoreSchema.parse(value),
-  })
-  return read.value.media
-}
-
-export async function clearAssistantResponseMedia(input: {
-  turnId: string
-  vault: string
-}): Promise<void> {
-  const turnId = normalizeAssistantResponseMediaTurnId(input.turnId)
-  await rm(resolveAssistantResponseMediaPath({ turnId, vault: input.vault }), {
-    force: true,
-  })
-}
-
-export async function clearAssistantResponseMediaBestEffort(input: {
-  turnId: string
-  vault: string
-}): Promise<void> {
-  await clearAssistantResponseMedia(input).catch(() => undefined)
-}
-
-export function resolveAssistantResponseMediaPath(input: {
-  turnId: string
-  vault: string
-}): string {
-  const turnId = normalizeAssistantResponseMediaTurnId(input.turnId)
-  const paths = resolveAssistantStatePaths(input.vault)
-  return path.join(paths.assistantStateRoot, 'response-media', `${turnId}.json`)
-}
-
-export function redactAssistantResponseMediaPath(input: {
-  turnId: string
-  vault: string
-}): string {
-  return redactAssistantDisplayPath(resolveAssistantResponseMediaPath(input))
 }
 
 export async function listAssistantMediaCatalog(input: {
@@ -366,21 +244,4 @@ function isAbortError(error: unknown): boolean {
   ) || (
     error instanceof Error && error.name === 'AbortError'
   )
-}
-
-function normalizeAssistantResponseMediaTurnId(value: string): string {
-  const normalized = normalizeNullableString(value)
-  if (
-    !normalized ||
-    normalized.includes('/') ||
-    normalized.includes('\\') ||
-    normalized === '.' ||
-    normalized === '..'
-  ) {
-    throw new VaultCliError(
-      'ASSISTANT_RESPONSE_MEDIA_TURN_REQUIRED',
-      'Assistant response media staging requires a valid active turn id.',
-    )
-  }
-  return normalized
 }
