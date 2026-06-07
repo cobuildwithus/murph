@@ -1,3 +1,4 @@
+import { isIP } from 'node:net'
 import { z } from 'zod'
 import {
   automationRouteSchema,
@@ -308,17 +309,55 @@ export const assistantResponseMediaSchema = z
     url: z
       .string()
       .url()
-      .refine((value) => {
-        try {
-          return new URL(value).protocol === 'https:'
-        } catch {
-          return false
-        }
-      }, 'Assistant response media URLs must be HTTPS.'),
+      .transform((value) => normalizeAssistantResponseMediaUrl(value)),
     alt: z.string().trim().min(1).max(500).nullable().default(null),
     source: z.string().trim().min(1).max(200).nullable().default(null),
   })
   .strict()
+
+export function normalizeAssistantResponseMediaUrl(value: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(value.trim())
+  } catch {
+    throw new Error('Assistant response media URLs must be valid URLs.')
+  }
+
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Assistant response media URLs must use HTTPS.')
+  }
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error('Assistant response media URLs must be public image URLs without credentials, query strings, or fragments.')
+  }
+  if (!isPublicAssistantResponseMediaHost(parsed.hostname)) {
+    throw new Error('Assistant response media URLs must use public hosts.')
+  }
+  if (!hasAssistantResponseMediaImageExtension(parsed.pathname)) {
+    throw new Error('Assistant response media URLs must point to image files.')
+  }
+
+  return parsed.toString()
+}
+
+function hasAssistantResponseMediaImageExtension(pathname: string): boolean {
+  return /\.(?:avif|gif|jpe?g|png|webp)$/iu.test(pathname)
+}
+
+function isPublicAssistantResponseMediaHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/\.$/u, '')
+  if (!normalized || normalized === 'localhost' || normalized.endsWith('.localhost') || normalized.endsWith('.local')) {
+    return false
+  }
+
+  const ipLiteral = normalized.startsWith('[') && normalized.endsWith(']')
+    ? normalized.slice(1, -1)
+    : normalized
+  if (isIP(ipLiteral) !== 0) {
+    return false
+  }
+
+  return true
+}
 
 const assistantPersistedSessionV1Schema = z
   .object({

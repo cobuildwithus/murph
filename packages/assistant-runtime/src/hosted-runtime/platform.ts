@@ -22,6 +22,9 @@ import type {
   AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import type {
+  AssistantResponseMedia,
+} from "@murphai/operator-config/assistant-cli-contracts";
+import type {
   HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
 import type {
@@ -127,6 +130,7 @@ export interface HostedRuntimeLinqSendRequest {
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
   idempotencyKey?: string | null;
+  media?: readonly AssistantResponseMedia[] | null;
   message: string;
   replyToMessageId?: string | null;
   target: string;

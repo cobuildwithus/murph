@@ -1,3 +1,5 @@
+import { rm } from "node:fs/promises";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -16,6 +18,11 @@ import type {
   ExecutedAssistantProviderTurnResult,
 } from "../src/assistant/service-contracts.ts";
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from "../src/assistant/first-contact-welcome.ts";
+import {
+  readAssistantResponseMedia,
+  stageAssistantResponseMedia,
+} from "../src/assistant/response-media.ts";
+import { createTempVaultContext } from "./test-helpers.ts";
 
 const seamMocks = vi.hoisted(() => ({
   buildAssistantCliGuidanceText: vi.fn(),
@@ -139,6 +146,7 @@ import { persistAssistantTurnAndSession } from "../src/assistant/turn-finalizer.
 type RuntimeStateStub = ReturnType<typeof createRuntimeStateStub>;
 
 let runtimeState: RuntimeStateStub;
+const tempRoots: string[] = [];
 
 beforeEach(() => {
   vi.useRealTimers();
@@ -218,6 +226,17 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
+});
+
+afterEach(async () => {
+  await Promise.all(
+    tempRoots.splice(0).map((rootPath) =>
+      rm(rootPath, {
+        force: true,
+        recursive: true,
+      }),
+    ),
+  );
 });
 
 describe("assistant service wrapper seam", () => {
@@ -1141,6 +1160,102 @@ describe("assistant delivery orchestration seam", () => {
       threadIsDirect: false,
       turnId: "turn-2",
     });
+  });
+
+  it("passes staged response media to final delivery and clears it after outbox creation", async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      "assistant-delivery-response-media-",
+    );
+    tempRoots.push(parentRoot);
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "linq",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "participant",
+          target: "binding-delivery",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
+    });
+    const media = [
+      {
+        kind: "image" as const,
+        url: "https://cdn.example.test/dead-bug/setup.png",
+        alt: "Dead bug setup",
+        source: "dead-bug-setup",
+      },
+    ];
+    await stageAssistantResponseMedia({
+      vault: vaultRoot,
+      turnId: "turn-media-delivery",
+      sessionId: session.sessionId,
+      media,
+    });
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "linq",
+        idempotencyKey: "idem-media",
+        messageLength: 10,
+        providerMessageId: "provider-media",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "binding-delivery",
+        targetKind: "participant",
+      },
+      intent: {
+        intentId: "intent-media",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    await expect(
+      deliverAssistantReply({
+        input: {
+          deliverResponse: true,
+          deliveryDispatchMode: "immediate",
+          prompt: "hello",
+          vault: vaultRoot,
+        },
+        response: "reply body",
+        session,
+        sharedPlan: createSharedPlan(),
+        turnId: "turn-media-delivery",
+      }),
+    ).resolves.toEqual({
+      delivery: {
+        channel: "linq",
+        idempotencyKey: "idem-media",
+        messageLength: 10,
+        providerMessageId: "provider-media",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "binding-delivery",
+        targetKind: "participant",
+      },
+      intentId: "intent-media",
+      kind: "sent",
+      media,
+      session,
+    });
+
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        media,
+        message: "reply body",
+        turnId: "turn-media-delivery",
+      }),
+    );
+    await expect(
+      readAssistantResponseMedia({
+        vault: vaultRoot,
+        turnId: "turn-media-delivery",
+      }),
+    ).resolves.toEqual([]);
   });
 
   it("marks hosted Linq deliveries with deterministic keys idempotent before outbox dispatch", async () => {

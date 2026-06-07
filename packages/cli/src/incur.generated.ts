@@ -19,6 +19,8 @@ declare module 'incur' {
       'assistant chat': { args: { prompt?: string }; options: { requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; codexCommand?: string; codexHome?: string; model?: string; modelProvider?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string } }
       'assistant deliver': { args: { message: string }; options: { requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; deliveryTarget?: string } }
       'assistant doctor': { args: {}; options: { requestId?: string; repair: boolean } }
+      'assistant media attach': { args: {}; options: { requestId?: string; url: string[]; alt?: string[]; source?: string[] } }
+      'assistant media list': { args: { query?: string }; options: { requestId?: string } }
       'assistant onboarding complete': { args: {}; options: { requestId?: string; reason: "user_answered" | "user_declined" | "manual" } }
       'assistant onboarding reopen': { args: {}; options: { requestId?: string } }
       'assistant onboarding status': { args: {}; options: { requestId?: string } }

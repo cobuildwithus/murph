@@ -17,6 +17,7 @@ import {
   errorMessage,
   normalizeNullableString,
 } from './text/shared.js'
+import { normalizeAssistantResponseMediaUrl } from './assistant-cli-contracts.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 const DEFAULT_LINQ_API_BASE_URL = 'https://api.linqapp.com/api/partner/v3'
@@ -1014,11 +1015,14 @@ function normalizeLinqMediaList(values: readonly LinqMessageMediaInput[]): Array
 
 function normalizeLinqHttpsUrl(value: string): string {
   const normalized = normalizeRequiredString(value, 'media url')
-  const parsed = new URL(normalized)
-  if (parsed.protocol !== 'https:') {
-    throw new VaultCliError('LINQ_INVALID_INPUT', 'Linq media URLs must use HTTPS.')
+  try {
+    return normalizeAssistantResponseMediaUrl(normalized)
+  } catch (error) {
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      error instanceof Error ? error.message.replace(/^Assistant response media/u, 'Linq media') : 'Linq media URLs must be valid public image URLs.',
+    )
   }
-  return parsed.toString()
 }
 
 function normalizeLinqStringList(

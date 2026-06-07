@@ -30,6 +30,7 @@ function createHostedAssistantDeliveryPayload(
     explicitTarget: null,
     idempotencyKey: "assistant-outbox:intent-1",
     identityId: "identity-1",
+    media: [],
     message: "hello from hosted execution",
     subject: null,
     replyToMessageId: null,
@@ -91,15 +92,38 @@ describe("hosted assistant delivery contracts", () => {
   });
 
   it("parses canonical assistant-delivery side effects", () => {
+    const media = [{
+      alt: "Dead bug setup",
+      kind: "image" as const,
+      source: "dead-bug-setup",
+      url: "https://cdn.example.test/dead-bug/setup.png",
+    }];
     const payload = [{
       deliveryPhase: "foreground_current_turn",
       effectId: "intent-1",
       fingerprint: "dedupe-1",
       kind: "assistant.delivery",
-      payload: createHostedAssistantDeliveryPayload(),
+      payload: createHostedAssistantDeliveryPayload({ media }),
     }];
 
     expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(payload);
+  });
+
+  it("rejects assistant-delivery side-effect media without HTTPS URLs", () => {
+    expect(() =>
+      buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe-1",
+        effectId: "intent-1",
+        payload: createHostedAssistantDeliveryPayload({
+          media: [{
+            alt: null,
+            kind: "image",
+            source: null,
+            url: "http://cdn.example.test/dead-bug/setup.png",
+          }],
+        }),
+      }),
+    ).toThrow("payload.media[0].url must use HTTPS");
   });
 
   it("builds canonical effects and sending records with only the canonical effect id", () => {

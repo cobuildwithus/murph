@@ -309,6 +309,14 @@ describe("hosted provider effects", () => {
     await expect(sendHostedProviderLinqMessage({
       directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: "+15550000",
+      media: [
+        {
+          kind: "image",
+          url: "https://cdn.example.test/dead-bug/setup.png",
+          alt: "Dead bug setup",
+          source: "dead-bug-setup",
+        },
+      ],
       message: "hello",
       target: "stale-chat",
       targetKind: "thread",
@@ -382,6 +390,14 @@ describe("hosted provider effects", () => {
     await expect(sendHostedProviderLinqMessage({
       directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: "+15550000",
+      media: [
+        {
+          kind: "image",
+          url: "https://cdn.example.test/dead-bug/setup.png",
+          alt: "Dead bug setup",
+          source: "dead-bug-setup",
+        },
+      ],
       message: "hello",
       target: "stale-chat",
       targetKind: "thread",
@@ -405,6 +421,25 @@ describe("hosted provider effects", () => {
     assert.equal(
       String(fetchImplementation.mock.calls[1]?.[0]),
       "https://api.linqapp.com/api/partner/v3/chats",
+    );
+    assert.deepEqual(
+      JSON.parse(String(fetchImplementation.mock.calls[1]?.[1]?.body)),
+      {
+        from: "+15550000",
+        message: {
+          parts: [
+            {
+              type: "text",
+              value: "hello",
+            },
+            {
+              type: "media",
+              url: "https://cdn.example.test/dead-bug/setup.png",
+            },
+          ],
+        },
+        to: ["+15550001"],
+      },
     );
   });
 

@@ -61,6 +61,7 @@ export function createAssistantChannelAdapter(
         }
       : {}),
     supportsIdempotencyKey: spec.supportsIdempotencyKey,
+    supportsResponseMedia: spec.supportsResponseMedia === true,
     async send(input, dependencies) {
       const candidate = resolveRequiredDeliveryCandidate(
         input,

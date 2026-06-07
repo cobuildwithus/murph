@@ -249,6 +249,7 @@ async function sendHostedProviderLinqMessageDirect(
   return await sendLinqMessage({
     fromPhoneNumber: request.fromPhoneNumber ?? null,
     idempotencyKey: request.idempotencyKey ?? null,
+    media: request.media ?? null,
     message: request.message,
     replyToMessageId: request.replyToMessageId ?? null,
     target: request.target,
@@ -302,6 +303,7 @@ async function materializeHostedProviderLinqDirectThread(input: {
     const delivered = await sendHostedProviderLinqMessageDirect({
       fromPhoneNumber: sender,
       idempotencyKey: input.request.idempotencyKey ?? null,
+      media: input.request.media ?? null,
       message: input.request.message,
       replyToMessageId: input.request.replyToMessageId ?? null,
       target: recipient,

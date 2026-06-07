@@ -165,6 +165,7 @@ export interface AssistantChannelAdapter {
     },
     dependencies: AssistantChannelDependencies,
   ) => Promise<ReturnType<typeof assistantChannelDeliverySchema.parse>>
+  supportsResponseMedia: boolean
 }
 
 export type AssistantChannelName = AssistantChannelAdapter['channel']

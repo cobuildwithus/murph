@@ -1180,17 +1180,10 @@ export function registerAssistantCommands(
       }),
       description:
         'List pre-generated media from the hosted assistant media catalog, including stable ids, descriptions, tags, and HTTPS URLs that can be attached later.',
-      options: withBaseOptions({
-        catalogUrl: z
-          .string()
-          .url()
-          .optional()
-          .describe('Optional assistant media catalog URL. Defaults to MURPH_ASSISTANT_MEDIA_CATALOG_URL or MURPH_PRODUCT_BASE_URL/assistant-media/catalog.json.'),
-      }),
+      options: withBaseOptions({}),
       output: assistantMediaListResultSchema,
       async run(context) {
         return listAssistantMediaCatalog({
-          catalogUrl: context.options.catalogUrl ?? null,
           env: process.env,
           query: context.args.query ?? null,
         })
@@ -1217,24 +1210,24 @@ export function registerAssistantCommands(
           .array(z.string().min(1))
           .optional()
           .describe('Optional catalog item ids or source labels matching --url order.'),
-        turn: optionalNonEmptyStringOption(
-          'Optional explicit assistant turn id. Normally inferred from the current assistant runtime environment.',
-        ),
-        session: optionalNonEmptyStringOption(
-          'Optional explicit assistant session id. Normally inferred from the current assistant runtime environment.',
-        ),
       }),
       output: assistantMediaAttachResultSchema,
       async run(context) {
         const active = resolveAssistantActiveTurnContextFromEnv(process.env)
-        const turnId = context.options.turn ?? active.turnId
+        const turnId = active.turnId
         if (!turnId) {
           throw new VaultCliError(
             'ASSISTANT_ACTIVE_TURN_REQUIRED',
-            'assistant media attach must run inside an assistant turn or receive --turn.',
+            'assistant media attach must run inside an active assistant turn.',
           )
         }
-        const sessionId = context.options.session ?? active.sessionId
+        const sessionId = active.sessionId
+        if (!sessionId) {
+          throw new VaultCliError(
+            'ASSISTANT_ACTIVE_SESSION_REQUIRED',
+            'assistant media attach must run inside an active assistant session.',
+          )
+        }
         const media = context.options.url.map((url, index) =>
           assistantResponseMediaSchema.parse({
             kind: 'image',

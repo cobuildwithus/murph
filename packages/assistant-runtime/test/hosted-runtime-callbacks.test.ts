@@ -96,6 +96,7 @@ function createPayload(
     explicitTarget: null,
     idempotencyKey: "assistant-outbox:intent_123",
     identityId: "identity_123",
+    media: [],
     message: "hello from hosted",
     subject: null,
     replyToMessageId: null,
@@ -200,6 +201,14 @@ describe("hosted runtime callbacks", () => {
         explicitTarget: null,
         identityId: "identity_1",
         intentId: "intent_1",
+        media: [
+          {
+            kind: "image",
+            url: "https://cdn.example.test/dead-bug/setup.png",
+            alt: "Dead bug setup",
+            source: "dead-bug-setup",
+          },
+        ],
         message: "hello 1",
         replyToMessageId: null,
         sessionId: "session_1",
@@ -227,6 +236,14 @@ describe("hosted runtime callbacks", () => {
           explicitTarget: null,
           idempotencyKey: "assistant-outbox:intent_1",
           identityId: "identity_1",
+          media: [
+            {
+              kind: "image",
+              url: "https://cdn.example.test/dead-bug/setup.png",
+              alt: "Dead bug setup",
+              source: "dead-bug-setup",
+            },
+          ],
           message: "hello 1",
           subject: null,
           replyToMessageId: null,
@@ -1366,6 +1383,14 @@ describe("hosted runtime callbacks", () => {
         directRecipientPhoneNumber: "+15550001",
         fromPhoneNumber: "+15550002",
         idempotencyKey: "assistant-outbox:intent_hashed_target",
+        media: [
+          {
+            kind: "image",
+            url: "https://cdn.example.test/dead-bug/setup.png",
+            alt: "Dead bug setup",
+            source: "dead-bug-setup",
+          },
+        ],
         message: "hello from hosted",
         replyToMessageId: "linq_message_current",
         target: "ain_hashed_thread",
@@ -1395,6 +1420,14 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
       fromPhoneNumber: "+15550002",
       idempotencyKey: "assistant-outbox:intent_hashed_target",
+      media: [
+        {
+          kind: "image",
+          url: "https://cdn.example.test/dead-bug/setup.png",
+          alt: "Dead bug setup",
+          source: "dead-bug-setup",
+        },
+      ],
       message: "hello from hosted",
       replyToMessageId: "linq_message_current",
       target: "+15550001",
@@ -1570,6 +1603,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_123",
+      media: null,
       message: "hello from hosted",
       replyToMessageId: "linq_message_inbound_123",
       target: "linq_chat_123",
@@ -1715,6 +1749,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
       fromPhoneNumber: "+15550002",
       idempotencyKey: "assistant-outbox:intent_hashed_target",
+      media: null,
       message: "hello from hosted",
       replyToMessageId: "linq_message_current",
       target: "+15550001",

@@ -1,8 +1,10 @@
 import path from 'node:path'
 import { mkdir, rm } from 'node:fs/promises'
+import { isIP } from 'node:net'
 import { z } from 'zod'
 import {
   assistantResponseMediaSchema,
+  normalizeAssistantResponseMediaUrl,
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -15,6 +17,7 @@ import {
   redactAssistantDisplayPath,
   resolveAssistantStatePaths,
 } from './store/paths.js'
+import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 
 export const MURPH_ASSISTANT_ACTIVE_TURN_ID_ENV = 'MURPH_ASSISTANT_ACTIVE_TURN_ID'
 export const MURPH_ASSISTANT_ACTIVE_SESSION_ID_ENV = 'MURPH_ASSISTANT_ACTIVE_SESSION_ID'
@@ -107,30 +110,32 @@ export async function stageAssistantResponseMedia(input: {
   turnId: string
   vault: string
 }): Promise<AssistantResponseMedia[]> {
-  const turnId = normalizeAssistantResponseMediaTurnId(input.turnId)
-  const filePath = resolveAssistantResponseMediaPath({
-    turnId,
-    vault: input.vault,
-  })
-  const existing = await readAssistantResponseMedia({
-    turnId,
-    vault: input.vault,
-  })
-  const media = normalizeAssistantResponseMediaList([...existing, ...input.media])
-
-  await mkdir(path.dirname(filePath), { recursive: true })
-  await writeJsonFileAtomic(
-    filePath,
-    assistantResponseMediaStoreSchema.parse({
-      schema: ASSISTANT_RESPONSE_MEDIA_STORE_SCHEMA,
+  return await withAssistantRuntimeWriteLock(input.vault, async () => {
+    const turnId = normalizeAssistantResponseMediaTurnId(input.turnId)
+    const filePath = resolveAssistantResponseMediaPath({
       turnId,
-      sessionId: normalizeNullableString(input.sessionId),
-      updatedAt: new Date().toISOString(),
-      media,
-    }),
-  )
+      vault: input.vault,
+    })
+    const existing = await readAssistantResponseMedia({
+      turnId,
+      vault: input.vault,
+    })
+    const media = normalizeAssistantResponseMediaList([...existing, ...input.media])
 
-  return media
+    await mkdir(path.dirname(filePath), { recursive: true })
+    await writeJsonFileAtomic(
+      filePath,
+      assistantResponseMediaStoreSchema.parse({
+        schema: ASSISTANT_RESPONSE_MEDIA_STORE_SCHEMA,
+        turnId,
+        sessionId: normalizeNullableString(input.sessionId),
+        updatedAt: new Date().toISOString(),
+        media,
+      }),
+    )
+
+    return media
+  })
 }
 
 export async function readAssistantResponseMedia(input: {
@@ -235,7 +240,7 @@ function resolveAssistantMediaCatalogUrl(input: {
   const explicit = normalizeNullableString(input.catalogUrl)
     ?? normalizeNullableString(env[MURPH_ASSISTANT_MEDIA_CATALOG_URL_ENV])
   if (explicit) {
-    return normalizeHttpsUrl(explicit, 'Assistant media catalog URL')
+    return normalizeAssistantMediaCatalogUrl(explicit)
   }
 
   const productBaseUrl = normalizeNullableString(input.productBaseUrl)
@@ -248,27 +253,45 @@ function resolveAssistantMediaCatalogUrl(input: {
     )
   }
 
-  return normalizeHttpsUrl(
-    new URL(DEFAULT_ASSISTANT_MEDIA_CATALOG_PATH, productBaseUrl).toString(),
-    'Assistant media catalog URL',
-  )
+  return normalizeAssistantMediaCatalogUrl(new URL(DEFAULT_ASSISTANT_MEDIA_CATALOG_PATH, productBaseUrl).toString())
 }
 
 function resolveCatalogItemUrl(catalogUrl: string, value: string): string {
-  return normalizeHttpsUrl(new URL(value, catalogUrl).toString(), 'Assistant media item URL')
+  return normalizeAssistantResponseMediaUrl(new URL(value, catalogUrl).toString())
 }
 
-function normalizeHttpsUrl(value: string, label: string): string {
+function normalizeAssistantMediaCatalogUrl(value: string): string {
   let parsed: URL
   try {
     parsed = new URL(value)
   } catch {
-    throw new VaultCliError('ASSISTANT_MEDIA_INVALID_URL', `${label} must be a valid URL.`)
+    throw new VaultCliError('ASSISTANT_MEDIA_INVALID_URL', 'Assistant media catalog URL must be a valid URL.')
   }
   if (parsed.protocol !== 'https:') {
-    throw new VaultCliError('ASSISTANT_MEDIA_INVALID_URL', `${label} must use HTTPS.`)
+    throw new VaultCliError('ASSISTANT_MEDIA_INVALID_URL', 'Assistant media catalog URL must use HTTPS.')
+  }
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new VaultCliError(
+      'ASSISTANT_MEDIA_INVALID_URL',
+      'Assistant media catalog URL must be a public URL without credentials, query strings, or fragments.',
+    )
+  }
+  if (!isPublicAssistantMediaCatalogHost(parsed.hostname)) {
+    throw new VaultCliError('ASSISTANT_MEDIA_INVALID_URL', 'Assistant media catalog URL must use a public host.')
   }
   return parsed.toString()
+}
+
+function isPublicAssistantMediaCatalogHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/\.$/u, '')
+  if (!normalized || normalized === 'localhost' || normalized.endsWith('.localhost') || normalized.endsWith('.local')) {
+    return false
+  }
+
+  const ipLiteral = normalized.startsWith('[') && normalized.endsWith(']')
+    ? normalized.slice(1, -1)
+    : normalized
+  return isIP(ipLiteral) === 0
 }
 
 function normalizeMediaCatalogQueryTokens(query: string | null | undefined): string[] {

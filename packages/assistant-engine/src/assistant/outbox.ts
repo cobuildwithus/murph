@@ -180,6 +180,10 @@ export async function createAssistantOutboxIntent(input: {
     const createdAt = input.createdAt ?? new Date().toISOString()
     const message = normalizeRequiredMessage(input.message)
     const media = normalizeAssistantResponseMediaList(input.media ?? [])
+    assertAssistantOutboxResponseMediaSupported({
+      channel: input.channel ?? null,
+      media,
+    })
     const persistedTarget = buildAssistantOutboxPersistedTarget(input)
     const subject = normalizeAssistantDeliverySubject({
       bindingDelivery: persistedTarget.bindingDelivery,
@@ -1078,6 +1082,25 @@ function normalizeRequiredMessage(value: string): string {
   }
 
   return normalized
+}
+
+function assertAssistantOutboxResponseMediaSupported(input: {
+  channel: string | null
+  media: readonly AssistantResponseMedia[]
+}): void {
+  if (input.media.length === 0) {
+    return
+  }
+
+  const adapter = getAssistantChannelAdapter(input.channel)
+  if (adapter?.supportsResponseMedia === true) {
+    return
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_CHANNEL_MEDIA_UNSUPPORTED',
+    `Outbound media delivery is not supported for ${input.channel ?? 'unknown channel'}.`,
+  )
 }
 
 function buildAssistantOutboxDeliveredIntent(input: {

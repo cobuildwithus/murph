@@ -647,6 +647,7 @@ function createHostedAssistantLinqSendDependency(input: {
       directRecipientPhoneNumber,
       fromPhoneNumber,
       idempotencyKey: request.idempotencyKey ?? null,
+      media: request.media ?? null,
       message: request.message,
       replyToMessageId: request.replyToMessageId ?? null,
       target: request.target,
@@ -1078,6 +1079,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     | "explicitTarget"
     | "identityId"
     | "intentId"
+    | "media"
     | "message"
     | "subject"
     | "replyToMessageId"
@@ -1095,6 +1097,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     explicitTarget: intent.explicitTarget ?? null,
     idempotencyKey: intent.deliveryIdempotencyKey ?? `assistant-outbox:${intent.intentId}`,
     identityId: intent.identityId ?? null,
+    media: intent.media ?? [],
     message: intent.message,
     subject: intent.subject ?? null,
     replyToMessageId: intent.replyToMessageId ?? null,

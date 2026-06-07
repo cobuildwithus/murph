@@ -247,7 +247,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   const media = await readAssistantResponseMedia({
     vault: input.input.vault,
     turnId: input.turnId,
-  }).catch(() => [])
+  })
   const outcome = await state.outbox.deliverMessage({
     ...deliveryFields,
     media,
