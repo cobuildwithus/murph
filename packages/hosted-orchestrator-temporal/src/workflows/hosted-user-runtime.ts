@@ -71,6 +71,8 @@ const HOSTED_USER_RUNTIME_UNREAD_DEMAND_BEFORE_CONTINUE_AS_NEW_PATCH =
   "hosted-user-runtime-unread-demand-before-continue-as-new-v1";
 const HOSTED_USER_RUNTIME_POST_DEMAND_WAIT_CONTINUE_AS_NEW_PATCH =
   "hosted-user-runtime-post-demand-wait-continue-as-new-v1";
+const HOSTED_USER_RUNTIME_DIRECT_MAILBOX_PROCESSING_PATCH =
+  "hosted-user-runtime-direct-mailbox-processing-v1";
 const LEGACY_DEVICE_SYNC_RECOVERY_SOURCE = "device_sync_recovery";
 const HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT = 3;
 
@@ -185,6 +187,8 @@ export async function hostedUserRuntimeWorkflow(
       patched(HOSTED_USER_RUNTIME_UNREAD_DEMAND_BEFORE_CONTINUE_AS_NEW_PATCH),
     usePostDemandWaitContinueAsNewPatch: () =>
       patched(HOSTED_USER_RUNTIME_POST_DEMAND_WAIT_CONTINUE_AS_NEW_PATCH),
+    useDirectMailboxProcessingPatch: () =>
+      patched(HOSTED_USER_RUNTIME_DIRECT_MAILBOX_PROCESSING_PATCH),
     useSignalOnlyWaitForNonRetryableFailure: () =>
       patched(HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH),
     uuid: uuid4,
@@ -234,6 +238,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
   useHistoryLengthContinueAsNewPatch(): boolean;
   useUnreadDemandBeforeContinueAsNewPatch(): boolean;
   usePostDemandWaitContinueAsNewPatch(): boolean;
+  useDirectMailboxProcessingPatch(): boolean;
   useSignalOnlyWaitForNonRetryableFailure(): boolean;
   uuid(): string;
   waitForSignalOrTimeout(
@@ -246,6 +251,10 @@ type HostedRuntimeRunDemand = Extract<HostedRuntimeDemand, { kind: "run" }>;
 type LegacyHostedRuntimeDemandRunSource =
   | HostedRuntimeRunDemand["source"]
   | typeof LEGACY_DEVICE_SYNC_RECOVERY_SOURCE;
+type HostedRuntimeProcessingIntent = {
+  reason: HostedRuntimeRunDemand["reason"];
+  source: LegacyHostedRuntimeDemandRunSource;
+};
 type LegacyHostedRuntimeRunDemand = Omit<HostedRuntimeRunDemand, "source"> & {
   source: typeof LEGACY_DEVICE_SYNC_RECOVERY_SOURCE;
 };
@@ -439,6 +448,119 @@ export function createHostedUserRuntimeWorkflowMachine(
     }
   };
 
+  const executeRuntimeProcessingIntent = async (
+    intent: HostedRuntimeProcessingIntent,
+  ): Promise<void> => {
+    const versionBeforeExecution = state.signalVersion;
+    const demandVersionBeforeExecution = demandSignalVersion;
+    let execution: HostedRuntimeEnsureProcessingResponse;
+    const orchestrationAttemptId = runtime.uuid();
+    state.lastOrchestrationAttemptId = orchestrationAttemptId;
+    clearPendingRuntimePrewarm(state);
+    try {
+      runtime.useEnsureRuntimeProcessingPatch();
+      const forwardDemandSource =
+        runtime.useEnsureRuntimeProcessingSourcePatch()
+        || isLegacyDeviceSyncRecoverySource(intent.source);
+      execution = await runtime.ensureRuntimeProcessing({
+        orchestrationAttemptId,
+        reason: intent.reason,
+        ...(forwardDemandSource ? { source: intent.source } : {}),
+        userId: input.userId,
+      });
+    } catch (error) {
+      state.lastExecutionAt = isoNow(runtime);
+      state.lastExecutionErrorCode = readExecutionErrorCode(error);
+      state.lastExecutionKind = "failed";
+      state.lastRuntimeAttemptId = null;
+      state.lastRuntimeStatus = null;
+      legacySameRuntimeWakeAcceptedCount = 0;
+      if (demandSignalVersion !== demandVersionBeforeExecution) {
+        return;
+      }
+      const retryAt = readActivityFailureRetryAt({
+        error,
+        retryDelayMs: HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
+        runtime,
+      });
+      if (
+        retryAt === null
+        && shouldContinueAsNewBeforePostDemandWait({ options, runtime })
+      ) {
+        await continueAsNewWithCurrentState();
+      }
+      await waitUntilTimestampOrSignal(
+        runtime,
+        retryAt,
+        state.signalVersion,
+        state,
+        retryAt === null ? "non_retryable_signal_only" : "execution_failure_retry",
+      );
+      return;
+    }
+
+    state.lastExecutionAt = isoNow(runtime);
+    state.lastExecutionErrorCode = null;
+    state.lastExecutionKind = execution.kind;
+    const signalArrivedDuringExecution =
+      state.signalVersion !== versionBeforeExecution;
+    const demandSignalArrivedDuringExecution =
+      demandSignalVersion !== demandVersionBeforeExecution;
+
+    if (execution.kind === "runtime_processing_accepted") {
+      // Keep this marker for histories that recorded the removed recovery-count patch.
+      const sameRuntimeWakeCountPatchEnabled =
+        runtime.preserveSameRuntimeWakeAcceptedCountPatchMarker();
+      legacySameRuntimeWakeAcceptedCount = recordLegacyRuntimeWakeAcceptedCount({
+        currentCount: legacySameRuntimeWakeAcceptedCount,
+        execution,
+        lastRuntimeAttemptId: state.lastRuntimeAttemptId,
+        patchEnabled: sameRuntimeWakeCountPatchEnabled,
+      });
+      recordRuntimeProcessingAccepted(state, execution);
+      if (demandSignalArrivedDuringExecution) {
+        return;
+      }
+      clearConsumedFlagsAfterRun(state, intent.source);
+      legacyDeviceSyncRecoveryRequested = clearLegacyDeviceSyncRecoveryAfterRun({
+        currentRequested: legacyDeviceSyncRecoveryRequested,
+        execution,
+        source: intent.source,
+        wakeCount: legacySameRuntimeWakeAcceptedCount,
+        wakeLimitEnabled: sameRuntimeWakeCountPatchEnabled,
+      });
+      if (signalArrivedDuringExecution) {
+        return;
+      }
+      const versionBeforeWakeWait = state.signalVersion;
+      await waitUntilTimestampOrSignal(
+        runtime,
+        execution.recommendedRecheckAt,
+        versionBeforeWakeWait,
+        state,
+        "runtime_wake_recheck",
+      );
+      return;
+    }
+
+    if (execution.kind === "retry_later") {
+      state.lastRuntimeAttemptId = null;
+      state.lastRuntimeStatus = "retry_later";
+      legacySameRuntimeWakeAcceptedCount = 0;
+      if (demandSignalArrivedDuringExecution) {
+        return;
+      }
+      await waitUntilTimestampOrSignal(
+        runtime,
+        execution.retryAt,
+        state.signalVersion,
+        state,
+        "processing_retry_later",
+      );
+      return;
+    }
+  };
+
   const run = async (): Promise<void> => {
     for (;;) {
       if (shouldContinueAsNewBeforeDemand({
@@ -452,6 +574,23 @@ export function createHostedUserRuntimeWorkflowMachine(
       }
 
       completedIterations += 1;
+
+      if (
+        state.latestMailboxPointer !== null
+        && runtime.useDirectMailboxProcessingPatch()
+      ) {
+        lastDemandSignalVersionRead = demandSignalVersion;
+        state.lastDemandKind = "run";
+        state.lastDemandNextWakeAt = null;
+        state.lastDemandSource = "mailbox_backlog";
+        state.lastMailboxLagLaneCount = 0;
+        await executeRuntimeProcessingIntent({
+          reason: "nudge",
+          source: "mailbox_backlog",
+        });
+        continue;
+      }
+
       const versionBeforeDemand = state.signalVersion;
       let demand: HostedUserRuntimeDemand;
       try {
@@ -551,115 +690,8 @@ export function createHostedUserRuntimeWorkflowMachine(
         continue;
       }
 
-      const versionBeforeExecution = state.signalVersion;
-      const demandVersionBeforeExecution = demandSignalVersion;
-      let execution: HostedRuntimeEnsureProcessingResponse;
-      const orchestrationAttemptId = runtime.uuid();
-      state.lastOrchestrationAttemptId = orchestrationAttemptId;
-      clearPendingRuntimePrewarm(state);
-      try {
-        runtime.useEnsureRuntimeProcessingPatch();
-        const forwardDemandSource =
-          runtime.useEnsureRuntimeProcessingSourcePatch()
-          || isLegacyDeviceSyncRecoverySource(demand.source);
-        execution = await runtime.ensureRuntimeProcessing({
-          orchestrationAttemptId,
-          reason: demand.reason,
-          ...(forwardDemandSource ? { source: demand.source } : {}),
-          userId: input.userId,
-        });
-      } catch (error) {
-        state.lastExecutionAt = isoNow(runtime);
-        state.lastExecutionErrorCode = readExecutionErrorCode(error);
-        state.lastExecutionKind = "failed";
-        state.lastRuntimeAttemptId = null;
-        state.lastRuntimeStatus = null;
-        legacySameRuntimeWakeAcceptedCount = 0;
-        if (demandSignalVersion !== demandVersionBeforeExecution) {
-          continue;
-        }
-        const retryAt = readActivityFailureRetryAt({
-          error,
-          retryDelayMs: HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
-          runtime,
-        });
-        if (
-          retryAt === null
-          && shouldContinueAsNewBeforePostDemandWait({ options, runtime })
-        ) {
-          await continueAsNewWithCurrentState();
-        }
-        await waitUntilTimestampOrSignal(
-          runtime,
-          retryAt,
-          state.signalVersion,
-          state,
-          retryAt === null ? "non_retryable_signal_only" : "execution_failure_retry",
-        );
-        continue;
-      }
-
-      state.lastExecutionAt = isoNow(runtime);
-      state.lastExecutionErrorCode = null;
-      state.lastExecutionKind = execution.kind;
-      const signalArrivedDuringExecution =
-        state.signalVersion !== versionBeforeExecution;
-      const demandSignalArrivedDuringExecution =
-        demandSignalVersion !== demandVersionBeforeExecution;
-
-      if (execution.kind === "runtime_processing_accepted") {
-        // Keep this marker for histories that recorded the removed recovery-count patch.
-        const sameRuntimeWakeCountPatchEnabled =
-          runtime.preserveSameRuntimeWakeAcceptedCountPatchMarker();
-        legacySameRuntimeWakeAcceptedCount = recordLegacyRuntimeWakeAcceptedCount({
-          currentCount: legacySameRuntimeWakeAcceptedCount,
-          execution,
-          lastRuntimeAttemptId: state.lastRuntimeAttemptId,
-          patchEnabled: sameRuntimeWakeCountPatchEnabled,
-        });
-        recordRuntimeProcessingAccepted(state, execution);
-        if (demandSignalArrivedDuringExecution) {
-          continue;
-        }
-        clearConsumedFlagsAfterRun(state, demand.source);
-        legacyDeviceSyncRecoveryRequested = clearLegacyDeviceSyncRecoveryAfterRun({
-          currentRequested: legacyDeviceSyncRecoveryRequested,
-          execution,
-          source: demand.source,
-          wakeCount: legacySameRuntimeWakeAcceptedCount,
-          wakeLimitEnabled: sameRuntimeWakeCountPatchEnabled,
-        });
-        if (signalArrivedDuringExecution) {
-          continue;
-        }
-        const versionBeforeWakeWait = state.signalVersion;
-        await waitUntilTimestampOrSignal(
-          runtime,
-          execution.recommendedRecheckAt,
-          versionBeforeWakeWait,
-          state,
-          "runtime_wake_recheck",
-        );
-        continue;
-      }
-
-      if (execution.kind === "retry_later") {
-        state.lastRuntimeAttemptId = null;
-        state.lastRuntimeStatus = "retry_later";
-        legacySameRuntimeWakeAcceptedCount = 0;
-        if (demandSignalArrivedDuringExecution) {
-          continue;
-        }
-        await waitUntilTimestampOrSignal(
-          runtime,
-          execution.retryAt,
-          state.signalVersion,
-          state,
-          "processing_retry_later",
-        );
-        continue;
-      }
-
+      await executeRuntimeProcessingIntent(demand);
+      continue;
     }
   };
 
