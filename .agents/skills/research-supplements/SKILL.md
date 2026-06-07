@@ -26,6 +26,7 @@ Never print `.env`, `.env.local`, database URLs, credentials, tokens, or raw con
    - Disallowed Safari actions: logging in, creating accounts, adding to cart, purchasing, submitting forms, solving CAPTCHAs, bypassing browser/security/paywall barriers, changing settings, uploading/transmitting user data, or accepting prompts beyond ordinary cookie consent.
    - Capture variant-level data when flavors, serving sizes, UPCs, or formulas differ.
    - Store exactly one standalone supplement product/label per row. Do not import bundles, kits, stacks that combine multiple products, regimens/plans, variety packs, multi-bottle pack duplicates, samples, promos, merch, shakers, apparel, topical products, or test products as dietary supplements.
+   - Do not import conventional food or snack products as supplement rows, even when the page has a clean Nutrition Facts panel. Reject protein bars, nutrition bars, energy bars, snack-category products, ready-to-eat foods, ready-to-drink shakes/beverages, cookies, brownies, chips/crisps, candy-like foods, meal bars, and grocery-style food products. Keep them in skipped/delete-candidate output instead of production JSON.
 
 3. **Normalize rows**
    - Emit JSON rows with: `id`, `dataOrigin`, `dataOriginId`, `dataOriginUrl`, `source`, `sourceId`, `name`, `brand`, optional `upc`, `offMarket`, and `label`. Do not provide custom `searchText`; the DB helper derives compact search text from normalized product fields.
@@ -39,7 +40,7 @@ Never print `.env`, `.env.local`, database URLs, credentials, tokens, or raw con
 4. **Dry-run against the DB**
    - Read `.agents/skills/research-supplements/references/database-contract.md` before writing.
    - Always run `supplement-db-brand-site-labels.mjs dry-run` before `upsert`.
-   - Treat dry-run `productionBlockedRows` as blockers. The helper blocks production upserts for missing `ingredientRows`, missing `servingSizes`, manual-review rows, obvious non-standalone products, oversized page-body text, raw page text, or oversized search text.
+   - Treat dry-run `productionBlockedRows` as blockers. The helper blocks production upserts for missing `ingredientRows`, missing `servingSizes`, manual-review rows, obvious non-standalone products, likely food/snack products such as protein bars, oversized page-body text, raw page text, or oversized search text.
    - For existing-row cleanup, run `supplement-db-brand-site-repair-preview.mjs` first. It is read-only and writes review artifacts showing proposed compact search text, parser coverage, normalized row additions, and superfluous field candidates. Do not write repair updates until the preview has been reviewed.
    - Treat repair preview `automatedBackfillReady: true` rows as the only candidates for automated backfill. `structured_ready` is diagnostic parser state and can still have blockers; do not use it alone as a write/delete gate. Keep blocked, `partial_parse`, and `needs_better_parser` rows in manual review/refetch/OCR queues, even when some facts were recovered.
    - After repair/refetch/OCR produces candidate rows, run the normal `supplement-db-brand-site-labels.mjs dry-run` on the exact candidate artifact before any upsert. Inspect candidate `name`, `brand`, `source`, `sourceId`, UPC, `ingredientRows`, `servingSizes`, and removable raw-evidence fields; do not write candidates that are mechanically accepted but still have stale category-like brands, ambiguous variants, lossy parsed facts, or missing official provenance.
@@ -84,7 +85,7 @@ Find official current product labels and return normalized brand_site supplement
 Do not write to the database.
 If static fetches miss official label evidence, you may use Computer Use with Safari for read-only official-page inspection, label image/PDF review, and official label downloads. Do not log in, create accounts, add to cart, purchase, submit forms, solve CAPTCHAs, bypass browser/security/paywall barriers, upload or transmit user data, or use retailer facts as authoritative unless marked lower-confidence/manual-review.
 For each row include id, dataOrigin=brand_site, dataOriginId, dataOriginUrl, source, sourceId, name, brand, upc if available, label.sourceFetchedAt, label.ingredientRows, label.servingSizes, label.factsText, label.ingredients or ingredientText, and label.needsManualReview.
-Report skipped products and why.
+Report skipped products and why. Put snack, protein-bar, ready-to-eat, and ready-to-drink food products in skipped/delete-candidate output, not production rows.
 ```
 
 ## Resources

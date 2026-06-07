@@ -19,3 +19,4 @@ Production upserts should use tier 1 evidence whenever possible. Tier 2 rows mus
 - If OCR is required, record the image URL and mark the OCR as extracted text, not official page text.
 - Do not infer amounts, serving sizes, or inactive ingredients from marketing copy.
 - Do not treat bundles/stacks as standalone supplement formulas. Import only one standalone supplement product/label per row.
+- Do not treat conventional foods as supplement formulas. Reject snack-category products, protein/nutrition/energy bars, ready-to-eat foods, ready-to-drink shakes or beverages, cookies, brownies, chips/crisps, candy-like foods, meal bars, and grocery-style food products even when they expose Nutrition Facts. Report them as skipped or delete candidates.
