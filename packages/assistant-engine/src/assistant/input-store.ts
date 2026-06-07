@@ -1435,9 +1435,7 @@ function safeAssistantInputTextSchema(fieldName: string) {
     .string()
     .max(ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH)
     .superRefine((value, context) => {
-      assertSafeAssistantInputText(value, context, fieldName, {
-        allowPathOrUrlTokens: true,
-      })
+      assertSafeAssistantInputText(value, context, fieldName)
     })
 }
 
@@ -1531,36 +1529,8 @@ function assertSafeAssistantInputText(
   text: string,
   context: z.RefinementCtx,
   fieldName: string,
-  options: {
-    allowPathOrUrlTokens?: boolean
-  } = {},
 ): void {
-  const lines = text.split(/\r?\n/u)
   const lowerText = text.toLowerCase()
-  const forbiddenLinePatterns = [
-    /^authorization\s*:/iu,
-    /^cookie\s*:/iu,
-    /^set-cookie\s*:/iu,
-    /^x-api-key\s*:/iu,
-  ]
-
-  for (const line of lines) {
-    if (forbiddenLinePatterns.some((pattern) => pattern.test(line))) {
-      context.addIssue({
-        code: 'custom',
-        message: `${fieldName} must be minimized and must not contain auth headers.`,
-      })
-      return
-    }
-  }
-
-  if (!options.allowPathOrUrlTokens && containsPathOrUrlToken(text)) {
-    context.addIssue({
-      code: 'custom',
-      message: `${fieldName} must be minimized and must not contain paths or URLs.`,
-    })
-    return
-  }
 
   if (
     looksLikeRawEmailHeaders(text) ||
@@ -1617,12 +1587,6 @@ function jsonValueHasProviderRequestShape(value: unknown, depth: number): boolea
 
   return entries.some(([, entryValue]) =>
     jsonValueHasProviderRequestShape(entryValue, depth + 1),
-  )
-}
-
-function containsPathOrUrlToken(text: string): boolean {
-  return /(?:^|[\s("'=])(?:https?:\/\/|file:\/\/|[A-Za-z]:[\\/]|\/[^\s"'<>]+|~\/|\.\.\/|\.\.\\)/u.test(
-    text,
   )
 }
 
