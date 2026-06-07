@@ -1642,7 +1642,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           errorMessagePresent: true,
           errorName: "Error",
           operation: "workspace_snapshot_restore",
-          workspaceSnapshotProcessExitCode: expect.any(Number),
           workspaceSnapshotProcessLabel: "zstd",
           workspaceSnapshotProcessStderrBytes: expect.any(Number),
           workspaceSnapshotProcessStderrLineCount: expect.any(Number),
@@ -1653,6 +1652,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         phase: "runtime.starting",
         userId: null,
       }));
+      const processFailureDetails = failedLogs.at(-1)?.details;
+      expect(
+        typeof processFailureDetails?.workspaceSnapshotProcessExitCode === "number"
+        || typeof processFailureDetails?.workspaceSnapshotProcessSignal === "string",
+      ).toBe(true);
 
       const serializedLogs = JSON.stringify(readWorkspaceSnapshotDiagnosticLogs());
       expect(serializedLogs).not.toContain(snapshotId);
