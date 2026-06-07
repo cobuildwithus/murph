@@ -1,6 +1,6 @@
 ---
 name: experiment-onboarding
-description: Use when helping a Murph user start, configure, modify, support, or review a bounded health experiment, including Health Commons protocol resolution, vault-first setup, safety screens, typed run creation, first-session prep reminders, active experiment support, and outcome review.
+description: Use when helping a Murph user start, configure, modify, support, or review a bounded health experiment, including Health Commons protocol resolution, vault-first setup, safety screens, typed run creation, first-session prep reminders, bounded first-week habit support reminders, active experiment support, and outcome review.
 ---
 
 # Experiment onboarding
@@ -15,7 +15,7 @@ Help the user set up a bounded experiment that fits their life, then create the 
 - Safety addressed before the run is created.
 - Run record captures protocol, schedule, measurement, stop conditions, and reminder preference.
 - After creating a protocol-linked run, the user gets the matching experiment page link so they can open the protocol and later results view.
-- Reminder setup is handled as an explicit part of experiment onboarding, and first-session instruction is resolved either in the current reply or through a one-shot first-session prep reminder when the first intervention session time and a deliverable route are resolved.
+- Reminder setup is handled as an explicit part of experiment onboarding: first-session instruction is resolved through the current reply or a one-shot first-session prep reminder, and bounded first-week habit support is either scheduled, explicitly declined, or blocked by a concrete missing route/cadence detail.
 
 ## Collaboration style
 
@@ -41,7 +41,7 @@ Match the user's energy. Brief answers deserve brief follow-ups. Never restate i
 - When a connected wearable or relevant wearable history is visible, treat activity, steps, workouts, sleep, recovery, readiness, HRV/RHR, and similar device-derived fields as available evidence. Do not ask the user to text or manually restate those fields just because an experiment can measure them. Ask only for missing, subjective, ambiguous, or protocol-specific details the wearable cannot answer, such as perceived effort, symptoms, caffeine or alcohol, illness, travel, unusual context, exact intervention adherence, or consent to a planned experiment.
 - If wearable coverage is stale, sparse, or missing the needed signal, say that plainly and ask one targeted gap question instead of a generic data request.
 - Check `vault-cli experiment list --status active --format json` before setup. If one exists, ask whether to pause, finish, defer, or run both.
-- Ask only setup slots that materially affect safety, logistics, measurement fidelity, or assistant support. Treat `setupSlots[].constraints.optional` as lower priority, and `setupSlots[].constraints.askWhen: "at_confirmation"` as a slot to resolve near run creation instead of early setup. Treat first-session reminder setup as a material assistant-support slot, not an optional measurement path. Skip optional measurement paths unless the user chooses them.
+- Ask only setup slots that materially affect safety, logistics, measurement fidelity, or assistant support. Treat `setupSlots[].constraints.optional` as lower priority, and `setupSlots[].constraints.askWhen: "at_confirmation"` as a slot to resolve near run creation instead of early setup. Treat first-session reminder setup and bounded first-week habit support as material assistant-support slots, not optional measurement paths. Skip optional measurement paths unless the user chooses them.
 - When all necessary info is resolved and the user has been agreeing, create the run. Only pause for explicit confirmation when the user contradicted something, there is real ambiguity, or a safety-screen positive changed the plan.
 
 ## First-session prep reminders
@@ -65,6 +65,20 @@ Match the user's energy. Brief answers deserve brief follow-ups. Never restate i
 - If the selected plan expects a baseline window before the first intervention, do not silently treat a user-provided time as session one. Resolve whether they want to start baseline then or skip baseline and treat that time as the first intervention.
 - Keep first-session prep separate from missed-log follow-up and weekly digest. First-session prep is before the first session; missed-log follow-up is after a planned session if nothing was logged.
 - After scheduling, tell the user the reminder time and that they can cancel or move it.
+
+## First-week habit support reminders
+
+- First-session prep and first-week habit support are separate. First-session prep teaches the user how to do the protocol the first time. First-week habit support helps the user remember, repeat, and log the experiment during the early habit-formation window.
+- During onboarding, after safety, protocol fit, schedule, first-session timing, and route delivery are clear, first-week habit support is a required reminder decision. Schedule bounded support, record that the user declined it, or name the concrete missing cadence/route detail. Do not leave first-week support as an unstated optional extra.
+- Because these reminders are outbound side effects, resolve cadence and preference explicitly in one lightweight question unless the user already gave a clear preference, explicitly declined reminders, or reminder delivery is not possible in the current route.
+- Default first-week support to the first 7 calendar days of the experiment, or the first 3-5 planned intervention sessions for non-daily protocols. Do not create indefinite recurring reminders for first-week support.
+- Prefer bounded one-shot `vault-cli automation save ... --schedule-kind at --schedule-at <ISO timestamp>` reminders with stable slugs such as `experiment-week-one-<experiment-slug>-<YYYY-MM-DD>`. Use `dailyLocal`, `cron`, or `every` only when the product surface supports a reliable end condition or the user explicitly asks for ongoing reminders beyond the first week.
+- Save traceability in onboarding setup answers when possible: `first_week_support_status` (`scheduled`, `declined`, or `blocked`), `first_week_support_cadence`, `first_week_support_window`, `first_week_support_automation_slugs`, and `first_week_support_blocked_reason` when blocked. If the run creation command cannot write those setup answers, apply them immediately after run creation with repeated key/value flags, for example `vault-cli experiment edit <id> --setup-answer first_week_support_status=scheduled --setup-answer first_week_support_cadence=daily --setup-answer first_week_support_window=<YYYY-MM-DD>..<YYYY-MM-DD> --setup-answer first_week_support_automation_slugs=<comma-separated-slugs>`.
+- If the experiment includes a baseline or run-in window before intervention, make reminder content match the phase. Baseline reminders should prompt baseline logging or context capture, not intervention instructions.
+- First-week support automation instructions must tell the scheduled assistant to read `vault-cli experiment show <id> --format json`, `vault-cli commons protocol show <key-or-route> --format json`, and `vault-cli experiment progress <id> --as-of <date> --format json` before sending.
+- Skip sending if the experiment is inactive, the user declined or cancelled reminders, the scheduled session or log is already complete, the saved plan changed, or the first-week support window has ended.
+- Keep first-week reminder copy short and non-pressuring. Include only what matters for that day: the planned action or baseline log, the safety stop rule when relevant, and what to log.
+- After scheduling, tell the user the reminder cadence, dates/times, and that they can cancel or move the reminders.
 
 ## Protocol resolution
 
@@ -93,10 +107,12 @@ Match the user's energy. Brief answers deserve brief follow-ups. Never restate i
 - Outcomes: `vault-cli experiment outcome analyze <id> --format json`, persist with `vault-cli experiment outcome write <id> --format json`.
 - Automations: `vault-cli automation save <title> --instructions "<text>" --schedule-kind <kind> --channel <channel>`. Missed-log checks are neutral, at most once per planned session, easy to decline.
 - First-session prep reminders: use `vault-cli automation save <title> --slug experiment-first-prep-<experiment-slug>-<YYYY-MM-DD> --instructions "<scheduled instructions>" --schedule-kind at --schedule-at <ISO timestamp> --channel <channel> ...` after the run exists. The stable slug lets rescheduling update the same automation instead of creating duplicates. Use generic tags by default: `assistant`, `scheduled`, `experiment`, and `first-session-prep`. Add protocol-specific tags only when they are necessary and non-sensitive.
+- First-week habit support reminders: use bounded one-shot `automation save` calls with slugs such as `experiment-week-one-<experiment-slug>-<YYYY-MM-DD>` after the run exists. The stable slug lets rescheduling update the same automation instead of creating duplicates. Use generic tags by default: `assistant`, `scheduled`, `experiment`, and `first-week-support`. Add protocol-specific tags only when they are necessary and non-sensitive.
 - Include the current route fields, not just `--channel`: pass `--delivery-target`, `--identity-id`, `--participant-id`, and/or `--thread-id` when they are available from the current conversation route. For iMessage, use the internal channel `linq` and preserve the bound participant/thread route fields.
 - Do not create a scheduled first-session prep reminder with only a bare channel when no deliverable target or binding route is available. Set up the experiment without the prep reminder, and tell the user they can give a channel and time later.
 - First-session prep automation instructions must tell the scheduled assistant to read `vault-cli experiment show <id> --format json`, `vault-cli commons protocol show <key-or-route> --format json`, and `vault-cli experiment progress <id> --as-of <firstSessionDate> --format json` before sending. The instructions should skip if the experiment is inactive, completed intervention sessions are already present, the reminder was cancelled or moved, or the saved plan no longer matches the scheduled first session.
 - First-session prep automation instructions must also include this outcome: "This is the user's first time doing this experiment. If sending, give a brief first-session walkthrough, not just a reminder." Tell the scheduled assistant to derive the walkthrough from `experimentOnboarding.planDefaults.firstSessionGuidance`, protocol steps or tips, stop conditions, `protocol.logFields`, compact tracking hints, and saved setup answers. Keep it short and do not dump the full protocol.
+- First-week support automation instructions must tell the scheduled assistant this is bounded early habit support, not a missed-log follow-up or weekly digest. The scheduled assistant should use direct experiment/protocol/progress reads, skip when the first-week support skip conditions apply, and send only a short reminder for that day.
 
 ## Stop rules
 

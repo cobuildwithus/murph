@@ -129,5 +129,15 @@ describe("@murphai/openclaw-plugin", () => {
     expect(skill).toContain('`vault-cli search query "<query>"`');
     expect(skill).toContain("Do not read raw revision hashes, field names, or test-plan ids aloud");
     expect(skill).toContain("Ask at most two questions per response");
+    expect(skill).toContain("bounded first-week support decision");
+    expect(skill).toContain("first 7 calendar days");
+    expect(skill).toContain("first 3-5 planned intervention sessions");
+    expect(skill).toContain("not indefinite recurring reminders");
+    expect(skill).toContain("first_week_support_status");
+    expect(skill).toContain("first_week_support_automation_slugs");
+    expect(skill).toContain("--setup-answer first_week_support_status=scheduled");
+    expect(skill).toContain("--setup-answer first_week_support_cadence=daily");
+    expect(skill).toContain("Scheduled first-session prep and first-week support reminders should read");
+    expect(skill).toContain("Before any other scheduled missed-log or weekly-digest decision");
   });
 });

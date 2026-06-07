@@ -578,7 +578,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'e3ea1bcccb8677a06c2b7b6123c400976c5574d7f2eef1d788f03bade50e3a13',
+      'b1e66e1e8fb1093d1df863fdcd8096dba196d4fe1a142dded1e22970b954933c',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -754,6 +754,7 @@ describe('assistant experiment onboarding guidance', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
     )
     expect(prompt).toContain('experiment-onboarding')
+    expect(prompt).toContain('bounded first-week habit support reminders')
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md',
     )
@@ -807,7 +808,7 @@ describe('assistant notification decision guidance', () => {
     )
   })
 
-  it('carves first-session prep automations out of deterministic followup due checks', () => {
+  it('carves onboarding support automations out of deterministic followup due checks', () => {
     const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput({
         assistantContextSnapshotPrompt:
@@ -816,7 +817,7 @@ describe('assistant notification decision guidance', () => {
     ).prompt
 
     expect(prompt).toContain(
-      'For experiment-related scheduled checks other than first-session prep, call `vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --format json` first.',
+      'For experiment-related scheduled checks other than first-session prep or first-week habit support, call `vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --format json` first.',
     )
     expect(prompt).toContain(
       'First-session prep automations are one-shot pre-session support, not missed-log or weekly-digest checks.',
@@ -836,7 +837,22 @@ describe('assistant notification decision guidance', () => {
     )
     expect(prompt).toContain('Do not only offer to walk the user through it.')
     expect(prompt).toContain(
-      'Default to skip for experiment notifications other than first-session prep unless the due check says `notify`',
+      'First-week habit support automations are bounded early support, not missed-log or weekly-digest checks.',
+    )
+    expect(prompt).toContain(
+      'For first-week support automations, do not call `experiment followup due`',
+    )
+    expect(prompt).toContain(
+      'read `vault-cli experiment show <id> --format json`, `vault-cli commons protocol show <key-or-route> --format json`, and `vault-cli experiment progress <id> --as-of <date> --format json` directly',
+    )
+    expect(prompt).toContain(
+      'skip if the experiment is inactive, the user declined or cancelled reminders, the scheduled session or log is already complete, the saved plan changed, or the first-week support window has ended',
+    )
+    expect(prompt).toContain(
+      'Send only a short reminder for that day: the planned action or baseline log, the safety stop rule when relevant, and what to log.',
+    )
+    expect(prompt).toContain(
+      'Default to skip for experiment notifications other than first-session prep or first-week habit support unless the due check says `notify`',
     )
   })
 })

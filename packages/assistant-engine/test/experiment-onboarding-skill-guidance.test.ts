@@ -49,4 +49,42 @@ describe('experiment onboarding skill guidance', () => {
     )
     expect(raw).toContain('Keep it short and do not dump the full protocol.')
   })
+
+  it('requires bounded first-week habit support reminder guidance', async () => {
+    const raw = await readExperimentOnboardingSkill()
+
+    expect(raw).toContain(
+      'First-session prep and first-week habit support are separate.',
+    )
+    expect(raw).toContain(
+      'first-week habit support is a required reminder decision',
+    )
+    expect(raw).toContain('first 7 calendar days')
+    expect(raw).toContain('first 3-5 planned intervention sessions')
+    expect(raw).toContain(
+      'Do not create indefinite recurring reminders for first-week support.',
+    )
+    expect(raw).toContain('Prefer bounded one-shot')
+    expect(raw).toContain(
+      'experiment-week-one-<experiment-slug>-<YYYY-MM-DD>',
+    )
+    expect(raw).toContain('first_week_support_status')
+    expect(raw).toContain('first_week_support_cadence')
+    expect(raw).toContain('first_week_support_window')
+    expect(raw).toContain('first_week_support_automation_slugs')
+    expect(raw).toContain('first_week_support_blocked_reason')
+    expect(raw).toContain(
+      '--setup-answer first_week_support_status=scheduled',
+    )
+    expect(raw).toContain('--setup-answer first_week_support_cadence=daily')
+    expect(raw).toContain(
+      'Skip sending if the experiment is inactive, the user declined or cancelled reminders',
+    )
+    expect(raw).toContain(
+      'First-week support automation instructions must tell the scheduled assistant this is bounded early habit support',
+    )
+    expect(raw).toContain(
+      'read `vault-cli experiment show <id> --format json`, `vault-cli commons protocol show <key-or-route> --format json`, and `vault-cli experiment progress <id> --as-of <date> --format json` before sending',
+    )
+  })
 })

@@ -1,6 +1,6 @@
 # Experiment Onboarding
 
-Last verified: 2026-05-08
+Last verified: 2026-06-07
 
 ## Current State
 
@@ -58,7 +58,12 @@ Before Murph writes a private run, it should already know the exact Health Commo
 
 - Reminders are experiment support that belong in the confirmed plan, not hidden compliance machinery.
 - Once a user agrees to a run plan with assistant support, missed-log checks may be default-on and opt-out.
-- Scheduled checks should call deterministic product logic, such as `vault-cli experiment followup due <id> --kind missed-log --format json`, before deciding whether an outbound message is due.
+- First-session prep and first-week habit support are explicit onboarding support paths, separate from missed-log checks and weekly summaries.
+- First-session prep should resolve how the user will know what to do the first time, either through the current reply or a one-shot prep reminder when the first intervention session time and a deliverable route are known.
+- Bounded first-week habit support is a required onboarding decision: schedule it, record that the user declined it, or record the concrete route/cadence blocker. Default the support window to the first 7 calendar days of the experiment, or the first 3-5 planned intervention sessions for non-daily protocols.
+- First-week support should use bounded one-shot reminders by default. Do not create indefinite recurring first-week support reminders unless the product surface has a reliable end condition or the user explicitly asks for ongoing reminders beyond the first week.
+- Scheduled first-session prep and first-week support decisions should read the saved experiment, protocol, and progress directly before sending. They should skip if the experiment is inactive, reminders were declined or cancelled, the scheduled work is already complete, the saved plan changed, or the bounded support window has ended.
+- Other scheduled experiment checks should call deterministic product logic, such as `vault-cli experiment followup due <id> --kind missed-log --format json`, before deciding whether an outbound message is due.
 - Missed-log follow-up should be neutral, at most once per planned session, and easy to decline.
 - Weekly summaries are preferred over daily coaching by default.
 
@@ -71,7 +76,8 @@ The assistant may sound conversational, but the durable product contract is the 
 - safety outcome
 - selected setup slots
 - final run plan
-- optional reminder policy
+- first-session prep and bounded first-week support decision
+- optional missed-log or weekly-summary reminder policy
 
 Chat is the interface. The onboarding block and the saved run are the source of truth.
 
