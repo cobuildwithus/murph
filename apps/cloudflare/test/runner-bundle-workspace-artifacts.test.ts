@@ -253,6 +253,7 @@ describe("runner bundle runtime artifact staging", () => {
     const binDir = path.join(rootDir, "bin");
     const packageDir = path.join(rootDir, "packages", "contracts");
     const tarballsDir = path.join(rootDir, "tarballs");
+    const npmLogPath = path.join(rootDir, "npm.log");
     const pnpmLogPath = path.join(rootDir, "pnpm.log");
 
     temporaryDirectories.push(rootDir);
@@ -279,9 +280,11 @@ describe("runner bundle runtime artifact staging", () => {
       [
         "#!/usr/bin/env node",
         "import { appendFileSync } from 'node:fs';",
-        "const logPath = process.env.MURPH_FAKE_PNPM_LOG;",
-        "if (!logPath) process.exit(2);",
+        `const logPath = ${JSON.stringify(pnpmLogPath)};`,
         "appendFileSync(logPath, `${process.argv.slice(2).join(' ')}\\n`, 'utf8');",
+        "if (process.argv.slice(2).join(' ') === 'store path --silent') {",
+        `  console.log(${JSON.stringify(path.join(rootDir, "pnpm-store"))});`,
+        "}",
       ].join("\n"),
       "utf8",
     );
@@ -289,9 +292,11 @@ describe("runner bundle runtime artifact staging", () => {
       path.join(binDir, "npm"),
       [
         "#!/usr/bin/env node",
-        "import { mkdirSync, writeFileSync } from 'node:fs';",
+        "import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';",
         "import path from 'node:path';",
         "const args = process.argv.slice(2);",
+        `const logPath = ${JSON.stringify(npmLogPath)};`,
+        "appendFileSync(logPath, `${args.join(' ')}\\n`, 'utf8');",
         "const destinationIndex = args.indexOf('--pack-destination');",
         "const destination = destinationIndex >= 0 ? args[destinationIndex + 1] : null;",
         "if (!destination) process.exit(2);",
@@ -304,7 +309,6 @@ describe("runner bundle runtime artifact staging", () => {
     await chmod(path.join(binDir, "npm"), 0o755);
 
     vi.stubEnv("PATH", `${binDir}${path.delimiter}${process.env.PATH ?? ""}`);
-    vi.stubEnv("MURPH_FAKE_PNPM_LOG", pnpmLogPath);
 
     const tarballs = await packWorkspacePackageArtifacts(
       ["@murphai/contracts"],
@@ -320,9 +324,12 @@ describe("runner bundle runtime artifact staging", () => {
       throw new Error("Contracts tarball was not packed.");
     }
 
-    await expect(readFile(pnpmLogPath, "utf8")).rejects.toMatchObject({
-      code: "ENOENT",
-    });
+    const pnpmLog = await readOptionalText(pnpmLogPath);
+    expect(["", "store path --silent\n"]).toContain(pnpmLog);
+    await expect(readFile(npmLogPath, "utf8")).resolves.toBe(
+      "pack --ignore-scripts --silent --pack-destination "
+        + `${path.join(tarballsDir, "01-_murphai_contracts")}\n`,
+    );
   });
 
   it("includes the workspace package name when npm pack fails", async () => {
@@ -753,6 +760,23 @@ describe("runner bundle runtime artifact staging", () => {
     expect(entries).toContain("package/package.json");
   });
 });
+
+async function readOptionalText(filePath: string): Promise<string> {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch (error) {
+    if (
+      typeof error === "object"
+      && error !== null
+      && "code" in error
+      && error.code === "ENOENT"
+    ) {
+      return "";
+    }
+
+    throw error;
+  }
+}
 
 async function writeMinimalHealthCommonsRuntimeArtifacts(generatedDir: string): Promise<void> {
   await mkdir(generatedDir, { recursive: true });
