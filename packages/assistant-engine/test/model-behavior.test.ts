@@ -133,7 +133,12 @@ describe('assistant local PDF evidence guidance', () => {
       'List only these supported choices when offering examples',
     )
     expect(prompt).toContain(
-      'do not proactively name unsupported sources as caveats',
+      'During the onboarding wearable/app checkpoint, omit examples by default',
+    )
+    expect(prompt).toContain('name at most eight supported choices')
+    expect(prompt).toContain('do not show the full provider list')
+    expect(prompt).toContain(
+      'Do not add generic consumer-health app examples or proactively name unsupported sources as caveats',
     )
     expect(prompt).toContain(
       'If the user asks for a wearable/source not in this list, say it is not supported yet',
@@ -891,6 +896,11 @@ describe('assistant Murph onboarding guidance', () => {
     expect(prompt).toContain(
       'List only these supported choices when offering examples',
     )
+    expect(prompt).toContain(
+      'During the onboarding wearable/app checkpoint, omit examples by default',
+    )
+    expect(prompt).toContain('name at most eight supported choices')
+    expect(prompt).toContain('do not show the full provider list')
     expect(prompt).not.toContain('roughly 3-4 short assistant messages')
     expect(prompt).not.toContain(
       'Do not compress the whole orientation into one "send me things" reply',
