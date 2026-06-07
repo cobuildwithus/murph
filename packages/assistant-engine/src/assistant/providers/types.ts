@@ -1,6 +1,7 @@
 import type {
   AssistantApprovalPolicy,
   AssistantChatProvider,
+  AssistantResponseMedia,
   AssistantSandbox,
   AssistantSessionBinding,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -172,6 +173,7 @@ export interface AssistantProviderTurnExecutionResult {
   codexThreadId: string | null
   rawEvents: unknown[]
   response: string
+  responseMedia?: readonly AssistantResponseMedia[] | null
   stderr: string
   stdout: string
   usage?: AssistantProviderUsage | null
