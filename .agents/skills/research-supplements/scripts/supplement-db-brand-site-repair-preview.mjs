@@ -12,7 +12,13 @@ import {
 
 const DEFAULT_BATCH_SIZE = 400;
 const DEFAULT_OUTPUT_DIR = "/tmp/murph-supplement-audit";
+const MAX_READ_ATTEMPTS = 4;
 const MAX_PARSED_ROWS = 150;
+const AMOUNT_VALUE_PATTERN = String.raw`(?<![\d,./])(?:<\s*)?\d(?:[\d,./]*)(?:\.\d+)?(?:\s*x\s*10\^?\d+)?(?:\s*\([^)]+\))?`;
+const UNIT_PATTERN = String.raw`mcg\s+RAE|mcg\s+DFE|(?:µ|μ)g\s+RAE|(?:µ|μ)g\s+DFE|mg\s+NE|billion\s+CFUs?|million\s+CFUs?|CFUs?|IU|mcgt|mgt|mlt|mca|mg|mcg|(?:µ|μ)g|gt|g(?!\.[A-Za-z])|ml|kcal|calories?`;
+const AMOUNT_WITH_UNIT_PATTERN = String.raw`${AMOUNT_VALUE_PATTERN}\s*(?:${UNIT_PATTERN})`;
+const SERVING_AMOUNT_PATTERN = String.raw`(?:about\s*)?(?:\d+(?:\.\d+)?|\d+\s*/\s*\d+|one|two|three|four|five|six|seven|eight|nine|ten)`;
+const SERVING_FORM_PATTERN = String.raw`(?:(?:quick\s+release|vegetarian|veggie|vegetable|coated|chewable)\s+)*(?:g|mg|mcg|mL|ml|fl\.?\s*oz|oz|tsp|teaspoons?|tbsp|tablespoons?|scoops?|capsules?(?:\(s\))?|tablets?|caplets?|softgels?|gummies?|chews?|chewables?|wafers?|lozenges?|packets?|stick\s+packs?|VegCaps?|servings?|drops?|pumps?|bars?|sachets?)`;
 
 function parseArgs(argv) {
   const options = {
@@ -100,7 +106,31 @@ from (
   offset ${offset}
 ) rows;
 `;
-  return JSON.parse(extractSingleColumn(runPsql(dbUrl, sql)));
+  return JSON.parse(extractSingleColumn(runPsqlWithRetry(dbUrl, sql, offset)));
+}
+
+function runPsqlWithRetry(dbUrl, sql, offset) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= MAX_READ_ATTEMPTS; attempt += 1) {
+    try {
+      return runPsql(dbUrl, sql);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= MAX_READ_ATTEMPTS || !isTransientPsqlReadError(error)) break;
+      console.error(`Transient supplement DB read failure at offset ${offset}; retrying ${attempt}/${MAX_READ_ATTEMPTS - 1}.`);
+      sleepSync(250 * attempt);
+    }
+  }
+  throw lastError;
+}
+
+function isTransientPsqlReadError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /SSL SYSCALL error|EOF detected|server closed the connection unexpectedly|connection .* failed|timeout expired/iu.test(message);
+}
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function extractSingleColumn(psqlOutput) {
@@ -125,8 +155,11 @@ function hasArray(value) {
 
 function repairPreviewForRow(row) {
   const label = row.label && typeof row.label === "object" && !Array.isArray(row.label) ? row.label : {};
-  const parsedServingSizes = hasArray(label.servingSizes) ? [] : extractServingSizes(label);
   const parsedIngredientRows = hasArray(label.ingredientRows) ? [] : extractIngredientRows(label);
+  const parsedServingSizes = hasArray(label.servingSizes) ? [] : extractServingSizes(label, {
+    productName: row.name,
+    ingredientRows: parsedIngredientRows,
+  });
   const proposedLabel = {
     ...label,
     ...(parsedServingSizes.length > 0 ? { servingSizes: parsedServingSizes } : {}),
@@ -145,9 +178,17 @@ function repairPreviewForRow(row) {
     dataOriginUrl: row.dataOriginUrl,
     label: proposedLabel,
   });
+  const parserBlockers = parserBlockersForRow(label, parsedIngredientRows, parsedServingSizes);
+  const currentParserStatus = parserStatus(label, parsedIngredientRows, parsedServingSizes);
   const removableFieldCandidates = findRemovableFieldCandidates(label, {
-    hasParsedIngredientRows: parsedIngredientRows.length > 0 || hasArray(label.ingredientRows),
-    hasParsedServingSizes: parsedServingSizes.length > 0 || hasArray(label.servingSizes),
+    allowRawEvidenceRemoval: currentParserStatus === "structured_ready" && parserBlockers.length === 0,
+  });
+  const parsedIngredientRowSources = uniqueStrings(parsedIngredientRows.map((ingredientRow) => ingredientRow.source));
+  const evidenceRecoveryHint = evidenceRecoveryHintForRow(label, {
+    parserStatus: currentParserStatus,
+    parserBlockers,
+    parsedIngredientRows: parsedIngredientRows.length,
+    parsedServingSizes: parsedServingSizes.length,
   });
 
   return {
@@ -162,32 +203,109 @@ function repairPreviewForRow(row) {
     parsedIngredientRows: parsedIngredientRows.length,
     existingServingSizes: Array.isArray(label.servingSizes) ? label.servingSizes.length : 0,
     parsedServingSizes: parsedServingSizes.length,
-    parserStatus: parserStatus(label, parsedIngredientRows, parsedServingSizes),
+    parserStatus: currentParserStatus,
+    parserBlockers,
+    evidenceRecoveryHint,
+    parsedIngredientRowSources,
     removableFieldCandidates,
     dataOriginUrl: row.dataOriginUrl,
     proposedSearchTextPreview: proposedSearchText.slice(0, 500),
   };
 }
 
+function evidenceRecoveryHintForRow(label, state) {
+  if (state.parserStatus === "structured_ready") return "structured_ready";
+  if (state.parserBlockers.includes("page_body_contamination") || state.parserBlockers.includes("facts_panel_too_long")) {
+    return "official_refetch_page_body";
+  }
+  if (state.parserStatus === "needs_better_parser") return "official_refetch_or_ocr";
+  if (state.parserBlockers.includes("fallback_amount_pattern_rows")) return "manual_review_fallback_rows";
+  if (state.parserBlockers.includes("missing_ingredient_rows") && state.parsedServingSizes > 0) {
+    return countPotentialAmountMentions(label) > 1 ? "parser_or_manual_review" : "official_refetch_or_ocr";
+  }
+  if (state.parserBlockers.includes("missing_serving_sizes") && state.parsedIngredientRows > 0) {
+    return "parser_serving_size_review";
+  }
+  return "parser_or_manual_review";
+}
+
 function parserStatus(label, ingredientRows, servingSizes) {
-  const hasExistingRows = hasArray(label.ingredientRows);
-  const hasExistingServing = hasArray(label.servingSizes);
+  const existingIngredientRows = existingIngredientRowsState(label);
+  const existingServingSizes = existingServingSizesState(label);
+  const hasExistingRows = existingIngredientRows.validRows.length > 0 && existingIngredientRows.invalidRows.length === 0;
+  const hasExistingServing = existingServingSizes.validServingSizes.length > 0 && existingServingSizes.invalidServingSizes.length === 0;
   const parsedRowsAreCompleteEnough = hasHighConfidenceParsedIngredientRows(label, ingredientRows);
   if ((hasExistingRows || parsedRowsAreCompleteEnough) && (hasExistingServing || servingSizes.length > 0)) {
     return "structured_ready";
   }
-  if (hasExistingRows || ingredientRows.length > 0 || servingSizes.length > 0) return "partial_parse";
+  if (existingIngredientRows.validRows.length > 0 || ingredientRows.length > 0 || existingServingSizes.validServingSizes.length > 0 || servingSizes.length > 0) {
+    return "partial_parse";
+  }
   return "needs_better_parser";
+}
+
+function parserBlockersForRow(label, ingredientRows, servingSizes) {
+  const blockers = [];
+  const existingIngredientRows = existingIngredientRowsState(label);
+  const existingServingSizes = existingServingSizesState(label);
+  if (existingIngredientRows.invalidRows.length > 0) blockers.push("invalid_existing_ingredient_rows");
+  if (existingServingSizes.invalidServingSizes.length > 0) blockers.push("invalid_existing_serving_sizes");
+  if (existingIngredientRows.validRows.length === 0 && ingredientRows.length === 0) blockers.push("missing_ingredient_rows");
+  if (existingServingSizes.validServingSizes.length === 0 && servingSizes.length === 0) blockers.push("missing_serving_sizes");
+  if (hasPageBodyContamination(label)) blockers.push("page_body_contamination");
+  if (hasStackedTableContinuationRisk(label) && !hasStrongParsedTableRows(ingredientRows, servingSizes)) {
+    blockers.push("stacked_table_continuation_risk");
+  }
+  if (maxFactsPanelLength(label) > 6000) blockers.push("facts_panel_too_long");
+  if (ingredientRows.some((row) => !isUsefulIngredientRow(row))) blockers.push("invalid_parsed_ingredient_row");
+  if (ingredientRows.some((row) => row.source === "factsText_amount_pattern")) blockers.push("fallback_amount_pattern_rows");
+  return uniqueStrings(blockers);
+}
+
+function existingIngredientRowsState(label) {
+  if (!Array.isArray(label.ingredientRows)) return { validRows: [], invalidRows: [] };
+  const validRows = [];
+  const invalidRows = [];
+  for (const row of label.ingredientRows) {
+    if (isUsefulIngredientRow(row)) {
+      validRows.push(row);
+    } else {
+      invalidRows.push(row);
+    }
+  }
+  return { validRows, invalidRows };
+}
+
+function existingServingSizesState(label) {
+  if (!Array.isArray(label.servingSizes)) return { validServingSizes: [], invalidServingSizes: [] };
+  const validServingSizes = [];
+  const invalidServingSizes = [];
+  for (const servingSize of label.servingSizes) {
+    if (isUsefulServingSize(servingSize)) {
+      validServingSizes.push(servingSize);
+    } else {
+      invalidServingSizes.push(servingSize);
+    }
+  }
+  return { validServingSizes, invalidServingSizes };
 }
 
 function hasHighConfidenceParsedIngredientRows(label, rows) {
   if (rows.length === 0) return false;
   if (hasPageBodyContamination(label)) return false;
+  if (hasStackedTableContinuationRisk(label) && !hasStrongParsedTableRows(rows)) return false;
+  if (maxFactsPanelLength(label) > 6000) return false;
   if (rows.some((row) => !isUsefulIngredientRow(row))) return false;
 
   const amountPatternRows = rows.filter((row) => row.source === "factsText_amount_pattern");
   if (amountPatternRows.length === 0) return true;
   return false;
+}
+
+function hasStrongParsedTableRows(rows, servingSizes = []) {
+  return rows.length >= 2
+    && rows.every((row) => row.source !== "factsText_amount_pattern" && isUsefulIngredientRow(row))
+    && (servingSizes.length === 0 || servingSizes.every((servingSize) => cleanValue(servingSize?.text).length > 0));
 }
 
 function countPotentialAmountMentions(label) {
@@ -200,14 +318,11 @@ function countPotentialAmountMentions(label) {
   return count;
 }
 
-function maxFactsPanelLength(label) {
-  return Math.max(0, ...labelTexts(label).map((text) => factsPanelText(text).length));
-}
-
 function hasPageBodyContamination(label) {
   return labelTexts(label).some((text) => {
-    const lowered = text.toLowerCase();
-    if (factsPanelText(text).length <= 1200) return false;
+    const factsPanel = factsPanelText(text);
+    const lowered = factsPanel.toLowerCase();
+    if (factsPanel.length <= 1200) return false;
     return [
       "add to cart",
       "buy now",
@@ -223,30 +338,118 @@ function hasPageBodyContamination(label) {
   });
 }
 
+function maxFactsPanelLength(label) {
+  return Math.max(0, ...labelTexts(label).map((text) => factsPanelText(text).length));
+}
+
+function hasStackedTableContinuationRisk(label) {
+  return labelTexts(label).some((text) => {
+    const lines = factsPanelText(text)
+      .split(/\n+/u)
+      .map(cleanValue)
+      .filter(Boolean);
+    for (let index = 0; index < lines.length - 1; index += 1) {
+      const line = lines[index];
+      if (isHeaderText(line) || isFootnoteText(line) || isDailyValueText(line) || parseStandaloneAmount(line)) continue;
+      if (!parseStandaloneAmount(lines[index + 1])) continue;
+      if (/^\(/u.test(line) && hasPreviousStackedNameLine(lines, index)) continue;
+      if (/^(?:as\b|from\b|fruiting\s+body\b|extract\b|\()/iu.test(line)) return true;
+      if (/^[a-z]/u.test(line) && hasPreviousStackedNameLine(lines, index)) continue;
+      if (/^[a-z]/u.test(line) && !isAllowedLowercaseIngredientName(line)) return true;
+      if (new RegExp(String.raw`\b${AMOUNT_WITH_UNIT_PATTERN}\b`, "iu").test(line)) return true;
+    }
+    return false;
+  });
+}
+
+function hasPreviousStackedNameLine(lines, index) {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const line = cleanValue(lines[cursor]);
+    if (!line) continue;
+    if (isHeaderText(line) || isFootnoteText(line) || isDailyValueText(line)) continue;
+    if (parseStandaloneAmount(line)) return false;
+    return Boolean(cleanIngredientName(line));
+  }
+  return false;
+}
+
 function findRemovableFieldCandidates(label, state) {
   const candidates = [];
+  if (!state.allowRawEvidenceRemoval) return candidates;
   if (typeof label.bodyText === "string" && label.bodyText.trim().length > 0) {
     candidates.push("bodyText");
   }
   if (typeof label.rawPageText === "string" && label.rawPageText.trim().length > 0) {
     candidates.push("rawPageText");
   }
-  if (state.hasParsedIngredientRows && state.hasParsedServingSizes && hasArray(label.allProductFactsText)) {
+  if (hasArray(label.allProductFactsText)) {
     candidates.push("allProductFactsText");
   }
   return candidates;
 }
 
-function extractServingSizes(label) {
+function extractServingSizes(label, context = {}) {
   const servingSizes = [];
+  for (const servingSize of extractStructuredServingSizes(label)) addServingSizeCandidate(servingSizes, servingSize);
+  for (const value of textValues(label.servingSize)) {
+    addServingSizeCandidate(servingSizes, value);
+  }
   for (const text of labelTexts(label)) {
-    const pattern = /\bServing Size\s*:?\s*([^|;\n]+?)(?=\s+Servings?\s+Per\s+Container|\s+Amount\s+Per\s+Serving|\s+Calories\b|\s+%?\s*Daily\s+Value\b|$)/giu;
+    const boundedServingPattern = /\bServings?\s+Size\s*:?\s*((?:about\s*)?(?:\d+(?:\.\d+)?|\d+\s*\/\s*\d+|one|two|three|four|five|six)\s*(?:(?:quick\s+release|vegetarian|veggie|coated|chewable)\s+)?(?:g|mg|mcg|mL|ml|fl oz|oz|tsp|teaspoons?|tbsp|tablespoons?|scoops?|capsules?|tablets?|caplets?|softgels?|gummies?|chews?|wafers?|lozenges?|packets?|stick packs?|VegCaps?)(?:\s*\([^)]{1,70}\))?)/giu;
+    for (const match of text.matchAll(boundedServingPattern)) {
+      addServingSizeCandidate(servingSizes, match[1]);
+    }
+    const pattern = /\bServings?\s+Size\s*:?\s*([^|;\n]+?)(?=\s+Servings?\s*(?:Per\s+Container)?\s*:|\s+Servings?\s+Per\s+Container|\s+Amount\s+Per\s+Serving|\s+Calories\b|\s+%?\s*Daily\s+Value\b|$)/giu;
     for (const match of text.matchAll(pattern)) {
-      const value = cleanValue(match[1]);
-      if (value && value.length <= 120) servingSizes.push(value);
+      addServingSizeCandidate(servingSizes, match[1]);
+    }
+    const chineseServingPattern = /每一份量\s*([^/\n]+)/giu;
+    for (const match of text.matchAll(chineseServingPattern)) {
+      addServingSizeCandidate(servingSizes, match[1]);
+    }
+    const amountPerCountPattern = /\bAmount\s+per\s+((?!(?:Serving|Capsule|Tablet|Softgel|VegCap|Scoop|Gummy|Gummies|Chew|Chewable|Lozenge)\b)(?:\d|one|two|three|four|five|six|seven|eight|nine|ten)\b[^|;\n]+?)(?=\s+%?\s*Daily\s+Value\b|\s+%DV\b)/giu;
+    for (const match of text.matchAll(amountPerCountPattern)) {
+      addServingSizeCandidate(servingSizes, match[1]);
+    }
+    const amountPerFormPattern = /\bAmount\s+Per\s+(Capsule|Tablet|Softgel|VegCap|Scoop|Gummy|Gummies|Chew|Chewable|Lozenge)\b/giu;
+    for (const match of text.matchAll(amountPerFormPattern)) {
+      addServingSizeCandidate(servingSizes, `1 ${match[1]}`);
     }
   }
+  for (const servingSize of inferServingSizesFromProductName(context.productName, context.ingredientRows)) {
+    addServingSizeCandidate(servingSizes, servingSize);
+  }
   return uniqueStrings(servingSizes).map((text) => ({ text, source: "factsText" })).slice(0, 8);
+}
+
+function addServingSizeCandidate(servingSizes, value) {
+  if (!isUsefulServingSize(value)) return;
+  servingSizes.push(cleanServingSize(typeof value === "string" ? value : value?.text));
+}
+
+function extractStructuredServingSizes(label) {
+  const servingSizes = [];
+  const preparedLists = label.rawTargetNutritionFacts?.value_prepared_list;
+  if (!Array.isArray(preparedLists)) return servingSizes;
+  for (const preparedList of preparedLists) {
+    const description = cleanValue(preparedList?.description);
+    if (/^(?:Amount\s+)?Per\s+Serving$/iu.test(description)) {
+      servingSizes.push("1 serving");
+    }
+  }
+  return servingSizes;
+}
+
+function inferServingSizesFromProductName(productName, ingredientRows) {
+  if (!productName || !Array.isArray(ingredientRows) || ingredientRows.length !== 1) return [];
+  const row = ingredientRows[0];
+  if (!isUsefulIngredientRow(row) || row.source === "factsText_amount_pattern") return [];
+  const match = cleanValue(productName).match(/\b(\d+(?:\.\d+)?)\s*(mg|mcg|g|IU)\b.{0,60}\bPer\s+(Tablet|Caplet|Capsule|Softgel|Gummy|Drop|Wafer)\b/iu);
+  if (!match) return [];
+  if (cleanValue(match[1]) !== cleanValue(row.amount) || cleanValue(match[2]).toLowerCase() !== cleanValue(row.unit).toLowerCase()) {
+    return [];
+  }
+  return [`1 ${match[3]}`];
 }
 
 function extractIngredientRows(label) {
@@ -263,11 +466,26 @@ function extractIngredientRows(label) {
 
 function extractIngredientRowsFromStructured(label) {
   const rows = [];
-  for (const value of [label.ingredients, label.activeIngredients]) {
+  for (const value of [label.ingredients, label.activeIngredients, label.facts, label.factsRows]) {
     if (!Array.isArray(value)) continue;
     for (const entry of value) {
       const row = ingredientRowFromValue(entry, "structured_label_field");
       if (row) rows.push(row);
+    }
+  }
+  const targetPreparedLists = label.rawTargetNutritionFacts?.value_prepared_list;
+  if (Array.isArray(targetPreparedLists)) {
+    for (const preparedList of targetPreparedLists) {
+      if (!Array.isArray(preparedList?.nutrients)) continue;
+      for (const nutrient of preparedList.nutrients) {
+        const row = ingredientRowFromValue({
+          name: nutrient.name,
+          amount: nutrient.quantity,
+          unit: nutrient.unit_of_measurement,
+          dailyValue: nutrient.percentage ? `${nutrient.percentage}%` : "",
+        }, "structured_label_field");
+        if (row) rows.push(row);
+      }
     }
   }
   return dedupeIngredientRows(rows.filter(isUsefulIngredientRow));
@@ -278,11 +496,20 @@ function ingredientRowFromValue(value, source) {
     return ingredientRowFromTextSegment(value, source);
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const name = cleanValue(value.name ?? value.ingredient ?? value.nutrient ?? value.title);
+  const baseName = cleanValue(value.name ?? value.ingredient ?? value.nutrient ?? value.title);
+  const parentheses = cleanValue(value.parentheses);
+  const name = parentheses ? `${baseName} (${parentheses})` : baseName;
   if (!name) return null;
-  const amount = cleanValue(value.amount ?? value.quantity ?? value.value);
-  const unit = cleanValue(value.unit);
-  const dailyValue = cleanValue(value.dailyValue ?? value.dv ?? value.percentDailyValue);
+  let amount = cleanValue(value.amount ?? value.quantity ?? value.value);
+  let unit = cleanValue(value.unit);
+  if (amount && !unit) {
+    const parsedAmount = parseAmount(amount);
+    if (parsedAmount) {
+      amount = parsedAmount.amount;
+      unit = parsedAmount.unit;
+    }
+  }
+  const dailyValue = cleanValue(value.dailyValue ?? value.dv ?? value.percentDailyValue ?? value.dailyValuePercentage);
   return {
     name,
     ...(amount ? { amount } : {}),
@@ -301,18 +528,51 @@ function labelTexts(label) {
 }
 
 function textValues(value) {
-  if (typeof value === "string") return [value];
+  if (typeof value === "string") return parsedJsonTextValues(value);
   if (Array.isArray(value)) return value.flatMap(textValues);
   if (!value || typeof value !== "object") return [];
   return Object.values(value).flatMap(textValues);
 }
 
+function parsedJsonTextValues(value) {
+  const text = String(value);
+  const trimmed = text.trim();
+  if (!/^(?:\[|\{)/u.test(trimmed)) return [text];
+  try {
+    const parsed = JSON.parse(trimmed);
+    const values = textValues(parsed);
+    return values.length > 0 ? values : [text];
+  } catch {
+    return [text];
+  }
+}
+
 function extractIngredientRowsFromText(input) {
+  const parsedInputs = parsedJsonTextValues(input);
+  if (parsedInputs.length !== 1 || parsedInputs[0] !== input) {
+    return dedupeIngredientRows(parsedInputs.flatMap(extractIngredientRowsFromText).filter(isUsefulIngredientRow));
+  }
   const factsText = factsPanelText(input);
   if (!factsText) return [];
   const rows = [];
+  rows.push(...ingredientRowsByChineseFacts(input));
+  rows.push(...ingredientRowsByColonDelimited(factsText));
+  rows.push(...ingredientRowsByPipeDelimitedTable(input));
+  rows.push(...ingredientRowsByTransposedTable(input));
+  rows.push(...ingredientRowsByLeadingAmountTable(input));
+  rows.push(...ingredientRowsByNameAmountBlockTable(input));
+  rows.push(...ingredientRowsByInlineNameAmountBlock(input));
+  rows.push(...ingredientRowsBySupplementFactsLines(input));
+
   const lineCandidates = factsText
+    .replace(/\s+\+\s+Contains\b[^\n]*/giu, "")
     .replace(/\s+\|\s+/gu, " | ")
+    .replace(/[•·]/gu, "\n")
+    .replace(new RegExp(String.raw`(${AMOUNT_WITH_UNIT_PATTERN})(?:\s*[†‡*+])?,\s+`, "giu"), "$1\n")
+    .replace(/(\d[\d,]{0,6}%\*?|<\s*\d[\d,]{0,6}%\*?|[†‡*+])(?:\s*(?:Daily Value|DV)(?:\s*\([^)]*\))?\s+not\s+established\.?)?[."'“”]*\s+["'“”]?(?=[A-Z][A-Za-z0-9('"’®-])/giu, "$1\n")
+    .replace(new RegExp(String.raw`(${AMOUNT_WITH_UNIT_PATTERN})\s*[."'“”]*\s+["'“”]?(?=(?:Daily\s+Value|DV)\b)`, "giu"), "$1\n")
+    .replace(/\b((?:<\s*)?\d[\d,./]*(?:\.\d+)?(?:\s*\([^)]+\))?\s*(?:mcg\s+RAE|mcg\s+DFE|billion\s+CFU|million\s+CFU|CFU|IU|mg|mcg|g|ml|kcal|calories?))\s+(?=\b(?:alpha|beta|gamma)\b)/giu, "$1\n")
+    .replace(new RegExp(String.raw`(${AMOUNT_WITH_UNIT_PATTERN}(?:\s+(?:NE|RAE|DFE))?)\s+(?!(?:NE|RAE|DFE)\b)(?=[A-Z][A-Za-z(])`, "giu"), "$1\n")
     .split(/\n| {2,}|(?<=%)\s+(?=[A-Z][A-Za-z(])|(?<=\*\*)\s+(?=[A-Z][A-Za-z(])/u)
     .map(cleanValue)
     .filter(Boolean);
@@ -322,28 +582,35 @@ function extractIngredientRowsFromText(input) {
     if (row) rows.push(row);
   }
 
-  if (rows.length < 2) {
+  rows.push(...ingredientRowsByAmountBeforeNameTable(factsText));
+  rows.push(...ingredientRowsByStackedTable(input));
+
+  if (rows.length === 0) {
     rows.push(...ingredientRowsByAmountPattern(factsText));
   }
 
-  return dedupeIngredientRows(rows);
+  return dedupeIngredientRows(rows.filter(isUsefulIngredientRow));
 }
 
-function factsPanelText(input) {
+function factsPanelText(input, options = {}) {
   const cleaned = cleanText(input);
   const factsIndex = cleaned.search(/\b(Supplement|Nutrition)\s+Facts\b/iu);
   let text = factsIndex >= 0 ? cleaned.slice(factsIndex) : cleaned;
-  const startIndex = text.search(/\b(Amount\s+Per\s+Serving|%?\s*Daily\s+Value)\b/iu);
-  if (startIndex >= 0) text = text.slice(startIndex);
+  const startIndex = text.search(/(?:\bAmount\s+Per\s+%?\s*Daily\s+Serving\s+Value\b|\bAmount\s*(?:Per\s+\w+|\/\s*Serving)\b|%DV\b|%?\s*Daily\s+Value\b)/iu);
+  if (startIndex >= 0 && !options.preserveLeadingTableRows) text = text.slice(startIndex);
   const endIndex = text.search(/\b(Other Ingredients?|Directions?|Suggested Use|Warning|Caution|Contains:)\b/iu);
   if (endIndex > 20) text = text.slice(0, endIndex);
   return text;
 }
 
 function ingredientRowFromTextSegment(segment, source) {
-  const text = cleanValue(segment)
-    .replace(/^(Amount\s+Per\s+Serving|%?\s*Daily\s+Value)\s*/iu, "")
-    .replace(/^Supplement Facts\s*/iu, "");
+  const text = cleanValue(cleanValue(segment)
+    .replace(/\s+\+\s+Contains\b.*$/iu, "")
+    .replace(/\s+([†‡+*])\s+\1(?=\s+(?:Daily Value|DV)\b)/giu, " $1")
+    .replace(/^(?:Amount\s+Per\s+)?%?\s*Daily\s+Serving\s+Value\*?\s*/iu, "")
+    .replace(/^(?:(?:Amount\s+Per\s+Serving|%?\s*Daily\s+Value|%?\s*DV)[."'“”\s]*)+/iu, "")
+    .replace(/^(?:%?\s*DV|%?\s*Daily\s+Value)\s*,\s*/iu, "")
+    .replace(/^Supplement Facts\s*/iu, ""));
   if (!text || isHeaderText(text)) return null;
 
   const pipeParts = text.split("|").map(cleanValue).filter(Boolean);
@@ -362,32 +629,482 @@ function ingredientRowFromTextSegment(segment, source) {
     }
   }
 
-  const amountMatch = text.match(/^(.+?)\s+((?:<\s*)?\d[\d,./]*(?:\.\d+)?(?:\s*\([^)]+\))?)\s*(mcg\s+RAE|mcg\s+DFE|billion\s+CFU|million\s+CFU|CFU|IU|mg|mcg|g|ml|kcal|calories?)\b(?:\s+(\d{1,5}%|\*\*|†|‡))?$/iu);
+  const amountMatch = text.match(new RegExp(String.raw`^(.+?)\s+(${AMOUNT_VALUE_PATTERN})\s*(${UNIT_PATTERN})\b(?:\s+(?:NE|RAE|DFE))?(?:\s*\((\d[\d,]{0,6}%[†‡*+]?|<\s*\d[\d,]{0,6}%[†‡*+]?|\*{1,2}|†|‡|\+)\s*(?:DV|Daily Value)?\))?(?:\s*\([^)]+\))*(?:\s*(\d[\d,]{0,6}%[†‡*+]?|<\s*\d[\d,]{0,6}%[†‡*+]?|\*{1,2}|†|‡|\+))?(?:\s+[†‡*+])?(?:\s*(?:Daily Value|DV)(?:\s*\([^)]*\))?\s+not\s+established\.?)?[."'“”]*$`, "iu"));
   if (!amountMatch) return null;
   const name = cleanIngredientName(amountMatch[1]);
   if (!name) return null;
+  if (/^\(/u.test(name)) return null;
   return {
     name,
     amount: cleanValue(amountMatch[2]),
-    unit: cleanValue(amountMatch[3]),
-    ...(amountMatch[4] ? { dailyValue: cleanDailyValue(amountMatch[4]) } : {}),
+    unit: cleanParsedUnit(amountMatch[3]),
+    ...(amountMatch[4] || amountMatch[5] ? { dailyValue: cleanDailyValue(amountMatch[4] ?? amountMatch[5]) } : {}),
     source,
   };
+}
+
+function ingredientRowsBySupplementFactsLines(text) {
+  const factsText = factsPanelText(text, { preserveLeadingTableRows: true });
+  if (!/\bSupplement\s+Facts\b/iu.test(factsText) || !/\bServing\s+Size\b/iu.test(factsText)) return [];
+  const rows = [];
+  const lines = factsText
+    .split(/\n+/u)
+    .map(cleanValue)
+    .filter(Boolean);
+  for (const line of lines) {
+    if (isHeaderText(line) || isFootnoteText(line) || isDailyValueText(line)) continue;
+    if (/^Supplement\s+Facts$/iu.test(line)) continue;
+    if (/^Servings?\s+(?:Size|Per\s+Container)\b/iu.test(line)) continue;
+    if (line.length > 180) continue;
+    const normalizedLine = line.replace(/(\([^)]*\b(?:DV|Daily Value)\))\s*;.*$/iu, "$1");
+    const row = ingredientRowFromTextSegment(normalizedLine, "factsText");
+    if (row) rows.push(row);
+  }
+  return rows;
+}
+
+function ingredientRowsByChineseFacts(text) {
+  if (!/營養標示|其他成分含量/u.test(text)) return [];
+  const rows = [];
+  const lines = cleanText(text)
+    .split(/\n+/u)
+    .map(cleanValue)
+    .filter(Boolean);
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    const name = cleanChineseIngredientName(lines[index]);
+    if (!name) continue;
+    const amount = parseChineseAmount(lines[index + 1]);
+    if (!amount) continue;
+    const dailyValueLine = cleanValue(lines[index + 2]);
+    rows.push({
+      name,
+      amount: amount.amount,
+      unit: amount.unit,
+      ...(isDailyValueText(dailyValueLine) ? { dailyValue: cleanDailyValue(dailyValueLine) } : {}),
+      source: "factsText_table",
+    });
+  }
+  return rows;
+}
+
+function ingredientRowsByPipeDelimitedTable(text) {
+  if (!String(text).includes("|")) return [];
+  const rows = [];
+  const cells = factsPanelText(text, { preserveLeadingTableRows: true })
+    .split(/\n+/u)
+    .flatMap((line) => line.split("|"))
+    .map(cleanValue)
+    .filter(Boolean);
+  let pendingNameCells = [];
+  for (let index = 0; index < cells.length; index += 1) {
+    const cell = cells[index];
+    if (isHeaderText(cell) || isFootnoteText(cell)) {
+      pendingNameCells = [];
+      continue;
+    }
+
+    const sameCellRow = ingredientRowFromTextSegment(cell, "factsText_pipe");
+    if (sameCellRow) {
+      const nextCell = cleanValue(cells[index + 1]);
+      if (isDailyValueText(nextCell)) {
+        sameCellRow.dailyValue = cleanDailyValue(nextCell);
+        index += 1;
+      }
+      rows.push(sameCellRow);
+      pendingNameCells = [];
+      continue;
+    }
+
+    const amount = parseStandaloneAmount(cell);
+    if (!amount) {
+      if (!isDailyValueText(cell) && !isBareNumberText(cell)) pendingNameCells.push(cell);
+      continue;
+    }
+
+    if (pendingNameCells.length === 0) continue;
+    const name = cleanIngredientName(pendingNameCells.join(" "));
+    pendingNameCells = [];
+    if (!name) continue;
+    const nextCell = cleanValue(cells[index + 1]);
+    rows.push({
+      name,
+      amount: amount.amount,
+      unit: amount.unit,
+      ...(amount.dailyValue ? { dailyValue: amount.dailyValue } : {}),
+      ...(isDailyValueText(nextCell) && !amount.dailyValue ? { dailyValue: cleanDailyValue(nextCell) } : {}),
+      source: "factsText_pipe",
+    });
+    if (isDailyValueText(nextCell) && !amount.dailyValue) index += 1;
+  }
+  return rows;
+}
+
+function ingredientRowsByTransposedTable(text) {
+  const lines = factsPanelText(text, { preserveLeadingTableRows: true })
+    .split(/\n+/u)
+    .map(cleanValue)
+    .filter(Boolean);
+  const amountHeaderIndex = lines.findIndex((line) => /Amount\s+Per/iu.test(line));
+  if (amountHeaderIndex < 1) return [];
+
+  const nameLines = compactTransposedNameLines(lines.slice(0, amountHeaderIndex));
+  if (nameLines.length === 0 || nameLines.length > 40) return [];
+
+  const amountEntries = [];
+  const dailyValues = [];
+  let amountBlockStarted = false;
+  for (const line of lines.slice(amountHeaderIndex + 1)) {
+    if (isHeaderText(line) || isFootnoteText(line)) continue;
+    const amount = parseStandaloneAmount(line);
+    if (amount) {
+      amountEntries.push(amount);
+      amountBlockStarted = true;
+      continue;
+    }
+    if (isBareNumberText(line) && nameLines[amountEntries.length]?.toLowerCase() === "calories") {
+      amountEntries.push({ amount: cleanValue(line), unit: "calories" });
+      amountBlockStarted = true;
+      continue;
+    }
+    if (!amountBlockStarted && /^Value$/iu.test(line)) continue;
+    if (amountBlockStarted && isDailyValueText(line)) {
+      dailyValues.push(cleanDailyValue(line));
+      continue;
+    }
+    if (amountBlockStarted) break;
+  }
+
+  if (amountEntries.length === 0) return [];
+  const names = nameLines.length === amountEntries.length ? nameLines : nameLines.slice(-amountEntries.length);
+  if (names.length !== amountEntries.length) return [];
+
+  let dailyValueIndex = dailyValues.length === amountEntries.length ? 0 : dailyValues.length === amountEntries.length - 1 ? -1 : null;
+  return names.map((name, index) => {
+    const amount = amountEntries[index];
+    const dailyValue = amount.dailyValue ?? (
+      dailyValueIndex === null ? null : dailyValues[dailyValueIndex < 0 && index === 0 ? -1 : index + dailyValueIndex]
+    );
+    return {
+      name,
+      amount: amount.amount,
+      unit: amount.unit,
+      ...(dailyValue ? { dailyValue } : {}),
+      source: "factsText_table",
+    };
+  });
+}
+
+function ingredientRowsByLeadingAmountTable(text) {
+  const lines = factsPanelText(text, { preserveLeadingTableRows: true })
+    .split(/\n+/u)
+    .map(cleanValue)
+    .filter(Boolean);
+  const amountHeaderIndex = lines.findIndex((line) => /Amount\s+Per/iu.test(line));
+  if (amountHeaderIndex < 0) return [];
+
+  const amounts = [];
+  const dailyValues = [];
+  let index = amountHeaderIndex + 1;
+  for (; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^(?:Serving|Value|%?\s*Daily|%?\s*DV)$/iu.test(line) || isHeaderText(line)) continue;
+    const amount = parseStandaloneAmount(line);
+    if (amount) {
+      amounts.push(amount);
+      continue;
+    }
+    if (isDailyValueText(line)) {
+      dailyValues.push(cleanDailyValue(line));
+      continue;
+    }
+    if (amounts.length === 0 && cleanIngredientName(line)) return [];
+    if (amounts.length > 0) break;
+  }
+  if (amounts.length === 0 || amounts.length > 40) return [];
+
+  const names = [];
+  for (; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line || isFootnoteText(line)) break;
+    if (/^(?:Serving|Value|%?\s*Daily|%?\s*DV)$/iu.test(line) || isHeaderText(line) || isDailyValueText(line)) continue;
+    if (parseStandaloneAmount(line)) break;
+    if (/^(?:\(|\[from\b|as\b)/iu.test(line) && names.length > 0) {
+      names[names.length - 1] = cleanValue(`${names[names.length - 1]} ${line}`);
+      continue;
+    }
+    const name = cleanIngredientName(line);
+    if (name) names.push(name);
+    if (names.length >= amounts.length && !hasUnbalancedParentheses(names[names.length - 1] ?? "")) {
+      const nextLine = cleanValue(lines[index + 1]);
+      if (/^(?:\(|\[from\b|as\b)/iu.test(nextLine)) continue;
+      break;
+    }
+  }
+
+  if (names.length !== amounts.length) return [];
+  return names.map((name, rowIndex) => {
+    const amount = amounts[rowIndex];
+    const dailyValue = amount.dailyValue ?? dailyValues[rowIndex] ?? null;
+    return {
+      name,
+      amount: amount.amount,
+      unit: amount.unit,
+      ...(dailyValue ? { dailyValue } : {}),
+      source: "factsText_table",
+    };
+  });
+}
+
+function ingredientRowsByNameAmountBlockTable(text) {
+  const lines = factsPanelText(text, { preserveLeadingTableRows: true })
+    .split(/\n+/u)
+    .map(cleanValue)
+    .filter(Boolean);
+  const amountHeaderIndex = lines.findIndex((line) => /Amount\s+Per/iu.test(line));
+  if (amountHeaderIndex < 0) return [];
+
+  const names = [];
+  const amounts = [];
+  const dailyValues = [];
+  let sawAmountOrName = false;
+  for (const line of lines.slice(amountHeaderIndex + 1)) {
+    if (!line) continue;
+    if (isFootnoteText(line)) break;
+    if (isHeaderText(line)) continue;
+    if (isDailyValueText(line)) {
+      if (amounts.length > 0) dailyValues.push(cleanDailyValue(line));
+      continue;
+    }
+
+    const amount = parseStandaloneAmount(line);
+    if (amount) {
+      amounts.push(amount);
+      sawAmountOrName = true;
+      continue;
+    }
+
+    if (isBareNumberText(line)) continue;
+    const normalizedName = normalizeTableIngredientName(line);
+    if (!normalizedName) continue;
+    if (/^(?:\(|\[from\b|as\b|from\b|standardized\b|guaranteed\b|providing\b|supplying\b)/iu.test(normalizedName) && names.length > 0) {
+      names[names.length - 1] = cleanValue(`${names[names.length - 1]} ${normalizedName}`);
+    } else {
+      names.push(normalizedName);
+    }
+    sawAmountOrName = true;
+    if (names.length > 80 || amounts.length > 80) return [];
+  }
+
+  if (!sawAmountOrName || names.length === 0 || amounts.length === 0 || names.length !== amounts.length) return [];
+  return names.map((name, index) => {
+    const amount = amounts[index];
+    const dailyValue = amount.dailyValue ?? dailyValues[index] ?? null;
+    return {
+      name,
+      amount: amount.amount,
+      unit: amount.unit,
+      ...(dailyValue ? { dailyValue } : {}),
+      source: "factsText_table",
+    };
+  });
+}
+
+function ingredientRowsByInlineNameAmountBlock(text) {
+  const factsText = factsPanelText(text);
+  if (factsText.includes("\n")) return [];
+  const amountHeaderMatch = factsText.match(/\bAmount\s+Per\s+(?:Serving|Tablet|Capsule|VegCap|Softgel|Scoop)\b/iu);
+  if (amountHeaderMatch?.index === undefined) return [];
+
+  let section = cleanValue(factsText.slice(amountHeaderMatch.index + amountHeaderMatch[0].length))
+    .replace(/^(?:%?\s*Daily\s+Value|%DV|DV)\s*/iu, "");
+  const footnoteIndex = section.search(/\s+(?:[*†‡+]\s*)?(?:Daily\s+Value|Percent\s+Daily\s+Values?|Other\s+Ingredients?)\b/iu);
+  if (footnoteIndex > 20) section = section.slice(0, footnoteIndex);
+  section = cleanValue(section.replace(/\b%?\s*Daily\s+Value\b|\b%DV\b/giu, " "));
+  if (!section || section.length > 1200) return [];
+
+  const amounts = [];
+  let leadingAmountMatch = section.match(new RegExp(String.raw`^(${AMOUNT_WITH_UNIT_PATTERN})(?:\s*[†‡*+])?\s+`, "iu"));
+  while (leadingAmountMatch) {
+    const amount = parseAmount(leadingAmountMatch[1]);
+    if (!amount) break;
+    amounts.push(amount);
+    section = cleanValue(section.slice(leadingAmountMatch[0].length));
+    leadingAmountMatch = section.match(new RegExp(String.raw`^(${AMOUNT_WITH_UNIT_PATTERN})(?:\s*[†‡*+])?\s+`, "iu"));
+  }
+
+  const trailingPattern = new RegExp(String.raw`\s((?:${AMOUNT_WITH_UNIT_PATTERN}(?:\s*[†‡*+])?\s*){1,40})$`, "iu");
+  const trailingMatch = section.match(trailingPattern);
+  if (!trailingMatch) return [];
+  const trailingAmountsText = trailingMatch[1];
+  const nameBlock = cleanValue(section.slice(0, trailingMatch.index));
+  for (const match of trailingAmountsText.matchAll(new RegExp(AMOUNT_WITH_UNIT_PATTERN, "giu"))) {
+    const amount = parseAmount(match[0]);
+    if (amount) amounts.push(amount);
+  }
+
+  if (amounts.length === 0 || amounts.length > 20 || !nameBlock) return [];
+  const names = splitInlineIngredientNames(nameBlock, amounts.length);
+  if (names.length !== amounts.length) return [];
+  return names.map((name, index) => ({
+    name,
+    amount: amounts[index].amount,
+    unit: amounts[index].unit,
+    source: "factsText_table",
+  }));
+}
+
+function compactTransposedNameLines(lines) {
+  const names = [];
+  for (const line of lines) {
+    if (isFootnoteText(line) || isDailyValueText(line)) continue;
+    if (/^(?:Supplement|Facts|Yielding:?)$/iu.test(line)) continue;
+    if (/^Supplement Facts$/iu.test(line)) continue;
+    if (/^Servings?\s+(?:Size|Per\s+Container)\b/iu.test(line)) continue;
+    if (parseStandaloneAmount(line) || isBareNumberText(line)) continue;
+    if (/^(?:Amount\s+Per|Serving|Value|%?\s*Daily)$/iu.test(line)) continue;
+    if (/^(?:\(|\[from\b)/iu.test(line) && names.length > 0) {
+      names[names.length - 1] = cleanValue(`${names[names.length - 1]} ${line}`);
+      continue;
+    }
+    const name = cleanIngredientName(line);
+    if (name) names.push(name);
+  }
+  return names;
+}
+
+function normalizeTableIngredientName(value) {
+  const withoutGuaranteeText = cleanValue(value)
+    .replace(/\s*\((?:guaranteed|standardized|providing|supplying)[^)]+\)/giu, "")
+    .replace(/\s*\[(?:guaranteed|standardized|providing|supplying)[^\]]+\]/giu, "");
+  return cleanIngredientName(withoutGuaranteeText);
+}
+
+function splitInlineIngredientNames(value, expectedCount) {
+  const normalized = normalizeTableIngredientName(value);
+  if (!normalized) return [];
+  if (expectedCount === 1) return [normalized];
+  const names = cleanValue(value)
+    .split(/(?<=\))\s+(?=[A-Z][A-Za-z0-9.'’®™+\-\s]{1,90}\()/u)
+    .map(normalizeTableIngredientName)
+    .filter(Boolean);
+  return names.length === expectedCount ? names : [];
 }
 
 function ingredientRowsByAmountPattern(text) {
   const rows = [];
   const normalized = factsPanelText(text).replaceAll("|", " ");
-  const pattern = /([A-Z][A-Za-z0-9,()\-+.'’/&\s]{2,}?)\s+((?:<\s*)?\d[\d,./]*(?:\.\d+)?(?:\s*\([^)]+\))?)\s*(mcg\s+RAE|mcg\s+DFE|billion\s+CFU|million\s+CFU|CFU|IU|mg|mcg|g|ml|kcal|calories?)\b(?:\s+(\d{1,5}%|\*\*|†|‡))?/giu;
+  const pattern = new RegExp(String.raw`([A-Z%][A-Za-z0-9,()\-+.'’/&:®™≥≤\s]{2,}?)\s+(${AMOUNT_VALUE_PATTERN})\s*(${UNIT_PATTERN})\b(?:\s+(?:NE|RAE|DFE))?(?:\s+(\d[\d,]{0,6}%\*?|<\s*\d[\d,]{0,6}%\*?|\*\*|†|‡|\+))?`, "giu");
   for (const match of normalized.matchAll(pattern)) {
     const name = cleanIngredientName(match[1]);
     if (!name) continue;
     rows.push({
       name,
       amount: cleanValue(match[2]),
-      unit: cleanValue(match[3]),
+      unit: cleanParsedUnit(match[3]),
       ...(match[4] ? { dailyValue: cleanDailyValue(match[4]) } : {}),
       source: "factsText_amount_pattern",
+    });
+  }
+  return rows;
+}
+
+function ingredientRowsByColonDelimited(text) {
+  const rows = [];
+  const normalized = factsPanelText(text)
+    .replace(/\s+\+\s+Contains\b[^\n]*/giu, "")
+    .replace(/\s+/gu, " ");
+  if (normalized.includes("|")) return rows;
+  const pattern = new RegExp(String.raw`(?:^|\s)([^:\n|]{2,220}?)\s*:\s*(${AMOUNT_VALUE_PATTERN})\s*(${UNIT_PATTERN})\b(?:\s+(?:NE|RAE|DFE))?\s*(\*{1,2}|†|‡|\+|\d[\d,]{0,6}%\*?)?`, "giu");
+  for (const match of normalized.matchAll(pattern)) {
+    const name = cleanIngredientName(match[1]);
+    if (!name) continue;
+    rows.push({
+      name,
+      amount: cleanValue(match[2]),
+      unit: cleanParsedUnit(match[3]),
+      ...(match[4] ? { dailyValue: cleanDailyValue(match[4]) } : {}),
+      source: "factsText",
+    });
+  }
+  return rows;
+}
+
+function ingredientRowsByAmountBeforeNameTable(text) {
+  const rows = [];
+  const normalized = factsPanelText(text).replace(/\s+/gu, " ");
+  const pattern = new RegExp(String.raw`\bAmount\s+Per\s+Serving\s+(${AMOUNT_VALUE_PATTERN})\s*(${UNIT_PATTERN})\b(?:\s+(?:NE|RAE|DFE))?\s+%?\s*Daily\s+Value\s+(?:\*+\s+)?(.+?)(?=\s+\*?\s*Daily\s+Value|\s*$)`, "giu");
+  for (const match of normalized.matchAll(pattern)) {
+    const rawName = cleanValue(match[3]).replace(/\s+\*+$/u, "");
+    if (new RegExp(String.raw`\b${AMOUNT_WITH_UNIT_PATTERN}\b`, "iu").test(rawName)) continue;
+    const name = cleanIngredientName(rawName);
+    if (!name) continue;
+    rows.push({
+      name,
+      amount: cleanValue(match[1]),
+      unit: cleanParsedUnit(match[2]),
+      source: "factsText_table",
+    });
+  }
+  return rows;
+}
+
+function ingredientRowsByStackedTable(text) {
+  const lines = factsPanelText(text, { preserveLeadingTableRows: true })
+    .split(/\n+/u)
+    .map(cleanValue)
+    .filter(Boolean);
+  const rows = [];
+  let pendingNameLines = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (isHeaderText(line) || isFootnoteText(line)) {
+      pendingNameLines = [];
+      continue;
+    }
+    if (isBareNumberText(line)) {
+      pendingNameLines = [];
+      continue;
+    }
+
+    const amount = parseStandaloneAmount(line);
+    const trailingAmount = amount ? null : parseTrailingAmountLine(line);
+    if (!amount && !trailingAmount) {
+      if (!isDailyValueText(line)) pendingNameLines.push(line);
+      continue;
+    }
+
+    if (pendingNameLines.length === 0) continue;
+    const nameLines = trailingAmount ? [...pendingNameLines, trailingAmount.nameSuffix] : [...pendingNameLines];
+    pendingNameLines = [];
+    if (nameLines.join(" ").length > 120) continue;
+    let dailyValue = null;
+    if (amount?.dailyValue) {
+      dailyValue = amount.dailyValue;
+    } else if (trailingAmount?.dailyValue) {
+      dailyValue = trailingAmount.dailyValue;
+    } else {
+      let lookahead = index + 1;
+      while (isHeaderText(lines[lookahead])) lookahead += 1;
+      const nextLine = cleanValue(lines[lookahead]);
+      if (isDailyValueText(nextLine)) {
+        dailyValue = cleanDailyValue(nextLine);
+        index = lookahead;
+      }
+    }
+    while (hasUnbalancedParentheses(nameLines.join(" ")) && index + 1 < lines.length) {
+      const continuation = cleanValue(lines[index + 1]);
+      if (!continuation || parseStandaloneAmount(continuation) || isDailyValueText(continuation) || isHeaderText(continuation) || isFootnoteText(continuation)) break;
+      nameLines.push(continuation);
+      index += 1;
+    }
+    const name = cleanIngredientName(nameLines.join(" "));
+    if (!name) continue;
+    rows.push({
+      name,
+      amount: (amount ?? trailingAmount).amount,
+      unit: (amount ?? trailingAmount).unit,
+      ...(dailyValue ? { dailyValue } : {}),
+      source: "factsText_table",
     });
   }
   return rows;
@@ -399,6 +1116,11 @@ function isUsefulIngredientRow(row) {
   const amount = cleanValue(row.amount);
   const unit = cleanValue(row.unit);
   if (!name || !amount || !unit) return false;
+  if (/^\(/u.test(name)) return false;
+  if (hasMismatchedParentheses(name)) return false;
+  if (/^(?:as|from|fruiting\s+body|extract)\b/iu.test(name)) return false;
+  if (row.source === "factsText_table" && /^[a-z]/u.test(name) && !isAllowedLowercaseIngredientName(name)) return false;
+  if (name.length > 120) return false;
   if (isKnownNonIngredientName(name)) return false;
   if (/\b(percent daily values?|daily values? are based|amount per serving|servings? per container|serving size|supplement facts|nutrition facts)\b/iu.test(name)) {
     return false;
@@ -407,13 +1129,18 @@ function isUsefulIngredientRow(row) {
   if (/\b(add to cart|buy now|notify me|view full details|copy link|shopify|reviews?|quantity|faq|shipping)\b/iu.test(name)) {
     return false;
   }
+  if (/\b(supplement facts panel|facts panel|label showing|panel for|of gummies|detailing|gmo-free|gluten-free|third party tested)\b/iu.test(name)) {
+    return false;
+  }
   if (/\b(provides|deliver|offers|designed|taking|supports?)\b/iu.test(name) && name.length > 40) return false;
+  if (/^(?:and|or|for|showing|close|providing|capsules?|tablets?|softgels?|soft chews?|gummies|powder)\b/iu.test(name)) return false;
   if (/\b(natural and artificial flavor|artificial flavor|citric acid|malic acid|tartaric acid|sucralose|silicon dioxide|red 40|blue 2)\b/iu.test(name)) {
     return false;
   }
   if (/\b(daily serving value|per serving\s*\/\s*per|tells you how much a nutrient|less than)\b/iu.test(name)) return false;
   if (/^(?:mg|mcg|g|iu|cfu|ml|kcal|calories?)\b/iu.test(name)) return false;
-  if (/\b(?:mg|mcg|g|iu|cfu|ml)\s+\d/u.test(name)) return false;
+  if (row.source !== "structured_label_field" && new RegExp(String.raw`\b${AMOUNT_WITH_UNIT_PATTERN}\b`, "iu").test(name)) return false;
+  if (/\d[\d,.]*\s*(?:mg|mcg|g|iu|cfu|ml)\s*\d/iu.test(name)) return false;
   if (/\b(calories|total fat|saturated fat|cholesterol|total carbohydrate|total sugars|added sugars|protein)\b/iu.test(name)
     && /\b(total fat|cholesterol|total carbohydrate|total sugars|added sugars|vitamin|minerals?|amount per serving|years of age|children|adults)\b/iu.test(name)) {
     return false;
@@ -425,14 +1152,87 @@ function isUsefulIngredientRow(row) {
 }
 
 function parseAmount(value) {
-  const match = cleanValue(value).match(/^((?:<\s*)?\d[\d,./]*(?:\.\d+)?(?:\s*\([^)]+\))?)\s*(mcg\s+RAE|mcg\s+DFE|billion\s+CFU|million\s+CFU|CFU|IU|mg|mcg|g|ml|kcal|calories?)\b/iu);
+  const match = cleanValue(value).match(new RegExp(String.raw`^(${AMOUNT_VALUE_PATTERN})\s*(${UNIT_PATTERN})\b(?:\s+(?:NE|RAE|DFE))?`, "iu"));
   if (!match) return null;
-  return { amount: cleanValue(match[1]), unit: cleanValue(match[2]) };
+  return { amount: cleanValue(match[1]), unit: cleanParsedUnit(match[2]) };
+}
+
+function isGreekPrefixIngredientName(value) {
+  return /^(?:alpha|beta|gamma)[-\s]/iu.test(cleanValue(value));
+}
+
+function isAllowedLowercaseIngredientName(value) {
+  const name = cleanValue(value);
+  return isGreekPrefixIngredientName(name)
+    || /^(?:omega-\d|phospholipids?\b|eicosapentaenoic\b|docosahexaenoic\b|medium\s+chain\s+triglycerides?\b|flax\b)/iu.test(name);
+}
+
+function parseStandaloneAmount(value) {
+  const match = cleanValue(value).match(new RegExp(String.raw`^(${AMOUNT_VALUE_PATTERN})\s*(${UNIT_PATTERN})(?:\s*\([^)]+\))?\s*(\d[\d,]{0,6}%[†‡*+]?|<\s*\d[\d,]{0,6}%[†‡*+]?|\*{1,2}|†|‡|\+)?$`, "iu"));
+  if (!match) return null;
+  return {
+    amount: cleanValue(match[1]),
+    unit: cleanParsedUnit(match[2]),
+    ...(match[3] ? { dailyValue: cleanDailyValue(match[3]) } : {}),
+  };
+}
+
+function parseTrailingAmountLine(value) {
+  const match = cleanValue(value).match(new RegExp(String.raw`^(.+?)\s+(${AMOUNT_VALUE_PATTERN})\s*(${UNIT_PATTERN})\s*(\*{1,2}|†|‡|\+)?$`, "iu"));
+  if (!match) return null;
+  const nameSuffix = cleanValue(match[1]);
+  if (!nameSuffix || !/^(?:\(.*\)|as\b)/iu.test(nameSuffix)) return null;
+  return {
+    nameSuffix,
+    amount: cleanValue(match[2]),
+    unit: cleanParsedUnit(match[3]),
+    ...(match[4] ? { dailyValue: cleanDailyValue(match[4]) } : {}),
+  };
+}
+
+function isDailyValueText(value) {
+  return /^(\d[\d,]{0,6}%[†‡*+]?|<\s*\d[\d,]{0,6}%[†‡*+]?|\*{1,2}|†|‡|\+|-|(?:Daily Value|DV)(?:\s*\([^)]*\))?\s+not\s+established\.?)$/iu.test(cleanValue(value));
+}
+
+function cleanParsedUnit(value) {
+  const unit = cleanValue(value);
+  if (/^(?:µ|μ)g/iu.test(unit)) return unit.replace(/^(?:µ|μ)g/iu, "mcg");
+  if (/^mcgt$/iu.test(unit)) return "mcg";
+  if (/^mgt$/iu.test(unit)) return "mg";
+  if (/^mlt$/iu.test(unit)) return "mL";
+  if (/^mca$/iu.test(unit)) return "mcg";
+  if (/^gt$/iu.test(unit)) return "g";
+  if (/^cfus$/iu.test(unit)) return "CFU";
+  if (/^billion\s+cfus$/iu.test(unit)) return "billion CFU";
+  if (/^million\s+cfus$/iu.test(unit)) return "million CFU";
+  return unit;
 }
 
 function isHeaderText(text) {
-  return /\b(Serving Size|Servings Per Container|Amount Per Serving|Daily Value|Calories|Total Fat|Total Carbohydrate)\b/iu.test(text)
+  const value = cleanValue(text);
+  if (/^(?:Supplement|Facts|Yielding:?|Amount\s+Per|Serving|%DV|%\s*Daily|Value|One\s+\w+\s+Contains:?|Two\s+\w+\s+Contain:?|\w+\s+Capsules?\s+Contain:?)$/iu.test(value)) {
+    return true;
+  }
+  return /\b(Serving Size|Servings Per Container|Amount Per Serving|Daily Value|Calories|Total Fat|Total Carbohydrate)\b/iu.test(value)
     && !/\b\d[\d,.]*\s*(mcg|mg|g|IU|CFU|ml)\b/iu.test(text);
+}
+
+function isFootnoteText(text) {
+  return /(?:percent daily values?|daily values?).*(?:based on|not established)|other ingredients?|suggested use|directions?|warning|caution|rev\s+[a-z0-9-]+$/iu.test(cleanValue(text));
+}
+
+function isBareNumberText(text) {
+  return /^(?:<\s*)?\d[\d,.]*(?:\.\d+)?%?$/u.test(cleanValue(text));
+}
+
+function hasUnbalancedParentheses(text) {
+  const value = cleanValue(text);
+  return (value.match(/\(/gu) ?? []).length > (value.match(/\)/gu) ?? []).length;
+}
+
+function hasMismatchedParentheses(text) {
+  const value = cleanValue(text);
+  return (value.match(/\(/gu) ?? []).length !== (value.match(/\)/gu) ?? []).length;
 }
 
 function cleanText(value) {
@@ -441,6 +1241,8 @@ function cleanText(value) {
     .replace(/&lt;/giu, "<")
     .replace(/&gt;/giu, ">")
     .replace(/&amp;/giu, "&")
+    .replace(/[‹›]/gu, (marker) => (marker === "‹" ? "<" : ">"))
+    .replace(/[“”]/gu, "\"")
     .replace(/\r/gu, "\n")
     .replace(/[ \t]+/gu, " ")
     .trim();
@@ -453,14 +1255,101 @@ function cleanValue(value) {
     .trim();
 }
 
+function cleanServingSize(value) {
+  return cleanValue(value)
+    .replace(/[,"']?\s+"?Servings?\s+Per\s+Container\b.*$/iu, "")
+    .replace(/\.(?![^()]*\))\s+.*$/u, "")
+    .replace(/\s+Servings?:.*$/iu, "")
+    .replace(/\s+(?:or\s+as\s+directed|daily\b|as\s+a\s+dietary|of\s+water\b|with\s+\d|your\s+preferred|mix\s+\d|shake\s+or\s+stir|by\s+your\s+health|healthcare\s+professional|third\s+party|non-gmo|gluten-free|warning\b|notice\b).*$/iu, "")
+    .trim();
+}
+
+function isUsefulServingSize(value) {
+  const rawText = typeof value === "string" ? cleanText(value) : cleanText(value?.text);
+  if (!rawText) return false;
+  if (hasServingSizeBodyMarkers(rawText)) return false;
+  const text = cleanServingSize(rawText);
+  if (!text || text.length > 120) return false;
+  if (/^(?:serving size|servings per container|amount per serving|supplement facts|nutrition facts)$/iu.test(text)) return false;
+  if (/\b(add to cart|buy now|notify me|view full details|copy link|shopify|reviews?|quantity|faq|shipping)\b/iu.test(text)) {
+    return false;
+  }
+  return hasBoundedServingSizeShape(text);
+}
+
+function hasServingSizeBodyMarkers(value) {
+  const text = cleanValue(value);
+  if (/\b(supplement facts|nutrition facts|amount per serving|%?\s*daily value|servings? per container|other ingredients?|suggested use|directions?|warning|caution)\b/iu.test(text)) {
+    return true;
+  }
+  if (/\b(?:calories|total fat|cholesterol|sodium|total carbohydrate|protein|vitamin|magnesium|zinc|iron|calcium)\b.{0,30}\b\d[\d,.]*\s*(?:mg|mcg|g|iu|ml|%)\b/iu.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+function hasBoundedServingSizeShape(value) {
+  const text = cleanValue(value);
+  const servingPattern = new RegExp(String.raw`^${SERVING_AMOUNT_PATTERN}\s*${SERVING_FORM_PATTERN}(?:\s*\([^)]{1,70}\))?$`, "iu");
+  if (servingPattern.test(text)) return !isLikelyContainerCountServingSize(text);
+  return new RegExp(String.raw`^(?:\d+(?:\.\d+)?|\d+\s*/\s*\d+)\s*[\p{Script=Han}]{1,4}$`, "u").test(text);
+}
+
+function isLikelyContainerCountServingSize(value) {
+  const text = cleanValue(value);
+  const match = text.match(/^(\d+(?:\.\d+)?)\s*(.+)$/u);
+  if (!match) return false;
+  const amount = Number.parseFloat(match[1]);
+  const unitText = cleanValue(match[2]);
+  if (/\([^)]*(?:scoop|teaspoon|tablespoon|tsp|tbsp|packet|stick\s+pack|capsule|tablet)[^)]*\)/iu.test(text)) {
+    return false;
+  }
+  if (amount >= 50 && /^(?:g|grams?)$/iu.test(unitText)) return true;
+  if (amount >= 100 && /^(?:mL|ml|milliliters?)$/u.test(unitText)) return true;
+  if (amount >= 8 && /^(?:fl\.?\s*oz|fluid\s+ounces?)$/iu.test(unitText)) return true;
+  return amount >= 10
+    && /\b(?:servings?|sv|packets?|stick\s+packs?|capsules?(?:\(s\))?|tablets?|caplets?|softgels?|gummies?|chews?|chewables?|wafers?|lozenges?)\b/iu.test(unitText);
+}
+
 function cleanIngredientName(value) {
   const name = cleanValue(value)
-    .replace(/\b(Amount Per Serving|Daily Value|Supplement Facts|Nutrition Facts)\b/giu, "")
+    .replace(/\b(Amount Per \w+|Daily Value|Supplement Facts|Nutrition Facts|%?\s*DV)\b/giu, "")
+    .replace(/^(?:Amount\s+Per\s+)?%?\s*Daily\s+Serving\s+Value\*?\s*/iu, "")
+    .replace(/^%\s+/u, "")
+    .replace(/^%[,.\s]+/u, "")
+    .replace(/^["'.:;,\-\s]+/u, "")
+    .replace(/["']+$/u, "")
+    .replace(/^(?:%?\s*DV|(?:<\s*)?\d[\d,]{0,6}%\*?)\s+/iu, "")
+    .replace(/^[†‡*+\s]+(?=\S)/u, "")
+    .replace(/^[†‡*+\s]*(?:not established\.?|daily value not established\.?)\s+/iu, "")
+    .replace(/\.{2,}/gu, " ")
     .replace(/\s+/gu, " ")
     .trim();
-  if (name.length < 2 || name.length > 180) return null;
+  if ((name.length < 2 && !/\p{Script=Han}/u.test(name)) || name.length > 180) return null;
   if (isKnownNonIngredientName(name)) return null;
   return name;
+}
+
+function cleanChineseIngredientName(value) {
+  const name = cleanIngredientName(value);
+  if (!name) return null;
+  if (/^(?:營養標示|成分|每份|每日參考值|其他成分含量|每一份量|本包裝含)$/u.test(name)) return null;
+  if (/^每日參考值[：:]/u.test(name)) return null;
+  return name;
+}
+
+function parseChineseAmount(value) {
+  const match = cleanValue(value).match(/^((?:<\s*)?\d+(?:\.\d+)?)\s*(毫克|微克|公克|克|IU)\s*([A-Za-zΑ-ωα-ω-]+)?(?:\([^)]+\))?$/u);
+  if (!match) return null;
+  const unitMap = new Map([
+    ["毫克", "mg"],
+    ["微克", "mcg"],
+    ["公克", "g"],
+    ["克", "g"],
+    ["IU", "IU"],
+  ]);
+  const unit = cleanValue(`${unitMap.get(match[2]) ?? match[2]} ${match[3] ?? ""}`);
+  return { amount: cleanValue(match[1]), unit };
 }
 
 function isKnownNonIngredientName(name) {
@@ -479,6 +1368,41 @@ function dedupeIngredientRows(rows) {
   const seen = new Set();
   const deduped = [];
   for (const row of rows) {
+    const name = cleanIngredientName(row.name);
+    if (name && rows.some((other) => {
+      if (other === row) return false;
+      const otherName = cleanIngredientName(other.name);
+      return otherName
+        && otherName.length > name.length
+        && otherName.endsWith(name)
+        && cleanValue(other.amount) === cleanValue(row.amount)
+        && cleanParsedUnit(other.unit) === cleanParsedUnit(row.unit)
+        && cleanDailyValue(other.dailyValue) === cleanDailyValue(row.dailyValue);
+    })) {
+      continue;
+    }
+    if (row.source === "factsText_amount_pattern" && rows.some((other) => {
+      if (other === row || other.source === "factsText_amount_pattern") return false;
+      const otherName = cleanIngredientName(other.name);
+      return name
+        && otherName
+        && otherName === name
+        && cleanValue(other.amount) === cleanValue(row.amount)
+        && cleanParsedUnit(other.unit) === cleanParsedUnit(row.unit);
+    })) {
+      continue;
+    }
+    if (!cleanDailyValue(row.dailyValue) && rows.some((other) => {
+      if (other === row) return false;
+      const otherName = cleanIngredientName(other.name);
+      return name
+        && otherName === name
+        && cleanValue(other.amount) === cleanValue(row.amount)
+        && cleanParsedUnit(other.unit) === cleanParsedUnit(row.unit)
+        && cleanDailyValue(other.dailyValue);
+    })) {
+      continue;
+    }
     const key = `${row.name}|${row.amount ?? ""}|${row.unit ?? ""}|${row.dailyValue ?? ""}`.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -527,6 +1451,7 @@ function writeArtifacts(outputDir, previews, summary) {
   writeFileSync(summaryPath, `${JSON.stringify(summary, null, 2)}\n`);
   const headers = [
     "parserStatus",
+    "evidenceRecoveryHint",
     "id",
     "dataOriginId",
     "name",
@@ -538,6 +1463,8 @@ function writeArtifacts(outputDir, previews, summary) {
     "parsedIngredientRows",
     "existingServingSizes",
     "parsedServingSizes",
+    "parserBlockers",
+    "parsedIngredientRowSources",
     "removableFieldCandidates",
     "dataOriginUrl",
     "proposedSearchTextPreview",

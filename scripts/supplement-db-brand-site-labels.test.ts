@@ -160,6 +160,823 @@ describe("supplement brand-site repair preview", () => {
     ]);
   });
 
+  test("extracts serving sizes from amount-per facts headers", () => {
+    const factsText = [
+      "Ingredients Supplement Facts Amount per 1 Capsule % Daily Value",
+      "Proprietary Probiotic Blend 300 mg",
+      "Supplement Facts Amount Per Tablet % Daily Value Magnesium 50 mg",
+    ].join(" ");
+
+    assert.deepEqual(extractServingSizes({ factsText }), [
+      { text: "1 Capsule", source: "factsText" },
+      { text: "1 Tablet", source: "factsText" },
+    ]);
+  });
+
+  test("extracts serving sizes from OCR typo and generic servings marker", () => {
+    const factsText = [
+      "Supplement Facts Servings Size 23 g Servings: 20 Amount Per Serving Protein 20 g",
+      "Supplement Facts Serving Size: 0.7 ml Servings: about 42 Amount Per Serving Anise seed extract 634 mg",
+    ].join(" ");
+
+    assert.deepEqual(extractServingSizes({ factsText }), [
+      { text: "23 g", source: "factsText" },
+      { text: "0.7 ml", source: "factsText" },
+    ]);
+  });
+
+  test("cleans noisy serving-size text", () => {
+    assert.deepEqual(extractServingSizes({
+      factsText: [
+        "Supplement Facts SUGGESTED USE Serving Size: 1 Scoop (4g) daily to a 16 oz water bottle",
+        "Servings Per Container: 120 Amount Per Serving Vitamin C 90mg 100%",
+      ].join(" "),
+    }), [
+      { text: "1 Scoop (4g)", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      factsText: "Supplement facts: Serving size 4 capsules. Magnesium (elemental) 144 mg (34% DV) from 2,000 mg Magtein® Magnesium L-Threonate.",
+    }), [
+      { text: "4 capsules", source: "factsText" },
+    ]);
+  });
+
+  test("extracts modified serving sizes and preserves periods inside parentheses", () => {
+    assert.deepEqual(extractServingSizes({
+      factsText: [
+        "Supplement Facts",
+        "Serving Size 1 Vegetarian Capsule",
+        "Amount Per Serving Enzyme Blend 94 mg",
+      ].join("\n"),
+    }), [
+      { text: "1 Vegetarian Capsule", source: "factsText" },
+    ]);
+
+    assert.deepEqual(extractServingSizes({
+      factsText: [
+        "Supplement Facts",
+        "Serving Size 5g (approx. 1 scoop)",
+        "Amount Per Serving Protein 20g",
+      ].join("\n"),
+    }), [
+      { text: "5g (approx. 1 scoop)", source: "factsText" },
+    ]);
+  });
+
+  test("splits same-line ingredient rows before lowercase Greek-prefix names", () => {
+    const factsText = [
+      "Supplement Facts Serving Size 1 Tablet Amount Per Serving %DV",
+      "Acetyl L-Carnitine (as HCl) 500 mg alpha-Lipoic Acid 150 mg †Daily Value not established.",
+    ].join(" ");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Acetyl L-Carnitine (as HCl)",
+        amount: "500",
+        unit: "mg",
+        source: "factsText",
+      },
+      {
+        name: "alpha-Lipoic Acid",
+        amount: "150",
+        unit: "mg",
+        dailyValue: "†",
+        source: "factsText",
+      },
+    ]);
+  });
+
+  test("extracts stacked lowercase Greek-prefix ingredient names", () => {
+    const factsText = [
+      "Supplement Facts",
+      "Serving Size 1 Tablet",
+      "Amount Per Serving",
+      "%DV",
+      "Acetyl L-Carnitine (as HCl)",
+      "500 mg",
+      "alpha-Lipoic Acid",
+      "150 mg",
+      "†Daily Value not established.",
+    ].join("\n");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Acetyl L-Carnitine (as HCl)",
+        amount: "500",
+        unit: "mg",
+        source: "factsText_table",
+      },
+      {
+        name: "alpha-Lipoic Acid",
+        amount: "150",
+        unit: "mg",
+        source: "factsText_table",
+      },
+    ]);
+  });
+
+  test("rejects caption-derived fake ingredient rows", () => {
+    assert.deepEqual(
+      extractIngredientRowsFromText("Codeage Liposomal L-Carnitine Supplement Facts Capsule 500mg"),
+      [],
+    );
+    assert.deepEqual(
+      extractIngredientRowsFromText("Double Wood NAD supplement facts label showing 250mg per capsule"),
+      [],
+    );
+    assert.deepEqual(
+      extractIngredientRowsFromText("Supplement Facts for Chewable Cal-Snack Calcium Magnesium 1000 MG 60 Count"),
+      [],
+    );
+  });
+
+  test("strips OCR daily-serving-value header text before ingredient rows", () => {
+    const factsText = [
+      "Supplement Facts Serving Size: 1 Capsule Servings Per Container: 120",
+      "Amount Per %Daily Serving Value* Alpha Lipoic Acid 200 mg * Daily Value not established.",
+    ].join(" ");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Alpha Lipoic Acid",
+        amount: "200",
+        unit: "mg",
+        dailyValue: "*",
+        source: "factsText",
+      },
+    ]);
+  });
+
+  test("strips repeated amount and daily-value headers before facts rows", () => {
+    const factsText = [
+      "Supplement Facts Serving Size 1 Capsule",
+      "Amount Per Serving % Daily Value Alpha-Lipoic Acid 150 mg † † Daily Value not established.",
+    ].join(" ");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Alpha-Lipoic Acid",
+        amount: "150",
+        unit: "mg",
+        dailyValue: "†",
+        source: "factsText",
+      },
+    ]);
+  });
+
+  test("parses large percent daily values before footnote markers", () => {
+    const factsText = [
+      "Supplement Facts Serving Size 1 Veggie Capsule",
+      "Amount Per Serving % Daily Value Biotin 5,000 mcg 16667% † Daily Value not established.",
+    ].join(" ");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Biotin",
+        amount: "5,000",
+        unit: "mcg",
+        dailyValue: "16667%",
+        source: "factsText",
+      },
+    ]);
+  });
+
+  test("parses comma-separated facts rows", () => {
+    const factsText = [
+      "Supplement Facts: Serving Size 5 Vegetable Capsules, Servings Per Container 30,",
+      "Amount Per Serving %DV, PeptiStrong Fava Bean Hydrolysate Peptide Complex 2400 mg*,",
+      "Panax ginseng Extract (stem and leaf) 100 mg*,",
+      "Rhodiola (Rhodiola rosea) Extract (root) 100 mg*,",
+      "*Daily Value (DV) not established.",
+    ].join(" ");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "PeptiStrong Fava Bean Hydrolysate Peptide Complex",
+        amount: "2400",
+        unit: "mg",
+        source: "factsText",
+      },
+      {
+        name: "Panax ginseng Extract (stem and leaf)",
+        amount: "100",
+        unit: "mg",
+        source: "factsText",
+      },
+      {
+        name: "Rhodiola (Rhodiola rosea) Extract (root)",
+        amount: "100",
+        unit: "mg",
+        source: "factsText",
+      },
+    ]);
+  });
+
+  test("parses rows with multiple amount parentheticals and terminal punctuation", () => {
+    const factsText = [
+      "Supplement Facts Serving Size: 3 Capsules Servings Per Container: 30 Amount Per Serving / % Daily Value",
+      "Vitamin D 25 mcg (1000 IU) (As Cholecalciferol) 125%",
+      "Calcium 750 mg (As AlgaeCal® Mesophyllum superpositum) 58%",
+      "Magnesium 65 mg (As AlgaeCal® Mesophyllum superpositum) 15%.",
+    ].join(" ");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Vitamin D",
+        amount: "25",
+        unit: "mcg",
+        dailyValue: "125%",
+        source: "factsText",
+      },
+      {
+        name: "Calcium",
+        amount: "750",
+        unit: "mg",
+        dailyValue: "58%",
+        source: "factsText",
+      },
+      {
+        name: "Magnesium",
+        amount: "65",
+        unit: "mg",
+        dailyValue: "15%",
+        source: "factsText",
+      },
+    ]);
+  });
+
+  test("parses dagger-delimited blend rows before component percentages", () => {
+    const factsText = [
+      "Supplement Facts Serving Size 1 scoop (5 g) Servings Per Container 80",
+      "Amount Per Serving % Daily Value Branched Chain Amino Acids(BCAA)2:1:1 5g †",
+      "Instantized L-Leucine 50% Instantized L-Valine 25% Instantized L-Isoleucine 25%",
+      "† Daily Value not established.",
+    ].join(" ");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Branched Chain Amino Acids(BCAA)2:1:1",
+        amount: "5",
+        unit: "g",
+        dailyValue: "†",
+        source: "factsText",
+      },
+    ]);
+  });
+
+  test("parses smart-quoted OCR label rows without broad fallback rows", () => {
+    const factsText = [
+      "Supplement Facts label for Elite Sleep. Text reads: “ELITE SLEEP,” “Supplement Facts,”",
+      "“Serving Size: 2 Capsules,” “Servings Per Container: 30.”",
+      "“Amount Per Serving % Daily Value.” “Vitamin B6 (As Pyridoxine HCl) 4mg 235%.”",
+      "“Melatonin 3mg *.” “Tart Cherry Fruit Powder (CherryPURE®) 200mg *.”",
+      "“L-Theanine 200mg *.” “Valerian Root Extract 300mg .”",
+      "“Daily value not established.”",
+    ].join(" ");
+
+    assert.deepEqual(extractServingSizes({ factsText }), [
+      { text: "2 Capsules", source: "factsText" },
+    ]);
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Vitamin B6 (As Pyridoxine HCl)",
+        amount: "4",
+        unit: "mg",
+        dailyValue: "235%",
+        source: "factsText",
+      },
+      {
+        name: "Melatonin",
+        amount: "3",
+        unit: "mg",
+        dailyValue: "*",
+        source: "factsText",
+      },
+      {
+        name: "Tart Cherry Fruit Powder (CherryPURE®)",
+        amount: "200",
+        unit: "mg",
+        dailyValue: "*",
+        source: "factsText",
+      },
+      {
+        name: "L-Theanine",
+        amount: "200",
+        unit: "mg",
+        dailyValue: "*",
+        source: "factsText",
+      },
+      {
+        name: "Valerian Root Extract",
+        amount: "300",
+        unit: "mg",
+        source: "factsText",
+      },
+    ]);
+  });
+
+  test("parses multi-line pipe-delimited facts cells", () => {
+    const factsText = [
+      "Supplement Facts",
+      "Serving size: 1 Capsule",
+      "Ingredient |",
+      "Amount per Serving |",
+      "% Daily Value* |",
+      "Vitamin D (as D3 cholecalciferol) |",
+      "125 mcg (5,000 IU) |",
+      "625% |",
+      "Vitamin K2 (from MK-7, menaquinone-7) |",
+      "50 mcg |",
+      "42% |",
+      "*Daily Value not established.",
+    ].join("\n");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Vitamin D (as D3 cholecalciferol)",
+        amount: "125",
+        unit: "mcg",
+        dailyValue: "625%",
+        source: "factsText_pipe",
+      },
+      {
+        name: "Vitamin K2 (from MK-7, menaquinone-7)",
+        amount: "50",
+        unit: "mcg",
+        dailyValue: "42%",
+        source: "factsText_pipe",
+      },
+    ]);
+  });
+
+  test("parses compact pipe facts rows with daily values in the next cell", () => {
+    const factsText = [
+      "Supplement Facts",
+      "Serving Size: 2 Softgels",
+      "Amount Per Serving | % DV",
+      "Total Fat 2g | 3%*",
+      "Saturated Fat 2g | 10%*",
+      "C8 MCT oil 2000mg (Brain Octane® oil) | **",
+      "** Daily Value not established.",
+    ].join("\n");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Saturated Fat",
+        amount: "2",
+        unit: "g",
+        dailyValue: "10%*",
+        source: "factsText_pipe",
+      },
+      {
+        name: "C8 MCT oil",
+        amount: "2000",
+        unit: "mg",
+        dailyValue: "**",
+        source: "factsText_pipe",
+      },
+    ]);
+  });
+
+  test("parses JSON-stringified stacked facts text", () => {
+    const factsText = JSON.stringify([
+      [
+        "Supplement Facts",
+        "Serving Size: 1 Quick Release Softgel",
+        "Servings Per Container: 100",
+        "Amount Per Serving",
+        "%Daily Value",
+        "Aloe Vera Extract (Aloe barbadensis)",
+        "25 mg",
+        "*",
+        "(a 200:1 extract, equivalent to 5,000 mg of fresh Aloe Vera inner leaf gel)",
+        "*Daily Value not established.",
+      ].join("\n"),
+    ]);
+
+    assert.deepEqual(extractServingSizes({ factsText }), [
+      { text: "1 Quick Release Softgel", source: "factsText" },
+    ]);
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Aloe Vera Extract (Aloe barbadensis)",
+        amount: "25",
+        unit: "mg",
+        dailyValue: "*",
+        source: "factsText_table",
+      },
+    ]);
+  });
+
+  test("clears label headers before stacked OCR amount rows", () => {
+    const factsText = [
+      "Supplement Facts",
+      "Serving Size 2 Tablets",
+      "Serving Per Container 15",
+      "Amount Per Serving",
+      "7-OXO-DHEA Acetate",
+      "100 mgt",
+      "†Daily Value not established.",
+      "Other ingredients: microcrystalline cellulose.",
+    ].join("\n");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "7-OXO-DHEA Acetate",
+        amount: "100",
+        unit: "mg",
+        source: "factsText_table",
+      },
+    ]);
+  });
+
+  test("parses amount-before-name OCR table rows", () => {
+    const factsText = [
+      "Supplement Facts",
+      "Serving Size: 1 capsule",
+      "Amount Per Serving",
+      "100mg*",
+      "7-Keto DHEA",
+      "(as 7-keto dehydroepiandrosterone acetate)",
+      "* Daily Value not established",
+      "Other Ingredients: Vegetarian Capsule.",
+    ].join("\n");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "7-Keto DHEA (as 7-keto dehydroepiandrosterone acetate)",
+        amount: "100",
+        unit: "mg",
+        dailyValue: "*",
+        source: "factsText_table",
+      },
+    ]);
+  });
+
+  test("parses amount block before ingredient names", () => {
+    const factsText = [
+      "Supplement Facts",
+      "Serving Size 1 VegCap",
+      "Amount Per",
+      "Serving",
+      "150 mg",
+      "60 mg",
+      "% Daily",
+      "Value",
+      "167%",
+      "Vitamin C (as Ascorbic Acid)",
+      "Hyaluronic Acid (Microbial Fermentation)",
+      "*Daily Value not established.",
+    ].join("\n");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Vitamin C (as Ascorbic Acid)",
+        amount: "150",
+        unit: "mg",
+        dailyValue: "167%",
+        source: "factsText_table",
+      },
+      {
+        name: "Hyaluronic Acid (Microbial Fermentation)",
+        amount: "60",
+        unit: "mg",
+        source: "factsText_table",
+      },
+    ]);
+  });
+
+  test("parses ingredient name blocks followed by amount blocks", () => {
+    const factsText = [
+      "Supplement Facts",
+      "Serving Size 1 VegCap",
+      "Amount Per Serving",
+      "Griffonia (Griffonia simplicifolia) (bean extract) (Guaranteed 100 mg [98%] L-5-Hydroxytryptophan)",
+      "St. John's Wort (Hypericum perforatum) (aerial)",
+      "102 mg",
+      "210 mg",
+      "*Daily Value not established.",
+    ].join("\n");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Griffonia (Griffonia simplicifolia) (bean extract)",
+        amount: "102",
+        unit: "mg",
+        source: "factsText_table",
+      },
+      {
+        name: "St. John's Wort (Hypericum perforatum) (aerial)",
+        amount: "210",
+        unit: "mg",
+        source: "factsText_table",
+      },
+    ]);
+  });
+
+  test("parses inline ingredient names followed by terminal amount blocks", () => {
+    const factsText = [
+      "Supplement Facts Serving Size 1 VegCap Amount Per Serving",
+      "Griffonia (Griffonia simplicifolia) (bean extract) (Guaranteed 100 mg [98%] L-5-Hydroxytryptophan)",
+      "St. John's Wort (Hypericum perforatum) (aerial) 102 mg 210 mg",
+      "*Daily Value not established. Other Ingredients: Vegetable Cellulose Capsule.",
+    ].join(" ");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Griffonia (Griffonia simplicifolia) (bean extract)",
+        amount: "102",
+        unit: "mg",
+        source: "factsText_table",
+      },
+      {
+        name: "St. John's Wort (Hypericum perforatum) (aerial)",
+        amount: "210",
+        unit: "mg",
+        source: "factsText_table",
+      },
+    ]);
+  });
+
+  test("normalizes OCR footnote letters after liquid units", () => {
+    const factsText = [
+      "Supplement Facts",
+      "Serving Size 1/2 Teaspoon",
+      "Amount Per Serving",
+      "Organic Cilantro Leaf Extract",
+      "1.5 mLT",
+      "Organic Chlorella",
+      "250 mgt",
+      "†Daily value not established.",
+    ].join("\n");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Organic Cilantro Leaf Extract",
+        amount: "1.5",
+        unit: "mL",
+        source: "factsText_table",
+      },
+      {
+        name: "Organic Chlorella",
+        amount: "250",
+        unit: "mg",
+        source: "factsText_table",
+      },
+    ]);
+  });
+
+  test("parses Chinese nutrition facts rows and serving size", () => {
+    const factsText = [
+      "營養標示",
+      "每一份量 1 粒 / 本包裝含 60 份",
+      "成分",
+      "每份",
+      "每日參考值%",
+      "維生素C",
+      "10毫克",
+      "10%",
+      "鋅",
+      "5.1毫克",
+      "34%",
+      "其他成分含量",
+      "每一份量 1粒",
+      "專利葡萄籽萃取物(含多酚)",
+      "100毫克",
+      "法國紅葡萄萃取物(含白藜蘆醇)",
+      "50毫克",
+      "反式白藜蘆醇",
+      "40毫克",
+    ].join("\n");
+
+    assert.deepEqual(extractServingSizes({ factsText }), [
+      { text: "1 粒", source: "factsText" },
+      { text: "1粒", source: "factsText" },
+    ]);
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "維生素C",
+        amount: "10",
+        unit: "mg",
+        dailyValue: "10%",
+        source: "factsText_table",
+      },
+      {
+        name: "鋅",
+        amount: "5.1",
+        unit: "mg",
+        dailyValue: "34%",
+        source: "factsText_table",
+      },
+      {
+        name: "專利葡萄籽萃取物(含多酚)",
+        amount: "100",
+        unit: "mg",
+        source: "factsText_table",
+      },
+      {
+        name: "法國紅葡萄萃取物(含白藜蘆醇)",
+        amount: "50",
+        unit: "mg",
+        source: "factsText_table",
+      },
+      {
+        name: "反式白藜蘆醇",
+        amount: "40",
+        unit: "mg",
+        source: "factsText_table",
+      },
+    ]);
+  });
+
+  test("parses mixed amount/name blocks when the counts align", () => {
+    const factsText = [
+      "Supplement Facts",
+      "Serving Size 1 VegCap",
+      "Amount Per Serving",
+      "350 mg",
+      "% Daily Value",
+      "Broccoli (Brassica oleracea italica) (seed extract) (Guaranteed to contain 35 mg [10%] Sulforaphane Glucosinolates)",
+      "Myrosinase Enzyme (Brassica oleracea italica) (Thioglucosidase)",
+      "Organic Freeze-Dried Broccoli Sprouts (Brassica oleracea italica)",
+      "13 mg",
+      "50 mg",
+      "*Daily Value not established.",
+    ].join("\n");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Broccoli (Brassica oleracea italica) (seed extract)",
+        amount: "350",
+        unit: "mg",
+        source: "factsText_table",
+      },
+      {
+        name: "Myrosinase Enzyme (Brassica oleracea italica) (Thioglucosidase)",
+        amount: "13",
+        unit: "mg",
+        source: "factsText_table",
+      },
+      {
+        name: "Organic Freeze-Dried Broccoli Sprouts (Brassica oleracea italica)",
+        amount: "50",
+        unit: "mg",
+        source: "factsText_table",
+      },
+    ]);
+  });
+
+  test("parses supplement facts lines without an amount-per-serving header", () => {
+    const factsText = [
+      "Supplement Facts",
+      "Protein Powder: Cake Batter (20 Serving Bag)",
+      "Serving Size: 1 Scoop (25g)",
+      "Servings Per Container: 20",
+      "Calories: 90",
+      "Cholesterol 10mg (3% DV)",
+      "Total Carbohydrate 2g (1% DV)",
+      "Total Sugars 1g († DV)",
+      "Protein 20g (40% DV)",
+      "Calcium 50mg (4% DV)",
+      "Iron 0.2mg (1% DV)",
+      "Sodium 30mg (1% DV)",
+      "Potassium 60mg (1% DV)",
+      "Digestive Enzyme Blend 100mg († DV); Lipase 10 FIP, Cellulase 50 CU",
+      "Other Ingredients: Grass-Fed Whey Protein Isolate.",
+    ].join("\n");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Protein",
+        amount: "20",
+        unit: "g",
+        dailyValue: "40%",
+        source: "factsText",
+      },
+      {
+        name: "Calcium",
+        amount: "50",
+        unit: "mg",
+        dailyValue: "4%",
+        source: "factsText",
+      },
+      {
+        name: "Iron",
+        amount: "0.2",
+        unit: "mg",
+        dailyValue: "1%",
+        source: "factsText",
+      },
+      {
+        name: "Sodium",
+        amount: "30",
+        unit: "mg",
+        dailyValue: "1%",
+        source: "factsText",
+      },
+      {
+        name: "Potassium",
+        amount: "60",
+        unit: "mg",
+        dailyValue: "1%",
+        source: "factsText",
+      },
+      {
+        name: "Digestive Enzyme Blend",
+        amount: "100",
+        unit: "mg",
+        dailyValue: "†",
+        source: "factsText",
+      },
+    ]);
+  });
+
+  test("parses transposed facts tables with names before amount rows", () => {
+    const factsText = [
+      "Supplement Facts",
+      "Serving Size 1 Chewable",
+      "Calories",
+      "Total Carbohydrate",
+      "Vitamin C (Ascorbic Acid)",
+      "Whole Food Base (Rutin Concentrate, Bioflavonoid Concentrate",
+      "[from Citrus], Hesperidin Concentrate, Citrus Pectin)",
+      "Amount Per % Daily",
+      "Serving",
+      "Value",
+      "5",
+      "1 g",
+      "500 mg",
+      "50 mg",
+      "<1%†",
+      "556%",
+      "*",
+      "†Percent Daily Value based on a 2,000 calorie diet.",
+    ].join("\n");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Vitamin C (Ascorbic Acid)",
+        amount: "500",
+        unit: "mg",
+        dailyValue: "556%",
+        source: "factsText_table",
+      },
+      {
+        name: "Whole Food Base (Rutin Concentrate, Bioflavonoid Concentrate [from Citrus], Hesperidin Concentrate, Citrus Pectin)",
+        amount: "50",
+        unit: "mg",
+        dailyValue: "*",
+        source: "factsText_table",
+      },
+    ]);
+  });
+
+  test("extracts stacked amount rows with parenthetical equivalent amounts", () => {
+    const factsText = [
+      "Supplement Facts",
+      "Serving Size: 2 Quick Release Capsules",
+      "Amount Per Serving",
+      "%Daily Value",
+      "Apple Cider Vinegar",
+      "1,200 mg (1.2 g)",
+      "*",
+      "*Daily Value not established.",
+    ].join("\n");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Apple Cider Vinegar",
+        amount: "1,200",
+        unit: "mg",
+        dailyValue: "*",
+        source: "factsText_table",
+      },
+    ]);
+  });
+
+  test("extracts stacked amount rows with numeric daily values", () => {
+    const factsText = [
+      "Supplement Facts",
+      "Serving Size 1 Tablet",
+      "Amount Per Serving",
+      "%DV",
+      "Biotin",
+      "5,000 mcg 16,667%",
+      "Other ingredients: microcrystalline cellulose.",
+    ].join("\n");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText), [
+      {
+        name: "Biotin",
+        amount: "5,000",
+        unit: "mcg",
+        dailyValue: "16,667%",
+        source: "factsText_table",
+      },
+    ]);
+  });
+
   test("repair preview preserves raw label fields while proposing additive rows and compact search text", () => {
     const preview = repairPreviewForRow({
       id: "example-brand:magnesium",
@@ -179,12 +996,473 @@ describe("supplement brand-site repair preview", () => {
     });
 
     assert.equal(preview.parserStatus, "structured_ready");
+    assert.equal(preview.evidenceRecoveryHint, "structured_ready");
     assert.equal(preview.parsedIngredientRows, 1);
     assert.equal(preview.parsedServingSizes, 1);
     assert.equal(preview.searchTextWouldChange, true);
     assert.deepEqual(preview.removableFieldCandidates, ["bodyText"]);
     assert.match(preview.proposedSearchTextPreview, /Magnesium 200 mg/u);
     assert.doesNotMatch(preview.proposedSearchTextPreview, /page copy page copy/u);
+  });
+
+  test("repair preview does not remove raw evidence from partial rows", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:caption-only",
+      dataOriginId: "example-brand:caption-only",
+      dataOriginUrl: "https://example.test/products/caption-only",
+      name: "Example Caption Only",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "caption-only",
+        factsText: "Supplement Facts Serving Size 1 Capsule",
+        bodyText: "Official page body retained for manual review.",
+        rawPageText: "Raw page text retained for refetch review.",
+        allProductFactsText: ["Supplement Facts"],
+      },
+    });
+
+    assert.equal(preview.parserStatus, "partial_parse");
+    assert.deepEqual(preview.parserBlockers, ["missing_ingredient_rows"]);
+    assert.deepEqual(preview.removableFieldCandidates, []);
+  });
+
+  test("repair preview rejects malformed existing normalized rows", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:malformed-existing",
+      dataOriginId: "example-brand:malformed-existing",
+      dataOriginUrl: "https://example.test/products/malformed-existing",
+      name: "Example Existing",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "malformed-existing",
+        ingredientRows: [{}],
+        servingSizes: ["1 Capsule"],
+        bodyText: "Raw evidence must not be removed when existing rows are invalid.",
+      },
+    });
+
+    assert.equal(preview.parserStatus, "partial_parse");
+    assert.deepEqual(preview.parserBlockers, [
+      "invalid_existing_ingredient_rows",
+      "missing_ingredient_rows",
+    ]);
+    assert.deepEqual(preview.removableFieldCandidates, []);
+  });
+
+  test("repair preview rejects facts-panel text stored as an existing serving size", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:malformed-serving-size",
+      dataOriginId: "example-brand:malformed-serving-size",
+      dataOriginUrl: "https://example.test/products/malformed-serving-size",
+      name: "Example Existing Serving Size",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "malformed-serving-size",
+        ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg", dailyValue: "48%" }],
+        servingSizes: ["Supplement Facts Serving Size 2 Capsules Amount Per Serving Magnesium 200 mg 48%"],
+        bodyText: "Raw evidence must not be removed when existing serving size text is invalid.",
+      },
+    });
+
+    assert.equal(preview.parserStatus, "partial_parse");
+    assert.deepEqual(preview.parserBlockers, [
+      "invalid_existing_serving_sizes",
+      "missing_serving_sizes",
+    ]);
+    assert.deepEqual(preview.removableFieldCandidates, []);
+  });
+
+  test("repair preview rejects facts-panel text stored as singular serving size", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:malformed-singular-serving-size",
+      dataOriginId: "example-brand:malformed-singular-serving-size",
+      dataOriginUrl: "https://example.test/products/malformed-singular-serving-size",
+      name: "Example Singular Serving Size",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "malformed-singular-serving-size",
+        ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg", dailyValue: "48%" }],
+        servingSize: "Supplement Facts Serving Size 2 Capsules Amount Per Serving Magnesium 200 mg 48%",
+        bodyText: "Raw evidence must not be removed when singular serving size text is invalid.",
+      },
+    });
+
+    assert.equal(preview.parserStatus, "partial_parse");
+    assert.deepEqual(preview.parserBlockers, ["missing_serving_sizes"]);
+    assert.deepEqual(preview.removableFieldCandidates, []);
+  });
+
+  test("repair preview rejects net-content counts stored as existing serving sizes", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:net-content-serving-size",
+      dataOriginId: "example-brand:net-content-serving-size",
+      dataOriginUrl: "https://example.test/products/net-content-serving-size",
+      name: "Example Stick Packs",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "net-content-serving-size",
+        ingredientRows: [{ name: "Vitamin C", amount: "500", unit: "mg" }],
+        servingSizes: ["30 Stick Packs"],
+        bodyText: "Raw evidence must not be removed when net contents are stored as serving size.",
+      },
+    });
+
+    assert.equal(preview.parserStatus, "partial_parse");
+    assert.deepEqual(preview.parserBlockers, [
+      "invalid_existing_serving_sizes",
+      "missing_serving_sizes",
+    ]);
+    assert.deepEqual(preview.removableFieldCandidates, []);
+  });
+
+  test("repair preview rejects mass and liquid net contents stored as existing serving sizes", () => {
+    for (const servingSize of ["100 g", "100g", "100mL", "12 fl oz", "12fl oz"]) {
+      const preview = repairPreviewForRow({
+        id: `example-brand:net-content-${servingSize}`,
+        dataOriginId: `example-brand:net-content-${servingSize}`,
+        dataOriginUrl: "https://example.test/products/net-content-serving-size",
+        name: "Example Net Content",
+        brand: "Example Brand",
+        upc: null,
+        offMarket: false,
+        searchText: "",
+        label: {
+          source: "example-brand",
+          sourceId: "net-content-serving-size",
+          ingredientRows: [{ name: "Protein", amount: "20", unit: "g" }],
+          servingSizes: [servingSize],
+          bodyText: "Raw evidence must not be removed when net contents are stored as serving size.",
+        },
+      });
+
+      assert.equal(preview.parserStatus, "partial_parse");
+      assert.deepEqual(preview.parserBlockers, [
+        "invalid_existing_serving_sizes",
+        "missing_serving_sizes",
+      ]);
+      assert.deepEqual(preview.removableFieldCandidates, []);
+    }
+  });
+
+  test("repair preview keeps large mass serving sizes with explicit serving context", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:large-serving-size",
+      dataOriginId: "example-brand:large-serving-size",
+      dataOriginUrl: "https://example.test/products/large-serving-size",
+      name: "Example Mass Gainer",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "large-serving-size",
+        ingredientRows: [{ name: "Protein", amount: "50", unit: "g" }],
+        servingSizes: ["340 g (About 2 Scoops)"],
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.deepEqual(preview.parserBlockers, []);
+  });
+
+  test("repair preview infers one-unit serving size from exact per-form product title", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:iron",
+      dataOriginId: "example-brand:iron",
+      dataOriginUrl: "https://example.test/products/iron",
+      name: "45mg Iron Per Tablet",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "iron",
+        factsText: "Supplement Facts Amount Per Serving Iron 45 mg 250%",
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.equal(preview.parsedServingSizes, 1);
+    assert.equal(preview.parsedIngredientRows, 1);
+  });
+
+  test("repair preview extracts structured label facts with compact amounts", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:collagen",
+      dataOriginId: "example-brand:collagen",
+      dataOriginUrl: "https://example.test/products/collagen",
+      name: "Example Collagen",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "collagen",
+        servingSize: "2 Capsules",
+        facts: [
+          { nutrient: "Protein", amount: "9g" },
+          { nutrient: "Vitamin C", parentheses: "from Lipid Metabolite Ascorbate", amount: "90mg", dailyValuePercentage: "100%" },
+        ],
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.equal(preview.parsedServingSizes, 1);
+    assert.equal(preview.parsedIngredientRows, 2);
+  });
+
+  test("repair preview extracts structured factsRows before text fallback", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:b-complex",
+      dataOriginId: "example-brand:b-complex",
+      dataOriginUrl: "https://example.test/products/b-complex",
+      name: "Example B Complex",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "b-complex",
+        servingSize: "1 Coated Caplet",
+        factsRows: [
+          { name: "Thiamin (Vitamin B-1)", amount: "50 mg", dailyValue: "4,167%" },
+          { name: "Folate (400 mcg Folic Acid)", amount: "666 mcg DFE", dailyValue: "167%" },
+        ],
+        factsText: [
+          "Supplement Facts Serving size: 1 Coated Caplet Amount Per Serving | % Daily Value",
+          "Thiamin (Vitamin B-1) 50 mg | 4,167%",
+          "Folate (400 mcg Folic Acid) 666 mcg DFE | 167%",
+        ].join("\n"),
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.deepEqual(preview.parserBlockers, []);
+    assert.deepEqual(preview.parsedIngredientRowSources, ["structured_label_field"]);
+    assert.equal(preview.parsedIngredientRows, 2);
+  });
+
+  test("repair preview infers generic serving from structured Target per-serving facts", () => {
+    const preview = repairPreviewForRow({
+      id: "example-target:b12",
+      dataOriginId: "example-target:b12",
+      dataOriginUrl: "https://example.test/products/b12",
+      name: "Example B12 Tablets - 60ct",
+      brand: "Example Target",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-target",
+        sourceId: "b12",
+        factsText: "Amount Per Serving\nVitamin B12 2500 mcg 104167% DV",
+        rawTargetNutritionFacts: {
+          value_prepared_list: [
+            {
+              description: "Amount Per Serving",
+              nutrients: [
+                {
+                  name: "Vitamin B12",
+                  quantity: 2500,
+                  percentage: 104167,
+                  unit_of_measurement: "mcg",
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.equal(preview.parsedServingSizes, 1);
+    assert.equal(preview.parsedIngredientRows, 1);
+  });
+
+  test("repair preview does not treat enzyme activity text as stacked amount risk", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:quercetin",
+      dataOriginId: "example-brand:quercetin",
+      dataOriginUrl: "https://example.test/products/quercetin",
+      name: "Example Quercetin",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "quercetin",
+        factsText: [
+          "Supplement Facts",
+          "Serving Size 3 Tablets",
+          "Amount Per Serving",
+          "Vitamin C (as ascorbic acid)",
+          "700 mg",
+          "778%",
+          "Quercetin",
+          "1 g",
+          "Bromelain (2,000 G.D.U. per gram)tT",
+          "300 mg",
+          "†Daily Value not established.",
+        ].join("\n"),
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.deepEqual(preview.parserBlockers, []);
+    assert.equal(preview.parsedIngredientRows, 3);
+  });
+
+  test("repair preview allows parenthetical name continuations before amount rows", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:apple-pectin",
+      dataOriginId: "example-brand:apple-pectin",
+      dataOriginUrl: "https://example.test/products/apple-pectin",
+      name: "Example Apple Pectin",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "apple-pectin",
+        factsText: [
+          "Supplement Facts",
+          "Serving Size: 3 Capsules",
+          "Amount Per Serving",
+          "% DV",
+          "Dietary Fiber",
+          "1g",
+          "4%",
+          "Apple Pectin Powder",
+          "(Malus domestica) (pomace)",
+          "2,100mg",
+          "** Daily Value not established.",
+        ].join("\n"),
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.deepEqual(preview.parserBlockers, []);
+    assert.equal(preview.parsedIngredientRows, 2);
+  });
+
+  test("repair preview allows lowercase wrapped name continuations before amount rows", () => {
+    const factsText = [
+      "Supplement Facts",
+      "Serving Size 1 Stick Pack",
+      "Amount Per Serving",
+      "Gotu Kola (Centella asiatica) leaf and",
+      "stem extract (10% triterpenes)",
+      "120 mg",
+      "Hyaluronic acid",
+      "120 mg",
+      "*Daily Value not established.",
+    ].join("\n");
+    const preview = repairPreviewForRow({
+      id: "example-brand:gotu-kola",
+      dataOriginId: "example-brand:gotu-kola",
+      dataOriginUrl: "https://example.test/products/gotu-kola",
+      name: "Example Gotu Kola",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "gotu-kola",
+        factsText,
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.deepEqual(preview.parserBlockers, []);
+    assert.deepEqual(extractIngredientRowsFromText(factsText).map((row) => row.name), [
+      "Gotu Kola (Centella asiatica) leaf and stem extract (10% triterpenes)",
+      "Hyaluronic acid",
+    ]);
+    assert.equal(preview.parsedIngredientRows, 2);
+  });
+
+  test("repair preview accepts lowercase omega component facts rows without header carryover", () => {
+    const factsText = [
+      "Supplement",
+      "Facts",
+      "Serving Size 2 Softgels",
+      "Amount Per Serving",
+      "%DV",
+      "Calories",
+      "10",
+      "Total Fat",
+      "1 g",
+      "2%*",
+      "Krill Oil Blend",
+      "1 g",
+      "Yielding:",
+      "Phospholipids, omega-3 rich",
+      "420 mg",
+      "omega-3 fatty acids, total",
+      "300 mg",
+      "Eicosapentaenoic acid (EPA)",
+      "150 mg",
+      "Docosahexaenoic acid (DHA)",
+      "90 mg",
+      "Astaxanthin",
+      "1.5 mg",
+      "+",
+      "*Percent Daily Values are based on a 2,000 calorie diet.",
+    ].join("\n");
+    const preview = repairPreviewForRow({
+      id: "example-brand:krill-oil",
+      dataOriginId: "example-brand:krill-oil",
+      dataOriginUrl: "https://example.test/products/krill-oil",
+      name: "Example Krill Oil",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "krill-oil",
+        factsText,
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.deepEqual(preview.parserBlockers, []);
+    assert.deepEqual(extractIngredientRowsFromText(factsText).map((row) => row.name), [
+      "Krill Oil Blend",
+      "Phospholipids, omega-3 rich",
+      "omega-3 fatty acids, total",
+      "Eicosapentaenoic acid (EPA)",
+      "Docosahexaenoic acid (DHA)",
+      "Astaxanthin",
+    ]);
+    assert.equal(preview.parsedIngredientRows, 6);
   });
 
   test("repair preview downgrades page-body facts text even when amount patterns are found", () => {
@@ -209,8 +1487,13 @@ describe("supplement brand-site repair preview", () => {
       },
     });
 
-    assert.equal(preview.parserStatus, "partial_parse");
-    assert.equal(preview.parsedIngredientRows > 0, true);
+    assert.equal(preview.parserStatus, "needs_better_parser");
+    assert.equal(preview.evidenceRecoveryHint, "official_refetch_or_ocr");
+    assert.equal(preview.parsedIngredientRows, 0);
+    assert.deepEqual(preview.parserBlockers, [
+      "missing_ingredient_rows",
+      "missing_serving_sizes",
+    ]);
   });
 
   test("repair preview downgrades table-layout facts text with separated names and amounts", () => {

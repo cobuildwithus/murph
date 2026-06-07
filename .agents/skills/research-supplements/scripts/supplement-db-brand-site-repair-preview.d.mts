@@ -23,6 +23,9 @@ export interface ProposedRepairPreview {
   existingServingSizes: number;
   parsedServingSizes: number;
   parserStatus: "structured_ready" | "partial_parse" | "needs_better_parser";
+  parserBlockers: string[];
+  evidenceRecoveryHint: string;
+  parsedIngredientRowSources: string[];
   removableFieldCandidates: string[];
   dataOriginUrl?: string | null;
   proposedSearchTextPreview: string;
@@ -30,5 +33,8 @@ export interface ProposedRepairPreview {
 
 export function extractIngredientRows(label: Record<string, unknown>): Array<Record<string, unknown>>;
 export function extractIngredientRowsFromText(input: string): Array<Record<string, unknown>>;
-export function extractServingSizes(label: Record<string, unknown>): Array<Record<string, unknown>>;
+export function extractServingSizes(
+  label: Record<string, unknown>,
+  context?: { productName?: string; ingredientRows?: Array<Record<string, unknown>> },
+): Array<Record<string, unknown>>;
 export function repairPreviewForRow(row: RepairPreviewRow): ProposedRepairPreview;
