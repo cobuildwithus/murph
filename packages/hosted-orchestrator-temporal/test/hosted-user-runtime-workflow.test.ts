@@ -931,6 +931,114 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.waits).toEqual([30_000]);
   });
 
+  it("continues as new before an indefinite blocked wait when history is high", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.historyLength = 750;
+    runtime.demands.push({
+      kind: "blocked",
+      mailboxLag: [],
+      reason: "ai_usage_gate_unavailable",
+      retryAt: null,
+      workspace: null,
+    });
+
+    const machine = createMachine(runtime, {
+      options: {
+        continueAsNewAfterHistoryEvents: 750,
+        continueAsNewAfterIterations: 100,
+      },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests).toHaveLength(1);
+    expect(runtime.waits).toEqual([]);
+    expect(continued).toEqual({
+      options: normalizedContinuedOptions({
+        continueAsNewAfterHistoryEvents: 750,
+        continueAsNewAfterIterations: 100,
+      }),
+      state: expect.objectContaining({
+        lastDemandKind: "blocked",
+        manualRunRequested: true,
+        signalVersion: 1,
+      }),
+      userId: "member_test",
+    });
+  });
+
+  it("lets coalesced demand signals interrupt indefinite blocked waits", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    let machine: HostedUserRuntimeWorkflowMachine | null = null;
+    runtime.demands.push({
+      kind: "blocked",
+      mailboxLag: [],
+      reason: "ai_usage_gate_unavailable",
+      retryAt: null,
+      workspace: null,
+    });
+    runtime.demands.push((request) => {
+      expect(request.browserVaultRefreshRequested).toBe(true);
+      return runDemand({ source: "browser_vault_refresh" });
+    });
+    runtime.executions.push(processingAccepted());
+
+    machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal(browserVaultSignal());
+    runtime.onWait = () => {
+      runtime.onWait = null;
+      machine?.applySignal(browserVaultSignal());
+      expect(machine?.readStatus().signalVersion).toBe(2);
+    };
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([null]);
+    expect(runtime.demandRequests).toHaveLength(2);
+    expect(runtime.executionRequests).toHaveLength(1);
+    expect(runtime.executionRequests[0]?.reason).toBe("browser_vault_refresh");
+  });
+
+  it("does not let coalesced demand signals interrupt finite blocked retry waits", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    runtime.demands.push({
+      kind: "blocked",
+      mailboxLag: [],
+      reason: "ai_usage_gate_unavailable",
+      retryAt: isoAfter(30_000),
+      workspace: null,
+    });
+    runtime.demands.push((request) => {
+      expect(request.browserVaultRefreshRequested).toBe(true);
+      return runDemand({ source: "browser_vault_refresh" });
+    });
+    runtime.executions.push(processingAccepted());
+
+    machine.applySignal(browserVaultSignal());
+    runtime.onWait = () => {
+      runtime.onWait = null;
+      machine.applySignal(browserVaultSignal());
+      expect(machine.readStatus().signalVersion).toBe(1);
+    };
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([30_000]);
+    expect(runtime.now).toBe(BASE_TIME_MS + 30_000);
+    expect(runtime.demandRequests).toHaveLength(2);
+    expect(runtime.executionRequests).toHaveLength(1);
+    expect(runtime.executionRequests[0]?.reason).toBe("browser_vault_refresh");
+  });
+
   it("lets a signal interrupt blocked demand retry wait", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push({
@@ -1021,6 +1129,34 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
   });
 
+  it("continues as new before non-retryable execution failure waits when history is high", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.historyLength = 750;
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(() => {
+      throw nonRetryableActivityFailure("hosted_orchestrator_http_non_retryable");
+    });
+
+    const machine = createMachine(runtime, {
+      options: {
+        continueAsNewAfterHistoryEvents: 750,
+        continueAsNewAfterIterations: 100,
+      },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toHaveLength(1);
+    expect(runtime.waits).toEqual([]);
+    expect(continued.state).toMatchObject({
+      lastExecutionErrorCode: "hosted_orchestrator_http_non_retryable",
+      lastExecutionKind: "failed",
+      manualRunRequested: true,
+    });
+  });
+
   it("keeps old retry timer behavior when the non-retryable wait patch is inactive", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.signalOnlyNonRetryableFailureWaitEnabled = false;
@@ -1090,6 +1226,96 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       lastDemandNextWakeAt: null,
       lastDemandSource: "demand_read_failed",
       lastExecutionErrorCode: "hosted_orchestrator_invalid_protocol_response",
+    });
+  });
+
+  it("continues as new before non-retryable demand failure waits when history is high", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.historyLength = 750;
+    runtime.demands.push(() => {
+      throw nonRetryableActivityFailure(
+        "hosted_orchestrator_invalid_protocol_response",
+      );
+    });
+
+    const machine = createMachine(runtime, {
+      options: {
+        continueAsNewAfterHistoryEvents: 750,
+        continueAsNewAfterIterations: 100,
+      },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toHaveLength(0);
+    expect(runtime.waits).toEqual([]);
+    expect(continued.state).toMatchObject({
+      lastDemandKind: null,
+      lastDemandSource: "demand_read_failed",
+      lastExecutionErrorCode: "hosted_orchestrator_invalid_protocol_response",
+      manualRunRequested: true,
+    });
+  });
+
+  it("keeps old non-retryable demand failure wait ordering before the post-demand wait patch marker", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.historyLength = 750;
+    runtime.postDemandWaitContinueAsNewPatchEnabled = false;
+    runtime.demands.push(() => {
+      throw nonRetryableActivityFailure(
+        "hosted_orchestrator_invalid_protocol_response",
+      );
+    });
+
+    const machine = createMachine(runtime, {
+      options: {
+        continueAsNewAfterHistoryEvents: 750,
+        continueAsNewAfterIterations: 1,
+      },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toHaveLength(0);
+    expect(runtime.waits).toEqual([null]);
+    expect(continued.state).toMatchObject({
+      lastDemandKind: null,
+      lastDemandSource: "demand_read_failed",
+      lastExecutionErrorCode: "hosted_orchestrator_invalid_protocol_response",
+      manualRunRequested: true,
+    });
+  });
+
+  it("keeps old non-retryable failure wait ordering before the post-demand wait patch marker", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.historyLength = 750;
+    runtime.postDemandWaitContinueAsNewPatchEnabled = false;
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(() => {
+      throw nonRetryableActivityFailure("hosted_orchestrator_http_non_retryable");
+    });
+
+    const machine = createMachine(runtime, {
+      options: {
+        continueAsNewAfterHistoryEvents: 750,
+        continueAsNewAfterIterations: 1,
+      },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toHaveLength(1);
+    expect(runtime.waits).toEqual([null]);
+    expect(continued.state).toMatchObject({
+      lastExecutionErrorCode: "hosted_orchestrator_http_non_retryable",
+      lastExecutionKind: "failed",
+      manualRunRequested: true,
     });
   });
 
@@ -1204,6 +1430,104 @@ describe("hostedUserRuntimeWorkflow loop", () => {
         latestMailboxPointer: null,
         lastDemandSource: "mailbox_backlog",
         lastExecutionKind: "runtime_processing_accepted",
+      }),
+      userId: "member_test",
+    });
+  });
+
+  it("continues as new before an indefinite idle wait when history is high", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.historyLength = 750;
+    runtime.demands.push(idleDemand(null));
+
+    const machine = createMachine(runtime, {
+      options: {
+        continueAsNewAfterHistoryEvents: 750,
+        continueAsNewAfterIterations: 100,
+      },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests).toHaveLength(1);
+    expect(runtime.waits).toEqual([]);
+    expect(continued).toEqual({
+      options: normalizedContinuedOptions({
+        continueAsNewAfterHistoryEvents: 750,
+        continueAsNewAfterIterations: 100,
+      }),
+      state: expect.objectContaining({
+        latestMailboxPointer: null,
+        mailboxSignalCount: 0,
+        manualRunRequested: false,
+      }),
+      userId: "member_test",
+    });
+  });
+
+  it("keeps old idle-wait ordering before the post-demand wait patch marker", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.historyLength = 750;
+    runtime.postDemandWaitContinueAsNewPatchEnabled = false;
+    runtime.demands.push(idleDemand(null));
+
+    const machine = createMachine(runtime, {
+      options: {
+        continueAsNewAfterHistoryEvents: 750,
+        continueAsNewAfterIterations: 1,
+      },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests).toHaveLength(1);
+    expect(runtime.waits).toEqual([null]);
+    expect(continued).toEqual({
+      options: normalizedContinuedOptions({
+        continueAsNewAfterHistoryEvents: 750,
+        continueAsNewAfterIterations: 1,
+      }),
+      state: expect.objectContaining({
+        latestMailboxPointer: null,
+        mailboxSignalCount: 0,
+        signalVersion: 1,
+      }),
+      userId: "member_test",
+    });
+  });
+
+  it("continues as new before idle wait when Temporal suggests it after demand read", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(() => {
+      runtime.suggestContinueAsNew = true;
+      return idleDemand(null);
+    });
+
+    const machine = createMachine(runtime, {
+      options: {
+        continueAsNewAfterHistoryEvents: 750,
+        continueAsNewAfterIterations: 100,
+      },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests).toHaveLength(1);
+    expect(runtime.waits).toEqual([]);
+    expect(continued).toEqual({
+      options: normalizedContinuedOptions({
+        continueAsNewAfterHistoryEvents: 750,
+        continueAsNewAfterIterations: 100,
+      }),
+      state: expect.objectContaining({
+        latestMailboxPointer: null,
+        mailboxSignalCount: 0,
       }),
       userId: "member_test",
     });
@@ -1358,6 +1682,7 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   suggestContinueAsNew = false;
   historyLength = 0;
   unreadDemandBeforeContinueAsNewPatchEnabled = true;
+  postDemandWaitContinueAsNewPatchEnabled = true;
   readonly waits: Array<number | null> = [];
   private uuidCounter = 0;
   private readonly signalWaits: Array<{
@@ -1486,6 +1811,10 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
 
   useUnreadDemandBeforeContinueAsNewPatch(): boolean {
     return this.unreadDemandBeforeContinueAsNewPatchEnabled;
+  }
+
+  usePostDemandWaitContinueAsNewPatch(): boolean {
+    return this.postDemandWaitContinueAsNewPatchEnabled;
   }
 
   useRuntimeRecheckSignalPatch(): boolean {

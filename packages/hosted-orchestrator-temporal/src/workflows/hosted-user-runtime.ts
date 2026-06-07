@@ -69,6 +69,8 @@ const HOSTED_USER_RUNTIME_HISTORY_LENGTH_CONTINUE_AS_NEW_PATCH =
   "hosted-user-runtime-history-length-continue-as-new-v1";
 const HOSTED_USER_RUNTIME_UNREAD_DEMAND_BEFORE_CONTINUE_AS_NEW_PATCH =
   "hosted-user-runtime-unread-demand-before-continue-as-new-v1";
+const HOSTED_USER_RUNTIME_POST_DEMAND_WAIT_CONTINUE_AS_NEW_PATCH =
+  "hosted-user-runtime-post-demand-wait-continue-as-new-v1";
 const LEGACY_DEVICE_SYNC_RECOVERY_SOURCE = "device_sync_recovery";
 const HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT = 3;
 
@@ -181,6 +183,8 @@ export async function hostedUserRuntimeWorkflow(
       patched(HOSTED_USER_RUNTIME_HISTORY_LENGTH_CONTINUE_AS_NEW_PATCH),
     useUnreadDemandBeforeContinueAsNewPatch: () =>
       patched(HOSTED_USER_RUNTIME_UNREAD_DEMAND_BEFORE_CONTINUE_AS_NEW_PATCH),
+    usePostDemandWaitContinueAsNewPatch: () =>
+      patched(HOSTED_USER_RUNTIME_POST_DEMAND_WAIT_CONTINUE_AS_NEW_PATCH),
     useSignalOnlyWaitForNonRetryableFailure: () =>
       patched(HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH),
     uuid: uuid4,
@@ -229,6 +233,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
   useDeviceSyncRecoveryDeletionPatch(): boolean;
   useHistoryLengthContinueAsNewPatch(): boolean;
   useUnreadDemandBeforeContinueAsNewPatch(): boolean;
+  usePostDemandWaitContinueAsNewPatch(): boolean;
   useSignalOnlyWaitForNonRetryableFailure(): boolean;
   uuid(): string;
   waitForSignalOrTimeout(
@@ -300,8 +305,33 @@ export function createHostedUserRuntimeWorkflowMachine(
 
   const readStatus = (): HostedRuntimeWorkflowState => ({ ...state });
 
-  const wakeSignalOnlyWaitForCoalescedDemandSignal = (): void => {
-    if (state.currentWaitReason !== "non_retryable_signal_only") {
+  const continueAsNewWithCurrentState = async (): Promise<never> => {
+    const deviceSyncRecoveryDeleted =
+      runtime.useDeviceSyncRecoveryDeletionPatch();
+    return await runtime.continueAsNew({
+      options: continueAsNewOptions,
+      state: readCarryForwardState(
+        state,
+        deviceSyncRecoveryDeleted
+          ? null
+          : {
+              deviceSyncRecoveryRequested: legacyDeviceSyncRecoveryRequested,
+              sameRuntimeWakeAcceptedCount: legacySameRuntimeWakeAcceptedCount,
+            },
+      ),
+      userId: input.userId,
+    });
+  };
+
+  const wakeIndefiniteWaitForCoalescedDemandSignal = (): void => {
+    const shouldWake =
+      state.currentWaitReason === "non_retryable_signal_only"
+      || (
+        state.currentWaitReason === "blocked_retry"
+        && state.currentWaitUntil === null
+        && runtime.usePostDemandWaitContinueAsNewPatch()
+      );
+    if (!shouldWake) {
       return;
     }
     state.signalVersion += 1;
@@ -363,7 +393,7 @@ export function createHostedUserRuntimeWorkflowMachine(
           runtime.useCoalescedPendingSignalPatch() &&
           state.browserVaultRefreshRequested
         ) {
-          wakeSignalOnlyWaitForCoalescedDemandSignal();
+          wakeIndefiniteWaitForCoalescedDemandSignal();
           break;
         }
         state.signalVersion += 1;
@@ -381,7 +411,7 @@ export function createHostedUserRuntimeWorkflowMachine(
           runtime.useCoalescedPendingSignalPatch()
           && legacyDeviceSyncRecoveryRequested
         ) {
-          wakeSignalOnlyWaitForCoalescedDemandSignal();
+          wakeIndefiniteWaitForCoalescedDemandSignal();
           break;
         }
         state.signalVersion += 1;
@@ -394,7 +424,7 @@ export function createHostedUserRuntimeWorkflowMachine(
           runtime.useCoalescedPendingSignalPatch() &&
           state.lagRecoveryObserved
         ) {
-          wakeSignalOnlyWaitForCoalescedDemandSignal();
+          wakeIndefiniteWaitForCoalescedDemandSignal();
           break;
         }
         state.signalVersion += 1;
@@ -418,21 +448,7 @@ export function createHostedUserRuntimeWorkflowMachine(
         options,
         runtime,
       })) {
-        const deviceSyncRecoveryDeleted =
-          runtime.useDeviceSyncRecoveryDeletionPatch();
-        await runtime.continueAsNew({
-          options: continueAsNewOptions,
-          state: readCarryForwardState(
-            state,
-            deviceSyncRecoveryDeleted
-              ? null
-              : {
-                  deviceSyncRecoveryRequested: legacyDeviceSyncRecoveryRequested,
-                  sameRuntimeWakeAcceptedCount: legacySameRuntimeWakeAcceptedCount,
-                },
-          ),
-          userId: input.userId,
-        });
+        await continueAsNewWithCurrentState();
       }
 
       completedIterations += 1;
@@ -464,6 +480,12 @@ export function createHostedUserRuntimeWorkflowMachine(
           retryDelayMs: HOSTED_USER_RUNTIME_DEFAULT_DEMAND_FAILURE_RETRY_DELAY_MS,
           runtime,
         });
+        if (
+          retryAt === null
+          && shouldContinueAsNewBeforePostDemandWait({ options, runtime })
+        ) {
+          await continueAsNewWithCurrentState();
+        }
         await waitUntilTimestampOrSignal(
           runtime,
           retryAt,
@@ -483,6 +505,9 @@ export function createHostedUserRuntimeWorkflowMachine(
 
       if (demand.kind === "blocked") {
         clearPendingRuntimePrewarm(state);
+        if (shouldContinueAsNewBeforePostDemandWait({ options, runtime })) {
+          await continueAsNewWithCurrentState();
+        }
         await waitUntilTimestampOrSignal(
           runtime,
           demand.retryAt,
@@ -512,6 +537,9 @@ export function createHostedUserRuntimeWorkflowMachine(
         }
         if (clearSatisfiedFlags(state, versionBeforeDemand)) {
           legacyDeviceSyncRecoveryRequested = false;
+        }
+        if (shouldContinueAsNewBeforePostDemandWait({ options, runtime })) {
+          await continueAsNewWithCurrentState();
         }
         await waitUntilTimestampOrSignal(
           runtime,
@@ -555,6 +583,12 @@ export function createHostedUserRuntimeWorkflowMachine(
           retryDelayMs: HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
           runtime,
         });
+        if (
+          retryAt === null
+          && shouldContinueAsNewBeforePostDemandWait({ options, runtime })
+        ) {
+          await continueAsNewWithCurrentState();
+        }
         await waitUntilTimestampOrSignal(
           runtime,
           retryAt,
@@ -842,6 +876,21 @@ function shouldContinueAsNewBeforeDemand(input: {
     input.hasUnreadDemandSignal
     && input.runtime.useUnreadDemandBeforeContinueAsNewPatch()
   );
+}
+
+function shouldContinueAsNewBeforePostDemandWait(input: {
+  options: NormalizedWorkflowOptions;
+  runtime: HostedUserRuntimeWorkflowRuntime;
+}): boolean {
+  if (!input.runtime.usePostDemandWaitContinueAsNewPatch()) {
+    return false;
+  }
+  if (input.runtime.continueAsNewSuggested()) {
+    return true;
+  }
+  return input.runtime.useHistoryLengthContinueAsNewPatch()
+    && input.runtime.currentHistoryLength()
+      >= input.options.continueAsNewAfterHistoryEvents;
 }
 
 function hasPendingCurrentRuntimeDemand(
