@@ -22,6 +22,7 @@ import type {
 } from '../src/assistant/service-contracts.js'
 import {
   MAX_PROGRESS_CHARS,
+  MAX_PROGRESS_UPDATES_PER_TURN,
 } from '../src/assistant/progress-constants.js'
 import {
   createAssistantProgressDelivery,
@@ -72,18 +73,32 @@ describe('assistant turn progress', () => {
     await expect(
       progress.send('Checking the saved context now.'),
     ).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    await expect(
+      progress.send('Reviewing the tool output now.'),
+    ).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    await expect(
+      progress.send('Preparing a concise final reply.'),
+    ).resolves.toEqual({
       kind: 'skipped',
       reason: 'limit',
       source: 'model',
     })
 
-    expect(deliver).toHaveBeenCalledTimes(1)
+    expect(deliver).toHaveBeenCalledTimes(MAX_PROGRESS_UPDATES_PER_TURN)
     expect(delivered.map((input) => [input.ordinal, input.text])).toEqual([
       [0, 'Extracting the PDF and checking relevant results.'],
+      [1, 'Checking the saved context now.'],
+      [2, 'Reviewing the tool output now.'],
     ])
   })
 
-  it('tracks system and model progress budgets independently', async () => {
+  it('tracks one shared progress budget across system and model updates', async () => {
     const delivered: DeliverProgressInput[] = []
     const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {
       delivered.push(input)
@@ -113,6 +128,12 @@ describe('assistant turn progress', () => {
     await expect(
       progress.send('Preparing a concise final reply.', { source: 'model' }),
     ).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    await expect(
+      progress.send('Writing the final answer now.', { source: 'model' }),
+    ).resolves.toEqual({
       kind: 'skipped',
       reason: 'limit',
       source: 'model',
@@ -121,6 +142,7 @@ describe('assistant turn progress', () => {
     expect(delivered.map((input) => [input.ordinal, input.text])).toEqual([
       [0, 'Hang on, refreshing my memory real quick.'],
       [1, 'Checking the saved context now.'],
+      [2, 'Preparing a concise final reply.'],
     ])
   })
 

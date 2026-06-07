@@ -296,7 +296,7 @@ function resolveCodexProgressToolResultText(
   if (result.reason === 'limit') {
     return {
       success: false,
-      text: 'progress update skipped: one progress update was already sent',
+      text: 'progress update skipped: progress update limit reached',
     }
   }
 

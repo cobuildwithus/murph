@@ -104,10 +104,13 @@ describe('assistant execution prompt contract', () => {
       'Use it for longer, multi-step, research, long parsing/scans, or non-audio content-inspection work',
     )
     expect(prompt).toContain(
+      'If the turn remains long-running after substantial tool work, send another brief update so the user is not left hanging, up to three total progress updates in the turn',
+    )
+    expect(prompt).toContain(
       'Keep the text brief, conversational, and specific to the immediate next step',
     )
     expect(prompt).toContain(
-      '3. Use `send_progress_update` first for genuinely longer, multi-step, research, long parsing/scans, or non-audio content-inspection work. Keep the progress text brief, conversational, and specific to the immediate next step; avoid stiff plan-recitation wording like "I\'m going to..." when a shorter "I\'ll..." or "Taking a look..." works.',
+      '3. Use `send_progress_update` first for genuinely longer, multi-step, research, long parsing/scans, or non-audio content-inspection work. If the turn remains long-running after substantial tool work, send another brief update so the user is not left hanging, up to three total progress updates in the turn. Keep the progress text brief, conversational, and specific to the immediate next step; avoid stiff plan-recitation wording like "I\'m going to..." when a shorter "I\'ll..." or "Taking a look..." works.',
     )
     expect(prompt).toContain(
       'avoid stiff plan-recitation wording like "I\'m going to..."',

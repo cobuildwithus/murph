@@ -23,6 +23,9 @@ describe('assistant progress prompt contract', () => {
       'Use it for longer, multi-step, research, long parsing/scans, or non-audio content-inspection work',
     )
     expect(prompt).toContain(
+      'If the turn remains long-running after substantial tool work, send another brief update so the user is not left hanging, up to three total progress updates in the turn',
+    )
+    expect(prompt).toContain(
       'Keep the text brief, conversational, and specific to the immediate next step',
     )
     expect(prompt).toContain(
@@ -39,6 +42,15 @@ describe('assistant progress prompt contract', () => {
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.name).toBe('send_progress_update')
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'before longer, tool-heavy, or user-content-inspection work',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'If the turn remains long-running after substantial tool work',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'so the user is not left hanging',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'up to three total progress updates in the turn',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'Use immediately as the first assistant action',

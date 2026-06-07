@@ -4143,13 +4143,25 @@ test('sendAssistantMessageLocal lets the provider own hosted attachment progress
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
   assert.ok(progressDelivery)
   await expect(
+    progressDelivery.send('Still checking the attachment context.'),
+  ).resolves.toEqual({
+    kind: 'sent',
+    source: 'model',
+  })
+  await expect(
+    progressDelivery.send('Reviewing the recovered details now.'),
+  ).resolves.toEqual({
+    kind: 'sent',
+    source: 'model',
+  })
+  await expect(
     progressDelivery.send('One more progress update.'),
   ).resolves.toEqual({
     kind: 'skipped',
     reason: 'limit',
     source: 'model',
   })
-  expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(1)
+  expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(3)
 })
 
 test('sendAssistantMessageLocal uses resolved audience channel for hosted model progress', async () => {

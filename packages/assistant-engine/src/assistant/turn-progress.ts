@@ -70,10 +70,7 @@ export function createAssistantProgressDelivery(input: {
   const deliver = input.deliver ?? deliverAssistantProgressUpdate
   const abortController = new AbortController()
   const sentTexts = new Set<string>()
-  const sentCountsBySource: Record<AssistantProgressDeliverySource, number> = {
-    model: 0,
-    system: 0,
-  }
+  let sentCount = 0
   let deliveryOrdinal = 0
 
   return {
@@ -93,7 +90,7 @@ export function createAssistantProgressDelivery(input: {
           source,
         }
       }
-      if (sentCountsBySource[source] >= MAX_PROGRESS_UPDATES_PER_TURN) {
+      if (sentCount >= MAX_PROGRESS_UPDATES_PER_TURN) {
         return {
           kind: 'skipped',
           reason: 'limit',
@@ -103,7 +100,7 @@ export function createAssistantProgressDelivery(input: {
 
       const ordinal = deliveryOrdinal
       deliveryOrdinal += 1
-      sentCountsBySource[source] += 1
+      sentCount += 1
       sentTexts.add(text)
 
       try {
