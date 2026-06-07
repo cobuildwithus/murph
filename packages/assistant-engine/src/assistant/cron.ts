@@ -37,6 +37,7 @@ import {
   claimNextDueAssistantCronJob,
   claimResolvedAssistantCronJob,
   executeClaimedAssistantCronJob,
+  expireNextStaleDueAssistantCronJob,
 } from './cron/execution.ts'
 import type { AssistantRunEvent } from './automation/shared.ts'
 import type { AssistantTurnEnvironment } from './service-contracts.ts'
@@ -539,6 +540,22 @@ export async function processDueAssistantCronJobsLocal(
   })
 
   while (!input.signal?.aborted && summary.processed < limit) {
+    const expired = await expireNextStaleDueAssistantCronJob({
+      paths,
+      vault: input.vault,
+    })
+    if (expired) {
+      summary.processed += 1
+      emitAssistantCronJobCompletedEvent({
+        errorPresent: expired.run.error !== null,
+        job: expired.job,
+        onEvent: input.onEvent,
+        runStatus: expired.run.status,
+        sourceKind: expired.sourceKind,
+      })
+      continue
+    }
+
     const claimed = await claimNextDueAssistantCronJob(paths, input.vault)
     if (!claimed) {
       break
@@ -664,16 +681,15 @@ function emitAssistantCronJobCompletedEvent(input: {
   runStatus: AssistantCronRunRecord['status']
   sourceKind: string
 }): void {
-  const safeDetailsByStatus: Record<AssistantCronRunRecord['status'], string> = {
-    failed: 'cron_job_enqueue_failed',
-    skipped: 'cron_job_delivery_pending',
-    succeeded: 'cron_job_enqueue_succeeded',
-  }
+  const safeDetails =
+    input.runStatus === 'skipped' && input.errorPresent
+      ? 'cron_job_skipped_error'
+      : resolveAssistantCronCompletedSafeDetails(input.runStatus)
 
   input.onEvent?.({
     type: 'cron.job.completed',
     details: 'scheduled job run completed',
-    safeDetails: safeDetailsByStatus[input.runStatus],
+    safeDetails,
     failureContext: {
       errorPresent: input.errorPresent,
       routeConfigured: assistantCronJobHasDeliveryRoute(input.job),
@@ -684,6 +700,19 @@ function emitAssistantCronJobCompletedEvent(input: {
     providerKind: 'status',
     providerState: 'completed',
   })
+}
+
+function resolveAssistantCronCompletedSafeDetails(
+  status: AssistantCronRunRecord['status'],
+): string {
+  switch (status) {
+    case 'failed':
+      return 'cron_job_enqueue_failed'
+    case 'skipped':
+      return 'cron_job_delivery_pending'
+    case 'succeeded':
+      return 'cron_job_enqueue_succeeded'
+  }
 }
 
 function resolveAssistantCronDueReason(job: AssistantCronJob, nowIso: string): string {

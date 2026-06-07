@@ -9,6 +9,7 @@ import {
   type AssistantCronSchedule,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { ScheduledLogQueryRecord } from '@murphai/query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type MockAutomationRecord = {
@@ -35,7 +36,9 @@ type MockAutomationRecord = {
 const cronMocks = vi.hoisted(() => ({
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   automationsByVault: new Map<string, MockAutomationRecord[]>(),
+  executeScheduledLogOccurrence: vi.fn(),
   getAssistantChannelAdapter: vi.fn(),
+  listCanonicalScheduledLogs: vi.fn(),
   listCanonicalAutomations: vi.fn(),
   loadImporterRuntime: vi.fn(),
   loadRuntimeModule: vi.fn(),
@@ -44,13 +47,17 @@ const cronMocks = vi.hoisted(() => ({
   renderAutoLoggedFoodMealNote: vi.fn(),
   resolveAssistantBindingDelivery: vi.fn(),
   sendAssistantMessageLocal: vi.fn(),
+  setScheduledLogStatus: vi.fn(),
+  scheduledLogsByVault: new Map<string, ScheduledLogQueryRecord[]>(),
   showCanonicalAutomation: vi.fn(),
   upsertAutomation: vi.fn(),
   withAssistantCronWriteLock: vi.fn(),
 }))
 
 vi.mock('@murphai/core', () => ({
+  executeScheduledLogOccurrence: cronMocks.executeScheduledLogOccurrence,
   loadVault: cronMocks.loadVault,
+  setScheduledLogStatus: cronMocks.setScheduledLogStatus,
   upsertAutomation: cronMocks.upsertAutomation,
 }))
 
@@ -59,6 +66,7 @@ vi.mock('@murphai/query', async (importOriginal) => {
   return {
     ...actual,
     listAutomations: cronMocks.listCanonicalAutomations,
+    listScheduledLogs: cronMocks.listCanonicalScheduledLogs,
     showAutomation: cronMocks.showCanonicalAutomation,
   }
 })
@@ -146,6 +154,7 @@ const tempRoots: string[] = []
 beforeEach(() => {
   vi.useRealTimers()
   cronMocks.automationsByVault.clear()
+  cronMocks.scheduledLogsByVault.clear()
   cronMocks.nextAutomationId = 1
 
   cronMocks.applyAssistantSelfDeliveryTargetDefaults.mockReset().mockImplementation(
@@ -226,6 +235,34 @@ beforeEach(() => {
   cronMocks.renderAutoLoggedFoodMealNote
     .mockReset()
     .mockImplementation((food: { title: string }) => `Meal note for ${food.title}`)
+  cronMocks.executeScheduledLogOccurrence.mockReset().mockResolvedValue({
+    message: 'Auto-logged scheduled log "Morning measurement" as event evt_1.',
+  })
+  cronMocks.setScheduledLogStatus.mockReset().mockImplementation(
+    async (input: {
+      scheduledLogId: string
+      status: ScheduledLogQueryRecord['status']
+      vaultRoot: string
+    }) => {
+      const records = getVaultScheduledLogStore(input.vaultRoot)
+      const index = records.findIndex(
+        (record) => record.scheduledLogId === input.scheduledLogId,
+      )
+      let updated: ScheduledLogQueryRecord | null = null
+      if (index >= 0) {
+        const existing = records[index] as ScheduledLogQueryRecord
+        updated = {
+          ...existing,
+          status: input.status,
+          updatedAt: new Date().toISOString(),
+        }
+        records.splice(index, 1, updated)
+      }
+      return {
+        record: updated,
+      }
+    },
+  )
   cronMocks.loadImporterRuntime.mockReset().mockResolvedValue({
     addMeal: vi.fn(async () => ({
       mealId: 'meal-1',
@@ -239,6 +276,20 @@ beforeEach(() => {
       },
     ) => {
       const records = getVaultAutomationStore(vault)
+      const allowed = options?.status
+      return records.filter((record) =>
+        allowed ? allowed.includes(record.status) : true,
+      )
+    },
+  )
+  cronMocks.listCanonicalScheduledLogs.mockReset().mockImplementation(
+    async (
+      vault: string,
+      options?: {
+        status?: ReadonlyArray<'active' | 'paused' | 'archived'>
+      },
+    ) => {
+      const records = getVaultScheduledLogStore(vault)
       const allowed = options?.status
       return records.filter((record) =>
         allowed ? allowed.includes(record.status) : true,
@@ -766,6 +817,269 @@ describe('assistant cron runtime orchestration', () => {
       runs: [
         expect.objectContaining({
           response: 'Skipped because no delivery was required.',
+          status: 'succeeded',
+        }),
+      ],
+    })
+  })
+
+  it('expires stale canonical one-shot notification cron jobs without sending', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-expired-one-shot-',
+    )
+    const canonicalJob = await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: 'expired one-shot reminder',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'First-session prep reminder.',
+      schedule: {
+        kind: 'at',
+        at: '2026-04-08T09:00:00.000Z',
+      },
+      vault: vaultRoot,
+    })
+    const events: Array<{
+      failureContext?: Record<string, boolean | number | string | null>
+      safeDetails?: string
+      type: string
+    }> = []
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      onEvent: (event) => {
+        events.push(event)
+      },
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(cronMocks.upsertAutomation).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        automationId: canonicalJob.jobId,
+        status: 'archived',
+      }),
+    )
+    await expect(listAssistantCronJobs(vaultRoot)).resolves.toEqual([])
+    await expect(
+      listAssistantCronRuns({
+        job: canonicalJob.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      jobId: canonicalJob.jobId,
+      runs: [
+        expect.objectContaining({
+          error: expect.stringContaining(
+            'Assistant cron one-shot notification expired before delivery.',
+          ),
+          response: null,
+          status: 'skipped',
+        }),
+      ],
+    })
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          failureContext: expect.objectContaining({
+            errorPresent: true,
+            runStatus: 'skipped',
+            scheduleKind: 'at',
+            sourceKind: 'automation',
+          }),
+          safeDetails: 'cron_job_skipped_error',
+          type: 'cron.job.completed',
+        }),
+      ]),
+    )
+  })
+
+  it('expires canonical one-shot notification retries by original occurrence', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:45:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-expired-one-shot-retry-',
+    )
+    const canonicalJob = await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: 'expired retry one-shot reminder',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'First-session prep reminder.',
+      schedule: {
+        kind: 'at',
+        at: '2026-04-08T09:00:00.000Z',
+      },
+      vault: vaultRoot,
+    })
+    await updateCanonicalRuntimeState(vaultRoot, canonicalJob.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        consecutiveFailures: 1,
+        lastError: 'temporary send failure',
+        lastFailedAt: '2026-04-08T09:29:00.000Z',
+        pendingOccurrenceAt: '2026-04-08T09:00:00.000Z',
+        retryAfterAt: '2026-04-08T09:40:00.000Z',
+      },
+    }))
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    await expect(listAssistantCronJobs(vaultRoot)).resolves.toEqual([])
+    await expect(
+      listAssistantCronRuns({
+        job: canonicalJob.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      runs: [
+        expect.objectContaining({
+          error: expect.stringContaining('Scheduled occurrence was 45 minute(s) late.'),
+          status: 'skipped',
+        }),
+      ],
+    })
+  })
+
+  it('runs canonical one-shot notification cron jobs within the expiry window', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-fresh-one-shot-',
+    )
+    const canonicalJob = await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: 'fresh one-shot reminder',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'First-session prep reminder.',
+      schedule: {
+        kind: 'at',
+        at: '2026-04-08T09:00:00.000Z',
+      },
+      vault: vaultRoot,
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryDedupeToken: expect.stringContaining(
+          `assistant-cron|${canonicalJob.jobId}|2026-04-08T09:00:00.000Z`,
+        ),
+        instructions: 'First-session prep reminder.',
+        turnTrigger: 'automation-cron',
+      }),
+    )
+    await expect(
+      listAssistantCronRuns({
+        job: canonicalJob.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      jobId: canonicalJob.jobId,
+      runs: [
+        expect.objectContaining({
+          error: null,
+          status: 'succeeded',
+        }),
+      ],
+    })
+  })
+
+  it('runs stale canonical one-shot scheduled-log cron jobs instead of expiring them', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-stale-scheduled-log-',
+    )
+    getVaultScheduledLogStore(vaultRoot).push({
+      action: {
+        kind: 'measurement.add',
+        measurements: [
+          {
+            metric: 'body-weight',
+            unit: 'lb',
+            value: 180.8,
+          },
+        ],
+      },
+      body: 'Write the morning measurement event.',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      docType: 'scheduled_log',
+      markdown: 'scheduled log markdown',
+      relativePath: 'bank/scheduled-logs/morning-measurement.md',
+      schedule: {
+        at: '2026-04-08T09:00:00.000Z',
+        kind: 'at',
+      },
+      schemaVersion: 'murph.frontmatter.scheduled-log.v1',
+      scheduledLogId: 'slog_01JX8VCQY2M5ZBV64ZP4N1DRBC',
+      slug: 'morning-measurement',
+      status: 'active',
+      summary: 'Record the morning measurement.',
+      tags: ['measurement'],
+      title: 'Morning measurement',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(cronMocks.executeScheduledLogOccurrence).toHaveBeenCalledWith({
+      occurrenceAt: '2026-04-08T09:00:00.000Z',
+      scheduledLogId: 'slog_01JX8VCQY2M5ZBV64ZP4N1DRBC',
+      vaultRoot,
+    })
+    expect(cronMocks.setScheduledLogStatus).toHaveBeenCalledWith({
+      scheduledLogId: 'slog_01JX8VCQY2M5ZBV64ZP4N1DRBC',
+      status: 'archived',
+      vaultRoot,
+    })
+    await expect(
+      listAssistantCronRuns({
+        job: 'slog_01JX8VCQY2M5ZBV64ZP4N1DRBC',
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      jobId: 'slog_01JX8VCQY2M5ZBV64ZP4N1DRBC',
+      runs: [
+        expect.objectContaining({
+          error: null,
+          response: 'Auto-logged scheduled log "Morning measurement" as event evt_1.',
           status: 'succeeded',
         }),
       ],
@@ -1608,6 +1922,17 @@ function getVaultAutomationStore(vault: string): MockAutomationRecord[] {
 
   const created: MockAutomationRecord[] = []
   cronMocks.automationsByVault.set(vault, created)
+  return created
+}
+
+function getVaultScheduledLogStore(vault: string): ScheduledLogQueryRecord[] {
+  const existing = cronMocks.scheduledLogsByVault.get(vault)
+  if (existing) {
+    return existing
+  }
+
+  const created: ScheduledLogQueryRecord[] = []
+  cronMocks.scheduledLogsByVault.set(vault, created)
   return created
 }
 
