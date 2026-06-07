@@ -49,7 +49,7 @@ describe("runner bundle package-manager process env", () => {
     expect(env).not.toHaveProperty("npm_config_cache");
   });
 
-  it("uses an isolated package-manager home while reusing the parent Corepack cache", async () => {
+  it("uses an isolated package-manager home while reusing configured package-manager caches", async () => {
     const processEnv = await createPackageManagerProcessEnv(
       {
         COREPACK_ENABLE_AUTO_PIN: "0",
@@ -79,8 +79,7 @@ describe("runner bundle package-manager process env", () => {
       expect(env.COREPACK_HOME).toBe("/tmp/corepack");
       expect(env.NPM_CONFIG_CACHE).toBe(path.join(env.HOME ?? "", "cache", "npm"));
       expect(env.NPM_CONFIG_CACHE).not.toBe("/tmp/npm-cache");
-      expect(env.PNPM_STORE_DIR).toBe(path.join(env.HOME ?? "", "data", "pnpm-store"));
-      expect(env.PNPM_STORE_DIR).not.toBe("/tmp/pnpm-store");
+      expect(env.PNPM_STORE_DIR).toBe("/tmp/pnpm-store");
       expect(env.XDG_CONFIG_HOME).toBe(path.join(env.HOME ?? "", "config"));
       expect(env.NPM_CONFIG_USERCONFIG).toBe(path.join(env.HOME ?? "", ".npmrc"));
       expect(env.npm_config_cache).toBe(env.NPM_CONFIG_CACHE);
@@ -91,20 +90,24 @@ describe("runner bundle package-manager process env", () => {
     }
   });
 
-  it("derives a reusable Corepack cache from the parent home when COREPACK_HOME is unset", async () => {
+  it("derives reusable Corepack and pnpm caches from the parent environment", async () => {
     const processEnv = await createPackageManagerProcessEnv(
       undefined,
       {
         HOME: "/tmp/home",
-        PATH: "/usr/bin",
+        PATH: process.env.PATH,
       },
     );
 
     try {
+      const tempHome = processEnv.env.HOME ?? "";
       expect(processEnv.env.COREPACK_HOME).toBe(
         path.join("/tmp/home", ".cache", "node", "corepack"),
       );
-      expect(processEnv.env.HOME).not.toBe("/tmp/home");
+      expect(processEnv.env.PNPM_STORE_DIR).toEqual(expect.any(String));
+      expect(processEnv.env.PNPM_STORE_DIR).not.toContain(tempHome);
+      expect(processEnv.env.npm_config_store_dir).toBe(processEnv.env.PNPM_STORE_DIR);
+      expect(tempHome).not.toBe("/tmp/home");
     } finally {
       await processEnv.cleanup();
     }

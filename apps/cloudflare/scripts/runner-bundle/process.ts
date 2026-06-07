@@ -95,19 +95,27 @@ export async function createPackageManagerProcessEnv(
   );
   const isolatedEnv = await createIsolatedPackageManagerHomeEnv(homeDir);
   const reusableCorepackHome = resolveReusableCorepackHome(source);
+  const reusablePnpmStoreDir = await resolveReusablePnpmStoreDir(explicitEnv, source);
   const packageManagerEnv = reusableCorepackHome
     ? {
         ...isolatedEnv,
         COREPACK_HOME: reusableCorepackHome,
       }
     : isolatedEnv;
+  const packageManagerCacheEnv = reusablePnpmStoreDir
+    ? {
+        ...packageManagerEnv,
+        PNPM_STORE_DIR: reusablePnpmStoreDir,
+        npm_config_store_dir: reusablePnpmStoreDir,
+      }
+    : packageManagerEnv;
 
   return {
     cleanup: async () => {
       await rm(homeDir, { force: true, recursive: true });
     },
     env: buildPackageManagerProcessEnv({
-      ...packageManagerEnv,
+      ...packageManagerCacheEnv,
       ...explicitEnv,
     }, source),
   };
@@ -124,7 +132,6 @@ async function createIsolatedPackageManagerHomeEnv(
   const localAppDataDir = path.join(dataDir, "localappdata");
   const npmCacheDir = path.join(cacheDir, "npm");
   const pnpmHomeDir = path.join(dataDir, "pnpm-home");
-  const pnpmStoreDir = path.join(dataDir, "pnpm-store");
   const userConfigPath = path.join(homeDir, ".npmrc");
 
   await Promise.all([
@@ -133,7 +140,6 @@ async function createIsolatedPackageManagerHomeEnv(
     mkdir(localAppDataDir, { recursive: true }),
     mkdir(npmCacheDir, { recursive: true }),
     mkdir(pnpmHomeDir, { recursive: true }),
-    mkdir(pnpmStoreDir, { recursive: true }),
   ]);
   await writeFile(userConfigPath, "", "utf8");
 
@@ -146,13 +152,11 @@ async function createIsolatedPackageManagerHomeEnv(
     NPM_CONFIG_CACHE: npmCacheDir,
     NPM_CONFIG_USERCONFIG: userConfigPath,
     PNPM_HOME: pnpmHomeDir,
-    PNPM_STORE_DIR: pnpmStoreDir,
     USERPROFILE: homeDir,
     XDG_CACHE_HOME: cacheDir,
     XDG_CONFIG_HOME: configDir,
     XDG_DATA_HOME: dataDir,
     npm_config_cache: npmCacheDir,
-    npm_config_store_dir: pnpmStoreDir,
     npm_config_userconfig: userConfigPath,
   };
 }
@@ -177,6 +181,83 @@ function resolveReusableCorepackHome(source: NodeJS.ProcessEnv): string | null {
   }
 
   return path.join(homeDir, ".cache", "node", "corepack");
+}
+
+async function resolveReusablePnpmStoreDir(
+  explicitEnv: NodeJS.ProcessEnv | undefined,
+  source: NodeJS.ProcessEnv,
+): Promise<string | null> {
+  const configuredStoreDir = readConfiguredPnpmStoreDir(explicitEnv)
+    ?? readConfiguredPnpmStoreDir(source);
+  if (configuredStoreDir) {
+    return configuredStoreDir;
+  }
+
+  return await resolvePnpmStorePath(source);
+}
+
+function readConfiguredPnpmStoreDir(
+  env: NodeJS.ProcessEnv | undefined,
+): string | null {
+  const configured =
+    env?.PNPM_STORE_DIR?.trim()
+    || env?.NPM_CONFIG_STORE_DIR?.trim()
+    || env?.npm_config_store_dir?.trim();
+
+  return configured || null;
+}
+
+async function resolvePnpmStorePath(source: NodeJS.ProcessEnv): Promise<string | null> {
+  const env = buildPnpmStorePathProcessEnv(source);
+
+  return await new Promise((resolve, reject) => {
+    const child = spawn(resolvePnpmCommand(), ["store", "path", "--silent"], {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) {
+        resolve(stdout.trim() || null);
+        return;
+      }
+
+      reject(new Error(
+        `pnpm store path exited with code ${code ?? "unknown"}.${stderr.trim() ? ` ${stderr.trim()}` : ""}`,
+      ));
+    });
+  });
+}
+
+function buildPnpmStorePathProcessEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env = buildPackageManagerProcessEnv(undefined, source);
+  for (const key of [
+    "APPDATA",
+    "COREPACK_HOME",
+    "HOME",
+    "LOCALAPPDATA",
+    "USERPROFILE",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+  ] as const) {
+    const value = source[key]?.trim();
+    if (value) {
+      env[key] = value;
+    }
+  }
+  env.COREPACK_ENABLE_DOWNLOAD_PROMPT = "0";
+  return env;
 }
 
 export function buildPackageManagerProcessEnv(
