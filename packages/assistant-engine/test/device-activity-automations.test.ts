@@ -59,7 +59,7 @@ describe('device activity triggered automations', () => {
     })
   })
 
-  it('fires the first matching walk activity and archives the automation', async () => {
+  it('schedules the first matching walk activity for assistant delivery', async () => {
     const automation = createDeviceActivityAutomation({
       activityKind: 'walk',
       after: '2026-06-07T11:00:00.000Z',
@@ -104,10 +104,31 @@ describe('device activity triggered automations', () => {
           at: '2026-06-07T12:01:00.000Z',
         },
         status: 'active',
-        tags: ['assistant-require-send'],
+        tags: ['system:assistant-require-send'],
         vaultRoot: '/vault',
       }),
     )
+  })
+
+  it('returns an assistant wake for an already due activity reminder handoff', async () => {
+    deviceActivityMocks.automations = [
+      createDueRequireSendAutomation({
+        at: '2026-06-07T12:01:00.000Z',
+      }),
+    ]
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:02:00.000Z',
+        vault: '/vault',
+      }),
+    ).resolves.toEqual({
+      matched: 0,
+      nextWakeAt: '2026-06-07T12:02:00.000Z',
+      scheduled: 0,
+    })
+
+    expect(deviceActivityMocks.upsertAutomation).not.toHaveBeenCalled()
   })
 
   it('does not fire when a walk filter only sees non-walk activity', async () => {
@@ -154,6 +175,21 @@ describe('device activity triggered automations', () => {
     await expect(listCanonicalAssistantCronRecords('/vault')).resolves.toEqual([])
   })
 })
+
+function createDueRequireSendAutomation(input: {
+  at: string
+}): AutomationQueryRecord {
+  return {
+    ...createDeviceActivityAutomation({
+      after: '2026-06-07T11:00:00.000Z',
+    }),
+    schedule: {
+      kind: 'at',
+      at: input.at,
+    },
+    tags: ['system:assistant-require-send'],
+  }
+}
 
 function createDeviceActivityAutomation(input: {
   activityKind?: 'walk'

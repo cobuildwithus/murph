@@ -698,7 +698,7 @@ describe('assistant cron runtime orchestration', () => {
     const canonicalJob = await createCanonicalJob(vaultRoot, 'raw-prompt-shape')
     const canonicalAutomation = findCanonicalAutomation(vaultRoot, canonicalJob.jobId)
     expect(canonicalAutomation).toBeDefined()
-    canonicalAutomation?.tags.push('assistant-require-send')
+    canonicalAutomation?.tags.push('system:assistant-require-send')
 
     await runAssistantCronJobNow({
       job: canonicalJob.jobId,

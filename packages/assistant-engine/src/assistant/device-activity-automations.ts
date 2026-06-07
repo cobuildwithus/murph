@@ -6,11 +6,11 @@ import {
   type VaultReadModel,
 } from '@murphai/query'
 import type { AutomationSchedule } from '@murphai/contracts'
+import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from './automation-tags.js'
 
 type DeviceActivitySchedule = Extract<AutomationSchedule, { kind: 'deviceActivity' }>
 type DeviceActivityAutomation = AutomationQueryRecord & { schedule: DeviceActivitySchedule }
 type ActivityEntity = VaultReadModel['events'][number]
-const ASSISTANT_REQUIRE_SEND_TAG = 'assistant-require-send'
 
 interface DeviceActivityCandidate {
   activityKind: string
@@ -51,10 +51,18 @@ async function scheduleDeviceActivityTriggeredAutomationsAt(
   input: ScheduleDeviceActivityTriggeredAutomationsInput & { nowIso: string },
 ): Promise<ScheduleDeviceActivityTriggeredAutomationsResult> {
   const automations = await listAutomations(input.vault, { status: ['active'] })
+  const hasDueScheduledActivityReminder = hasDueAssistantRequireSendAutomation({
+    automations,
+    nowIso: input.nowIso,
+  })
   const deviceActivityAutomations = automations.filter(isDeviceActivityAutomation)
 
   if (deviceActivityAutomations.length === 0) {
-    return { matched: 0, nextWakeAt: null, scheduled: 0 }
+    return {
+      matched: 0,
+      nextWakeAt: hasDueScheduledActivityReminder ? input.nowIso : null,
+      scheduled: 0,
+    }
   }
 
   const vault = await readVaultRawTolerant(input.vault)
@@ -88,13 +96,37 @@ async function scheduleDeviceActivityTriggeredAutomationsAt(
 
   return {
     matched,
-    nextWakeAt: scheduled > 0 ? input.nowIso : null,
+    nextWakeAt: scheduled > 0 || hasDueScheduledActivityReminder
+      ? input.nowIso
+      : null,
     scheduled,
   }
 }
 
 function isDeviceActivityAutomation(record: AutomationQueryRecord): record is DeviceActivityAutomation {
   return record.schedule.kind === 'deviceActivity'
+}
+
+function hasDueAssistantRequireSendAutomation(input: {
+  automations: readonly AutomationQueryRecord[]
+  nowIso: string
+}): boolean {
+  const nowMs = Date.parse(input.nowIso)
+  if (!Number.isFinite(nowMs)) {
+    return false
+  }
+
+  return input.automations.some((automation) => {
+    if (
+      automation.schedule.kind !== 'at' ||
+      !automation.tags.includes(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    ) {
+      return false
+    }
+
+    const scheduledMs = Date.parse(automation.schedule.at)
+    return Number.isFinite(scheduledMs) && scheduledMs <= nowMs
+  })
 }
 
 function listDeviceActivityCandidates(vault: VaultReadModel): DeviceActivityCandidate[] {
@@ -265,7 +297,7 @@ async function scheduleDeviceActivityAutomationNotification(input: {
     slug: input.automation.slug,
     status: 'active',
     ...(input.automation.summary ? { summary: input.automation.summary } : {}),
-    tags: mergeAutomationTags(input.automation.tags, [ASSISTANT_REQUIRE_SEND_TAG]),
+    tags: mergeAutomationTags(input.automation.tags, [ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG]),
     title: input.automation.title,
   })
 }

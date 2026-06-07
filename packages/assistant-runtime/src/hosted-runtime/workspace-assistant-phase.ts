@@ -1079,7 +1079,7 @@ function createHostedDeviceActivityAutomationWakeCandidate(
   result: HostedDeviceActivityAutomationScheduleResult | null,
 ): HostedRuntimeWakeCandidate | null {
   return createHostedRuntimeWakeCandidate(
-    result && result.scheduled > 0 ? result.nextWakeAt : null,
+    result?.nextWakeAt ?? null,
     HOSTED_ASSISTANT_WAKE_REASON,
   );
 }

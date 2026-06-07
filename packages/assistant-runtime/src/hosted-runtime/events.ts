@@ -526,7 +526,7 @@ async function executeHostedSystemWake(input: {
           deviceSyncMetrics.nextWakeReason ?? HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
         ),
         createHostedRuntimeWakeCandidate(
-          activityAutomation.scheduled > 0 ? activityAutomation.nextWakeAt : null,
+          activityAutomation.nextWakeAt,
           HOSTED_ASSISTANT_WAKE_REASON,
         ),
       ]);
