@@ -239,21 +239,35 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
-  it("signals browser-vault refresh directly as coalesced runtime demand", async () => {
+  it("persists browser-vault refresh as durable control demand before signaling", async () => {
     await signalHostedBrowserVaultRefreshRuntime({
       client: buildClient(),
       userId: "member_123",
     });
 
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: expect.stringMatching(/^runtime-control:browser-vault-refresh:[0-9a-f]{32}$/u),
+        kind: "runtime.browser-vault-refresh-requested",
+        userId: "member_123",
+      }),
+      tx: { kind: "tx" },
+    });
     expect(mocks.signalWithStart).toHaveBeenCalledWith(
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
       expect.objectContaining({
         signalArgs: [{
-          kind: "browser_vault_refresh_requested",
+          kind: "mailbox_appended",
+          lane: "system",
+          laneSeq: "77",
+          mailboxItemId: "mailbox_runtime.browser-vault-refresh-requested",
+          source: "browser-vault-refresh",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),
+    );
+    expect(mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.signalWithStart.mock.invocationCallOrder[0] ?? 0,
     );
     expect(mocks.ensureHostedWorkspace).toHaveBeenCalledWith({
       prisma: mocks.prisma,
@@ -268,28 +282,24 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
-  it("persists browser-vault refresh as durable control demand when direct signaling fails", async () => {
-    mocks.signalWithStart
-      .mockRejectedValueOnce(new Error("temporal unavailable"))
-      .mockResolvedValueOnce(undefined);
+  it("keeps browser-vault refresh durable when Temporal signaling fails", async () => {
+    mocks.signalWithStart.mockRejectedValueOnce(new Error("temporal unavailable"));
 
     await expect(signalHostedBrowserVaultRefreshRuntime({
       client: buildClient(),
       userId: "member_123",
-    })).resolves.toEqual({
-      signalAccepted: true,
-      workflowId: "hosted-user-runtime:member_123",
-    });
+    })).rejects.toThrow("temporal unavailable");
 
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
+        eventId: expect.stringMatching(/^runtime-control:browser-vault-refresh:[0-9a-f]{32}$/u),
         kind: "runtime.browser-vault-refresh-requested",
         userId: "member_123",
       }),
       tx: { kind: "tx" },
     });
-    expect(mocks.signalWithStart).toHaveBeenNthCalledWith(
-      2,
+    expect(mocks.signalWithStart).toHaveBeenCalledTimes(1);
+    expect(mocks.signalWithStart).toHaveBeenCalledWith(
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
       expect.objectContaining({
         signalArgs: [{
@@ -302,18 +312,15 @@ describe("hosted runtime Temporal signaling", () => {
         workflowId: "hosted-user-runtime:member_123",
       }),
     );
+    expect(mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.signalWithStart.mock.invocationCallOrder[0] ?? 0,
+    );
   });
 
-  it("dedupes browser-vault fallback control demands within a short outage window", async () => {
+  it("dedupes browser-vault control demands for the same workspace version within a short window", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-28T08:15:31.000Z"));
     try {
-      mocks.signalWithStart
-        .mockRejectedValueOnce(new Error("temporal unavailable"))
-        .mockResolvedValueOnce(undefined)
-        .mockRejectedValueOnce(new Error("temporal unavailable"))
-        .mockResolvedValueOnce(undefined);
-
       await signalHostedBrowserVaultRefreshRuntime({
         client: buildClient(),
         userId: "member_123",
@@ -331,6 +338,59 @@ describe("hosted runtime Temporal signaling", () => {
         /^runtime-control:browser-vault-refresh:[0-9a-f]{32}$/u,
       );
       expect(envelopes[1]?.eventId).toBe(envelopes[0]?.eventId);
+      expect(envelopes.map((envelope) => envelope.occurredAt)).toEqual([
+        "2026-05-28T08:15:00.000Z",
+        "2026-05-28T08:15:00.000Z",
+      ]);
+      expect(mocks.signalWithStart).toHaveBeenCalledTimes(2);
+      expect(mocks.signalWithStart.mock.calls.map((call) => call[1].signalArgs[0])).toEqual([
+        {
+          kind: "mailbox_appended",
+          lane: "system",
+          laneSeq: "77",
+          mailboxItemId: "mailbox_runtime.browser-vault-refresh-requested",
+          source: "browser-vault-refresh",
+        },
+        {
+          kind: "mailbox_appended",
+          lane: "system",
+          laneSeq: "77",
+          mailboxItemId: "mailbox_runtime.browser-vault-refresh-requested",
+          source: "browser-vault-refresh",
+        },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("creates a new browser-vault control demand after the workspace version advances", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-28T08:15:31.000Z"));
+    mocks.ensureHostedWorkspace
+      .mockResolvedValueOnce(buildHostedWorkspaceRecord({ version: "10" }))
+      .mockResolvedValueOnce(buildHostedWorkspaceRecord({ version: "11" }));
+    try {
+      await signalHostedBrowserVaultRefreshRuntime({
+        client: buildClient(),
+        userId: "member_123",
+      });
+      await signalHostedBrowserVaultRefreshRuntime({
+        client: buildClient(),
+        userId: "member_123",
+      });
+
+      const envelopes = mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(
+        ([input]) => input.envelope,
+      );
+      expect(envelopes).toHaveLength(2);
+      expect(envelopes[0]?.eventId).toMatch(
+        /^runtime-control:browser-vault-refresh:[0-9a-f]{32}$/u,
+      );
+      expect(envelopes[1]?.eventId).toMatch(
+        /^runtime-control:browser-vault-refresh:[0-9a-f]{32}$/u,
+      );
+      expect(envelopes[1]?.eventId).not.toBe(envelopes[0]?.eventId);
       expect(envelopes.map((envelope) => envelope.occurredAt)).toEqual([
         "2026-05-28T08:15:00.000Z",
         "2026-05-28T08:15:00.000Z",
@@ -562,6 +622,7 @@ function buildActiveMemberRecord(overrides: Partial<{
 
 function buildHostedWorkspaceRecord(overrides: Partial<{
   redactedStatusJson: unknown;
+  version: string;
 }> = {}) {
   return {
     browserVaultReplicaRef: null,

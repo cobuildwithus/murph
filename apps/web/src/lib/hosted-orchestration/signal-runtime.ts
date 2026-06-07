@@ -146,32 +146,24 @@ export async function signalHostedMailboxAppendRuntime(
 export async function signalHostedBrowserVaultRefreshRuntime(
   input: SignalHostedBrowserVaultRefreshInput,
 ): Promise<HostedRuntimeSignalResult> {
-  await ensureHostedRuntimeWorkspaceForActiveUser(input.userId, input.prisma ?? getPrisma());
-  try {
-    return await signalHostedUserRuntimeWorkflow({
-      client: input.client,
-      environment: input.environment,
-      ensureWorkspace: false,
-      prisma: input.prisma,
-      signal: parseHostedRuntimeSignal({
-        kind: "browser_vault_refresh_requested",
-      }),
-      userId: input.userId,
-    });
-  } catch {
-    const fallbackControl =
-      buildHostedBrowserVaultRefreshRuntimeControlFallback(input.userId);
-    return signalHostedRuntimeControlMailboxRequest({
-      client: input.client,
-      environment: input.environment,
-      eventId: fallbackControl.eventId,
-      kind: "runtime.browser-vault-refresh-requested",
-      occurredAt: fallbackControl.occurredAt,
-      prisma: input.prisma,
-      source: "browser-vault-refresh",
-      userId: input.userId,
-    });
-  }
+  const prisma = input.prisma ?? getPrisma();
+  const workspace = await ensureHostedRuntimeWorkspaceForActiveUser(input.userId, prisma);
+  const control = buildHostedBrowserVaultRefreshRuntimeControlEvent({
+    userId: input.userId,
+    workspaceVersion: workspace.version,
+  });
+
+  return signalHostedRuntimeControlMailboxRequest({
+    client: input.client,
+    environment: input.environment,
+    ensureWorkspace: false,
+    eventId: control.eventId,
+    kind: "runtime.browser-vault-refresh-requested",
+    occurredAt: control.occurredAt,
+    prisma,
+    source: "browser-vault-refresh",
+    userId: input.userId,
+  });
 }
 
 export async function signalHostedManualRunRuntime(
@@ -252,6 +244,7 @@ export async function signalHostedDeviceSyncMailboxRuntime(
 async function signalHostedRuntimeControlMailboxRequest(input: {
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
+  ensureWorkspace?: boolean;
   eventId?: string | null;
   kind: HostedExecutionRuntimeControlWakeKind;
   occurredAt?: string | null;
@@ -260,7 +253,9 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
   userId: string;
 }): Promise<HostedRuntimeSignalResult> {
   const prisma = input.prisma ?? getPrisma();
-  await ensureHostedRuntimeWorkspaceForActiveUser(input.userId, prisma);
+  if (input.ensureWorkspace !== false) {
+    await ensureHostedRuntimeWorkspaceForActiveUser(input.userId, prisma);
+  }
   const deterministicEventId = normalizeHostedRuntimeControlEventId(input.eventId);
   const occurredAt = normalizeHostedRuntimeControlOccurredAt(input.occurredAt)
     ?? (deterministicEventId ? HOSTED_RUNTIME_CONTROL_DETERMINISTIC_OCCURRED_AT : new Date().toISOString());
@@ -297,7 +292,10 @@ const HOSTED_RUNTIME_CONTROL_DETERMINISTIC_OCCURRED_AT = "1970-01-01T00:00:00.00
 
 const BROWSER_VAULT_REFRESH_CONTROL_DEDUPE_WINDOW_MS = 60_000;
 
-function buildHostedBrowserVaultRefreshRuntimeControlFallback(userId: string): {
+function buildHostedBrowserVaultRefreshRuntimeControlEvent(input: {
+  userId: string;
+  workspaceVersion: string;
+}): {
   eventId: string;
   occurredAt: string;
 } {
@@ -306,8 +304,9 @@ function buildHostedBrowserVaultRefreshRuntimeControlFallback(userId: string): {
   const fingerprint = createHash("sha256")
     .update(JSON.stringify({
       bucketMs,
-      userId,
+      userId: input.userId,
       version: 1,
+      workspaceVersion: input.workspaceVersion,
     }))
     .digest("hex")
     .slice(0, 32);
