@@ -196,7 +196,7 @@ test("JoinInvitePageView keeps the desktop invite rail sticky", () => {
   });
 });
 
-test("JoinInvitePageView renders Pulse Trial allowance and billing disclosure", () => {
+test("JoinInvitePageView renders Pulse Trial billing disclosure", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInvitePageView, {
       model: createModel({
@@ -218,9 +218,8 @@ test("JoinInvitePageView renders Pulse Trial allowance and billing disclosure", 
   );
 
   assert.match(markup, /Pulse Trial/);
-  assert.match(markup, /Includes \$4\.50 hosted AI usage during trial/);
   assert.match(markup, /Card required\. Then \$8\/month unless canceled\./);
-  assert.doesNotMatch(markup, /\$2\.50/);
+  assert.doesNotMatch(markup, /hosted AI usage/);
 });
 
 test("JoinInvitePageView hides pricing behind the server launch-consent gate", () => {

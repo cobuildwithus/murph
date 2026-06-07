@@ -117,7 +117,6 @@ Replace the current self-hosted "Free" card with a Pulse Trial card:
 - Name: `Pulse Trial`
 - Price: `$0 for 7 days`
 - Price detail: `Then $8/month`
-- Usage detail: `Includes $4.50 hosted AI usage during trial`
 - Billing disclosure: `Card required. Then $8/month unless canceled.`
 - CTA: `Start 7-day trial`
 
