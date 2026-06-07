@@ -2801,4 +2801,126 @@ describe("supplement brand-site repair preview", () => {
     assert.equal(preview.parserStatus, "partial_parse");
     assert.equal(preview.parsedServingSizes, 1);
   });
+
+  test("repair preview blocks oversized retained page evidence even with parsed rows", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:legacy-page",
+      dataOriginId: "example-brand:legacy-page",
+      dataOriginUrl: "https://example.test/products/legacy-page",
+      name: "Example Legacy Page",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "legacy-page",
+        servingSize: "2 Capsules",
+        factsText: "Supplement Facts Amount Per Serving Magnesium 200 mg 48%",
+        ingredientText: "Saved page body ".repeat(500),
+        bodyText: "Raw page evidence must stay until refetch/OCR replaces it.",
+      },
+    });
+
+    assert.equal(preview.automatedBackfillReady, false);
+    assert.match(preview.parserBlockers.join("|"), /oversized_retained_evidence/u);
+    assert.deepEqual(preview.removableFieldCandidates, []);
+    assert.equal(preview.productionCandidate, null);
+  });
+
+  test("repair parser extracts multi-DV prenatal facts rows from OCR text", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:prenatal",
+      dataOriginId: "example-brand:prenatal",
+      dataOriginUrl: "https://example.test/products/prenatal",
+      name: "Example Prenatal",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "prenatal",
+        evidenceStatus: "structured_facts_from_official_facts_image_ocr",
+        factsText: [
+          "Supplement Facts",
+          "Serving size 1 Tablet",
+          "Amount per serving %DV for adults %DV for pregnant women",
+          "Vitamin A (100% as beta-carotene and from ferment media) 770 mcg 86% 59%",
+          "Vitamin C (as calcium ascorbate and as ascorbic acid from ferment media) 60 mg 67% 50%",
+          "Vitamin D3 (as cholecalciferol and from ferment media) 25 mcg [1000 IU] 125% 167%",
+          "Folate (as L-5-methylfolate) 680 mcg DFE 170% 113%",
+          "Iron (as ferrous bisglycinate chelate) 20 mg 111% 74%",
+          "Zinc (as zinc oxide from ferment media) 5.2 mg 47% 40%",
+          "Soothing Digestive Blend 65 mg",
+        ].join("\n"),
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.deepEqual(preview.parserBlockers, []);
+    assert.equal(preview.parsedIngredientRows, 7);
+    assert.deepEqual(extractIngredientRowsFromText([
+      "Supplement Facts",
+      "Serving size 1 Tablet",
+      "Amount per serving %DV for adults %DV for pregnant women",
+      "Vitamin A (100% as beta-carotene and from ferment media) 770 mcg 86% 59%",
+      "Vitamin C (as calcium ascorbate and as ascorbic acid from ferment media) 60 mg 67% 50%",
+      "Vitamin D3 (as cholecalciferol and from ferment media) 25 mcg [1000 IU] 125% 167%",
+      "Folate (as L-5-methylfolate) 680 mcg DFE 170% 113%",
+      "Iron (as ferrous bisglycinate chelate) 20 mg 111% 74%",
+      "Zinc (as zinc oxide from ferment media) 5.2 mg 47% 40%",
+      "Soothing Digestive Blend 65 mg",
+    ].join("\n")).map((row) => row.name), [
+      "Vitamin A (100% as beta-carotene and from ferment media)",
+      "Vitamin C (as calcium ascorbate and as ascorbic acid from ferment media)",
+      "Vitamin D3 (as cholecalciferol and from ferment media)",
+      "Folate (as L-5-methylfolate)",
+      "Iron (as ferrous bisglycinate chelate)",
+      "Zinc (as zinc oxide from ferment media)",
+      "Soothing Digestive Blend",
+    ]);
+  });
+
+  test("repair parser keeps stacked folate rows and rejects bracket-only continuation rows", () => {
+    const factsText = [
+      "Supplement Facts",
+      "Serving Size 1 mL",
+      "Servings Per Container 60",
+      "Amount Per Serving % Daily Value",
+      "Vitamin C",
+      "[as Ascorbic Acid (from Acerola Cherry Fruit Extract)] 26 mg 22%",
+      "Folate",
+      "(from Citrus Lemon Peel Extract) 600 mcg DFE 100%",
+    ].join("\n");
+
+    assert.deepEqual(extractIngredientRowsFromText(factsText).map((row) => row.name), [
+      "Vitamin C [as Ascorbic Acid (from Acerola Cherry Fruit Extract)]",
+      "Folate (from Citrus Lemon Peel Extract)",
+    ]);
+  });
+
+  test("repair parser extracts hydrate minerals instead of mineral-source components", () => {
+    const rows = extractIngredientRowsFromText([
+      "Supplement Facts",
+      "Serving Size: 1 Stick Pack (8.5g)",
+      "Servings Per Container: 30",
+      "Amount Per Serving %DV",
+      "Calcium (from 389mg Calcium Bisglycinate Chelate (TRAACS), 48mg Di-Calcium Phosphate) 84mg 6%",
+      "Magnesium (from 250mg Aquamin MG, 214mg Magnesium Bisglycinate) 50mg 12%",
+      "Sodium (from 1,630mg Sodium Citrate, 318mg Himalayan Rock Salt) 500mg 22%",
+      "Potassium (from 554mg Potassium Citrate, 500mg Organic Coconut Water, 96mg Potassium Chloride) 250mg 6%",
+      "Taurine 1000mg †",
+      "SenActiv Tienchi Ginseng (Panax notoginseng) Root Extract & Chestnut Rose Fruit Extract 50mg †",
+    ].join("\n"));
+
+    assert.deepEqual(rows.map((row) => row.name), [
+      "Calcium",
+      "Magnesium",
+      "Sodium",
+      "Potassium",
+      "Taurine",
+      "SenActiv Tienchi Ginseng (Panax notoginseng) Root Extract & Chestnut Rose Fruit Extract",
+    ]);
+  });
 });

@@ -20,6 +20,39 @@ const UNIT_PATTERN = String.raw`mcg\s+RAE|mcg\s+DFE|(?:µ|μ)g\s+RAE|(?:µ|μ)g\
 const AMOUNT_WITH_UNIT_PATTERN = String.raw`${AMOUNT_VALUE_PATTERN}\s*(?:${UNIT_PATTERN})`;
 const SERVING_AMOUNT_PATTERN = String.raw`(?:about\s*)?(?:\d+(?:[.,]\d+)?(?:\s*-\s*\d+(?:[.,]\d+)?)?|\d+\s*/\s*\d+|one|two|three|four|five|six|seven|eight|nine|ten|un|una|dos|tres|quatre)`;
 const SERVING_FORM_PATTERN = String.raw`(?:(?:quick\s+release|vegetarian|vegan|veggie|vegetable|coated|chewable|rounded|level|heaping|heaped|liquid|effervescent|oil\s*-?\s*infused|biodegradable)\s+)*(?:g(?![A-Za-z])|grams?|mg|mcg|mL|ml|milliliters?|fl\.?\s*oz\.?|fluid\s+ounces?|oz|tsp|teaspoons?|tbsp|tablespoons?|scoops?|capsules?(?:\(s\))?|tabletten?|tablety|(?!tablet[tky])tablets?(?:\(s\))?|caplets?|soft\s*-?\s*gels?|softgels?|gumm(?:y|ies)(?:\(ies\))?|chews?|chewables?|wafers?|lozenges?|packets?|stick\s+packs?|sticks?|VegCaps?|servings?|drops?(?:\(s\))?|gouttes?|gotas?|pumps?|bars?|sachets?|vials?|latas?|l[aá]hev|s[aá]č(?:ek|ky|ků)?|shots?|shota|cps|tbl|porcje?|porcj[ęea]?|kapsu[lł]ki|kapsu[lł]ka|kapsle|kapsl[iíe]|kapseln?|tabletk[ęeai]?|miark[ęea]?(?:\s+proszku)?|cacitos?|comprimidos?|comprim[eé]s?|g[eé]lules?|capsulas?|c[aá]psulas?|perlas?|pipettes?|cuill[eè]res?|כמוס(?:ה|ות)|טבלי(?:ה|ות)|קפסול(?:ה|ות))`;
+const PROMINENT_FACTS_ROW_NAMES = [
+  "Vitamin A",
+  "Vitamin C",
+  "Vitamin D",
+  "Vitamin D3",
+  "Vitamin E",
+  "Vitamin K",
+  "Thiamin",
+  "Thiamine",
+  "Riboflavin",
+  "Niacin",
+  "Vitamin B6",
+  "Folate",
+  "Vitamin B12",
+  "Biotin",
+  "Pantothenic Acid",
+  "Choline",
+  "Calcium",
+  "Iron",
+  "Iodine",
+  "Magnesium",
+  "Zinc",
+  "Selenium",
+  "Copper",
+  "Manganese",
+  "Chromium",
+  "Molybdenum",
+  "Sodium",
+  "Potassium",
+  "Total Carbohydrate",
+  "Dietary Fiber",
+  "Protein",
+];
 
 function parseArgs(argv) {
   const options = {
@@ -292,10 +325,12 @@ function parserBlockersForRow(row, label, ingredientRows, servingSizes, state) {
   if (existingIngredientRows.validRows.length === 0 && ingredientRows.length === 0) blockers.push("missing_ingredient_rows");
   if (existingServingSizes.validServingSizes.length === 0 && servingSizes.length === 0) blockers.push("missing_serving_sizes");
   if (hasPageBodyContamination(label)) blockers.push("page_body_contamination");
+  if (hasOversizedRetainedEvidence(label)) blockers.push("oversized_retained_evidence");
   if (hasStackedTableContinuationRisk(label) && !hasStrongParsedTableRows(ingredientRows, servingSizes)) {
     blockers.push("stacked_table_continuation_risk");
   }
   if (maxFactsPanelLength(label) > 6000) blockers.push("facts_panel_too_long");
+  if (hasLikelyMissingProminentFactsRows(label, ingredientRows)) blockers.push("likely_missing_facts_rows");
   if (ingredientRows.some((row) => !isUsefulIngredientRow(row))) blockers.push("invalid_parsed_ingredient_row");
   if (isLikelyFoodOrNonSupplementRow(row, label)) blockers.push("likely_food_or_non_supplement");
   if (ingredientRows.some((row) => row.source === "factsText_amount_pattern")) blockers.push("fallback_amount_pattern_rows");
@@ -395,6 +430,33 @@ function hasPageBodyContamination(label) {
 
 function maxFactsPanelLength(label) {
   return Math.max(0, ...labelTexts(label).map((text) => factsPanelText(text).length));
+}
+
+function hasOversizedRetainedEvidence(label) {
+  return [
+    label.factsText,
+    label.factsTextEvidence,
+    label.ingredientText,
+    label.ingredients,
+    label.otherIngredients,
+  ].flatMap(textValues).some((text) => cleanText(text).length > 6000);
+}
+
+function hasLikelyMissingProminentFactsRows(label, ingredientRows) {
+  if (label.source !== "official_facts_image_ocr_preview" && label.evidenceStatus !== "structured_facts_from_official_facts_image_ocr") {
+    return false;
+  }
+  if (!Array.isArray(ingredientRows) || ingredientRows.length === 0) return false;
+  if (ingredientRows.length > 2) return false;
+  let amountMentions = 0;
+  for (const text of labelTexts(label)) {
+    const factsText = factsPanelText(text, { preserveLeadingTableRows: true });
+    for (const _match of factsText.matchAll(new RegExp(AMOUNT_WITH_UNIT_PATTERN, "giu"))) {
+      amountMentions += 1;
+      if (amountMentions >= 12) return true;
+    }
+  }
+  return false;
 }
 
 function hasStackedTableContinuationRisk(label) {
@@ -738,6 +800,7 @@ function extractIngredientRowsFromText(input) {
   rows.push(...ingredientRowsByEachServingProvides(input));
   rows.push(...ingredientRowsByNameAmountBlockTable(input));
   rows.push(...ingredientRowsByInlineNameAmountBlock(input));
+  rows.push(...ingredientRowsByMultiDailyValueLines(input));
   rows.push(...ingredientRowsBySupplementFactsLines(input));
 
   const lineCandidates = factsText
@@ -765,7 +828,7 @@ function extractIngredientRowsFromText(input) {
     rows.push(...ingredientRowsByAmountPattern(factsText));
   }
 
-  return dedupeIngredientRows(rows.filter(isUsefulIngredientRow));
+  return dedupeIngredientRows(removeSourceComponentRows(rows.filter(isUsefulIngredientRow)));
 }
 
 function factsPanelText(input, options = {}) {
@@ -788,6 +851,12 @@ function ingredientRowFromTextSegment(segment, source) {
     .replace(/^(?:%?\s*DV|%?\s*Daily\s+Value)\s*,\s*/iu, "")
     .replace(/^Supplement Facts\s*/iu, ""));
   if (!text || isHeaderText(text)) return null;
+
+  const sourceParentheticalRow = ingredientRowFromSourceParentheticalTextSegment(text, source);
+  if (sourceParentheticalRow) return sourceParentheticalRow;
+
+  const tabularRow = ingredientRowFromMultiDailyValueTextSegment(text, source);
+  if (tabularRow) return tabularRow;
 
   const pipeParts = text.split("|").map(cleanValue).filter(Boolean);
   if (pipeParts.length >= 2) {
@@ -817,6 +886,52 @@ function ingredientRowFromTextSegment(segment, source) {
     ...(amountMatch[4] || amountMatch[5] ? { dailyValue: cleanDailyValue(amountMatch[4] ?? amountMatch[5]) } : {}),
     source,
   };
+}
+
+function ingredientRowFromSourceParentheticalTextSegment(segment, source) {
+  const text = cleanValue(segment);
+  const prominentNamePattern = PROMINENT_FACTS_ROW_NAMES.map(escapeRegExp).join("|");
+  const match = text.match(new RegExp(String.raw`^(${prominentNamePattern})\s+\(`, "iu"));
+  if (!match) return null;
+  const beforeLastClose = text.slice(0, text.lastIndexOf(")"));
+  if (!new RegExp(String.raw`\b${AMOUNT_VALUE_PATTERN}\s*${UNIT_PATTERN}\b`, "iu").test(beforeLastClose)) return null;
+  const amountMatches = [...text.matchAll(new RegExp(String.raw`(${AMOUNT_VALUE_PATTERN})\s*(${UNIT_PATTERN})(?:\s+(?:RAE|DFE|NE))?\s*(\d[\d,]{0,6}%[†‡*+]?|<\s*\d[\d,]{0,6}%[†‡*+]?|\*{1,2}|†|‡|\+)?`, "giu"))];
+  const amountMatch = amountMatches.at(-1);
+  if (!amountMatch) return null;
+  return {
+    name: cleanValue(match[1]),
+    amount: cleanValue(amountMatch[1]),
+    unit: cleanParsedUnit(amountMatch[2]),
+    ...(amountMatch[3] ? { dailyValue: cleanDailyValue(amountMatch[3]) } : {}),
+    source,
+  };
+}
+
+function ingredientRowFromMultiDailyValueTextSegment(segment, source) {
+  const text = cleanValue(segment);
+  const pattern = new RegExp(String.raw`^(.+?)\s+(${AMOUNT_VALUE_PATTERN})\s*(${UNIT_PATTERN})(?:\s+(?:RAE|DFE|NE))?(?:\s*\[[^\]]{1,40}\])?(?:\s+\([^)]+\))?\s+((?:(?:<\s*)?\d[\d,]{0,6}%[†‡*+]?|\*{1,2}|†|‡|\+)(?:\s+(?:(?:<\s*)?\d[\d,]{0,6}%[†‡*+]?|\*{1,2}|†|‡|\+))*)$`, "iu");
+  const match = text.match(pattern);
+  if (!match) return null;
+  const name = cleanIngredientName(match[1]);
+  if (!name) return null;
+  const dailyValues = uniqueStrings(match[4].split(/\s+/u).map(cleanDailyValue));
+  if (dailyValues.length < 2 || dailyValues.some((value) => !/^(?:<\s*)?\d[\d,]{0,6}%[†‡*+]?$/u.test(value))) return null;
+  return {
+    name,
+    amount: cleanValue(match[2]),
+    unit: cleanParsedUnit(match[3]),
+    ...(dailyValues.length > 0 ? { dailyValue: dailyValues.join(" / ") } : {}),
+    source,
+  };
+}
+
+function ingredientRowsByMultiDailyValueLines(text) {
+  return factsPanelText(text, { preserveLeadingTableRows: true })
+    .split(/\n+/u)
+    .map(cleanValue)
+    .filter((line) => (line.match(/\d[\d,]{0,6}%/gu) ?? []).length >= 2)
+    .map((line) => ingredientRowFromMultiDailyValueTextSegment(line, "factsText_multi_dv"))
+    .filter(Boolean);
 }
 
 function ingredientRowsBySupplementFactsLines(text) {
@@ -1323,9 +1438,11 @@ function isUsefulIngredientRow(row) {
   const unit = cleanValue(row.unit);
   if (!name || !amount || !unit) return false;
   if (/^\(/u.test(name)) return false;
+  if (/^(?:\[?\s*(?:as|from)\b|&|\/\d|\W?→)/iu.test(name)) return false;
+  if (/[→]/u.test(name)) return false;
   if (hasMismatchedParentheses(name)) return false;
   if (/^(?:as|from|fruiting\s+body|extract)\b/iu.test(name)) return false;
-  if (row.source === "factsText_table" && /^[a-z]/u.test(name) && !isAllowedLowercaseIngredientName(name)) return false;
+  if (row.source !== "structured_label_field" && /^[a-z]/u.test(name) && !isAllowedLowercaseIngredientName(name)) return false;
   if (name.length > 120) return false;
   if (isKnownNonIngredientName(name)) return false;
   if (/\b(percent daily values?|daily values? are based|amount per serving|servings? per container|serving size|supplement facts|nutrition facts)\b/iu.test(name)) {
@@ -1388,10 +1505,10 @@ function parseStandaloneAmount(value) {
 }
 
 function parseTrailingAmountLine(value) {
-  const match = cleanValue(value).match(new RegExp(String.raw`^(.+?)\s+(${AMOUNT_VALUE_PATTERN})\s*(${UNIT_PATTERN})\s*(\*{1,2}|†|‡|\+)?$`, "iu"));
+  const match = cleanValue(value).match(new RegExp(String.raw`^(.+?)\s+(${AMOUNT_VALUE_PATTERN})\s*(${UNIT_PATTERN})(?:\s+(?:RAE|DFE|NE))?\s*(\d[\d,]{0,6}%[†‡*+]?|<\s*\d[\d,]{0,6}%[†‡*+]?|\*{1,2}|†|‡|\+)?$`, "iu"));
   if (!match) return null;
   const nameSuffix = cleanValue(match[1]);
-  if (!nameSuffix || !/^(?:\(.*\)|as\b)/iu.test(nameSuffix)) return null;
+  if (!nameSuffix || !/^(?:\(.*\)|\[.*\]|as\b)/iu.test(nameSuffix)) return null;
   return {
     nameSuffix,
     amount: cleanValue(match[2]),
@@ -1596,6 +1713,7 @@ function cleanIngredientName(value) {
 
 function cleanIngredientEquivalenceNotes(value) {
   return cleanValue(value)
+    .replace(/\s*\((?:from|as)\s+[^)]*\b\d[\d,.]*\s*(?:mg|mcg|g|IU|ml)\b[^)]*\)/giu, "")
     .replace(/\s*\(([^)]*\b(?:equivalent|providing|yielding|supplying)[^)]*)\)/giu, (_match, body) => {
       const kept = cleanValue(String(body).split(/\s*,\s*(?=\b(?:equivalent|providing|yielding|supplying)\b)/iu)[0]);
       if (!kept || new RegExp(String.raw`\b${AMOUNT_WITH_UNIT_PATTERN}\b`, "iu").test(kept)) return "";
@@ -1635,6 +1753,10 @@ function cleanDailyValue(value) {
 
 function uniqueStrings(values) {
   return [...new Set(values.map(cleanValue).filter(Boolean))];
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function dedupeIngredientRows(rows) {
@@ -1687,12 +1809,65 @@ function dedupeIngredientRows(rows) {
     })) {
       continue;
     }
-    const key = `${row.name}|${row.amount ?? ""}|${row.unit ?? ""}|${row.dailyValue ?? ""}`.toLowerCase();
+    if (rows.some((other) => {
+      if (other === row) return false;
+      return hasSameBaseIngredientAmount(row, other) && isRicherIngredientRow(other, row);
+    })) {
+      continue;
+    }
+    const key = `${cleanIngredientName(row.name) ?? row.name}|${row.amount ?? ""}|${cleanParsedUnit(row.unit) ?? ""}|${cleanDailyValue(row.dailyValue)}`.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     deduped.push(row);
   }
   return deduped;
+}
+
+function hasSameBaseIngredientAmount(left, right) {
+  const leftBaseName = baseIngredientName(left.name);
+  const rightBaseName = baseIngredientName(right.name);
+  return Boolean(leftBaseName && rightBaseName)
+    && leftBaseName === rightBaseName
+    && cleanValue(left.amount) === cleanValue(right.amount)
+    && cleanParsedUnit(left.unit) === cleanParsedUnit(right.unit);
+}
+
+function baseIngredientName(value) {
+  const name = cleanIngredientName(value);
+  if (!name) return null;
+  return cleanValue(name.replace(/\s*\([^)]*\)/gu, "").replace(/\s*\[[^\]]*\]/gu, "")).toLowerCase();
+}
+
+function isRicherIngredientRow(candidate, current) {
+  const candidateDailyValue = cleanDailyValue(candidate.dailyValue);
+  const currentDailyValue = cleanDailyValue(current.dailyValue);
+  if (candidateDailyValue && currentDailyValue && candidateDailyValue !== currentDailyValue) {
+    return candidateDailyValue.split(/\s*\/\s*/u).length > currentDailyValue.split(/\s*\/\s*/u).length;
+  }
+  if (candidateDailyValue && !currentDailyValue) return true;
+  const candidateName = cleanIngredientName(candidate.name) ?? "";
+  const currentName = cleanIngredientName(current.name) ?? "";
+  if (cleanTrailingExtractRatioName(candidateName) === currentName) return false;
+  return candidateDailyValue === currentDailyValue && candidateName.length > currentName.length;
+}
+
+function removeSourceComponentRows(rows) {
+  const parsedNames = new Set(rows.map((row) => cleanIngredientName(row.name)?.toLowerCase()).filter(Boolean));
+  const hasMineralParent = ["calcium", "magnesium", "sodium", "potassium"].some((name) => parsedNames.has(name));
+  if (!hasMineralParent) return rows;
+  return rows.filter((row) => {
+    const name = cleanIngredientName(row.name) ?? "";
+    if (/^(?:calcium|magnesium|sodium|potassium)$/iu.test(name)) {
+      const hasSameNameParentWithDailyValue = !cleanDailyValue(row.dailyValue) && rows.some((other) => {
+        if (other === row) return false;
+        return cleanIngredientName(other.name) === name
+          && cleanParsedUnit(other.unit) === cleanParsedUnit(row.unit)
+          && cleanDailyValue(other.dailyValue);
+      });
+      return !hasSameNameParentWithDailyValue;
+    }
+    return !/\b(?:bisglycinate|citrate|phosphate|chloride|aquamin|himalayan\s+rock\s+salt|coconut\s+water)\b/iu.test(name);
+  });
 }
 
 function cleanTrailingExtractRatioName(value) {
