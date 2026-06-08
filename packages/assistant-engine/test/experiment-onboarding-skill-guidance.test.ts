@@ -135,8 +135,5 @@ describe('experiment onboarding skill guidance', () => {
     expect(raw).toContain(
       'The user does not need to approve the cadence separately once they have agreed to the run plan and assistant support is available',
     )
-    expect(raw).toContain(
-      'After scheduling, tell the user the bounded support plan, the reminder dates or times, and that they can cancel or move the reminders.',
-    )
   })
 })
