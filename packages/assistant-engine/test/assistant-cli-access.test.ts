@@ -17,9 +17,6 @@ import {
 import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
 } from "../src/assistant-skill-assets.js";
-import {
-  MURPH_ASSISTANT_MEDIA_CATALOG_URL_ENV,
-} from "../src/assistant/response-media-env.js";
 
 describe("prepareAssistantDirectCliEnv", () => {
   it("aliases the hosted runtime marker from the bridge owner", () => {
@@ -95,7 +92,6 @@ describe("prepareAssistantDirectCliEnv", () => {
       [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: path.join("/tmp", "stale-skills"),
       MURPH_ASSISTANT_ACTIVE_SESSION_ID: "session_hosted_active",
       MURPH_ASSISTANT_ACTIVE_TURN_ID: "turn_hosted_active",
-      [MURPH_ASSISTANT_MEDIA_CATALOG_URL_ENV]: "https://app.example.test/assistant-media/catalog.json",
       MURPH_PRODUCT_BASE_URL: "https://app.example.test",
       NEXT_PUBLIC_MURPH_PRODUCT_BASE_URL: "https://public-app.example.test",
       MURPH_HOSTED_CODEX_BOUND_USER_ID: "member_123",
@@ -126,11 +122,8 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env[HOSTED_CLI_BRIDGE_URL_ENV]).toBe("http://127.0.0.1:43123/");
     expect(env.MURPH_ASSISTANT_ACTIVE_SESSION_ID).toBeUndefined();
     expect(env.MURPH_ASSISTANT_ACTIVE_TURN_ID).toBeUndefined();
-    expect(env[MURPH_ASSISTANT_MEDIA_CATALOG_URL_ENV]).toBe(
-      "https://app.example.test/assistant-media/catalog.json",
-    );
-    expect(env.MURPH_PRODUCT_BASE_URL).toBe("https://app.example.test");
-    expect(env.NEXT_PUBLIC_MURPH_PRODUCT_BASE_URL).toBe("https://public-app.example.test");
+    expect(env.MURPH_PRODUCT_BASE_URL).toBeUndefined();
+    expect(env.NEXT_PUBLIC_MURPH_PRODUCT_BASE_URL).toBeUndefined();
     expect(env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]).toMatch(
       /assistant-engine[/\\]skills$/,
     );

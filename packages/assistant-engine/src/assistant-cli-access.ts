@@ -11,9 +11,6 @@ import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
   withAssistantSkillsRootEnv,
 } from './assistant-skill-assets.js'
-import {
-  MURPH_ASSISTANT_MEDIA_CATALOG_URL_ENV,
-} from './assistant/response-media-env.js'
 
 const DEFAULT_USER_BIN_SEGMENTS = ['.local', 'bin'] as const
 export const HOSTED_RUNTIME_PROCESS_ENV_MARKER =
@@ -27,9 +24,6 @@ const HOSTED_CODEX_DIRECT_CLI_ENV_NAMES = [
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
-  MURPH_ASSISTANT_MEDIA_CATALOG_URL_ENV,
-  'MURPH_PRODUCT_BASE_URL',
-  'NEXT_PUBLIC_MURPH_PRODUCT_BASE_URL',
   'LANG',
   'LANGUAGE',
   'LC_ALL',
