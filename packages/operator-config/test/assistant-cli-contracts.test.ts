@@ -377,6 +377,7 @@ describe('assistant CLI automation shape ownership', () => {
       }),
     ).toEqual({
       channel: null,
+      deliverySource: null,
       deliveryTarget: null,
       identityId: null,
       participantId: null,

@@ -256,7 +256,6 @@ test('operator config saves, sorts, resolves, and clears assistant self-delivery
     ),
     {
       channel: 'telegram',
-      deliverySource: null,
       deliveryTarget: 'explicit-target',
       identityId: 'identity-1',
       participantId: 'person-1',
@@ -288,7 +287,6 @@ test('operator config saves, sorts, resolves, and clears assistant self-delivery
     ),
     {
       channel: 'email',
-      deliverySource: null,
       deliveryTarget: 'person@example.test',
       identityId: null,
       participantId: null,
@@ -318,7 +316,6 @@ test('operator config trims explicit self-target defaults and normalizes legacy 
     ),
     {
       channel: 'telegram',
-      deliverySource: null,
       deliveryTarget: 'explicit-target',
       identityId: 'identity-2',
       participantId: 'participant-2',
