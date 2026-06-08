@@ -268,9 +268,9 @@ The per-user workflow reads source-less reconciliation facts from web:
 Facts do not contain run/idle decisions, producer source/reason, raw mailbox
 payloads, workspace redacted status, signed usage decisions, or direct wake
 flags. Temporal interprets the facts mechanically: fresh mailbox signals may
-ensure `nudge` directly; carried pointers and timers re-read facts; positive
-mailbox lag ensures `nudge`; due workspace wake ensures `alarm`; future or
-absent wake waits.
+ensure processing directly; carried pointers and timers re-read facts; positive
+mailbox lag ensures processing; due workspace wake ensures processing; future
+or absent wake waits.
 
 Usage and product policy blocks are successful reconciliation reads with a
 non-null `blocked` object, never Temporal activity failures. Transport, auth,
@@ -317,8 +317,6 @@ shared bearer token for this adapter.
 
 Request summary:
 
-- `reason`: the runtime invocation reason mechanically selected by Temporal
-  from source-less signals and reconciliation facts.
 - `orchestrationAttemptId`: an opaque Temporal attempt id for observability and
   idempotency at the orchestration boundary.
 

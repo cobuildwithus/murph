@@ -1232,7 +1232,7 @@ describe("cloudflare worker routes", () => {
 
     const response = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
-        "https://runner.example.test/__test/users/member_123/stuck-invocation?reason=manual&startedAgoMs=35000",
+        "https://runner.example.test/__test/users/member_123/stuck-invocation?startedAgoMs=35000",
         {
           method: "POST",
         },
