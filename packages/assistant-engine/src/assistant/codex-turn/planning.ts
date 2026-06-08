@@ -212,12 +212,6 @@ export interface AssistantCodexTurnThreadScopeProfile
 export type AssistantCodexTurnResolvedExecutionProfile =
   Required<Omit<AssistantCodexTurnExecutionProfile, 'nativeResumePolicy'>>
 
-export interface AssistantCodexThreadPlan {
-  onboardingGuidanceInjected: boolean
-  resumeCodexThreadId: string | null
-  shouldInjectBootstrapContext: boolean
-}
-
 export interface AssistantCodexTurnExecutionPlan {
   activeTurnSteering: AssistantActiveTurnLiveProviderSteering | null
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext>
@@ -235,24 +229,6 @@ export interface AssistantCodexAttemptPlan {
   route: CodexThreadIdentity
   routePlan: AssistantRouteTurnPlan
   session: AssistantSession
-}
-
-export function resolveAssistantCodexThreadPlan(input: {
-  candidateResumeCodexThreadId: string | null
-  onboardingGuidanceOpen: boolean
-  promptProfile: AssistantCodexTurnPromptProfile
-}): AssistantCodexThreadPlan {
-  const resumeCodexThreadId = input.candidateResumeCodexThreadId
-  const shouldInjectBootstrapContext = resumeCodexThreadId === null
-  const onboardingGuidanceInjected =
-    input.promptProfile === 'conversation' &&
-    input.onboardingGuidanceOpen
-
-  return {
-    onboardingGuidanceInjected,
-    resumeCodexThreadId,
-    shouldInjectBootstrapContext,
-  }
 }
 
 function resolveAssistantCodexTurnExecutionProfile(
@@ -527,16 +503,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
           }),
         })
       : null
-  const threadPlan = resolveAssistantCodexThreadPlan({
-    candidateResumeCodexThreadId,
-    onboardingGuidanceOpen: input.sharedPlan.onboardingGuidanceOpen,
-    promptProfile: input.profile.promptProfile,
-  })
-  const resumeCodexThreadId = threadPlan.resumeCodexThreadId
+  const resumeCodexThreadId = candidateResumeCodexThreadId
   const conversationHistoryMessages = resumeCodexThreadId === null
     ? await resolveCommittedTranscriptHistoryMessages()
     : []
-  const shouldInjectBootstrapContext = threadPlan.shouldInjectBootstrapContext
+  const shouldInjectBootstrapContext = resumeCodexThreadId === null
   const shouldPrepareBootstrapContext = shouldInjectBootstrapContext
   const shouldPrepareAnyBootstrapContext =
     shouldPrepareBootstrapContext || shouldPrepareConversationThreadInstructions

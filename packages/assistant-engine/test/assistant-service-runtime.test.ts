@@ -2148,6 +2148,7 @@ describe("assistant turn finalizer seam", () => {
         persistUserPromptOnFailure: false,
       }),
       providerResult: createProviderResult({
+        assistantContractFingerprint: "contract-finalizer-test",
         providerOptions: createProviderOptions({
           model: "gpt-5-mini",
         }),
@@ -2197,6 +2198,7 @@ describe("assistant turn finalizer seam", () => {
           model: "gpt-5-mini",
         }),
         resumeState: expect.objectContaining({
+          assistantContractFingerprint: "contract-finalizer-test",
           routeFingerprint: "route-backup",
           threadId: "provider-session-existing",
         }),
@@ -2205,6 +2207,9 @@ describe("assistant turn finalizer seam", () => {
       })
     );
     expect(saved.resumeState?.routeFingerprint).toBe("route-backup");
+    expect(saved.resumeState?.assistantContractFingerprint).toBe(
+      "contract-finalizer-test"
+    );
   });
 
   it("clears provider resume state when requested and only persists the assistant transcript", async () => {
@@ -2693,6 +2698,7 @@ function createSharedPlan(input?: {
 }
 
 function createProviderResult(input?: {
+  assistantContractFingerprint?: string;
   attemptCount?: number;
   providerOptions?: AssistantProviderSessionOptions;
   codexThreadId?: string | null;
@@ -2720,7 +2726,8 @@ function createProviderResult(input?: {
     totalTokens: 13,
   };
   return {
-    assistantContractFingerprint: "contract-test",
+    assistantContractFingerprint:
+      input?.assistantContractFingerprint ?? "contract-test",
     attemptCount: input?.attemptCount ?? 1,
     provider: "codex-cli",
     codexContinuation: {

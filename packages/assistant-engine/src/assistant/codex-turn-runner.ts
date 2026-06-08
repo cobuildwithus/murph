@@ -73,11 +73,9 @@ const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = 'assistant.provider.plan'
 
 export {
-  resolveAssistantCodexThreadPlan,
   resolveAssistantCodexThreadScope,
 } from './codex-turn/planning.js'
 export type {
-  AssistantCodexThreadPlan,
   AssistantCodexTurnExecutionProfile,
   AssistantCodexTurnNativeResumePolicy,
   AssistantCodexTurnPromptProfile,
