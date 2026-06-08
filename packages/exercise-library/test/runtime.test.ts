@@ -145,6 +145,20 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ee04ec9d-9164-4f47-9de2-514488500a00/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "sit-to-stand")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/49719035-3eed-4cf9-2628-3cfb59bdb600/public",
+      }),
+      expect.objectContaining({
+        step: "Rise",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c5af575e-62b4-4b09-d265-f6468e86b900/public",
+      }),
+      expect.objectContaining({
+        step: "Finish",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d4dced10-7694-4d27-697f-25d550e11000/public",
+      }),
+    ]);
     expect(artifacts.details.sources).toEqual(catalog.sources);
     expect(artifacts.facets.facets.kinds).toEqual(["exercise", "stretch"]);
     expect(artifacts.facets.facets.equipment).toContain("none");

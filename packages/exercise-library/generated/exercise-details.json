@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:880ebcf4b1e6122fa33e362340ae4d240bfb7498c06cafc0832d92b1f6b4bfae",
+  "catalogHash": "sha256:99e514bea4a836cebe46246d764be20fee328b8c758e70fe025b205e79d60b2e",
   "generatedAt": null,
   "items": [
     {
@@ -30165,7 +30165,23 @@
         "Chair"
       ],
       "id": "EX003",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person sitting near the front edge of a sturdy chair with feet planted and chest tall.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/49719035-3eed-4cf9-2628-3cfb59bdb600/public"
+        },
+        {
+          "alt": "Person leaning forward from the chair and pressing through planted feet to stand.",
+          "step": "Rise",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c5af575e-62b4-4b09-d265-f6468e86b900/public"
+        },
+        {
+          "alt": "Person standing tall in front of the chair with hips fully up and feet planted.",
+          "step": "Finish",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d4dced10-7694-4d27-697f-25d550e11000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
