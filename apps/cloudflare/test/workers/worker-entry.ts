@@ -2,9 +2,6 @@ import { DurableObject, env } from "cloudflare:workers";
 import {
   buildHostedExecutionRuntimeTimerWake,
 } from "@murphai/hosted-execution";
-import type {
-  HostedWorkspaceInvocationReason,
-} from "@murphai/hosted-execution/runtime-control";
 import {
   parseHostedExecutionWake,
 } from "@murphai/hosted-execution/parsers";
@@ -97,12 +94,10 @@ export class VitestUserRunnerDurableObject extends DurableObject {
   }
 
   async beginLeaseForTest(input: {
-    reason?: HostedWorkspaceInvocationReason;
     userId: string;
     workspaceVersion?: string | null;
   }): Promise<RunnerInvocationLease> {
     const lease = await this.stateStore.beginInvocation({
-      reason: input.reason ?? "manual",
       runnerContainerName: input.userId,
       userId: input.userId,
     });
@@ -390,7 +385,6 @@ function getUserRunnerStub(userId: string) {
       USER_RUNNER: {
         getByName(name: string): {
           beginLeaseForTest(input: {
-            reason?: HostedWorkspaceInvocationReason;
             userId: string;
             workspaceVersion?: string | null;
           }): Promise<RunnerInvocationLease>;
@@ -559,7 +553,6 @@ async function driveRunnerNudgeForTest(
 ): Promise<void> {
   await runner.ensureRuntimeProcessingForUser({
     orchestrationAttemptId: createTestOrchestrationAttemptId("wake"),
-    reason: "nudge",
     userId,
   });
 }

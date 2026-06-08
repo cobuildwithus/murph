@@ -3,9 +3,6 @@ import type { SQLInputValue } from "node:sqlite";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type {
-  HostedWorkspaceInvocationReason,
-} from "@murphai/hosted-execution/runtime-control";
 import {
   RunnerStateStore,
   type RunnerWriteFenceToken,
@@ -17,12 +14,6 @@ import type {
 } from "../src/user-runner/types.js";
 
 const NOW = "2026-04-27T00:00:00.000Z";
-const RECONSTRUCTED_REASON_CASES: HostedWorkspaceInvocationReason[] = [
-  "manual",
-  "browser_vault_refresh",
-  "retry",
-  "nudge",
-];
 
 describe("RunnerStateStore execution lease authority", () => {
   afterEach(() => {
@@ -36,7 +27,6 @@ describe("RunnerStateStore execution lease authority", () => {
     await store.bindUser("member_123");
 
     const token = await store.beginWriteFence({
-      reason: "nudge",
       runnerContainerName: "member_123",
       userId: "member_123",
     });
@@ -61,7 +51,6 @@ describe("RunnerStateStore execution lease authority", () => {
     const { store } = createHarness();
     await store.bindUser("member_123");
     const token = await store.beginWriteFence({
-      reason: "nudge",
       runnerContainerName: "member_123",
       userId: "member_123",
     });
@@ -81,40 +70,21 @@ describe("RunnerStateStore execution lease authority", () => {
     });
   });
 
-  it.each(RECONSTRUCTED_REASON_CASES)(
-    "reconstructs the persisted %s write-fence reason",
-    async (reason) => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date(NOW));
-      const { db, store } = createHarness();
-      await store.bindUser("member_123");
-
-      const token = await store.beginWriteFence({
-        reason,
-        runnerContainerName: "member_123",
-        userId: "member_123",
-      });
-      const restartedStore = new RunnerStateStore(createDurableObjectState(db));
-
-      await expect(restartedStore.readWriteFenceToken()).resolves.toMatchObject({
-        attemptId: token.attemptId,
-        reason,
-        userId: "member_123",
-      } satisfies Partial<RunnerWriteFenceToken>);
-    },
-  );
-
-  it("clears the persisted active reason when the active write fence is cleared", async () => {
+  it("keeps the persisted active reason null while the write fence is live and after clear", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
     const { db, store } = createHarness();
     await store.bindUser("member_123");
     const token = await store.beginWriteFence({
-      reason: "browser_vault_refresh",
       runnerContainerName: "member_123",
       userId: "member_123",
     });
-    expect(readActiveReason(db)).toBe("browser_vault_refresh");
+    expect(readActiveReason(db)).toBeNull();
+    const restartedStore = new RunnerStateStore(createDurableObjectState(db));
+    await expect(restartedStore.readWriteFenceToken()).resolves.toMatchObject({
+      attemptId: token.attemptId,
+      userId: "member_123",
+    } satisfies Partial<RunnerWriteFenceToken>);
 
     const completed = await store.clearWriteFenceAfterCompletion({
       finishedAt: NOW,
@@ -133,7 +103,6 @@ describe("RunnerStateStore execution lease authority", () => {
     const { store } = createHarness();
     await store.bindUser("member_123");
     const token = await store.beginWriteFence({
-      reason: "nudge",
       runnerContainerName: "member_123",
       userId: "member_123",
     });
@@ -166,7 +135,6 @@ describe("RunnerStateStore execution lease authority", () => {
     const { store } = createHarness();
     await store.bindUser("member_123");
     const token = await store.beginWriteFence({
-      reason: "manual",
       runnerContainerName: "member_123",
       userId: "member_123",
     });

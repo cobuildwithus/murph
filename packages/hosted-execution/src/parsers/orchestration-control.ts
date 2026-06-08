@@ -1,7 +1,5 @@
 import {
-  HOSTED_WORKSPACE_INVOCATION_REASONS,
   type HostedMailboxLaneLag,
-  type HostedWorkspaceInvocationReason,
 } from "../runtime-control.ts";
 import {
   HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
@@ -196,17 +194,12 @@ export function parseHostedRuntimeEnsureProcessingRequest(
   const record = requireObject(value, "Hosted runtime ensure-processing request");
   assertExactKeys(record, "Hosted runtime ensure-processing request", [
     "orchestrationAttemptId",
-    "reason",
   ]);
 
   return {
     orchestrationAttemptId: requireOpaqueIdentifier(
       record.orchestrationAttemptId,
       "Hosted runtime ensure-processing request orchestrationAttemptId",
-    ),
-    reason: parseHostedWorkspaceInvocationReason(
-      record.reason,
-      "Hosted runtime ensure-processing request reason",
     ),
   };
 }
@@ -372,13 +365,6 @@ function parseHostedRuntimeMailboxLaneLag(
           maxUpdatedAt: readNullableIsoTimestamp(record.maxUpdatedAt, `${label}.maxUpdatedAt`),
         }),
   };
-}
-
-function parseHostedWorkspaceInvocationReason(
-  value: unknown,
-  label: string,
-): HostedWorkspaceInvocationReason {
-  return parseAllowedString(value, label, HOSTED_WORKSPACE_INVOCATION_REASONS);
 }
 
 function parseHostedRuntimePrewarmSource(

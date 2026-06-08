@@ -282,7 +282,6 @@ describe("RunnerContainer", () => {
         leaseGeneration: "11",
         userId: "member_123",
       },
-      reason: "nudge",
       userId: "member_123",
     })).resolves.toEqual({
       action: "woken",
@@ -349,7 +348,6 @@ describe("RunnerContainer", () => {
         leaseGeneration: "11",
         userId: "member_123",
       },
-      reason: "nudge",
       userId: "member_123",
     })).resolves.toEqual({
       action: "already_running",
@@ -382,7 +380,6 @@ describe("RunnerContainer", () => {
         timeoutMs: 60_000,
         userId: "member_123",
       },
-      reason: "nudge",
       userId: "member_123",
     })).resolves.toEqual({
       action: "restarted",
@@ -637,7 +634,6 @@ describe("RunnerContainer", () => {
         leaseGeneration: "11",
         userId: "member_other",
       },
-      reason: "nudge",
       userId: "member_123",
     })).rejects.toThrow(/activeRuntime userId must match input userId/u);
 
@@ -650,7 +646,6 @@ describe("RunnerContainer", () => {
         timeoutMs: 60_000,
         userId: "member_other",
       },
-      reason: "nudge",
       userId: "member_123",
     })).rejects.toThrow(/invoke userId must match input userId/u);
 
@@ -666,7 +661,6 @@ describe("RunnerContainer", () => {
         timeoutMs: 60_000,
         userId: "member_123",
       },
-      reason: "nudge",
       userId: "member_123",
     })).rejects.toThrow(/job userId must match input userId/u);
 
@@ -3824,7 +3818,6 @@ describe("RunnerContainer", () => {
         kind: "workspace-invocation",
         request: {
           ...createRunnerRequest("evt_runtime_renew"),
-          reason: "nudge",
         },
       },
       timeoutMs: 60_000,
@@ -4110,7 +4103,6 @@ describe("RunnerContainer", () => {
         request: {
           attemptId: "attempt_member_workspace_container",
           leaseGeneration: "11",
-          reason: "nudge",
           userId: "member_workspace_container",
           workspaceVersion: "6",
         },
@@ -4289,7 +4281,6 @@ describe("RunnerContainer", () => {
             maxMailboxItems: 3,
           },
           leaseGeneration: "11",
-          reason: "nudge",
           userId: "member_123",
           workspaceVersion: "6",
         },
@@ -4504,7 +4495,6 @@ function createRunnerRequest(eventId = "evt_123") {
   return {
     attemptId: `attempt_${eventId}`,
     leaseGeneration: "11",
-    reason: "nudge" as const,
     userId: "member_123",
     workspaceVersion: "6",
   };
@@ -4519,7 +4509,6 @@ function createWorkspaceRunnerJob(userId: string) {
         maxMailboxItems: 5,
       },
       leaseGeneration: "11",
-      reason: "nudge" as const,
       userId,
       workspaceVersion: "6",
     },

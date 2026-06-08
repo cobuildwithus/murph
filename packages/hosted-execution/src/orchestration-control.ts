@@ -1,7 +1,6 @@
 import type {
   HostedMailboxLane,
   HostedMailboxLaneLag,
-  HostedWorkspaceInvocationReason,
 } from "./runtime-control.ts";
 
 export const HOSTED_USER_RUNTIME_WORKFLOW_TYPE =
@@ -101,7 +100,6 @@ export interface HostedRuntimeReconciliationFacts {
 
 export interface HostedRuntimeEnsureProcessingRequest {
   orchestrationAttemptId: string;
-  reason: HostedWorkspaceInvocationReason;
 }
 
 export const HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS = [

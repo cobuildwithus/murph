@@ -233,12 +233,11 @@ describe("hosted orchestration control contracts", () => {
   it("parses ensure-processing request and response variants", () => {
     const ensureProcessingRequest = parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "manual",
     });
     expect(ensureProcessingRequest).toEqual({
       orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "manual",
     });
+    expect(ensureProcessingRequest).not.toHaveProperty("reason");
     expect(ensureProcessingRequest).not.toHaveProperty("source");
 
     for (const action of [
@@ -274,7 +273,6 @@ describe("hosted orchestration control contracts", () => {
     expect(() => parseHostedRuntimeEnsureProcessingRequest({
       aiUsageAllowDecision: createAiUsageAllowDecision(),
       orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
     })).toThrow(
       "Hosted runtime ensure-processing request must not include aiUsageAllowDecision.",
     );
@@ -282,6 +280,12 @@ describe("hosted orchestration control contracts", () => {
     expect(() => parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
+    })).toThrow(
+      "Hosted runtime ensure-processing request must not include reason.",
+    );
+
+    expect(() => parseHostedRuntimeEnsureProcessingRequest({
+      orchestrationAttemptId: "orchestration_attempt_test",
       source: "device_sync_recovery",
     })).toThrow(
       "Hosted runtime ensure-processing request must not include source.",

@@ -36,7 +36,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toEqual([
       {
         orchestrationAttemptId: "orchestration-attempt-1",
-        reason: "nudge",
         userId: "member_test",
       },
     ]);
@@ -120,7 +119,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toEqual([
       {
         orchestrationAttemptId: "orchestration-attempt-1",
-        reason: "alarm",
         userId: "member_test",
       },
     ]);
@@ -146,7 +144,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toEqual([
       {
         orchestrationAttemptId: "orchestration-attempt-1",
-        reason: "alarm",
         userId: "member_test",
       },
     ]);
@@ -221,7 +218,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toEqual([
       {
         orchestrationAttemptId: "orchestration-attempt-2",
-        reason: "nudge",
         userId: "member_test",
       },
     ]);

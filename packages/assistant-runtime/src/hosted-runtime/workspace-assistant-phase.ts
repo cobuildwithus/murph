@@ -2363,10 +2363,7 @@ function isDueHostedLegacyDeviceSyncRecoveryAlarm(
 function isDueHostedWorkspaceAlarm(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
-  if (
-    input.request.reason !== "alarm"
-    || hasFreshHostedConversationInput(input)
-  ) {
+  if (hasFreshHostedConversationInput(input)) {
     return false;
   }
 
@@ -2376,10 +2373,7 @@ function isDueHostedWorkspaceAlarm(
 function isDueHostedWorkspaceWake(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
-  if (
-    input.request.reason !== "alarm"
-    || !input.workspace?.nextWakeAt
-  ) {
+  if (!input.workspace?.nextWakeAt) {
     return false;
   }
 
@@ -2471,7 +2465,7 @@ function shouldRescheduleSkippedDeviceSyncWake(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
   return (
-    input.request.reason === "nudge"
+    !consumedScheduledWorkspaceWake(input)
     || hasFreshHostedConversationInput(input)
     || input.shouldYieldBackgroundMaintenance?.() === true
   );
@@ -2968,7 +2962,7 @@ function isHostedOutboxDeliverySafeExternalErrorCode(code: string): boolean {
 }
 
 function consumedScheduledWorkspaceWake(input: HostedWorkspaceRuntimeAssistantPhaseInput): boolean {
-  if (input.request.reason !== "alarm" || !input.workspace?.nextWakeAt) {
+  if (!input.workspace?.nextWakeAt) {
     return false;
   }
 
@@ -2996,16 +2990,12 @@ function hostedAssistantWakeStateProgressed(input: {
     return false;
   }
 
-  if (input.input.request.reason !== "alarm") {
+  if (!consumedScheduledWorkspaceWake(input.input)) {
     return (
       input.nextWakeAt !== null
       && !hasFreshHostedConversationInput(input.input)
       && input.assistantMetrics.activeTurnInputIngested !== true
     );
-  }
-
-  if (!consumedScheduledWorkspaceWake(input.input)) {
-    return false;
   }
 
   if (isDueHostedDeviceSyncRecoveryAlarm(input.input)) {
@@ -3245,7 +3235,7 @@ function shouldFastDispatchAssistantDeliveryEffects(input: {
 }): boolean {
   return (
     (
-      input.input.request.reason === "nudge"
+      !consumedScheduledWorkspaceWake(input.input)
       || hasFreshHostedConversationInput(input.input)
       || input.assistantMetrics.activeTurnInputIngested === true
     )

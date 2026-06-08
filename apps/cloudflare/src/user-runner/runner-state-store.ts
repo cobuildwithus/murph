@@ -1,10 +1,6 @@
 import {
   deriveHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
-import {
-  HOSTED_WORKSPACE_INVOCATION_REASONS,
-  type HostedWorkspaceInvocationReason,
-} from "@murphai/hosted-execution/runtime-control";
 
 import { ensureRunnerStateSchema } from "./runner-state-schema.js";
 import {
@@ -29,7 +25,6 @@ export interface RunnerWriteFenceToken {
   kind: RunnerWriteFenceKind;
   leaseGeneration: string;
   providerEgressToken: string | null;
-  reason: HostedWorkspaceInvocationReason;
   runnerContainerName: string | null;
   startedAt: string;
   userId: string;
@@ -151,7 +146,6 @@ export class RunnerStateStore {
   }
 
   async beginWriteFence(input: {
-    reason: HostedWorkspaceInvocationReason;
     runnerContainerName: string;
     userId: string;
   }): Promise<RunnerWriteFenceToken> {
@@ -173,7 +167,7 @@ export class RunnerStateStore {
     meta.active_generation = nextGeneration;
     meta.active_kind = kind;
     meta.active_provider_egress_token_hash = await hashProviderEgressToken(providerEgressToken);
-    meta.active_reason = input.reason;
+    meta.active_reason = null;
     meta.active_runner_container_name = requireRunnerContainerName(input.runnerContainerName);
     meta.active_started_at = startedAt;
     meta.active_workspace_version = null;
@@ -187,7 +181,6 @@ export class RunnerStateStore {
       kind,
       leaseGeneration: nextGeneration.toString(),
       providerEgressToken,
-      reason: input.reason,
       runnerContainerName: meta.active_runner_container_name,
       startedAt,
       userId: input.userId,
@@ -629,7 +622,7 @@ export class RunnerStateStore {
       meta.active_kind,
       meta.active_provider_egress_token_hash,
       meta.active_runner_container_name,
-      readHostedWorkspaceInvocationReasonOrNull(meta.active_reason),
+      null,
       meta.active_started_at,
       meta.active_expires_at,
       meta.active_workspace_version,
@@ -696,7 +689,6 @@ export class RunnerStateStore {
       kind,
       leaseGeneration: normalizeNonNegativeInteger(meta.active_generation).toString(),
       providerEgressToken: null,
-      reason: readHostedWorkspaceInvocationReasonOrDefault(meta.active_reason),
       runnerContainerName: normalizeRunnerContainerNameOrNull(meta.active_runner_container_name),
       startedAt: meta.active_started_at,
       userId: meta.user_id,
@@ -712,21 +704,6 @@ export class RunnerStateStore {
 
     return sql;
   }
-}
-
-function readHostedWorkspaceInvocationReasonOrDefault(
-  value: unknown,
-): HostedWorkspaceInvocationReason {
-  return readHostedWorkspaceInvocationReasonOrNull(value) ?? "nudge";
-}
-
-function readHostedWorkspaceInvocationReasonOrNull(
-  value: unknown,
-): HostedWorkspaceInvocationReason | null {
-  return typeof value === "string"
-    && HOSTED_WORKSPACE_INVOCATION_REASONS.includes(value as HostedWorkspaceInvocationReason)
-    ? value as HostedWorkspaceInvocationReason
-    : null;
 }
 
 function requireWorkspaceVersion(value: string): string {

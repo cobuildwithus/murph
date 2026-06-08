@@ -56,6 +56,11 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
   );
   rejectRemovedHostedAssistantRuntimeField(
     record,
+    "reason",
+    "Hosted assistant workspace runtime job request",
+  );
+  rejectRemovedHostedAssistantRuntimeField(
+    record,
     "run",
     "Hosted assistant workspace runtime job request",
   );
@@ -84,11 +89,6 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
     "wake",
     "Hosted assistant workspace runtime job request",
   );
-  const reason = parseHostedWorkspaceInvocationReason(
-    record.reason,
-    "Hosted assistant workspace runtime job request.reason",
-  );
-
   return {
     attemptId: requireString(
       record.attemptId,
@@ -124,7 +124,6 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
             "Hosted assistant workspace runtime job request.providerEgressToken",
           ),
         }),
-    reason,
     userId: requireString(
       record.userId,
       "Hosted assistant workspace runtime job request.userId",
@@ -447,24 +446,6 @@ function parseHostedWorkspaceInvocationBudget(
             : requirePositiveInteger(record.maxRuntimeMs, `${label}.maxRuntimeMs`),
         }),
   };
-}
-
-function parseHostedWorkspaceInvocationReason(
-  value: unknown,
-  label: string,
-): HostedAssistantWorkspaceRuntimeJobInput["request"]["reason"] {
-  const reason = requireString(value, label);
-
-  switch (reason) {
-    case "alarm":
-    case "browser_vault_refresh":
-    case "manual":
-    case "nudge":
-    case "retry":
-      return reason;
-    default:
-      throw new TypeError(`${label} is not supported.`);
-  }
 }
 
 function readNullableString(value: unknown, label: string): string | null {

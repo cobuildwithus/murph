@@ -267,7 +267,6 @@ function buildJobBody(input: {
       request: {
         attemptId: `attempt_${input.wake.eventId}`,
         leaseGeneration: "1",
-        reason: "nudge",
         userId,
         workspaceVersion: "0",
       },
@@ -293,7 +292,6 @@ function buildWorkspaceJobBody() {
       request: {
         attemptId: "attempt_container_workspace",
         leaseGeneration: "8",
-        reason: "nudge",
         userId: "u_container_workspace",
         workspaceVersion: "5",
       },

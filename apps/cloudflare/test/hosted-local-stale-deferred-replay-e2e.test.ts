@@ -99,7 +99,6 @@ describe("hosted local stale deferred invocation recovery", () => {
       const stuckInvocation = await requireScenario().harness.startStuckInvocationForTest(
         userId,
         {
-          reason: "manual",
           startedAgoMs: 35_000,
         },
       );

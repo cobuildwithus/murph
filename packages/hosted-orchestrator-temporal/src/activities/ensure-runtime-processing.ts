@@ -8,10 +8,6 @@ import {
 import {
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
 } from "@murphai/hosted-execution/contracts";
-import {
-  HOSTED_WORKSPACE_INVOCATION_REASONS,
-  type HostedWorkspaceInvocationReason,
-} from "@murphai/hosted-execution/runtime-control";
 
 import {
   observeHostedTemporalActivity,
@@ -21,7 +17,6 @@ import {
 
 export interface EnsureRuntimeProcessingInput {
   orchestrationAttemptId: string;
-  reason: HostedWorkspaceInvocationReason;
   userId: string;
 }
 
@@ -36,13 +31,11 @@ export async function ensureRuntimeProcessing(
   const cloudflareEnvironment = readHostedOrchestratorTemporalCloudflareEnvironment();
   const cloudflareRequest = parseHostedRuntimeEnsureProcessingRequest({
     orchestrationAttemptId: parsedRequest.orchestrationAttemptId,
-    reason: parsedRequest.reason,
   });
 
   return observeHostedTemporalActivity({
     activity: "ensureRuntimeProcessing",
     orchestrationAttemptId: parsedRequest.orchestrationAttemptId,
-    reason: parsedRequest.reason,
     userId: parsedRequest.userId,
   }, async () =>
     await requestHostedOrchestratorJson(
@@ -75,7 +68,6 @@ function parseEnsureRuntimeProcessingInput(
   const record = value;
   assertExactKeys(record, "Hosted runtime ensure-processing Activity input", [
     "orchestrationAttemptId",
-    "reason",
     "userId",
   ]);
 
@@ -83,10 +75,6 @@ function parseEnsureRuntimeProcessingInput(
     orchestrationAttemptId: requireOpaqueIdentifier(
       record.orchestrationAttemptId,
       "Hosted runtime ensure-processing Activity input orchestrationAttemptId",
-    ),
-    reason: parseHostedWorkspaceInvocationReason(
-      record.reason,
-      "Hosted runtime ensure-processing Activity input reason",
     ),
     userId: requireOpaqueIdentifier(
       record.userId,
@@ -126,19 +114,4 @@ function requireOpaqueIdentifier(value: unknown, label: string): string {
     throw new TypeError(`${label} must be a bounded opaque identifier.`);
   }
   return value;
-}
-
-function parseHostedWorkspaceInvocationReason(
-  value: unknown,
-  label: string,
-): HostedWorkspaceInvocationReason {
-  if (
-    typeof value !== "string"
-    || !HOSTED_WORKSPACE_INVOCATION_REASONS.includes(
-      value as HostedWorkspaceInvocationReason,
-    )
-  ) {
-    throw new TypeError(`${label} must be a supported invocation reason.`);
-  }
-  return value as HostedWorkspaceInvocationReason;
 }

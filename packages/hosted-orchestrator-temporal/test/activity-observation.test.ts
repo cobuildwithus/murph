@@ -24,7 +24,6 @@ describe("observeHostedTemporalActivity", () => {
     await expect(observeHostedTemporalActivity({
       activity: "ensureRuntimeProcessing",
       orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
       userId: "member_test",
     }, async () => ({
       action: "woken",
@@ -43,7 +42,7 @@ describe("observeHostedTemporalActivity", () => {
         durationMs: expect.any(Number),
         orchestrationAttemptId: "orchestration_attempt_test",
         prewarmAttemptId: null,
-        reason: "nudge",
+        reason: null,
         resultAction: "woken",
         resultKind: "runtime_processing_accepted",
         userIdPresent: true,
@@ -92,7 +91,6 @@ describe("observeHostedTemporalActivity", () => {
     await expect(observeHostedTemporalActivity({
       activity: "ensureRuntimeProcessing",
       orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
       userId: "member_test",
     }, async () => ({
       action: unsafeResultDetail,
@@ -126,7 +124,6 @@ describe("observeHostedTemporalActivity", () => {
     await expect(observeHostedTemporalActivity({
       activity: "ensureRuntimeProcessing",
       orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
       userId: "member_test",
     }, async () => {
       throw error;
@@ -142,7 +139,7 @@ describe("observeHostedTemporalActivity", () => {
         nonRetryable: false,
         orchestrationAttemptId: "orchestration_attempt_test",
         prewarmAttemptId: null,
-        reason: "nudge",
+        reason: null,
         resultAction: null,
         resultKind: null,
         userIdPresent: true,

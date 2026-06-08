@@ -8,9 +8,6 @@ import {
   type HostedExecutionStructuredLogDetails,
   type HostedExecutionStructuredLogDetailValue,
 } from "@murphai/hosted-execution";
-import type {
-  HostedWorkspaceInvocationReason,
-} from "@murphai/hosted-execution/runtime-control";
 import { methodNotAllowed } from "./json.ts";
 import {
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
@@ -294,7 +291,6 @@ export type RunnerRuntimeWakeResult =
 export interface RunnerContainerEnsureProcessingInput {
   activeRuntime?: RunnerRuntimeWakeInput | null;
   invoke?: HostedExecutionContainerInvokeRequest | null;
-  reason: HostedWorkspaceInvocationReason;
   userId: string;
 }
 
@@ -867,7 +863,6 @@ export class RunnerContainer extends Container {
           readyTimeoutMs: readRunnerReadyTimeoutMs(this.environment),
           workspaceAttemptId: input.job.request.attemptId,
           workspaceLeaseGeneration: input.job.request.leaseGeneration,
-          workspaceReason: input.job.request.reason,
           workspaceVersion: input.job.request.workspaceVersion,
           runnerIdleTtlMs: readRunnerContainerIdleTtlMs(this.environment),
           runnerPort: RUNNER_PORT,
@@ -2194,7 +2189,6 @@ async function invokeRunnerContainerProcessing(
 
   const ensured = await container.ensureProcessing({
     invoke: invokeRequest,
-    reason: readHostedExecutionRunnerJobReason(invokeRequest.job),
     userId: invokeRequest.userId,
   });
   if (ensured.kind === "accepted" && ensured.result) {
@@ -2202,12 +2196,6 @@ async function invokeRunnerContainerProcessing(
   }
 
   throw new Error(`Hosted runner container ensureProcessing returned ${ensured.kind} without invoking work.`);
-}
-
-function readHostedExecutionRunnerJobReason(
-  job: HostedExecutionRunnerJobInput,
-): HostedWorkspaceInvocationReason {
-  return job.request.reason;
 }
 
 export async function destroyHostedExecutionContainer(input: {

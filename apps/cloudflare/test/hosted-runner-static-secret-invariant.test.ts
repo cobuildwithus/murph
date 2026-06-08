@@ -255,7 +255,6 @@ function createWorkspaceJob(
     request: {
       attemptId: "attempt_secret_invariant",
       leaseGeneration: "1",
-      reason: "nudge",
       userId: "member_secret_invariant",
       workspaceVersion: "7",
     },

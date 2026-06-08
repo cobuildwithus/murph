@@ -27,7 +27,6 @@ import {
   type HostedRuntimeWorkflowState,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
-  type HostedWorkspaceInvocationReason,
   isHostedMailboxLane,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
@@ -150,7 +149,6 @@ export interface HostedUserRuntimeWorkflowRuntime {
   currentHistoryLength(): number;
   ensureRuntimeProcessing(input: {
     orchestrationAttemptId: string;
-    reason: HostedWorkspaceInvocationReason;
     userId: string;
   }): Promise<HostedRuntimeEnsureProcessingResponse>;
   nowMs(): number;
@@ -261,7 +259,6 @@ export function createHostedUserRuntimeWorkflowMachine(
 
   const executeRuntimeProcessing = async (processingInput: {
     clearMailboxPointerOnAccepted: boolean;
-    reason: HostedWorkspaceInvocationReason;
   }): Promise<void> => {
     const signalVersionBeforeExecution = state.signalVersion;
     const mailboxVersionBeforeExecution = mailboxSignalVersion;
@@ -272,7 +269,6 @@ export function createHostedUserRuntimeWorkflowMachine(
     try {
       execution = await runtime.ensureRuntimeProcessing({
         orchestrationAttemptId,
-        reason: processingInput.reason,
         userId: input.userId,
       });
     } catch (error) {
@@ -376,7 +372,6 @@ export function createHostedUserRuntimeWorkflowMachine(
         recordDirectMailboxProcessingSummary(state);
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: true,
-          reason: "nudge",
         });
         continue;
       }
@@ -444,7 +439,6 @@ export function createHostedUserRuntimeWorkflowMachine(
       if (hasAnyMailboxLag(facts)) {
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: true,
-          reason: "nudge",
         });
         continue;
       }
@@ -472,7 +466,6 @@ export function createHostedUserRuntimeWorkflowMachine(
       if (isDueTimestamp(nextWakeAt, runtime.nowMs())) {
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: false,
-          reason: "alarm",
         });
         continue;
       }

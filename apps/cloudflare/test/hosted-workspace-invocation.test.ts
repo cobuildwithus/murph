@@ -514,7 +514,6 @@ function createWorkspaceJob(
     request: {
       attemptId: request.attemptId ?? "attempt_direct_invocation",
       leaseGeneration: request.leaseGeneration ?? "3",
-      reason: request.reason ?? "nudge",
       userId: request.userId ?? "member_direct_invocation",
       workspaceVersion: request.workspaceVersion ?? "9",
     },

@@ -1,10 +1,6 @@
 import {
   summarizeHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
-import {
-  HOSTED_WORKSPACE_INVOCATION_REASONS,
-  type HostedWorkspaceInvocationReason,
-} from "@murphai/hosted-execution/runtime-control";
 import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import type {
@@ -71,9 +67,6 @@ export function projectRunnerStateRecord(input: {
         workspaceVersion: input.meta.active_workspace_version,
       }
     : null;
-  const activeReason = writeFence
-    ? readHostedWorkspaceInvocationReasonOrNull(input.meta.active_reason)
-    : null;
   const failureCount = normalizeNonNegativeInteger(input.meta.failure_count);
   const lastError = summarizeHostedExecutionErrorCode(input.meta.last_error_code);
 
@@ -88,7 +81,7 @@ export function projectRunnerStateRecord(input: {
           attemptId: writeFence.attemptId,
           expiresAt: writeFence.expiresAt,
           leaseGeneration: String(writeFence.generation),
-          reason: activeReason,
+          reason: null,
           startedAt: writeFence.startedAt,
           workspaceVersion: writeFence.workspaceVersion,
         }
@@ -124,19 +117,12 @@ export function projectRunnerStateRecord(input: {
           attemptId: writeFence.attemptId,
           lastHeartbeatAt: null,
           orphanObservedAt: null,
-          reason: activeReason,
+          reason: null,
           startedAt: writeFence.startedAt,
           workspaceVersion: writeFence.workspaceVersion,
         }
       : null,
   };
-}
-
-function readHostedWorkspaceInvocationReasonOrNull(value: unknown): string | null {
-  return typeof value === "string"
-    && HOSTED_WORKSPACE_INVOCATION_REASONS.includes(value as HostedWorkspaceInvocationReason)
-    ? value
-    : null;
 }
 
 function readRunnerContainerNameOrNull(value: unknown): string | null {

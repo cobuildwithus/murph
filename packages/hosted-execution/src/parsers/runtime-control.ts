@@ -23,7 +23,6 @@ import {
   HOSTED_RUNTIME_LOG_PHASES,
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
-  HOSTED_WORKSPACE_INVOCATION_REASONS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
   type HostedMailboxFetchRequest,
   type HostedMailboxFetchResponse,
@@ -74,7 +73,6 @@ import {
   type HostedWorkspaceCheckpointResponse,
   type HostedWorkspaceReadResponse,
   type HostedWorkspaceInvocationBudget,
-  type HostedWorkspaceInvocationReason,
   type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceInvocationResult,
   type HostedWorkspaceInvocationStatus,
@@ -268,6 +266,7 @@ const HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS = [
   "runDrain",
   "runId",
   "runToken",
+  "reason",
   "source",
   "targetCommittedSeqHint",
   "targetReached",
@@ -1211,7 +1210,6 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
       "Hosted workspace invocation request",
     );
   }
-  const reason = parseHostedWorkspaceInvocationReason(record.reason);
 
   return {
     attemptId: requireString(record.attemptId, "Hosted workspace invocation request attemptId"),
@@ -1245,7 +1243,6 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
             "Hosted workspace invocation request providerEgressToken",
           ),
         }),
-    reason,
     userId: requireString(record.userId, "Hosted workspace invocation request userId"),
     ...(record.workspace === undefined
       ? {}
@@ -1347,14 +1344,6 @@ function parseHostedWorkspaceInvocationBudget(
             : requirePositiveInteger(record.maxRuntimeMs, `${label}.maxRuntimeMs`),
         }),
   };
-}
-
-function parseHostedWorkspaceInvocationReason(value: unknown): HostedWorkspaceInvocationReason {
-  return parseAllowedString(
-    value,
-    "Hosted workspace invocation request reason",
-    HOSTED_WORKSPACE_INVOCATION_REASONS,
-  );
 }
 
 function parseHostedWorkspaceInvocationStatus(value: unknown): HostedWorkspaceInvocationStatus {

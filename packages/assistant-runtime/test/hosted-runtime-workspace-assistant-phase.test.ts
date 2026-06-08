@@ -587,7 +587,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("keeps device-sync options out of the assistant lane when active input is fresh", async () => {
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
-      reason: "alarm",
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions({
@@ -599,7 +598,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("keeps plain webhook nudges out of idle device-sync maintenance", async () => {
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
-      reason: "nudge",
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions();
@@ -621,7 +619,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
-      reason: "nudge",
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
@@ -646,7 +643,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
-      reason: "nudge",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -689,7 +685,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
-      reason: "alarm",
       workspace: {
         checkpointedAt: "2026-04-27T00:00:00.000Z",
         createdAt: "2026-04-27T00:00:00.000Z",
@@ -749,7 +744,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
-      reason: "alarm",
       workspace: {
         checkpointedAt: "2026-04-27T00:00:00.000Z",
         createdAt: "2026-04-27T00:00:00.000Z",
@@ -804,7 +798,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
-      reason: "alarm",
       workspace: {
         checkpointedAt: "2026-04-27T00:00:00.000Z",
         createdAt: "2026-04-27T00:00:00.000Z",
@@ -851,7 +844,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
-      reason: "alarm",
       workspace: {
         checkpointedAt: "2026-04-27T00:00:00.000Z",
         createdAt: "2026-04-27T00:00:00.000Z",
@@ -1056,7 +1048,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       workspace: {
         checkpointedAt: "2026-04-27T00:00:00.000Z",
         createdAt: "2026-04-27T00:00:00.000Z",
@@ -1085,7 +1076,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       workspace: {
         checkpointedAt: "2026-04-27T00:00:00.000Z",
         createdAt: "2026-04-27T00:00:00.000Z",
@@ -1106,11 +1096,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect("nextWakeAt" in result).toBe(false);
   });
 
-  it("keeps projected due device-sync wakes out of plain foreground nudges", async () => {
+  it("keeps projected due device-sync wakes out when foreground input is fresh", async () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 0,
+      importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "nudge",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -1137,6 +1126,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expectAssistantLaneCallWithoutDeviceSyncOptions();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
       nextWakeAt: "2026-04-27T00:00:30.000Z",
       nextWakeReason: "device-sync.reconcile",
       progressed: true,
@@ -1156,7 +1146,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -1269,7 +1258,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -1318,7 +1306,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -1373,7 +1360,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -1408,7 +1394,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -1453,7 +1438,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -1495,7 +1479,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "nudge",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -1523,15 +1506,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       preferredInputIds: ["ain_00000000000000000000000000000001"],
     });
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
-    expect(result).toEqual({
-      progressed: false,
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: null,
+      progressed: true,
       redactedStatus: expect.objectContaining({
         hostedAssistantNextWakeAt: null,
-        hostedAssistantProgressed: false,
+        hostedAssistantProgressed: true,
       }),
-    });
-    expect("checkpointReason" in result).toBe(false);
-    expect("nextWakeAt" in result).toBe(false);
+    }));
     expect("nextWakeReason" in result).toBe(false);
   });
 
@@ -1551,7 +1534,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -1599,7 +1581,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "nudge",
     }));
 
     expect(result).toEqual({
@@ -1629,7 +1610,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       importedCount: 0,
       logRequests,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       workspace: {
         checkpointedAt: "2026-04-27T00:00:00.000Z",
         createdAt: "2026-04-27T00:00:00.000Z",
@@ -1644,20 +1624,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(result).toEqual({
+      checkpointReason: "canonical_runtime_commit",
       nextWakeAt,
-      progressed: false,
+      progressed: true,
       redactedStatus: expect.objectContaining({
         hostedAssistantNextWakeAt: nextWakeAt,
-        hostedAssistantProgressed: false,
+        hostedAssistantProgressed: true,
       }),
     });
-    expect("checkpointReason" in result).toBe(false);
     expect(logRequests.at(-1)?.entries[0]).toEqual(expect.objectContaining({
       eventCode: "assistant.pass_finished",
       redactedJson: expect.objectContaining({
         assistantAutomationProgressed: false,
         nextWakeAtPresent: true,
-        progressed: false,
+        progressed: true,
       }),
     }));
   });
@@ -1679,7 +1659,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       importedCount: 0,
       logRequests,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "nudge",
       workspace: null,
     }));
 
@@ -1717,7 +1696,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -1759,7 +1737,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "nudge",
       workspace: {
         checkpointedAt: "2026-04-27T00:00:00.000Z",
         createdAt: "2026-04-27T00:00:00.000Z",
@@ -1786,7 +1763,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       workspace: {
         checkpointedAt: "2026-04-27T00:00:00.000Z",
         createdAt: "2026-04-27T00:00:00.000Z",
@@ -1811,7 +1787,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "nudge",
       workspace: {
         checkpointedAt: "2026-04-27T00:00:00.000Z",
         createdAt: "2026-04-27T00:00:00.000Z",
@@ -1848,7 +1823,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -1898,7 +1872,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -1950,7 +1923,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       workspace: {
         checkpointedAt: "2026-04-27T00:00:00.000Z",
         createdAt: "2026-04-27T00:00:00.000Z",
@@ -2182,7 +2154,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       logRequests,
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
     }));
 
     expect(result.progressed).toBe(true);
@@ -2419,7 +2390,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       logRequests,
-      reason: "alarm",
+      workspace: createDueAssistantWorkspace(),
     }));
     await result.afterCheckpoint?.();
 
@@ -2465,7 +2436,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      reason: "alarm",
+      workspace: createDueAssistantWorkspace(),
     }));
     const postCheckpoint = await result.afterCheckpoint?.();
 
@@ -2634,7 +2605,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
         importedCount: 1,
         now: () => "2026-05-08T02:28:12.000Z",
-        reason: "alarm",
         resolvedDeviceSync: {
           providerConfigs: {
             whoop: {
@@ -2755,7 +2725,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
-      reason: "nudge",
     }));
 
     expect(result.afterCheckpoint).toBeUndefined();
@@ -2801,7 +2770,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
-      reason: "alarm",
     }));
 
     expect(result.afterCheckpoint).toBeUndefined();
@@ -2838,7 +2806,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       logRequests,
-      reason: "alarm",
+      workspace: createDueAssistantWorkspace(),
     }));
     await result.afterCheckpoint?.();
 
@@ -2885,7 +2853,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       logRequests,
-      reason: "alarm",
+      workspace: createDueAssistantWorkspace(),
     }));
     await result.afterCheckpoint?.();
 
@@ -2945,7 +2913,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -2994,7 +2961,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -3203,7 +3169,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       importedCount: 1,
       logRequests,
       now: () => "2026-04-27T00:09:00.000Z",
-      reason: "alarm",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -3629,7 +3594,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:09:00.000Z",
-      reason: "nudge",
     }));
 
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
@@ -3806,7 +3770,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       now: () => "2026-04-27T00:00:00.000Z",
-      reason: "alarm",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -4188,7 +4151,6 @@ function createPhaseInput(input: {
   };
   logRequests?: HostedRuntimeLogRequest[];
   now?: () => string;
-  reason?: HostedWorkspaceRuntimeAssistantPhaseInput["request"]["reason"];
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
   runtimeForwardedEnv?: Record<string, string>;
@@ -4265,7 +4227,6 @@ function createPhaseInput(input: {
     request: {
       attemptId: "attempt_synthetic_phase",
       leaseGeneration: "3",
-      reason: input.reason ?? "nudge",
       userId: "member_synthetic_phase",
       workspaceVersion: "8",
     },
@@ -4315,6 +4276,23 @@ function createPhaseInput(input: {
     runtimeEnv: input.runtimeEnv ?? {},
     shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
     workspace: input.workspace ?? null,
+  };
+}
+
+function createDueAssistantWorkspace(
+  overrides: Partial<NonNullable<HostedWorkspaceRuntimeAssistantPhaseInput["workspace"]>> = {},
+): NonNullable<HostedWorkspaceRuntimeAssistantPhaseInput["workspace"]> {
+  return {
+    checkpointedAt: "2026-04-27T00:00:00.000Z",
+    createdAt: "2026-04-27T00:00:00.000Z",
+    nextWakeAt: "2026-04-26T23:59:59.000Z",
+    nextWakeReason: "assistant",
+    redactedStatus: null,
+    snapshotRef: null,
+    updatedAt: "2026-04-27T00:00:00.000Z",
+    userId: "member_synthetic_phase",
+    version: "8",
+    ...overrides,
   };
 }
 

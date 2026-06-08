@@ -70,7 +70,6 @@ import {
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import type {
-  HostedWorkspaceInvocationReason,
   HostedWorkspaceInvocationResult,
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
@@ -1245,7 +1244,6 @@ describe("cloudflare worker routes", () => {
 
     expect(response.status).toBe(200);
     expect(stub.startStuckInvocationForTest).toHaveBeenCalledWith({
-      reason: "manual",
       startedAgoMs: 35000,
       userId: "member_123",
     });
@@ -1628,7 +1626,7 @@ describe("cloudflare worker routes", () => {
     expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
   });
 
-  it("passes the test run-until-idle reason to the Durable Object", async () => {
+  it("passes a reason-less test run-until-idle request to the Durable Object", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
@@ -1637,7 +1635,7 @@ describe("cloudflare worker routes", () => {
 
     const response = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
-        "https://runner.example.test/__test/users/member_123/run-until-idle?reason=manual",
+        "https://runner.example.test/__test/users/member_123/run-until-idle",
         {
           method: "POST",
         },
@@ -1653,12 +1651,11 @@ describe("cloudflare worker routes", () => {
       status: "idle",
     });
     expect(stub.runUntilIdleForTest).toHaveBeenCalledWith({
-      reason: "manual",
       userId: "member_123",
     });
   });
 
-  it("rejects unsupported test run-until-idle reasons", async () => {
+  it("rejects removed test run-until-idle reason query hints", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
@@ -1679,7 +1676,7 @@ describe("cloudflare worker routes", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "Unsupported test workspace invocation reason.",
+      error: "Test run-until-idle reason is no longer supported.",
     });
     expect(stub.runUntilIdleForTest).not.toHaveBeenCalled();
   });
@@ -1713,7 +1710,6 @@ describe("cloudflare worker routes", () => {
           new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
             body: JSON.stringify({
               orchestrationAttemptId: "orchestration-attempt-test",
-              reason: "nudge",
             }),
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -1736,7 +1732,6 @@ describe("cloudflare worker routes", () => {
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
         orchestrationAttemptId: "orchestration-attempt-test",
         commandTimeoutMs: 10_000,
-        reason: "nudge",
         userId: "test-user",
       });
     });
@@ -1824,7 +1819,6 @@ describe("cloudflare worker routes", () => {
           new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
             body: JSON.stringify({
               orchestrationAttemptId: "orchestration-attempt-test",
-              reason: "nudge",
               source: "unsupported-source",
             }),
             headers: {
@@ -1854,7 +1848,6 @@ describe("cloudflare worker routes", () => {
           new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
             body: JSON.stringify({
               orchestrationAttemptId: "orchestration-attempt-test",
-              reason: "nudge",
             }),
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -1875,7 +1868,6 @@ describe("cloudflare worker routes", () => {
       });
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
         orchestrationAttemptId: "orchestration-attempt-test",
-        reason: "nudge",
         userId: "test-user",
       });
     });
@@ -1898,7 +1890,6 @@ describe("cloudflare worker routes", () => {
             new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
               body: JSON.stringify({
                 orchestrationAttemptId: "orchestration-attempt-test",
-                reason: "nudge",
               }),
               headers: {
                 "content-type": "application/json; charset=utf-8",
@@ -1941,7 +1932,6 @@ describe("cloudflare worker routes", () => {
 
       const response = await runner.ensureRuntimeProcessingForUser({
         orchestrationAttemptId: "orchestration-attempt-test",
-        reason: "nudge",
         userId: "test-user",
       });
 
@@ -1954,7 +1944,6 @@ describe("cloudflare worker routes", () => {
       await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
       expect(invoke).toHaveBeenCalledOnce();
       expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
-        reason: "nudge",
         userId: "test-user",
         workspaceVersion: "7",
       });
@@ -1991,7 +1980,6 @@ describe("cloudflare worker routes", () => {
 
       const response = await runner.ensureRuntimeProcessingForUser({
         orchestrationAttemptId: "orchestration-attempt-test",
-        reason: "nudge",
         userId: "test-user",
       });
 
@@ -2007,7 +1995,6 @@ describe("cloudflare worker routes", () => {
           leaseGeneration: token.generation,
           userId: "test-user",
         },
-        reason: "nudge",
         userId: "test-user",
       });
       expect(invoke).not.toHaveBeenCalled();
@@ -2037,7 +2024,6 @@ describe("cloudflare worker routes", () => {
 
       const response = await runner.ensureRuntimeProcessingForUser({
         orchestrationAttemptId: "orchestration-attempt-test",
-        reason: "nudge",
         userId: "test-user",
       });
 
@@ -2052,7 +2038,6 @@ describe("cloudflare worker routes", () => {
           leaseGeneration: oldToken.generation,
           userId: "test-user",
         },
-        reason: "nudge",
         userId: "test-user",
       });
       expect(invoke).not.toHaveBeenCalled();
@@ -2081,7 +2066,6 @@ describe("cloudflare worker routes", () => {
 
       await expect(runner.ensureRuntimeProcessingForUser({
         orchestrationAttemptId: "orchestration-attempt-test",
-        reason: "nudge",
         userId: "test-user",
       })).resolves.toEqual({
         kind: "retry_later",
@@ -2107,7 +2091,6 @@ describe("cloudflare worker routes", () => {
         new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
           body: JSON.stringify({
             orchestrationAttemptId: "orchestration-attempt-test",
-            reason: "nudge",
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -3012,12 +2995,8 @@ async function resolveHostedUserCryptoContextForTest(
 
 type WorkerTestUserRunnerStub = UserRunnerDurableObjectStubLike & {
   runAlarmForTest(input: { userId: string }): Promise<{ ok: true }>;
-  runUntilIdleForTest(input: {
-    reason: HostedWorkspaceInvocationReason;
-    userId: string;
-  }): Promise<HostedWorkspaceInvocationResult>;
+  runUntilIdleForTest(input: { userId: string }): Promise<HostedWorkspaceInvocationResult>;
   startStuckInvocationForTest(input: {
-    reason?: HostedWorkspaceInvocationReason;
     startedAgoMs?: number;
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult>;

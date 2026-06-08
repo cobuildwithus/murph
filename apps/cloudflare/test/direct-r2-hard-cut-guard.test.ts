@@ -104,7 +104,6 @@ describe("direct-R2 hard-cut guards", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       } satisfies HostedWorkspaceInvocationRequest,

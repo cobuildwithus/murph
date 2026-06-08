@@ -75,7 +75,6 @@ export async function wakeHostedWorker(input: {
   const url = new URL(path, `${input.harness.workerBaseUrl}/`);
   const requestBody = JSON.stringify(parseHostedRuntimeEnsureProcessingRequest({
     orchestrationAttemptId: `hosted-local-wake:${input.userId}`,
-    reason: "nudge",
   }));
   const headers = new Headers({
     "content-type": "application/json; charset=utf-8",

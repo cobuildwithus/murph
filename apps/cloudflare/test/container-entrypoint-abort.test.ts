@@ -65,7 +65,6 @@ function buildWorkspaceJobBody(input: {
       request: {
         attemptId: `attempt_${input.eventId}`,
         leaseGeneration: "1",
-        reason: "nudge",
         userId: "u1",
         workspaceVersion: "0",
       },

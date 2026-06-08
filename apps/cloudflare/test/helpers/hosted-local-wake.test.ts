@@ -60,7 +60,6 @@ it("ensures workspace processing through the signed callback-only control route"
   expect(init.method).toBe("POST");
   expect(JSON.parse(String(init.body))).toEqual({
     orchestrationAttemptId: "hosted-local-wake:member_local_telegram_reply_123",
-    reason: "nudge",
   });
 
   const headers = init.headers as Headers;
@@ -130,7 +129,6 @@ it("retries retry_later responses until processing is accepted", async () => {
     expect(init.method).toBe("POST");
     expect(JSON.parse(String(init.body))).toEqual({
       orchestrationAttemptId: "hosted-local-wake:member_local_retry_123",
-      reason: "nudge",
     });
 
     const headers = init.headers as Headers;
