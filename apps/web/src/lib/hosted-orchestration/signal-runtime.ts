@@ -26,6 +26,9 @@ import {
   hasHostedMemberActiveAccess,
 } from "../hosted-onboarding/entitlement";
 import {
+  hostedOnboardingError,
+} from "../hosted-onboarding/errors";
+import {
   readHostedMemberCoreState,
 } from "../hosted-onboarding/hosted-member-store";
 import {
@@ -41,6 +44,9 @@ import {
   readHostedRuntimeTemporalSignalClientIfConfigured,
   type HostedRuntimeTemporalSignalClient,
 } from "./temporal-client";
+import {
+  resolveHostedRuntimeAiUsageDemandGate,
+} from "./runtime-usage-decision";
 
 export interface HostedRuntimeSignalResult {
   signalAccepted: true;
@@ -168,11 +174,17 @@ export async function signalHostedBrowserVaultRefreshRuntime(
 export async function signalHostedManualRunRuntime(
   input: SignalHostedManualRunInput,
 ): Promise<HostedRuntimeSignalResult> {
+  const prisma = input.prisma ?? getPrisma();
+  await assertHostedManualRunAiUsageAllowed({
+    prisma,
+    userId: input.userId,
+  });
+
   return signalHostedRuntimeControlMailboxRequest({
     client: input.client,
     environment: input.environment,
     kind: "runtime.manual-requested",
-    prisma: input.prisma,
+    prisma,
     source: "manual",
     userId: input.userId,
   });
@@ -237,6 +249,38 @@ export async function signalHostedDeviceSyncMailboxRuntime(
       source: "device-sync",
     }),
     userId: mailboxItem.userId,
+  });
+}
+
+async function assertHostedManualRunAiUsageAllowed(input: {
+  prisma: PrismaClient;
+  userId: string;
+}): Promise<void> {
+  const gate = await resolveHostedRuntimeAiUsageDemandGate({
+    prisma: input.prisma,
+    userId: input.userId,
+  });
+
+  if (gate.status === "allowed") {
+    return;
+  }
+
+  if (gate.status === "unavailable") {
+    throw hostedOnboardingError({
+      code: "HOSTED_RUNTIME_MANUAL_WAKE_AI_USAGE_GATE_UNAVAILABLE",
+      details: {
+        retryAt: gate.retryAt,
+      },
+      httpStatus: 503,
+      message: "Hosted runtime manual wake AI usage gate is unavailable.",
+      retryable: true,
+    });
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_RUNTIME_MANUAL_WAKE_AI_USAGE_DENIED",
+    httpStatus: 403,
+    message: "Hosted runtime manual wake AI usage is denied.",
   });
 }
 

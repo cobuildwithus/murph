@@ -586,7 +586,7 @@ export function createHostedUserRuntimeWorkflowMachine(
       completedIterations += 1;
 
       if (
-        state.latestMailboxPointer?.lane === "conversation"
+        state.latestMailboxPointer !== null
         && latestMailboxSignalDemandVersion === demandSignalVersion
         && runtime.useDirectMailboxProcessingPatch()
       ) {

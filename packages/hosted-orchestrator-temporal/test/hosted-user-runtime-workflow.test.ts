@@ -104,9 +104,8 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toHaveLength(1);
   });
 
-  it("reads demand for system mailbox signals because web owns system item-kind routing", async () => {
+  it("runs Cloudflare execution directly after a system mailbox signal without reading demand", async () => {
     const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(runDemand({ source: "manual" }));
     runtime.executions.push(processingAccepted());
 
     const machine = createMachine(runtime, {
@@ -122,11 +121,11 @@ describe("hostedUserRuntimeWorkflow loop", () => {
 
     await runUntilContinueAsNew(machine);
 
-    expect(runtime.demandRequests).toHaveLength(1);
+    expect(runtime.demandRequests).toEqual([]);
     expect(runtime.executionRequests).toEqual([
       {
         orchestrationAttemptId: "orchestration-attempt-1",
-        reason: "manual",
+        reason: "nudge",
         userId: "member_test",
       },
     ]);

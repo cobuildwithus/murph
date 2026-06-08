@@ -6,6 +6,9 @@ import {
   it,
   vi,
 } from "vitest";
+import {
+  hostedOnboardingError,
+} from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   signalHostedManualRunRuntime: vi.fn(),
@@ -77,6 +80,49 @@ describe("signalHostedRuntimeManualWakeBestEffortResult", () => {
       usageGateDenied: false,
       workflowIdPresent: true,
     });
+  });
+
+  it("returns usageGateDenied without logging when manual wake AI usage is denied", async () => {
+    mocks.signalHostedManualRunRuntime.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_RUNTIME_MANUAL_WAKE_AI_USAGE_DENIED",
+      httpStatus: 403,
+      message: "Hosted runtime manual wake AI usage is denied.",
+    }));
+
+    await expect(signalHostedRuntimeManualWakeBestEffortResult({
+      timeoutMs: 1_000,
+      userId: "member_denied",
+    })).resolves.toEqual({
+      accepted: false,
+      configured: true,
+      errorCode: null,
+      signalAccepted: null,
+      usageGateDenied: true,
+      workflowIdPresent: null,
+    });
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe failure when manual wake AI usage gate is unavailable", async () => {
+    mocks.signalHostedManualRunRuntime.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_RUNTIME_MANUAL_WAKE_AI_USAGE_GATE_UNAVAILABLE",
+      httpStatus: 503,
+      message: "Hosted runtime manual wake AI usage gate is unavailable.",
+      retryable: true,
+    }));
+
+    await expect(signalHostedRuntimeManualWakeBestEffortResult({
+      timeoutMs: 1_000,
+      userId: "member_gate_unavailable",
+    })).resolves.toEqual({
+      accepted: false,
+      configured: true,
+      errorCode: "HOSTED_RUNTIME_MANUAL_WAKE_AI_USAGE_GATE_UNAVAILABLE",
+      signalAccepted: null,
+      usageGateDenied: false,
+      workflowIdPresent: null,
+    });
+    expect(consoleError).not.toHaveBeenCalled();
   });
 });
 
