@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:299ec8c154e54ccf13305667e1427609ce22a4e6cee4acaaa504b96a7964504e",
+  "catalogHash": "sha256:53b6e2cb3183243719ec71afb3725c0c5c4d7126d49fbdbebd452f160caf0e1d",
   "generatedAt": null,
   "items": [
     {
@@ -35183,7 +35183,18 @@
         "Couch"
       ],
       "id": "EX123",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person setting up for a single-leg hip thrust with upper back on a couch hips low and both feet flat.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1d64d08d-a472-49af-a8ae-5686fb0df000/public"
+        },
+        {
+          "alt": "Person holding a single-leg hip thrust with upper back supported one foot planted and the opposite leg raised.",
+          "step": "Single-leg lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/881f5bc2-9175-47ab-3d4e-9657cbc24400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -35223,7 +35234,18 @@
       ],
       "equipment": [],
       "id": "EX124",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person setting up for a long-lever glute bridge lying on a mat with heels farther from hips and hips low.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/34d37366-f985-4fd3-4c67-df9d07348400/public"
+        },
+        {
+          "alt": "Person holding a long-lever glute bridge with hips lifted knees slightly bent and heels planted far from hips.",
+          "step": "Lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6422b8f4-6a49-4288-4a7b-5201aa6caf00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
