@@ -47,7 +47,6 @@ import {
   resolveAssistantOnboardingStatePath,
   listAssistantSessions,
   resolveAssistantStatePaths,
-  listAssistantMediaCatalog,
 } from '@murphai/assistant-engine/assistant-state'
 import {
   emptyArgsSchema,
@@ -208,19 +207,6 @@ const assistantSelfDeliveryTargetOptionFields = {
     assistantSavedDeliveryTargetRoutingDescription,
   ),
 }
-
-const assistantMediaListResultSchema = z.object({
-  catalogUrl: z.string().url(),
-  updatedAt: z.string().nullable(),
-  items: z.array(z.object({
-    id: z.string().min(1),
-    title: z.string().min(1),
-    description: z.string().min(1),
-    url: z.string().url(),
-    alt: z.string().min(1).nullable(),
-    tags: z.array(z.string().min(1)),
-  })),
-})
 
 function assertAssistantSelfDeliveryTargetInput(input: {
   channel: string
@@ -1149,37 +1135,6 @@ export function registerAssistantCommands(
     assistant.command(session)
   }
 
-  const registerMediaCommands = () => {
-    const media = Cli.create('media', {
-      description:
-        'List pre-generated assistant response media catalog entries. Codex attaches final response media through its turn-local runtime tool.',
-    })
-
-    media.command('list', {
-      args: z.object({
-        query: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Optional search text such as an exercise name, stretch, body region, or step.'),
-      }),
-      description:
-        'List pre-generated media from the hosted assistant media catalog, including stable ids, descriptions, tags, and HTTPS URLs that can be attached later.',
-      options: z.object({
-        requestId: requestIdSchema,
-      }),
-      output: assistantMediaListResultSchema,
-      async run(context) {
-        return listAssistantMediaCatalog({
-          env: process.env,
-          query: context.args.query ?? null,
-        })
-      },
-    })
-
-    assistant.command(media)
-  }
-
   const registerRootAliases = () => {
     cli.command(
       'chat',
@@ -1230,7 +1185,6 @@ export function registerAssistantCommands(
 
   registerConversationCommands()
   registerSelfTargetCommands()
-  registerMediaCommands()
   registerObservabilityCommands()
   registerOnboardingCommands()
   registerSessionCommands()

@@ -47,7 +47,8 @@ const runId = Date.now();
 const userId = `member_local_vault_persistence_${runId}`;
 const chatId = `chat_local_vault_persistence_${runId}`;
 const linqWebhookSecret = "linq-local-vault-persistence-secret";
-const productionLikeAssistantModel = "gpt-5.5";
+const safeLiveAssistantModel =
+  process.env.MURPH_HOSTED_LOCAL_LIVE_E2E_MODEL?.trim() || "gpt-5.4-mini";
 const vaultRelativePath = `bank/hosted-e2e/vault-persistence-${runId}.md`;
 const firstMarker = `first-marker-${randomUUID()}`;
 
@@ -169,7 +170,7 @@ async function startVaultPersistenceScenario(input: {
   return await startHostedLocalFullStackScenario({
     additionalEnv: {
       ...(input.cryptoEnv ?? {}),
-      HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
+      HOSTED_ASSISTANT_MODEL: safeLiveAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
@@ -181,7 +182,7 @@ async function startVaultPersistenceScenario(input: {
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
     },
     assistantProviderMode: "live",
-    assistantProviderStubModelId: productionLikeAssistantModel,
+    assistantProviderStubModelId: safeLiveAssistantModel,
     localDatabaseUrl: requireDatabaseUrl(),
     persistDirOverride: requirePersistDir(),
     persistDirPrefix: "murph-hosted-local-vault-persistence-",
