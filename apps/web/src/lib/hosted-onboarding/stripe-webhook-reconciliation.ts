@@ -1,6 +1,5 @@
 import { HostedStripeEventStatus, type PrismaClient } from "@prisma/client";
 
-import { signalHostedRuntimeManualWakeBestEffortResult } from "../hosted-orchestration/manual-wake";
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
 import {
@@ -17,6 +16,9 @@ import {
 import {
   requireHostedStripeApi,
 } from "./runtime";
+import {
+  signalHostedMemberActivationRuntimeWakeBestEffortResult,
+} from "./member-activation-runtime-wake";
 
 export const HOSTED_STRIPE_WEBHOOK_WORKFLOW_RETRY_AFTER_DETAIL_KEY = "workflowRetryAfter";
 
@@ -29,6 +31,7 @@ export type HostedStripeWebhookReconciliationResult = {
   eventId: string;
   eventType: string;
   hostedExecutionEventId: string | null;
+  hostedExecutionMailboxItemId: string | null;
 };
 
 export type HostedStripeWebhookRuntimeWakeResult = {
@@ -138,6 +141,7 @@ export async function reconcileRecordedHostedStripeWebhookEvent(input: {
     eventId: reconciled.eventId,
     eventType: storedEvent.type,
     hostedExecutionEventId: reconciled.hostedExecutionEventId ?? null,
+    hostedExecutionMailboxItemId: null,
   };
 }
 
@@ -153,6 +157,7 @@ export async function processRecordedHostedStripeWebhookEvent(input: {
 
   return signalHostedStripeWebhookActivationRuntimeWake({
     ...reconciliation,
+    prisma: input.prisma,
     timeoutMs: input.timeoutMs,
   });
 }
@@ -162,6 +167,8 @@ export async function signalHostedStripeWebhookActivationRuntimeWake(input: {
   eventId: string;
   eventType: string;
   hostedExecutionEventId: string | null;
+  hostedExecutionMailboxItemId?: string | null;
+  prisma?: PrismaClient;
   timeoutMs?: number;
 }): Promise<HostedStripeWebhookRuntimeWakeResult> {
   const hostedExecutionEventId = input.hostedExecutionEventId ?? null;
@@ -185,14 +192,19 @@ export async function signalHostedStripeWebhookActivationRuntimeWake(input: {
       hostedExecutionMemberIdSuffix: toHostedOnboardingLogIdSuffix(hostedExecutionMemberId),
     },
   );
-  const result = await signalHostedRuntimeManualWakeBestEffortResult({
+  const result = await signalHostedMemberActivationRuntimeWakeBestEffortResult({
+    hostedExecutionEventId,
+    mailboxItemId: input.hostedExecutionMailboxItemId ?? null,
+    memberId: hostedExecutionMemberId,
+    prisma: input.prisma,
+    source: "stripe.webhook.activation",
     timeoutMs: input.timeoutMs,
-    userId: hostedExecutionMemberId,
   });
   finishHostedOnboardingTiming(runtimeWakeTiming, result.accepted ? "accepted" : "not-accepted", {
     accepted: result.accepted,
     configured: result.configured,
     errorCode: result.errorCode,
+    mailboxItemIdPresent: result.mailboxItemIdPresent,
     signalAccepted: result.signalAccepted,
     workflowIdPresent: result.workflowIdPresent,
   });
@@ -280,12 +292,14 @@ async function resolveCompletedHostedStripeWebhookActivationResult(input: {
       eventId: input.eventId,
       eventType: input.eventType,
       hostedExecutionEventId: activation.dedupeKey,
+      hostedExecutionMailboxItemId: activation.id,
     }
     : {
       activatedMemberId: null,
       eventId: input.eventId,
       eventType: input.eventType,
       hostedExecutionEventId: null,
+      hostedExecutionMailboxItemId: null,
     };
 }
 
@@ -293,7 +307,7 @@ async function readHostedStripeActivationMailboxItemForCompletedEvent(input: {
   eventId: string;
   eventType: string;
   prisma: PrismaClient;
-}): Promise<{ dedupeKey: string; userId: string } | null> {
+}): Promise<{ dedupeKey: string; id: string; userId: string } | null> {
   for (const sourceEventId of await resolveHostedStripeActivationSourceEventIds(input.eventId)) {
     const activation = await input.prisma.hostedMailboxItem.findFirst({
       orderBy: {
@@ -301,6 +315,7 @@ async function readHostedStripeActivationMailboxItemForCompletedEvent(input: {
       },
       select: {
         dedupeKey: true,
+        id: true,
         userId: true,
       },
       where: {

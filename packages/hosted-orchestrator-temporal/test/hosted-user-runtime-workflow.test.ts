@@ -104,7 +104,34 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toHaveLength(1);
   });
 
-  it("reads demand for system mailbox signals because web owns system item-kind routing", async () => {
+  it("runs Cloudflare execution directly after a system mailbox signal without reading demand", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal({
+      lane: "system",
+      laneSeq: "3",
+      mailboxItemId: "mailbox_system_manual",
+      source: "manual-ai-gated",
+    }));
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests).toEqual([]);
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        reason: "nudge",
+        userId: "member_test",
+      },
+    ]);
+  });
+
+  it("keeps old manual system mailbox signals on the demand-read path", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({ source: "manual" }));
     runtime.executions.push(processingAccepted());
@@ -130,6 +157,29 @@ describe("hostedUserRuntimeWorkflow loop", () => {
         userId: "member_test",
       },
     ]);
+  });
+
+  it("keeps system mailbox signals on the demand-read path before the any-lane direct patch", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.directAnyLaneMailboxProcessingPatchEnabled = false;
+    runtime.demands.push(runDemand({ source: "mailbox_backlog" }));
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal({
+      lane: "system",
+      laneSeq: "4",
+      mailboxItemId: "mailbox_system_device_sync",
+      source: "device-sync",
+    }));
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests).toHaveLength(1);
+    expect(runtime.executionRequests).toHaveLength(1);
   });
 
   it("waits for a future idle nextWakeAt with a signal-or-timer condition", async () => {
@@ -1890,6 +1940,7 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   readonly prewarms: Array<PrewarmHandler | HostedRuntimePrewarmResponse | Promise<HostedRuntimePrewarmResponse>> = [];
   prewarmSignalPatchEnabled = true;
   deviceSyncRecoveryDeletionPatchEnabled = true;
+  directAnyLaneMailboxProcessingPatchEnabled = true;
   directMailboxProcessingPatchEnabled = true;
   dropEnsureProcessingSourcePatchEnabled = true;
   now = BASE_TIME_MS;
@@ -2039,6 +2090,10 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
 
   useDirectMailboxProcessingPatch(): boolean {
     return this.directMailboxProcessingPatchEnabled;
+  }
+
+  useDirectAnyLaneMailboxProcessingPatch(): boolean {
+    return this.directAnyLaneMailboxProcessingPatchEnabled;
   }
 
   useDropEnsureProcessingSourcePatch(): boolean {

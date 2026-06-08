@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:fd5527a2292d24de94830d83585b8f0bfa5a7977cadaaa2bc18d2b9a8d006da6",
+  "catalogHash": "sha256:5652e3712dc91999f668b170dfa54eff8235f55b1e8fcd54af3e87492f476f06",
   "generatedAt": null,
   "items": [
     {
@@ -30055,7 +30055,23 @@
       ],
       "equipment": [],
       "id": "EX001",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person standing in bodyweight squat setup with feet shoulder-width, chest tall, and knees soft.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b07d650b-2f8b-41b2-c315-63bc169be200/public"
+        },
+        {
+          "alt": "Person sitting hips back into a bodyweight squat with heels flat and knees tracking toes.",
+          "step": "Bottom position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/54fe4a6f-b80b-4e86-646a-7082b8ba8600/public"
+        },
+        {
+          "alt": "Person holding a clean squat with chest tall, heels down, and knees tracking toes.",
+          "step": "Form check",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/68adb210-af29-457d-cce1-1103ca2ea400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -30096,7 +30112,18 @@
         "Chair"
       ],
       "id": "EX002",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person standing in front of a sturdy chair with feet planted, chest tall, and arms forward.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/20def0d6-d5c5-432f-c414-d28e8ecd5400/public"
+        },
+        {
+          "alt": "Person reaching hips back to lightly tap the chair while keeping chest tall and feet flat.",
+          "step": "Chair tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ee04ec9d-9164-4f47-9de2-514488500a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -30138,7 +30165,23 @@
         "Chair"
       ],
       "id": "EX003",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person sitting near the front edge of a sturdy chair with feet planted and chest tall.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/49719035-3eed-4cf9-2628-3cfb59bdb600/public"
+        },
+        {
+          "alt": "Person leaning forward from the chair and pressing through planted feet to stand.",
+          "step": "Rise",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c5af575e-62b4-4b09-d265-f6468e86b900/public"
+        },
+        {
+          "alt": "Person standing tall in front of the chair with hips fully up and feet planted.",
+          "step": "Finish",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d4dced10-7694-4d27-697f-25d550e11000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -31185,7 +31228,23 @@
         "Wall"
       ],
       "id": "EX029",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person standing tall with back to wall and feet walked forward for wall sit setup.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fea942e2-e3fa-4272-2dff-327c82cb8700/public"
+        },
+        {
+          "alt": "Person holding a wall sit with back supported and knees over ankles.",
+          "step": "Hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/84fc6b2d-a4bc-4206-23b1-342f730d3200/public"
+        },
+        {
+          "alt": "Person holding wall sit with feet flat, back supported, and knees stacked over ankles.",
+          "step": "Form check",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c68fe1c7-c87b-411d-a6f3-6190b705ff00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -31680,7 +31739,23 @@
       ],
       "equipment": [],
       "id": "EX041",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person standing tall on a mat with feet hip-width before a reverse lunge.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f7ca31a2-b0a7-4ad8-1ec3-2b80de73ec00/public"
+        },
+        {
+          "alt": "Person stepping one leg back into a reverse lunge with the front knee stacked.",
+          "step": "Step back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2e04eb1f-1488-4a2a-47df-50ee06d03500/public"
+        },
+        {
+          "alt": "Person pressing through the front foot to return from a reverse lunge.",
+          "step": "Return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5360888f-5a0f-4535-e1c9-8a9d5d32d300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -34466,7 +34541,23 @@
       ],
       "equipment": [],
       "id": "EX110",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person standing tall on a mat with feet hip-width and heels down before a calf raise.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7e28abd3-9089-4612-0d87-325a5afad200/public"
+        },
+        {
+          "alt": "Person rising onto the balls of both feet with heels lifted during a standing calf raise.",
+          "step": "Lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8519b35a-f5fb-483b-f2c9-1aaafba39300/public"
+        },
+        {
+          "alt": "Person lowering both heels with control to finish a standing calf raise.",
+          "step": "Lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a48ab2c8-54fb-4218-ba91-9a7701c40100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -34631,7 +34722,18 @@
         "Wall or chair"
       ],
       "id": "EX114",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person standing tall near a wall with light fingertip support and heels down before a calf raise hold.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cb506987-c45e-4aff-167b-7d83920fd500/public"
+        },
+        {
+          "alt": "Person holding the top of a calf raise near a wall with heels lifted and posture tall.",
+          "step": "Hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e3f43c31-5766-4c2c-c68b-4e6ee5b17300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -34713,7 +34815,18 @@
         "Wall"
       ],
       "id": "EX116",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person standing with back against a wall feet forward and toes down before a tibialis raise.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/439efe55-c1f8-4058-8269-5d3b6644f200/public"
+        },
+        {
+          "alt": "Person leaning back against a wall with heels down and toes lifted during a tibialis raise.",
+          "step": "Toes lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d20ff83a-ea86-46c3-d867-2b5bd0222a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -34752,7 +34865,23 @@
       ],
       "equipment": [],
       "id": "EX117",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person lying on back with knees bent, feet under knees, ribs quiet, and arms relaxed.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e80eb41a-b096-4310-6671-6e583878da00/public"
+        },
+        {
+          "alt": "Person lifting hips into a glute bridge with feet planted and a long line from shoulders to knees.",
+          "step": "Lift and hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/268d71c2-fd86-47e1-7c4c-665e0afcfe00/public"
+        },
+        {
+          "alt": "Person holding glute bridge with hips level, ribs quiet, and a cue to avoid sagging.",
+          "step": "Form check",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/738a6903-71cd-40e1-1465-dac718c09400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -34791,7 +34920,18 @@
       ],
       "equipment": [],
       "id": "EX118",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person lying on back with knees bent feet under knees and arms relaxed before a glute bridge hold.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/400dca32-e29f-4155-2265-739fb8f08200/public"
+        },
+        {
+          "alt": "Person holding the top of a glute bridge with hips lifted feet grounded and torso aligned.",
+          "step": "Hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7d5e432f-98a0-433c-5acb-08ec1d0bf400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -34830,7 +34970,23 @@
       ],
       "equipment": [],
       "id": "EX119",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person holding a glute bridge with both feet planted before starting a bridge march.",
+          "step": "Bridge hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d7e51f40-1d55-4301-3ac2-2e6ea1076300/public"
+        },
+        {
+          "alt": "Person holding a glute bridge while the near knee lifts and the far foot stays grounded.",
+          "step": "Near knee lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/29fce266-0d6d-4cd5-2310-898d42561200/public"
+        },
+        {
+          "alt": "Person holding a glute bridge while the far knee lifts and the near foot stays grounded.",
+          "step": "Far knee lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b7d05f24-5dcc-4353-6e90-e107a0a81c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -34870,7 +35026,18 @@
       ],
       "equipment": [],
       "id": "EX120",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person lying on back with knees bent feet under knees and arms relaxed before a single-leg glute bridge.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c9ce65b7-15b6-4201-25e1-296ee35b4a00/public"
+        },
+        {
+          "alt": "Person holding a single-leg glute bridge with one foot planted and the other leg straight and raised.",
+          "step": "Single-leg bridge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4dd164b5-b742-453f-b95d-00def001fb00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -36764,7 +36931,23 @@
         "Wall"
       ],
       "id": "EX167",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person holding the top of a wall push-up with hands on the wall and feet planted.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/18415a8b-f19e-46a3-70ea-398d10678500/public"
+        },
+        {
+          "alt": "Person bending the elbows and lowering the chest toward the wall during a wall push-up.",
+          "step": "Lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aac956f3-e656-43ce-b6cb-8f03ff21f700/public"
+        },
+        {
+          "alt": "Person pressing away from the wall to return to the top of a wall push-up.",
+          "step": "Press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3d0b1200-fb74-4f59-6b2e-28e0b33f4400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -36849,7 +37032,23 @@
         "Bench or couch"
       ],
       "id": "EX169",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person holding the top of an incline push-up with hands on an elevated surface and feet planted.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c3da8032-4832-459f-1613-88104dd11400/public"
+        },
+        {
+          "alt": "Person lowering the chest toward an elevated surface during an incline push-up.",
+          "step": "Lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/233a1260-824e-4ef8-7922-72ae0c982600/public"
+        },
+        {
+          "alt": "Person pressing away from an elevated surface to return to the top of an incline push-up.",
+          "step": "Press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2576f54c-d229-4dd6-e72e-95650d976900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",

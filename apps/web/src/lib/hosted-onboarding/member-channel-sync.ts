@@ -2,7 +2,6 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   buildHostedExecutionMemberChannelsUpdatedWake,
   type HostedExecutionMemberChannels,
-  type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
@@ -22,6 +21,10 @@ import {
 import { lockHostedMemberRow } from "./shared";
 
 type HostedMemberEmailLinkedClient = PrismaClient | Prisma.TransactionClient;
+
+export interface HostedMailboxAppendDispatch {
+  mailboxItemId: string;
+}
 
 export function resolveHostedMemberChannelsForSnapshot(input: {
   emailLinked: boolean;
@@ -49,7 +52,7 @@ export async function enqueueHostedMemberChannelsUpdatedTx(input: {
   occurredAt: string;
   prisma: Prisma.TransactionClient;
   sourceType: string;
-}): Promise<HostedExecutionWake> {
+}): Promise<HostedMailboxAppendDispatch> {
   await lockHostedMemberRow(input.prisma, input.memberId);
 
   const member = await readHostedMemberSnapshot({
@@ -82,7 +85,7 @@ async function appendHostedMemberChannelsUpdatedForSnapshotTx(input: {
   occurredAt: string;
   prisma: Prisma.TransactionClient;
   sourceType: string;
-}): Promise<HostedExecutionWake> {
+}): Promise<HostedMailboxAppendDispatch> {
   const memberChannels = resolveHostedMemberChannelsForSnapshot({
     emailLinked: input.emailLinked,
     member: input.member,
@@ -98,12 +101,14 @@ async function appendHostedMemberChannelsUpdatedForSnapshotTx(input: {
     occurredAt: input.occurredAt,
   });
 
-  await appendHostedMailboxEnvelopeTx({
+  const append = await appendHostedMailboxEnvelopeTx({
     envelope: wake,
     tx: input.prisma,
   });
 
-  return wake;
+  return {
+    mailboxItemId: append.item.id,
+  };
 }
 
 export async function enqueueHostedMemberChannelsUpdatedForActiveMemberTx(input: {
@@ -112,7 +117,7 @@ export async function enqueueHostedMemberChannelsUpdatedForActiveMemberTx(input:
   occurredAt: string;
   prisma: Prisma.TransactionClient;
   sourceType: string;
-}): Promise<HostedExecutionWake | null> {
+}): Promise<HostedMailboxAppendDispatch | null> {
   await lockHostedMemberRow(input.prisma, input.memberId);
 
   const member = await readHostedMemberSnapshot({

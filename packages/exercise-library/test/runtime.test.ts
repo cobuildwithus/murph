@@ -93,6 +93,182 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ab24a93b-6a01-4a4e-5c61-43b746baff00/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "glute-bridge")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e80eb41a-b096-4310-6671-6e583878da00/public",
+      }),
+      expect.objectContaining({
+        step: "Lift and hold",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/268d71c2-fd86-47e1-7c4c-665e0afcfe00/public",
+      }),
+      expect.objectContaining({
+        step: "Form check",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/738a6903-71cd-40e1-1465-dac718c09400/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "glute-bridge-hold")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/400dca32-e29f-4155-2265-739fb8f08200/public",
+      }),
+      expect.objectContaining({
+        step: "Hold",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7d5e432f-98a0-433c-5acb-08ec1d0bf400/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "glute-bridge-march")?.images).toEqual([
+      expect.objectContaining({
+        step: "Bridge hold",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d7e51f40-1d55-4301-3ac2-2e6ea1076300/public",
+      }),
+      expect.objectContaining({
+        step: "Near knee lift",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/29fce266-0d6d-4cd5-2310-898d42561200/public",
+      }),
+      expect.objectContaining({
+        step: "Far knee lift",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b7d05f24-5dcc-4353-6e90-e107a0a81c00/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "single-leg-glute-bridge")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c9ce65b7-15b6-4201-25e1-296ee35b4a00/public",
+      }),
+      expect.objectContaining({
+        step: "Single-leg bridge",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4dd164b5-b742-453f-b95d-00def001fb00/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "wall-sit")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fea942e2-e3fa-4272-2dff-327c82cb8700/public",
+      }),
+      expect.objectContaining({
+        step: "Hold",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/84fc6b2d-a4bc-4206-23b1-342f730d3200/public",
+      }),
+      expect.objectContaining({
+        step: "Form check",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c68fe1c7-c87b-411d-a6f3-6190b705ff00/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "bodyweight-squat")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b07d650b-2f8b-41b2-c315-63bc169be200/public",
+      }),
+      expect.objectContaining({
+        step: "Bottom position",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/54fe4a6f-b80b-4e86-646a-7082b8ba8600/public",
+      }),
+      expect.objectContaining({
+        step: "Form check",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/68adb210-af29-457d-cce1-1103ca2ea400/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "chair-squat")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/20def0d6-d5c5-432f-c414-d28e8ecd5400/public",
+      }),
+      expect.objectContaining({
+        step: "Chair tap",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ee04ec9d-9164-4f47-9de2-514488500a00/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "sit-to-stand")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/49719035-3eed-4cf9-2628-3cfb59bdb600/public",
+      }),
+      expect.objectContaining({
+        step: "Rise",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c5af575e-62b4-4b09-d265-f6468e86b900/public",
+      }),
+      expect.objectContaining({
+        step: "Finish",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d4dced10-7694-4d27-697f-25d550e11000/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "reverse-lunge")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f7ca31a2-b0a7-4ad8-1ec3-2b80de73ec00/public",
+      }),
+      expect.objectContaining({
+        step: "Step back",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2e04eb1f-1488-4a2a-47df-50ee06d03500/public",
+      }),
+      expect.objectContaining({
+        step: "Return",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5360888f-5a0f-4535-e1c9-8a9d5d32d300/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "incline-push-up")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c3da8032-4832-459f-1613-88104dd11400/public",
+      }),
+      expect.objectContaining({
+        step: "Lower",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/233a1260-824e-4ef8-7922-72ae0c982600/public",
+      }),
+      expect.objectContaining({
+        step: "Press",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2576f54c-d229-4dd6-e72e-95650d976900/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "wall-push-up")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/18415a8b-f19e-46a3-70ea-398d10678500/public",
+      }),
+      expect.objectContaining({
+        step: "Lower",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aac956f3-e656-43ce-b6cb-8f03ff21f700/public",
+      }),
+      expect.objectContaining({
+        step: "Press",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3d0b1200-fb74-4f59-6b2e-28e0b33f4400/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "standing-calf-raise")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7e28abd3-9089-4612-0d87-325a5afad200/public",
+      }),
+      expect.objectContaining({
+        step: "Lift",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8519b35a-f5fb-483b-f2c9-1aaafba39300/public",
+      }),
+      expect.objectContaining({
+        step: "Lower",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a48ab2c8-54fb-4218-ba91-9a7701c40100/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "calf-raise-hold")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cb506987-c45e-4aff-167b-7d83920fd500/public",
+      }),
+      expect.objectContaining({
+        step: "Hold",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e3f43c31-5766-4c2c-c68b-4e6ee5b17300/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "tibialis-raise")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/439efe55-c1f8-4058-8269-5d3b6644f200/public",
+      }),
+      expect.objectContaining({
+        step: "Toes lift",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d20ff83a-ea86-46c3-d867-2b5bd0222a00/public",
+      }),
+    ]);
     expect(artifacts.details.sources).toEqual(catalog.sources);
     expect(artifacts.facets.facets.kinds).toEqual(["exercise", "stretch"]);
     expect(artifacts.facets.facets.equipment).toContain("none");
