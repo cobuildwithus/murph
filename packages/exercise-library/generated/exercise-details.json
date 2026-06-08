@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:53bef96aa2ccf9dead5041d67b5cb6b08d7a8778996fa9da1eceba009fb7a6be",
+  "catalogHash": "sha256:8739bd18363342fbafdfdc1335111530c83c058e3ea30db39b3af1220a9ebe3f",
   "generatedAt": null,
   "items": [
     {
@@ -34970,7 +34970,23 @@
       ],
       "equipment": [],
       "id": "EX119",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person holding a glute bridge with both feet planted before starting a bridge march.",
+          "step": "Bridge hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d7e51f40-1d55-4301-3ac2-2e6ea1076300/public"
+        },
+        {
+          "alt": "Person holding a glute bridge while the near knee lifts and the far foot stays grounded.",
+          "step": "Near knee lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/29fce266-0d6d-4cd5-2310-898d42561200/public"
+        },
+        {
+          "alt": "Person holding a glute bridge while the far knee lifts and the near foot stays grounded.",
+          "step": "Far knee lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b7d05f24-5dcc-4353-6e90-e107a0a81c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",

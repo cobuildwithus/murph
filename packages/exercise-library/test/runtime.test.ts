@@ -117,6 +117,20 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7d5e432f-98a0-433c-5acb-08ec1d0bf400/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "glute-bridge-march")?.images).toEqual([
+      expect.objectContaining({
+        step: "Bridge hold",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d7e51f40-1d55-4301-3ac2-2e6ea1076300/public",
+      }),
+      expect.objectContaining({
+        step: "Near knee lift",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/29fce266-0d6d-4cd5-2310-898d42561200/public",
+      }),
+      expect.objectContaining({
+        step: "Far knee lift",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b7d05f24-5dcc-4353-6e90-e107a0a81c00/public",
+      }),
+    ]);
     expect(artifacts.details.items.find((item) => item.slug === "wall-sit")?.images).toEqual([
       expect.objectContaining({
         step: "Setup",
