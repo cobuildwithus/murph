@@ -45,6 +45,26 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(continued.state?.lastMailboxLagLaneCount).toBe(0);
   });
 
+  it("does not sleep on failed runtime execution when a recheck signal arrives", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    runtime.executions.push(async () => {
+      machine.applySignal(runtimeRecheckSignal());
+      throw new Error("cloudflare unavailable");
+    });
+    runtime.facts.push(reconciliationFacts());
+    machine.applySignal(mailboxSignal());
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([null]);
+    expect(runtime.waits).not.toContain(30_000);
+    expect(runtime.reconciliationRequests).toEqual([{ userId: "member_test" }]);
+  });
+
   it("reads reconciliation facts for carried mailbox pointers", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.facts.push(reconciliationFacts({
@@ -486,6 +506,12 @@ function runtimePrewarmSignal(): HostedRuntimeSignal {
     kind: "runtime_prewarm_requested",
     occurredAt: "2026-05-20T11:59:58.000Z",
     source: "linq.imessage.typing",
+  };
+}
+
+function runtimeRecheckSignal(): HostedRuntimeSignal {
+  return {
+    kind: "runtime_recheck_requested",
   };
 }
 

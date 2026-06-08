@@ -277,7 +277,7 @@ export function createHostedUserRuntimeWorkflowMachine(
       state.lastExecutionKind = "failed";
       state.lastRuntimeAttemptId = null;
       state.lastRuntimeStatus = null;
-      if (mailboxSignalVersion !== mailboxVersionBeforeExecution) {
+      if (state.signalVersion !== signalVersionBeforeExecution) {
         return;
       }
       const retryAt = readActivityFailureRetryAt({
