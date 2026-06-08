@@ -205,6 +205,54 @@ describe("automation helpers", () => {
     });
   });
 
+  it("loads device activity automation schedules", async () => {
+    const vaultRoot = await createVaultRoot();
+    await writeAutomationDocument(
+      vaultRoot,
+      "after-walk",
+      [
+        "---",
+        "schemaVersion: murph.frontmatter.automation.v1",
+        "docType: automation",
+        "automationId: auto_after_walk",
+        "slug: after-walk",
+        "title: After walk",
+        "status: active",
+        "schedule:",
+        "  kind: deviceActivity",
+        "  after: 2026-06-07T12:00:00.000Z",
+        "  source: whoop",
+        "  activityKind: walk",
+        "route:",
+        "  channel: linq",
+        "  deliverResponse: true",
+        "  deliveryTarget: linq-target-walk",
+        "  identityId: null",
+        "  participantId: null",
+        "  threadId: null",
+        "continuityPolicy: preserve",
+        "createdAt: 2026-06-07T12:00:00.000Z",
+        "updatedAt: 2026-06-07T12:00:00.000Z",
+        "---",
+        "",
+        "Ask how the walk felt.",
+        "",
+      ].join("\n"),
+    );
+
+    await expect(listAutomations(vaultRoot)).resolves.toMatchObject([
+      {
+        automationId: "auto_after_walk",
+        schedule: {
+          activityKind: "walk",
+          after: "2026-06-07T12:00:00.000Z",
+          kind: "deviceActivity",
+          source: "whoop",
+        },
+      },
+    ]);
+  });
+
   it("rejects malformed automation schedules instead of silently coercing them", async () => {
     const vaultRoot = await createVaultRoot();
     await writeAutomationDocument(
@@ -277,6 +325,43 @@ describe("automation helpers", () => {
 
     await expect(listAutomations(timeZoneVault)).rejects.toThrow(
       /schedule\.timeZone is not supported for canonical automation schedules\./u,
+    );
+
+    const invalidDeviceSourceVault = await createVaultRoot();
+    await writeAutomationDocument(
+      invalidDeviceSourceVault,
+      "broken-device-source",
+      [
+        "---",
+        "schemaVersion: murph.frontmatter.automation.v1",
+        "docType: automation",
+        "automationId: auto_broken_device_source",
+        "slug: broken-device-source",
+        "title: Broken device source",
+        "status: active",
+        "schedule:",
+        "  kind: deviceActivity",
+        "  after: 2026-06-07T12:00:00.000Z",
+        "  source: garmin",
+        "route:",
+        "  channel: linq",
+        "  deliverResponse: true",
+        "  deliveryTarget: linq-target-walk",
+        "  identityId: null",
+        "  participantId: null",
+        "  threadId: null",
+        "continuityPolicy: preserve",
+        "createdAt: 2026-06-07T12:00:00.000Z",
+        "updatedAt: 2026-06-07T12:00:00.000Z",
+        "---",
+        "",
+        "Broken device source body.",
+        "",
+      ].join("\n"),
+    );
+
+    await expect(listAutomations(invalidDeviceSourceVault)).rejects.toThrow(
+      /schedule\.source must match a supported device activity source\./u,
     );
   });
 

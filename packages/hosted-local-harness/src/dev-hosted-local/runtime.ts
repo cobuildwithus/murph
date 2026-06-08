@@ -426,6 +426,13 @@ export function spawnChildProcess(
 export async function waitForFirstChildExit(
   children: readonly NamedChildProcess[],
 ): Promise<NamedChildProcess> {
+  const exitedChild = children.find((entry) =>
+    entry.child.exitCode !== null || entry.child.signalCode !== null
+  );
+  if (exitedChild) {
+    return exitedChild;
+  }
+
   return await new Promise((resolve) => {
     for (const entry of children) {
       entry.child.once("exit", () => resolve(entry));

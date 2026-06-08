@@ -3,10 +3,14 @@ import {
   AUTOMATION_SCHEMA_VERSION,
   MIN_AUTOMATION_EVERY_MS,
   automationContinuityPolicyValues,
+  automationDeviceActivityKindValues,
+  automationDeviceActivitySourceValues,
   automationScheduleKindValues,
   automationStatusValues,
   VAULT_LAYOUT,
   type AutomationContinuityPolicy,
+  type AutomationDeviceActivityKind,
+  type AutomationDeviceActivitySource,
   type AutomationRoute,
   type AutomationSchedule,
   type AutomationScheduleKind,
@@ -114,6 +118,28 @@ function normalizeAutomationContinuityPolicy(
   return "preserve";
 }
 
+function normalizeDeviceActivitySource(value: unknown): AutomationDeviceActivitySource | undefined {
+  const normalized = normalizeNullableString(typeof value === "string" ? value : null);
+  if (!normalized) {
+    return undefined;
+  }
+  if (!automationDeviceActivitySourceValues.includes(normalized as AutomationDeviceActivitySource)) {
+    throw new Error("schedule.source must match a supported device activity source.");
+  }
+  return normalized as AutomationDeviceActivitySource;
+}
+
+function normalizeDeviceActivityKind(value: unknown): AutomationDeviceActivityKind | undefined {
+  const normalized = normalizeNullableString(typeof value === "string" ? value : null);
+  if (!normalized) {
+    return undefined;
+  }
+  if (!automationDeviceActivityKindValues.includes(normalized as AutomationDeviceActivityKind)) {
+    throw new Error("schedule.activityKind must match a supported device activity kind.");
+  }
+  return normalized as AutomationDeviceActivityKind;
+}
+
 function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("schedule must be an object.");
@@ -162,6 +188,20 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
       return {
         kind,
         localTime,
+      };
+    }
+    case "deviceActivity": {
+      const after = requireStringValue(object.after, "schedule.after");
+      if (Number.isNaN(Date.parse(after))) {
+        throw new Error("schedule.after must be a valid ISO timestamp.");
+      }
+      const source = normalizeDeviceActivitySource(object.source);
+      const activityKind = normalizeDeviceActivityKind(object.activityKind);
+      return {
+        kind,
+        after,
+        ...(source ? { source } : {}),
+        ...(activityKind ? { activityKind } : {}),
       };
     }
   }

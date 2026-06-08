@@ -3308,6 +3308,148 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it("fails closed when the destroy request itself never settles", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const destroy = vi.fn(async () => {
+        await new Promise<void>(() => undefined);
+      });
+      const getState = vi.fn(async () => ({
+        lastChange: Date.now(),
+        status: "running",
+      }));
+      const { container } = createContainerDouble({
+        destroy,
+        getState,
+        initialStatus: "running",
+      });
+
+      const destroyPromise = container.destroyInstance().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_500);
+
+      await expect(destroyPromise).resolves.toMatchObject({
+        message: "Hosted runner container did not report stopped after destroy.",
+      });
+      expect(destroy).toHaveBeenCalledTimes(1);
+      expect(getState.mock.calls.length).toBeGreaterThan(1);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            destroySettleTimeoutMs: 5_000,
+            failClosed: true,
+            lifecycleStage: "destroy-settle",
+            statusBeforeDestroy: "running",
+          }),
+          level: "error",
+          message: "Hosted execution container destroy did not settle to stopped.",
+          phase: "failed",
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails closed when the initial destroy status read never settles", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const destroy = vi.fn(async () => {});
+      const getState = vi.fn(async () => {
+        await new Promise<void>(() => undefined);
+        return {
+          lastChange: Date.now(),
+          status: "running",
+        };
+      });
+      const { container } = createContainerDouble({
+        destroy,
+        getState,
+        initialStatus: "running",
+      });
+
+      const destroyPromise = container.destroyInstance().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_500);
+
+      await expect(destroyPromise).resolves.toMatchObject({
+        message: "Hosted runner container failed to destroy cleanly.",
+      });
+      expect(destroy).not.toHaveBeenCalled();
+      expect(getState).toHaveBeenCalledTimes(1);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            failClosed: true,
+            lifecycleStage: "status",
+          }),
+          message: "Hosted execution container failed while checking its lifecycle state.",
+          phase: "failed",
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails closed when destroy settle status reads never settle", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const destroy = vi.fn(async () => {});
+      let statusReadCount = 0;
+      const getState = vi.fn(async () => {
+        statusReadCount += 1;
+        if (statusReadCount === 1) {
+          return {
+            lastChange: Date.now(),
+            status: "running",
+          };
+        }
+
+        await new Promise<void>(() => undefined);
+        return {
+          lastChange: Date.now(),
+          status: "destroying",
+        };
+      });
+      const { container } = createContainerDouble({
+        destroy,
+        getState,
+        initialStatus: "running",
+      });
+
+      const destroyPromise = container.destroyInstance().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_500);
+
+      await expect(destroyPromise).resolves.toMatchObject({
+        message: "Hosted runner container did not report stopped after destroy.",
+      });
+      expect(destroy).toHaveBeenCalledTimes(1);
+      expect(getState.mock.calls.length).toBeGreaterThan(1);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            destroySettleTimeoutMs: 5_000,
+            failClosed: true,
+            lifecycleStage: "destroy-settle",
+            observedStatusesAfterDestroy: ["status_error"],
+            statusAfterDestroy: null,
+            statusBeforeDestroy: "running",
+          }),
+          level: "error",
+          message: "Hosted execution container destroy did not settle to stopped.",
+          phase: "failed",
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("fails closed when explicit destroy throws", async () => {
     const destroy = vi.fn(async () => {
       throw new Error("destroy failed");
@@ -4023,6 +4165,48 @@ describe("RunnerContainer", () => {
       userId: "member_foreground_abort",
     });
     expect(destroyInstance).not.toHaveBeenCalled();
+  });
+
+  it("does not wait for timed-out container destroy cleanup before rejecting", async () => {
+    const abortController = new AbortController();
+    const abortWorkspaceInvocation = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
+    >(async () => {});
+    const destroyInstance = vi.fn(async () => {
+      await new Promise<void>(() => undefined);
+    });
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
+      async () => new Promise<never>(() => {}),
+    );
+    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
+      abortWorkspaceInvocation,
+      destroyInstance,
+      invoke,
+      async smokeHealth() {
+        return {
+          ok: true,
+          runnerBundle: null,
+          service: "cloudflare-hosted-runner-node",
+          status: 200,
+        };
+      },
+    }));
+
+    const invocation = invokeHostedExecutionContainerRunner({
+      job: createWorkspaceRunnerJob("member_hard_timeout"),
+      runnerContainerNamespace: { getByName },
+      signal: abortController.signal,
+      timeoutMs: 45_000,
+      userId: "member_hard_timeout",
+    });
+
+    abortController.abort(new DOMException("The operation timed out.", "TimeoutError"));
+
+    await expect(invocation).rejects.toMatchObject({
+      name: "TimeoutError",
+    });
+    expect(destroyInstance).toHaveBeenCalledTimes(1);
+    expect(abortWorkspaceInvocation).not.toHaveBeenCalled();
   });
 
   it("rejects explicit run-drain runner jobs at the container boundary", async () => {

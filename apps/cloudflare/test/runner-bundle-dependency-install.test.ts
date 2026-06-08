@@ -6,9 +6,13 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   assertInstalledRunnerHealthCommonsRuntimeImport,
+  assertRunnerBundleHasNoForbiddenInstallArtifacts,
   assertRunnerBundleLockfileUsesCommittedResolutions,
+  assertRunnerBundleLockfileUsesOnlyBundleImporter,
   installPackedRunnerDependencies,
   pinInstalledDependencyVersions,
+  pruneRunnerBundleUnsupportedPlatformPackages,
+  stripPnpmLockfileImporters,
   writeRunnerBundlePnpmInstallConfig,
 } from "../scripts/runner-bundle/dependency-install.js";
 
@@ -113,10 +117,21 @@ describe("runner bundle pnpm install config", () => {
       [
         "lockfileVersion: '9.0'",
         "",
+        "importers:",
+        "",
+        "  apps/web:",
+        "    dependencies:",
+        "      next:",
+        "        specifier: ^16.2.6",
+        "        version: 16.2.6",
+        "",
         "packages:",
         "",
         "  'jose@6.2.2':",
         "    resolution: {integrity: sha512-root}",
+        "",
+        "  'next@16.2.6':",
+        "    resolution: {integrity: sha512-web-only}",
         "",
       ].join("\n"),
       "utf8",
@@ -160,9 +175,44 @@ describe("runner bundle pnpm install config", () => {
       path.join(binDir, "pnpm"),
       [
         "#!/usr/bin/env node",
-        "import { appendFileSync } from 'node:fs';",
+        "import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';",
         `const logPath = ${JSON.stringify(pnpmLogPath)};`,
-        "appendFileSync(logPath, `${process.argv.slice(2).join(' ')} SHARP_IGNORE_GLOBAL_LIBVIPS=${process.env.SHARP_IGNORE_GLOBAL_LIBVIPS ?? ''}\\n`, 'utf8');",
+        "const writePackage = (dir, manifest) => {",
+        "  mkdirSync(dir, { recursive: true });",
+        "  writeFileSync(`${dir}/package.json`, JSON.stringify(manifest), 'utf8');",
+        "};",
+        "const command = process.argv.slice(2).join(' ');",
+        "appendFileSync(logPath, `${command} SHARP_IGNORE_GLOBAL_LIBVIPS=${process.env.SHARP_IGNORE_GLOBAL_LIBVIPS ?? ''}\\n`, 'utf8');",
+        "if (command === 'install --prod --lockfile-only') {",
+        "  const seedLockfile = readFileSync('pnpm-lock.yaml', 'utf8');",
+        "  if (seedLockfile.includes('importers:') || seedLockfile.includes('apps/web')) {",
+        "    throw new Error('runner seed lockfile still contains workspace importers');",
+        "  }",
+        "  writeFileSync('pnpm-lock.yaml', [",
+        "    \"lockfileVersion: '9.0'\",",
+        "    '',",
+        "    'importers:',",
+        "    '',",
+        "    '  .:',",
+        "    '    dependencies:',",
+        "    '      jose:',",
+        "    '        specifier: 6.2.2',",
+        "    '        version: 6.2.2',",
+        "    '',",
+        "    'packages:',",
+        "    '',",
+        "    \"  'jose@6.2.2':\",",
+        "    '    resolution: {integrity: sha512-root}',",
+        "    '',",
+        "    '  file:../tarballs/assistant-runtime.tgz:',",
+        "    '    resolution: {integrity: sha512-local-runtime}',",
+        "    '',",
+        "  ].join('\\n'), 'utf8');",
+        "}",
+        "if (command === 'install --prod --frozen-lockfile') {",
+        "  writePackage('node_modules/linux-glibc-package', { cpu: ['x64'], libc: ['glibc'], name: 'linux-glibc-package', os: ['linux'], version: '1.0.0' });",
+        "  writePackage('node_modules/@img/sharp-linuxmusl-x64', { cpu: ['x64'], libc: ['musl'], name: '@img/sharp-linuxmusl-x64', os: ['linux'], version: '1.0.0' });",
+        "}",
       ].join("\n"),
       "utf8",
     );
@@ -190,13 +240,22 @@ describe("runner bundle pnpm install config", () => {
       process.env.PATH = previousPath;
     }
 
-    await expect(readFile(pnpmLogPath, "utf8")).resolves.toBe(
-      [
-        "install --prod --lockfile-only SHARP_IGNORE_GLOBAL_LIBVIPS=1",
-        "install --prod --frozen-lockfile SHARP_IGNORE_GLOBAL_LIBVIPS=1",
-        "",
-      ].join("\n"),
+    const pnpmLogLines = (await readFile(pnpmLogPath, "utf8"))
+      .trimEnd()
+      .split("\n");
+    expect(pnpmLogLines.filter((line) => line.startsWith("install "))).toEqual([
+      "install --prod --lockfile-only SHARP_IGNORE_GLOBAL_LIBVIPS=1",
+      "install --prod --frozen-lockfile SHARP_IGNORE_GLOBAL_LIBVIPS=1",
+    ]);
+    const pnpmStorePathLines = pnpmLogLines.filter((line) =>
+      line.startsWith("store path "),
     );
+    expect([0, 2]).toContain(pnpmStorePathLines.length);
+    expect(
+      pnpmStorePathLines.every(
+        (line) => line === "store path --silent SHARP_IGNORE_GLOBAL_LIBVIPS=",
+      ),
+    ).toBe(true);
     await expect(readFile(path.join(bundleDir, ".npmrc"), "utf8")).resolves.toBe(
       [
         "minimum-release-age=1440",
@@ -246,10 +305,34 @@ describe("runner bundle pnpm install config", () => {
       jose: "6.2.2",
     });
     expect(packageJson.pnpm?.supportedArchitectures).toEqual({
-      cpu: ["current", "x64"],
-      libc: ["current", "glibc"],
-      os: ["current", "linux"],
+      cpu: ["x64"],
+      libc: ["glibc"],
+      os: ["linux"],
     });
+    await expect(
+      readFile(path.join(bundleDir, "pnpm-lock.yaml"), "utf8"),
+    ).resolves.not.toContain("apps/web");
+    await expect(
+      readFile(path.join(bundleDir, "pnpm-lock.yaml"), "utf8"),
+    ).resolves.not.toContain("next@16.2.6");
+    await expect(
+      readFile(
+        path.join(bundleDir, "node_modules", "linux-glibc-package", "package.json"),
+        "utf8",
+      ),
+    ).resolves.toContain("linux-glibc-package");
+    await expect(
+      readFile(
+        path.join(
+          bundleDir,
+          "node_modules",
+          "@img",
+          "sharp-linuxmusl-x64",
+          "package.json",
+        ),
+        "utf8",
+      ),
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("mirrors root dependency policy into the isolated bundle install", async () => {
@@ -349,6 +432,158 @@ describe("runner bundle pnpm install config", () => {
 });
 
 describe("runner bundle lockfile policy", () => {
+  it("strips workspace importers from the runner resolution seed lockfile", () => {
+    expect(
+      stripPnpmLockfileImporters(
+        [
+          "lockfileVersion: '9.0'",
+          "",
+          "settings:",
+          "  autoInstallPeers: true",
+          "",
+          "importers:",
+          "",
+          "  apps/web:",
+          "    dependencies:",
+          "      next:",
+          "        specifier: ^16.2.6",
+          "        version: 16.2.6",
+          "",
+          "packages:",
+          "",
+          "  'jose@6.2.2':",
+          "    resolution: {integrity: sha512-root}",
+          "",
+          "snapshots:",
+          "",
+          "  'jose@6.2.2': {}",
+          "",
+        ].join("\n"),
+      ),
+    ).toBe(
+      [
+        "lockfileVersion: '9.0'",
+        "",
+        "settings:",
+        "  autoInstallPeers: true",
+        "",
+        "packages:",
+        "",
+        "  'jose@6.2.2':",
+        "    resolution: {integrity: sha512-root}",
+        "",
+        "snapshots:",
+        "",
+        "  'jose@6.2.2': {}",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("rejects generated runner lockfiles with workspace importers", async () => {
+    const tempDir = await createRuntimePackageRoot();
+    const bundleLockfilePath = path.join(tempDir, "pnpm-lock.yaml");
+
+    await writeFile(
+      bundleLockfilePath,
+      [
+        "lockfileVersion: '9.0'",
+        "",
+        "importers:",
+        "",
+        "  .:",
+        "    dependencies:",
+        "      jose:",
+        "        specifier: 6.2.3",
+        "        version: 6.2.3",
+        "",
+        "  apps/web:",
+        "    dependencies:",
+        "      next:",
+        "        specifier: ^16.2.6",
+        "        version: 16.2.6",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await expect(
+      assertRunnerBundleLockfileUsesOnlyBundleImporter(bundleLockfilePath),
+    ).rejects.toThrow(/apps\/web/u);
+  });
+
+  it("rejects generated runner artifacts with web-only install paths", async () => {
+    const bundleDir = await createRuntimePackageRoot();
+
+    await mkdir(path.join(bundleDir, "apps", "web"), { recursive: true });
+    await mkdir(path.join(bundleDir, "node_modules", "next"), {
+      recursive: true,
+    });
+
+    await expect(
+      assertRunnerBundleHasNoForbiddenInstallArtifacts(bundleDir),
+    ).rejects.toThrow(/apps\/web.*node_modules\/next/u);
+  });
+
+  it("prunes installed packages outside the runner image platform target", async () => {
+    const bundleDir = await createRuntimePackageRoot();
+
+    await writeInstalledPlatformPackage(bundleDir, "linux-glibc-package", {
+      cpu: ["x64"],
+      libc: ["glibc"],
+      os: ["linux"],
+    });
+    await writeInstalledPlatformPackage(bundleDir, "@img/sharp-linuxmusl-x64", {
+      cpu: ["x64"],
+      libc: ["musl"],
+      os: ["linux"],
+    });
+    await writeInstalledPlatformPackage(bundleDir, "@native/darwin-arm64", {
+      cpu: ["arm64"],
+      os: ["darwin"],
+    });
+    await writeInstalledPlatformPackage(bundleDir, "generic-package", {});
+
+    await pruneRunnerBundleUnsupportedPlatformPackages(bundleDir);
+
+    await expect(
+      readFile(
+        path.join(bundleDir, "node_modules", "linux-glibc-package", "package.json"),
+        "utf8",
+      ),
+    ).resolves.toContain("linux-glibc-package");
+    await expect(
+      readFile(
+        path.join(bundleDir, "node_modules", "generic-package", "package.json"),
+        "utf8",
+      ),
+    ).resolves.toContain("generic-package");
+    await expect(
+      readFile(
+        path.join(
+          bundleDir,
+          "node_modules",
+          "@img",
+          "sharp-linuxmusl-x64",
+          "package.json",
+        ),
+        "utf8",
+      ),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(
+      readFile(
+        path.join(
+          bundleDir,
+          "node_modules",
+          "@native",
+          "darwin-arm64",
+          "package.json",
+        ),
+        "utf8",
+      ),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("accepts generated bundle lockfiles whose external packages are in the root lockfile", async () => {
     const tempDir = await createRuntimePackageRoot();
     const bundleLockfilePath = path.join(tempDir, "bundle-pnpm-lock.yaml");
@@ -617,6 +852,33 @@ async function writeInstalledPackage(
     JSON.stringify({
       name: packageName,
       version,
+    }),
+    "utf8",
+  );
+}
+
+async function writeInstalledPlatformPackage(
+  runtimePackageRoot: string,
+  packageName: string,
+  platformFields: {
+    cpu?: string[];
+    libc?: string[];
+    os?: string[];
+  },
+): Promise<void> {
+  const packageRoot = path.join(
+    runtimePackageRoot,
+    "node_modules",
+    ...packageName.split("/"),
+  );
+
+  await mkdir(packageRoot, { recursive: true });
+  await writeFile(
+    path.join(packageRoot, "package.json"),
+    JSON.stringify({
+      ...platformFields,
+      name: packageName,
+      version: "1.0.0",
     }),
     "utf8",
   );

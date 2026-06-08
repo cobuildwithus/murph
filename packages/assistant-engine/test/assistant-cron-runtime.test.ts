@@ -696,6 +696,9 @@ describe('assistant cron runtime orchestration', () => {
       'assistant-cron-runtime-send-shape-',
     )
     const canonicalJob = await createCanonicalJob(vaultRoot, 'raw-prompt-shape')
+    const canonicalAutomation = findCanonicalAutomation(vaultRoot, canonicalJob.jobId)
+    expect(canonicalAutomation).toBeDefined()
+    canonicalAutomation?.tags.push('system:assistant-require-send')
 
     await runAssistantCronJobNow({
       job: canonicalJob.jobId,
@@ -706,6 +709,7 @@ describe('assistant cron runtime orchestration', () => {
       expect.objectContaining({
         deliveryDedupeToken: null,
         instructions: 'Check in for raw-prompt-shape',
+        responsePolicy: { kind: 'require_send' },
         turnTrigger: 'automation-cron',
       }),
     )

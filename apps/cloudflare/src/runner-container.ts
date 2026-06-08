@@ -1206,7 +1206,10 @@ export class RunnerContainer extends Container {
     let statusBeforeDestroy: string | null = null;
 
     try {
-      statusBeforeDestroy = await readRunnerContainerStatus(this);
+      statusBeforeDestroy = await readRunnerContainerStatusWithTimeout(
+        this,
+        RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
+      );
       if (isRunnerContainerStopped(statusBeforeDestroy)) {
         return true;
       }
@@ -1247,9 +1250,26 @@ export class RunnerContainer extends Container {
       userId: context?.userId,
     });
 
-    try {
-      await this.destroy();
-    } catch (error) {
+    const destroyRequest = this.destroy().then(
+      () => ({ kind: "destroy-resolved" as const }),
+      (error: unknown) => ({ error, kind: "destroy-rejected" as const }),
+    );
+    const destroySettle = this.waitForDestroyedContainerStopped({
+      destroyStartedAt,
+      failClosed,
+      statusBeforeDestroy,
+      stopGenerationBeforeDestroy,
+    }).then(
+      (settled) => ({ kind: "settle-finished" as const, settled }),
+      (error: unknown) => ({ error, kind: "settle-rejected" as const }),
+    );
+    const firstDestroyOutcome = await Promise.race([
+      destroyRequest,
+      destroySettle,
+    ]);
+
+    if (firstDestroyOutcome.kind === "destroy-rejected") {
+      const error = firstDestroyOutcome.error;
       if (isSettledRunnerContainerDestroyRaceError(error)) {
         return true;
       }
@@ -1268,12 +1288,17 @@ export class RunnerContainer extends Container {
       return false;
     }
 
-    const settled = await this.waitForDestroyedContainerStopped({
-      destroyStartedAt,
-      failClosed,
-      statusBeforeDestroy,
-      stopGenerationBeforeDestroy,
-    });
+    const settledOutcome = firstDestroyOutcome.kind === "destroy-resolved"
+      ? await destroySettle
+      : firstDestroyOutcome;
+    if (settledOutcome.kind === "settle-rejected") {
+      if (failClosed) {
+        throw settledOutcome.error;
+      }
+      return false;
+    }
+
+    const settled = settledOutcome.settled;
     if (!settled.ok) {
       return false;
     }
@@ -1334,25 +1359,7 @@ export class RunnerContainer extends Container {
         };
       }
 
-      try {
-        statusAfterDestroy = await readRunnerContainerStatus(this);
-        appendObservedRunnerContainerStatus(observedStatuses, statusAfterDestroy);
-        if (isRunnerContainerStopped(statusAfterDestroy)) {
-          return {
-            ok: true,
-            observedStatuses,
-            settleReason: "status",
-            settleLatencyMs: Date.now() - input.destroyStartedAt,
-            statusAfterDestroy,
-            stopObservedAfterDestroy: this.stopGeneration > input.stopGenerationBeforeDestroy,
-          };
-        }
-      } catch (error) {
-        lastError = error;
-        appendObservedRunnerContainerStatus(observedStatuses, "status_error");
-      }
-
-      const remainingMs = deadlineMs - Date.now();
+      let remainingMs = deadlineMs - Date.now();
       if (remainingMs <= 0) {
         const error = lastError
           ? new Error("Hosted runner container did not report stopped after destroy.", {
@@ -1382,6 +1389,31 @@ export class RunnerContainer extends Container {
         return { ok: false };
       }
 
+      try {
+        statusAfterDestroy = await readRunnerContainerStatusWithTimeout(
+          this,
+          Math.min(RUNNER_WAIT_INTERVAL_MS, remainingMs),
+        );
+        appendObservedRunnerContainerStatus(observedStatuses, statusAfterDestroy);
+        if (isRunnerContainerStopped(statusAfterDestroy)) {
+          return {
+            ok: true,
+            observedStatuses,
+            settleReason: "status",
+            settleLatencyMs: Date.now() - input.destroyStartedAt,
+            statusAfterDestroy,
+            stopObservedAfterDestroy: this.stopGeneration > input.stopGenerationBeforeDestroy,
+          };
+        }
+      } catch (error) {
+        lastError = error;
+        appendObservedRunnerContainerStatus(observedStatuses, "status_error");
+      }
+
+      remainingMs = deadlineMs - Date.now();
+      if (remainingMs <= 0) {
+        continue;
+      }
       await this.waitForStopOrDelay(
         input.stopGenerationBeforeDestroy,
         Math.min(RUNNER_WAIT_INTERVAL_MS, remainingMs),
@@ -1640,7 +1672,7 @@ export async function invokeHostedExecutionContainerRunner(
   return input.signal
     ? await raceRunnerContainerOperationAbort(invocation, input.signal, async () => {
         if (isRunnerContainerAbortHardTimeout(input.signal?.reason)) {
-          await container.destroyInstance().catch((error: unknown) => {
+          void container.destroyInstance().catch((error: unknown) => {
             emitHostedExecutionStructuredLog({
               component: "container",
               error,
@@ -2566,6 +2598,29 @@ async function readRunnerContainerStatus(
       return "stopped";
     }
     throw error;
+  }
+}
+
+async function readRunnerContainerStatusWithTimeout(
+  container: RunnerContainer,
+  timeoutMs: number,
+): Promise<string | null> {
+  const statusRead = readRunnerContainerStatus(container);
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      statusRead,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error("Hosted runner container status read timed out."));
+        }, Math.max(1, timeoutMs));
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+    void statusRead.catch(() => undefined);
   }
 }
 

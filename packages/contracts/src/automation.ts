@@ -25,11 +25,25 @@ export const automationContinuityPolicyValues = [
   "preserve",
 ] as const;
 
-export const automationScheduleKindValues = [
+export const automationTimeScheduleKindValues = [
   "at",
   "every",
   "cron",
   "dailyLocal",
+] as const;
+
+export const automationDeviceActivitySourceValues = [
+  "whoop",
+  "whoop_v2",
+] as const;
+
+export const automationDeviceActivityKindValues = [
+  "walk",
+] as const;
+
+export const automationScheduleKindValues = [
+  ...automationTimeScheduleKindValues,
+  "deviceActivity",
 ] as const;
 
 export const MIN_AUTOMATION_EVERY_MS = MIN_EXECUTABLE_SCHEDULE_EVERY_MS;
@@ -44,11 +58,25 @@ export const automationScheduleEverySchema = executableScheduleIntentEverySchema
 export const automationScheduleCronSchema = executableScheduleIntentCronSchema;
 export const automationScheduleDailyLocalSchema = executableScheduleIntentDailyLocalSchema;
 
-export const automationScheduleSchema = z.discriminatedUnion("kind", [
+export const automationTimeScheduleSchema = z.discriminatedUnion("kind", [
   automationScheduleAtSchema,
   automationScheduleEverySchema,
   automationScheduleCronSchema,
   automationScheduleDailyLocalSchema,
+]);
+
+export const automationScheduleDeviceActivitySchema = z
+  .object({
+    kind: z.literal("deviceActivity"),
+    after: isoTimestampSchema(),
+    source: z.enum(automationDeviceActivitySourceValues).optional(),
+    activityKind: z.enum(automationDeviceActivityKindValues).optional(),
+  })
+  .strict();
+
+export const automationScheduleSchema = z.discriminatedUnion("kind", [
+  ...automationTimeScheduleSchema.options,
+  automationScheduleDeviceActivitySchema,
 ]);
 
 export const automationRouteSchema = z
@@ -107,9 +135,18 @@ export const automationScaffoldPayloadSchema = z
 
 export type AutomationStatus = (typeof automationStatusValues)[number];
 export type AutomationContinuityPolicy = (typeof automationContinuityPolicyValues)[number];
+export type AutomationTimeScheduleKind = (typeof automationTimeScheduleKindValues)[number];
 export type AutomationScheduleKind = (typeof automationScheduleKindValues)[number];
+export type AutomationDeviceActivitySource = (typeof automationDeviceActivitySourceValues)[number];
+export type AutomationDeviceActivityKind = (typeof automationDeviceActivityKindValues)[number];
+export type AutomationTimeSchedule = z.infer<typeof automationTimeScheduleSchema>;
 export type AutomationSchedule = z.infer<typeof automationScheduleSchema>;
 export type AutomationRoute = z.infer<typeof automationRouteSchema>;
 export type AutomationFrontmatter = z.infer<typeof automationFrontmatterSchema>;
 export type AutomationMarkdownDocument = z.infer<typeof automationMarkdownDocumentSchema>;
 export type AutomationScaffoldPayload = z.infer<typeof automationScaffoldPayloadSchema>;
+
+// Product-facing aliases. The persisted frontmatter key remains `schedule` for now.
+export const automationTriggerKindValues = automationScheduleKindValues;
+export const automationTriggerSchema = automationScheduleSchema;
+export type AutomationTrigger = AutomationSchedule;

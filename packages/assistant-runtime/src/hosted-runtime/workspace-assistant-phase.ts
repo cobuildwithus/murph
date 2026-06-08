@@ -12,6 +12,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   refreshAssistantContextSnapshotBestEffort,
+  scheduleDeviceActivityTriggeredAutomations,
   type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 import {
@@ -81,6 +82,7 @@ import type {
   HostedWorkspaceRunnerAssistantPhaseResult,
 } from "./workspace-runner.ts";
 import {
+  HOSTED_ASSISTANT_WAKE_REASON,
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
@@ -1033,6 +1035,8 @@ type HostedAssistantDeliveryEffects = Awaited<
 >;
 type HostedAssistantMetrics = Awaited<ReturnType<typeof runHostedAssistantAutomationLane>>;
 type HostedDeviceSyncWakeMetrics = Awaited<ReturnType<typeof runHostedDeviceSyncWakeLane>>;
+type HostedDeviceActivityAutomationScheduleResult =
+  Awaited<ReturnType<typeof scheduleDeviceActivityTriggeredAutomations>>;
 type HostedSystemMailboxPreparation = NonNullable<
   Awaited<ReturnType<typeof prepareHostedSystemMailboxItemForCheckpoint>>
 >;
@@ -1061,6 +1065,23 @@ function withHostedDeviceSyncStagedDirtyAcks(
   return records && records.length > 0
     ? { stagedDirtyAcks: records }
     : {};
+}
+
+function emptyHostedDeviceActivityAutomationScheduleResult(): HostedDeviceActivityAutomationScheduleResult {
+  return {
+    matched: 0,
+    nextWakeAt: null,
+    scheduled: 0,
+  };
+}
+
+function createHostedDeviceActivityAutomationWakeCandidate(
+  result: HostedDeviceActivityAutomationScheduleResult | null,
+): HostedRuntimeWakeCandidate | null {
+  return createHostedRuntimeWakeCandidate(
+    result?.nextWakeAt ?? null,
+    HOSTED_ASSISTANT_WAKE_REASON,
+  );
 }
 
 function systemMailboxPreparationRanDeviceSync(
@@ -1148,6 +1169,26 @@ async function runIdleDeviceSyncWakeLaneBestEffort(input: {
     };
   } finally {
     cancellation.dispose();
+  }
+}
+
+async function scheduleDeviceActivityAutomationsAfterDeviceSyncBestEffort(input: {
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+  wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
+}): Promise<HostedDeviceActivityAutomationScheduleResult> {
+  try {
+    return await scheduleDeviceActivityTriggeredAutomations({
+      now: () => new Date(resolveHostedAssistantPhaseNowMs(input.phaseInput)).toISOString(),
+      signal: input.phaseInput.signal ?? undefined,
+      vault: input.phaseInput.restored.vaultRoot,
+    });
+  } catch (error) {
+    await writeHostedDeviceActivityAutomationScheduleFailureRuntimeLog({
+      error,
+      input: input.phaseInput,
+      wake: input.wake,
+    });
+    return emptyHostedDeviceActivityAutomationScheduleResult();
   }
 }
 
@@ -1246,7 +1287,33 @@ async function writeHostedIdleDeviceSyncFailureRuntimeLog(input: {
   });
 }
 
+async function writeHostedDeviceActivityAutomationScheduleFailureRuntimeLog(input: {
+  error: unknown;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
+}): Promise<void> {
+  const errorCode = deriveHostedExecutionErrorCode(input.error);
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      component: "runtime",
+      eventCode: "device-sync.job_failed",
+      level: "warn",
+      phase: "idle",
+      redactedJson: {
+        deviceActivityAutomationScheduleFailed: true,
+        errorCode: toHostedRuntimeLogCode(errorCode),
+        errorMessagePresent: input.error instanceof Error
+          ? input.error.message.length > 0
+          : input.error !== null && input.error !== undefined,
+        wakeKind: input.wake.kind,
+      },
+    },
+    platform: input.input.runtime.platform,
+  });
+}
+
 function buildIdleDeviceSyncOnlyAssistantPhaseResult(input: {
+  deviceActivityAutomation: HostedDeviceActivityAutomationScheduleResult | null;
   dirtyDeviceSyncMetrics: HostedDeviceSyncWakeMetrics;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
 }): HostedWorkspaceRunnerAssistantPhaseResult {
@@ -1259,6 +1326,7 @@ function buildIdleDeviceSyncOnlyAssistantPhaseResult(input: {
       input.dirtyDeviceSyncMetrics.postCheckpointRecord?.nextWakeAt ?? null,
       HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
     ),
+    createHostedDeviceActivityAutomationWakeCandidate(input.deviceActivityAutomation),
   ]);
   const nextWakeAt = dirtyDeviceSyncWake.at;
   const dirtyPostCheckpoint = input.dirtyDeviceSyncMetrics.postCheckpointRecord
@@ -1352,6 +1420,14 @@ async function runSystemMailboxMaintenancePhase(input: {
         wake: input.wake,
       })
     : null;
+  const dirtyDeviceActivityAutomation = dirtyDeviceSyncMetrics &&
+      !dirtyDeviceSyncMetrics.deviceSyncSkipped &&
+      phaseInput.shouldYieldBackgroundMaintenance?.() !== true
+    ? await scheduleDeviceActivityAutomationsAfterDeviceSyncBestEffort({
+      phaseInput,
+      wake: input.wake,
+    })
+    : null;
   if (!systemMailboxPreparation) {
     if (pendingAssistantInputWakeAt) {
       return {
@@ -1367,6 +1443,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         deviceSyncMaintenanceRan: true,
         initialProviderCleanupCheckpoint,
         result: buildIdleDeviceSyncOnlyAssistantPhaseResult({
+          deviceActivityAutomation: dirtyDeviceActivityAutomation,
           dirtyDeviceSyncMetrics,
           input: phaseInput,
         }),
@@ -1440,6 +1517,7 @@ async function runSystemMailboxMaintenancePhase(input: {
           dirtyDeviceSyncMetrics.postCheckpointRecord?.nextWakeAt ?? null,
           HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
         ),
+        createHostedDeviceActivityAutomationWakeCandidate(dirtyDeviceActivityAutomation),
       ])
     : null;
   const dirtyDeviceSyncWakeAt = dirtyDeviceSyncWake?.at ?? null;
@@ -1504,6 +1582,7 @@ async function runSystemMailboxMaintenancePhase(input: {
               assertHostedAssistantPhaseLiveness(phaseInput.signal);
               return await runSystemMailboxPostCheckpointPhase({
                 dirtyDeviceSyncMetrics,
+                dirtyDeviceActivityAutomation,
                 initialProviderCleanupCheckpoint,
                 initialProviderCleanupDue,
                 input: phaseInput,
@@ -1595,6 +1674,7 @@ async function runAssistantContextSnapshotIdleRefreshBestEffort(input: {
 }
 
 async function runSystemMailboxPostCheckpointPhase(input: {
+  dirtyDeviceActivityAutomation: HostedDeviceActivityAutomationScheduleResult | null;
   dirtyDeviceSyncMetrics: HostedDeviceSyncWakeMetrics | null;
   initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
   initialProviderCleanupDue: boolean;
@@ -1636,6 +1716,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
         input.systemMailboxMetricsWakeAt,
         input.systemMailboxMetricsWakeReason,
       ),
+      createHostedDeviceActivityAutomationWakeCandidate(input.dirtyDeviceActivityAutomation),
     ]);
     const statusNextWakeAt = statusNextWake.at;
     const statusNextWakeReason = statusNextWake.reason;
@@ -1707,6 +1788,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
         HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
       ),
       createHostedRuntimeWakeCandidate(input.pendingAssistantInputWakeAt, "assistant"),
+      createHostedDeviceActivityAutomationWakeCandidate(input.dirtyDeviceActivityAutomation),
     ]);
     return await drainHostedPostCheckpointDelivery({
       afterDurableCheckpoint: dirtyPostCheckpoint?.afterDurableCheckpoint ?? null,
@@ -1730,6 +1812,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
   const dirtyNextWake = selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(input.systemMailboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(input.pendingAssistantInputWakeAt, "assistant"),
+    createHostedDeviceActivityAutomationWakeCandidate(input.dirtyDeviceActivityAutomation),
     createHostedRuntimeWakeCandidate(
       dirtyPostCheckpoint.nextWakeAt,
       HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,

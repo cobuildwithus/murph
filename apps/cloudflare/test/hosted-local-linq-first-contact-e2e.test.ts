@@ -74,6 +74,7 @@ const progressToolFinalReplyText = "I checked that and can keep helping from her
 const typingLoopReplyText = "I saw that and can help from here.";
 const productionLikeAssistantModel = "gpt-5.5";
 const localRunnerIdleTtlMs = "300000";
+const expectedDynamicTools = "murph.send_progress_update,murph.attach_response_media";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const fastDeployGate = process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1";
@@ -732,7 +733,7 @@ describe("hosted local Linq first-contact e2e", () => {
     });
     expect(
       requireScenario().runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV],
-    ).toBe("murph.send_progress_update");
+    ).toBe(expectedDynamicTools);
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
@@ -1285,7 +1286,7 @@ async function startLinqScenario(
       LINQ_API_TOKEN: linqApiToken,
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV]:
-        "murph.send_progress_update",
+        expectedDynamicTools,
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: localRunnerIdleTtlMs,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
