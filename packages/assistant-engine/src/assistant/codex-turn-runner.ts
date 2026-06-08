@@ -231,7 +231,6 @@ function emitCodexPlanTraceEvent(input: {
   codexContinuation: string
   providerRequestOrdinal: number | null
   routePlanningDiagnostics: AssistantRoutePlanningDiagnostics
-  refreshThreadInstructions: boolean
   resumeCodexThreadIdPresent: boolean
   workingDirectory: string
 }): void {
@@ -280,7 +279,6 @@ function emitCodexPlanTraceEvent(input: {
           input.routePlanningDiagnostics.routeTargetCapabilitiesElapsedMs,
         routePlanningUnaccountedElapsedMs:
           input.routePlanningDiagnostics.routePlanningUnaccountedElapsedMs,
-        refreshThreadInstructions: input.refreshThreadInstructions,
         resumeCodexThreadIdPresent: input.resumeCodexThreadIdPresent,
         workingDirectoryKind:
           input.workingDirectory === HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY
@@ -316,7 +314,6 @@ async function executeAssistantCodexAttempt(input: {
     at: attemptAt,
     codexContinuation: attemptPlan.routePlan.codexContinuation.kind,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
-    refreshThreadInstructions: attemptPlan.routePlan.refreshThreadInstructions,
     resumeCodexThreadIdPresent:
       attemptPlan.routePlan.resumeCodexThreadId !== null,
     route: attemptPlan.route,
@@ -331,7 +328,6 @@ async function executeAssistantCodexAttempt(input: {
     codexContinuation: attemptPlan.routePlan.codexContinuation.kind,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
     routePlanningDiagnostics: attemptPlan.routePlan.planningDiagnostics,
-    refreshThreadInstructions: attemptPlan.routePlan.refreshThreadInstructions,
     resumeCodexThreadIdPresent:
       attemptPlan.routePlan.resumeCodexThreadId !== null,
     workingDirectory: attemptPlan.routePlan.workingDirectory,
@@ -342,7 +338,6 @@ async function executeAssistantCodexAttempt(input: {
     hasResumeCodexThreadId:
       attemptPlan.routePlan.resumeCodexThreadId !== null,
     codexContinuationKind: attemptPlan.routePlan.codexContinuation.kind,
-    refreshThreadInstructions: attemptPlan.routePlan.refreshThreadInstructions,
     route: attemptPlan.route,
     sessionId: attemptPlan.session.sessionId,
     turnId: executionPlan.turnId,
@@ -406,7 +401,6 @@ async function executeAssistantCodexAttempt(input: {
       prepareFreshThreadFallback:
         attemptPlan.routePlan.prepareFreshThreadFallback,
       resumeCodexThreadId: attemptPlan.routePlan.resumeCodexThreadId,
-      refreshThreadInstructions: attemptPlan.routePlan.refreshThreadInstructions,
       codexCommand:
         attemptPlan.route.codexCommand ??
         executionPlan.input.codexCommand ??

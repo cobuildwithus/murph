@@ -80,7 +80,6 @@ export interface AssistantProviderTurnInput {
   prompt?: string | null
   provider?: AssistantChatProvider | null
   reasoningEffort?: string | null
-  refreshThreadInstructions?: boolean
   resumeCodexThreadId?: string | null
   freshThreadFallback?: AssistantProviderFreshThreadFallbackInput | null
   prepareFreshThreadFallback?: AssistantProviderFreshThreadFallbackResolver | null
@@ -123,7 +122,6 @@ export interface AssistantProviderTurnExecutionInput {
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   prompt?: string | null
   providerConfig: AssistantProviderConfig
-  refreshThreadInstructions?: boolean
   resumeCodexThreadId?: string | null
   freshThreadFallback?: AssistantProviderFreshThreadFallbackInput | null
   prepareFreshThreadFallback?: AssistantProviderFreshThreadFallbackResolver | null

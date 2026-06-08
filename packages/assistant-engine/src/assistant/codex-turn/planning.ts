@@ -77,7 +77,6 @@ export interface AssistantRouteTurnPlan {
   onboardingGuidanceInjected: boolean
   codexContinuation: AssistantCodexContinuation
   planningDiagnostics: AssistantRoutePlanningDiagnostics
-  refreshThreadInstructions: boolean
   resumeCodexThreadId: string | null
   sessionContext?: {
     binding: AssistantSession['binding']
@@ -560,7 +559,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
       injectOnboardingGuidance: shouldInjectOnboardingGuidance,
     }),
   )
-  const refreshThreadInstructions = resumeCodexThreadId === null
   const systemPrompt = systemPromptResult.prompt
   const developerInstructions =
     resumeCodexThreadId === null
@@ -614,7 +612,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
       supportedExperimentProtocolsElapsedMs:
         routePlanningSpans.supportedExperimentProtocolsElapsedMs ?? null,
     },
-    refreshThreadInstructions,
     resumeCodexThreadId,
     sessionContext: shouldPrepareBootstrapContext
       ? {

@@ -186,8 +186,6 @@ describe('assistant protocol index planning', () => {
       session: createSession(),
       sharedPlan: createSharedPlan(),
     })
-
-    expect(initialPlan.refreshThreadInstructions).toBe(true)
     expect(initialPlan.developerInstructions).toContain('bootstrap contract')
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockClear()
     planningMocks.readAssistantContextSnapshotPrompt.mockClear()
@@ -212,7 +210,6 @@ describe('assistant protocol index planning', () => {
     })
 
     expect(resumedPlan.resumeCodexThreadId).toBe('thread-resume')
-    expect(resumedPlan.refreshThreadInstructions).toBe(false)
     expect(resumedPlan.developerInstructions).toBeNull()
     expect(resumedPlan.sessionContext).toBeUndefined()
     expect(resumedPlan.freshThreadFallback).toBeUndefined()
@@ -342,7 +339,6 @@ describe('assistant protocol index planning', () => {
     })
 
     expect(resumedPlan.resumeCodexThreadId).toBe('thread-active-turn')
-    expect(resumedPlan.refreshThreadInstructions).toBe(false)
     expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
     expect(resumedPlan.codexContinuation).toEqual({
       kind: 'provider-state-optimization',
@@ -816,7 +812,6 @@ describe('assistant protocol index planning', () => {
     })
 
     expect(plan.resumeCodexThreadId).toBeNull()
-    expect(plan.refreshThreadInstructions).toBe(true)
     expect(plan.developerInstructions).toContain('bootstrap contract')
     expect(
       planningMocks.readAssistantCliSurfaceBootstrapContext,

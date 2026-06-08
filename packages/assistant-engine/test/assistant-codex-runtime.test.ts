@@ -305,7 +305,7 @@ describe('assistant codex runtime', () => {
     ).toThrowError('Codex app-server turnId is required for live turn requests.')
   })
 
-  it('puts instructions on thread lifecycle requests but keeps turn input user-scoped', () => {
+  it('puts instructions and dynamic tools on thread start but keeps resume and turn input scoped', () => {
     const baseInput = {
       approvalPolicy: 'never',
       baseInstructions: 'Do not use this in normal Murph config.',
@@ -315,7 +315,6 @@ describe('assistant codex runtime', () => {
       modelProvider: 'vercel-ai-gateway',
       prompt: 'User message:\nWhat changed?',
       reasoningEffort: 'high',
-      refreshThreadInstructions: false,
       sandbox: 'workspace-write' as const,
       workingDirectory: '/workspace',
     }
@@ -378,7 +377,6 @@ describe('assistant codex runtime', () => {
         codexThreadId: 'thread-1',
       }),
     ).toEqual({
-      dynamicTools: MURPH_DYNAMIC_TOOLS,
       excludeTurns: true,
       threadId: 'thread-1',
     })
@@ -395,22 +393,6 @@ describe('assistant codex runtime', () => {
         codexThreadId: 'thread-1',
       }),
     ).toEqual({
-      dynamicTools: MURPH_DYNAMIC_TOOLS,
-      excludeTurns: true,
-      threadId: 'thread-1',
-    })
-
-    expect(
-      buildCodexThreadResumeParams({
-        input: {
-          ...baseInput,
-          refreshThreadInstructions: true,
-        },
-        codexThreadId: 'thread-1',
-      }),
-    ).toEqual({
-      developerInstructions: 'Stable Murph instructions.',
-      dynamicTools: MURPH_DYNAMIC_TOOLS,
       excludeTurns: true,
       threadId: 'thread-1',
     })
@@ -5696,7 +5678,6 @@ describe('assistant codex runtime', () => {
           developerInstructions: 'Stable Murph instructions.',
           prompt: 'resume prompt',
           reasoningEffort: 'high',
-          refreshThreadInstructions: false,
           resumeSessionId: 'thread-resume-request',
           sandbox,
           workingDirectory,
@@ -5711,7 +5692,6 @@ describe('assistant codex runtime', () => {
         serviceName: 'murph',
       })
       expect(asRecord(threadRequests[1]?.params)).toEqual({
-        dynamicTools: MURPH_DYNAMIC_TOOLS,
         excludeTurns: true,
         threadId: 'thread-resume-request',
       })
@@ -6932,8 +6912,9 @@ describe('assistant codex runtime', () => {
           await waitForRpcMethod(child, 'initialize')
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadResume = await waitForRpcMethod(child, 'thread/resume')
-          expect(asRecord(threadResume.params)).toMatchObject({
-            dynamicTools: MURPH_DYNAMIC_TOOLS,
+          expect(asRecord(threadResume.params)).toEqual({
+            excludeTurns: true,
+            threadId: 'existing-thread-without-progress-tool',
           })
           child.stdout.write(
             jsonLine({

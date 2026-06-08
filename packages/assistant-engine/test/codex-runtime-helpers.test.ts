@@ -188,7 +188,6 @@ describe('Codex assistant registry helpers', () => {
       at: '2026-05-04T00:00:00.000Z',
       hasResumeCodexThreadId: true,
       codexContinuationKind: 'provider-state-optimization',
-      refreshThreadInstructions: false,
       route,
       sessionId: 'session-1',
       turnId: 'turn-1',
@@ -220,7 +219,6 @@ describe('Codex assistant registry helpers', () => {
           provider: 'codex-cli',
           codexContinuationKind: 'provider-state-optimization',
           reasoningEffort: 'high',
-          refreshThreadInstructions: false,
           routeFingerprint: 'route-1',
         },
       }),
@@ -235,7 +233,6 @@ describe('Codex assistant registry helpers', () => {
       provider: 'codex-cli',
       codexContinuationKind: 'provider-state-optimization',
       reasoningEffort: 'high',
-      refreshThreadInstructions: false,
       routeFingerprint: 'route-1',
     })
   })
@@ -262,7 +259,6 @@ describe('Codex assistant registry helpers', () => {
       at: '2026-05-04T00:10:24.000Z',
       codexContinuation: 'provider-state-optimization',
       providerRequestOrdinal: 1,
-      refreshThreadInstructions: false,
       resumeCodexThreadIdPresent: true,
       route,
       sessionId: 'session-plan',
@@ -283,7 +279,6 @@ describe('Codex assistant registry helpers', () => {
           codexHomeHash: expect.stringMatching(/^h1_[a-f0-9]{24}$/u),
           codexContinuation: 'provider-state-optimization',
           providerRequestOrdinal: 1,
-          refreshThreadInstructions: false,
           resumeCodexThreadIdPresent: true,
           routeFingerprint: 'route-plan',
           sessionId: 'session-plan',
@@ -1310,7 +1305,6 @@ describe('Codex assistant registry helpers', () => {
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
-      refreshThreadInstructions: true,
       sessionContext: {
         binding: sessionBinding,
       },
@@ -1341,7 +1335,6 @@ describe('Codex assistant registry helpers', () => {
       providerPromptBytes: Buffer.byteLength(prompt, 'utf8'),
       providerPromptDiagnosticKind: 'primary',
       providerTraceKind: 'provider.prompt_size',
-      refreshThreadInstructions: true,
       resumeCodexThreadIdPresent: false,
       schema: 'murph.assistant-provider-prompt-size-diagnostics.v1',
       systemPromptBytes: Buffer.byteLength('Private system prompt 💚.', 'utf8'),
@@ -1609,7 +1602,6 @@ describe('Codex assistant registry helpers', () => {
       conversationHistoryCount: 0,
       conversationHistoryPresent: false,
       providerPromptDiagnosticKind: 'primary',
-      refreshThreadInstructions: false,
       resumeCodexThreadIdPresent: true,
     })
     expect(findProviderPromptSizeTraceRawEvent(
@@ -1619,7 +1611,6 @@ describe('Codex assistant registry helpers', () => {
       conversationHistoryCount: 2,
       conversationHistoryPresent: true,
       providerPromptDiagnosticKind: 'fresh-thread-fallback',
-      refreshThreadInstructions: true,
       resumeCodexThreadIdPresent: false,
     })
     expect(findProviderTraceRawEvent(

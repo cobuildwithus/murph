@@ -57,11 +57,6 @@ export function buildCodexThreadResumeParams(input: {
   codexThreadId: string
 }): Record<string, unknown> {
   return stripUndefinedRpcParams({
-    developerInstructions:
-      input.input.refreshThreadInstructions === true
-        ? normalizeNullableString(input.input.developerInstructions)
-        : undefined,
-    dynamicTools: resolveCodexAppServerDynamicTools(),
     excludeTurns: input.input.excludeResumeTurns === false ? undefined : true,
     threadId: input.codexThreadId,
   })
