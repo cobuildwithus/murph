@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:99e514bea4a836cebe46246d764be20fee328b8c758e70fe025b205e79d60b2e",
+  "catalogHash": "sha256:2abb4e7411c498359203682e749a4e97845ecd1fadf34b3237278c484e29c604",
   "generatedAt": null,
   "items": [
     {
@@ -31739,7 +31739,23 @@
       ],
       "equipment": [],
       "id": "EX041",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person standing tall on a mat with feet hip-width before a reverse lunge.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f7ca31a2-b0a7-4ad8-1ec3-2b80de73ec00/public"
+        },
+        {
+          "alt": "Person stepping one leg back into a reverse lunge with the front knee stacked.",
+          "step": "Step back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2e04eb1f-1488-4a2a-47df-50ee06d03500/public"
+        },
+        {
+          "alt": "Person pressing through the front foot to return from a reverse lunge.",
+          "step": "Return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5360888f-5a0f-4535-e1c9-8a9d5d32d300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",

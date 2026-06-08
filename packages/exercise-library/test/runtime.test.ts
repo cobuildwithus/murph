@@ -159,6 +159,20 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d4dced10-7694-4d27-697f-25d550e11000/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "reverse-lunge")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f7ca31a2-b0a7-4ad8-1ec3-2b80de73ec00/public",
+      }),
+      expect.objectContaining({
+        step: "Step back",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2e04eb1f-1488-4a2a-47df-50ee06d03500/public",
+      }),
+      expect.objectContaining({
+        step: "Return",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5360888f-5a0f-4535-e1c9-8a9d5d32d300/public",
+      }),
+    ]);
     expect(artifacts.details.sources).toEqual(catalog.sources);
     expect(artifacts.facets.facets.kinds).toEqual(["exercise", "stretch"]);
     expect(artifacts.facets.facets.equipment).toContain("none");
