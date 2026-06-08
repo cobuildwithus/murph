@@ -708,6 +708,12 @@ function hasFreshHostedConversationInput(
     || (input.initialMailboxImport.importResult.conversationImportedCount ?? 0) > 0;
 }
 
+function hasFreshHostedMailboxInput(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): boolean {
+  return input.initialMailboxImport.importResult.fetchedCount > 0;
+}
+
 function resolveHostedForegroundReplayInputIds(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): readonly string[] {
@@ -2349,7 +2355,7 @@ function isDueHostedDeviceSyncReconcileWake(
 ): boolean {
   return (
     input.workspace?.nextWakeReason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
-    && !hasFreshHostedConversationInput(input)
+    && !hasFreshHostedMailboxInput(input)
     && isDueHostedWorkspaceWakeAt(input)
   );
 }
@@ -2363,7 +2369,7 @@ function isDueHostedLegacyDeviceSyncRecoveryAlarm(
 function isDueHostedWorkspaceAlarm(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
-  if (hasFreshHostedConversationInput(input)) {
+  if (hasFreshHostedMailboxInput(input)) {
     return false;
   }
 
@@ -2962,6 +2968,9 @@ function isHostedOutboxDeliverySafeExternalErrorCode(code: string): boolean {
 }
 
 function consumedScheduledWorkspaceWake(input: HostedWorkspaceRuntimeAssistantPhaseInput): boolean {
+  if (hasFreshHostedMailboxInput(input) && !hasFreshHostedConversationInput(input)) {
+    return false;
+  }
   if (!input.workspace?.nextWakeAt) {
     return false;
   }
