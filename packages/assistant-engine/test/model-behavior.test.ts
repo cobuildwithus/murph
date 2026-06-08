@@ -113,6 +113,12 @@ describe('assistant execution prompt contract', () => {
       '3. Use `send_progress_update` first for genuinely longer, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work. If the turn remains long-running after substantial tool work, send another brief update so the user is not left hanging, up to three total progress updates in the turn. Keep the progress text to one to three short conversational sentences, specific to the immediate next step; avoid stiff plan-recitation wording like "I\'m going to..." when a shorter "I\'ll..." or "Taking a look..." works.',
     )
     expect(prompt).toContain(
+      'Prefer using available sources over giving the user busywork such as sending logs, restating device-derived facts, or reporting completion of an activity that Murph can verify itself.',
+    )
+    expect(prompt).toContain(
+      'Ask only for missing subjective context, ambiguous details, consent, or facts no available source can answer.',
+    )
+    expect(prompt).toContain(
       'avoid stiff plan-recitation wording like "I\'m going to..."',
     )
     expect(prompt).toContain(
@@ -163,6 +169,15 @@ describe('assistant local PDF evidence guidance', () => {
     )
     expect(prompt).toContain(
       'Treat Junction as device-sync bridge/aggregator plumbing, not the user-facing wearable source',
+    )
+    expect(prompt).toContain(
+      'When connected or historical wearable data can answer a question, use it instead of asking the user to text or manually restate activity, workouts, sleep, recovery, readiness, HRV, RHR, steps, or similar device-derived fields.',
+    )
+    expect(prompt).toContain(
+      'Do not ask the user to "let me know after your walk/workout" when a connected device can provide the completion signal.',
+    )
+    expect(prompt).toContain(
+      'Ask for subjective or protocol-specific details only when the wearable cannot answer them',
     )
     expect(prompt).toContain(
       'mention Junction only when explicitly debugging low-level connection or runtime state',
