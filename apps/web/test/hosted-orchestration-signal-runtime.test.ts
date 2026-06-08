@@ -23,6 +23,9 @@ const mocks = vi.hoisted(() => ({
   },
   readHostedMailboxItemCheckpointById: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
+  readHostedAiUsageGate: vi.fn(),
+  resolveHostedAiUsageGate: vi.fn(),
+  resolveHostedRuntimeAiUsageDemandGate: vi.fn(),
   signalWithStart: vi.fn(),
 }));
 
@@ -50,6 +53,15 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
+vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
+  resolveHostedRuntimeAiUsageDemandGate: mocks.resolveHostedRuntimeAiUsageDemandGate,
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  readHostedAiUsageGate: mocks.readHostedAiUsageGate,
+  resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
+}));
+
 import {
   sanitizeHostedRuntimeSignalSource,
   signalHostedBrowserVaultRefreshRuntime,
@@ -65,6 +77,9 @@ describe("hosted runtime Temporal signaling", () => {
     mocks.getPrisma.mockReturnValue(mocks.prisma);
     mocks.ensureHostedWorkspace.mockResolvedValue(buildHostedWorkspaceRecord());
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
+    mocks.resolveHostedRuntimeAiUsageDemandGate.mockResolvedValue({
+      status: "allowed",
+    });
     mocks.signalWithStart.mockResolvedValue(undefined);
     mocks.appendHostedMailboxEnvelopeTx.mockImplementation(async (input) => ({
       dedupeConflict: false,
@@ -408,6 +423,10 @@ describe("hosted runtime Temporal signaling", () => {
       userId: "member_123",
     });
 
+    expect(mocks.resolveHostedRuntimeAiUsageDemandGate).toHaveBeenCalledWith({
+      prisma: mocks.prisma,
+      userId: "member_123",
+    });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
         kind: "runtime.manual-requested",
@@ -423,7 +442,7 @@ describe("hosted runtime Temporal signaling", () => {
           lane: "system",
           laneSeq: "77",
           mailboxItemId: "mailbox_runtime.manual-requested",
-          source: "manual",
+          source: "manual-ai-gated",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),
@@ -436,6 +455,49 @@ describe("hosted runtime Temporal signaling", () => {
       memberId: "member_123",
       prisma: mocks.prisma,
     });
+  });
+
+  it("does not append or signal manual runs when AI usage is denied", async () => {
+    mocks.resolveHostedRuntimeAiUsageDemandGate.mockResolvedValueOnce({
+      status: "denied",
+    });
+
+    await expect(signalHostedManualRunRuntime({
+      client: buildClient(),
+      userId: "member_123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_RUNTIME_MANUAL_WAKE_AI_USAGE_DENIED",
+      httpStatus: 403,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).not.toHaveBeenCalled();
+  });
+
+  it("does not append or signal manual runs when the AI usage gate is unavailable", async () => {
+    mocks.resolveHostedRuntimeAiUsageDemandGate.mockResolvedValueOnce({
+      retryAt: "2026-05-20T12:00:30.000Z",
+      status: "unavailable",
+    });
+
+    await expect(signalHostedManualRunRuntime({
+      client: buildClient(),
+      userId: "member_123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_RUNTIME_MANUAL_WAKE_AI_USAGE_GATE_UNAVAILABLE",
+      details: {
+        retryAt: "2026-05-20T12:00:30.000Z",
+      },
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).not.toHaveBeenCalled();
   });
 
   it("uses explicit Prisma and Temporal dependencies for manual runtime signals", async () => {
@@ -460,6 +522,10 @@ describe("hosted runtime Temporal signaling", () => {
       userId: "member_123",
     });
 
+    expect(mocks.resolveHostedRuntimeAiUsageDemandGate).toHaveBeenCalledWith({
+      prisma: explicitPrisma,
+      userId: "member_123",
+    });
     expect(mocks.getPrisma).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -491,6 +557,37 @@ describe("hosted runtime Temporal signaling", () => {
         workflowId: "hosted-user-runtime:member_123",
       }),
     );
+  });
+
+  it("forwards explicit Prisma through the runtime usage gate resolver", async () => {
+    const {
+      resolveHostedRuntimeAiUsageDemandGate,
+    } = await vi.importActual<{
+      resolveHostedRuntimeAiUsageDemandGate: (input: {
+        now: string;
+        prisma: typeof mocks.prisma;
+        userId: string;
+      }) => Promise<{ status: "allowed" } | { status: "denied" } | {
+        retryAt: string;
+        status: "unavailable";
+      }>;
+    }>("@/src/lib/hosted-orchestration/runtime-usage-decision");
+    const explicitPrisma = mocks.prisma;
+    mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({ allowed: true });
+
+    await expect(resolveHostedRuntimeAiUsageDemandGate({
+      now: "2026-05-20T12:00:00.000Z",
+      prisma: explicitPrisma,
+      userId: "member_123",
+    })).resolves.toEqual({
+      status: "allowed",
+    });
+
+    expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
+      memberId: "member_123",
+      now: new Date("2026-05-20T12:00:00.000Z"),
+      prisma: explicitPrisma,
+    });
   });
 
   it("ensures workspace before device-sync mailbox pointer signals", async () => {

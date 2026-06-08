@@ -9,7 +9,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   reconcileHostedStripeEventById: vi.fn(),
-  signalHostedRuntimeManualWakeBestEffortResult: vi.fn(),
+  signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
   stripeEventsRetrieve: vi.fn(),
 }));
 
@@ -17,9 +17,9 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-event-reconciliation", () => ({
   reconcileHostedStripeEventById: mocks.reconcileHostedStripeEventById,
 }));
 
-vi.mock("@/src/lib/hosted-orchestration/manual-wake", () => ({
-  signalHostedRuntimeManualWakeBestEffortResult:
-    mocks.signalHostedRuntimeManualWakeBestEffortResult,
+vi.mock("@/src/lib/hosted-onboarding/member-activation-runtime-wake", () => ({
+  signalHostedMemberActivationRuntimeWakeBestEffortResult:
+    mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -45,12 +45,12 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
       hostedExecutionEventId: "member.activated:member_123:stripe:evt_123",
       status: "completed",
     });
-    mocks.signalHostedRuntimeManualWakeBestEffortResult.mockResolvedValue({
+    mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult.mockResolvedValue({
       accepted: true,
       configured: true,
       errorCode: null,
+      mailboxItemIdPresent: true,
       signalAccepted: true,
-      usageGateDenied: false,
       workflowIdPresent: true,
     });
     mocks.stripeEventsRetrieve.mockResolvedValue({
@@ -75,6 +75,7 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
       eventId: "evt_123",
       eventType: "invoice.paid",
       hostedExecutionEventId: "member.activated:member_123:stripe:evt_123",
+      hostedExecutionMailboxItemId: null,
     });
 
     expect(mocks.reconcileHostedStripeEventById).toHaveBeenCalledWith({
@@ -158,6 +159,7 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
       hostedMailboxItem: {
         findFirst: vi.fn().mockResolvedValue({
           dedupeKey: "member.activated:stripe.invoice.paid:member_123:invoice:in_123",
+          id: "mailbox_item_activation_123",
           userId: "member_123",
         }),
       },
@@ -189,6 +191,7 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
       },
       select: {
         dedupeKey: true,
+        id: true,
         userId: true,
       },
       where: {
@@ -199,9 +202,13 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
         kind: "member.activated",
       },
     });
-    expect(mocks.signalHostedRuntimeManualWakeBestEffortResult).toHaveBeenCalledWith({
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).toHaveBeenCalledWith({
+      hostedExecutionEventId: "member.activated:stripe.invoice.paid:member_123:invoice:in_123",
+      mailboxItemId: "mailbox_item_activation_123",
+      memberId: "member_123",
+      prisma,
+      source: "stripe.webhook.activation",
       timeoutMs: 5_000,
-      userId: "member_123",
     });
   });
 
@@ -217,9 +224,13 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
       required: true,
     });
 
-    expect(mocks.signalHostedRuntimeManualWakeBestEffortResult).toHaveBeenCalledWith({
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).toHaveBeenCalledWith({
+      hostedExecutionEventId: "member.activated:member_123:stripe:evt_123",
+      mailboxItemId: null,
+      memberId: "member_123",
+      prisma: undefined,
+      source: "stripe.webhook.activation",
       timeoutMs: 5_000,
-      userId: "member_123",
     });
   });
 
@@ -234,7 +245,7 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
       required: false,
     });
 
-    expect(mocks.signalHostedRuntimeManualWakeBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
   });
 });
 

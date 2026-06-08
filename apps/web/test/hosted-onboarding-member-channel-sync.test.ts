@@ -146,15 +146,7 @@ describe("hosted onboarding member channel sync", () => {
         sourceType: "settings.phone.sync",
       }),
     ).resolves.toEqual({
-      eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
-      kind: "member.channels.updated",
-      memberChannels: {
-        email: true,
-        linq: true,
-        telegram: true,
-      },
-      occurredAt: "2026-04-15T00:00:00.000Z",
-      userId: "member_123",
+      mailboxItemId: "mailbox_member_channels_1",
     });
 
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
@@ -198,15 +190,7 @@ describe("hosted onboarding member channel sync", () => {
         sourceType: "settings.phone.sync",
       }),
     ).resolves.toEqual({
-      eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
-      kind: "member.channels.updated",
-      memberChannels: {
-        email: true,
-        linq: true,
-        telegram: true,
-      },
-      occurredAt: "2026-04-15T00:00:00.000Z",
-      userId: "member_123",
+      mailboxItemId: "mailbox_member_channels_1",
     });
 
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(tx, "member_123");
@@ -294,15 +278,7 @@ describe("hosted onboarding member channel sync", () => {
         sourceType: "settings.phone.sync",
       }),
     ).resolves.toEqual({
-      eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
-      kind: "member.channels.updated",
-      memberChannels: {
-        email: true,
-        linq: true,
-        telegram: true,
-      },
-      occurredAt: "2026-04-15T00:00:00.000Z",
-      userId: "member_123",
+      mailboxItemId: "mailbox_member_channels_1",
     });
 
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);

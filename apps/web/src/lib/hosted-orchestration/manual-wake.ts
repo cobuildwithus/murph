@@ -2,6 +2,9 @@ import {
   formatHostedExecutionSafeLogError,
 } from "../hosted-execution/logging";
 import {
+  isHostedOnboardingError,
+} from "../hosted-onboarding/errors";
+import {
   signalHostedManualRunRuntime,
 } from "./signal-runtime";
 
@@ -10,7 +13,7 @@ export interface HostedRuntimeManualWakeBestEffortResult {
   configured: boolean;
   errorCode: string | null;
   signalAccepted: boolean | null;
-  usageGateDenied: false;
+  usageGateDenied: boolean;
   workflowIdPresent: boolean | null;
 }
 
@@ -39,6 +42,11 @@ export async function signalHostedRuntimeManualWakeBestEffortResult(input: {
       workflowIdPresent: Boolean(signal.workflowId),
     };
   } catch (error) {
+    const usageGateResult = readManualWakeUsageGateResult(error);
+    if (usageGateResult) {
+      return usageGateResult;
+    }
+
     if (isHostedRuntimeTemporalNotConfiguredError(error)) {
       return {
         accepted: false,
@@ -63,6 +71,38 @@ export async function signalHostedRuntimeManualWakeBestEffortResult(input: {
       workflowIdPresent: null,
     };
   }
+}
+
+function readManualWakeUsageGateResult(
+  error: unknown,
+): HostedRuntimeManualWakeBestEffortResult | null {
+  if (!isHostedOnboardingError(error)) {
+    return null;
+  }
+
+  if (error.code === "HOSTED_RUNTIME_MANUAL_WAKE_AI_USAGE_DENIED") {
+    return {
+      accepted: false,
+      configured: true,
+      errorCode: null,
+      signalAccepted: null,
+      usageGateDenied: true,
+      workflowIdPresent: null,
+    };
+  }
+
+  if (error.code === "HOSTED_RUNTIME_MANUAL_WAKE_AI_USAGE_GATE_UNAVAILABLE") {
+    return {
+      accepted: false,
+      configured: true,
+      errorCode: error.code,
+      signalAccepted: null,
+      usageGateDenied: false,
+      workflowIdPresent: null,
+    };
+  }
+
+  return null;
 }
 
 function isHostedRuntimeTemporalNotConfiguredError(error: unknown): boolean {

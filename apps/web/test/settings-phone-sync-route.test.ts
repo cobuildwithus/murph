@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   reconcileHostedPrivyIdentityOnMemberTx: vi.fn(),
   requireFreshPrivyMemberAuthForHostedAppSession: vi.fn(),
   requirePrivyMemberAuth: vi.fn(),
-  signalHostedManualRunRuntime: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -39,7 +39,7 @@ vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  signalHostedManualRunRuntime: mocks.signalHostedManualRunRuntime,
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -69,9 +69,9 @@ describe("settings phone sync route", () => {
     );
     mocks.reconcileHostedPrivyIdentityOnMemberTx.mockResolvedValue(undefined);
     mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockResolvedValue({
-      eventId: "member.channels.updated:settings.phone.sync:member_123:evt_123",
+      mailboxItemId: "mailbox_item_channels_phone_123",
     });
-    mocks.signalHostedManualRunRuntime.mockResolvedValue({
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     });
@@ -135,8 +135,10 @@ describe("settings phone sync route", () => {
       prisma: mocks.prismaClient,
       sourceType: "settings.phone.sync",
     });
-    expect(mocks.signalHostedManualRunRuntime).toHaveBeenCalledWith({
-      userId: "member_123",
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_item_channels_phone_123",
+      source: "settings.phone.sync",
     });
     expect(mocks.readHostedPhoneHint).toHaveBeenCalledWith("+14155552671");
     await expect(response.json()).resolves.toEqual({
@@ -179,7 +181,7 @@ describe("settings phone sync route", () => {
       prisma: mocks.prismaClient,
       sourceType: "settings.phone.sync",
     });
-    expect(mocks.signalHostedManualRunRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       ok: true,
       phoneNumber: "+14155552671",
@@ -219,7 +221,7 @@ describe("settings phone sync route", () => {
       prisma: mocks.prismaClient,
       sourceType: "settings.phone.sync",
     });
-    expect(mocks.signalHostedManualRunRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       ok: true,
       phoneNumber: "+14155552671",
@@ -253,7 +255,7 @@ describe("settings phone sync route", () => {
     expect(response.status).toBe(403);
     expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx).not.toHaveBeenCalled();
-    expect(mocks.signalHostedManualRunRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_MEMBER_SUSPENDED",

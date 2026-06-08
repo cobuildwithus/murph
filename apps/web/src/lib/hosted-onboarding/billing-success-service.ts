@@ -1,9 +1,11 @@
 import { type PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
-import { signalHostedRuntimeManualWakeBestEffort } from "../hosted-orchestration/manual-wake";
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
+import {
+  signalHostedMemberActivationRuntimeWakeBestEffortResult,
+} from "./member-activation-runtime-wake";
 import {
   readHostedMemberCoreState,
   type HostedMemberCoreState,
@@ -58,7 +60,10 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
     prisma,
     session,
   });
-  await nudgeHostedCheckoutSuccessActivationRunner(activationOutcome);
+  await nudgeHostedCheckoutSuccessActivationRunner({
+    ...activationOutcome,
+    prisma,
+  });
   await sendHostedCheckoutSuccessWelcomeEmailBestEffort({
     memberId: activationOutcome.welcomeEmailMemberId,
     prisma,
@@ -127,13 +132,17 @@ async function sendHostedCheckoutSuccessWelcomeEmailBestEffort(input: {
 async function nudgeHostedCheckoutSuccessActivationRunner(input: {
   activatedMemberId: string | null;
   hostedExecutionEventId: string | null;
+  prisma: PrismaClient;
 }): Promise<void> {
   if (!input.activatedMemberId || !input.hostedExecutionEventId) {
     return;
   }
 
-  await signalHostedRuntimeManualWakeBestEffort({
-    userId: input.activatedMemberId,
+  await signalHostedMemberActivationRuntimeWakeBestEffortResult({
+    hostedExecutionEventId: input.hostedExecutionEventId,
+    memberId: input.activatedMemberId,
+    prisma: input.prisma,
+    source: "checkout-success.activation",
   });
 }
 
