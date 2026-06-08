@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:9215ed4a898865908b086328b7ae27f2ae3fb69e39517b98b9bf4d9efc143305",
+  "catalogHash": "sha256:53bef96aa2ccf9dead5041d67b5cb6b08d7a8778996fa9da1eceba009fb7a6be",
   "generatedAt": null,
   "items": [
     {
@@ -34920,7 +34920,18 @@
       ],
       "equipment": [],
       "id": "EX118",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person lying on back with knees bent feet under knees and arms relaxed before a glute bridge hold.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/400dca32-e29f-4155-2265-739fb8f08200/public"
+        },
+        {
+          "alt": "Person holding the top of a glute bridge with hips lifted feet grounded and torso aligned.",
+          "step": "Hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7d5e432f-98a0-433c-5acb-08ec1d0bf400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",

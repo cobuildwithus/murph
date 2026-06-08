@@ -107,6 +107,16 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/738a6903-71cd-40e1-1465-dac718c09400/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "glute-bridge-hold")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/400dca32-e29f-4155-2265-739fb8f08200/public",
+      }),
+      expect.objectContaining({
+        step: "Hold",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7d5e432f-98a0-433c-5acb-08ec1d0bf400/public",
+      }),
+    ]);
     expect(artifacts.details.items.find((item) => item.slug === "wall-sit")?.images).toEqual([
       expect.objectContaining({
         step: "Setup",
