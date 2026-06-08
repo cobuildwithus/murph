@@ -187,6 +187,20 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2576f54c-d229-4dd6-e72e-95650d976900/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "standing-calf-raise")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7e28abd3-9089-4612-0d87-325a5afad200/public",
+      }),
+      expect.objectContaining({
+        step: "Lift",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8519b35a-f5fb-483b-f2c9-1aaafba39300/public",
+      }),
+      expect.objectContaining({
+        step: "Lower",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a48ab2c8-54fb-4218-ba91-9a7701c40100/public",
+      }),
+    ]);
     expect(artifacts.details.sources).toEqual(catalog.sources);
     expect(artifacts.facets.facets.kinds).toEqual(["exercise", "stretch"]);
     expect(artifacts.facets.facets.equipment).toContain("none");
