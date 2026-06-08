@@ -37,7 +37,7 @@ export const captureCommandDescriptions = {
   importJson:
     'Import one or more dated media captures from a structured JSON payload file or stdin.',
   addHint:
-    'Use --media for one capture with one or more files. Use capture import-json --input @captures.json for batch capture, for example 20 separate mole photos each with its own label/bodySite.',
+    'Use --media for one capture with one or more files. Use capture import-json --input @captures.json for batches.',
   show: 'Show one capture by canonical event id or stable label.',
   list: 'List capture events with optional date, label, body-site, collection, and tag filters.',
   manifest: 'Show the immutable raw import manifest for one capture event id or stable label.',

@@ -345,7 +345,8 @@ export function registerSupplementCommands(
         },
       },
     ],
-    hint: 'Supplements are saved as regimen records with kind supplement.',
+    hint:
+      'Repeat --ingredient with one shell-quoted JSON object per ingredient; do not pass plain ingredient text or an array. Use unit "mcg" and put qualifiers like "DFE" in note.',
     options: withBaseOptions({
       id: z
         .string()
