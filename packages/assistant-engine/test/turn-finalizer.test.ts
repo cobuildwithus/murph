@@ -9,13 +9,15 @@ describe('resolveAssistantResumeStateFromProviderTurn', () => {
       `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${codexThreadId}.jsonl`
     expect(
       resolveAssistantResumeStateFromProviderTurn({
-        assistantContractFingerprint: 'contract-v1',
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         codexRolloutRelativePath,
         codexThreadId,
         routeFingerprint: 'route-new',
       }),
     ).toEqual({
-      assistantContractFingerprint: 'contract-v1',
+      assistantContractFingerprint:
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       rolloutRelativePath: codexRolloutRelativePath,
       routeFingerprint: 'route-new',
       threadId: codexThreadId,
@@ -25,7 +27,8 @@ describe('resolveAssistantResumeStateFromProviderTurn', () => {
   it('drops non-resumable turns instead of persisting route-only state', () => {
     expect(
       resolveAssistantResumeStateFromProviderTurn({
-        assistantContractFingerprint: 'contract-v1',
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         codexThreadId: null,
         routeFingerprint: 'route-new',
       }),

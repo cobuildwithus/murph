@@ -222,7 +222,6 @@ describe('assistant protocol index planning', () => {
     expect(resumedPlan.freshThreadFallback).toBeUndefined()
     expect(resumedPlan.prepareFreshThreadFallback).toEqual(expect.any(Function))
     expect(resumedPlan.planningDiagnostics).toMatchObject({
-      shouldPrepareAnyBootstrapContext: true,
       shouldPrepareBootstrapContext: false,
     })
     expect(
@@ -686,6 +685,75 @@ describe('assistant protocol index planning', () => {
         sharedPlan: createPrivateSharedPlan(),
       })
 
+      expect(plan.conversationHistoryMessages).toEqual([
+        {
+          content: 'Earlier answer.',
+          role: 'assistant',
+        },
+      ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('does not replay a persisted pre-provider prompt after active-turn input changes the current prompt', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-active-turn-current-'))
+    const session = createSession({
+      resumeState: {
+        assistantContractFingerprint:
+          '0000000000000000000000000000000000000000000000000000000000000000',
+        routeFingerprint: 'route-test',
+        threadId: 'thread-stale-contract',
+      },
+      turnCount: 1,
+    })
+    const originalPrompt =
+      'Please inspect the Codex assistant contract migration and summarize the resume behavior.'
+    const currentPrompt = [
+      originalPrompt,
+      '',
+      'Late active-turn input: also account for the dynamic tool fingerprint.',
+    ].join('\n')
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          kind: 'assistant',
+          text: 'Earlier answer.',
+        },
+        {
+          kind: 'user',
+          text: originalPrompt,
+        },
+      ])
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          prompt: currentPrompt,
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-05-04',
+          currentTimeZone: 'Asia/Kuala_Lumpur',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resumeCodexThreadId).toBeNull()
       expect(plan.conversationHistoryMessages).toEqual([
         {
           content: 'Earlier answer.',

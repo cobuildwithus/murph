@@ -104,7 +104,6 @@ export interface AssistantRoutePlanningDiagnostics {
   routePlanningUnaccountedElapsedMs: number
   routeResumeBindingElapsedMs: number | null
   routeTargetCapabilitiesElapsedMs: number | null
-  shouldPrepareAnyBootstrapContext: boolean
   shouldPrepareBootstrapContext: boolean
   supportedExperimentProtocolsElapsedMs: number | null
 }
@@ -509,8 +508,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
     : []
   const shouldInjectBootstrapContext = resumeCodexThreadId === null
   const shouldPrepareBootstrapContext = shouldInjectBootstrapContext
-  const shouldPrepareAnyBootstrapContext =
-    shouldPrepareBootstrapContext || shouldPrepareConversationThreadInstructions
   const shouldResolveFreshThreadFallback = resumeCodexThreadId !== null
   const actualAssistantCliContract = shouldPrepareBootstrapContext
     ? bootstrapAssistantCliContract
@@ -586,7 +583,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
         routePlanningSpans.routeResumeBindingElapsedMs ?? null,
       routeTargetCapabilitiesElapsedMs:
         routePlanningSpans.routeTargetCapabilitiesElapsedMs ?? null,
-      shouldPrepareAnyBootstrapContext,
       shouldPrepareBootstrapContext,
       supportedExperimentProtocolsElapsedMs:
         routePlanningSpans.supportedExperimentProtocolsElapsedMs ?? null,
@@ -657,10 +653,10 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
     const lastUserPromptKey =
       lastMessage.userPromptKey ??
       normalizeAssistantConversationHistoryText(lastMessage.message.content)
-    if (
-      !lastUserPromptKey ||
-      (currentPromptKey && lastUserPromptKey === currentPromptKey)
-    ) {
+    if (!lastUserPromptKey || shouldDropTrailingCurrentUserPrompt({
+      currentPromptKey,
+      lastUserPromptKey,
+    })) {
       messages.pop()
       continue
     }
@@ -675,6 +671,22 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
 function normalizeAssistantConversationHistoryText(value: string): string | null {
   const normalized = normalizeNullableString(value)
   return normalized?.replace(/\s+/gu, ' ') ?? null
+}
+
+function shouldDropTrailingCurrentUserPrompt(input: {
+  currentPromptKey: string | null
+  lastUserPromptKey: string
+}): boolean {
+  if (!input.currentPromptKey) {
+    return false
+  }
+  if (input.lastUserPromptKey === input.currentPromptKey) {
+    return true
+  }
+  return (
+    input.lastUserPromptKey.length >= 32 &&
+    input.currentPromptKey.includes(input.lastUserPromptKey)
+  )
 }
 
 function limitAssistantConversationHistoryMessages(

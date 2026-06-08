@@ -319,6 +319,42 @@ test("hosted-local Codex app-server stub enforces expected dynamic tools", async
   );
 });
 
+test("hosted-local Codex app-server stub restores dynamic tools on clean resume", async () => {
+  const root = await createTemporaryDirectory();
+  const { codexHome, command } = await installStubCommand({
+    baseUrl: "http://127.0.0.1:4111/v1",
+    root,
+    runtimeEnv: {
+      [HOSTED_LOCAL_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV]:
+        "murph.send_progress_update",
+    },
+  });
+
+  const startMessages = await runHostedLocalCodexStubThreadStart(
+    spawnStubCommand(command, codexHome),
+    {
+      dynamicTools: [
+        {
+          name: "send_progress_update",
+          namespace: "murph",
+        },
+      ],
+    },
+  );
+  const threadId = readThreadId(startMessages);
+
+  const resumeMessages = await runHostedLocalCodexStubThreadRequest(
+    spawnStubCommand(command, codexHome),
+    "thread/resume",
+    {
+      threadId,
+    },
+  );
+
+  assert.equal(readRpcErrorMessageOrNull(resumeMessages, 2), null);
+  assert.equal(readThreadId(resumeMessages), threadId);
+});
+
 async function installStubCommand(input: {
   baseUrl: string;
   root: string;
@@ -585,6 +621,18 @@ async function runHostedLocalCodexStubThreadStart(
   child: ReturnType<typeof spawn>,
   threadStartParams: Record<string, unknown>,
 ): Promise<Record<string, unknown>[]> {
+  return await runHostedLocalCodexStubThreadRequest(
+    child,
+    "thread/start",
+    threadStartParams,
+  );
+}
+
+async function runHostedLocalCodexStubThreadRequest(
+  child: ReturnType<typeof spawn>,
+  method: "thread/start" | "thread/resume",
+  params: Record<string, unknown>,
+): Promise<Record<string, unknown>[]> {
   const childStdin = child.stdin;
   const childStdout = child.stdout;
   const childStderr = child.stderr;
@@ -598,7 +646,7 @@ async function runHostedLocalCodexStubThreadStart(
 
   const completed = new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
-      reject(new Error(`Timed out waiting for hosted-local Codex stub thread/start. stderr: ${stderr}`));
+      reject(new Error(`Timed out waiting for hosted-local Codex stub ${method}. stderr: ${stderr}`));
     }, 5_000);
     let resolved = false;
 
@@ -619,7 +667,7 @@ async function runHostedLocalCodexStubThreadStart(
     child.once("exit", (code, signal) => {
       if (!resolved) {
         finish(new Error(
-          `Hosted-local Codex stub exited before thread/start response: ${code ?? signal}. stderr: ${stderr}`,
+          `Hosted-local Codex stub exited before ${method} response: ${code ?? signal}. stderr: ${stderr}`,
         ));
       }
     });
@@ -649,8 +697,8 @@ async function runHostedLocalCodexStubThreadStart(
     childStdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
     childStdin.write(`${JSON.stringify({
       id: 2,
-      method: "thread/start",
-      params: threadStartParams,
+      method,
+      params,
     })}\n`);
     await completed;
     return messages;
@@ -721,10 +769,21 @@ function readRpcErrorMessage(
   messages: readonly Record<string, unknown>[],
   id: number,
 ): string {
+  const errorMessage = readRpcErrorMessageOrNull(messages, id);
+  if (typeof errorMessage !== "string") {
+    throw new Error(`Expected hosted-local Codex stub RPC error for id ${id}.`);
+  }
+  return errorMessage;
+}
+
+function readRpcErrorMessageOrNull(
+  messages: readonly Record<string, unknown>[],
+  id: number,
+): string | null {
   const message = messages.find((candidate) => candidate.id === id);
   const error = isRecord(message?.error) ? message.error : null;
   if (typeof error?.message !== "string") {
-    throw new Error(`Expected hosted-local Codex stub RPC error for id ${id}.`);
+    return null;
   }
   return error.message;
 }

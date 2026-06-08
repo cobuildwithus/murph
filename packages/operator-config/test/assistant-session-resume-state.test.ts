@@ -77,7 +77,8 @@ describe('assistant session resume state normalization', () => {
     const session = parseAssistantSessionRecord(
       createPersistedSessionRecord({
         resumeState: {
-          assistantContractFingerprint: ' contract-fingerprint-v1 ',
+          assistantContractFingerprint:
+            ' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ',
           providerSessionId,
           resumeRouteId: 'route-new',
         },
@@ -85,7 +86,8 @@ describe('assistant session resume state normalization', () => {
     )
 
     expect(session.resumeState).toEqual({
-      assistantContractFingerprint: 'contract-fingerprint-v1',
+      assistantContractFingerprint:
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       routeFingerprint: 'route-new',
       threadId: providerSessionId,
     })
@@ -169,7 +171,8 @@ describe('assistant session resume state normalization', () => {
       conversationId: 'session_123',
       codexTarget: target,
       codexResume: {
-        assistantContractFingerprint: 'contract-fingerprint-v2',
+        assistantContractFingerprint:
+          'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
         rolloutRelativePath: codexRolloutRelativePath,
         routeFingerprint: 'route-v2',
         threadId: providerSessionId,
@@ -179,7 +182,8 @@ describe('assistant session resume state normalization', () => {
     expect(session.conversationId).toBe('session_123')
     expect(session.sessionId).toBe('session_123')
     expect(session.codexResume).toEqual({
-      assistantContractFingerprint: 'contract-fingerprint-v2',
+      assistantContractFingerprint:
+        'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       rolloutRelativePath: codexRolloutRelativePath,
       routeFingerprint: 'route-v2',
       threadId: providerSessionId,

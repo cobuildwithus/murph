@@ -4,10 +4,11 @@ import { normalizeNullableString } from './shared.js'
 
 const codexRolloutRelativePathPattern =
   /^sessions\/(\d{4})\/(\d{2})\/(\d{2})\/rollout-(\d{4})-(\d{2})-(\d{2})T[^/]+-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.jsonl$/u
+const assistantContractFingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/u)
 
 export const codexResumeStateSchema = z
   .object({
-    assistantContractFingerprint: z.string().min(1).optional(),
+    assistantContractFingerprint: assistantContractFingerprintSchema.optional(),
     rolloutRelativePath: z.string().min(1).nullable().optional(),
     routeFingerprint: z.string().min(1),
     threadId: z.string().min(1),

@@ -2148,7 +2148,8 @@ describe("assistant turn finalizer seam", () => {
         persistUserPromptOnFailure: false,
       }),
       providerResult: createProviderResult({
-        assistantContractFingerprint: "contract-finalizer-test",
+        assistantContractFingerprint:
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         providerOptions: createProviderOptions({
           model: "gpt-5-mini",
         }),
@@ -2198,7 +2199,8 @@ describe("assistant turn finalizer seam", () => {
           model: "gpt-5-mini",
         }),
         resumeState: expect.objectContaining({
-          assistantContractFingerprint: "contract-finalizer-test",
+          assistantContractFingerprint:
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           routeFingerprint: "route-backup",
           threadId: "provider-session-existing",
         }),
@@ -2208,7 +2210,7 @@ describe("assistant turn finalizer seam", () => {
     );
     expect(saved.resumeState?.routeFingerprint).toBe("route-backup");
     expect(saved.resumeState?.assistantContractFingerprint).toBe(
-      "contract-finalizer-test"
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     );
   });
 
@@ -2727,7 +2729,8 @@ function createProviderResult(input?: {
   };
   return {
     assistantContractFingerprint:
-      input?.assistantContractFingerprint ?? "contract-test",
+      input?.assistantContractFingerprint ??
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     attemptCount: input?.attemptCount ?? 1,
     provider: "codex-cli",
     codexContinuation: {

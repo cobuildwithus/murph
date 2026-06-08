@@ -253,7 +253,7 @@ function emitCodexPlanTraceEvent(input: {
         routePlanningAssistantContextSnapshotElapsedMs:
           input.routePlanningDiagnostics.assistantContextSnapshotElapsedMs,
         routePlanningAnyBootstrapContextPrepared:
-          input.routePlanningDiagnostics.shouldPrepareAnyBootstrapContext,
+          input.routePlanningDiagnostics.shouldPrepareBootstrapContext,
         routePlanningBootstrapContextPrepared:
           input.routePlanningDiagnostics.shouldPrepareBootstrapContext,
         routePlanningFreshThreadFallbackPrepared: false,
