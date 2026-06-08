@@ -281,6 +281,45 @@ describe('assistant protocol index planning', () => {
     expect(plan.assistantContractFingerprint).toEqual(expect.any(String))
   })
 
+  it('keeps the assistant contract fingerprint stable across repeated identical plans', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const route = createRoute()
+    const input = {
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    } satisfies Parameters<typeof resolveAssistantRouteTurnPlan>[0]
+
+    const first = await resolveAssistantRouteTurnPlan(input)
+    const second = await resolveAssistantRouteTurnPlan(input)
+
+    expect(second.assistantContractFingerprint).toBe(
+      first.assistantContractFingerprint,
+    )
+    expect(first.assistantContractFingerprint).toBe(
+      buildAssistantCodexContractFingerprint({
+        developerInstructions: first.developerInstructions,
+        dynamicTools: MURPH_DYNAMIC_TOOLS,
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+      }),
+    )
+  })
+
   it('starts a fresh thread when stable developer instructions change', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValueOnce('old bootstrap')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
