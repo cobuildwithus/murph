@@ -73,6 +73,8 @@ const HOSTED_USER_RUNTIME_POST_DEMAND_WAIT_CONTINUE_AS_NEW_PATCH =
   "hosted-user-runtime-post-demand-wait-continue-as-new-v1";
 const HOSTED_USER_RUNTIME_DIRECT_MAILBOX_PROCESSING_PATCH =
   "hosted-user-runtime-direct-mailbox-processing-v1";
+const HOSTED_USER_RUNTIME_DROP_ENSURE_PROCESSING_SOURCE_PATCH =
+  "hosted-user-runtime-drop-ensure-processing-source-v1";
 const LEGACY_DEVICE_SYNC_RECOVERY_SOURCE = "device_sync_recovery";
 const HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT = 3;
 
@@ -189,6 +191,8 @@ export async function hostedUserRuntimeWorkflow(
       patched(HOSTED_USER_RUNTIME_POST_DEMAND_WAIT_CONTINUE_AS_NEW_PATCH),
     useDirectMailboxProcessingPatch: () =>
       patched(HOSTED_USER_RUNTIME_DIRECT_MAILBOX_PROCESSING_PATCH),
+    useDropEnsureProcessingSourcePatch: () =>
+      patched(HOSTED_USER_RUNTIME_DROP_ENSURE_PROCESSING_SOURCE_PATCH),
     useSignalOnlyWaitForNonRetryableFailure: () =>
       patched(HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH),
     uuid: uuid4,
@@ -239,6 +243,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
   useUnreadDemandBeforeContinueAsNewPatch(): boolean;
   usePostDemandWaitContinueAsNewPatch(): boolean;
   useDirectMailboxProcessingPatch(): boolean;
+  useDropEnsureProcessingSourcePatch(): boolean;
   useSignalOnlyWaitForNonRetryableFailure(): boolean;
   uuid(): string;
   waitForSignalOrTimeout(
@@ -462,8 +467,11 @@ export function createHostedUserRuntimeWorkflowMachine(
     try {
       runtime.useEnsureRuntimeProcessingPatch();
       const forwardDemandSource =
-        runtime.useEnsureRuntimeProcessingSourcePatch()
-        || isLegacyDeviceSyncRecoverySource(intent.source);
+        !runtime.useDropEnsureProcessingSourcePatch()
+        && (
+          runtime.useEnsureRuntimeProcessingSourcePatch()
+          || isLegacyDeviceSyncRecoverySource(intent.source)
+        );
       execution = await runtime.ensureRuntimeProcessing({
         orchestrationAttemptId,
         reason: intent.reason,

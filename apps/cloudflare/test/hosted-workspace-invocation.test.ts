@@ -230,6 +230,7 @@ describe("runHostedWorkspaceInvocation", () => {
     if (!isWorkspaceInvocationJob(capturedJob)) {
       throw new Error("Expected package invocation input to include the job.");
     }
+    expect(capturedJob.request).not.toHaveProperty("source");
     expect(capturedJob.runtime?.forwardedEnv).toMatchObject({
       HOSTED_ASSISTANT_MODEL: "gpt-job",
       HOSTED_ASSISTANT_PROVIDER: "openai",

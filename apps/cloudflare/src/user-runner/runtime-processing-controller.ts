@@ -77,7 +77,6 @@ function toRuntimeInvocationInput(input: RuntimeProcessingInput): RuntimeInvocat
   return {
     orchestrationAttemptId: input.orchestrationAttemptId,
     reason: input.reason,
-    ...(input.source ? { source: input.source } : {}),
     userId: input.userId,
   };
 }
