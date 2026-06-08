@@ -135,6 +135,16 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/68adb210-af29-457d-cce1-1103ca2ea400/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "chair-squat")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/20def0d6-d5c5-432f-c414-d28e8ecd5400/public",
+      }),
+      expect.objectContaining({
+        step: "Chair tap",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ee04ec9d-9164-4f47-9de2-514488500a00/public",
+      }),
+    ]);
     expect(artifacts.details.sources).toEqual(catalog.sources);
     expect(artifacts.facets.facets.kinds).toEqual(["exercise", "stretch"]);
     expect(artifacts.facets.facets.equipment).toContain("none");

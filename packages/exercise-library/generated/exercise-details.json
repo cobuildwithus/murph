@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:e33dcb6be64e8f76f48d507a77c58081ed1c53a9c67b857ace08064708579cbf",
+  "catalogHash": "sha256:880ebcf4b1e6122fa33e362340ae4d240bfb7498c06cafc0832d92b1f6b4bfae",
   "generatedAt": null,
   "items": [
     {
@@ -30112,7 +30112,18 @@
         "Chair"
       ],
       "id": "EX002",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person standing in front of a sturdy chair with feet planted, chest tall, and arms forward.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/20def0d6-d5c5-432f-c414-d28e8ecd5400/public"
+        },
+        {
+          "alt": "Person reaching hips back to lightly tap the chair while keeping chest tall and feet flat.",
+          "step": "Chair tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ee04ec9d-9164-4f47-9de2-514488500a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
