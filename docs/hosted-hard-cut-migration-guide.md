@@ -50,11 +50,9 @@ must stop old Temporal workers, terminate old `hosted-user-runtime:*`
 workflows, deploy matching web, Temporal, and Cloudflare builds together, then
 reseed new histories.
 
-Cloudflare Durable Object state is also part of that reset boundary. Existing
-runner objects that still contain the removed `runner_bundle_slots` table must
-be wiped or recreated before the new worker starts serving those objects; the
-new schema assertion treats that table as incompatible legacy state rather than
-migrating it in place.
+Cloudflare Durable Object state is not canonical product truth. The new runner
+schema drops the retired `runner_bundle_slots` table during schema migration, so
+the cutover does not require a manual Durable Object wipe for that table.
 
 ## Rule For Future Work
 

@@ -53,8 +53,8 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
   }
 
   migrateLegacyRunnerState(sql);
+  dropRetiredRunnerStateTable(sql, "runner_bundle_slots");
   markRunnerStateSchemaVersion(sql);
-  assertRunnerStateTableAbsent(sql, "runner_bundle_slots");
   assertRunnerStateTableColumns(sql, "runner_meta", {
     requiredColumns: [
       "singleton",
@@ -210,16 +210,11 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
   }
 }
 
-function assertRunnerStateTableAbsent(
+function dropRetiredRunnerStateTable(
   sql: DurableObjectSqlStorageLike,
   tableName: string,
 ): void {
-  const rows = sql.exec<{ name: DurableObjectSqlValue }>(
-    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${tableName}'`,
-  ).toArray();
-  if (rows.length > 0) {
-    throw new Error(`runner_meta schema is unsupported; legacy ${tableName} table remains.`);
-  }
+  sql.exec(`DROP TABLE IF EXISTS ${tableName}`);
 }
 
 function ensureRunnerStateTableColumn(

@@ -196,9 +196,9 @@ the tolerant deploy sequence above. It deletes the old demand Activity and
 legacy direct demand signals, so operators must stop old Temporal workers,
 terminate old `hosted-user-runtime:*` workflows, deploy matching web,
 Temporal, and Cloudflare builds together, then reseed new histories. Existing
-Cloudflare Durable Object state that still contains the removed
-`runner_bundle_slots` table must be wiped or recreated as part of the cutover;
-the new runner schema assertion treats that table as incompatible legacy state.
+Cloudflare Durable Object state is not canonical product truth for this
+cutover; the new runner schema drops the retired `runner_bundle_slots` table
+during schema migration instead of requiring a manual Durable Object wipe.
 
 Hosted producers for exact user-visible events append one `HostedMailboxItem` in
 the same transaction as the product/control-plane mutation that made work

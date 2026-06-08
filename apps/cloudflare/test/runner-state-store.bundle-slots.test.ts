@@ -197,7 +197,7 @@ function runnerBundleSlotsTableExists(db: DatabaseSync): boolean {
 }
 
 describe("RunnerStateStore schema guard", () => {
-  it("fails closed when the legacy split runner bundle schema is still present", () => {
+  it("drops the retired split runner bundle table during schema migration", async () => {
     const setupLegacyBundleSchema = (database: DatabaseSync) => {
       database.exec(`
         DROP TABLE IF EXISTS runner_meta;
@@ -223,9 +223,9 @@ describe("RunnerStateStore schema guard", () => {
 
     expect(readRunnerMetaColumns(db)).not.toContain("bundle_ref_json");
     expect(runnerBundleSlotsTableExists(db)).toBe(true);
-    expect(() => createRunnerStateStoreHarness(setupLegacyBundleSchema)).toThrow(
-      /runner_meta schema is unsupported; legacy runner_bundle_slots table remains/u,
-    );
+    const store = new RunnerStateStore(createDurableObjectState(db));
+    await store.bindUser("user-retired-bundle-slots");
+    expect(runnerBundleSlotsTableExists(db)).toBe(false);
   });
 
   it("creates the current write-fence schema without retired active-invocation columns", async () => {
