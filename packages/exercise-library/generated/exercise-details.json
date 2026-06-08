@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:f5d2f92ee31e55f635aba527c080e922754824c321dd31eb0d76b3ffcb239d17",
+  "catalogHash": "sha256:0cc08df6afe87b9ee15841b1dd8431cdfa296b7f65c6ae8052cf9b5d00b3e384",
   "generatedAt": null,
   "items": [
     {
@@ -36871,7 +36871,23 @@
         "Wall"
       ],
       "id": "EX167",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person holding the top of a wall push-up with hands on the wall and feet planted.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/18415a8b-f19e-46a3-70ea-398d10678500/public"
+        },
+        {
+          "alt": "Person bending the elbows and lowering the chest toward the wall during a wall push-up.",
+          "step": "Lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aac956f3-e656-43ce-b6cb-8f03ff21f700/public"
+        },
+        {
+          "alt": "Person pressing away from the wall to return to the top of a wall push-up.",
+          "step": "Press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3d0b1200-fb74-4f59-6b2e-28e0b33f4400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",

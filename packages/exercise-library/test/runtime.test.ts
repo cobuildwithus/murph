@@ -187,6 +187,20 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2576f54c-d229-4dd6-e72e-95650d976900/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "wall-push-up")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/18415a8b-f19e-46a3-70ea-398d10678500/public",
+      }),
+      expect.objectContaining({
+        step: "Lower",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aac956f3-e656-43ce-b6cb-8f03ff21f700/public",
+      }),
+      expect.objectContaining({
+        step: "Press",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3d0b1200-fb74-4f59-6b2e-28e0b33f4400/public",
+      }),
+    ]);
     expect(artifacts.details.items.find((item) => item.slug === "standing-calf-raise")?.images).toEqual([
       expect.objectContaining({
         step: "Setup",
