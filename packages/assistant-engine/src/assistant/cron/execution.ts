@@ -9,6 +9,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { sendAssistantNotificationLocal } from '../../assistant-service.js'
+import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
 import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
@@ -63,7 +64,6 @@ export const ASSISTANT_CRON_ONE_SHOT_NOTIFICATION_EXPIRES_AFTER_MS =
   30 * 60 * 1000
 const ASSISTANT_CRON_ONE_SHOT_NOTIFICATION_EXPIRED_ERROR =
   'Assistant cron one-shot notification expired before delivery.'
-
 export interface ExpiredAssistantCronJobResult {
   job: AssistantCronJob
   run: AssistantCronRunRecord
@@ -401,6 +401,7 @@ export async function executeClaimedAssistantCronJob(input: {
         identityId: claimedJob.target.identityId,
         onTraceEvent: input.onTraceEvent,
         participantId: claimedJob.target.participantId,
+        responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
         threadId: claimedJob.target.threadId,
         deliveryTarget: claimedJob.target.deliveryTarget,
         operatorAuthority: 'direct-operator',
@@ -587,6 +588,16 @@ export async function executeClaimedAssistantCronJob(input: {
 
 function buildAssistantCronExecutionInstructions(job: AssistantCronJob): string {
   return job.prompt
+}
+
+function resolveAssistantCronNotificationResponsePolicy(
+  job: ResolvedAssistantCronJob,
+): { kind: 'require_send' } | null {
+  return job.kind === 'canonical' &&
+    job.source.kind === 'automation' &&
+    job.source.tags.includes(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    ? { kind: 'require_send' }
+    : null
 }
 
 function finalizeAssistantCronJobAfterRun(input: {

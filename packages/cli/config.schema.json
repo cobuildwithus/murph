@@ -1119,15 +1119,62 @@
                           "minLength": 1,
                           "description": "Automation instructions to run on the schedule."
                         },
+                        "triggerKind": {
+                          "description": "Automation trigger discriminator.",
+                          "type": "string",
+                          "enum": [
+                            "at",
+                            "every",
+                            "cron",
+                            "dailyLocal",
+                            "deviceActivity"
+                          ]
+                        },
+                        "triggerAt": {
+                          "description": "Required timestamp when --trigger-kind=at.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "triggerEveryMs": {
+                          "description": "Required positive millisecond interval when --trigger-kind=every.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "triggerCron": {
+                          "description": "Required cron expression when --trigger-kind=cron.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "triggerLocalTime": {
+                          "description": "Required HH:MM local time when --trigger-kind=dailyLocal.",
+                          "type": "string",
+                          "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
+                        },
+                        "deviceSource": {
+                          "description": "Optional device activity source filter.",
+                          "type": "string",
+                          "enum": [
+                            "whoop",
+                            "whoop_v2"
+                          ]
+                        },
+                        "activityKind": {
+                          "description": "Optional device activity kind filter.",
+                          "type": "string",
+                          "enum": [
+                            "walk"
+                          ]
+                        },
                         "scheduleKind": {
+                          "description": "Legacy alias for time-based --trigger-kind values.",
                           "type": "string",
                           "enum": [
                             "at",
                             "every",
                             "cron",
                             "dailyLocal"
-                          ],
-                          "description": "Schedule discriminator."
+                          ]
                         },
                         "scheduleAt": {
                           "description": "Required timestamp when --schedule-kind=at.",
