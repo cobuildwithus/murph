@@ -73,6 +73,8 @@ const HOSTED_USER_RUNTIME_POST_DEMAND_WAIT_CONTINUE_AS_NEW_PATCH =
   "hosted-user-runtime-post-demand-wait-continue-as-new-v1";
 const HOSTED_USER_RUNTIME_DIRECT_MAILBOX_PROCESSING_PATCH =
   "hosted-user-runtime-direct-mailbox-processing-v1";
+const HOSTED_USER_RUNTIME_DIRECT_ANY_LANE_MAILBOX_PROCESSING_PATCH =
+  "hosted-user-runtime-direct-any-lane-mailbox-processing-v1";
 const HOSTED_USER_RUNTIME_DROP_ENSURE_PROCESSING_SOURCE_PATCH =
   "hosted-user-runtime-drop-ensure-processing-source-v1";
 const LEGACY_DEVICE_SYNC_RECOVERY_SOURCE = "device_sync_recovery";
@@ -191,6 +193,8 @@ export async function hostedUserRuntimeWorkflow(
       patched(HOSTED_USER_RUNTIME_POST_DEMAND_WAIT_CONTINUE_AS_NEW_PATCH),
     useDirectMailboxProcessingPatch: () =>
       patched(HOSTED_USER_RUNTIME_DIRECT_MAILBOX_PROCESSING_PATCH),
+    useDirectAnyLaneMailboxProcessingPatch: () =>
+      patched(HOSTED_USER_RUNTIME_DIRECT_ANY_LANE_MAILBOX_PROCESSING_PATCH),
     useDropEnsureProcessingSourcePatch: () =>
       patched(HOSTED_USER_RUNTIME_DROP_ENSURE_PROCESSING_SOURCE_PATCH),
     useSignalOnlyWaitForNonRetryableFailure: () =>
@@ -243,6 +247,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
   useUnreadDemandBeforeContinueAsNewPatch(): boolean;
   usePostDemandWaitContinueAsNewPatch(): boolean;
   useDirectMailboxProcessingPatch(): boolean;
+  useDirectAnyLaneMailboxProcessingPatch(): boolean;
   useDropEnsureProcessingSourcePatch(): boolean;
   useSignalOnlyWaitForNonRetryableFailure(): boolean;
   uuid(): string;
@@ -586,9 +591,13 @@ export function createHostedUserRuntimeWorkflowMachine(
       completedIterations += 1;
 
       if (
-        state.latestMailboxPointer?.lane === "conversation"
+        state.latestMailboxPointer !== null
         && latestMailboxSignalDemandVersion === demandSignalVersion
         && runtime.useDirectMailboxProcessingPatch()
+        && canDirectProcessFreshMailboxPointer({
+          pointer: state.latestMailboxPointer,
+          runtime,
+        })
       ) {
         latestMailboxSignalDemandVersion = null;
         lastDemandSignalVersionRead = demandSignalVersion;
@@ -1083,6 +1092,24 @@ function recordDirectMailboxRunSummary(state: HostedRuntimeWorkflowState): void 
   state.lastDemandNextWakeAt = null;
   state.lastDemandSource = "mailbox_backlog";
   state.lastMailboxLagLaneCount = 0;
+}
+
+function canDirectProcessFreshMailboxPointer(input: {
+  pointer: NonNullable<HostedRuntimeWorkflowState["latestMailboxPointer"]>;
+  runtime: HostedUserRuntimeWorkflowRuntime;
+}): boolean {
+  if (input.pointer.lane === "conversation") {
+    return true;
+  }
+
+  if (!input.runtime.useDirectAnyLaneMailboxProcessingPatch()) {
+    return false;
+  }
+
+  // Compatibility only: old source:"manual" system mailbox signals were
+  // emitted before manual runtime-control append became AI-gated, so keep them
+  // on the demand-read path.
+  return input.pointer.source !== "manual";
 }
 
 function clearSatisfiedFlags(

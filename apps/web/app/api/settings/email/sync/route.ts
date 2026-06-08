@@ -1,6 +1,6 @@
 import { getPrisma } from "@/src/lib/prisma";
 import {
-  signalHostedManualRunRuntime,
+  signalHostedMailboxAppendRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -54,7 +54,7 @@ export const POST = withJsonError(async (request: Request) => {
   const replyAlias = await createHostedMemberReplyAliasRoute({
     memberId: auth.member.id,
   });
-  const channelsUpdated = await prisma.$transaction(async (tx) => {
+  const channelSyncDispatch = await prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, auth.member.id);
     const currentAuthorization = await readHostedMemberEmailAuthorization({
       memberId: auth.member.id,
@@ -91,42 +91,47 @@ export const POST = withJsonError(async (request: Request) => {
     }
 
     if (emailAuthorizationMatches) {
-      return false;
+      return null;
     }
 
-    await enqueueHostedMemberChannelsUpdatedTx({
+    return enqueueHostedMemberChannelsUpdatedTx({
       emailLinked: true,
       memberId: auth.member.id,
       occurredAt,
       prisma: tx,
       sourceType: "settings.email.sync",
     });
-    return true;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   await sendSettingsEmailSyncWelcomeEmailBestEffort({
     memberId: auth.member.id,
     prisma,
   });
-  if (channelsUpdated) {
-    await signalHostedManualRunBestEffort({
-      userId: auth.member.id,
+  if (channelSyncDispatch) {
+    await signalHostedMailboxAppendBestEffort({
+      expectedUserId: auth.member.id,
+      mailboxItemId: channelSyncDispatch.mailboxItemId,
+      source: "settings.email.sync",
     });
   }
 
   return jsonOk({
     emailAddress: verifiedEmail.address,
     ok: true,
-    runTriggered: channelsUpdated,
+    runTriggered: channelSyncDispatch !== null,
     verifiedAt,
   });
 });
 
-async function signalHostedManualRunBestEffort(input: {
-  userId: string;
+async function signalHostedMailboxAppendBestEffort(input: {
+  expectedUserId: string;
+  mailboxItemId: string;
+  source: string;
 }): Promise<void> {
   try {
-    await signalHostedManualRunRuntime({
-      userId: input.userId,
+    await signalHostedMailboxAppendRuntime({
+      expectedUserId: input.expectedUserId,
+      mailboxItemId: input.mailboxItemId,
+      source: input.source,
     });
   } catch {
     // Settings sync should not fail if the best-effort runtime wake is unavailable.

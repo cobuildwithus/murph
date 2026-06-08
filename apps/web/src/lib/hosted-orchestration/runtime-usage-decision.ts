@@ -13,6 +13,7 @@ export type HostedRuntimeUsageGateCheck =
 export async function resolveHostedRuntimeAiUsageDemandGate(input: {
   mode?: "mutating" | "read_only";
   now?: Date | string;
+  prisma?: Parameters<typeof resolveHostedAiUsageGate>[0]["prisma"];
   userId: string;
 }): Promise<HostedRuntimeUsageGateCheck> {
   const now = normalizeHostedRuntimeUsageDecisionDate(input.now);
@@ -24,6 +25,7 @@ export async function resolveHostedRuntimeAiUsageDemandGate(input: {
     const decision = await readGate({
       memberId: input.userId,
       now,
+      prisma: input.prisma,
     });
 
     if (!decision.allowed) {
