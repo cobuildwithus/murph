@@ -173,6 +173,20 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5360888f-5a0f-4535-e1c9-8a9d5d32d300/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "incline-push-up")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c3da8032-4832-459f-1613-88104dd11400/public",
+      }),
+      expect.objectContaining({
+        step: "Lower",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/233a1260-824e-4ef8-7922-72ae0c982600/public",
+      }),
+      expect.objectContaining({
+        step: "Press",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2576f54c-d229-4dd6-e72e-95650d976900/public",
+      }),
+    ]);
     expect(artifacts.details.sources).toEqual(catalog.sources);
     expect(artifacts.facets.facets.kinds).toEqual(["exercise", "stretch"]);
     expect(artifacts.facets.facets.equipment).toContain("none");

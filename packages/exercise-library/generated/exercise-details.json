@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:2abb4e7411c498359203682e749a4e97845ecd1fadf34b3237278c484e29c604",
+  "catalogHash": "sha256:4e3d658bc1a3b06ce2962a51777ce5b07f08f9935407cb74eba741ee51005148",
   "generatedAt": null,
   "items": [
     {
@@ -36940,7 +36940,23 @@
         "Bench or couch"
       ],
       "id": "EX169",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person holding the top of an incline push-up with hands on an elevated surface and feet planted.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c3da8032-4832-459f-1613-88104dd11400/public"
+        },
+        {
+          "alt": "Person lowering the chest toward an elevated surface during an incline push-up.",
+          "step": "Lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/233a1260-824e-4ef8-7922-72ae0c982600/public"
+        },
+        {
+          "alt": "Person pressing away from an elevated surface to return to the top of an incline push-up.",
+          "step": "Press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2576f54c-d229-4dd6-e72e-95650d976900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
