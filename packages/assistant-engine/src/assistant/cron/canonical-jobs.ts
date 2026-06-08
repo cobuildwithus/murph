@@ -159,6 +159,7 @@ export function projectCanonicalAssistantCronJob(input: {
       ? input.source.route
       : {
           channel: null,
+          deliverySource: null,
           deliveryTarget: null,
           identityId: null,
           participantId: null,
@@ -168,6 +169,7 @@ export function projectCanonicalAssistantCronJob(input: {
     sessionId: continuitySessionId,
     alias: continuityAlias,
     channel: targetRoute.channel,
+    deliverySource: targetRoute.deliverySource,
     identityId: targetRoute.identityId,
     participantId: targetRoute.participantId,
     threadId: targetRoute.threadId,
@@ -282,6 +284,7 @@ export function buildCanonicalAutomationRoute(
 ): CanonicalAutomationAssistantCronJobRecord['route'] {
   return {
     channel: target.channel ?? '',
+    deliverySource: target.deliverySource,
     deliveryTarget: target.deliveryTarget,
     identityId: target.identityId,
     participantId: target.participantId,

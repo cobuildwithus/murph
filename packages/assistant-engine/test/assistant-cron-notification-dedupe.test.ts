@@ -21,6 +21,7 @@ describe('buildAssistantCronNotificationDedupeToken', () => {
     target: {
       alias: null,
       channel: 'telegram',
+      deliverySource: null,
       sessionId: null,
       identityId: null,
       participantId: 'user_123',

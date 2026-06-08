@@ -11,6 +11,7 @@ import {
 } from "../src/markdown-documents.ts";
 import {
   buildAutomationMarkdownPreview,
+  deleteAutomation,
   listAutomations,
   readAutomation,
   readAutomationMarkdown,
@@ -211,6 +212,42 @@ describe("markdown document primitives", () => {
     expect(parsed.attributes.automationId).toBe(result.record.automationId);
     expect(parsed.attributes.slug).toBe(result.record.slug);
     expect(parsed.body).toContain(result.record.instructions);
+  });
+
+  it("deletes automation markdown through the canonical registry path", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const created = await upsertAutomation({
+      vaultRoot,
+      ...scaffoldAutomationPayload(),
+    });
+
+    const deleted = await deleteAutomation({
+      automationId: created.record.automationId,
+      vaultRoot,
+    });
+
+    expect(deleted).toEqual({
+      automationId: created.record.automationId,
+      deleted: true,
+      relativePath: created.record.relativePath,
+    });
+    await expect(
+      fs.readFile(path.join(vaultRoot, created.record.relativePath), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(
+      readAutomation({
+        automationId: created.record.automationId,
+        vaultRoot,
+      }),
+    ).rejects.toThrow("Automation was not found.");
+    await expect(
+      listAutomations({
+        vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      count: 0,
+      items: [],
+    });
   });
 
   it("preserves existing automation tags when an upsert omits tags", async () => {

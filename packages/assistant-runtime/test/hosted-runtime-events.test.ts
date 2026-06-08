@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
@@ -96,6 +96,33 @@ function expectHostedTurnEnvironment(input: {
     }),
   };
 }
+
+function createQueuedNotificationResult(intentId = "intent_notification") {
+  return {
+    decision: {
+      kind: "send_message",
+      privateSummary: "Notification accepted for delivery.",
+      text: "Welcome to Murph.",
+    },
+    deliveryOutcome: {
+      error: null,
+      intentId,
+      kind: "queued",
+      media: [],
+      session: {
+        sessionId: "session_notification",
+      },
+    },
+    response: "Welcome to Murph.",
+    session: {
+      sessionId: "session_notification",
+    },
+  };
+}
+
+beforeEach(() => {
+  mocks.sendAssistantNotification.mockResolvedValue(createQueuedNotificationResult());
+});
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -1188,6 +1215,7 @@ describe("executeHostedMailboxEvent", () => {
         },
         updates: [],
       });
+      return createQueuedNotificationResult();
     });
 
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
@@ -1285,6 +1313,7 @@ describe("executeHostedMailboxEvent", () => {
       instructions: expect.stringContaining("vault-cli assistant onboarding status"),
       route: {
         channel: "linq",
+        deliverySource: null,
         deliveryTarget: "thread_123",
         identityId: "hid_linq_identity_123",
         participantId: null,
@@ -1595,6 +1624,7 @@ describe("executeHostedMailboxEvent", () => {
       expect.objectContaining({
         route: {
           channel: "telegram",
+          deliverySource: null,
           deliveryTarget: null,
           identityId: null,
           participantId: null,
@@ -1603,6 +1633,51 @@ describe("executeHostedMailboxEvent", () => {
         slug: "finish-onboarding-followup",
       }),
     );
+  });
+
+  it("does not seed onboarding follow-up when signup welcome delivery is skipped", async () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_notification_welcome_skip_result",
+      memberId: "member_123",
+      notification: {
+        deliveryIdempotencyKey: "signup-welcome:member_123",
+        instructions: "Send exactly the signup welcome.",
+        route: {
+          actorId: "hid_telegram_actor_123",
+          channel: "telegram",
+          delivery: {
+            kind: "thread",
+            target: "telegram_thread_123",
+          },
+          identityId: null,
+          threadId: null,
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+    mocks.sendAssistantNotification.mockResolvedValueOnce({
+      decision: {
+        kind: "skip",
+        reason: "First contact was already accepted.",
+      },
+      deliveryOutcome: null,
+      response: null,
+      session: {
+        sessionId: "session_notification_skip",
+      },
+    });
+
+    await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledOnce();
+    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
   });
 
   it("keeps signup welcome delivery successful when onboarding follow-up seeding fails", async () => {
@@ -1908,7 +1983,22 @@ describe("executeHostedMailboxEvent", () => {
       turnTrigger: "automation-cron",
       vault: "/tmp/assistant-runtime-events",
     });
-    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: {
+          channel: "linq",
+          deliverySource: {
+            fromPhoneNumber: "+15550001111",
+            kind: "linq",
+          },
+          deliveryTarget: null,
+          identityId: "hid_linq_identity_participant",
+          participantId: "+15550002222",
+          threadId: null,
+        },
+        slug: "finish-onboarding-followup",
+      }),
+    );
   });
 
   it("rejects direct conversation wakes so mailbox staging owns assistant input", async () => {

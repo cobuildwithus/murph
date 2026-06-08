@@ -1,4 +1,4 @@
-import { upsertAutomation } from '@murphai/core'
+import { deleteAutomation, upsertAutomation } from '@murphai/core'
 import {
   formatTimeZoneDateTimeParts,
   type AutomationRoute,
@@ -42,6 +42,7 @@ import {
   type AssistantCronTargetInput,
 } from './store.js'
 import {
+  assistantCronTargetAudienceEquals,
   resolveAssistantCronTargetDefaults,
   validateAssistantCronDeliveryTarget,
 } from './targets.js'
@@ -199,7 +200,10 @@ export async function upsertAssistantCronAutomation(
   return withAssistantCronWriteLock(lockPaths, async () => {
     const existingAutomation = await showCanonicalAutomation(input.vault, input.slug)
     const existingStatus = existingAutomation?.status ?? null
-    if (existingStatus === 'archived' && input.status === undefined) {
+    if (
+      existingStatus === 'archived' &&
+      input.status === undefined
+    ) {
       return null
     }
 
@@ -216,6 +220,14 @@ export async function upsertAssistantCronAutomation(
     const target = validateAssistantCronDeliveryTarget(input.route)
     const localStore = await readAssistantCronStore(resolvedCreation.paths)
     assertAssistantCronJobNameIsAvailable(localStore, resolvedCreation.name)
+
+    if (
+      existingAutomation &&
+      existingStatus !== 'archived' &&
+      !assistantCronTargetAudienceEquals(existingAutomation.route, target)
+    ) {
+      return null
+    }
 
     const created = await upsertAutomation(
       buildCanonicalAutomationUpsertInput({
@@ -316,17 +328,8 @@ async function restoreAssistantCronAutomationAfterRuntimeStateFailure(input: {
     return
   }
 
-  await upsertAutomation({
+  await deleteAutomation({
     automationId: input.created.automationId,
-    continuityPolicy: input.created.continuityPolicy,
-    instructions: input.created.instructions,
-    route: input.created.route,
-    schedule: input.created.schedule,
-    slug: input.created.slug,
-    status: 'archived',
-    summary: input.created.summary ?? undefined,
-    tags: input.created.tags,
-    title: input.created.title,
     vaultRoot: input.vault,
   })
 }

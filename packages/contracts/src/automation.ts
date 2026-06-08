@@ -79,9 +79,19 @@ export const automationScheduleSchema = z.discriminatedUnion("kind", [
   automationScheduleDeviceActivitySchema,
 ]);
 
+const automationRouteDeliverySourceSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("linq"),
+      fromPhoneNumber: z.string().min(1),
+    })
+    .strict(),
+]);
+
 export const automationRouteSchema = z
   .object({
     channel: z.string().min(1),
+    deliverySource: automationRouteDeliverySourceSchema.nullable().default(null),
     deliveryTarget: z.string().min(1).nullable(),
     identityId: z.string().min(1).nullable(),
     participantId: z.string().min(1).nullable(),

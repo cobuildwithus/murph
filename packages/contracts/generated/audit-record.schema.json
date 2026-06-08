@@ -14,6 +14,7 @@
       "type": "string",
       "enum": [
         "allergy_upsert",
+        "automation_delete",
         "automation_upsert",
         "scheduled_log_upsert",
         "condition_upsert",

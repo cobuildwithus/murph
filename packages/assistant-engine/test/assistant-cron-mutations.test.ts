@@ -19,6 +19,7 @@ import type { AssistantCronStore } from '../src/assistant/cron/store.ts'
 import type { AssistantStatePaths } from '../src/assistant/store/paths.ts'
 
 const cronMutationMocks = vi.hoisted(() => ({
+  deleteAutomation: vi.fn(),
   executeScheduledLogOccurrence: vi.fn(),
   loadVault: vi.fn(),
   setScheduledLogStatus: vi.fn(),
@@ -26,6 +27,7 @@ const cronMutationMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@murphai/core', () => ({
+  deleteAutomation: cronMutationMocks.deleteAutomation,
   executeScheduledLogOccurrence: cronMutationMocks.executeScheduledLogOccurrence,
   loadVault: cronMutationMocks.loadVault,
   setScheduledLogStatus: cronMutationMocks.setScheduledLogStatus,
@@ -269,6 +271,7 @@ function createCronTarget(
   return {
     alias: null,
     channel: null,
+    deliverySource: null,
     deliveryTarget: null,
     identityId: null,
     participantId: null,

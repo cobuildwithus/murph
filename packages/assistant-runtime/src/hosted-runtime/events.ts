@@ -17,6 +17,7 @@ import {
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantCronAutomation,
   type AssistantExecutionContext,
+  type AssistantNotificationResult,
   type AssistantTurnEnvironment,
 } from "@murphai/assistant-engine";
 import type { AutomationRoute } from "@murphai/contracts";
@@ -599,7 +600,7 @@ export async function executeHostedAssistantNotificationWake(input: {
   ];
 
   try {
-    await sendAssistantNotification(
+    const notificationResult = await sendAssistantNotification(
       buildAssistantNotificationInput(
         input.wake,
         input.executionContext,
@@ -613,6 +614,7 @@ export async function executeHostedAssistantNotificationWake(input: {
       ),
     );
     await maybeSeedOnboardingFollowupAutomation({
+      notificationResult,
       redactedLogEntries,
       vaultRoot: input.vaultRoot,
       wake: input.wake,
@@ -655,11 +657,16 @@ export async function executeHostedAssistantNotificationWake(input: {
 }
 
 async function maybeSeedOnboardingFollowupAutomation(input: {
+  notificationResult: AssistantNotificationResult | undefined;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   vaultRoot: string;
   wake: HostedExecutionAssistantNotificationRequestedWake;
 }): Promise<void> {
   if (!isSignupWelcomeAssistantNotification(input.wake)) {
+    return;
+  }
+
+  if (!didAssistantNotificationAcceptDelivery(input.notificationResult)) {
     return;
   }
 
@@ -692,6 +699,13 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
   }
 }
 
+function didAssistantNotificationAcceptDelivery(
+  result: AssistantNotificationResult | undefined,
+): boolean {
+  const outcomeKind = result?.deliveryOutcome?.kind;
+  return outcomeKind === "sent" || outcomeKind === "queued";
+}
+
 function isSignupWelcomeAssistantNotification(
   wake: HostedExecutionAssistantNotificationRequestedWake,
 ): boolean {
@@ -706,21 +720,19 @@ function buildOnboardingFollowupAutomationRoute(
 ): AutomationRoute | null {
   const delivery = route.delivery;
   if (route.channel === "linq") {
-    if (delivery.kind === "participant") {
-      return null;
-    }
-
     return {
       channel: route.channel,
-      deliveryTarget: delivery.target,
+      deliverySource: delivery.source ?? null,
+      deliveryTarget: delivery.kind === "participant" ? null : delivery.target,
       identityId: route.identityId,
-      participantId: null,
+      participantId: delivery.kind === "participant" ? delivery.target : null,
       threadId: null,
     };
   }
 
   return {
     channel: route.channel,
+    deliverySource: delivery.source ?? null,
     deliveryTarget: delivery.kind === "explicit" ? delivery.target : null,
     identityId: route.identityId,
     participantId: delivery.kind === "participant" ? delivery.target : null,

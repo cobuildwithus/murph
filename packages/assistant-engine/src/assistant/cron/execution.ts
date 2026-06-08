@@ -403,6 +403,11 @@ export async function executeClaimedAssistantCronJob(input: {
         participantId: claimedJob.target.participantId,
         responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
         threadId: claimedJob.target.threadId,
+        deliveryKind:
+          claimedJob.target.participantId ? 'participant' :
+            claimedJob.target.threadId ? 'thread' :
+              undefined,
+        deliverySource: claimedJob.target.deliverySource,
         deliveryTarget: claimedJob.target.deliveryTarget,
         operatorAuthority: 'direct-operator',
         workingDirectory: input.vault,

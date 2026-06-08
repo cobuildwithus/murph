@@ -40,6 +40,7 @@ export async function resolveAssistantCronTargetDefaults<
   return {
     ...input,
     channel: resolvedRoute.channel ?? undefined,
+    deliverySource: input.deliverySource ?? undefined,
     identityId: resolvedRoute.identityId ?? undefined,
     participantId: resolvedRoute.participantId ?? undefined,
     threadId: resolvedRoute.threadId ?? undefined,
@@ -83,11 +84,15 @@ export function validateAssistantCronDeliveryTarget(
   const participantId = normalizedRoute.participantId
   const threadId = normalizedRoute.threadId
   const deliveryTarget = normalizedRoute.deliveryTarget
+  const deliverySource = input.deliverySource ?? null
   if (channel === 'linq') {
-    if (!deliveryTarget) {
+    if (
+      !deliveryTarget &&
+      !(participantId && deliverySource?.kind === 'linq')
+    ) {
       throw new VaultCliError(
         'ASSISTANT_CRON_DELIVERY_REQUIRED',
-        'iMessage assistant cron jobs require an explicit delivery target. Pass --deliveryTarget.',
+        'iMessage assistant cron jobs require an explicit delivery target or a participant target with a Linq delivery source.',
       )
     }
 
@@ -114,6 +119,7 @@ export function validateAssistantCronDeliveryTarget(
   return buildAssistantCronTarget({
     ...input,
     channel,
+    deliverySource,
     identityId,
     participantId,
     threadId,
@@ -140,18 +146,44 @@ export function buildAssistantCronTargetSnapshot(
 export function assistantCronTargetAudienceEquals(
   left: Pick<
     AssistantCronTarget,
-    'channel' | 'deliveryTarget' | 'identityId' | 'participantId' | 'threadId'
+    | 'channel'
+    | 'deliverySource'
+    | 'deliveryTarget'
+    | 'identityId'
+    | 'participantId'
+    | 'threadId'
   >,
   right: Pick<
     AssistantCronTarget,
-    'channel' | 'deliveryTarget' | 'identityId' | 'participantId' | 'threadId'
+    | 'channel'
+    | 'deliverySource'
+    | 'deliveryTarget'
+    | 'identityId'
+    | 'participantId'
+    | 'threadId'
   >,
 ): boolean {
   return (
     left.channel === right.channel &&
+    assistantCronDeliverySourceEquals(
+      left.deliverySource,
+      right.deliverySource,
+    ) &&
     left.identityId === right.identityId &&
     left.participantId === right.participantId &&
     left.threadId === right.threadId &&
     left.deliveryTarget === right.deliveryTarget
   )
+}
+
+function assistantCronDeliverySourceEquals(
+  left: AssistantCronTarget['deliverySource'],
+  right: AssistantCronTarget['deliverySource'],
+): boolean {
+  if (left === null || right === null) {
+    return left === right
+  }
+
+  return left.kind === right.kind &&
+    left.fromPhoneNumber === right.fromPhoneNumber
 }

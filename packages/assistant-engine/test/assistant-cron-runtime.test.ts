@@ -19,6 +19,7 @@ type MockAutomationRecord = {
   instructions: string
   route: {
     channel: string
+    deliverySource: { kind: 'linq'; fromPhoneNumber: string } | null
     deliveryTarget: string | null
     identityId: string | null
     participantId: string | null
@@ -36,6 +37,7 @@ type MockAutomationRecord = {
 const cronMocks = vi.hoisted(() => ({
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   automationsByVault: new Map<string, MockAutomationRecord[]>(),
+  deleteAutomation: vi.fn(),
   executeScheduledLogOccurrence: vi.fn(),
   getAssistantChannelAdapter: vi.fn(),
   listCanonicalScheduledLogs: vi.fn(),
@@ -55,6 +57,7 @@ const cronMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@murphai/core', () => ({
+  deleteAutomation: cronMocks.deleteAutomation,
   executeScheduledLogOccurrence: cronMocks.executeScheduledLogOccurrence,
   loadVault: cronMocks.loadVault,
   setScheduledLogStatus: cronMocks.setScheduledLogStatus,
@@ -129,6 +132,7 @@ import {
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
 } from '../src/assistant/cron/runtime-state.ts'
+import * as assistantCronRuntimeState from '../src/assistant/cron/runtime-state.ts'
 import {
   readAssistantCronStore,
   writeAssistantCronStore,
@@ -310,6 +314,34 @@ beforeEach(() => {
         ) ?? null
       )
     })
+  cronMocks.deleteAutomation.mockReset().mockImplementation(
+    async (input: {
+      automationId?: string
+      slug?: string
+      vaultRoot: string
+    }) => {
+      const records = getVaultAutomationStore(input.vaultRoot)
+      const lookup = input.automationId ?? input.slug
+      if (!lookup) {
+        throw new Error('Automation lookup is required.')
+      }
+      const index = records.findIndex(
+        (record) => record.automationId === lookup || record.slug === lookup,
+      )
+      if (index === -1) {
+        throw new Error('Automation was not found.')
+      }
+      const [record] = records.splice(index, 1)
+      if (!record) {
+        throw new Error('Automation was not found.')
+      }
+      return {
+        automationId: record.automationId,
+        deleted: true,
+        relativePath: `bank/automations/${record.slug}.md`,
+      }
+    },
+  )
   cronMocks.upsertAutomation.mockReset().mockImplementation(
     async (input: {
       automationId?: string
@@ -465,6 +497,7 @@ describe('assistant cron runtime orchestration', () => {
       now: new Date('2026-04-08T15:00:00.000Z'),
       route: {
         channel: 'telegram',
+        deliverySource: null,
         deliveryTarget: 'room-1',
         identityId: null,
         participantId: null,
@@ -518,6 +551,7 @@ describe('assistant cron runtime orchestration', () => {
       now: new Date('2026-04-08T16:00:00.000Z'),
       route: {
         channel: 'telegram',
+        deliverySource: null,
         deliveryTarget: 'room-1',
         identityId: null,
         participantId: null,
@@ -541,6 +575,34 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(2)
     expect(getVaultAutomationStore(vaultRoot)).toHaveLength(1)
 
+    const retargeted = await upsertAssistantCronAutomation({
+      firstOccurrencePolicy: 'after-current-local-day',
+      instructions: 'Check setup progress in another chat.',
+      now: new Date('2026-04-08T16:30:00.000Z'),
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'room-2',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '13:30',
+      },
+      slug: 'finish-onboarding-followup',
+      title: 'Finish Murph onboarding follow-up',
+      vault: vaultRoot,
+    })
+
+    expect(retargeted).toBeNull()
+    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')?.route).toMatchObject({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+    })
+    expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(2)
+
     const automation = findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')
     if (!automation) {
       throw new Error('Expected onboarding follow-up automation to exist.')
@@ -553,6 +615,7 @@ describe('assistant cron runtime orchestration', () => {
       now: new Date('2026-04-08T17:00:00.000Z'),
       route: {
         channel: 'telegram',
+        deliverySource: null,
         deliveryTarget: 'room-1',
         identityId: null,
         participantId: null,
@@ -572,6 +635,98 @@ describe('assistant cron runtime orchestration', () => {
       'archived',
     )
     expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(2)
+  })
+
+  it('recovers onboarding automation seeds after a first runtime-state write failure', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-upsert-automation-write-failure-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+    const writeSpy = vi.spyOn(
+      assistantCronRuntimeState,
+      'writeAssistantCronCanonicalRuntimeStore',
+    )
+
+    try {
+      writeSpy.mockRejectedValueOnce(new Error('state store unavailable'))
+      await expect(
+        upsertAssistantCronAutomation({
+          firstOccurrencePolicy: 'after-current-local-day',
+          instructions: 'Check setup progress.',
+          now: new Date('2026-04-08T15:00:00.000Z'),
+          route: {
+            channel: 'telegram',
+            deliverySource: null,
+            deliveryTarget: 'room-1',
+            identityId: null,
+            participantId: null,
+            threadId: null,
+          },
+          schedule: {
+            kind: 'dailyLocal',
+            localTime: '13:30',
+          },
+          slug: 'finish-onboarding-followup',
+          summary: 'Continue setup.',
+          tags: ['assistant', 'onboarding'],
+          title: 'Finish Murph onboarding follow-up',
+          vault: vaultRoot,
+        }),
+      ).rejects.toThrow('state store unavailable')
+    } finally {
+      writeSpy.mockRestore()
+    }
+
+    expect(cronMocks.deleteAutomation).toHaveBeenCalledWith({
+      automationId: 'automation-1',
+      vaultRoot,
+    })
+    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')).toBeUndefined()
+
+    const recovered = await upsertAssistantCronAutomation({
+      firstOccurrencePolicy: 'after-current-local-day',
+      instructions: 'Check setup progress.',
+      now: new Date('2026-04-08T16:00:00.000Z'),
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'room-1',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '13:30',
+      },
+      slug: 'finish-onboarding-followup',
+      summary: 'Continue setup.',
+      tags: ['assistant', 'onboarding'],
+      title: 'Finish Murph onboarding follow-up',
+      vault: vaultRoot,
+    })
+    if (!recovered) {
+      throw new Error('Expected retry after incomplete seed to recover.')
+    }
+
+    expect(recovered.state.nextRunAt).toBe('2026-04-09T17:30:00.000Z')
+    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')).toMatchObject({
+      status: 'active',
+      tags: ['assistant', 'onboarding'],
+    })
+    await expect(
+      readAssistantCronCanonicalRuntimeStore(resolveAssistantStatePaths(vaultRoot)),
+    ).resolves.toMatchObject({
+      jobs: [
+        expect.objectContaining({
+          jobId: recovered.jobId,
+        }),
+      ],
+    })
   })
 
   it('lists mixed local and canonical jobs and computes status from both stores', async () => {
@@ -1533,6 +1688,7 @@ describe('assistant cron runtime orchestration', () => {
       instructions: 'Remind me to sleep.',
       route: {
         channel: 'linq',
+        deliverySource: null,
         deliveryTarget: null,
         identityId: null,
         participantId: 'participant-1',
@@ -1696,6 +1852,7 @@ describe('assistant cron runtime orchestration', () => {
       instructions: 'Remind me to sleep.',
       route: {
         channel: 'linq',
+        deliverySource: null,
         deliveryTarget: null,
         identityId: null,
         participantId: 'participant-1',
@@ -1798,6 +1955,7 @@ describe('assistant cron runtime orchestration', () => {
       instructions: 'Remind me to sleep.',
       route: {
         channel: 'linq',
+        deliverySource: null,
         deliveryTarget: null,
         identityId: null,
         participantId: 'participant-1',

@@ -23,6 +23,7 @@ import { VAULT_LAYOUT } from "./constants.ts";
 import { generateRecordId } from "./ids.ts";
 import { VaultError } from "./errors.ts";
 import {
+  deleteMarkdownRegistryDocument,
   loadMarkdownRegistryDocuments,
   readRegistryRecord,
   resolveMarkdownRegistryUpsertTarget,
@@ -105,6 +106,14 @@ export interface ReadAutomationInput {
   automationId?: string;
   slug?: string;
   vaultRoot: string;
+}
+
+export interface DeleteAutomationInput extends ReadAutomationInput {}
+
+export interface DeleteAutomationResult {
+  automationId: string;
+  deleted: true;
+  relativePath: string;
 }
 
 export interface ListAutomationInput {
@@ -245,10 +254,33 @@ function normalizeAutomationRoute(value: unknown): AutomationRoute {
 
   return {
     channel: normalizeAutomationRouteChannel(object.channel),
+    deliverySource: normalizeAutomationRouteDeliverySource(object.deliverySource),
     deliveryTarget: normalizeNullableRouteString(object.deliveryTarget),
     identityId: normalizeNullableRouteString(object.identityId),
     participantId: normalizeNullableRouteString(object.participantId),
     threadId: normalizeNullableRouteString(object.threadId),
+  };
+}
+
+function normalizeAutomationRouteDeliverySource(
+  value: unknown,
+): AutomationRoute["deliverySource"] {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const object = requireObject(value, "route.deliverySource");
+  const kind = requireString(object.kind, "route.deliverySource.kind");
+  if (kind !== "linq") {
+    throw new VaultError("VAULT_INVALID_INPUT", "route.deliverySource.kind must be linq.");
+  }
+
+  return {
+    fromPhoneNumber: requireString(
+      object.fromPhoneNumber,
+      "route.deliverySource.fromPhoneNumber",
+    ),
+    kind,
   };
 }
 
@@ -343,6 +375,7 @@ function buildAutomationScheduleFrontmatter(schedule: AutomationSchedule): Front
 function buildAutomationRouteFrontmatter(route: AutomationRoute): FrontmatterObject {
   return {
     channel: route.channel,
+    deliverySource: route.deliverySource,
     deliveryTarget: route.deliveryTarget,
     identityId: route.identityId,
     participantId: route.participantId,
@@ -480,6 +513,7 @@ export function scaffoldAutomationPayload(): AutomationScaffoldPayload {
     },
     route: {
       channel: "telegram",
+      deliverySource: null,
       deliveryTarget: null,
       identityId: null,
       participantId: null,
@@ -548,6 +582,33 @@ export async function upsertAutomation(
   input: UpsertAutomationInput,
 ): Promise<UpsertAutomationResult> {
   return withAutomationRegistryLock(input.vaultRoot, () => upsertAutomationWithLatestRegistry(input));
+}
+
+export async function deleteAutomation(
+  input: DeleteAutomationInput,
+): Promise<DeleteAutomationResult> {
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    const record = await readAutomation(input);
+
+    await deleteMarkdownRegistryDocument({
+      vaultRoot: input.vaultRoot,
+      operationType: "automation_delete",
+      summary: `Delete automation ${record.automationId}`,
+      relativePath: record.relativePath,
+      audit: {
+        action: "automation_delete",
+        commandName: "core.deleteAutomation",
+        summary: `Deleted automation ${record.automationId}.`,
+        targetIds: [record.automationId],
+      },
+    });
+
+    return {
+      automationId: record.automationId,
+      deleted: true,
+      relativePath: record.relativePath,
+    };
+  });
 }
 
 async function upsertAutomationWithLatestRegistry(

@@ -154,6 +154,36 @@
           "type": "string",
           "minLength": 1
         },
+        "deliverySource": {
+          "default": null,
+          "anyOf": [
+            {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "linq"
+                    },
+                    "fromPhoneNumber": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "fromPhoneNumber"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "deliveryTarget": {
           "anyOf": [
             {
@@ -201,6 +231,7 @@
       },
       "required": [
         "channel",
+        "deliverySource",
         "deliveryTarget",
         "identityId",
         "participantId",

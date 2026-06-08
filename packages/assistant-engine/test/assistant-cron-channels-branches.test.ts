@@ -81,6 +81,7 @@ vi.mock('@murphai/operator-config/linq-runtime', async (importOriginal) => {
 })
 
 vi.mock('@murphai/core', () => ({
+  deleteAutomation: vi.fn(),
   loadVault: cronMocks.loadVault,
   upsertAutomation: cronMocks.upsertAutomation,
 }))

@@ -179,6 +179,7 @@ test("automation scaffold payload uses the canonical default shape", () => {
     },
     route: {
       channel: "telegram",
+      deliverySource: null,
       deliveryTarget: null,
       identityId: null,
       participantId: null,

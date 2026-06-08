@@ -39,6 +39,7 @@ import {
   checkpointExperiment,
   copyRawArtifact,
   createExperiment,
+  deleteAutomation,
   deleteEvent,
   ensureJournalDay,
   importDocument,
@@ -4963,6 +4964,7 @@ test("importSamples stores aggregate skip reasons from v1 batch provenance", asy
 test("public core exports include the high-level canonical mutation ports", () => {
   assert.equal(typeof appendJournal, "function");
   assert.equal(typeof checkpointExperiment, "function");
+  assert.equal(typeof deleteAutomation, "function");
   assert.equal(typeof linkJournalEventIds, "function");
   assert.equal(typeof linkJournalStreams, "function");
   assert.equal(typeof promoteInboxExperimentNote, "function");
