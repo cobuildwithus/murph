@@ -151,7 +151,9 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('# First-session prep reminders')
     expect(raw).toContain('# First-week habit support reminders')
-    expect(raw).toContain('Ask a direct, lightweight reminder setup question')
+    expect(raw).toContain(
+      'Prefer a context-backed suggestion the user can accept or edit',
+    )
     expect(raw).toContain('vault-cli experiment start <slug>')
     expect(raw).toContain('vault-cli experiment edit <id>')
     expect(raw).toContain('vault-cli automation save <title>')

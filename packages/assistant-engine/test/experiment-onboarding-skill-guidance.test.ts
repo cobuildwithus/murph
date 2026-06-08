@@ -57,10 +57,21 @@ describe('experiment onboarding skill guidance', () => {
       'First-session prep and first-week habit support are separate.',
     )
     expect(raw).toContain(
-      'first-week habit support is a required reminder decision',
+      'first-week habit support is default-on once the user agrees to a run plan with assistant support',
     )
-    expect(raw).toContain('first 7 calendar days')
-    expect(raw).toContain('first 3-5 planned intervention sessions')
+    expect(raw).toContain('Do not ask the user to choose cadence by default')
+    expect(raw).toContain(
+      'Ask a first-week support setup question only when cadence, timing, route, or user preference is genuinely unclear',
+    )
+    expect(raw).toContain(
+      'Do not ask when the user already gave a clear preference, explicitly declined reminders, or reminder delivery is not possible',
+    )
+    expect(raw).toContain(
+      'for daily or near-daily protocols, automatically schedule daily bounded support for the first 7 calendar days',
+    )
+    expect(raw).toContain(
+      'For non-daily protocols, automatically schedule support around each planned intervention for the first 3-5 planned sessions',
+    )
     expect(raw).toContain(
       'Do not create indefinite recurring reminders for first-week support.',
     )
@@ -85,6 +96,47 @@ describe('experiment onboarding skill guidance', () => {
     )
     expect(raw).toContain(
       'read `vault-cli experiment show <id> --format json`, `vault-cli commons protocol show <key-or-route> --format json`, and `vault-cli experiment progress <id> --as-of <date> --format json` before sending',
+    )
+  })
+
+  it('requires context-backed reminder time suggestions before open-ended time questions', async () => {
+    const raw = await readExperimentOnboardingSkill()
+
+    expect(raw).toContain(
+      'do not make the user pick a time from scratch if existing context can support a sensible suggestion',
+    )
+    expect(raw).toContain(
+      'recent sleep/wake timing, recurring workouts or activity windows, meal timing when relevant, wearable summaries, saved memory/preferences, and recent journal notes',
+    )
+    expect(raw).toContain(
+      'propose one practical reminder time the user can accept or edit',
+    )
+    expect(raw).toContain(
+      'briefly explain the context behind it, and ask for confirmation or a simple edit',
+    )
+    expect(raw).toContain(
+      'do not dump raw wearable values or private note details',
+    )
+    expect(raw).toContain(
+      'Before asking for the first session time, try to propose a default from context',
+    )
+    expect(raw).toContain(
+      'Ask a direct, lightweight reminder setup question only when reminders are viable, the user has not declined them, and neither user-provided nor context-backed timing gives you a usable time',
+    )
+    expect(raw).toContain(
+      'Do not ask for another time when the user already gave a usable time, declined reminders, or reminder delivery is not possible',
+    )
+    expect(raw).toContain(
+      'Ask the user to confirm or adjust the suggestion before scheduling from inferred context',
+    )
+    expect(raw).toContain(
+      'Use the experiment schedule plus saved context: shortly after the user\'s usual wake window for morning logs',
+    )
+    expect(raw).toContain(
+      'The user does not need to approve the cadence separately once they have agreed to the run plan and assistant support is available',
+    )
+    expect(raw).toContain(
+      'After scheduling, tell the user the bounded support plan, the reminder dates or times, and that they can cancel or move the reminders.',
     )
   })
 })
