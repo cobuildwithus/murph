@@ -121,6 +121,20 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c68fe1c7-c87b-411d-a6f3-6190b705ff00/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "bodyweight-squat")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b07d650b-2f8b-41b2-c315-63bc169be200/public",
+      }),
+      expect.objectContaining({
+        step: "Bottom position",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/54fe4a6f-b80b-4e86-646a-7082b8ba8600/public",
+      }),
+      expect.objectContaining({
+        step: "Form check",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/68adb210-af29-457d-cce1-1103ca2ea400/public",
+      }),
+    ]);
     expect(artifacts.details.sources).toEqual(catalog.sources);
     expect(artifacts.facets.facets.kinds).toEqual(["exercise", "stretch"]);
     expect(artifacts.facets.facets.equipment).toContain("none");

@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:c77848a008a827bc2fca726417cffc2612bf5fedc0a9e0edf87ebcc8c648c866",
+  "catalogHash": "sha256:e33dcb6be64e8f76f48d507a77c58081ed1c53a9c67b857ace08064708579cbf",
   "generatedAt": null,
   "items": [
     {
@@ -30055,7 +30055,23 @@
       ],
       "equipment": [],
       "id": "EX001",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person standing in bodyweight squat setup with feet shoulder-width, chest tall, and knees soft.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b07d650b-2f8b-41b2-c315-63bc169be200/public"
+        },
+        {
+          "alt": "Person sitting hips back into a bodyweight squat with heels flat and knees tracking toes.",
+          "step": "Bottom position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/54fe4a6f-b80b-4e86-646a-7082b8ba8600/public"
+        },
+        {
+          "alt": "Person holding a clean squat with chest tall, heels down, and knees tracking toes.",
+          "step": "Form check",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/68adb210-af29-457d-cce1-1103ca2ea400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
