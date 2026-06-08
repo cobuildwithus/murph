@@ -283,6 +283,14 @@ export function parseHostedRuntimeEnsureProcessingRequest(
     "reason",
     "source",
   ]);
+  if (record.source !== undefined && record.source !== null) {
+    // Legacy wire tolerance only. Runtime ensure-processing is source-less;
+    // validate old source-bearing callers, then drop the field.
+    parseHostedRuntimeDemandRunSource(
+      record.source,
+      "Hosted runtime ensure-processing request source",
+    );
+  }
 
   return {
     orchestrationAttemptId: requireOpaqueIdentifier(
@@ -293,14 +301,6 @@ export function parseHostedRuntimeEnsureProcessingRequest(
       record.reason,
       "Hosted runtime ensure-processing request reason",
     ),
-    ...(record.source === undefined || record.source === null
-      ? {}
-      : {
-          source: parseHostedRuntimeDemandRunSource(
-            record.source,
-            "Hosted runtime ensure-processing request source",
-          ),
-        }),
   };
 }
 

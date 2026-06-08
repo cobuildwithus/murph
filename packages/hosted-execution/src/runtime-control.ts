@@ -889,9 +889,6 @@ export const HOSTED_WORKSPACE_INVOCATION_REASONS = [
 
 export type HostedWorkspaceInvocationReason = (typeof HOSTED_WORKSPACE_INVOCATION_REASONS)[number];
 
-export type HostedWorkspaceInvocationSource =
-  import("./orchestration-control.ts").HostedRuntimeDemandRunSource;
-
 export const HOSTED_WORKSPACE_INVOCATION_STATUSES = [
   "idle",
   "budget_exhausted",
@@ -913,7 +910,6 @@ export interface HostedWorkspaceInvocationRequest {
   leaseGeneration: string;
   providerEgressToken?: string | null;
   reason: HostedWorkspaceInvocationReason;
-  source?: HostedWorkspaceInvocationSource | null;
   userId: string;
   workspace?: HostedWorkspaceState | null;
   workspaceVersion: string;

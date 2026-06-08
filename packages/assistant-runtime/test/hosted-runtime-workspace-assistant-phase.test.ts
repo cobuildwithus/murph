@@ -4190,7 +4190,6 @@ function createPhaseInput(input: {
   now?: () => string;
   reason?: HostedWorkspaceRuntimeAssistantPhaseInput["request"]["reason"];
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
-  source?: HostedWorkspaceRuntimeAssistantPhaseInput["request"]["source"];
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
   runtimeForwardedEnv?: Record<string, string>;
   runtimeEnv?: Record<string, string>;
@@ -4267,7 +4266,6 @@ function createPhaseInput(input: {
       attemptId: "attempt_synthetic_phase",
       leaseGeneration: "3",
       reason: input.reason ?? "nudge",
-      ...(input.source ? { source: input.source } : {}),
       userId: "member_synthetic_phase",
       workspaceVersion: "8",
     },

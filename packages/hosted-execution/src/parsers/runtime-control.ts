@@ -93,9 +93,6 @@ import {
   parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionSnapshotRef,
 } from "./cursor.ts";
-import {
-  parseHostedRuntimeDemandRunSource,
-} from "./demand-source.ts";
 
 const FORBIDDEN_RAW_REDACTED_KEY_NAMES = [
   "address",
@@ -1214,6 +1211,15 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
     );
   }
   const reason = parseHostedWorkspaceInvocationReason(record.reason);
+  if (record.source !== undefined && record.source !== null) {
+    // Legacy wire tolerance only. Workspace invocation is source-less; validate
+    // old source-bearing requests, then drop the field.
+    parseAllowedString(
+      record.source,
+      "Hosted workspace invocation request source",
+      ["mailbox_backlog", "manual", "browser_vault_refresh", "workspace_wake", "lag_recovery"] as const,
+    );
+  }
 
   return {
     attemptId: requireString(record.attemptId, "Hosted workspace invocation request attemptId"),
@@ -1248,14 +1254,6 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
           ),
         }),
     reason,
-    ...(record.source === undefined || record.source === null
-      ? {}
-      : {
-          source: parseHostedRuntimeDemandRunSource(
-            record.source,
-            "Hosted workspace invocation request source",
-          ),
-        }),
     userId: requireString(record.userId, "Hosted workspace invocation request userId"),
     ...(record.workspace === undefined
       ? {}

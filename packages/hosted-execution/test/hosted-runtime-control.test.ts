@@ -229,15 +229,16 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedWorkspaceInvocationRequest(workspaceInvocationRequest)).toEqual(
       workspaceInvocationRequest,
     );
-    expect(parseHostedWorkspaceInvocationRequest({
-      ...workspaceInvocationRequest,
-      source: "workspace_wake",
-      workspace: null,
-    })).toEqual({
+    const legacySourceInvocationRequest = parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
       source: "workspace_wake",
       workspace: null,
     });
+    expect(legacySourceInvocationRequest).toEqual({
+      ...workspaceInvocationRequest,
+      workspace: null,
+    });
+    expect(legacySourceInvocationRequest).not.toHaveProperty("source");
     expect(parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
       workspace: workspaceState,
@@ -245,6 +246,12 @@ describe("hosted runtime control contracts", () => {
       ...workspaceInvocationRequest,
       workspace: workspaceState,
     });
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      source: "device_sync_recovery",
+    })).toThrow(
+      "Hosted workspace invocation request source is not supported.",
+    );
     expect(() => parseHostedWorkspaceInvocationRequest({
       attemptId: "attempt_3",
       checkpointNextWakeAt: null,
