@@ -225,6 +225,16 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e3f43c31-5766-4c2c-c68b-4e6ee5b17300/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "tibialis-raise")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/439efe55-c1f8-4058-8269-5d3b6644f200/public",
+      }),
+      expect.objectContaining({
+        step: "Toes lift",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d20ff83a-ea86-46c3-d867-2b5bd0222a00/public",
+      }),
+    ]);
     expect(artifacts.details.sources).toEqual(catalog.sources);
     expect(artifacts.facets.facets.kinds).toEqual(["exercise", "stretch"]);
     expect(artifacts.facets.facets.equipment).toContain("none");

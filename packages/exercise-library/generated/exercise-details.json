@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:8b3e13565a60d5d1c55178aa4185ed4317eaf5fb21228b9b37eb6542911a4761",
+  "catalogHash": "sha256:9215ed4a898865908b086328b7ae27f2ae3fb69e39517b98b9bf4d9efc143305",
   "generatedAt": null,
   "items": [
     {
@@ -34815,7 +34815,18 @@
         "Wall"
       ],
       "id": "EX116",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person standing with back against a wall feet forward and toes down before a tibialis raise.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/439efe55-c1f8-4058-8269-5d3b6644f200/public"
+        },
+        {
+          "alt": "Person leaning back against a wall with heels down and toes lifted during a tibialis raise.",
+          "step": "Toes lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d20ff83a-ea86-46c3-d867-2b5bd0222a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
