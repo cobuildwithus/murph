@@ -26,12 +26,12 @@ export const metadata: Metadata = createMurphPageMetadata({
   },
   openGraph: {
     description:
-      "Your personal health assistant. Pick a protocol, run it as a proper experiment, see what actually changed. Expert-backed, measured against your baseline.",
+      "Your personal health assistant. Text Murph over iMessage, connect any wearable. Pick a protocol and see what actually makes you healthier.",
     type: "website",
   },
   twitter: {
     description:
-      "Your personal health assistant. Pick a protocol, see what actually makes you healthier. Works with Oura, WHOOP, Garmin, and Strava.",
+      "Your personal health assistant. Text Murph over iMessage, connect any wearable. Pick a protocol and see what actually makes you healthier.",
   },
 });
 

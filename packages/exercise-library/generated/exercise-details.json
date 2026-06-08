@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:5652e3712dc91999f668b170dfa54eff8235f55b1e8fcd54af3e87492f476f06",
+  "catalogHash": "sha256:76b9f1742f8c239f05e084ee110c369baa0f09597af23cf9c88a3b428a26b981",
   "generatedAt": null,
   "items": [
     {
@@ -35079,7 +35079,18 @@
         "Chair or couch"
       ],
       "id": "EX121",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person lying on back with heels on a chair hips down and arms relaxed before a feet-elevated glute bridge.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f2f399c4-eaa6-4e01-6613-0fe171aedb00/public"
+        },
+        {
+          "alt": "Person lifting hips into a feet-elevated glute bridge with heels planted on a chair.",
+          "step": "Lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6112ec51-4742-43bd-09e4-1205b21f5100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
