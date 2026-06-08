@@ -427,9 +427,10 @@ test('executeCodexAppServerTurn classifies resume RPC failures as stale provider
         await waitForRpcMethod(child, 'initialize')
         child.stdout.write(jsonLine({ id: 1, result: {} }))
         const threadResume = await waitForRpcMethod(child, 'thread/resume')
-        const progressTool = readDynamicTool(threadResume, 0)
-        assert.equal(progressTool.namespace, 'murph')
-        assert.equal(progressTool.name, 'send_progress_update')
+        assert.deepEqual(asRecord(threadResume.params), {
+          excludeTurns: true,
+          threadId: 'stale-thread',
+        })
         child.stdout.write(
           jsonLine({
             id: 2,

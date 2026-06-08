@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import { homedir } from 'node:os'
+import path from 'node:path'
 import {
   type AssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -98,9 +100,16 @@ function buildCodexThreadIdentityFingerprint(input: {
     profile: input.providerOptions.profile,
     oss: input.providerOptions.oss,
     codexHome: normalizeCodexThreadIdentityCodexHome(input.providerOptions.codexHome),
-    codexCommand: input.codexCommand,
+    codexCommand: normalizeCodexThreadIdentityCodexCommand(input.codexCommand),
     resumeKind: input.providerOptions.resumeKind,
   }
+}
+
+function normalizeCodexThreadIdentityCodexCommand(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(value)
+  return normalized === 'codex' ? null : normalized
 }
 
 function normalizeCodexThreadIdentityCodexHome(
@@ -112,7 +121,21 @@ function normalizeCodexThreadIdentityCodexHome(
   }
 
   const pathSegments = normalized.replace(/\\/gu, '/').split('/')
-  return pathSegments.at(-1) === '.codex-hosted'
-    ? '<hosted-codex-home>'
-    : normalized
+  if (pathSegments.at(-1) === '.codex-hosted') {
+    return '<hosted-codex-home>'
+  }
+
+  return normalizeCodexThreadIdentityLocalCodexHome(normalized)
+}
+
+function normalizeCodexThreadIdentityLocalCodexHome(value: string): string {
+  if (value === '~') {
+    return path.resolve(homedir())
+  }
+
+  if (value.startsWith('~/')) {
+    return path.resolve(homedir(), value.slice(2))
+  }
+
+  return path.resolve(value)
 }

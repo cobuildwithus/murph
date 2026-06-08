@@ -164,7 +164,6 @@ function createRoutePlanningDiagnostics(): AssistantRouteTurnPlan['planningDiagn
     routePlanningUnaccountedElapsedMs: 0,
     routeResumeBindingElapsedMs: null,
     routeTargetCapabilitiesElapsedMs: null,
-    shouldPrepareAnyBootstrapContext: false,
     shouldPrepareBootstrapContext: false,
     supportedExperimentProtocolsElapsedMs: null,
   }
@@ -512,6 +511,8 @@ describe('Codex model catalog', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: null,
         cliEnv: {},
         developerInstructions: null,
@@ -526,7 +527,6 @@ describe('Codex model catalog', () => {
         } satisfies AssistantCodexContinuation,
         planningDiagnostics: createRoutePlanningDiagnostics(),
         promptCacheMetadata: null,
-        refreshThreadInstructions: false,
         resumeCodexThreadId: null,
         sessionContext: undefined,
         systemPrompt: null,
@@ -563,7 +563,6 @@ describe('Codex model catalog', () => {
       expect.objectContaining({
         codexContinuation: 'explicit-structured-history',
         providerRequestOrdinal: 1,
-        refreshThreadInstructions: false,
         resumeCodexThreadIdPresent: false,
         route,
         sessionId: session.sessionId,
@@ -624,6 +623,8 @@ describe('Codex model catalog', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: null,
         cliEnv: {},
         developerInstructions: null,
@@ -638,7 +639,6 @@ describe('Codex model catalog', () => {
         } satisfies AssistantCodexContinuation,
         planningDiagnostics: createRoutePlanningDiagnostics(),
         promptCacheMetadata: null,
-        refreshThreadInstructions: false,
         resumeCodexThreadId: null,
         sessionContext: undefined,
         systemPrompt: null,

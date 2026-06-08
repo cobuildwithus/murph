@@ -348,7 +348,6 @@ export interface CodexAppServerTurnInput {
   baseInstructions?: string | null
   developerInstructions?: string | null
   excludeResumeTurns?: boolean
-  refreshThreadInstructions?: boolean
   model?: string | null
   modelProvider?: string | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null

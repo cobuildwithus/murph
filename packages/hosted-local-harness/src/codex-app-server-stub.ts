@@ -840,16 +840,12 @@ async function handleRpc(message) {
       }
     }
     const receivedDynamicToolNames = readThreadStartDynamicToolNames(params);
-    const requireReceivedDynamicToolNames =
-      method === "thread/resume" &&
-      expectedThreadStartDynamicTools.length > 0;
     const restoredDynamicToolNames = method === "thread/resume"
       ? readThreadDynamicToolNames(threadId)
       : [];
     const validateReceivedDynamicToolNames =
       method === "thread/start" ||
-      receivedDynamicToolNames.length > 0 ||
-      requireReceivedDynamicToolNames;
+      receivedDynamicToolNames.length > 0;
     const dynamicToolNames = validateReceivedDynamicToolNames
       ? receivedDynamicToolNames
       : restoredDynamicToolNames;

@@ -17,7 +17,6 @@ export async function recordCodexAttemptStarted(input: {
   at: string
   hasResumeCodexThreadId: boolean
   codexContinuationKind: string
-  refreshThreadInstructions: boolean
   route: CodexThreadIdentity
   sessionId: string
   turnId: string
@@ -52,7 +51,6 @@ export async function recordCodexAttemptStarted(input: {
       modelProvider: input.route.providerOptions.modelProvider,
       reasoningEffort: input.route.providerOptions.reasoningEffort,
       codexContinuationKind: input.codexContinuationKind,
-      refreshThreadInstructions: input.refreshThreadInstructions,
       hasResumeCodexThreadId: input.hasResumeCodexThreadId,
     },
     counterDeltas: {
@@ -66,7 +64,6 @@ export async function recordCodexPlan(input: {
   at: string
   codexContinuation: string
   providerRequestOrdinal: number | null
-  refreshThreadInstructions: boolean
   resumeCodexThreadIdPresent: boolean
   route: CodexThreadIdentity
   sessionId: string
@@ -94,7 +91,6 @@ export async function recordCodexPlan(input: {
       providerRequestOrdinal: input.providerRequestOrdinal,
       codexContinuation: input.codexContinuation,
       resumeCodexThreadIdPresent: input.resumeCodexThreadIdPresent,
-      refreshThreadInstructions: input.refreshThreadInstructions,
       ...pathDiagnostics,
     },
     at: input.at,

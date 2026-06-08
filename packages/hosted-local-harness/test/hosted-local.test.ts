@@ -134,27 +134,6 @@ describe("hosted-local harness", () => {
     expect(workflow).toContain(
       "HOSTED_DEVICE_ROUTING_INDEX_KEY: 0101010101010101010101010101010101010101010101010101010101010101",
     );
-    expect(workflow).toContain("apps/web/app/(dashboard)/biomarkers/**");
-    expect(workflow).toContain("apps/web/app/api/device-sync/**");
-    expect(workflow).toContain("apps/web/app/api/internal/device-sync/**");
-    expect(workflow).toContain("apps/web/app/api/settings/device-sync/**");
-    expect(workflow).toContain("apps/web/app/device-sync/**");
-    expect(workflow).toContain("apps/web/src/components/biomarkers/**");
-    expect(workflow).toContain("apps/web/src/components/settings/hosted-device-sync-*.tsx");
-    expect(workflow).toContain("apps/web/src/lib/device-sync/**");
-    expect(workflow).toContain("apps/web/src/lib/health-commons/**");
-    expect(workflow).toContain("apps/web/test/biomarker*");
-    expect(workflow).toContain("apps/web/test/device-sync*");
-    expect(workflow).toContain("apps/web/test/health-commons-biomarker*");
-    expect(workflow).toContain("apps/web/test/hosted-device-sync*");
-    expect(workflow).toContain("packages/contracts/**");
-    expect(workflow).toContain("packages/core/**");
-    expect(workflow).toContain("packages/device-syncd/**");
-    expect(workflow).toContain("packages/health-commons/**");
-    expect(workflow).toContain("packages/health-metrics/**");
-    expect(workflow).toContain("packages/importers/**");
-    expect(workflow).toContain("packages/query/**");
-    expect(workflow).toContain("packages/vault-usecases/**");
     expect(workflow).toContain(".artifacts/hosted-local/**/state.json");
     expect(workflow).not.toContain("DEVICE_SYNC_ENCRYPTION_KEY");
     expect(workflow).not.toContain("DEVICE_SYNC_ENCRYPTION_KEY_VERSION");

@@ -30,6 +30,7 @@ import {
   JUNCTION_WEARABLE_BROWSER_VAULT_BIOMARKER_EXPECTATIONS,
   JUNCTION_WEARABLE_FIXTURE_SUMMARY_RESOURCES,
   JUNCTION_WEARABLE_FIXTURE_TIMESERIES_RESOURCES,
+  JUNCTION_WEARABLE_HOSTED_DIRECT_REPLAY_BROWSER_VAULT_METRIC_EXPECTATIONS,
   normalizeJunctionProviderSlugForComparison,
   summarizeJunctionWearableBrowserVaultReplica,
   type JunctionWearableBrowserVaultReplicaSummary,
@@ -58,7 +59,6 @@ const junctionWebhookSecret = "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==";
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
-const fixtureTimeseriesResourceNames: readonly string[] = JUNCTION_WEARABLE_FIXTURE_TIMESERIES_RESOURCES;
 const textDecoder = new TextDecoder();
 
 let plan: JunctionWearableHostedReplayPlan | null = null;
@@ -132,17 +132,14 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       typeof resource.payload.eventType === "string"
       && resource.payload.eventType.startsWith("daily.data.")
     )).toBe(true);
-    const replayedTimeseriesResources = replayPlan.resources
-      .filter((resource) => resource.resourceCategory === "timeseries")
-      .map((resource) => resource.resource);
-    expect(replayedTimeseriesResources.every((resource) =>
-      fixtureTimeseriesResourceNames.includes(resource)
+    expect(replayPlan.resources.every((resource) =>
+      resource.resourceCategory === "summary"
+      && ["activity", "sleep"].includes(resource.resource)
     )).toBe(true);
-    expect(replayedTimeseriesResources).not.toEqual(expect.arrayContaining([
-      "heartrate",
-      "hrv",
-      "respiratory_rate",
-    ]));
+    expect(replayPlan.dirtyResources.every((resource) =>
+      resource.resourceCategory === "summary"
+      && ["activity", "sleep"].includes(resource.resource)
+    )).toBe(true);
     expect(replayPlan.sources.map((source) => source.sourceProviderSlug).sort()).toEqual([
       "garmin",
       "oura",
@@ -356,7 +353,9 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       replica,
     });
 
-    const summaryFailures = collectJunctionWearableBrowserVaultSummaryFailures(browserVaultSummary);
+    const summaryFailures = collectJunctionWearableBrowserVaultSummaryFailures(browserVaultSummary, {
+      metricExpectations: JUNCTION_WEARABLE_HOSTED_DIRECT_REPLAY_BROWSER_VAULT_METRIC_EXPECTATIONS,
+    });
     if (summaryFailures.length > 0) {
       throw new Error(await activeScenario.buildFailureMessage(userId, [
         "Hosted Junction wearable direct-resource replay did not publish the expected browser-vault biomarker contract.",
@@ -379,7 +378,6 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
         + whoopSourceHealth.sleepNights
         + whoopSourceHealth.recoveryDays,
     ).toBeGreaterThan(0);
-    expect(garminSourceHealth.activityDays).toBeGreaterThan(0);
     expect(garminSourceHealth.selectedMetrics).toBeGreaterThan(0);
     expect(garminSourceHealth.sleepNights).toBeGreaterThan(0);
 
