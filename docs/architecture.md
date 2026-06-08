@@ -202,7 +202,7 @@ to Codex.
 - Narrow Cloudflare-to-web signed callbacks remain only where the execution
   runtime still needs them, such as execution-time device-sync runtime
   snapshot/apply, device connect-link starts, and direct hosted usage recording.
-- Normal webhook and app paths commit durable demand in web-owned storage and
+- Normal webhook and app paths append durable mailbox facts in web-owned storage and
   signal Temporal only. Temporal calls Cloudflare `ensure-processing`; Cloudflare
   responds with `runtime_processing_accepted` or `retry_later` and owns runner
   start, wake, active-fence alarm cleanup, and execution cleanup.

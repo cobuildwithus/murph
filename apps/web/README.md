@@ -268,7 +268,7 @@ Hosted managed crypto:
 Hosted AI usage metering:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
-- Hosted AI included-allowance gating is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns, maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state, and gates hosted Temporal demand sources that strongly imply foreground model work. It is a post-task hard stop, not an exact prepaid cap.
+- Hosted AI included-allowance gating is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns, maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state, and gates hosted runtime work that strongly implies foreground model work. It is a post-task hard stop, not an exact prepaid cap.
 - Homepage reset countdowns come from the same usage-gate period end/retry-after value; a fresh monthly period is created on the next gate resolution after the prior billing or calendar period ends, with no separate reset cron.
 - Temporal does not fetch or forward signed usage decisions to Cloudflare ensure-processing, and webhook wake handoff signals Temporal by mailbox pointer only. Runtime/provider code still enforces spend before actual model calls and records usage rows through the hosted runtime platform.
 - Pulse Trial uses the same allowance system with a phase-aware 4.50 USD trial cap. Paid phase is authoritative for the normal Pulse allowance, and stale or malformed trial phase denies before calendar fallback or fallback-usage carryover.

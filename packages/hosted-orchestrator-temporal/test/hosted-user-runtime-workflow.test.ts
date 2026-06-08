@@ -227,7 +227,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     ]);
   });
 
-  it("rejects legacy direct demand signals instead of storing flags", () => {
+  it("rejects legacy direct runtime signals instead of storing flags", () => {
     const runtime = new FakeWorkflowRuntime();
     const machine = createMachine(runtime, {
       userId: "member_test",

@@ -104,11 +104,11 @@ describe("HostedUserRunner execution coordination", () => {
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
   });
 
-  it("accepts one runtime-processing pass without reading status as demand", async () => {
+  it("accepts one runtime-processing pass without reading status as a scheduler", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const onStatusRead = vi.fn(() => {
-      throw new Error("Cloudflare must not read status to schedule runtime demand.");
+      throw new Error("Cloudflare must not read status to schedule runtime work.");
     });
     const readiness = createDeferred<Awaited<
       ReturnType<NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>>
@@ -1590,11 +1590,11 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("does not read web demand while syncing write-fence alarms", async () => {
+  it("does not read web status while syncing write-fence alarms", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const onStatusRead = vi.fn(() => {
-      throw new Error("Alarm must not read web demand.");
+      throw new Error("Alarm must not read web status as runtime work.");
     });
     const { alarms, invoke, runner, sql } = createRunnerHarness({
       onStatusRead,

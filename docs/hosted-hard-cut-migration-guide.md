@@ -13,7 +13,7 @@ has been superseded by the greenfield mailbox/workspace cutover in
   metadata, hosted runtime logs, and hosted runtime status.
 - Producers appended mailbox envelopes in the same transaction as the owning web
   state mutation, then best-effort nudged the runner. The active architecture is
-  Temporal-only orchestration: producers append durable demand and signal
+  Temporal-only orchestration: producers append durable mailbox facts and signal
   Temporal, and Temporal calls Cloudflare `ensure-processing`.
 - `apps/cloudflare` is a thin runner/container. It accepts authenticated
   Temporal processing requests/status reads, restores encrypted bundles, invokes

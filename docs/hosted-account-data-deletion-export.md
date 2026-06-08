@@ -153,7 +153,7 @@ Container workspace artifacts are covered to the extent they are persisted throu
 
 Hosted deletion treats the per-user Temporal runtime workflow as orchestration state, not product truth. After Prisma account rows are deleted successfully, the deletion service best-effort terminates the workflow with reason `account-deleted` before Cloudflare cleanup and repeats the same bounded best-effort termination afterward. A missing or already-finished workflow is considered cleaned up, and timeout or transport failures are logged as sanitized best-effort cleanup errors without blocking Cloudflare cleanup.
 
-The hosted runtime demand endpoint also fails closed for stale workflow wakeups: if the member is missing, suspended, or not active, demand returns `blocked` with reason `user_not_active` and no retry. If an active member has selected run demand but no hosted workspace row, demand returns `blocked` with reason `hosted_runtime_not_configured` and no retry. Those guards prevent a sleeping workflow from turning stale runtime-result, manual, or workspace wake state into a new Cloudflare execution after deletion or deactivation.
+The hosted runtime reconciliation-facts endpoint also fails closed for stale workflow wakeups: if the member is missing, suspended, or not active, facts return `blocked` with reason `user_not_active` and no retry. If an active member has durable work pending but no hosted workspace row, facts return `blocked` with reason `hosted_runtime_not_configured` and no retry. Those guards prevent a sleeping workflow from turning stale mailbox, manual, or workspace wake state into a new Cloudflare execution after deletion or deactivation.
 
 ## External providers, vendors, and backups
 
@@ -178,6 +178,6 @@ The MVP deletes Murph live stores and local references. Provider/vendor erasure 
 - non-empty notes plus valid deletion/export modes for each store.
 - high-value data export contents, bounded/truncated export metadata, omitted mailbox payload bodies, omitted runtime logs, and redaction of lookup keys, token hashes, invite codes, API key environment names, and workspace object refs.
 - deletion ordering that keeps Cloudflare cleanup after Prisma commit and skips Cloudflare cleanup when the transaction fails.
-- Temporal workflow termination ordering after Prisma commit, plus hosted demand blocking for deleted, inactive, or unconfigured users.
+- Temporal workflow termination ordering after Prisma commit, plus hosted reconciliation-facts blocking for deleted, inactive, or unconfigured users.
 
 Any future account data store should update `HOSTED_ACCOUNT_DATA_STORE_COVERAGE`, the deletion/export implementation, this document, and the coverage test in the same change.

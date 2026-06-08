@@ -286,9 +286,12 @@ audit/signal facts, widens the per-connection dirty row and safe dirty
 resource/window map, and completes the trace in the same transaction. Dirty
 state is durable runtime work input; the `device-sync.wake` mailbox row is only
 the bounded handoff to the normal Temporal wake path and must not carry provider
-payloads or become the device-sync queue. The assistant runtime runs system-lane
-device sync only when no fresh conversation input is pending, and reschedules a short
-`device-sync.reconcile` wake if foreground work preempts that background pass.
+payloads or become the device-sync queue. Active foreground wake handling stays
+conversation-focused; system-lane work runs through normal invocation and
+reconciliation when no fresh conversation input is pending, and reschedules a
+short `device-sync.reconcile` wake if foreground work preempts that background
+pass. Do not add a separate system-lane active-wake import path unless measured
+latency or product behavior proves the simpler split is insufficient.
 The scheduled-wake sweep is the bounded backstop for active connections whose
 canonical `nextReconcileAt` is due. Temporal owns that cadence through a global
 scheduled reconciler workflow, but web owns the signed legacy-named command that
