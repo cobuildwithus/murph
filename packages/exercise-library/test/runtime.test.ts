@@ -141,6 +141,16 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4dd164b5-b742-453f-b95d-00def001fb00/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "feet-elevated-glute-bridge")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f2f399c4-eaa6-4e01-6613-0fe171aedb00/public",
+      }),
+      expect.objectContaining({
+        step: "Lift",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6112ec51-4742-43bd-09e4-1205b21f5100/public",
+      }),
+    ]);
     expect(artifacts.details.items.find((item) => item.slug === "wall-sit")?.images).toEqual([
       expect.objectContaining({
         step: "Setup",
