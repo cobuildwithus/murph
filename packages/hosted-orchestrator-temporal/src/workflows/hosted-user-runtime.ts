@@ -77,7 +77,6 @@ const HOSTED_USER_RUNTIME_DIRECT_ANY_LANE_MAILBOX_PROCESSING_PATCH =
   "hosted-user-runtime-direct-any-lane-mailbox-processing-v1";
 const HOSTED_USER_RUNTIME_DROP_ENSURE_PROCESSING_SOURCE_PATCH =
   "hosted-user-runtime-drop-ensure-processing-source-v1";
-const HOSTED_USER_RUNTIME_MANUAL_AI_GATED_SIGNAL_SOURCE = "manual-ai-gated";
 const LEGACY_DEVICE_SYNC_RECOVERY_SOURCE = "device_sync_recovery";
 const HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT = 3;
 
@@ -1107,8 +1106,10 @@ function canDirectProcessFreshMailboxPointer(input: {
     return false;
   }
 
-  return input.pointer.source === HOSTED_USER_RUNTIME_MANUAL_AI_GATED_SIGNAL_SOURCE ||
-    input.pointer.source !== "manual";
+  // Compatibility only: old source:"manual" system mailbox signals were
+  // emitted before manual runtime-control append became AI-gated, so keep them
+  // on the demand-read path.
+  return input.pointer.source !== "manual";
 }
 
 function clearSatisfiedFlags(
