@@ -138,6 +138,64 @@ jobs:
             .artifacts/hosted-local/**/state.json
           if-no-files-found: warn
 
+  codex-image-media-delivery:
+    name: Codex image media delivery E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_DB: murph_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    concurrency:
+      group: cloudflare-hosted-e2e-codex-image-media-${{ github.event.pull_request.number || github.ref || github.run_id }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Install/check Temporal CLI
+        run: pnpm temporal:cli:setup
+
+      - name: Run Codex image media delivery hosted E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/cloudflare-hosted-e2e
+          pnpm hosted-local e2e codex-image-media-delivery 2>&1 \
+            | tee .artifacts/cloudflare-hosted-e2e/codex-image-media-delivery.log
+
+      - name: Upload Codex image media delivery E2E logs
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: cloudflare-hosted-e2e-codex-image-media-delivery-logs
+          path: |
+            .artifacts/cloudflare-hosted-e2e/codex-image-media-delivery.log
+            .artifacts/hosted-local/**/state.json
+          if-no-files-found: warn
+
   linq-scheduled-reminder:
     name: Linq scheduled reminder E2E
     runs-on: ubuntu-24.04

@@ -50,6 +50,7 @@ const cleanupHostedLocalMinioE2eContainersBestEffortMock = vi.hoisted(() =>
 );
 const expectedScenarioFiles = [
   "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
+  "apps/cloudflare/test/hosted-local-codex-image-media-delivery-e2e.test.ts",
   "apps/cloudflare/test/hosted-local-device-connect-e2e.test.ts",
   "apps/cloudflare/test/hosted-local-direct-r2-presigned-put-e2e.test.ts",
   "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",

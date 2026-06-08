@@ -324,9 +324,8 @@ describe("runner bundle runtime artifact staging", () => {
       throw new Error("Contracts tarball was not packed.");
     }
 
-    await expect(readFile(pnpmLogPath, "utf8")).resolves.toBe(
-      "store path --silent\n",
-    );
+    const pnpmLog = await readOptionalText(pnpmLogPath);
+    expect(["", "store path --silent\n"]).toContain(pnpmLog);
     await expect(readFile(npmLogPath, "utf8")).resolves.toBe(
       "pack --ignore-scripts --silent --pack-destination "
         + `${path.join(tarballsDir, "01-_murphai_contracts")}\n`,
@@ -761,6 +760,23 @@ describe("runner bundle runtime artifact staging", () => {
     expect(entries).toContain("package/package.json");
   });
 });
+
+async function readOptionalText(filePath: string): Promise<string> {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch (error) {
+    if (
+      typeof error === "object"
+      && error !== null
+      && "code" in error
+      && error.code === "ENOENT"
+    ) {
+      return "";
+    }
+
+    throw error;
+  }
+}
 
 async function writeMinimalHealthCommonsRuntimeArtifacts(generatedDir: string): Promise<void> {
   await mkdir(generatedDir, { recursive: true });

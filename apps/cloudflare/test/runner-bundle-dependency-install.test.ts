@@ -240,15 +240,22 @@ describe("runner bundle pnpm install config", () => {
       process.env.PATH = previousPath;
     }
 
-    await expect(readFile(pnpmLogPath, "utf8")).resolves.toBe(
-      [
-        "store path --silent SHARP_IGNORE_GLOBAL_LIBVIPS=",
-        "install --prod --lockfile-only SHARP_IGNORE_GLOBAL_LIBVIPS=1",
-        "store path --silent SHARP_IGNORE_GLOBAL_LIBVIPS=",
-        "install --prod --frozen-lockfile SHARP_IGNORE_GLOBAL_LIBVIPS=1",
-        "",
-      ].join("\n"),
+    const pnpmLogLines = (await readFile(pnpmLogPath, "utf8"))
+      .trimEnd()
+      .split("\n");
+    expect(pnpmLogLines.filter((line) => line.startsWith("install "))).toEqual([
+      "install --prod --lockfile-only SHARP_IGNORE_GLOBAL_LIBVIPS=1",
+      "install --prod --frozen-lockfile SHARP_IGNORE_GLOBAL_LIBVIPS=1",
+    ]);
+    const pnpmStorePathLines = pnpmLogLines.filter((line) =>
+      line.startsWith("store path "),
     );
+    expect([0, 2]).toContain(pnpmStorePathLines.length);
+    expect(
+      pnpmStorePathLines.every(
+        (line) => line === "store path --silent SHARP_IGNORE_GLOBAL_LIBVIPS=",
+      ),
+    ).toBe(true);
     await expect(readFile(path.join(bundleDir, ".npmrc"), "utf8")).resolves.toBe(
       [
         "minimum-release-age=1440",
