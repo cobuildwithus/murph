@@ -338,8 +338,10 @@ describe('assistant skill assets', () => {
       'ask one short follow-up for duration or start timing after the structured save or on the next onboarding turn',
     )
     expect(raw).toContain(
-      'Acknowledge that downloading results can be annoying; they can skip this now and send PDFs or pasted results later if they want Murph to use them',
+      'if they do not have results handy, they can skip this now and send PDFs or pasted results later if they want Murph to use them',
     )
+    expect(raw).not.toContain('downloading results can be annoying')
+    expect(raw).not.toContain('downloading results is annoying')
     expect(raw).toContain(
       'If the user sends lab PDFs, pasted lab results, or blood-test documents',
     )
@@ -577,7 +579,7 @@ describe('assistant skill assets', () => {
       'what gender should I use when interpreting health stuff',
       'Are you already trying any health protocols or experiments, or mostly starting fresh?',
       'Are you taking any supplements right now? Product or brand names help, plus roughly how long you\'ve taken each one or since when.',
-      'Do you have any recent blood tests or lab panels, like Function Health or doctor-ordered labs? If downloading results is annoying, skip this for now — you can always send a PDF or paste results later.',
+      'Do you have any recent blood tests or lab panels, like Function Health or doctor-ordered labs? If you don\'t have them handy, skip this for now — you can always send a PDF or paste results later.',
     ]
     for (const removedFixedScript of removedFixedScripts) {
       expect(raw).not.toContain(removedFixedScript)
