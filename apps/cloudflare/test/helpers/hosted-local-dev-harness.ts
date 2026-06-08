@@ -246,15 +246,24 @@ export async function startHostedLocalDevHarness(input: {
         let nextCompletionRetryAt = startedAt;
         let mailboxLagFirstObservedAt: number | null = null;
         let lastStatus: HostedRunnerStatusResponse | null = null;
+        let lastStatusReadError: string | null = null;
 
         while ((Date.now() - startedAt) < timeoutMs) {
-          const status = await readHostedUserStatus({
-            requestJson: requestJsonForRuntime,
-            statusHeaders,
-            statusPath,
-            userId,
-          });
+          let status: HostedRunnerStatusResponse;
+          try {
+            status = await readHostedUserStatus({
+              requestJson: requestJsonForRuntime,
+              statusHeaders,
+              statusPath,
+              userId,
+            });
+          } catch (error) {
+            lastStatusReadError = error instanceof Error ? error.message : String(error);
+            await sleep(pollIntervalMs);
+            continue;
+          }
           lastStatus = status;
+          lastStatusReadError = null;
 
           if (hostedStatusHasCompletedWithError(status)) {
             throw new Error(formatFailure([
@@ -306,6 +315,7 @@ export async function startHostedLocalDevHarness(input: {
           ...(lastStatus
             ? [`last status: ${JSON.stringify(sanitizeHostedStatusForFailureLog(lastStatus))}`]
             : []),
+          ...(lastStatusReadError ? [`last status read error: ${lastStatusReadError}`] : []),
         ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
       },
       waitForHostedIdle: async (
@@ -318,14 +328,23 @@ export async function startHostedLocalDevHarness(input: {
         const timeoutMs = pollInput.timeoutMs ?? hostedLocalStatusTimeoutMs;
         const pollIntervalMs = pollInput.pollIntervalMs ?? hostedLocalStatusPollIntervalMs;
         const startedAt = Date.now();
+        let lastStatusReadError: string | null = null;
 
         while ((Date.now() - startedAt) < timeoutMs) {
-          const status = await readHostedUserStatus({
-            requestJson: requestJsonForRuntime,
-            statusHeaders,
-            statusPath,
-            userId,
-          });
+          let status: HostedRunnerStatusResponse;
+          try {
+            status = await readHostedUserStatus({
+              requestJson: requestJsonForRuntime,
+              statusHeaders,
+              statusPath,
+              userId,
+            });
+          } catch (error) {
+            lastStatusReadError = error instanceof Error ? error.message : String(error);
+            await sleep(pollIntervalMs);
+            continue;
+          }
+          lastStatusReadError = null;
 
           if (!status.inFlight && status.mailboxLag.every((lane) => lane.lag === "0")) {
             return status;
@@ -336,6 +355,7 @@ export async function startHostedLocalDevHarness(input: {
 
         throw new Error(formatFailure([
           `Timed out waiting for hosted idle state for ${userId}.`,
+          ...(lastStatusReadError ? [`last status read error: ${lastStatusReadError}`] : []),
         ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
       },
       webBaseUrl,
