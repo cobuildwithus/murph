@@ -32,6 +32,7 @@ describe("supplements query helpers", () => {
     expect(dsldImportSql).toContain("\\set ON_ERROR_STOP on");
     expect(dsldImportSql).toContain(`cat "$DSLD_NDJSON_PATH"`);
     expect(dsldImportSql).toContain("WITH (FORMAT csv");
+    expect(dsldImportSql).toContain("btrim(COALESCE(");
     expect(dsldImportSql).not.toContain(":'DSLD_NDJSON_PATH'");
 
     expect(dailymedImportSql).toContain(
@@ -40,6 +41,9 @@ describe("supplements query helpers", () => {
     expect(dailymedImportSql).toContain("\\set ON_ERROR_STOP on");
     expect(dailymedImportSql).toContain(`cat "$DAILYMED_NDJSON_PATH"`);
     expect(dailymedImportSql).toContain("WITH (FORMAT csv");
+    expect(dailymedImportSql).toContain(
+      "NULLIF(btrim(payload->>'brand'), '') AS brand",
+    );
     expect(dailymedImportSql).not.toContain(":'DAILYMED_NDJSON_PATH'");
   });
 
@@ -51,7 +55,16 @@ describe("supplements query helpers", () => {
 
     expect(schemaSql).toContain("CREATE TABLE IF NOT EXISTS supplements");
     expect(schemaSql).toContain("UNIQUE (data_origin, data_origin_id)");
-    expect(schemaSql).toContain("CREATE INDEX IF NOT EXISTS supplements_canonical_key_idx");
+    expect(schemaSql).toContain("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+    expect(schemaSql).toContain(
+      "CREATE INDEX IF NOT EXISTS supplements_name_trgm_idx",
+    );
+    expect(schemaSql).toContain(
+      "CREATE INDEX IF NOT EXISTS supplements_brand_idx",
+    );
+    expect(schemaSql).toContain(
+      "CREATE INDEX IF NOT EXISTS supplements_canonical_key_idx",
+    );
     expect(schemaSql).not.toContain("supplement_external_labels");
     expect(schemaSql).not.toContain("supplements_data_origin_idx");
   });
@@ -96,22 +109,235 @@ describe("supplements query helpers", () => {
         servingSize: "1 scoop",
       },
     });
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.text).toContain("websearch_to_tsquery");
-    expect(calls[0]?.text).toContain("$1::text AS raw_q");
-    expect(calls[0]?.text).toContain("strict_word_similarity(name, query.raw_q)");
-    expect(calls[0]?.text).toContain("name % query.raw_q");
-    expect(calls[0]?.text).toContain("name_phrase_match DESC");
-    expect(calls[0]?.text).toContain("name_phrase_length DESC");
-    expect(calls[0]?.text).toContain("name_similarity DESC");
-    expect(calls[0]?.text).toContain("FROM supplements, query");
-    expect(calls[0]?.text).toContain("PARTITION BY canonical_key");
-    expect(calls[0]?.text).toContain("dedupe_rank = 1");
-    expect(calls[0]?.text).toContain("data_origin_priority ASC");
-    expect(calls[0]?.text).toContain("label");
-    expect(calls[0]?.text).not.toContain("supplement_external_labels");
-    expect(calls[0]?.text).not.toContain("matched_dsld_id");
-    expect(calls[0]?.values).toEqual(["creatine", false, 5]);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.text).toContain("GROUP BY brand");
+    expect(calls[0]?.values).toEqual([]);
+
+    const searchCall = calls[1];
+    expect(searchCall?.text).toContain("websearch_to_tsquery");
+    expect(searchCall?.text).toContain("$1::text AS raw_q");
+    expect(searchCall?.text).toContain(
+      "strict_word_similarity(name, query.raw_q)",
+    );
+    expect(searchCall?.text).toContain("name % query.raw_q");
+    expect(searchCall?.text).toContain("name_phrase_match DESC");
+    expect(searchCall?.text).toContain("name_phrase_length DESC");
+    expect(searchCall?.text).toContain("name_similarity DESC");
+    expect(searchCall?.text).toContain("FROM supplements, query");
+    expect(searchCall?.text).toContain("PARTITION BY canonical_key");
+    expect(searchCall?.text).toContain("dedupe_rank = 1");
+    expect(searchCall?.text).toContain("data_origin_priority ASC");
+    expect(searchCall?.text).toContain("label");
+    expect(searchCall?.text).not.toContain("brand_candidates AS MATERIALIZED");
+    expect(searchCall?.text).not.toContain("supplement_external_labels");
+    expect(searchCall?.text).not.toContain("matched_dsld_id");
+    expect(searchCall?.values).toEqual(["creatine", false, 5]);
+  });
+
+  it("scopes branded supplement searches to same-brand product matches", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("GROUP BY brand")) {
+          return { rows: [{ brand: "Momentous" }] as T[] };
+        }
+        return { rows: [] as T[] };
+      },
+    });
+
+    await queries.searchSupplements({
+      q: "Momentous Calcium",
+      limit: 1,
+      includeOffMarket: false,
+    });
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.text).toContain("GROUP BY brand");
+
+    const sql = calls[1]?.text ?? "";
+
+    expect(sql).toContain("brand_candidates AS MATERIALIZED");
+    expect(sql).toContain("brand = ANY($4::text[])");
+    expect(sql).toContain("product_identity_match");
+    expect(sql).toContain("WHERE product_identity_match = 1");
+    expect(sql).toContain("websearch_to_tsquery('simple', product_q)");
+    expect(sql).toContain("strict_word_similarity(name, product_q)");
+    expect(sql).toContain(`"offMarket" ASC,
+            data_origin_priority ASC`);
+    expect(sql).toContain("data_origin_priority ASC");
+    expect(calls[1]?.values).toEqual([
+      "Momentous Calcium",
+      false,
+      1,
+      ["Momentous"],
+    ]);
+  });
+
+  it("does not brand-scope one-word brands from middle or brand-only queries", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("GROUP BY brand")) {
+          return { rows: [{ brand: "Life" }] as T[] };
+        }
+        return { rows: [] as T[] };
+      },
+    });
+
+    await queries.searchSupplements({
+      q: "Daily Life Magnesium",
+      limit: 5,
+      includeOffMarket: false,
+    });
+    await queries.searchSupplements({
+      q: "Life",
+      limit: 5,
+      includeOffMarket: false,
+    });
+    await queries.searchSupplements({
+      q: "Life Magnesium",
+      limit: 1,
+      includeOffMarket: false,
+    });
+
+    expect(calls.filter((call) => call.values.length === 3)).toHaveLength(2);
+    expect(calls.filter((call) => call.values.length === 4)).toEqual([
+      {
+        text: expect.stringContaining("brand_candidates AS MATERIALIZED"),
+        values: ["Life Magnesium", false, 1, ["Life"]],
+      },
+    ]);
+  });
+
+  it("matches possessive brand names without requiring apostrophes", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("GROUP BY brand")) {
+          return { rows: [{ brand: "Doctor's Best" }] as T[] };
+        }
+        return { rows: [] as T[] };
+      },
+    });
+
+    await queries.searchSupplements({
+      q: "Doctors Best Magnesium",
+      limit: 3,
+      includeOffMarket: false,
+    });
+
+    const sql = calls[1]?.text ?? "";
+
+    expect(sql).toContain("replace(lower($1::text), '''', '')");
+    expect(sql).toContain("replace(lower(name), '''', '')");
+    expect(sql).toContain("replace(lower(brand), '''', '')");
+    expect(calls[1]?.values).toEqual([
+      "Doctors Best Magnesium",
+      false,
+      3,
+      ["Doctor's Best"],
+    ]);
+  });
+
+  it("reuses the supplement brand index across repeated searches", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        return { rows: [] as T[] };
+      },
+    });
+
+    await queries.searchSupplements({
+      q: "Creatine",
+      limit: 5,
+      includeOffMarket: false,
+    });
+    await queries.searchSupplements({
+      q: "Magnesium",
+      limit: 5,
+      includeOffMarket: false,
+    });
+
+    expect(calls.filter((call) => call.text.includes("GROUP BY brand"))).toHaveLength(
+      1,
+    );
+    expect(calls.filter((call) => call.values.length === 3)).toHaveLength(2);
+  });
+
+  it("retries the supplement brand index after a failed load", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    let brandLoadAttempts = 0;
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("GROUP BY brand")) {
+          brandLoadAttempts += 1;
+          if (brandLoadAttempts === 1) {
+            throw new Error("brand index unavailable");
+          }
+          return { rows: [{ brand: "Momentous" }] as T[] };
+        }
+        return { rows: [] as T[] };
+      },
+    });
+
+    await expect(queries.searchSupplements({
+      q: "Momentous Calcium",
+      limit: 1,
+      includeOffMarket: false,
+    })).rejects.toThrow("brand index unavailable");
+
+    await expect(queries.searchSupplements({
+      q: "Momentous Calcium",
+      limit: 1,
+      includeOffMarket: false,
+    })).resolves.toEqual([]);
+
+    expect(calls.filter((call) => call.text.includes("GROUP BY brand"))).toHaveLength(
+      2,
+    );
+    expect(calls.filter((call) => call.values.length === 4)).toEqual([
+      {
+        text: expect.stringContaining("brand_candidates AS MATERIALIZED"),
+        values: ["Momentous Calcium", false, 1, ["Momentous"]],
+      },
+    ]);
+  });
+
+  it("keeps overlapping brand scopes without one-word substring brands", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("GROUP BY brand")) {
+          return {
+            rows: [
+              { brand: "Life" },
+              { brand: "Garden of Life" },
+              { brand: "Garden of Life Dr. Formulated" },
+            ],
+          } as { rows: T[] };
+        }
+        return { rows: [] as T[] };
+      },
+    });
+
+    await queries.searchSupplements({
+      q: "Garden of Life Dr Formulated Probiotics",
+      limit: 5,
+      includeOffMarket: false,
+    });
+
+    expect(calls[1]?.values).toEqual([
+      "Garden of Life Dr Formulated Probiotics",
+      false,
+      5,
+      ["Garden of Life Dr. Formulated", "Garden of Life"],
+    ]);
   });
 
   it("skips invalid ids before querying", async () => {

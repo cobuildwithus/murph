@@ -24,11 +24,11 @@ WITH normalized AS (
     ) AS name,
 
     NULLIF(
-      COALESCE(
+      btrim(COALESCE(
         label->>'brandName',
         label->>'brand',
         label->>'brand_name'
-      ),
+      )),
       ''
     ) AS brand,
 

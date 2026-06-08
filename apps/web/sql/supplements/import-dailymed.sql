@@ -12,7 +12,7 @@ WITH normalized AS (
     NULLIF(btrim(payload->>'dataOrigin'), '') AS data_origin,
     NULLIF(btrim(payload->>'dataOriginId'), '') AS data_origin_id,
     COALESCE(NULLIF(payload->>'name', ''), 'Unknown supplement') AS name,
-    NULLIF(payload->>'brand', '') AS brand,
+    NULLIF(btrim(payload->>'brand'), '') AS brand,
     NULLIF(regexp_replace(COALESCE(payload->>'upc', ''), '\D', '', 'g'), '') AS upc,
     CASE lower(COALESCE(payload->>'offMarket', 'false'))
       WHEN '1' THEN true
