@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:8739bd18363342fbafdfdc1335111530c83c058e3ea30db39b3af1220a9ebe3f",
+  "catalogHash": "sha256:5652e3712dc91999f668b170dfa54eff8235f55b1e8fcd54af3e87492f476f06",
   "generatedAt": null,
   "items": [
     {
@@ -35026,7 +35026,18 @@
       ],
       "equipment": [],
       "id": "EX120",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person lying on back with knees bent feet under knees and arms relaxed before a single-leg glute bridge.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c9ce65b7-15b6-4201-25e1-296ee35b4a00/public"
+        },
+        {
+          "alt": "Person holding a single-leg glute bridge with one foot planted and the other leg straight and raised.",
+          "step": "Single-leg bridge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4dd164b5-b742-453f-b95d-00def001fb00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",

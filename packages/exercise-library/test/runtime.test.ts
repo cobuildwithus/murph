@@ -131,6 +131,16 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b7d05f24-5dcc-4353-6e90-e107a0a81c00/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "single-leg-glute-bridge")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c9ce65b7-15b6-4201-25e1-296ee35b4a00/public",
+      }),
+      expect.objectContaining({
+        step: "Single-leg bridge",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4dd164b5-b742-453f-b95d-00def001fb00/public",
+      }),
+    ]);
     expect(artifacts.details.items.find((item) => item.slug === "wall-sit")?.images).toEqual([
       expect.objectContaining({
         step: "Setup",
