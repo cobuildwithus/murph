@@ -215,6 +215,16 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a48ab2c8-54fb-4218-ba91-9a7701c40100/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "calf-raise-hold")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cb506987-c45e-4aff-167b-7d83920fd500/public",
+      }),
+      expect.objectContaining({
+        step: "Hold",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e3f43c31-5766-4c2c-c68b-4e6ee5b17300/public",
+      }),
+    ]);
     expect(artifacts.details.sources).toEqual(catalog.sources);
     expect(artifacts.facets.facets.kinds).toEqual(["exercise", "stretch"]);
     expect(artifacts.facets.facets.equipment).toContain("none");
