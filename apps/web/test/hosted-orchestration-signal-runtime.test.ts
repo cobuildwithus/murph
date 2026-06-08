@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   },
   readHostedMailboxItemCheckpointById: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
+  readHostedAiUsageGate: vi.fn(),
+  resolveHostedAiUsageGate: vi.fn(),
   resolveHostedRuntimeAiUsageDemandGate: vi.fn(),
   signalWithStart: vi.fn(),
 }));
@@ -53,6 +55,11 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
   resolveHostedRuntimeAiUsageDemandGate: mocks.resolveHostedRuntimeAiUsageDemandGate,
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  readHostedAiUsageGate: mocks.readHostedAiUsageGate,
+  resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
 }));
 
 import {
@@ -435,7 +442,7 @@ describe("hosted runtime Temporal signaling", () => {
           lane: "system",
           laneSeq: "77",
           mailboxItemId: "mailbox_runtime.manual-requested",
-          source: "manual",
+          source: "manual-ai-gated",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),
@@ -550,6 +557,37 @@ describe("hosted runtime Temporal signaling", () => {
         workflowId: "hosted-user-runtime:member_123",
       }),
     );
+  });
+
+  it("forwards explicit Prisma through the runtime usage gate resolver", async () => {
+    const {
+      resolveHostedRuntimeAiUsageDemandGate,
+    } = await vi.importActual<{
+      resolveHostedRuntimeAiUsageDemandGate: (input: {
+        now: string;
+        prisma: typeof mocks.prisma;
+        userId: string;
+      }) => Promise<{ status: "allowed" } | { status: "denied" } | {
+        retryAt: string;
+        status: "unavailable";
+      }>;
+    }>("@/src/lib/hosted-orchestration/runtime-usage-decision");
+    const explicitPrisma = mocks.prisma;
+    mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({ allowed: true });
+
+    await expect(resolveHostedRuntimeAiUsageDemandGate({
+      now: "2026-05-20T12:00:00.000Z",
+      prisma: explicitPrisma,
+      userId: "member_123",
+    })).resolves.toEqual({
+      status: "allowed",
+    });
+
+    expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
+      memberId: "member_123",
+      now: new Date("2026-05-20T12:00:00.000Z"),
+      prisma: explicitPrisma,
+    });
   });
 
   it("ensures workspace before device-sync mailbox pointer signals", async () => {

@@ -185,7 +185,7 @@ export async function signalHostedManualRunRuntime(
     environment: input.environment,
     kind: "runtime.manual-requested",
     prisma,
-    source: "manual",
+    source: HOSTED_RUNTIME_MANUAL_AI_GATED_SIGNAL_SOURCE,
     userId: input.userId,
   });
 }
@@ -329,6 +329,7 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
 }
 
 const HOSTED_RUNTIME_CONTROL_DETERMINISTIC_OCCURRED_AT = "1970-01-01T00:00:00.000Z";
+const HOSTED_RUNTIME_MANUAL_AI_GATED_SIGNAL_SOURCE = "manual-ai-gated";
 
 const BROWSER_VAULT_REFRESH_CONTROL_DEDUPE_WINDOW_MS = 60_000;
 
