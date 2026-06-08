@@ -85,6 +85,7 @@ describe("hosted orchestration control contracts", () => {
   });
 
   it("keeps retired runtime wake sources out of durable demand sources", () => {
+    expect(HOSTED_RUNTIME_DEMAND_RUN_SOURCES).toContain("workspace_wake");
     expect(HOSTED_RUNTIME_DEMAND_RUN_SOURCES).not.toContain(
       "linq.imessage.typing",
     );
@@ -289,15 +290,16 @@ describe("hosted orchestration control contracts", () => {
   });
 
   it("parses ensure-processing request and response variants", () => {
-    expect(parseHostedRuntimeEnsureProcessingRequest({
-      orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "manual",
-      source: "workspace_wake",
-    })).toEqual({
+    const ensureProcessingRequest = parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "manual",
       source: "workspace_wake",
     });
+    expect(ensureProcessingRequest).toEqual({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "manual",
+    });
+    expect(ensureProcessingRequest).not.toHaveProperty("source");
 
     for (const action of [
       "started",
@@ -335,6 +337,14 @@ describe("hosted orchestration control contracts", () => {
       reason: "nudge",
     })).toThrow(
       "Hosted runtime ensure-processing request must not include aiUsageAllowDecision.",
+    );
+
+    expect(() => parseHostedRuntimeEnsureProcessingRequest({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "nudge",
+      source: "device_sync_recovery",
+    })).toThrow(
+      "Hosted runtime ensure-processing request source is not supported.",
     );
 
     expect(() => parseHostedRuntimeEnsureProcessingResponse({

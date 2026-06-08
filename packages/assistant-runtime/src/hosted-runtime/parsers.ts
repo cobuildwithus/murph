@@ -2,7 +2,6 @@ import {
   parseConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/runtime-config";
 import {
-  parseHostedRuntimeDemandRunSource,
   parseHostedWorkspaceState,
 } from "@murphai/hosted-execution/parsers";
 
@@ -84,6 +83,14 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
     record.reason,
     "Hosted assistant workspace runtime job request.reason",
   );
+  if (record.source !== undefined && record.source !== null) {
+    // Legacy job tolerance only. Runtime behavior should come from reason,
+    // workspace state, and canonical mailbox facts.
+    parseHostedWorkspaceInvocationSource(
+      record.source,
+      "Hosted assistant workspace runtime job request.source",
+    );
+  }
 
   return {
     attemptId: requireString(
@@ -121,14 +128,6 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
           ),
         }),
     reason,
-    ...(record.source === undefined || record.source === null
-      ? {}
-      : {
-          source: parseHostedRuntimeDemandRunSource(
-            record.source,
-            "Hosted assistant workspace runtime job request.source",
-          ),
-        }),
     userId: requireString(
       record.userId,
       "Hosted assistant workspace runtime job request.userId",
@@ -468,6 +467,21 @@ function parseHostedWorkspaceInvocationReason(
       return reason;
     default:
       throw new TypeError(`${label} is not supported.`);
+  }
+}
+
+function parseHostedWorkspaceInvocationSource(
+  value: unknown,
+  label: string,
+): void {
+  if (
+    value !== "mailbox_backlog"
+    && value !== "manual"
+    && value !== "browser_vault_refresh"
+    && value !== "workspace_wake"
+    && value !== "lag_recovery"
+  ) {
+    throw new TypeError(`${label} is not supported.`);
   }
 }
 
