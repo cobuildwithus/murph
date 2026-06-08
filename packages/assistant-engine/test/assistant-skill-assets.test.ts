@@ -237,7 +237,7 @@ describe('assistant skill assets', () => {
       'Do not let this suppress later voice memo or attachment options',
     )
     expect(raw).toContain(
-      'What should I call you? And is there anything health-wise you\'ve been curious about, working on, or dealing with lately?',
+      'What\'s your name? And is there anything health-wise you\'ve been curious about, working on, or dealing with lately?',
     )
     expect(raw).toContain('## Required input affordances')
     expect(raw).toContain(
@@ -338,7 +338,7 @@ describe('assistant skill assets', () => {
       'ask one short follow-up for duration or start timing after the structured save or on the next onboarding turn',
     )
     expect(raw).toContain(
-      'Make clear that PDFs or pasted results are welcome whenever the user wants to share them',
+      'Acknowledge that downloading results can be annoying; they can skip this now and send PDFs or pasted results later if they want Murph to use them',
     )
     expect(raw).toContain(
       'If the user sends lab PDFs, pasted lab results, or blood-test documents',
@@ -486,7 +486,7 @@ describe('assistant skill assets', () => {
       'whether they have recent blood tests or lab panels',
     )
     expect(raw).toContain(
-      'PDFs or pasted results are welcome whenever the user wants to share them',
+      'lab sharing is optional and can be deferred',
     )
     expect(raw).toContain('they can skip anything they do not want to share')
     expect(raw).toContain(
@@ -577,7 +577,7 @@ describe('assistant skill assets', () => {
       'what gender should I use when interpreting health stuff',
       'Are you already trying any health protocols or experiments, or mostly starting fresh?',
       'Are you taking any supplements right now? Product or brand names help, plus roughly how long you\'ve taken each one or since when.',
-      'Do you have any recent blood tests or lab panels, like Function Health or doctor-ordered tests? If you do, you can send the PDFs or copy/paste the results whenever you want.',
+      'Do you have any recent blood tests or lab panels, like Function Health or doctor-ordered labs? If downloading results is annoying, skip this for now — you can always send a PDF or paste results later.',
     ]
     for (const removedFixedScript of removedFixedScripts) {
       expect(raw).not.toContain(removedFixedScript)
