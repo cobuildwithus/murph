@@ -43,6 +43,19 @@ has been superseded by the greenfield mailbox/workspace cutover in
 - `HostedRunLog`
 - `HostedExecutionCursor`
 
+## PR66 Operational Cutover
+
+The PR66 runtime reconciliation cutover is a coordinated hard cut. Operators
+must stop old Temporal workers, terminate old `hosted-user-runtime:*`
+workflows, deploy matching web, Temporal, and Cloudflare builds together, then
+reseed new histories.
+
+Cloudflare Durable Object state is also part of that reset boundary. Existing
+runner objects that still contain the removed `runner_bundle_slots` table must
+be wiped or recreated before the new worker starts serving those objects; the
+new schema assertion treats that table as incompatible legacy state rather than
+migrating it in place.
+
 ## Rule For Future Work
 
 Keep Cloudflare boring. If a behavior can live in the local runtime, the hosted

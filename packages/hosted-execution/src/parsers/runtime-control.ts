@@ -268,6 +268,7 @@ const HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS = [
   "runDrain",
   "runId",
   "runToken",
+  "source",
   "targetCommittedSeqHint",
   "targetReached",
   "wake",
@@ -1211,15 +1212,6 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
     );
   }
   const reason = parseHostedWorkspaceInvocationReason(record.reason);
-  if (record.source !== undefined && record.source !== null) {
-    // Legacy wire tolerance only. Workspace invocation is source-less; validate
-    // old source-bearing requests, then drop the field.
-    parseAllowedString(
-      record.source,
-      "Hosted workspace invocation request source",
-      ["mailbox_backlog", "manual", "browser_vault_refresh", "workspace_wake", "lag_recovery"] as const,
-    );
-  }
 
   return {
     attemptId: requireString(record.attemptId, "Hosted workspace invocation request attemptId"),

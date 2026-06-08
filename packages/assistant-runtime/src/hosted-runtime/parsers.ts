@@ -71,6 +71,11 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
   );
   rejectRemovedHostedAssistantRuntimeField(
     record,
+    "source",
+    "Hosted assistant workspace runtime job request",
+  );
+  rejectRemovedHostedAssistantRuntimeField(
+    record,
     "targetCommittedSeqHint",
     "Hosted assistant workspace runtime job request",
   );
@@ -83,14 +88,6 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
     record.reason,
     "Hosted assistant workspace runtime job request.reason",
   );
-  if (record.source !== undefined && record.source !== null) {
-    // Legacy job tolerance only. Runtime behavior should come from reason,
-    // workspace state, and canonical mailbox facts.
-    parseHostedWorkspaceInvocationSource(
-      record.source,
-      "Hosted assistant workspace runtime job request.source",
-    );
-  }
 
   return {
     attemptId: requireString(
@@ -467,21 +464,6 @@ function parseHostedWorkspaceInvocationReason(
       return reason;
     default:
       throw new TypeError(`${label} is not supported.`);
-  }
-}
-
-function parseHostedWorkspaceInvocationSource(
-  value: unknown,
-  label: string,
-): void {
-  if (
-    value !== "mailbox_backlog"
-    && value !== "manual"
-    && value !== "browser_vault_refresh"
-    && value !== "workspace_wake"
-    && value !== "lag_recovery"
-  ) {
-    throw new TypeError(`${label} is not supported.`);
   }
 }
 

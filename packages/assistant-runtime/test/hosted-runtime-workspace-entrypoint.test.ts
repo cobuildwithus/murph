@@ -7317,23 +7317,14 @@ describe("hosted workspace runtime entrypoint", () => {
     });
     assert.equal(browserVaultRefreshParsed.request.reason, "browser_vault_refresh");
 
-    const workspaceWakeParsed = parseHostedAssistantWorkspaceRuntimeJobInput({
-      request: {
-        ...createWorkspaceRunRequest(),
-        source: "workspace_wake",
-      },
-    });
-    assert.equal(workspaceWakeParsed.request.reason, "nudge");
-    assert.equal("source" in workspaceWakeParsed.request, false);
-
     expect(() =>
       parseHostedAssistantWorkspaceRuntimeJobInput({
         request: {
           ...createWorkspaceRunRequest(),
-          source: "webhook",
+          source: "manual",
         },
       })
-    ).toThrow("Hosted assistant workspace runtime job request.source is not supported.");
+    ).toThrow("Hosted assistant workspace runtime job request.source is no longer supported.");
 
     expect(() =>
       parseHostedAssistantWorkspaceRuntimeJobInput({
