@@ -205,6 +205,66 @@ it("fails fast when hosted completion reaches a terminal runner error", async ()
   }
 });
 
+it("keeps polling hosted completion after a transient status read abort", async () => {
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const completedStatus = {
+    inFlight: false,
+    lastErrorCode: null,
+    mailboxLag: [
+      {
+        importedSeq: "1",
+        lag: "0",
+        lane: "conversation",
+        maxSeq: "1",
+      },
+    ],
+    recentLogs: [],
+    userId: "member_transient_status_abort",
+    workspace: {
+      browserVaultReplicaRef: null,
+      checkpointedAt: "2026-05-08T00:00:04.000Z",
+      createdAt: "2026-05-08T00:00:00.000Z",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      redactedStatus: null,
+      snapshotRef: null,
+      updatedAt: "2026-05-08T00:00:04.000Z",
+      userId: "member_transient_status_abort",
+      version: "1",
+    },
+  } satisfies HostedRunnerStatusResponse;
+  let statusReads = 0;
+  const fetch = vi.fn(async () => {
+    statusReads += 1;
+    if (statusReads === 1) {
+      throw new Error("The operation was aborted due to timeout");
+    }
+    return Response.json(completedStatus);
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const harness = await startHostedLocalDevHarness({
+    env: {
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+    statusPath: (userId) => `/status/${userId}`,
+  });
+
+  try {
+    await expect(harness.waitForHostedCompletion("member_transient_status_abort", {
+      pollIntervalMs: 1,
+      timeoutMs: 5_000,
+    })).resolves.toMatchObject({
+      userId: "member_transient_status_abort",
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  } finally {
+    await harness.stop();
+  }
+});
+
 it("lets fresh mailbox lag settle before recovery nudging", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
   const laggedStatus = {

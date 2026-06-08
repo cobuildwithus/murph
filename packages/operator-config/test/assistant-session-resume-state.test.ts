@@ -73,6 +73,45 @@ describe('assistant session resume state normalization', () => {
     expect(session.codexResume).toEqual(session.resumeState)
   })
 
+  it('preserves Codex assistant contract fingerprints when present', () => {
+    const session = parseAssistantSessionRecord(
+      createPersistedSessionRecord({
+        resumeState: {
+          assistantContractFingerprint:
+            ' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ',
+          providerSessionId,
+          resumeRouteId: 'route-new',
+        },
+      }),
+    )
+
+    expect(session.resumeState).toEqual({
+      assistantContractFingerprint:
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      routeFingerprint: 'route-new',
+      threadId: providerSessionId,
+    })
+    expect(session.codexResume).toEqual(session.resumeState)
+  })
+
+  it('drops malformed Codex assistant contract fingerprints', () => {
+    const session = parseAssistantSessionRecord(
+      createPersistedSessionRecord({
+        resumeState: {
+          assistantContractFingerprint: 'not-a-valid-contract-fingerprint',
+          providerSessionId,
+          resumeRouteId: 'route-new',
+        },
+      }),
+    )
+
+    expect(session.resumeState).toEqual({
+      routeFingerprint: 'route-new',
+      threadId: providerSessionId,
+    })
+    expect(session.codexResume).toEqual(session.resumeState)
+  })
+
   it('drops legacy thread ids without route fingerprints', () => {
     const session = parseAssistantSessionRecord(
       createPersistedSessionRecord({
@@ -150,6 +189,8 @@ describe('assistant session resume state normalization', () => {
       conversationId: 'session_123',
       codexTarget: target,
       codexResume: {
+        assistantContractFingerprint:
+          'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
         rolloutRelativePath: codexRolloutRelativePath,
         routeFingerprint: 'route-v2',
         threadId: providerSessionId,
@@ -159,6 +200,8 @@ describe('assistant session resume state normalization', () => {
     expect(session.conversationId).toBe('session_123')
     expect(session.sessionId).toBe('session_123')
     expect(session.codexResume).toEqual({
+      assistantContractFingerprint:
+        'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       rolloutRelativePath: codexRolloutRelativePath,
       routeFingerprint: 'route-v2',
       threadId: providerSessionId,

@@ -226,7 +226,6 @@ export async function executeCodexAssistantTurnAttempt(
     progressDelivery: input.progressDelivery ?? undefined,
     images: extractCodexAppServerUserMessageImages(input.userMessageContent),
     excludeResumeTurns: true,
-    refreshThreadInstructions: input.refreshThreadInstructions,
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
     sandbox: providerConfig.policy.sandbox ?? undefined,
     workingDirectory: input.workingDirectory,
@@ -266,7 +265,6 @@ export async function executeCodexAssistantTurnAttempt(
       diagnosticKind: 'fresh-thread-fallback',
       input: fallbackInput,
       prompt,
-      refreshThreadInstructions: true,
     })
     const appServerResult = await executeCodexAppServerTurn({
       ...baseAppServerInput,
@@ -274,7 +272,6 @@ export async function executeCodexAssistantTurnAttempt(
         fallbackInput.developerInstructions,
       ),
       prompt,
-      refreshThreadInstructions: true,
       resumeSessionId: undefined,
     })
     return appServerResult
@@ -444,7 +441,6 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
   diagnosticKind: 'fresh-thread-fallback' | 'primary'
   input: AssistantProviderTurnExecutionInput
   prompt: string
-  refreshThreadInstructions?: boolean | null
 }): void {
   const onTraceEvent = input.input.onTraceEvent
   if (!onTraceEvent) {
@@ -489,8 +485,6 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
         conversationHistoryPresent: conversationHistoryCount > 0,
         conversationContextBytes: byteLength(conversationContextPrompt),
         conversationContextPresent,
-        refreshThreadInstructions:
-          input.refreshThreadInstructions ?? input.input.refreshThreadInstructions === true,
         resumeCodexThreadIdPresent:
           normalizeNullableString(input.input.resumeCodexThreadId) !== null,
       },

@@ -115,7 +115,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         const first = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: 'Reply exactly TURN_START_CONTRACT_ONE_OK.',
-          refreshThreadInstructions: true,
         })
         const secondTraceEvents: unknown[] = []
         const second = await executeRealCodexAppServerTurn({
@@ -124,7 +123,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             secondTraceEvents.push(event)
           },
           prompt: 'Reply exactly TURN_START_CONTRACT_TWO_OK.',
-          refreshThreadInstructions: false,
           resumeSessionId: first.sessionId,
         })
         const turnStartResultTurnIds = readCodexTurnStartResultTurnIds(
@@ -482,12 +480,10 @@ async function runResumeCacheProbeAttempt(input: {
     const first = await executeRealCodexAppServerTurn({
       ...commonInput,
       prompt: 'Reply exactly RESUME_CACHE_PROBE_ONE_OK.',
-      refreshThreadInstructions: true,
     })
     const second = await executeRealCodexAppServerTurn({
       ...commonInput,
       prompt: 'Reply exactly RESUME_CACHE_PROBE_TWO_OK.',
-      refreshThreadInstructions: false,
       resumeSessionId: first.sessionId,
     })
     const firstUsageEvents = readCodexTokenUsageEvents(first.jsonEvents)

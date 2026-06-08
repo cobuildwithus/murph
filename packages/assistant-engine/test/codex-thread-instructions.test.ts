@@ -88,7 +88,6 @@ describe('Codex thread instructions', () => {
         developerInstructions: 'Stable Murph instructions.',
         turnContextPrompt: 'Current Murph runtime context.',
       },
-      refreshThreadInstructions: false,
       resumeCodexThreadId: 'thread-resume',
       systemPrompt: 'Stable Murph instructions.',
       turnContextPrompt: 'Current Murph runtime context.',
@@ -102,7 +101,6 @@ describe('Codex thread instructions', () => {
       'Stable Murph instructions.',
     )
     expect(appServerInput.excludeResumeTurns).toBe(true)
-    expect(appServerInput.refreshThreadInstructions).toBe(false)
     expect(appServerInput.prompt).toBe(
       ['Current Murph runtime context.', 'User message:\nContinue.'].join('\n\n'),
     )
@@ -129,7 +127,6 @@ describe('Codex thread instructions', () => {
         }),
         env: {},
         developerInstructions: 'Stable Murph instructions.',
-        refreshThreadInstructions: false,
         resumeCodexThreadId: 'thread-resume',
         userPrompt: 'Continue.',
         workingDirectory: '/tmp/provider-tests',
@@ -141,7 +138,6 @@ describe('Codex thread instructions', () => {
     expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
     expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0])
       .toMatchObject({
-        refreshThreadInstructions: false,
         resumeSessionId: 'thread-resume',
       })
   })
@@ -165,7 +161,6 @@ describe('Codex thread instructions', () => {
         }),
         env: {},
         developerInstructions: 'Stable Murph instructions.',
-        refreshThreadInstructions: false,
         resumeCodexThreadId: 'stale-thread',
         userPrompt: 'Continue.',
         workingDirectory: '/tmp/provider-tests',
@@ -224,7 +219,6 @@ describe('Codex thread instructions', () => {
         env: {},
         developerInstructions: null,
         prepareFreshThreadFallback,
-        refreshThreadInstructions: false,
         resumeCodexThreadId: 'stale-thread',
         userPrompt: 'Continue.',
         workingDirectory: '/tmp/provider-tests',
@@ -238,14 +232,12 @@ describe('Codex thread instructions', () => {
     expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0])
       .toMatchObject({
         developerInstructions: null,
-        refreshThreadInstructions: false,
         resumeSessionId: 'stale-thread',
       })
     const fallbackInput = codexAppServerMocks.executeCodexAppServerTurn.mock
       .calls[1]?.[0]
     expect(fallbackInput).toMatchObject({
       developerInstructions: 'Stable Murph instructions.',
-      refreshThreadInstructions: true,
       resumeSessionId: undefined,
     })
     expect(fallbackInput.prompt).toContain('Current Murph runtime context.')

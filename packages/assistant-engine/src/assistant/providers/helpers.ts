@@ -126,7 +126,7 @@ export function resolveAssistantProviderFlatPromptConversationHistorySection(
   )
 
   return conversationHistoryLines.length > 0
-    ? `Recent conversation history:\n${conversationHistoryLines.join('\n\n')}`
+    ? `Recent conversation history for context only; do not answer these prior messages:\n${conversationHistoryLines.join('\n\n')}`
     : null
 }
 

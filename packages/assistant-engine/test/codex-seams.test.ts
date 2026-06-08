@@ -1,4 +1,6 @@
 import { rm } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -91,6 +93,66 @@ describe('assistant Codex seam helpers', () => {
 
     expect(secondHostedRoute.routeId).toBe(firstHostedRoute.routeId)
     expect(secondLocalRoute.routeId).not.toBe(firstLocalRoute.routeId)
+  })
+
+  it('keeps equivalent local Codex home spellings on the same route', () => {
+    const relativeRoute = buildCodexThreadIdentity(
+      normalizeAssistantProviderConfig({
+        codexHome: 'local-codex-home',
+        model: 'gpt-synthetic',
+        modelProvider: 'openai',
+      }),
+    )
+    const resolvedRoute = buildCodexThreadIdentity(
+      normalizeAssistantProviderConfig({
+        codexHome: path.resolve('local-codex-home'),
+        model: 'gpt-synthetic',
+        modelProvider: 'openai',
+      }),
+    )
+    const tildeRoute = buildCodexThreadIdentity(
+      normalizeAssistantProviderConfig({
+        codexHome: '~/.codex-local',
+        model: 'gpt-synthetic',
+        modelProvider: 'openai',
+      }),
+    )
+    const homeRoute = buildCodexThreadIdentity(
+      normalizeAssistantProviderConfig({
+        codexHome: path.join(homedir(), '.codex-local'),
+        model: 'gpt-synthetic',
+        modelProvider: 'openai',
+      }),
+    )
+
+    expect(resolvedRoute.routeId).toBe(relativeRoute.routeId)
+    expect(homeRoute.routeId).toBe(tildeRoute.routeId)
+  })
+
+  it('keeps omitted and explicit default Codex commands on the same route', () => {
+    const defaultCommandRoute = buildCodexThreadIdentity(
+      normalizeAssistantProviderConfig({
+        model: 'gpt-synthetic',
+        modelProvider: 'openai',
+      }),
+    )
+    const explicitDefaultCommandRoute = buildCodexThreadIdentity(
+      normalizeAssistantProviderConfig({
+        codexCommand: 'codex',
+        model: 'gpt-synthetic',
+        modelProvider: 'openai',
+      }),
+    )
+    const customCommandRoute = buildCodexThreadIdentity(
+      normalizeAssistantProviderConfig({
+        codexCommand: 'codex-next',
+        model: 'gpt-synthetic',
+        modelProvider: 'openai',
+      }),
+    )
+
+    expect(explicitDefaultCommandRoute.routeId).toBe(defaultCommandRoute.routeId)
+    expect(customCommandRoute.routeId).not.toBe(defaultCommandRoute.routeId)
   })
 
   it('matches resume bindings only when the stored route id matches exactly', () => {

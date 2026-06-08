@@ -45,7 +45,10 @@ export const JUNCTION_WEARABLE_FIXTURE_TIMESERIES_RESOURCES = Object.freeze([
   ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
 ]);
 const JUNCTION_ALLOWED_SUMMARY_RESOURCE_NAMES: readonly string[] = JUNCTION_ALLOWED_SUMMARY_RESOURCES;
-const JUNCTION_ALLOWED_TIMESERIES_RESOURCE_NAMES: readonly string[] = JUNCTION_ALLOWED_TIMESERIES_RESOURCES;
+const JUNCTION_HOSTED_DIRECT_REPLAY_SUMMARY_RESOURCE_NAMES = new Set<string>([
+  "activity",
+  "sleep",
+]);
 const DEFAULT_WEARABLE_TREND_DEFAULTS = {
   aggregation: "median",
   comparisonWindowDays: 30,
@@ -109,6 +112,16 @@ export const JUNCTION_WEARABLE_BROWSER_VAULT_METRIC_EXPECTATIONS = [
   { metricKey: "steps", minimumRows: 5 },
   { metricKey: "total-sleep-minutes", minimumRows: 5 },
 ] as const satisfies readonly JunctionWearableMetricRowExpectation[];
+
+const JUNCTION_HOSTED_DIRECT_REPLAY_REST_FALLBACK_METRIC_KEYS = new Set<string>([
+  "activity-minutes",
+  "body-weight",
+]);
+
+export const JUNCTION_WEARABLE_HOSTED_DIRECT_REPLAY_BROWSER_VAULT_METRIC_EXPECTATIONS =
+  JUNCTION_WEARABLE_BROWSER_VAULT_METRIC_EXPECTATIONS.filter((expectation) =>
+    !JUNCTION_HOSTED_DIRECT_REPLAY_REST_FALLBACK_METRIC_KEYS.has(expectation.metricKey)
+  );
 
 function wearableBiomarkerExpectation(input: {
   biomarkerKey: string;
@@ -876,9 +889,12 @@ function isHostedReplayResourceAllowed(input: {
   resource: string;
   resourceCategory: "summary" | "timeseries";
 }): boolean {
-  return input.resourceCategory === "summary"
-    ? JUNCTION_ALLOWED_SUMMARY_RESOURCE_NAMES.includes(input.resource)
-    : JUNCTION_ALLOWED_TIMESERIES_RESOURCE_NAMES.includes(input.resource);
+  if (input.resourceCategory !== "summary") {
+    return false;
+  }
+
+  return JUNCTION_ALLOWED_SUMMARY_RESOURCE_NAMES.includes(input.resource)
+    && JUNCTION_HOSTED_DIRECT_REPLAY_SUMMARY_RESOURCE_NAMES.has(input.resource);
 }
 
 function selectHostedReplayRecords(

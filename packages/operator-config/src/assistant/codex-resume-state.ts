@@ -4,9 +4,11 @@ import { normalizeNullableString } from './shared.js'
 
 const codexRolloutRelativePathPattern =
   /^sessions\/(\d{4})\/(\d{2})\/(\d{2})\/rollout-(\d{4})-(\d{2})-(\d{2})T[^/]+-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.jsonl$/u
+const assistantContractFingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/u)
 
 export const codexResumeStateSchema = z
   .object({
+    assistantContractFingerprint: assistantContractFingerprintSchema.optional(),
     rolloutRelativePath: z.string().min(1).nullable().optional(),
     routeFingerprint: z.string().min(1),
     threadId: z.string().min(1),
@@ -73,15 +75,20 @@ export function normalizeCodexResumeState(value: unknown): CodexResumeState | nu
   const rolloutRelativePath =
     normalizeCodexRolloutRelativePath(record.rolloutRelativePath) ??
     normalizeCodexRolloutRelativePath(record.codexRolloutRelativePath)
+  const assistantContractFingerprint = normalizeAssistantContractFingerprint(
+    record.assistantContractFingerprint,
+  )
 
   return codexResumeStateSchema.parse({
     threadId,
     routeFingerprint,
     ...(rolloutRelativePath ? { rolloutRelativePath } : {}),
+    ...(assistantContractFingerprint ? { assistantContractFingerprint } : {}),
   })
 }
 
 export function buildCodexResumeState(input: {
+  assistantContractFingerprint?: string | null
   rolloutRelativePath?: string | null
   routeFingerprint: string | null | undefined
   threadId: string | null | undefined
@@ -98,11 +105,15 @@ export function buildCodexResumeState(input: {
   const rolloutRelativePath = normalizeCodexRolloutRelativePath(
     input.rolloutRelativePath,
   )
+  const assistantContractFingerprint = normalizeNullableString(
+    input.assistantContractFingerprint,
+  )
 
   return codexResumeStateSchema.parse({
     threadId,
     routeFingerprint,
     ...(rolloutRelativePath ? { rolloutRelativePath } : {}),
+    ...(assistantContractFingerprint ? { assistantContractFingerprint } : {}),
   })
 }
 
@@ -114,4 +125,11 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 
 function normalizeUnknownString(value: unknown): string | null {
   return normalizeNullableString(typeof value === 'string' ? value : null)
+}
+
+function normalizeAssistantContractFingerprint(value: unknown): string | null {
+  const normalized = normalizeUnknownString(value)
+  return normalized && assistantContractFingerprintSchema.safeParse(normalized).success
+    ? normalized
+    : null
 }

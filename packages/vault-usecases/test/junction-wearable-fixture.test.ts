@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildJunctionWearableHostedReplayPlan,
+  JUNCTION_WEARABLE_HOSTED_DIRECT_REPLAY_BROWSER_VAULT_METRIC_EXPECTATIONS,
   promoteWearableCaptureToJunctionHostedSmokeFixture,
   runJunctionWearableFixtureE2e,
 } from "../src/testing.ts";
@@ -106,6 +107,50 @@ describe("Junction wearable fixture testing helpers", () => {
       expect(plan.dirtyResources.every((resource) =>
         resource.resourceCategory !== "timeseries"
       )).toBe(true);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps hosted direct replay on resources that do not require Junction REST fallback", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-fixture-"));
+    const fixturePath = path.join(tempRoot, "junction-wearables-hosted-smoke.json");
+
+    try {
+      const fixture = buildSafeFixture({ recordCount: 1 });
+      fixture.rawArtifacts.push(
+        {
+          content: [{
+            calendar_date: "2026-04-01",
+            date: "2026-04-01",
+            sourceProviderSlug: "garmin",
+            stages: [],
+          }],
+          relativePath: "hosted-smoke/garmin/02-junction-summary-sleep-cycle.json",
+        },
+        {
+          content: [{
+            data: [{ timestamp: "2026-04-01T12:00:00.000Z", unit: "%", value: 97 }],
+            sourceProviderSlug: "garmin",
+          }],
+          relativePath: "hosted-smoke/garmin/03-junction-timeseries-blood-oxygen.json",
+        },
+      );
+      await writeFile(fixturePath, JSON.stringify(fixture), "utf8");
+
+      const plan = await buildJunctionWearableHostedReplayPlan({ fixturePath });
+      expect(plan.resources.map((resource) => [
+        resource.resourceCategory,
+        resource.resource,
+      ])).toEqual([["summary", "activity"]]);
+      expect(plan.dirtyResources.every((resource) =>
+        resource.resourceCategory === "summary" && resource.resource === "activity"
+      )).toBe(true);
+      expect(
+        JUNCTION_WEARABLE_HOSTED_DIRECT_REPLAY_BROWSER_VAULT_METRIC_EXPECTATIONS.map(
+          (expectation) => expectation.metricKey,
+        ),
+      ).not.toEqual(expect.arrayContaining(["activity-minutes", "body-weight"]));
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }

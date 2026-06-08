@@ -349,7 +349,6 @@ const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_ARRAY_KEYS = [
 const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_BOOLEAN_KEYS = [
   "conversationContextPresent",
   "developerInstructionsPresent",
-  "refreshThreadInstructions",
   "resumeCodexThreadIdPresent",
 ] as const;
 const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_NUMBER_KEYS = [
@@ -913,8 +912,6 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
     providerPlanKind: "provider.plan",
     providerRequestOrdinal:
       readHostedAssistantProviderPlanNullableNumber(record, "providerRequestOrdinal"),
-    refreshThreadInstructions:
-      readHostedAssistantProviderPlanBoolean(record, "refreshThreadInstructions"),
     resumeCodexThreadIdPresent:
       readHostedAssistantProviderPlanBoolean(record, "resumeCodexThreadIdPresent")
         ?? readHostedAssistantProviderPlanBoolean(record, "resumeProviderSessionIdPresent"),
