@@ -142,9 +142,6 @@ describe("settings email sync route", () => {
     mocks.upsertHostedMemberReplyAliasLookupKeyTx.mockResolvedValue(undefined);
     mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({
       mailboxItemId: "mailbox_item_channels_email_123",
-      wake: {
-        eventId: "member.channels.updated:settings.email.sync:member_123:2026-04-22T10:00:00.000Z",
-      },
     });
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
       signalAccepted: true,

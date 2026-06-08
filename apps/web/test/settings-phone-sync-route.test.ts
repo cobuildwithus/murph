@@ -70,9 +70,6 @@ describe("settings phone sync route", () => {
     mocks.reconcileHostedPrivyIdentityOnMemberTx.mockResolvedValue(undefined);
     mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockResolvedValue({
       mailboxItemId: "mailbox_item_channels_phone_123",
-      wake: {
-        eventId: "member.channels.updated:settings.phone.sync:member_123:evt_123",
-      },
     });
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
       signalAccepted: true,

@@ -2,7 +2,6 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   buildHostedExecutionMemberChannelsUpdatedWake,
   type HostedExecutionMemberChannels,
-  type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
@@ -25,7 +24,6 @@ type HostedMemberEmailLinkedClient = PrismaClient | Prisma.TransactionClient;
 
 export interface HostedMailboxAppendDispatch {
   mailboxItemId: string;
-  wake: HostedExecutionWake;
 }
 
 export function resolveHostedMemberChannelsForSnapshot(input: {
@@ -110,7 +108,6 @@ async function appendHostedMemberChannelsUpdatedForSnapshotTx(input: {
 
   return {
     mailboxItemId: append.item.id,
-    wake,
   };
 }
 

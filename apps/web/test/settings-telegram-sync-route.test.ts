@@ -69,9 +69,6 @@ describe("settings telegram sync route", () => {
     mocks.upsertHostedMemberTelegramRoutingBindingTx.mockResolvedValue(undefined);
     mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockResolvedValue({
       mailboxItemId: "mailbox_item_channels_telegram_123",
-      wake: {
-        eventId: "member.channels.updated:settings.telegram.sync:member_123:evt_123",
-      },
     });
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
       signalAccepted: true,
