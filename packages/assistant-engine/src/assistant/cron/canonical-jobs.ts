@@ -295,24 +295,29 @@ export function buildCanonicalAutomationUpsertInput(input: {
     CanonicalAutomationAssistantCronJobRecord,
     'continuityPolicy' | 'slug' | 'summary' | 'tags'
   > | null
+  continuityPolicy?: CanonicalAutomationAssistantCronJobRecord['continuityPolicy']
   instructions: string
   route: CanonicalAutomationAssistantCronJobRecord['route']
   schedule: AssistantCronSchedule
+  slug?: string
   status: CanonicalAutomationAssistantCronJobRecord['status'] | 'archived'
+  summary?: string | null
+  tags?: string[]
   title: string
   vault: string
 }): Parameters<typeof upsertAutomation>[0] {
   return {
     vaultRoot: input.vault,
     automationId: input.automationId,
-    slug: input.automation?.slug,
+    slug: input.slug ?? input.automation?.slug,
     title: input.title,
     status: input.status,
-    summary: input.automation?.summary ?? undefined,
+    summary: input.summary ?? input.automation?.summary ?? undefined,
     schedule: input.schedule,
     route: input.route,
-    continuityPolicy: input.automation?.continuityPolicy ?? 'preserve',
-    tags: input.automation?.tags ?? ['assistant', 'scheduled'],
+    continuityPolicy:
+      input.continuityPolicy ?? input.automation?.continuityPolicy ?? 'preserve',
+    tags: input.tags ?? input.automation?.tags ?? ['assistant', 'scheduled'],
     instructions: input.instructions,
   }
 }

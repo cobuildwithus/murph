@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type MockAutomationRecord = {
   automationId: string
-  continuityPolicy: 'preserve' | 'reset'
+  continuityPolicy: 'fresh' | 'preserve'
   createdAt: string
   instructions: string
   route: {
@@ -114,6 +114,7 @@ import {
   runAssistantCronJobNow,
   setAssistantCronJobEnabled,
   setAssistantCronJobTarget,
+  upsertAssistantCronAutomation,
 } from '../src/assistant-cron.ts'
 import {
   listCanonicalAssistantCronRecords,
@@ -303,14 +304,16 @@ beforeEach(() => {
       return (
         getVaultAutomationStore(vault).find(
           (record) =>
-            record.automationId === normalized || record.title === normalized,
+            record.automationId === normalized ||
+            record.slug === normalized ||
+            record.title === normalized,
         ) ?? null
       )
     })
   cronMocks.upsertAutomation.mockReset().mockImplementation(
     async (input: {
       automationId?: string
-      continuityPolicy?: 'preserve' | 'reset'
+      continuityPolicy?: 'fresh' | 'preserve'
       instructions: string
       route: MockAutomationRecord['route']
       schedule: AssistantCronSchedule
@@ -444,6 +447,131 @@ describe('assistant cron runtime orchestration', () => {
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CRON_DELIVERY_REQUIRED',
     })
+  })
+
+  it('upserts canonical automations by slug and defers the first run to the next local day', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-upsert-automation-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+
+    const job = await upsertAssistantCronAutomation({
+      firstOccurrencePolicy: 'after-current-local-day',
+      instructions: 'Check setup progress.',
+      now: new Date('2026-04-08T15:00:00.000Z'),
+      route: {
+        channel: 'telegram',
+        deliveryTarget: 'room-1',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '13:30',
+      },
+      slug: 'finish-onboarding-followup',
+      summary: 'Continue setup.',
+      tags: ['assistant', 'onboarding'],
+      title: 'Finish Murph onboarding follow-up',
+      vault: vaultRoot,
+    })
+    if (!job) {
+      throw new Error('Expected onboarding follow-up automation to be seeded.')
+    }
+
+    expect(job.name).toBe('Finish Murph onboarding follow-up')
+    expect(job.state.nextRunAt).toBe('2026-04-09T17:30:00.000Z')
+    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')).toMatchObject({
+      automationId: job.jobId,
+      instructions: 'Check setup progress.',
+      route: {
+        channel: 'telegram',
+        deliveryTarget: 'room-1',
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '13:30',
+      },
+      slug: 'finish-onboarding-followup',
+      status: 'active',
+      summary: 'Continue setup.',
+      tags: ['assistant', 'onboarding'],
+    })
+
+    await updateCanonicalRuntimeState(vaultRoot, job.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        lastSucceededAt: '2026-04-09T17:35:00.000Z',
+        pendingOccurrenceAt: '2026-04-10T17:30:00.000Z',
+      },
+    }))
+
+    const updated = await upsertAssistantCronAutomation({
+      firstOccurrencePolicy: 'after-current-local-day',
+      instructions: 'Check setup progress with the latest wording.',
+      now: new Date('2026-04-08T16:00:00.000Z'),
+      route: {
+        channel: 'telegram',
+        deliveryTarget: 'room-1',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '13:30',
+      },
+      slug: 'finish-onboarding-followup',
+      title: 'Finish Murph onboarding follow-up',
+      vault: vaultRoot,
+    })
+    if (!updated) {
+      throw new Error('Expected onboarding follow-up automation to be updated.')
+    }
+
+    expect(updated.jobId).toBe(job.jobId)
+    expect(updated.state.lastSucceededAt).toBe('2026-04-09T17:35:00.000Z')
+    expect(updated.state.nextRunAt).toBe('2026-04-10T17:30:00.000Z')
+    expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(2)
+    expect(getVaultAutomationStore(vaultRoot)).toHaveLength(1)
+
+    const automation = findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')
+    if (!automation) {
+      throw new Error('Expected onboarding follow-up automation to exist.')
+    }
+    automation.status = 'archived'
+
+    const archived = await upsertAssistantCronAutomation({
+      firstOccurrencePolicy: 'after-current-local-day',
+      instructions: 'Check setup progress after archive.',
+      now: new Date('2026-04-08T17:00:00.000Z'),
+      route: {
+        channel: 'telegram',
+        deliveryTarget: 'room-1',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '13:30',
+      },
+      slug: 'finish-onboarding-followup',
+      title: 'Finish Murph onboarding follow-up',
+      vault: vaultRoot,
+    })
+
+    expect(archived).toBeNull()
+    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')?.status).toBe(
+      'archived',
+    )
+    expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(2)
   })
 
   it('lists mixed local and canonical jobs and computes status from both stores', async () => {
@@ -1946,7 +2074,10 @@ function findCanonicalAutomation(
 ): MockAutomationRecord | undefined {
   const normalized = lookup.trim()
   return getVaultAutomationStore(vault).find(
-    (record) => record.automationId === normalized || record.title === normalized,
+    (record) =>
+      record.automationId === normalized ||
+      record.slug === normalized ||
+      record.title === normalized,
   )
 }
 

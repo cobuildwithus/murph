@@ -1,4 +1,8 @@
 import { upsertAutomation } from '@murphai/core'
+import {
+  formatTimeZoneDateTimeParts,
+  type AutomationRoute,
+} from '@murphai/contracts'
 import { showAutomation as showCanonicalAutomation } from '@murphai/query'
 import {
   assistantCronScheduleSchema,
@@ -23,6 +27,7 @@ import { withAssistantCronWriteLock } from './locking.js'
 import { renderAssistantCronPreset } from './presets.js'
 import {
   createAssistantCronCanonicalRuntimeRecord,
+  findAssistantCronCanonicalRuntimeRecord,
   readAssistantCronCanonicalRuntimeStore,
   upsertAssistantCronCanonicalRuntimeRecord,
   writeAssistantCronCanonicalRuntimeStore,
@@ -55,6 +60,20 @@ export interface AddAssistantCronJobInput
   extends AssistantCronJobCreationBaseInput,
     AssistantCronTargetInput {
   resolveTargetDefaults?: boolean
+}
+
+export interface UpsertAssistantCronAutomationInput {
+  firstOccurrencePolicy?: 'after-current-local-day'
+  instructions: string
+  now?: Date
+  route: AutomationRoute
+  schedule: AssistantCronScheduleInput
+  slug: string
+  status?: 'active' | 'paused'
+  summary?: string | null
+  tags?: string[]
+  title: string
+  vault: string
 }
 
 export interface InstallAssistantCronPresetInput extends AssistantCronTargetInput {
@@ -171,6 +190,147 @@ export async function addAssistantCronJob(
   })
 }
 
+export async function upsertAssistantCronAutomation(
+  input: UpsertAssistantCronAutomationInput,
+): Promise<AssistantCronJob | null> {
+  const lockPaths = resolveAssistantStatePaths(input.vault)
+  await ensureAssistantCronState(lockPaths)
+
+  return withAssistantCronWriteLock(lockPaths, async () => {
+    const existingAutomation = await showCanonicalAutomation(input.vault, input.slug)
+    const existingStatus = existingAutomation?.status ?? null
+    if (existingStatus === 'archived' && input.status === undefined) {
+      return null
+    }
+
+    const status =
+      input.status ?? (existingStatus === 'paused' ? 'paused' : 'active')
+    const resolvedCreation = await resolveAssistantCronJobCreationInput({
+      enabled: status === 'active',
+      name: input.title,
+      now: input.now,
+      prompt: input.instructions,
+      schedule: input.schedule,
+      vault: input.vault,
+    })
+    const target = validateAssistantCronDeliveryTarget(input.route)
+    const localStore = await readAssistantCronStore(resolvedCreation.paths)
+    assertAssistantCronJobNameIsAvailable(localStore, resolvedCreation.name)
+
+    const created = await upsertAutomation(
+      buildCanonicalAutomationUpsertInput({
+        vault: resolvedCreation.vault,
+        automationId: existingAutomation?.automationId,
+        automation: existingAutomation,
+        title: resolvedCreation.name,
+        status,
+        schedule: resolvedCreation.schedule,
+        route: buildCanonicalAutomationRoute(target),
+        instructions: resolvedCreation.prompt,
+        slug: input.slug,
+        summary: input.summary ?? null,
+        tags: input.tags,
+      }),
+    )
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(
+      resolvedCreation.paths,
+    )
+    const timeZone = await resolveAssistantCronDefaultTimeZone(resolvedCreation.vault)
+    const source = requireCanonicalAutomationCronRecord(
+      created.record,
+      timeZone,
+    )
+    const existingRuntimeState = findAssistantCronCanonicalRuntimeRecord(
+      runtimeStore,
+      source.automationId,
+    )
+    if (existingRuntimeState) {
+      return projectCanonicalAssistantCronJob({
+        source,
+        runtimeState: existingRuntimeState,
+      })
+    }
+
+    const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+      jobId: source.automationId,
+      now: resolvedCreation.now.toISOString(),
+    })
+
+    const persistedRuntimeState =
+      input.firstOccurrencePolicy !== 'after-current-local-day'
+        ? runtimeState
+        : {
+            ...runtimeState,
+            state: {
+              ...runtimeState.state,
+              pendingOccurrenceAt: resolveFirstOccurrenceAfterCurrentLocalDay({
+                now: resolvedCreation.now,
+                schedule: resolvedCreation.resolvedSchedule,
+              }),
+            },
+          }
+
+    upsertAssistantCronCanonicalRuntimeRecord(runtimeStore, persistedRuntimeState)
+    try {
+      await writeAssistantCronCanonicalRuntimeStore(
+        resolvedCreation.paths,
+        runtimeStore,
+      )
+    } catch (error) {
+      await restoreAssistantCronAutomationAfterRuntimeStateFailure({
+        created: source,
+        existing: existingAutomation,
+        vault: resolvedCreation.vault,
+      }).catch(() => undefined)
+      throw error
+    }
+
+    return projectCanonicalAssistantCronJob({
+      source,
+      runtimeState: persistedRuntimeState,
+    })
+  })
+}
+
+async function restoreAssistantCronAutomationAfterRuntimeStateFailure(input: {
+  created: CanonicalAutomationAssistantCronJobRecord
+  existing: NonNullable<
+    Awaited<ReturnType<typeof showCanonicalAutomation>>
+  > | null
+  vault: string
+}): Promise<void> {
+  if (input.existing) {
+    await upsertAutomation({
+      automationId: input.existing.automationId,
+      continuityPolicy: input.existing.continuityPolicy,
+      instructions: input.existing.instructions,
+      route: input.existing.route,
+      schedule: input.existing.schedule,
+      slug: input.existing.slug,
+      status: input.existing.status,
+      summary: input.existing.summary ?? undefined,
+      tags: input.existing.tags,
+      title: input.existing.title,
+      vaultRoot: input.vault,
+    })
+    return
+  }
+
+  await upsertAutomation({
+    automationId: input.created.automationId,
+    continuityPolicy: input.created.continuityPolicy,
+    instructions: input.created.instructions,
+    route: input.created.route,
+    schedule: input.created.schedule,
+    slug: input.created.slug,
+    status: 'archived',
+    summary: input.created.summary ?? undefined,
+    tags: input.created.tags,
+    title: input.created.title,
+    vaultRoot: input.vault,
+  })
+}
+
 export async function resolveAssistantCronJobCreationInput(
   input: AssistantCronJobCreationBaseInput,
 ): Promise<{
@@ -181,6 +341,10 @@ export async function resolveAssistantCronJobCreationInput(
   now: Date
   paths: AssistantStatePaths
   prompt: string
+  resolvedSchedule:
+    | AssistantCronSchedule
+    | ({ kind: 'cron'; expression: string; timeZone: string })
+    | ({ kind: 'dailyLocal'; localTime: string; timeZone: string })
   schedule: AssistantCronSchedule
   vault: string
 }> {
@@ -216,10 +380,65 @@ export async function resolveAssistantCronJobCreationInput(
     name,
     prompt,
     enabled,
+    resolvedSchedule,
     schedule,
     keepAfterRun,
     nextRunAt,
   }
+}
+
+function resolveFirstOccurrenceAfterCurrentLocalDay(input: {
+  now: Date
+  schedule:
+    | AssistantCronSchedule
+    | ({ kind: 'cron'; expression: string; timeZone: string })
+    | ({ kind: 'dailyLocal'; localTime: string; timeZone: string })
+}): string {
+  const schedule = input.schedule
+  if (schedule.kind !== 'dailyLocal') {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'First-occurrence local-day deferral requires a daily-local schedule.',
+    )
+  }
+
+  const timeZone = 'timeZone' in schedule ? schedule.timeZone : null
+  if (!timeZone) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'First-occurrence local-day deferral requires a resolved time zone.',
+    )
+  }
+
+  const first = computeAssistantCronNextRunAt(schedule, input.now)
+  if (!first) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'The assistant cron schedule does not produce a future run time.',
+    )
+  }
+
+  const nowDayKey = formatTimeZoneDateTimeParts(
+    input.now,
+    timeZone,
+  ).dayKey
+  const firstDayKey = formatTimeZoneDateTimeParts(
+    first,
+    timeZone,
+  ).dayKey
+  if (firstDayKey !== nowDayKey) {
+    return first
+  }
+
+  const next = computeAssistantCronNextRunAt(schedule, new Date(first))
+  if (!next) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'The assistant cron schedule does not produce a deferred future run time.',
+    )
+  }
+
+  return next
 }
 
 function requireCanonicalAutomationCronRecord(

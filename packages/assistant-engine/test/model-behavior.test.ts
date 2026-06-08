@@ -849,6 +849,12 @@ describe('assistant notification decision guidance', () => {
 
     expect(prompt).toContain('This turn is a scheduled notification decision')
     expect(prompt).toContain('read-only CLI commands before deciding')
+    expect(prompt).toContain(
+      'The only write exception is self-disabling the current scheduled automation',
+    )
+    expect(prompt).toContain(
+      'vault-cli automation set-status <lookup> --status archived',
+    )
     expect(prompt).not.toContain('Normal conversation logging:')
     expect(prompt).not.toContain(
       'treat raw health, meal, supplement, workout, activity, symptom, body, or physical-state data as implicit logging intent',

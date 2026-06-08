@@ -319,6 +319,7 @@ test("automation save schema exposes typed fields while automation import-json i
   const automationCommandNames = requireAutomationCommandNames(cli);
   assert.equal(automationCommandNames.includes("automation save"), true);
   assert.equal(automationCommandNames.includes("automation import-json"), true);
+  assert.equal(automationCommandNames.includes("automation set-status"), true);
   assert.equal(automationCommandNames.includes("automation upsert"), false);
 
   const saveSchema = await readCommandSchema(cli, ["automation", "save"]);
@@ -353,6 +354,11 @@ test("automation save schema exposes typed fields while automation import-json i
   assert.equal("input" in importJsonSchema.options.properties, true);
   assert.equal(importJsonSchema.options.required?.includes("input") ?? false, true);
   assert.deepEqual(importJsonSchema.args.required ?? [], []);
+
+  const setStatusSchema = await readCommandSchema(cli, ["automation", "set-status"]);
+  assert.deepEqual(setStatusSchema.args.required, ["lookup"]);
+  assert.equal("status" in setStatusSchema.options.properties, true);
+  assert.equal(setStatusSchema.options.required?.includes("status") ?? false, true);
 });
 
 test("automation save guidance keeps examples shell-copyable", async () => {
@@ -764,6 +770,78 @@ test("automation commands round-trip save, import-json, show, and list through t
     assert.equal(shownData.automation.route.identityId, "identity_daily");
     assert.equal(shownData.automation.route.participantId, "participant_daily");
     assert.equal(shownData.automation.route.threadId, "thread_daily");
+
+    const archived = await runInProcessJsonCli<{
+      automationId: string;
+      created: boolean;
+      lookupId: string;
+      path: string;
+      vault: string;
+    }>(cli, [
+      "automation",
+      "set-status",
+      payload.slug,
+      "--status",
+      "archived",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(archived.exitCode, null);
+    assert.equal(archived.envelope.ok, true);
+    assert.equal(archived.envelope.data?.created, false);
+    assert.equal(archived.envelope.data?.automationId, savedData.automationId);
+
+    const archivedShown = await runInProcessJsonCli<{
+      automation: {
+        automationId: string;
+        instructions: string;
+        route: {
+          deliveryTarget: string | null;
+          identityId: string | null;
+          participantId: string | null;
+          threadId: string | null;
+        };
+        schedule: {
+          kind: string;
+          localTime?: string;
+        };
+        status: string;
+      } | null;
+      vault: string;
+    }>(cli, [
+      "automation",
+      "show",
+      payload.slug,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(archivedShown.exitCode, null);
+    assert.equal(archivedShown.envelope.ok, true);
+    assert.equal(archivedShown.envelope.data?.automation?.status, "archived");
+    assert.equal(
+      archivedShown.envelope.data?.automation?.instructions,
+      payload.instructions,
+    );
+    assert.equal(
+      archivedShown.envelope.data?.automation?.schedule.localTime,
+      "08:30",
+    );
+    assert.equal(
+      archivedShown.envelope.data?.automation?.route.deliveryTarget,
+      "agentmail:daily",
+    );
+    assert.equal(
+      archivedShown.envelope.data?.automation?.route.identityId,
+      "identity_daily",
+    );
+    assert.equal(
+      archivedShown.envelope.data?.automation?.route.participantId,
+      "participant_daily",
+    );
+    assert.equal(
+      archivedShown.envelope.data?.automation?.route.threadId,
+      "thread_daily",
+    );
 
     const listed = await runInProcessJsonCli<{
       count: number;
