@@ -93,6 +93,34 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ab24a93b-6a01-4a4e-5c61-43b746baff00/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "glute-bridge")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e80eb41a-b096-4310-6671-6e583878da00/public",
+      }),
+      expect.objectContaining({
+        step: "Lift and hold",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/268d71c2-fd86-47e1-7c4c-665e0afcfe00/public",
+      }),
+      expect.objectContaining({
+        step: "Form check",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/738a6903-71cd-40e1-1465-dac718c09400/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "wall-sit")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fea942e2-e3fa-4272-2dff-327c82cb8700/public",
+      }),
+      expect.objectContaining({
+        step: "Hold",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/84fc6b2d-a4bc-4206-23b1-342f730d3200/public",
+      }),
+      expect.objectContaining({
+        step: "Form check",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c68fe1c7-c87b-411d-a6f3-6190b705ff00/public",
+      }),
+    ]);
     expect(artifacts.details.sources).toEqual(catalog.sources);
     expect(artifacts.facets.facets.kinds).toEqual(["exercise", "stretch"]);
     expect(artifacts.facets.facets.equipment).toContain("none");
