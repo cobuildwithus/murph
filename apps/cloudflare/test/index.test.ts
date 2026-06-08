@@ -1738,7 +1738,6 @@ describe("cloudflare worker routes", () => {
         orchestrationAttemptId: "orchestration-attempt-test",
         commandTimeoutMs: 10_000,
         reason: "nudge",
-        source: "workspace_wake",
         userId: "test-user",
       });
     });
@@ -1879,7 +1878,6 @@ describe("cloudflare worker routes", () => {
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
         orchestrationAttemptId: "orchestration-attempt-test",
         reason: "nudge",
-        source: "workspace_wake",
         userId: "test-user",
       });
     });

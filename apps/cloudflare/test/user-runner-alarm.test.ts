@@ -349,7 +349,6 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
       reason: "nudge",
-      source: "workspace_wake",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
@@ -414,7 +413,6 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
       reason: "nudge",
-      source: "workspace_wake",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
@@ -1193,7 +1191,6 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
       reason: "nudge",
-      source: "workspace_wake",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "woken",

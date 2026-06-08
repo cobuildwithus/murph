@@ -7323,7 +7323,8 @@ describe("hosted workspace runtime entrypoint", () => {
         source: "workspace_wake",
       },
     });
-    assert.equal(workspaceWakeParsed.request.source, "workspace_wake");
+    assert.equal(workspaceWakeParsed.request.reason, "nudge");
+    assert.equal("source" in workspaceWakeParsed.request, false);
 
     expect(() =>
       parseHostedAssistantWorkspaceRuntimeJobInput({

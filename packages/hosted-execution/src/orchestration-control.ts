@@ -151,7 +151,6 @@ export type HostedRuntimeDemand =
 export interface HostedRuntimeEnsureProcessingRequest {
   orchestrationAttemptId: string;
   reason: HostedWorkspaceInvocationReason;
-  source?: HostedRuntimeDemandRunSource | null;
 }
 
 export const HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS = [
