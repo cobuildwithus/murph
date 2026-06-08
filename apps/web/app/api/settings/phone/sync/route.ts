@@ -1,6 +1,6 @@
 import { getPrisma } from "@/src/lib/prisma";
 import {
-  signalHostedManualRunRuntime,
+  signalHostedMailboxAppendRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { readHostedPhoneHint } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -51,8 +51,10 @@ export const POST = withJsonError(async (request: Request) => {
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   if (channelSyncDispatch) {
-    await signalHostedManualRunBestEffort({
-      userId: auth.member.id,
+    await signalHostedMailboxAppendBestEffort({
+      expectedUserId: auth.member.id,
+      mailboxItemId: channelSyncDispatch.mailboxItemId,
+      source: "settings.phone.sync",
     });
   }
 
@@ -64,12 +66,16 @@ export const POST = withJsonError(async (request: Request) => {
   });
 });
 
-async function signalHostedManualRunBestEffort(input: {
-  userId: string;
+async function signalHostedMailboxAppendBestEffort(input: {
+  expectedUserId: string;
+  mailboxItemId: string;
+  source: string;
 }): Promise<void> {
   try {
-    await signalHostedManualRunRuntime({
-      userId: input.userId,
+    await signalHostedMailboxAppendRuntime({
+      expectedUserId: input.expectedUserId,
+      mailboxItemId: input.mailboxItemId,
+      source: input.source,
     });
   } catch {
     // Settings sync should not fail if the best-effort runtime wake is unavailable.

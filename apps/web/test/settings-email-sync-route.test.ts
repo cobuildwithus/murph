@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   requireFreshActivePrivyMemberAuthForHostedAppSession: vi.fn(),
   requireActivePrivyMemberAuth: vi.fn(),
   sendHostedSignupWelcomeEmailForRecentMember: vi.fn(),
-  signalHostedManualRunRuntime: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
   upsertHostedMemberEmailAuthorization: vi.fn(),
   upsertHostedMemberReplyAliasLookupKeyTx: vi.fn(),
 }));
@@ -38,7 +38,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  signalHostedManualRunRuntime: mocks.signalHostedManualRunRuntime,
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
@@ -140,8 +140,13 @@ describe("settings email sync route", () => {
     });
     mocks.upsertHostedMemberEmailAuthorization.mockResolvedValue({});
     mocks.upsertHostedMemberReplyAliasLookupKeyTx.mockResolvedValue(undefined);
-    mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({});
-    mocks.signalHostedManualRunRuntime.mockResolvedValue({
+    mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({
+      mailboxItemId: "mailbox_item_channels_email_123",
+      wake: {
+        eventId: "member.channels.updated:settings.email.sync:member_123:2026-04-22T10:00:00.000Z",
+      },
+    });
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     });
@@ -205,8 +210,10 @@ describe("settings email sync route", () => {
       memberId: "member_123",
       prisma: mocks.prismaClient,
     });
-    expect(mocks.signalHostedManualRunRuntime).toHaveBeenCalledWith({
-      userId: "member_123",
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_item_channels_email_123",
+      source: "settings.email.sync",
     });
     await expect(response.json()).resolves.toEqual({
       emailAddress: "user@example.com",
@@ -252,7 +259,7 @@ describe("settings email sync route", () => {
       replyAliasLookupKey: "0123456789abcdef0123456789abcdef",
     });
     expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
-    expect(mocks.signalHostedManualRunRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       emailAddress: "user@example.com",
       ok: true,
@@ -303,8 +310,10 @@ describe("settings email sync route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.signalHostedManualRunRuntime).toHaveBeenCalledWith({
-      userId: "member_123",
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_item_channels_email_123",
+      source: "settings.email.sync",
     });
     expect(warnSpy).toHaveBeenCalledWith(
       "Hosted signup welcome email send failed after settings email sync.",
