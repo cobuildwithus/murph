@@ -187,7 +187,6 @@ export async function startHostedDeviceSyncReconnectNoticeWorkflowBestEffort(
   try {
     await signalHostedMailboxAppendRuntime({
       mailboxItemId,
-      source: "device-sync",
     });
   } catch (error) {
     console.warn("Hosted device-sync reconnect notice Temporal signal failed after mailbox append.", {

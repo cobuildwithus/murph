@@ -20,7 +20,7 @@ import {
   readHostedMailboxMaxSeqByLane,
 } from "@/src/lib/hosted-mailbox/store";
 import {
-  resolveHostedRuntimeAiUsageDemandGate,
+  resolveHostedRuntimeAiUsageGate,
 } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
@@ -86,7 +86,7 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
     return;
   }
 
-  const gate = await resolveHostedRuntimeAiUsageDemandGate({
+  const gate = await resolveHostedRuntimeAiUsageGate({
     userId: input.userId,
   });
 

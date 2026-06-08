@@ -66,7 +66,6 @@ describe("hosted webhook Temporal handoff", () => {
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
-      source: "linq",
     });
   });
 
@@ -96,7 +95,6 @@ describe("hosted webhook Temporal handoff", () => {
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
-      source: "linq",
     });
   });
 
@@ -142,7 +140,6 @@ describe("hosted webhook Temporal handoff", () => {
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
-      source: "telegram",
     });
   });
 });

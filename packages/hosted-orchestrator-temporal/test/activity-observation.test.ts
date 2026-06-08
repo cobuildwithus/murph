@@ -163,7 +163,7 @@ describe("observeHostedTemporalActivity", () => {
     );
 
     await expect(observeHostedTemporalActivity({
-      activity: "readRuntimeDemand",
+      activity: "readRuntimeReconciliationFacts",
       userId: "member_test",
     }, async () => {
       throw error;
@@ -172,7 +172,7 @@ describe("observeHostedTemporalActivity", () => {
     expect(activityLog.warn).toHaveBeenCalledWith(
       "Hosted Temporal activity failed.",
       expect.objectContaining({
-        activity: "readRuntimeDemand",
+        activity: "readRuntimeReconciliationFacts",
         errorCode: "hosted_orchestrator_invalid_protocol_response",
         nonRetryable: true,
         orchestrationAttemptId: null,

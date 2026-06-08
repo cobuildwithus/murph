@@ -118,10 +118,10 @@ Defaulted worker vars:
 
 `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` bounds consecutive failed hosted runner
 invocations for a Durable Object. Temporal decides when durable work is due by
-reading web-owned demand; Cloudflare does not reread web mailbox/workspace
-status as a scheduler. Cloudflare alarms clear active write-fence alarm state
-only, while successful runtime completion or a replacement invocation clears
-stale execution-failure state.
+reading web-owned reconciliation facts; Cloudflare does not reread web
+mailbox/workspace status as a scheduler. Cloudflare alarms clear active
+write-fence alarm state only, while successful runtime completion or a
+replacement invocation clears stale execution-failure state.
 
 Optional execution vars and secrets:
 

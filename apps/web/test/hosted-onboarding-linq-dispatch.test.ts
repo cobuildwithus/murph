@@ -160,7 +160,6 @@ function expectHostedLinqPointerSignalAccepted(eventId = "evt_123", userId = "me
   expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
     expectedUserId: userId,
     mailboxItemId: `mailbox_${eventId}`,
-    source: "linq",
   });
 }
 
@@ -1349,7 +1348,6 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_direct_nudge_read_receipt",
-      source: "linq",
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
@@ -1416,7 +1414,6 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_ingress_read_receipt_skipped",
-      source: "linq",
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.startHostedLinqTypingIndicator).not.toHaveBeenCalled();

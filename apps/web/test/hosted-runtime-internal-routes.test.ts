@@ -32,7 +32,7 @@ const mocks = vi.hoisted(() => ({
   recordHostedIngressRuntimeMilestone: vi.fn(),
   recordHostedRuntimeLog: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
-  resolveHostedRuntimeAiUsageDemandGate: vi.fn(),
+  resolveHostedRuntimeAiUsageGate: vi.fn(),
   signalHostedRuntimeRecheckRuntime: vi.fn(),
 }));
 
@@ -52,7 +52,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
-  resolveHostedRuntimeAiUsageDemandGate: mocks.resolveHostedRuntimeAiUsageDemandGate,
+  resolveHostedRuntimeAiUsageGate: mocks.resolveHostedRuntimeAiUsageGate,
 }));
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
@@ -142,7 +142,7 @@ describe("hosted runtime internal web routes", () => {
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveHostedMemberRecord());
     mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(null);
-    mocks.resolveHostedRuntimeAiUsageDemandGate.mockResolvedValue({
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "allowed",
     });
     mocks.signalHostedRuntimeRecheckRuntime.mockResolvedValue({
@@ -291,7 +291,7 @@ describe("hosted runtime internal web routes", () => {
         maxSeq: "12",
       },
     ]);
-    mocks.resolveHostedRuntimeAiUsageDemandGate.mockResolvedValueOnce({
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
       status: "denied",
     });
 
@@ -310,7 +310,7 @@ describe("hosted runtime internal web routes", () => {
     ));
 
     expect(response.status).toBe(403);
-    expect(mocks.resolveHostedRuntimeAiUsageDemandGate).toHaveBeenCalledWith({
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       userId: "member_routes_1",
     });
   });
@@ -342,7 +342,7 @@ describe("hosted runtime internal web routes", () => {
         maxSeq: "12",
       },
     ]);
-    mocks.resolveHostedRuntimeAiUsageDemandGate.mockResolvedValueOnce({
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
       status: "denied",
     });
 
@@ -361,7 +361,7 @@ describe("hosted runtime internal web routes", () => {
     ));
 
     expect(response.status).toBe(403);
-    expect(mocks.resolveHostedRuntimeAiUsageDemandGate).toHaveBeenCalledWith({
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       userId: "member_routes_1",
     });
   });
@@ -409,7 +409,7 @@ describe("hosted runtime internal web routes", () => {
     ));
 
     expect(response.status).toBe(200);
-    expect(mocks.resolveHostedRuntimeAiUsageDemandGate).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("fetches a mailbox payload sidecar through the separate signed route", async () => {
@@ -474,7 +474,7 @@ describe("hosted runtime internal web routes", () => {
       lane: "conversation",
       userId: "member_routes_1",
     });
-    mocks.resolveHostedRuntimeAiUsageDemandGate.mockResolvedValueOnce({
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
       status: "denied",
     });
 
@@ -489,7 +489,7 @@ describe("hosted runtime internal web routes", () => {
     ));
 
     expect(response.status).toBe(403);
-    expect(mocks.resolveHostedRuntimeAiUsageDemandGate).toHaveBeenCalledWith({
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       userId: "member_routes_1",
     });
     expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
@@ -522,7 +522,7 @@ describe("hosted runtime internal web routes", () => {
     ));
 
     expect(response.status).toBe(200);
-    expect(mocks.resolveHostedRuntimeAiUsageDemandGate).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
       dedupeKey: "dedupe_item_2",
       mailboxItemId: "mailbox_item_2",
@@ -562,7 +562,7 @@ describe("hosted runtime internal web routes", () => {
     ));
 
     expect(response.status).toBe(200);
-    expect(mocks.resolveHostedRuntimeAiUsageDemandGate).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
       dedupeKey: "dedupe_browser_vault",
       mailboxItemId: "mailbox_browser_vault",

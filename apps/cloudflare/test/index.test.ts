@@ -1714,7 +1714,6 @@ describe("cloudflare worker routes", () => {
             body: JSON.stringify({
               orchestrationAttemptId: "orchestration-attempt-test",
               reason: "nudge",
-              source: "workspace_wake",
             }),
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -1856,7 +1855,6 @@ describe("cloudflare worker routes", () => {
             body: JSON.stringify({
               orchestrationAttemptId: "orchestration-attempt-test",
               reason: "nudge",
-              source: "workspace_wake",
             }),
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -1901,7 +1899,6 @@ describe("cloudflare worker routes", () => {
               body: JSON.stringify({
                 orchestrationAttemptId: "orchestration-attempt-test",
                 reason: "nudge",
-                source: "workspace_wake",
               }),
               headers: {
                 "content-type": "application/json; charset=utf-8",

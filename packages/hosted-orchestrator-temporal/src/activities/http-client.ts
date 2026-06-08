@@ -26,9 +26,12 @@ import { ApplicationFailure } from "@temporalio/common";
 
 const DEFAULT_HOSTED_WEB_CALLBACK_SIGNING_KEY_ID = "v1";
 const DEFAULT_HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_TIMEOUT_MS = 30_000;
-const DEFAULT_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS = 10_000;
+const DEFAULT_HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS = 10_000;
+const HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_ENV =
+  "HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS";
+const HOSTED_RUNTIME_DEMAND_TIMEOUT_ENV = "HOSTED_RUNTIME_DEMAND_TIMEOUT_MS";
 const MAX_HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_TIMEOUT_MS = 120_000;
-const MAX_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS = 30_000;
+const MAX_HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS = 30_000;
 const HOSTED_WEB_CALLBACK_SIGNING_IMPORT_ALGORITHM: EcKeyImportParams = {
   name: "ECDSA",
   namedCurve: "P-256",
@@ -54,7 +57,7 @@ export interface HostedOrchestratorTemporalActivityEnvironment {
   ensureRuntimeProcessingHttpTimeoutMs: number;
   hostedWebBaseUrl: string;
   hostedWebCallbackSigning: HostedWebCallbackSigningEnvironment;
-  readRuntimeDemandTimeoutMs: number;
+  readRuntimeReconciliationFactsTimeoutMs: number;
 }
 
 export interface HostedWebCallbackSigningEnvironment {
@@ -81,7 +84,7 @@ const privateKeyCache = new Map<string, Promise<CryptoKey>>();
 export interface HostedTemporalActivityObservation {
   activity:
     | "runHostedDeviceSyncRecoverySweep"
-    | "readRuntimeDemand"
+    | "readRuntimeReconciliationFacts"
     | "ensureRuntimeProcessing"
     | "prewarmRuntimeContainer";
   orchestrationAttemptId?: string | null;
@@ -111,12 +114,8 @@ export function readHostedOrchestratorTemporalActivityEnvironment(
       "HOSTED_WEB_BASE_URL",
     ),
     hostedWebCallbackSigning: readHostedWebCallbackSigningEnvironment(source),
-    readRuntimeDemandTimeoutMs: parseBoundedPositiveInteger(
-      normalizeHostedExecutionString(source.HOSTED_RUNTIME_DEMAND_TIMEOUT_MS),
-      DEFAULT_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS,
-      MAX_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS,
-      "HOSTED_RUNTIME_DEMAND_TIMEOUT_MS",
-    ),
+    readRuntimeReconciliationFactsTimeoutMs:
+      readRuntimeReconciliationFactsTimeoutMs(source),
   };
 }
 
@@ -149,7 +148,7 @@ export function readHostedOrchestratorTemporalWebEnvironment(
   | "deviceSyncRecoverySweepTimeoutMs"
   | "hostedWebBaseUrl"
   | "hostedWebCallbackSigning"
-  | "readRuntimeDemandTimeoutMs"
+  | "readRuntimeReconciliationFactsTimeoutMs"
 > {
   const hostedWebBaseUrl = requireWebOriginBaseUrl(
     source.HOSTED_WEB_BASE_URL,
@@ -161,13 +160,45 @@ export function readHostedOrchestratorTemporalWebEnvironment(
       readHostedDeviceSyncRecoverySweepTimeoutMs(source),
     hostedWebBaseUrl,
     hostedWebCallbackSigning: readHostedWebCallbackSigningEnvironment(source),
-    readRuntimeDemandTimeoutMs: parseBoundedPositiveInteger(
-      normalizeHostedExecutionString(source.HOSTED_RUNTIME_DEMAND_TIMEOUT_MS),
-      DEFAULT_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS,
-      MAX_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS,
-      "HOSTED_RUNTIME_DEMAND_TIMEOUT_MS",
-    ),
+    readRuntimeReconciliationFactsTimeoutMs:
+      readRuntimeReconciliationFactsTimeoutMs(source),
   };
+}
+
+function readRuntimeReconciliationFactsTimeoutMs(source: EnvSource): number {
+  const entry = readRuntimeReconciliationFactsTimeoutEntry(source);
+  return parseBoundedPositiveInteger(
+    entry?.value ?? null,
+    DEFAULT_HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS,
+    MAX_HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS,
+    entry?.key ?? HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_ENV,
+  );
+}
+
+function readRuntimeReconciliationFactsTimeoutEntry(
+  source: EnvSource,
+): { key: string; value: string } | null {
+  const primary = normalizeHostedExecutionString(
+    source[HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_ENV],
+  );
+  if (primary !== null) {
+    return {
+      key: HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_ENV,
+      value: primary,
+    };
+  }
+
+  const fallback = normalizeHostedExecutionString(
+    source[HOSTED_RUNTIME_DEMAND_TIMEOUT_ENV],
+  );
+  if (fallback !== null) {
+    return {
+      key: HOSTED_RUNTIME_DEMAND_TIMEOUT_ENV,
+      value: fallback,
+    };
+  }
+
+  return null;
 }
 
 export async function requestHostedOrchestratorJson<TResponse>(

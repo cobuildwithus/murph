@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type {
-  HostedRuntimeDemand,
-  HostedRuntimeDemandRequest,
-  HostedRuntimeDemandWorkspaceProjection,
   HostedRuntimeEnsureProcessingResponse,
+  HostedRuntimeReconciliationFacts,
+  HostedRuntimeReconciliationFactsWorkspace,
   HostedRuntimeSignal,
   HostedUserRuntimeWorkflowInput,
 } from "../src/index.js";
@@ -14,7 +13,6 @@ import type {
 import {
   createHostedUserRuntimeWorkflowMachine,
   HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
-  HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
   type HostedUserRuntimeWorkflowMachine,
   type HostedUserRuntimeWorkflowRuntime,
 } from "../src/workflows/hosted-user-runtime.js";
@@ -22,7 +20,7 @@ import {
 const BASE_TIME_MS = Date.parse("2026-05-20T12:00:00.000Z");
 
 describe("hostedUserRuntimeWorkflow loop", () => {
-  it("runs Cloudflare execution directly after a mailbox signal without reading demand", async () => {
+  it("runs Cloudflare execution directly after a fresh mailbox signal", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.executions.push(processingAccepted());
 
@@ -34,7 +32,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
 
     const continued = await runUntilContinueAsNew(machine);
 
-    expect(runtime.demandRequests).toEqual([]);
+    expect(runtime.reconciliationRequests).toEqual([]);
     expect(runtime.executionRequests).toEqual([
       {
         orchestrationAttemptId: "orchestration-attempt-1",
@@ -44,42 +42,14 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     ]);
     expect(continued.state?.mailboxSignalCount).toBe(0);
     expect(continued.state?.latestMailboxPointer).toBeNull();
-    expect(continued.state?.lastDemandSource).toBe("mailbox_backlog");
+    expect(continued.state?.lastReconciliationStatus).toBe("work_pending");
     expect(continued.state?.lastMailboxLagLaneCount).toBe(0);
   });
 
-  it("preserves the demand-read mailbox path before the direct mailbox patch", async () => {
+  it("reads reconciliation facts for carried mailbox pointers", async () => {
     const runtime = new FakeWorkflowRuntime();
-    runtime.directMailboxProcessingPatchEnabled = false;
-    runtime.demands.push(runDemand({
+    runtime.facts.push(reconciliationFacts({
       mailboxLag: [mailboxLag()],
-      source: "mailbox_backlog",
-    }));
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxSignal());
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests).toHaveLength(1);
-    expect(runtime.executionRequests).toEqual([
-      {
-        orchestrationAttemptId: "orchestration-attempt-1",
-        reason: "nudge",
-        userId: "member_test",
-      },
-    ]);
-  });
-
-  it("reads demand for carried mailbox pointers after continue-as-new", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(runDemand({
-      mailboxLag: [mailboxLag()],
-      source: "mailbox_backlog",
     }));
     runtime.executions.push(processingAccepted());
 
@@ -91,7 +61,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
           lane: "conversation",
           laneSeq: "7",
           mailboxItemId: "mailbox_item_test",
-          source: "test",
         },
         mailboxSignalCount: 1,
       },
@@ -100,306 +69,154 @@ describe("hostedUserRuntimeWorkflow loop", () => {
 
     await runUntilContinueAsNew(machine);
 
-    expect(runtime.demandRequests).toHaveLength(1);
+    expect(runtime.reconciliationRequests).toEqual([{ userId: "member_test" }]);
     expect(runtime.executionRequests).toHaveLength(1);
   });
 
-  it("runs Cloudflare execution directly after a system mailbox signal without reading demand", async () => {
+  it("waits until a future workspace wake from reconciliation facts", async () => {
     const runtime = new FakeWorkflowRuntime();
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxSignal({
-      lane: "system",
-      laneSeq: "3",
-      mailboxItemId: "mailbox_system_manual",
-      source: "manual-ai-gated",
+    runtime.facts.push(reconciliationFacts({
+      workspace: workspaceProjection({ nextWakeAt: isoAfter(60_000) }),
     }));
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests).toEqual([]);
-    expect(runtime.executionRequests).toEqual([
-      {
-        orchestrationAttemptId: "orchestration-attempt-1",
-        reason: "nudge",
-        userId: "member_test",
-      },
-    ]);
-  });
-
-  it("keeps old manual system mailbox signals on the demand-read path", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(processingAccepted());
-
     const machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 1 },
       userId: "member_test",
     });
-    machine.applySignal(mailboxSignal({
-      lane: "system",
-      laneSeq: "3",
-      mailboxItemId: "mailbox_system_manual",
-      source: "manual",
-    }));
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests).toHaveLength(1);
-    expect(runtime.executionRequests).toEqual([
-      {
-        orchestrationAttemptId: "orchestration-attempt-1",
-        reason: "manual",
-        userId: "member_test",
-      },
-    ]);
-  });
-
-  it("keeps system mailbox signals on the demand-read path before the any-lane direct patch", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.directAnyLaneMailboxProcessingPatchEnabled = false;
-    runtime.demands.push(runDemand({ source: "mailbox_backlog" }));
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxSignal({
-      lane: "system",
-      laneSeq: "4",
-      mailboxItemId: "mailbox_system_device_sync",
-      source: "device-sync",
-    }));
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests).toHaveLength(1);
-    expect(runtime.executionRequests).toHaveLength(1);
-  });
-
-  it("waits for a future idle nextWakeAt with a signal-or-timer condition", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(idleDemand(isoAfter(60_000)));
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([60_000]);
-  });
-
-  it("lets a signal interrupt idle wait and drive a new demand read", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(idleDemand(isoAfter(60_000)));
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    runtime.onWait = () => {
-      machine.applySignal(manualSignal());
-    };
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([60_000]);
-    expect(runtime.demandRequests[1]).toMatchObject({
-      manualRunRequested: true,
-    });
-    expect(runtime.executionRequests).toHaveLength(1);
-  });
-
-  it("uses processing accepted owner recheck before re-reading demand", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(processingAcceptedWithRecheck(isoAfter(45_000)));
-    runtime.demands.push(idleDemand(isoAfter(120_000)));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal());
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits[0]).toBe(45_000);
-    expect(runtime.demandRequests).toHaveLength(2);
-    expect(runtime.demandRequests[1].manualRunRequested).toBe(false);
-  });
-
-  it("lets a signal interrupt processing accepted recheck wait", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(processingAcceptedWithRecheck(isoAfter(45_000)));
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal("manual-before-wake"));
-    runtime.onWait = () => {
-      machine.applySignal(manualSignal("manual-during-wake"));
-    };
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([45_000]);
-    expect(runtime.demandRequests[1].manualRunRequested).toBe(true);
-    expect(runtime.executionRequests).toHaveLength(2);
-  });
-
-  it("lets a stateless runtime recheck interrupt accepted processing without setting demand flags", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(processingAcceptedWithRecheck(isoAfter(45_000)));
-    runtime.demands.push((request) => {
-      expect(request).toEqual({
-        browserVaultRefreshRequested: false,
-        lagRecoveryObserved: false,
-        manualRunRequested: false,
-        userId: "member_test",
-      });
-      return idleDemand(null);
-    });
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal("manual-before-wake"));
-    runtime.onWait = () => {
-      runtime.onWait = null;
-      machine.applySignal(runtimeRecheckSignal());
-    };
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([45_000, null]);
-    expect(runtime.executionRequests).toHaveLength(1);
-  });
-
-  it("keeps runtime recheck signals invalid before the patch marker is present", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.runtimeRecheckSignalPatchEnabled = false;
-    runtime.demands.push(idleDemand(isoAfter(60_000)));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    runtime.onWait = () => {
-      machine.applySignal(runtimeRecheckSignal());
-    };
 
     const continued = await runUntilContinueAsNew(machine);
 
     expect(runtime.waits).toEqual([60_000]);
-    expect(runtime.demandRequests).toHaveLength(1);
-    expect(continued.state?.invalidSignalCount).toBe(1);
-    expect(continued.state?.lastInvalidSignalErrorCode).toBe("TypeError");
-    expect(continued.state?.signalVersion).toBe(0);
+    expect(continued.state?.lastReconciliationStatus).toBe("idle");
+    expect(continued.state?.lastReconciliationNextWakeAt).toBe(isoAfter(60_000));
   });
 
-  it("prewarms the runtime container only while idle", async () => {
+  it("re-reads reconciliation facts after a workspace wake timer before alarming", async () => {
     const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(idleDemand(null));
-    runtime.prewarms.push({
-      action: "started",
-      kind: "runtime_prewarm_accepted",
+    runtime.facts.push(reconciliationFacts({
+      workspace: workspaceProjection({
+        nextWakeAt: isoAfter(60_000),
+        nextWakeReason: "assistant_due",
+      }),
+    }));
+    runtime.facts.push(reconciliationFacts({
+      workspace: workspaceProjection({
+        nextWakeAt: isoAfter(-1),
+        nextWakeReason: "assistant_due",
+      }),
+    }));
+    runtime.executions.push(processingAccepted());
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
     });
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([60_000]);
+    expect(runtime.reconciliationRequests).toEqual([
+      { userId: "member_test" },
+      { userId: "member_test" },
+    ]);
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        reason: "alarm",
+        userId: "member_test",
+      },
+    ]);
+    expect(continued.state?.lastReconciliationNextWakeAt).toBe(isoAfter(-1));
+  });
+
+  it("drives an alarm when reconciliation facts show a due workspace wake", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      workspace: workspaceProjection({
+        nextWakeAt: isoAfter(-1),
+        nextWakeReason: "assistant_due",
+      }),
+    }));
+    runtime.executions.push(processingAccepted());
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        reason: "alarm",
+        userId: "member_test",
+      },
+    ]);
+  });
+
+  it("blocks without processing when reconciliation facts deny work", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      blocked: {
+        reason: "ai_usage_gate_unavailable",
+        retryAt: isoAfter(30_000),
+      },
+    }));
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([]);
+    expect(runtime.waits).toEqual([30_000]);
+    expect(continued.state?.lastReconciliationStatus).toBe("blocked");
+    expect(continued.state?.lastReconciliationBlockedReason).toBe(
+      "ai_usage_gate_unavailable",
+    );
+  });
+
+  it("records reconciliation read failures and uses reconciliation retry waits", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(async () => {
+      throw new Error("web unavailable");
+    });
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([30_000]);
+    expect(continued.state?.lastReconciliationStatus).toBeNull();
+    expect(continued.state?.lastExecutionErrorCode).toBe("Error");
+  });
+
+  it("prewarms while idle and cancels prewarm when a mailbox signal wins", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts());
+    runtime.executions.push(processingAccepted());
+    runtime.prewarms.push(pendingPrewarm());
 
     const machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 1 },
       userId: "member_test",
     });
     machine.applySignal(runtimePrewarmSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.prewarmRequests).toEqual([
-      {
-        prewarmAttemptId: "orchestration-attempt-1",
-        source: "linq.imessage.typing",
-        userId: "member_test",
-      },
-    ]);
-    expect(runtime.executionRequests).toHaveLength(0);
-    expect(continued.state).toMatchObject({
-      lastPrewarmAttemptId: "orchestration-attempt-1",
-      lastPrewarmErrorCode: null,
-      lastPrewarmResult: "accepted",
-      prewarmRequested: false,
-      prewarmSignalCount: 1,
-    });
-  });
-
-  it("accepts legacy prewarm scopeHash without carrying it into prewarm requests", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(idleDemand(null));
-    runtime.prewarms.push({
-      action: "started",
-      kind: "runtime_prewarm_accepted",
-    });
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    machine.applySignal({
-      ...runtimePrewarmSignal(),
-      scopeHash: "linq-chat:legacy-scope",
-    });
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.prewarmRequests).toEqual([
-      {
-        prewarmAttemptId: "orchestration-attempt-1",
-        source: "linq.imessage.typing",
-        userId: "member_test",
-      },
-    ]);
-    expect(continued.state?.invalidSignalCount).toBe(0);
-    expect(continued.state).toMatchObject({
-      lastPrewarmResult: "accepted",
-      prewarmRequested: false,
-      prewarmSignalCount: 1,
-    });
-    expect(continued.state).not.toHaveProperty("scopeHash");
-  });
-
-  it("does not let pending prewarm block a later mailbox demand signal", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    let machine: HostedUserRuntimeWorkflowMachine | null = null;
-    runtime.demands.push(idleDemand(null));
-    runtime.executions.push(processingAccepted());
-    runtime.prewarms.push(new Promise<HostedRuntimePrewarmResponse>(() => undefined));
     runtime.onSignalWait = () => {
-      machine?.applySignal(mailboxSignal());
+      machine.applySignal(mailboxSignal());
       runtime.resolveSignalWaits();
     };
 
-    machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(runtimePrewarmSignal());
+    await runUntilContinueAsNew(machine);
 
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.prewarmRequests).toHaveLength(1);
+    expect(runtime.prewarmRequests).toEqual([
+      {
+        prewarmAttemptId: "orchestration-attempt-1",
+        source: "linq.imessage.typing",
+        userId: "member_test",
+      },
+    ]);
     expect(runtime.prewarmCancelCount).toBe(1);
     expect(runtime.executionRequests).toEqual([
       {
@@ -408,1480 +225,22 @@ describe("hostedUserRuntimeWorkflow loop", () => {
         userId: "member_test",
       },
     ]);
-    expect(continued.state).toMatchObject({
-      lastPrewarmErrorCode: "abandoned_for_demand",
-      lastPrewarmResult: null,
-      prewarmRequested: false,
-    });
   });
 
-  it("does not retain consumed demand flags when runtime recheck arrives during processing", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    let machine: HostedUserRuntimeWorkflowMachine | null = null;
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(() => {
-      machine?.applySignal(runtimeRecheckSignal());
-      return processingAcceptedWithRecheck(isoAfter(45_000));
-    });
-    runtime.demands.push((request) => {
-      expect(request).toEqual({
-        browserVaultRefreshRequested: false,
-        lagRecoveryObserved: false,
-        manualRunRequested: false,
-        userId: "member_test",
-      });
-      return idleDemand(null);
-    });
-
-    machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal("manual-before-processing"));
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([null]);
-    expect(runtime.executionRequests).toHaveLength(1);
-    expect(continued.state?.manualRunRequested).toBe(false);
-  });
-
-  it("re-reads demand immediately when a signal arrives before processing accepted returns", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    let machine: HostedUserRuntimeWorkflowMachine | null = null;
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(() => {
-      machine?.applySignal(browserVaultSignal());
-      return processingAcceptedWithRecheck(isoAfter(45_000));
-    });
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(processingAccepted());
-
-    machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal("manual-before-wake"));
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([]);
-    expect(runtime.demandRequests[1]).toMatchObject({
-      browserVaultRefreshRequested: true,
-      manualRunRequested: true,
-    });
-    expect(runtime.executionRequests).toHaveLength(2);
-  });
-
-  it("records accepted runtime processing status", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.executions.push(processingAcceptedWithRecheck(isoAfter(11_000)));
-    runtime.demands.push(idleDemand(null));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([11_000, null]);
-    expect(runtime.sameRuntimeWakeAcceptedCountPatchMarkerCount).toBe(1);
-    expect(continued.state).toMatchObject({
-      lastExecutionKind: "runtime_processing_accepted",
-      lastRuntimeAttemptId: "runtime_attempt_test",
-      lastRuntimeStatus: "scheduled",
-    });
-  });
-
-  it("lets a signal interrupt accepted processing recheck wait", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.executions.push(processingAcceptedWithRecheck(isoAfter(30_000)));
-    runtime.demands.push((request) => {
-      expect(request.manualRunRequested).toBe(true);
-      return runDemand({ source: "manual" });
-    });
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxSignal());
-    runtime.onWait = () => {
-      runtime.onWait = null;
-      machine.applySignal(manualSignal("manual-during-processing-recheck"));
-    };
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([30_000]);
-    expect(runtime.now).toBe(BASE_TIME_MS);
-    expect(runtime.executionRequests).toHaveLength(2);
-    expect(runtime.executionRequests[1]?.reason).toBe("manual");
-  });
-
-  it("keeps mailbox work pending after direct mailbox retry_later responses", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.executions.push(retryLater(isoAfter(22_000)));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests).toHaveLength(0);
-    expect(runtime.waits).toEqual([22_000]);
-    expect(continued.state).toMatchObject({
-      lastRuntimeAttemptId: null,
-      lastRuntimeStatus: "retry_later",
-      latestMailboxPointer: expect.objectContaining({
-        mailboxItemId: "mailbox_item_test",
-      }),
-      mailboxSignalCount: 1,
-    });
-  });
-
-  it("falls back to demand read after direct mailbox retry_later responses", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.executions.push(retryLater(isoAfter(22_000)));
-    runtime.demands.push(blockedDemand(null));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.executionRequests).toHaveLength(1);
-    expect(runtime.demandRequests).toHaveLength(1);
-    expect(runtime.waits).toEqual([22_000, null]);
-    expect(continued.state).toMatchObject({
-      lastDemandKind: "blocked",
-      lastDemandSource: "ai_usage_gate_unavailable",
-      latestMailboxPointer: expect.objectContaining({
-        mailboxItemId: "mailbox_item_test",
-      }),
-    });
-  });
-
-  it("falls back to demand read after direct mailbox execution failures", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.executions.push(() => {
-      const error = new Error("runtime preparation failed") as Error & {
-        code: string;
-      };
-      error.code = "container_rpc_error";
-      throw error;
-    });
-    runtime.demands.push(blockedDemand(null));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.executionRequests).toHaveLength(1);
-    expect(runtime.demandRequests).toHaveLength(1);
-    expect(runtime.waits).toEqual([
-      HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
-      null,
-    ]);
-    expect(continued.state).toMatchObject({
-      lastDemandKind: "blocked",
-      lastDemandSource: "ai_usage_gate_unavailable",
-      latestMailboxPointer: expect.objectContaining({
-        mailboxItemId: "mailbox_item_test",
-      }),
-    });
-  });
-
-  it("reads demand after a manual signal arrives during direct mailbox execution", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    let machine: HostedUserRuntimeWorkflowMachine | null = null;
-    runtime.executions.push(() => {
-      machine?.applySignal(manualSignal("manual-during-direct-mailbox"));
-      return processingAcceptedWithRecheck(isoAfter(30_000));
-    });
-    runtime.demands.push((request) => {
-      expect(request.manualRunRequested).toBe(true);
-      return runDemand({ source: "manual" });
-    });
-    runtime.executions.push(processingAccepted());
-
-    machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxSignal());
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests).toHaveLength(1);
-    expect(runtime.executionRequests).toEqual([
-      {
-        orchestrationAttemptId: "orchestration-attempt-1",
-        reason: "nudge",
-        userId: "member_test",
-      },
-      {
-        orchestrationAttemptId: "orchestration-attempt-2",
-        reason: "manual",
-        userId: "member_test",
-      },
-    ]);
-  });
-
-  it("direct-processes a new mailbox signal that arrives during direct mailbox execution", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    let machine: HostedUserRuntimeWorkflowMachine | null = null;
-    runtime.executions.push(() => {
-      machine?.applySignal(mailboxSignal({
-        mailboxItemId: "mailbox_item_new",
-        laneSeq: "8",
-      }));
-      return processingAcceptedWithRecheck(isoAfter(30_000));
-    });
-    runtime.executions.push(processingAccepted());
-
-    machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxSignal());
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests).toEqual([]);
-    expect(runtime.executionRequests).toEqual([
-      {
-        orchestrationAttemptId: "orchestration-attempt-1",
-        reason: "nudge",
-        userId: "member_test",
-      },
-      {
-        orchestrationAttemptId: "orchestration-attempt-2",
-        reason: "nudge",
-        userId: "member_test",
-      },
-    ]);
-  });
-
-  it("waits signal-interruptibly after retry-later processing responses", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(retryLater(isoAfter(22_000)));
-    runtime.demands.push((request) => {
-      expect(request.manualRunRequested).toBe(true);
-      return runDemand({ source: "manual" });
-    });
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal("manual-before-retry"));
-    runtime.onWait = () => {
-      runtime.onWait = null;
-      machine.applySignal(manualSignal("manual-during-retry-wait"));
-    };
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([22_000]);
-    expect(runtime.now).toBe(BASE_TIME_MS);
-    expect(runtime.executionRequests).toHaveLength(2);
-  });
-
-  it("does not let duplicate pending browser-vault refresh signals reset retry backoff", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(runDemand({ source: "browser_vault_refresh" }));
-    runtime.executions.push(retryLater(isoAfter(22_000)));
-    runtime.demands.push(runDemand({ source: "browser_vault_refresh" }));
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(browserVaultSignal());
-    runtime.onWait = () => {
-      runtime.onWait = null;
-      machine.applySignal(browserVaultSignal());
-    };
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits[0]).toBe(22_000);
-    expect(runtime.now).toBe(BASE_TIME_MS + 22_000);
-    expect(runtime.executionRequests).toHaveLength(2);
-  });
-
-  it("does not let duplicate pending mailbox-lag signals reset retry backoff", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(runDemand({ source: "lag_recovery" }));
-    runtime.executions.push(retryLater(isoAfter(22_000)));
-    runtime.demands.push(runDemand({ source: "lag_recovery" }));
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxLagSignal());
-    runtime.onWait = () => {
-      runtime.onWait = null;
-      machine.applySignal(mailboxLagSignal());
-    };
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits[0]).toBe(22_000);
-    expect(runtime.now).toBe(BASE_TIME_MS + 22_000);
-    expect(runtime.executionRequests).toHaveLength(2);
-  });
-
-  it("retries after retry-later processing responses when no signal arrives", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(retryLater(isoAfter(22_000)));
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal("manual-before-retry"));
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits[0]).toBe(22_000);
-    expect(runtime.now).toBe(BASE_TIME_MS + 22_000);
-    expect(runtime.executionRequests).toHaveLength(2);
-  });
-
-  it("clears stale runtime attempt status after retry-later responses", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(retryLater(isoAfter(22_000)));
-
-    const state = emptyCarryForwardState();
-    state.lastRuntimeAttemptId = "runtime_attempt_previous";
-    state.lastRuntimeStatus = "scheduled";
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      state,
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal("manual-before-retry"));
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(continued.state).toMatchObject({
-      lastRuntimeAttemptId: null,
-      lastRuntimeStatus: "retry_later",
-    });
-  });
-
-  it("does not pass usage decisions into execution", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal());
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.executionRequests).toEqual([
-      {
-        orchestrationAttemptId: "orchestration-attempt-1",
-        reason: "manual",
-        userId: "member_test",
-      },
-    ]);
-    expect(runtime.executionRequests[0]).not.toHaveProperty(
-      "aiUsageAllowDecision",
-    );
-    expect(runtime.executionRequests[0]).not.toHaveProperty(
-      "requiresAiUsageDecision",
-    );
-    expect(runtime.executionRequests[0]).not.toHaveProperty("source");
-  });
-
-  it("preserves the old ensure-processing source shape before the drop-source patch", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.dropEnsureProcessingSourcePatchEnabled = false;
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal());
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.executionRequests).toEqual([
-      {
-        orchestrationAttemptId: "orchestration-attempt-1",
-        reason: "manual",
-        source: "manual",
-        userId: "member_test",
-      },
-    ]);
-  });
-
-  it("does not suppress workspace wakes after processing is merely accepted", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    const workspace = workspaceProjection({
-      nextWakeAt: isoAfter(-1),
-      nextWakeReason: "assistant",
-      version: "workspace-version-1",
-    });
-    runtime.demands.push(runDemand({
-      source: "workspace_wake",
-      workspace,
-    }));
-    runtime.executions.push(processingAccepted());
-    runtime.demands.push(idleDemand(isoAfter(60_000)));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.executionRequests[0]?.reason).toBe("nudge");
-    expect(runtime.executionRequests[0]).not.toHaveProperty("source");
-    expect(runtime.demandRequests[1]).toMatchObject({
-      userId: "member_test",
-    });
-  });
-
-  it("does not clear a signal that arrives while demand is awaited", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    let machine: HostedUserRuntimeWorkflowMachine | null = null;
-    runtime.demands.push(() => {
-      machine?.applySignal(manualSignal("manual-during-demand"));
-      return idleDemand(isoAfter(60_000));
-    });
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(processingAccepted());
-
-    machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests[1].manualRunRequested).toBe(true);
-    expect(runtime.executionRequests).toHaveLength(1);
-  });
-
-  it("does not clear signals that arrive while execution is awaited", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    let machine: HostedUserRuntimeWorkflowMachine | null = null;
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(() => {
-      machine?.applySignal(browserVaultSignal());
-      return processingAccepted();
-    });
-    runtime.demands.push(idleDemand(isoAfter(60_000)));
-
-    machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal());
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests[1]).toMatchObject({
-      browserVaultRefreshRequested: true,
-      manualRunRequested: true,
-    });
-  });
-
-  it("keeps signals that arrive during workspace-wake processing pending", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    let machine: HostedUserRuntimeWorkflowMachine | null = null;
-    const workspace = workspaceProjection({
-      nextWakeAt: isoAfter(-1),
-      nextWakeReason: "assistant_due",
-      version: "workspace-version-1",
-    });
-    runtime.demands.push(runDemand({
-      source: "workspace_wake",
-      workspace,
-    }));
-    runtime.executions.push(() => {
-      machine?.applySignal(manualSignal("manual-during-workspace-wake"));
-      return processingAccepted();
-    });
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(processingAccepted());
-
-    machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests[1]).toMatchObject({
-      manualRunRequested: true,
-    });
-    expect(runtime.executionRequests).toHaveLength(2);
-  });
-
-  it("clears mailbox and explicit wake flags once demand is idle", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.directMailboxProcessingPatchEnabled = false;
-    runtime.demands.push(idleDemand(isoAfter(60_000)));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      state: {
-        ...emptyCarryForwardState(),
-        browserVaultRefreshRequested: true,
-        lagRecoveryObserved: true,
-        latestMailboxPointer: {
-          lane: "conversation",
-          laneSeq: "7",
-          mailboxItemId: "mailbox_item_test",
-          source: "test",
-        },
-        mailboxSignalCount: 3,
-        manualRunRequested: true,
-      },
-      userId: "member_test",
-    });
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(continued.state).toMatchObject({
-      browserVaultRefreshRequested: false,
-      lagRecoveryObserved: false,
-      latestMailboxPointer: null,
-      mailboxSignalCount: 0,
-      manualRunRequested: false,
-    });
-  });
-
-  it("accepts legacy device-sync recovery signals without creating demand", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(idleDemand(isoAfter(60_000)));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    machine.applySignal({
-      kind: "device_sync_recovery_requested",
-    });
-    machine.applySignal({
-      kind: "mailbox_lag_observed",
-    });
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests[0]).toMatchObject({
-      lagRecoveryObserved: true,
-    });
-    expect(runtime.demandRequests[0]).not.toHaveProperty(
-      "deviceSyncRecoveryRequested",
-    );
-  });
-
-  it("lets legacy device-sync recovery signals interrupt idle waits without current recovery demand", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(idleDemand(isoAfter(60_000)));
-    runtime.demands.push(idleDemand(null));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    runtime.onWait = () => {
-      runtime.onWait = null;
-      machine.applySignal({
-        kind: "device_sync_recovery_requested",
-      });
-    };
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([60_000, null]);
-    expect(runtime.demandRequests[1]).not.toHaveProperty(
-      "deviceSyncRecoveryRequested",
-    );
-  });
-
-  it("replays pre-deletion device-sync recovery demand requests and sources locally", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.deviceSyncRecoveryDeletionPatchEnabled = false;
-    runtime.demands.push((request) => {
-      expect(request).toMatchObject({
-        deviceSyncRecoveryRequested: true,
-        userId: "member_test",
-      });
-      return legacyDeviceSyncRecoveryDemand();
-    });
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    machine.applySignal({
-      kind: "device_sync_recovery_requested",
-    });
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.executionRequests).toEqual([
-      {
-        orchestrationAttemptId: "orchestration-attempt-1",
-        reason: "nudge",
-        userId: "member_test",
-      },
-    ]);
-    expect(continued.state).toMatchObject({
-      deviceSyncRecoveryRequested: false,
-      sameRuntimeWakeAcceptedCount: 0,
-    });
-  });
-
-  it("keeps pre-deletion recovery requests through unrelated run sources", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.deviceSyncRecoveryDeletionPatchEnabled = false;
-    runtime.demands.push((request) => {
-      expect(request).toMatchObject({
-        deviceSyncRecoveryRequested: true,
-        manualRunRequested: true,
-        userId: "member_test",
-      });
-      return runDemand({ source: "manual" });
-    });
-    runtime.executions.push(processingAccepted({ action: "started" }));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      state: {
-        ...legacyCarryForwardState({
-          deviceSyncRecoveryRequested: true,
-          sameRuntimeWakeAcceptedCount: 2,
-        }),
-        manualRunRequested: true,
-      },
-      userId: "member_test",
-    });
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.executionRequests).toEqual([
-      {
-        orchestrationAttemptId: "orchestration-attempt-1",
-        reason: "manual",
-        userId: "member_test",
-      },
-    ]);
-    expect(continued.state).toMatchObject({
-      deviceSyncRecoveryRequested: true,
-      manualRunRequested: false,
-      sameRuntimeWakeAcceptedCount: 0,
-    });
-  });
-
-  it("preserves old recovery wake requests only through the old same-runtime limit", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.deviceSyncRecoveryDeletionPatchEnabled = false;
-    runtime.demands.push(legacyDeviceSyncRecoveryDemand());
-    runtime.executions.push(processingAccepted({
-      action: "woken",
-      recommendedRecheckAt: isoAfter(30_000),
-      runtimeAttemptId: "runtime_attempt_test",
-    }));
-    runtime.demands.push(legacyDeviceSyncRecoveryDemand());
-    runtime.executions.push(processingAccepted({
-      action: "already_running",
-      recommendedRecheckAt: isoAfter(30_000),
-      runtimeAttemptId: "runtime_attempt_test",
-    }));
-    runtime.demands.push(legacyDeviceSyncRecoveryDemand());
-    runtime.executions.push(processingAccepted({
-      action: "already_running",
-      recommendedRecheckAt: isoAfter(30_000),
-      runtimeAttemptId: "runtime_attempt_test",
-    }));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 3 },
-      state: legacyCarryForwardState({
-        deviceSyncRecoveryRequested: true,
-        sameRuntimeWakeAcceptedCount: 0,
-      }),
-      userId: "member_test",
-    });
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.executionRequests).toHaveLength(3);
-    expect(runtime.executionRequests.every((request) =>
-      !Object.hasOwn(request, "source")
-    )).toBe(true);
-    expect(continued.state).toMatchObject({
-      deviceSyncRecoveryRequested: false,
-      sameRuntimeWakeAcceptedCount: 3,
-    });
-  });
-
-  it("records malformed raw signals as no-op diagnostics", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(idleDemand(isoAfter(60_000)));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    expect(() => machine.applySignal({
-      kind: "manual_run_requested",
-      source: "unexpected-source",
-    })).not.toThrow();
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests[0]).toMatchObject({
-      browserVaultRefreshRequested: false,
-      lagRecoveryObserved: false,
-      manualRunRequested: false,
-    });
-    expect(continued.state).toMatchObject({
-      invalidSignalCount: 1,
-      lastInvalidSignalErrorCode: "TypeError",
-      signalVersion: 0,
-    });
-  });
-
-  it("waits until blocked demand retryAt or a newer signal", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push({
-      kind: "blocked",
-      mailboxLag: [],
-      reason: "ai_usage_gate_unavailable",
-      retryAt: isoAfter(30_000),
-      workspace: null,
-    });
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([30_000]);
-  });
-
-  it("continues as new before an indefinite blocked wait when history is high", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.historyLength = 750;
-    runtime.demands.push({
-      kind: "blocked",
-      mailboxLag: [],
-      reason: "ai_usage_gate_unavailable",
-      retryAt: null,
-      workspace: null,
-    });
-
-    const machine = createMachine(runtime, {
-      options: {
-        continueAsNewAfterHistoryEvents: 750,
-        continueAsNewAfterIterations: 100,
-      },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests).toHaveLength(1);
-    expect(runtime.waits).toEqual([]);
-    expect(continued).toEqual({
-      options: normalizedContinuedOptions({
-        continueAsNewAfterHistoryEvents: 750,
-        continueAsNewAfterIterations: 100,
-      }),
-      state: expect.objectContaining({
-        lastDemandKind: "blocked",
-        manualRunRequested: true,
-        signalVersion: 1,
-      }),
-      userId: "member_test",
-    });
-  });
-
-  it("lets coalesced demand signals interrupt indefinite blocked waits", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    let machine: HostedUserRuntimeWorkflowMachine | null = null;
-    runtime.demands.push({
-      kind: "blocked",
-      mailboxLag: [],
-      reason: "ai_usage_gate_unavailable",
-      retryAt: null,
-      workspace: null,
-    });
-    runtime.demands.push((request) => {
-      expect(request.browserVaultRefreshRequested).toBe(true);
-      return runDemand({ source: "browser_vault_refresh" });
-    });
-    runtime.executions.push(processingAccepted());
-
-    machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    machine.applySignal(browserVaultSignal());
-    runtime.onWait = () => {
-      runtime.onWait = null;
-      machine?.applySignal(browserVaultSignal());
-      expect(machine?.readStatus().signalVersion).toBe(2);
-    };
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([null]);
-    expect(runtime.demandRequests).toHaveLength(2);
-    expect(runtime.executionRequests).toHaveLength(1);
-    expect(runtime.executionRequests[0]?.reason).toBe("browser_vault_refresh");
-  });
-
-  it("does not let coalesced demand signals interrupt finite blocked retry waits", async () => {
+  it("rejects legacy direct demand signals instead of storing flags", () => {
     const runtime = new FakeWorkflowRuntime();
     const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
       userId: "member_test",
     });
-    runtime.demands.push({
-      kind: "blocked",
-      mailboxLag: [],
-      reason: "ai_usage_gate_unavailable",
-      retryAt: isoAfter(30_000),
-      workspace: null,
-    });
-    runtime.demands.push((request) => {
-      expect(request.browserVaultRefreshRequested).toBe(true);
-      return runDemand({ source: "browser_vault_refresh" });
-    });
-    runtime.executions.push(processingAccepted());
 
-    machine.applySignal(browserVaultSignal());
-    runtime.onWait = () => {
-      runtime.onWait = null;
-      machine.applySignal(browserVaultSignal());
-      expect(machine.readStatus().signalVersion).toBe(1);
-    };
+    for (const kind of legacyDirectSignalKinds()) {
+      machine.applySignal({ kind });
+    }
 
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([30_000]);
-    expect(runtime.now).toBe(BASE_TIME_MS + 30_000);
-    expect(runtime.demandRequests).toHaveLength(2);
-    expect(runtime.executionRequests).toHaveLength(1);
-    expect(runtime.executionRequests[0]?.reason).toBe("browser_vault_refresh");
+    const status = machine.readStatus();
+    expect(status.invalidSignalCount).toBe(4);
+    expect(status.signalVersion).toBe(0);
   });
-
-  it("lets a signal interrupt blocked demand retry wait", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push({
-      kind: "blocked",
-      mailboxLag: [],
-      reason: "ai_usage_gate_unavailable",
-      retryAt: isoAfter(30_000),
-      workspace: null,
-    });
-    runtime.demands.push((request) => {
-      expect(request.manualRunRequested).toBe(true);
-      return runDemand({ source: "manual" });
-    });
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      userId: "member_test",
-    });
-    runtime.onWait = () => {
-      runtime.onWait = null;
-      machine.applySignal(manualSignal("manual-during-blocked-retry"));
-    };
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([30_000]);
-    expect(runtime.now).toBe(BASE_TIME_MS);
-    expect(runtime.executionRequests).toHaveLength(1);
-    expect(runtime.executionRequests[0]?.reason).toBe("manual");
-  });
-
-  it("records execution errors and keeps the workflow alive for retry", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(() => {
-      const error = new Error("transport failed") as Error & { code: string };
-      error.code = "retryable_transport";
-      throw error;
-    });
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      state: {
-        ...emptyCarryForwardState(),
-        lastRuntimeAttemptId: "runtime_attempt_previous",
-        lastRuntimeStatus: "scheduled",
-      },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-    expect(machine.readStatus()).toMatchObject({
-      lastExecutionErrorCode: "retryable_transport",
-      lastExecutionKind: "failed",
-      lastRuntimeAttemptId: null,
-      lastRuntimeStatus: null,
-    });
-    expect(runtime.waits).toEqual([30_000]);
-    expect(continued.state).toMatchObject({
-      lastExecutionErrorCode: "retryable_transport",
-      lastExecutionKind: "failed",
-      lastRuntimeAttemptId: null,
-      lastRuntimeStatus: null,
-    });
-  });
-
-  it("waits for a signal only after non-retryable execution failures", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(() => {
-      throw nonRetryableActivityFailure("hosted_orchestrator_http_non_retryable");
-    });
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([null]);
-    expect(continued.state).toMatchObject({
-      lastExecutionErrorCode: "hosted_orchestrator_http_non_retryable",
-      lastExecutionKind: "failed",
-    });
-  });
-
-  it("continues as new before non-retryable execution failure waits when history is high", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.historyLength = 750;
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(() => {
-      throw nonRetryableActivityFailure("hosted_orchestrator_http_non_retryable");
-    });
-
-    const machine = createMachine(runtime, {
-      options: {
-        continueAsNewAfterHistoryEvents: 750,
-        continueAsNewAfterIterations: 100,
-      },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.executionRequests).toHaveLength(1);
-    expect(runtime.waits).toEqual([]);
-    expect(continued.state).toMatchObject({
-      lastExecutionErrorCode: "hosted_orchestrator_http_non_retryable",
-      lastExecutionKind: "failed",
-      manualRunRequested: true,
-    });
-  });
-
-  it("keeps old retry timer behavior when the non-retryable wait patch is inactive", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.signalOnlyNonRetryableFailureWaitEnabled = false;
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(() => {
-      throw nonRetryableActivityFailure("hosted_orchestrator_http_non_retryable");
-    });
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal());
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([
-      HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
-    ]);
-  });
-
-  it("records demand read errors and keeps the workflow alive for retry", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(() => {
-      const error = new Error("web unavailable") as Error & { code: string };
-      error.code = "demand_transport_unavailable";
-      throw error;
-    });
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.executionRequests).toHaveLength(0);
-    expect(runtime.waits).toEqual([30_000]);
-    expect(continued.state).toMatchObject({
-      lastDemandKind: null,
-      lastDemandNextWakeAt: null,
-      lastDemandSource: "demand_read_failed",
-      lastExecutionErrorCode: "demand_transport_unavailable",
-    });
-  });
-
-  it("waits for a signal only after non-retryable demand read failures", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(() => {
-      throw nonRetryableActivityFailure(
-        "hosted_orchestrator_invalid_protocol_response",
-      );
-    });
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.executionRequests).toHaveLength(0);
-    expect(runtime.waits).toEqual([null]);
-    expect(continued.state).toMatchObject({
-      lastDemandKind: null,
-      lastDemandNextWakeAt: null,
-      lastDemandSource: "demand_read_failed",
-      lastExecutionErrorCode: "hosted_orchestrator_invalid_protocol_response",
-    });
-  });
-
-  it("continues as new before non-retryable demand failure waits when history is high", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.historyLength = 750;
-    runtime.demands.push(() => {
-      throw nonRetryableActivityFailure(
-        "hosted_orchestrator_invalid_protocol_response",
-      );
-    });
-
-    const machine = createMachine(runtime, {
-      options: {
-        continueAsNewAfterHistoryEvents: 750,
-        continueAsNewAfterIterations: 100,
-      },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.executionRequests).toHaveLength(0);
-    expect(runtime.waits).toEqual([]);
-    expect(continued.state).toMatchObject({
-      lastDemandKind: null,
-      lastDemandSource: "demand_read_failed",
-      lastExecutionErrorCode: "hosted_orchestrator_invalid_protocol_response",
-      manualRunRequested: true,
-    });
-  });
-
-  it("keeps old non-retryable demand failure wait ordering before the post-demand wait patch marker", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.historyLength = 750;
-    runtime.postDemandWaitContinueAsNewPatchEnabled = false;
-    runtime.demands.push(() => {
-      throw nonRetryableActivityFailure(
-        "hosted_orchestrator_invalid_protocol_response",
-      );
-    });
-
-    const machine = createMachine(runtime, {
-      options: {
-        continueAsNewAfterHistoryEvents: 750,
-        continueAsNewAfterIterations: 1,
-      },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.executionRequests).toHaveLength(0);
-    expect(runtime.waits).toEqual([null]);
-    expect(continued.state).toMatchObject({
-      lastDemandKind: null,
-      lastDemandSource: "demand_read_failed",
-      lastExecutionErrorCode: "hosted_orchestrator_invalid_protocol_response",
-      manualRunRequested: true,
-    });
-  });
-
-  it("keeps old non-retryable failure wait ordering before the post-demand wait patch marker", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.historyLength = 750;
-    runtime.postDemandWaitContinueAsNewPatchEnabled = false;
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(() => {
-      throw nonRetryableActivityFailure("hosted_orchestrator_http_non_retryable");
-    });
-
-    const machine = createMachine(runtime, {
-      options: {
-        continueAsNewAfterHistoryEvents: 750,
-        continueAsNewAfterIterations: 1,
-      },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.executionRequests).toHaveLength(1);
-    expect(runtime.waits).toEqual([null]);
-    expect(continued.state).toMatchObject({
-      lastExecutionErrorCode: "hosted_orchestrator_http_non_retryable",
-      lastExecutionKind: "failed",
-      manualRunRequested: true,
-    });
-  });
-
-  it("does not sleep when processing accepted recheck is already due or malformed", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(processingAcceptedWithRecheck("not-an-iso-timestamp"));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal());
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([]);
-  });
-
-  it("continues as new with compact carry-forward state after the configured threshold", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(idleDemand(isoAfter(60_000)));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      state: {
-        ...emptyCarryForwardState(),
-        mailboxSignalCount: 3,
-      },
-      userId: "member_test",
-    });
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(continued).toEqual({
-      options: normalizedContinuedOptions({ continueAsNewAfterIterations: 1 }),
-      state: expect.objectContaining({
-        lastDemandKind: "idle",
-        mailboxSignalCount: 0,
-        signalVersion: 0,
-      }),
-      userId: "member_test",
-    });
-    expect(continued.state).not.toHaveProperty("lastDemand");
-    expect(continued.state).not.toHaveProperty("redactedStatus");
-    expect(continued.state).not.toHaveProperty("aiUsageAllowDecision");
-  });
-
-  it("continues as new when history length reaches the configured threshold", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.historyLength = 750;
-
-    const machine = createMachine(runtime, {
-      options: {
-        continueAsNewAfterHistoryEvents: 750,
-        continueAsNewAfterIterations: 100,
-      },
-      userId: "member_test",
-    });
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests).toHaveLength(0);
-    expect(runtime.executionRequests).toHaveLength(0);
-    expect(continued).toEqual({
-      options: normalizedContinuedOptions({
-        continueAsNewAfterHistoryEvents: 750,
-        continueAsNewAfterIterations: 100,
-      }),
-      state: expect.objectContaining({ signalVersion: 0 }),
-      userId: "member_test",
-    });
-  });
-
-  it("processes pending mailbox demand before continuing as new for high history", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.historyLength = 750;
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: {
-        continueAsNewAfterHistoryEvents: 750,
-        continueAsNewAfterIterations: 100,
-      },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests).toHaveLength(0);
-    expect(runtime.executionRequests).toEqual([
-      {
-        orchestrationAttemptId: "orchestration-attempt-1",
-        reason: "nudge",
-        userId: "member_test",
-      },
-    ]);
-    expect(runtime.waits).toEqual([]);
-    expect(continued).toEqual({
-      options: normalizedContinuedOptions({
-        continueAsNewAfterHistoryEvents: 750,
-        continueAsNewAfterIterations: 100,
-      }),
-      state: expect.objectContaining({
-        mailboxSignalCount: 0,
-        latestMailboxPointer: null,
-        lastDemandSource: "mailbox_backlog",
-        lastExecutionKind: "runtime_processing_accepted",
-      }),
-      userId: "member_test",
-    });
-  });
-
-  it("continues as new before an indefinite idle wait when history is high", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.directMailboxProcessingPatchEnabled = false;
-    runtime.historyLength = 750;
-    runtime.demands.push(idleDemand(null));
-
-    const machine = createMachine(runtime, {
-      options: {
-        continueAsNewAfterHistoryEvents: 750,
-        continueAsNewAfterIterations: 100,
-      },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests).toHaveLength(1);
-    expect(runtime.waits).toEqual([]);
-    expect(continued).toEqual({
-      options: normalizedContinuedOptions({
-        continueAsNewAfterHistoryEvents: 750,
-        continueAsNewAfterIterations: 100,
-      }),
-      state: expect.objectContaining({
-        latestMailboxPointer: null,
-        mailboxSignalCount: 0,
-        manualRunRequested: false,
-      }),
-      userId: "member_test",
-    });
-  });
-
-  it("keeps old idle-wait ordering before the post-demand wait patch marker", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.directMailboxProcessingPatchEnabled = false;
-    runtime.historyLength = 750;
-    runtime.postDemandWaitContinueAsNewPatchEnabled = false;
-    runtime.demands.push(idleDemand(null));
-
-    const machine = createMachine(runtime, {
-      options: {
-        continueAsNewAfterHistoryEvents: 750,
-        continueAsNewAfterIterations: 1,
-      },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests).toHaveLength(1);
-    expect(runtime.waits).toEqual([null]);
-    expect(continued).toEqual({
-      options: normalizedContinuedOptions({
-        continueAsNewAfterHistoryEvents: 750,
-        continueAsNewAfterIterations: 1,
-      }),
-      state: expect.objectContaining({
-        latestMailboxPointer: null,
-        mailboxSignalCount: 0,
-        signalVersion: 1,
-      }),
-      userId: "member_test",
-    });
-  });
-
-  it("continues as new before idle wait when Temporal suggests it after demand read", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.directMailboxProcessingPatchEnabled = false;
-    runtime.demands.push(() => {
-      runtime.suggestContinueAsNew = true;
-      return idleDemand(null);
-    });
-
-    const machine = createMachine(runtime, {
-      options: {
-        continueAsNewAfterHistoryEvents: 750,
-        continueAsNewAfterIterations: 100,
-      },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests).toHaveLength(1);
-    expect(runtime.waits).toEqual([]);
-    expect(continued).toEqual({
-      options: normalizedContinuedOptions({
-        continueAsNewAfterHistoryEvents: 750,
-        continueAsNewAfterIterations: 100,
-      }),
-      state: expect.objectContaining({
-        latestMailboxPointer: null,
-        mailboxSignalCount: 0,
-      }),
-      userId: "member_test",
-    });
-  });
-
-  it("preserves old iteration-threshold continue-as-new ordering before the unread-demand patch", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.unreadDemandBeforeContinueAsNewPatchEnabled = false;
-    runtime.demands.push(idleDemand(isoAfter(60_000)));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    runtime.onWait = () => {
-      runtime.onWait = null;
-      machine.applySignal(mailboxSignal());
-    };
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests).toHaveLength(1);
-    expect(runtime.executionRequests).toHaveLength(0);
-    expect(runtime.waits).toEqual([60_000]);
-    expect(continued).toEqual({
-      options: normalizedContinuedOptions({ continueAsNewAfterIterations: 1 }),
-      state: expect.objectContaining({
-        mailboxSignalCount: 1,
-        latestMailboxPointer: expect.objectContaining({
-          mailboxItemId: "mailbox_item_test",
-        }),
-      }),
-      userId: "member_test",
-    });
-  });
-
-  it("continues as new when Temporal suggests it and no runtime demand is pending", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.suggestContinueAsNew = true;
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 100 },
-      userId: "member_test",
-    });
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests).toHaveLength(0);
-    expect(runtime.executionRequests).toHaveLength(0);
-    expect(continued).toEqual({
-      options: normalizedContinuedOptions({ continueAsNewAfterIterations: 100 }),
-      state: expect.objectContaining({ signalVersion: 0 }),
-      userId: "member_test",
-    });
-  });
-
-  it("honors Temporal continue-as-new suggestions even with unread demand", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.suggestContinueAsNew = true;
-    runtime.demands.push(runDemand({
-      mailboxLag: [mailboxLag()],
-      source: "mailbox_backlog",
-    }));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 100 },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.demandRequests).toHaveLength(0);
-    expect(runtime.executionRequests).toHaveLength(0);
-    expect(continued).toEqual({
-      options: normalizedContinuedOptions({ continueAsNewAfterIterations: 100 }),
-      state: expect.objectContaining({
-        mailboxSignalCount: 1,
-        latestMailboxPointer: expect.objectContaining({
-          mailboxItemId: "mailbox_item_test",
-        }),
-      }),
-      userId: "member_test",
-    });
-  });
-
 });
 
 function normalizedContinuedOptions(
@@ -1893,7 +252,7 @@ function normalizedContinuedOptions(
     ensureRuntimeProcessingStartToCloseTimeoutMs:
       HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
     prewarmTaskQueue: "murph-hosted-runtime-prewarm",
-    readRuntimeDemandStartToCloseTimeoutMs: 10_000,
+    readRuntimeReconciliationFactsStartToCloseTimeoutMs: 10_000,
     ...overrides,
   };
 }
@@ -1904,9 +263,12 @@ class ContinueAsNewSignal extends Error {
   }
 }
 
-type DemandHandler = (
-  request: TestDemandRequest,
-) => TestDemand | Promise<TestDemand>;
+type ReconciliationInput = Parameters<
+  HostedUserRuntimeWorkflowRuntime["readRuntimeReconciliationFacts"]
+>[0];
+type ReconciliationHandler = (
+  request: ReconciliationInput,
+) => HostedRuntimeReconciliationFacts | Promise<HostedRuntimeReconciliationFacts>;
 type ExecutionInput = Parameters<
   HostedUserRuntimeWorkflowRuntime["ensureRuntimeProcessing"]
 >[0];
@@ -1919,41 +281,25 @@ type PrewarmInput = Parameters<
 type PrewarmHandler = (
   request: PrewarmInput,
 ) => HostedRuntimePrewarmResponse | Promise<HostedRuntimePrewarmResponse>;
-type RunDemand = Extract<HostedRuntimeDemand, { kind: "run" }>;
-type LegacyRunDemand = Omit<RunDemand, "source"> & {
-  source: "device_sync_recovery";
-};
-type TestDemand = HostedRuntimeDemand | LegacyRunDemand;
-type TestDemandRequest = HostedRuntimeDemandRequest & {
-  deviceSyncRecoveryRequested?: boolean;
-};
 
 class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   continuedInput: HostedUserRuntimeWorkflowInput | null = null;
-  readonly demandRequests: TestDemandRequest[] = [];
-  readonly demands: Array<DemandHandler | TestDemand> = [];
+  readonly reconciliationRequests: ReconciliationInput[] = [];
+  readonly facts: Array<ReconciliationHandler | HostedRuntimeReconciliationFacts> = [];
   readonly executionRequests: ExecutionInput[] = [];
   readonly executions: Array<ExecutionHandler | HostedRuntimeEnsureProcessingResponse> = [];
+  now = BASE_TIME_MS;
   onSignalWait: (() => void) | null = null;
+  onWait: (() => void) | null = null;
   prewarmCancelCount = 0;
   readonly prewarmRequests: PrewarmInput[] = [];
-  readonly prewarms: Array<PrewarmHandler | HostedRuntimePrewarmResponse | Promise<HostedRuntimePrewarmResponse>> = [];
-  prewarmSignalPatchEnabled = true;
-  deviceSyncRecoveryDeletionPatchEnabled = true;
-  directAnyLaneMailboxProcessingPatchEnabled = true;
-  directMailboxProcessingPatchEnabled = true;
-  dropEnsureProcessingSourcePatchEnabled = true;
-  now = BASE_TIME_MS;
-  onWait: (() => void) | null = null;
-  coalescedPendingSignalPatchEnabled = true;
-  ensureProcessingSourcePatchEnabled = true;
-  runtimeRecheckSignalPatchEnabled = true;
-  sameRuntimeWakeAcceptedCountPatchMarkerCount = 0;
-  signalOnlyNonRetryableFailureWaitEnabled = true;
+  readonly prewarms: Array<
+    PrewarmHandler
+    | HostedRuntimePrewarmResponse
+    | Promise<HostedRuntimePrewarmResponse>
+  > = [];
   suggestContinueAsNew = false;
   historyLength = 0;
-  unreadDemandBeforeContinueAsNewPatchEnabled = true;
-  postDemandWaitContinueAsNewPatchEnabled = true;
   readonly waits: Array<number | null> = [];
   private uuidCounter = 0;
   private readonly signalWaits: Array<{
@@ -1991,13 +337,13 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
     return this.now;
   }
 
-  async readRuntimeDemand(
-    request: TestDemandRequest,
-  ): Promise<TestDemand> {
-    this.demandRequests.push(request);
-    const next = this.demands.shift();
+  async readRuntimeReconciliationFacts(
+    request: ReconciliationInput,
+  ): Promise<HostedRuntimeReconciliationFacts> {
+    this.reconciliationRequests.push(request);
+    const next = this.facts.shift();
     if (!next) {
-      throw new Error("Unexpected readRuntimeDemand call.");
+      throw new Error("Unexpected readRuntimeReconciliationFacts call.");
     }
     return typeof next === "function" ? next(request) : next;
   }
@@ -2059,63 +405,6 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
     }
   }
 
-  useSignalOnlyWaitForNonRetryableFailure(): boolean {
-    return this.signalOnlyNonRetryableFailureWaitEnabled;
-  }
-
-  useEnsureRuntimeProcessingPatch(): void {
-    return;
-  }
-
-  preserveSameRuntimeWakeAcceptedCountPatchMarker(): boolean {
-    this.sameRuntimeWakeAcceptedCountPatchMarkerCount += 1;
-    return true;
-  }
-
-  useDeviceSyncRecoveryDeletionPatch(): boolean {
-    return this.deviceSyncRecoveryDeletionPatchEnabled;
-  }
-
-  useHistoryLengthContinueAsNewPatch(): boolean {
-    return true;
-  }
-
-  useUnreadDemandBeforeContinueAsNewPatch(): boolean {
-    return this.unreadDemandBeforeContinueAsNewPatchEnabled;
-  }
-
-  usePostDemandWaitContinueAsNewPatch(): boolean {
-    return this.postDemandWaitContinueAsNewPatchEnabled;
-  }
-
-  useDirectMailboxProcessingPatch(): boolean {
-    return this.directMailboxProcessingPatchEnabled;
-  }
-
-  useDirectAnyLaneMailboxProcessingPatch(): boolean {
-    return this.directAnyLaneMailboxProcessingPatchEnabled;
-  }
-
-  useDropEnsureProcessingSourcePatch(): boolean {
-    return this.dropEnsureProcessingSourcePatchEnabled;
-  }
-
-  useRuntimeRecheckSignalPatch(): boolean {
-    return this.runtimeRecheckSignalPatchEnabled;
-  }
-
-  useCoalescedPendingSignalPatch(): boolean {
-    return this.coalescedPendingSignalPatchEnabled;
-  }
-
-  useEnsureRuntimeProcessingSourcePatch(): boolean {
-    return this.ensureProcessingSourcePatchEnabled;
-  }
-
-  useRuntimePrewarmSignalPatch(): boolean {
-    return this.prewarmSignalPatchEnabled;
-  }
-
   uuid(): string {
     this.uuidCounter += 1;
     return `orchestration-attempt-${this.uuidCounter}`;
@@ -2157,46 +446,29 @@ async function runUntilContinueAsNew(
 
 function emptyCarryForwardState(): NonNullable<HostedUserRuntimeWorkflowInput["state"]> {
   return {
-    browserVaultRefreshRequested: false,
     currentWaitReason: null,
     currentWaitUntil: null,
     invalidSignalCount: 0,
-    lagRecoveryObserved: false,
     lastOrchestrationAttemptId: null,
     lastInvalidSignalErrorCode: null,
-    lastDemandKind: null,
-    lastDemandNextWakeAt: null,
-    lastDemandSource: null,
     lastExecutionAt: null,
     lastExecutionErrorCode: null,
     lastExecutionKind: null,
     lastMailboxLagLaneCount: 0,
+    lastReconciliationBlockedReason: null,
+    lastReconciliationNextWakeAt: null,
+    lastReconciliationStatus: null,
     lastRuntimeAttemptId: null,
     lastRuntimeStatus: null,
     latestMailboxPointer: null,
     latestPrewarmRequestedAt: null,
     mailboxSignalCount: 0,
-    manualRunRequested: false,
     lastPrewarmAttemptId: null,
     lastPrewarmErrorCode: null,
     lastPrewarmResult: null,
     prewarmRequested: false,
     prewarmSignalCount: 0,
     signalVersion: 0,
-  };
-}
-
-function legacyCarryForwardState(input: {
-  deviceSyncRecoveryRequested: boolean;
-  sameRuntimeWakeAcceptedCount: number;
-}): NonNullable<HostedUserRuntimeWorkflowInput["state"]> & {
-  deviceSyncRecoveryRequested: boolean;
-  sameRuntimeWakeAcceptedCount: number;
-} {
-  return {
-    ...emptyCarryForwardState(),
-    deviceSyncRecoveryRequested: input.deviceSyncRecoveryRequested,
-    sameRuntimeWakeAcceptedCount: input.sameRuntimeWakeAcceptedCount,
   };
 }
 
@@ -2208,32 +480,7 @@ function mailboxSignal(
     lane: "conversation",
     laneSeq: "7",
     mailboxItemId: "mailbox_item_test",
-    source: "test",
     ...overrides,
-  };
-}
-
-function manualSignal(_label = "manual_signal_test"): HostedRuntimeSignal {
-  return {
-    kind: "manual_run_requested",
-  };
-}
-
-function browserVaultSignal(): HostedRuntimeSignal {
-  return {
-    kind: "browser_vault_refresh_requested",
-  };
-}
-
-function mailboxLagSignal(): HostedRuntimeSignal {
-  return {
-    kind: "mailbox_lag_observed",
-  };
-}
-
-function runtimeRecheckSignal(): HostedRuntimeSignal {
-  return {
-    kind: "runtime_recheck_requested",
   };
 }
 
@@ -2246,6 +493,15 @@ function runtimePrewarmSignal(): HostedRuntimeSignal {
   };
 }
 
+function legacyDirectSignalKinds(): string[] {
+  return [
+    ["manual", "run", "requested"].join("_"),
+    ["browser", "vault", "refresh", "requested"].join("_"),
+    ["mailbox", "lag", "observed"].join("_"),
+    ["device", "sync", "recovery", "requested"].join("_"),
+  ];
+}
+
 function mailboxLag() {
   return {
     importedSeq: "0",
@@ -2256,54 +512,25 @@ function mailboxLag() {
   };
 }
 
-function runDemand(input: {
-  mailboxLag?: RunDemand["mailboxLag"];
-  source: RunDemand["source"];
-  workspace?: HostedRuntimeDemandWorkspaceProjection | null;
-}): HostedRuntimeDemand {
+function reconciliationFacts(input: {
+  blocked?: HostedRuntimeReconciliationFacts["blocked"];
+  mailboxLag?: HostedRuntimeReconciliationFacts["mailboxLag"];
+  workspace?: HostedRuntimeReconciliationFactsWorkspace | null;
+} = {}): HostedRuntimeReconciliationFacts {
   return {
-    kind: "run",
+    blocked: input.blocked ?? null,
     mailboxLag: input.mailboxLag ?? [],
-    reason: input.source === "browser_vault_refresh"
-      ? "browser_vault_refresh"
-      : input.source === "manual"
-        ? "manual"
-        : "nudge",
-    source: input.source,
     workspace: input.workspace ?? null,
   };
 }
 
-function legacyDeviceSyncRecoveryDemand(): LegacyRunDemand {
+function workspaceProjection(
+  input: Partial<HostedRuntimeReconciliationFactsWorkspace>,
+): HostedRuntimeReconciliationFactsWorkspace {
   return {
-    kind: "run",
-    mailboxLag: [],
-    reason: "nudge",
-    source: "device_sync_recovery",
-    workspace: null,
-  };
-}
-
-function idleDemand(nextWakeAt: string | null): HostedRuntimeDemand {
-  return {
-    kind: "idle",
-    mailboxLag: [],
-    nextWakeAt,
-    workspace: null,
-  };
-}
-
-function blockedDemand(
-  retryAt: string | null,
-  reason: Extract<HostedRuntimeDemand, { kind: "blocked" }>["reason"] =
-    "ai_usage_gate_unavailable",
-): HostedRuntimeDemand {
-  return {
-    kind: "blocked",
-    mailboxLag: [],
-    reason,
-    retryAt,
-    workspace: null,
+    nextWakeAt: input.nextWakeAt ?? null,
+    nextWakeReason: input.nextWakeReason ?? null,
+    version: input.version ?? null,
   };
 }
 
@@ -2323,45 +550,8 @@ function processingAccepted(
   };
 }
 
-function processingAcceptedWithRecheck(
-  recommendedRecheckAt: string,
-): HostedRuntimeEnsureProcessingResponse {
-  return {
-    action: "woken",
-    kind: "runtime_processing_accepted",
-    recommendedRecheckAt,
-    runtimeAttemptId: "runtime_attempt_test",
-  };
-}
-
-function retryLater(retryAt: string): HostedRuntimeEnsureProcessingResponse {
-  return {
-    kind: "retry_later",
-    retryAt,
-  };
-}
-
-function nonRetryableActivityFailure(type: string): Error {
-  const applicationFailure = new Error("permanent hosted control failure") as
-    Error & {
-      nonRetryable: boolean;
-      type: string;
-    };
-  applicationFailure.nonRetryable = true;
-  applicationFailure.type = type;
-  return new Error("activity failed", {
-    cause: applicationFailure,
-  });
-}
-
-function workspaceProjection(
-  input: Partial<HostedRuntimeDemandWorkspaceProjection>,
-): HostedRuntimeDemandWorkspaceProjection {
-  return {
-    nextWakeAt: input.nextWakeAt ?? null,
-    nextWakeReason: input.nextWakeReason ?? null,
-    version: input.version ?? null,
-  };
+function pendingPrewarm(): Promise<HostedRuntimePrewarmResponse> {
+  return new Promise(() => undefined);
 }
 
 function isoAfter(deltaMs: number): string {

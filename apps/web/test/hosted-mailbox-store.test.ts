@@ -13,6 +13,7 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   readHostedMailboxItemCheckpointById,
   readHostedMailboxMaxSeqByLane,
+  readHostedMailboxPendingSystemItemsNeedAiUsageGate,
   type HostedMailboxItemRow,
   type HostedMailboxPayloadRow,
 } from "@/src/lib/hosted-mailbox/store";
@@ -811,6 +812,42 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       },
       where: {
         kind: "member.activated",
+        userId: "member_mailbox_1",
+      },
+    });
+  });
+
+  it("checks pending system mailbox rows for any manual item after the imported watermark", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => buildHostedMailboxItemRow({
+        id: "mailbox_manual_2",
+        kind: "runtime.manual-requested",
+        lane: "system",
+        laneSeq: 2n,
+      })),
+    });
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const prisma = createHostedMailboxClient({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+    });
+
+    await expect(readHostedMailboxPendingSystemItemsNeedAiUsageGate({
+      afterSeq: "0",
+      prisma,
+      userId: "member_mailbox_1",
+    })).resolves.toBe(true);
+
+    expect(hostedMailboxItem.findFirst).toHaveBeenCalledWith({
+      select: {
+        id: true,
+      },
+      where: {
+        kind: "runtime.manual-requested",
+        lane: "system",
+        laneSeq: {
+          gt: 0n,
+        },
         userId: "member_mailbox_1",
       },
     });

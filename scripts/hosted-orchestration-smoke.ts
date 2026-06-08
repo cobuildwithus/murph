@@ -41,7 +41,7 @@ async function main(): Promise<void> {
 
 function readSmokeSignal(): HostedRuntimeSignal {
   return parseHostedRuntimeSignal({
-    kind: "manual_run_requested",
+    kind: "runtime_recheck_requested",
   });
 }
 

@@ -497,6 +497,34 @@ export async function readHostedMailboxFirstPendingSystemKind(input: {
   return item?.kind ?? null;
 }
 
+export async function readHostedMailboxPendingSystemItemsNeedAiUsageGate(input: {
+  afterSeq: bigint | number | string;
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
+  const afterSeq = normalizeHostedMailboxSeq(
+    input.afterSeq,
+    "Hosted mailbox pending system afterSeq",
+  );
+  const row = await prisma.hostedMailboxItem.findFirst({
+    select: {
+      id: true,
+    },
+    where: {
+      kind: "runtime.manual-requested",
+      lane: "system",
+      laneSeq: {
+        gt: afterSeq,
+      },
+      userId,
+    },
+  });
+
+  return row !== null;
+}
+
 export async function readHostedMailboxFirstPendingSystemItemCheckpoint(input: {
   afterSeq: bigint | number | string;
   prisma?: HostedMailboxStoreClient;

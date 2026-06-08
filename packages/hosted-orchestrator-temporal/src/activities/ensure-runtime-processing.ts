@@ -2,13 +2,9 @@ import type {
   HostedRuntimeEnsureProcessingResponse,
 } from "../index.js";
 import {
-  parseHostedRuntimeDemandRunSource,
   parseHostedRuntimeEnsureProcessingRequest,
   parseHostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/parsers";
-import type {
-  HostedRuntimeDemandRunSource,
-} from "@murphai/hosted-execution/orchestration-control";
 import {
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
 } from "@murphai/hosted-execution/contracts";
@@ -23,18 +19,11 @@ import {
   requestHostedOrchestratorJson,
 } from "./http-client.js";
 
-const LEGACY_DEVICE_SYNC_RECOVERY_SOURCE = "device_sync_recovery";
-
 export interface EnsureRuntimeProcessingInput {
   orchestrationAttemptId: string;
   reason: HostedWorkspaceInvocationReason;
-  source?: EnsureRuntimeProcessingInputSource | null;
   userId: string;
 }
-
-type EnsureRuntimeProcessingInputSource =
-  | HostedRuntimeDemandRunSource
-  | typeof LEGACY_DEVICE_SYNC_RECOVERY_SOURCE;
 
 const CLOUDFLARE_RUNTIME_ENSURE_PROCESSING_PATH_PREFIX = "/internal/users/";
 const CLOUDFLARE_RUNTIME_ENSURE_PROCESSING_PATH_SUFFIX =
@@ -87,7 +76,6 @@ function parseEnsureRuntimeProcessingInput(
   assertExactKeys(record, "Hosted runtime ensure-processing Activity input", [
     "orchestrationAttemptId",
     "reason",
-    "source",
     "userId",
   ]);
 
@@ -100,28 +88,11 @@ function parseEnsureRuntimeProcessingInput(
       record.reason,
       "Hosted runtime ensure-processing Activity input reason",
     ),
-    ...(record.source === undefined || record.source === null
-      ? {}
-      : {
-          source: parseEnsureRuntimeProcessingInputSource(record.source),
-        }),
     userId: requireOpaqueIdentifier(
       record.userId,
       "Hosted runtime ensure-processing Activity input userId",
     ),
   };
-}
-
-function parseEnsureRuntimeProcessingInputSource(
-  value: unknown,
-): EnsureRuntimeProcessingInputSource {
-  if (value === LEGACY_DEVICE_SYNC_RECOVERY_SOURCE) {
-    return LEGACY_DEVICE_SYNC_RECOVERY_SOURCE;
-  }
-  return parseHostedRuntimeDemandRunSource(
-    value,
-    "Hosted runtime ensure-processing Activity input source",
-  );
 }
 
 function buildCloudflareRuntimeEnsureProcessingPath(userId: string): string {

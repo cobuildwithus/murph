@@ -144,7 +144,6 @@ describe("hosted email mailbox ingress route", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_item_24",
-      source: "email",
     });
   });
 
@@ -192,7 +191,6 @@ describe("hosted email mailbox ingress route", () => {
       expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
         expectedUserId: "member_123",
         mailboxItemId: "mailbox_item_24",
-        source: "email",
       });
       expect(consoleWarn).toHaveBeenCalledWith(
         "Hosted email ingress Temporal signal failed after mailbox append.",

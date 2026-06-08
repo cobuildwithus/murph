@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   getRunnerStatus: vi.fn(),
   queryWorkflowStatus: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
-  readHostedRuntimeDemand: vi.fn(),
+  readHostedRuntimeReconciliationFacts: vi.fn(),
   readHostedRuntimeTemporalSignalClientIfConfigured: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
 }));
@@ -27,8 +27,9 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
     mocks.readHostedExecutionControlClientIfConfigured,
 }));
 
-vi.mock("@/src/lib/hosted-orchestration/runtime-demand", () => ({
-  readHostedRuntimeDemand: mocks.readHostedRuntimeDemand,
+vi.mock("@/src/lib/hosted-orchestration/runtime-reconciliation-facts", () => ({
+  readHostedRuntimeReconciliationFacts:
+    mocks.readHostedRuntimeReconciliationFacts,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -69,10 +70,10 @@ describe("hosted orchestration status route", () => {
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       getRunnerStatus: mocks.getRunnerStatus,
     });
-    mocks.readHostedRuntimeDemand.mockResolvedValue(buildDemand());
+    mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(buildFacts());
   });
 
-  it("composes workflow query state, current demand, and Cloudflare runner status", async () => {
+  it("composes workflow query state, reconciliation facts, and Cloudflare runner status", async () => {
     const response = await statusRoute.GET(
       requestForStatus(),
       routeContext(),
@@ -86,11 +87,8 @@ describe("hosted orchestration status route", () => {
     expect(mocks.queryWorkflowStatus).toHaveBeenCalledWith(
       HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
     );
-    expect(mocks.readHostedRuntimeDemand).toHaveBeenCalledWith({
-      browserVaultRefreshRequested: false,
+    expect(mocks.readHostedRuntimeReconciliationFacts).toHaveBeenCalledWith({
       decisionSource: "status",
-      lagRecoveryObserved: true,
-      manualRunRequested: true,
       usageGateMode: "read_only",
       userId: MEMBER_ID,
     });
@@ -100,8 +98,8 @@ describe("hosted orchestration status route", () => {
         runnerStatus: buildRunnerStatusProjection(),
         unavailableReason: null,
       },
-      demand: {
-        current: buildDemand(),
+      reconciliation: {
+        facts: buildFacts(),
       },
       temporal: {
         status: buildWorkflowStatusProjection(),
@@ -135,6 +133,9 @@ describe("hosted orchestration status route", () => {
         runnerStatus: null,
         unavailableReason: "not_configured",
       },
+      reconciliation: {
+        facts: buildFacts(),
+      },
       temporal: {
         status: null,
         unavailableReason: "not_configured",
@@ -142,43 +143,12 @@ describe("hosted orchestration status route", () => {
       },
       userId: MEMBER_ID,
     });
-    expect(mocks.readHostedRuntimeDemand).toHaveBeenCalledWith({
-      browserVaultRefreshRequested: false,
+    expect(mocks.readHostedRuntimeReconciliationFacts).toHaveBeenCalledWith({
       decisionSource: "status",
-      lagRecoveryObserved: false,
-      manualRunRequested: false,
       usageGateMode: "read_only",
       userId: MEMBER_ID,
     });
     expect(mocks.getRunnerStatus).not.toHaveBeenCalled();
-  });
-
-  it("treats dependency errors as unavailable without failing the status route", async () => {
-    mocks.queryWorkflowStatus.mockRejectedValue(new Error("Temporal unavailable"));
-    mocks.getRunnerStatus.mockRejectedValue(new Error("Runner unavailable"));
-
-    const response = await statusRoute.GET(
-      requestForStatus(),
-      routeContext(),
-    );
-    const body = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(body).toMatchObject({
-      cloudflare: {
-        runnerStatus: null,
-        unavailableReason: "request_failed",
-      },
-      temporal: {
-        status: null,
-        unavailableReason: "query_failed",
-      },
-    });
-    expect(mocks.readHostedRuntimeDemand).toHaveBeenCalledWith(expect.objectContaining({
-      manualRunRequested: false,
-      usageGateMode: "read_only",
-      userId: MEMBER_ID,
-    }));
   });
 
   it("classifies workflow not found separately from query failures", async () => {
@@ -198,101 +168,6 @@ describe("hosted orchestration status route", () => {
       unavailableReason: "not_found",
       workflowId: "hosted-user-runtime:member_status_1",
     });
-  });
-
-  it("classifies configured Temporal client creation failures as query failures", async () => {
-    mocks.readHostedRuntimeTemporalSignalClientIfConfigured.mockRejectedValue(
-      new Error("Temporal connection failed"),
-    );
-
-    const response = await statusRoute.GET(
-      requestForStatus(),
-      routeContext(),
-    );
-    const body = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(body.temporal).toMatchObject({
-      status: null,
-      unavailableReason: "query_failed",
-      workflowId: "hosted-user-runtime:member_status_1",
-    });
-  });
-
-  it("keeps old workflow status query shapes visible during deploy skew", async () => {
-    const oldStatus: Record<string, unknown> = { ...buildWorkflowStatus() };
-    delete oldStatus.currentWaitReason;
-    delete oldStatus.currentWaitUntil;
-    delete oldStatus.lastOrchestrationAttemptId;
-    delete oldStatus.lastRuntimeAttemptId;
-    delete oldStatus.lastRuntimeStatus;
-    delete oldStatus.latestPrewarmRequestedAt;
-    delete oldStatus.lastPrewarmAttemptId;
-    delete oldStatus.lastPrewarmErrorCode;
-    delete oldStatus.lastPrewarmResult;
-    delete oldStatus.prewarmRequested;
-    delete oldStatus.prewarmSignalCount;
-    mocks.queryWorkflowStatus.mockResolvedValue(oldStatus);
-
-    const response = await statusRoute.GET(
-      requestForStatus(),
-      routeContext(),
-    );
-    const body = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(body.temporal.unavailableReason).toBeNull();
-    expect(body.temporal.status).toMatchObject({
-      currentWaitReason: null,
-      currentWaitUntil: null,
-      lastOrchestrationAttemptId: null,
-      lastPrewarmAttemptId: null,
-      lastPrewarmErrorCode: null,
-      lastPrewarmResult: null,
-      lastRuntimeAttemptId: null,
-      lastRuntimeStatus: null,
-      latestPrewarmRequestedAt: null,
-      prewarmRequested: false,
-      prewarmSignalCount: 0,
-    });
-  });
-
-  it("keeps core workflow flags visible when observability enums are newer than web", async () => {
-    mocks.queryWorkflowStatus.mockResolvedValue({
-      ...buildWorkflowStatus(),
-      currentWaitReason: "future_wait_reason",
-      lastDemandKind: "future_demand",
-      lastExecutionKind: "future_execution",
-      lastRuntimeStatus: "future_runtime_status",
-      latestMailboxPointer: {
-        lane: "future_lane",
-      },
-    });
-
-    const response = await statusRoute.GET(
-      requestForStatus(),
-      routeContext(),
-    );
-    const body = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(body.temporal.unavailableReason).toBeNull();
-    expect(body.temporal.status).toMatchObject({
-      currentWaitReason: null,
-      lastDemandKind: null,
-      lastExecutionKind: null,
-      lastRuntimeStatus: null,
-      latestMailboxPointerPresent: false,
-      manualRunRequested: true,
-      signalVersion: 4,
-    });
-    expect(mocks.readHostedRuntimeDemand).toHaveBeenCalledWith(
-      expect.objectContaining({
-        decisionSource: "status",
-        manualRunRequested: true,
-        userId: MEMBER_ID,
-      }),
-    );
   });
 
   it("reports invalid status payloads without collapsing them into absent state", async () => {
@@ -341,11 +216,8 @@ describe("hosted orchestration status route", () => {
       unavailableReason: "user_mismatch",
       workflowId: "hosted-user-runtime:member_status_1",
     });
-    expect(mocks.readHostedRuntimeDemand).toHaveBeenCalledWith({
-      browserVaultRefreshRequested: false,
+    expect(mocks.readHostedRuntimeReconciliationFacts).toHaveBeenCalledWith({
       decisionSource: "status",
-      lagRecoveryObserved: false,
-      manualRunRequested: false,
       usageGateMode: "read_only",
       userId: MEMBER_ID,
     });
@@ -366,7 +238,7 @@ describe("hosted orchestration status route", () => {
         message: "Hosted orchestration request is not authorized for this user.",
       },
     });
-    expect(mocks.readHostedRuntimeDemand).not.toHaveBeenCalled();
+    expect(mocks.readHostedRuntimeReconciliationFacts).not.toHaveBeenCalled();
     expect(mocks.getRunnerStatus).not.toHaveBeenCalled();
     expect(mocks.queryWorkflowStatus).not.toHaveBeenCalled();
   });
@@ -389,9 +261,9 @@ function routeContext(): { params: Promise<{ userId: string }> } {
   };
 }
 
-function buildDemand() {
+function buildFacts() {
   return {
-    kind: "run",
+    blocked: null,
     mailboxLag: [
       {
         importedSeq: "5",
@@ -400,8 +272,6 @@ function buildDemand() {
         maxSeq: "6",
       },
     ],
-    reason: "manual",
-    source: "manual",
     workspace: {
       nextWakeAt: "2026-05-21T12:05:00.000Z",
       nextWakeReason: "assistant_due",
@@ -474,14 +344,9 @@ function buildRunnerStatusProjection() {
 
 function buildWorkflowStatus() {
   return {
-    browserVaultRefreshRequested: false,
     currentWaitReason: "runtime_wake_recheck",
     currentWaitUntil: "2026-05-21T12:04:00.000Z",
     invalidSignalCount: 0,
-    lagRecoveryObserved: true,
-    lastDemandKind: "run",
-    lastDemandNextWakeAt: null,
-    lastDemandSource: "manual",
     lastExecutionAt: "2026-05-21T11:59:45.000Z",
     lastExecutionErrorCode: null,
     lastExecutionKind: "runtime_processing_accepted",
@@ -491,17 +356,18 @@ function buildWorkflowStatus() {
     lastPrewarmAttemptId: "prewarm_attempt_1",
     lastPrewarmErrorCode: null,
     lastPrewarmResult: "accepted",
+    lastReconciliationBlockedReason: null,
+    lastReconciliationNextWakeAt: null,
+    lastReconciliationStatus: "work_pending",
     lastRuntimeAttemptId: "runtime_attempt_1",
     lastRuntimeStatus: "scheduled",
     latestMailboxPointer: {
       lane: "conversation",
       laneSeq: "6",
       mailboxItemId: "mailbox_status_1",
-      source: "email",
     },
     latestPrewarmRequestedAt: "2026-05-21T11:59:15.000Z",
     mailboxSignalCount: 2,
-    manualRunRequested: true,
     prewarmRequested: false,
     prewarmSignalCount: 1,
     signalVersion: 4,

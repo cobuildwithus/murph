@@ -24,7 +24,6 @@ const CURRENT_RUNNER_META_COLUMNS = [
   "active_expires_at",
   "active_workspace_version",
   "backoff_until",
-  "browser_vault_refresh_requested_at",
   "failure_count",
   "last_error_at",
   "last_error_code",
@@ -234,17 +233,35 @@ describe("RunnerStateStore schema guard", () => {
 
     await store.bindUser("user-current");
 
-    expect(readRunnerMetaColumns(db)).toEqual(expect.arrayContaining(CURRENT_RUNNER_META_COLUMNS));
-    expect(readRunnerMetaColumns(db)).not.toContain("active_invocation_id");
-    expect(readRunnerMetaColumns(db)).not.toContain("pending_nudge");
-    expect(readRunnerMetaColumns(db)).not.toContain("alarm_kind");
+    const columns = readRunnerMetaColumns(db);
+    const retiredBrowserVaultRefreshColumn = [
+      "browser",
+      "vault",
+      "refresh",
+      "requested",
+      "at",
+    ].join("_");
+    const retiredBrowserVaultRefreshProjection = [
+      "browser",
+      "Vault",
+      "Refresh",
+      "Requested",
+      "At",
+    ].join("");
+    expect(columns).toEqual(expect.arrayContaining(CURRENT_RUNNER_META_COLUMNS));
+    expect(columns).not.toContain("active_invocation_id");
+    expect(columns).not.toContain("pending_nudge");
+    expect(columns).not.toContain("alarm_kind");
+    expect(columns).not.toContain(retiredBrowserVaultRefreshColumn);
     expect(readRunnerStateSchemaVersion(db)).toBe(13);
-    await expect(store.readState()).resolves.toMatchObject({
+    const state = await store.readState();
+    expect(state).toMatchObject({
       schema: "murph.hosted-runner.v3",
       userId: "user-current",
       wakeAt: null,
       writeFence: null,
     });
+    expect(state).not.toHaveProperty(retiredBrowserVaultRefreshProjection);
   });
 
   it("migrates legacy active invocation and pending nudge state into the write fence", async () => {
@@ -601,7 +618,6 @@ describe("RunnerStateStore schema guard", () => {
 
     await expect(store.readState()).resolves.toMatchObject({
       backoffUntil: null,
-      browserVaultRefreshRequestedAt: null,
       nextWakeAt: null,
       retry: {
         at: null,

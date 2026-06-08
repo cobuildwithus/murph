@@ -6,9 +6,8 @@ import {
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
   HOSTED_USER_RUNTIME_TASK_QUEUE,
   HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
-  HOSTED_RUNTIME_DEMAND_RUN_SOURCES,
   deriveHostedUserRuntimePrewarmTaskQueue,
-  type HostedRuntimeDemandWorkspaceProjection,
+  type HostedRuntimeReconciliationFactsWorkspace,
   type HostedRuntimeSignal,
 } from "../src/orchestration-control.ts";
 import {
@@ -18,12 +17,12 @@ import {
   type HostedMailboxLaneLag,
 } from "../src/runtime-control.ts";
 import {
-  parseHostedRuntimeDemand,
-  parseHostedRuntimeDemandRequest,
   parseHostedRuntimeEnsureProcessingRequest,
   parseHostedRuntimeEnsureProcessingResponse,
   parseHostedRuntimePrewarmRequest,
   parseHostedRuntimePrewarmResponse,
+  parseHostedRuntimeReconciliationFacts,
+  parseHostedRuntimeReconciliationFactsRequest,
   parseHostedRuntimeSignal,
 } from "../src/parsers.ts";
 
@@ -57,16 +56,6 @@ describe("hosted orchestration control contracts", () => {
         lane: "conversation",
         laneSeq: "42",
         mailboxItemId: "mailbox_item_test",
-        source: "email:agentmail",
-      },
-      {
-        kind: "manual_run_requested",
-      },
-      {
-        kind: "browser_vault_refresh_requested",
-      },
-      {
-        kind: "mailbox_lag_observed",
       },
       {
         kind: "runtime_recheck_requested",
@@ -84,30 +73,20 @@ describe("hosted orchestration control contracts", () => {
     }
   });
 
-  it("keeps retired runtime wake sources out of durable demand sources", () => {
-    expect(HOSTED_RUNTIME_DEMAND_RUN_SOURCES).toContain("workspace_wake");
-    expect(HOSTED_RUNTIME_DEMAND_RUN_SOURCES).not.toContain(
-      "linq.imessage.typing",
-    );
-    expect(HOSTED_RUNTIME_DEMAND_RUN_SOURCES).not.toContain(
-      "device_sync_recovery",
-    );
-  });
-
   it("rejects raw payload-shaped fields in runtime signals", () => {
     const baseSignal = {
-      kind: "manual_run_requested",
+      kind: "runtime_recheck_requested",
     };
 
     expect(() => parseHostedRuntimeSignal({
       ...baseSignal,
       eventId: "hosted-orchestration-smoke",
-    })).toThrow("Hosted runtime manual-run signal must not include eventId.");
+    })).toThrow("Hosted runtime recheck signal must not include eventId.");
 
     expect(() => parseHostedRuntimeSignal({
       ...baseSignal,
       source: "test",
-    })).toThrow("Hosted runtime manual-run signal must not include source.");
+    })).toThrow("Hosted runtime recheck signal must not include source.");
 
     expect(() => parseHostedRuntimeSignal({
       kind: "runtime_recheck_requested",
@@ -127,7 +106,7 @@ describe("hosted orchestration control contracts", () => {
       expect(() => parseHostedRuntimeSignal({
         ...baseSignal,
         [field]: true,
-      })).toThrow(`Hosted runtime manual-run signal must not include ${field}.`);
+      })).toThrow(`Hosted runtime recheck signal must not include ${field}.`);
     }
 
     expect(() => parseHostedRuntimeSignal({
@@ -136,18 +115,10 @@ describe("hosted orchestration control contracts", () => {
       laneSeq: "42",
       mailboxItemId: "mailbox_item_test",
       source: "Provider",
-    })).toThrow(/safe source string/u);
+    })).toThrow("Hosted runtime mailbox signal must not include source.");
 
     expect(() => parseHostedRuntimeSignal({
-      kind: "mailbox_appended",
-      lane: "conversation",
-      laneSeq: "42",
-      mailboxItemId: "mailbox_item_test",
-      source: " ".repeat(1),
-    })).toThrow(/safe source string/u);
-
-    expect(() => parseHostedRuntimeSignal({
-      kind: "device_sync_recovery_requested",
+      kind: ["device", "sync", "recovery", "requested"].join("_"),
     })).toThrow("Hosted runtime signal kind is not supported.");
 
     expect(() => parseHostedRuntimeSignal({
@@ -159,141 +130,110 @@ describe("hosted orchestration control contracts", () => {
     })).toThrow("Hosted runtime prewarm signal must not include scopeHash.");
   });
 
-  it("parses demand requests and demand responses", () => {
-    const demandRequest = {
-      browserVaultRefreshRequested: true,
-      lagRecoveryObserved: false,
-      manualRunRequested: true,
+  it("parses reconciliation facts requests and responses", () => {
+    const factsRequest = {
       userId: "user_test",
     };
     const mailboxLag = createMailboxLag();
     const workspace = createWorkspaceProjection();
 
-    expect(parseHostedRuntimeDemandRequest(demandRequest)).toEqual(demandRequest);
-    expect(parseHostedRuntimeDemandRequest({ userId: "user_test" })).toEqual({
+    expect(parseHostedRuntimeReconciliationFactsRequest(factsRequest)).toEqual(
+      factsRequest,
+    );
+    expect(parseHostedRuntimeReconciliationFactsRequest({
+      userId: "user_test",
+    })).toEqual({
       userId: "user_test",
     });
-    expect(parseHostedRuntimeDemand({
-      kind: "run",
+    expect(parseHostedRuntimeReconciliationFacts({
+      blocked: null,
       mailboxLag,
-      reason: "nudge",
-      source: "mailbox_backlog",
       workspace,
     })).toEqual({
-      kind: "run",
+      blocked: null,
       mailboxLag,
-      reason: "nudge",
-      source: "mailbox_backlog",
       workspace,
     });
-    expect(parseHostedRuntimeDemand({
-      kind: "idle",
+    expect(parseHostedRuntimeReconciliationFacts({
+      blocked: {
+        reason: "ai_usage_gate_unavailable",
+        retryAt: "2026-05-20T12:02:00.000Z",
+      },
       mailboxLag,
-      nextWakeAt: "2026-05-20T12:01:00.000Z",
-      workspace,
-    })).toEqual({
-      kind: "idle",
-      mailboxLag,
-      nextWakeAt: "2026-05-20T12:01:00.000Z",
-      workspace,
-    });
-    expect(parseHostedRuntimeDemand({
-      kind: "blocked",
-      mailboxLag,
-      reason: "ai_usage_gate_unavailable",
-      retryAt: "2026-05-20T12:02:00.000Z",
       workspace: null,
     })).toEqual({
-      kind: "blocked",
+      blocked: {
+        reason: "ai_usage_gate_unavailable",
+        retryAt: "2026-05-20T12:02:00.000Z",
+      },
       mailboxLag,
-      reason: "ai_usage_gate_unavailable",
-      retryAt: "2026-05-20T12:02:00.000Z",
       workspace: null,
     });
   });
 
-  it("rejects raw payload-shaped fields in demand contracts", () => {
-    expect(() => parseHostedRuntimeDemandRequest({
+  it("rejects raw payload-shaped fields in reconciliation facts contracts", () => {
+    expect(() => parseHostedRuntimeReconciliationFactsRequest({
       deviceSyncRecoveryRequested: true,
       userId: "user_test",
     })).toThrow(
-      "Hosted runtime demand request must not include deviceSyncRecoveryRequested.",
+      "Hosted runtime reconciliation facts request must not include deviceSyncRecoveryRequested.",
     );
 
-    expect(() => parseHostedRuntimeDemandRequest({
+    expect(() => parseHostedRuntimeReconciliationFactsRequest({
       payload: true,
       userId: "user_test",
-    })).toThrow("Hosted runtime demand request must not include payload.");
+    })).toThrow("Hosted runtime reconciliation facts request must not include payload.");
 
-    expect(() => parseHostedRuntimeDemand({
+    expect(() => parseHostedRuntimeReconciliationFacts({
       body: true,
-      kind: "idle",
+      blocked: null,
       mailboxLag: [],
-      nextWakeAt: null,
       workspace: null,
-    })).toThrow("Hosted runtime idle demand must not include body.");
+    })).toThrow("Hosted runtime reconciliation facts must not include body.");
 
-    expect(() => parseHostedRuntimeDemand({
-      kind: "run",
+    expect(() => parseHostedRuntimeReconciliationFacts({
+      blocked: null,
       mailboxLag: [],
-      reason: "nudge",
-      source: "device_sync_recovery",
-      workspace: null,
-    })).toThrow("Hosted runtime run demand source is not supported.");
-
-    expect(() => parseHostedRuntimeDemand({
-      kind: "run",
-      mailboxLag: [],
-      reason: "nudge",
-      source: "mailbox_backlog",
-      workspace: null,
-    })).not.toThrow();
-
-    expect(() => parseHostedRuntimeDemand({
-      kind: "run",
-      mailboxLag: [],
-      reason: "nudge",
       requiresAiUsageDecision: false,
-      source: "mailbox_backlog",
       workspace: null,
-    })).toThrow("Hosted runtime run demand must not include requiresAiUsageDecision.");
+    })).toThrow(
+      "Hosted runtime reconciliation facts must not include requiresAiUsageDecision.",
+    );
 
-    expect(() => parseHostedRuntimeDemand({
-      kind: "run",
+    expect(() => parseHostedRuntimeReconciliationFacts({
+      blocked: null,
       mailboxLag: [],
       rawPayload: true,
-      reason: "nudge",
-      source: "mailbox_backlog",
       workspace: null,
-    })).toThrow("Hosted runtime run demand must not include rawPayload.");
+    })).toThrow("Hosted runtime reconciliation facts must not include rawPayload.");
 
-    expect(() => parseHostedRuntimeDemand({
+    expect(() => parseHostedRuntimeReconciliationFacts({
       aiUsageAllowDecision: createAiUsageAllowDecision(),
-      kind: "run",
+      blocked: null,
       mailboxLag: [],
-      reason: "nudge",
-      source: "mailbox_backlog",
       workspace: null,
-    })).toThrow("Hosted runtime run demand must not include aiUsageAllowDecision.");
+    })).toThrow(
+      "Hosted runtime reconciliation facts must not include aiUsageAllowDecision.",
+    );
 
-    expect(() => parseHostedRuntimeDemand({
-      kind: "idle",
+    expect(() => parseHostedRuntimeReconciliationFacts({
+      blocked: null,
       mailboxLag: [],
-      nextWakeAt: null,
       workspace: {
         nextWakeAt: null,
         nextWakeReason: null,
         redactedStatus: {},
         version: "7",
       },
-    })).toThrow("Hosted runtime demand workspace projection must not include redactedStatus.");
+    })).toThrow(
+      "Hosted runtime reconciliation facts workspace must not include redactedStatus.",
+    );
   });
 
   it("parses ensure-processing request and response variants", () => {
     const ensureProcessingRequest = parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "manual",
-      source: "workspace_wake",
     });
     expect(ensureProcessingRequest).toEqual({
       orchestrationAttemptId: "orchestration_attempt_test",
@@ -344,7 +284,7 @@ describe("hosted orchestration control contracts", () => {
       reason: "nudge",
       source: "device_sync_recovery",
     })).toThrow(
-      "Hosted runtime ensure-processing request source is not supported.",
+      "Hosted runtime ensure-processing request must not include source.",
     );
 
     expect(() => parseHostedRuntimeEnsureProcessingResponse({
@@ -466,7 +406,7 @@ function createMailboxLag(): HostedMailboxLaneLag[] {
   ];
 }
 
-function createWorkspaceProjection(): HostedRuntimeDemandWorkspaceProjection {
+function createWorkspaceProjection(): HostedRuntimeReconciliationFactsWorkspace {
   return {
     nextWakeAt: null,
     nextWakeReason: null,

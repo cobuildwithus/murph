@@ -70,7 +70,6 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     signal = await signalHostedMailboxAppendRuntime({
       expectedUserId: input.userId ?? null,
       mailboxItemId,
-      source: input.source,
     });
   } catch (error) {
     const errorName = deriveHostedOnboardingTimingErrorName(error);

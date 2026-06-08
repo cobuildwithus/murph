@@ -135,7 +135,6 @@ describe("hosted device sync reconnect notice", () => {
     await startHostedDeviceSyncReconnectNoticeWorkflowBestEffort("hmi_reconnect_123");
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       mailboxItemId: "hmi_reconnect_123",
-      source: "device-sync",
     });
   });
 

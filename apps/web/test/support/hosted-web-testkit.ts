@@ -173,7 +173,6 @@ interface HostedRuntimeSignalModule {
     expectedUserId?: string | null;
     mailboxItemId: string;
     prisma?: HostedTestPrismaClient;
-    source: string;
   }): Promise<{
     signalAccepted: true;
     workflowId: string;
@@ -386,7 +385,6 @@ export async function signalHostedMailboxAppendRuntimeForTest(input: {
   environment?: NodeJS.ProcessEnv;
   expectedUserId?: string | null;
   mailboxItemId: string;
-  source?: string;
 }): Promise<{
   signalAccepted: true;
   workflowId: string;
@@ -399,7 +397,6 @@ export async function signalHostedMailboxAppendRuntimeForTest(input: {
       expectedUserId: input.expectedUserId ?? null,
       mailboxItemId: input.mailboxItemId,
       prisma: deps.prisma,
-      source: input.source ?? "hosted-local-e2e",
     });
   });
 }

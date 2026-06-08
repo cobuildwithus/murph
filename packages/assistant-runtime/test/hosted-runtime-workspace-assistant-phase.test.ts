@@ -4438,7 +4438,7 @@ function createBrowserVaultRefreshSystemMailboxItem() {
     mailboxDedupeKey: "dedupe_system_mailbox_item_browser_vault_refresh",
     routeAction: "apply-runtime-control-request" as const,
     wake: {
-      eventId: "evt_runtime_browser_vault_refresh_requested",
+      eventId: "evt_runtime_browser_vault_refresh_control",
       kind: "runtime.browser-vault-refresh-requested" as const,
       occurredAt: "2026-04-27T00:00:00.000Z",
       userId: "member_synthetic_phase",

@@ -4,34 +4,30 @@ import {
   type HostedWorkspaceInvocationReason,
 } from "../runtime-control.ts";
 import {
-  HOSTED_RUNTIME_DEMAND_BLOCKED_REASONS,
-  HOSTED_RUNTIME_DEMAND_KINDS,
   HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
   HOSTED_RUNTIME_PREWARM_ACCEPTED_ACTIONS,
   HOSTED_RUNTIME_PREWARM_RESPONSE_KINDS,
   HOSTED_RUNTIME_PREWARM_SOURCES,
   HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
+  HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
   HOSTED_RUNTIME_SIGNAL_KINDS,
-  type HostedRuntimeDemand,
-  type HostedRuntimeDemandRequest,
-  type HostedRuntimeDemandWorkspaceProjection,
   type HostedRuntimeEnsureProcessingRequest,
   type HostedRuntimeEnsureProcessingResponse,
   type HostedRuntimePrewarmRequest,
   type HostedRuntimePrewarmResponse,
   type HostedRuntimePrewarmSource,
+  type HostedRuntimeReconciliationFacts,
+  type HostedRuntimeReconciliationFactsBlocked,
+  type HostedRuntimeReconciliationFactsRequest,
+  type HostedRuntimeReconciliationFactsWorkspace,
   type HostedRuntimeSignal,
 } from "../orchestration-control.ts";
 import {
   requireArray,
-  requireBoolean,
   requireObject,
   requireString,
   readNullableString,
 } from "./assertions.ts";
-import {
-  parseHostedRuntimeDemandRunSource,
-} from "./demand-source.ts";
 import {
   parseHostedMailboxLane,
 } from "./runtime-control.ts";
@@ -51,7 +47,6 @@ export function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
         "lane",
         "laneSeq",
         "mailboxItemId",
-        "source",
       ]);
 
       return {
@@ -65,37 +60,6 @@ export function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
           record.mailboxItemId,
           "Hosted runtime mailbox signal mailboxItemId",
         ),
-        source: requireSafeRuntimeSignalSource(
-          record.source,
-          "Hosted runtime mailbox signal source",
-        ),
-      };
-    }
-    case "manual_run_requested": {
-      assertExactKeys(record, "Hosted runtime manual-run signal", [
-        "kind",
-      ]);
-
-      return {
-        kind,
-      };
-    }
-    case "browser_vault_refresh_requested": {
-      assertExactKeys(record, "Hosted runtime browser-vault refresh signal", [
-        "kind",
-      ]);
-
-      return {
-        kind,
-      };
-    }
-    case "mailbox_lag_observed": {
-      assertExactKeys(record, "Hosted runtime mailbox-lag signal", [
-        "kind",
-      ]);
-
-      return {
-        kind,
       };
     }
     case "runtime_recheck_requested": {
@@ -138,140 +102,92 @@ export function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
   }
 }
 
-export function parseHostedRuntimeDemandRequest(
+export function parseHostedRuntimeReconciliationFactsRequest(
   value: unknown,
-): HostedRuntimeDemandRequest {
-  const record = requireObject(value, "Hosted runtime demand request");
-  assertExactKeys(record, "Hosted runtime demand request", [
-    "browserVaultRefreshRequested",
-    "lagRecoveryObserved",
-    "manualRunRequested",
+): HostedRuntimeReconciliationFactsRequest {
+  const record = requireObject(value, "Hosted runtime reconciliation facts request");
+  assertExactKeys(record, "Hosted runtime reconciliation facts request", [
     "userId",
   ]);
 
   return {
-    ...(record.browserVaultRefreshRequested === undefined
-      ? {}
-      : {
-          browserVaultRefreshRequested: requireBoolean(
-            record.browserVaultRefreshRequested,
-            "Hosted runtime demand request browserVaultRefreshRequested",
-          ),
-        }),
-    ...(record.lagRecoveryObserved === undefined
-      ? {}
-      : {
-          lagRecoveryObserved: requireBoolean(
-            record.lagRecoveryObserved,
-            "Hosted runtime demand request lagRecoveryObserved",
-          ),
-        }),
-    ...(record.manualRunRequested === undefined
-      ? {}
-      : {
-          manualRunRequested: requireBoolean(
-            record.manualRunRequested,
-            "Hosted runtime demand request manualRunRequested",
-          ),
-        }),
-    userId: requireOpaqueIdentifier(record.userId, "Hosted runtime demand request userId"),
+    userId: requireOpaqueIdentifier(
+      record.userId,
+      "Hosted runtime reconciliation facts request userId",
+    ),
   };
 }
 
-export function parseHostedRuntimeDemand(value: unknown): HostedRuntimeDemand {
-  const record = requireObject(value, "Hosted runtime demand");
-  const kind = parseAllowedString(
-    record.kind,
-    "Hosted runtime demand kind",
-    HOSTED_RUNTIME_DEMAND_KINDS,
-  );
+export function parseHostedRuntimeReconciliationFacts(
+  value: unknown,
+): HostedRuntimeReconciliationFacts {
+  const record = requireObject(value, "Hosted runtime reconciliation facts");
+  assertExactKeys(record, "Hosted runtime reconciliation facts", [
+    "blocked",
+    "mailboxLag",
+    "workspace",
+  ]);
 
-  switch (kind) {
-    case "run": {
-      assertExactKeys(record, "Hosted runtime run demand", [
-        "kind",
-        "mailboxLag",
-        "reason",
-        "source",
-        "workspace",
-      ]);
+  return {
+    blocked: record.blocked === null
+      ? null
+      : parseHostedRuntimeReconciliationFactsBlocked(record.blocked),
+    mailboxLag: parseHostedRuntimeMailboxLaneLagArray(
+      record.mailboxLag,
+      "Hosted runtime reconciliation facts mailboxLag",
+    ),
+    workspace: record.workspace === null
+      ? null
+      : parseHostedRuntimeReconciliationFactsWorkspace(record.workspace),
+  };
+}
 
-      return {
-        kind,
-        mailboxLag: parseHostedRuntimeMailboxLaneLagArray(
-          record.mailboxLag,
-          "Hosted runtime run demand mailboxLag",
-        ),
-        reason: parseHostedWorkspaceInvocationReason(
-          record.reason,
-          "Hosted runtime run demand reason",
-        ),
-        source: parseHostedRuntimeDemandRunSource(
-          record.source,
-          "Hosted runtime run demand source",
-        ),
-        workspace: record.workspace === null
-          ? null
-          : parseHostedRuntimeDemandWorkspaceProjection(record.workspace),
-      };
-    }
-    case "idle": {
-      assertExactKeys(record, "Hosted runtime idle demand", [
-        "kind",
-        "mailboxLag",
-        "nextWakeAt",
-        "workspace",
-      ]);
+export function parseHostedRuntimeReconciliationFactsBlocked(
+  value: unknown,
+): HostedRuntimeReconciliationFactsBlocked {
+  const record = requireObject(value, "Hosted runtime reconciliation facts blocked");
+  assertExactKeys(record, "Hosted runtime reconciliation facts blocked", [
+    "reason",
+    "retryAt",
+  ]);
 
-      return {
-        kind,
-        mailboxLag: parseHostedRuntimeMailboxLaneLagArray(
-          record.mailboxLag,
-          "Hosted runtime idle demand mailboxLag",
-        ),
-        nextWakeAt: readRequiredNullableIsoTimestamp(
-          record.nextWakeAt,
-          "Hosted runtime idle demand nextWakeAt",
-        ),
-        workspace: record.workspace === null
-          ? null
-          : parseHostedRuntimeDemandWorkspaceProjection(record.workspace),
-      };
-    }
-    case "blocked": {
-      assertExactKeys(record, "Hosted runtime blocked demand", [
-        "kind",
-        "mailboxLag",
-        "reason",
-        "retryAt",
-        "workspace",
-      ]);
+  return {
+    reason: parseAllowedString(
+      record.reason,
+      "Hosted runtime reconciliation facts blocked reason",
+      HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
+    ),
+    retryAt: readRequiredNullableIsoTimestamp(
+      record.retryAt,
+      "Hosted runtime reconciliation facts blocked retryAt",
+    ),
+  };
+}
 
-      return {
-        kind,
-        mailboxLag: parseHostedRuntimeMailboxLaneLagArray(
-          record.mailboxLag,
-          "Hosted runtime blocked demand mailboxLag",
-        ),
-        reason: parseAllowedString(
-          record.reason,
-          "Hosted runtime blocked demand reason",
-          HOSTED_RUNTIME_DEMAND_BLOCKED_REASONS,
-        ),
-        retryAt: readRequiredNullableIsoTimestamp(
-          record.retryAt,
-          "Hosted runtime blocked demand retryAt",
-        ),
-        workspace: record.workspace === null
-          ? null
-          : parseHostedRuntimeDemandWorkspaceProjection(record.workspace),
-      };
-    }
-    default: {
-      const exhaustive: never = kind;
-      throw new TypeError(`Unsupported hosted runtime demand kind: ${String(exhaustive)}.`);
-    }
-  }
+export function parseHostedRuntimeReconciliationFactsWorkspace(
+  value: unknown,
+): HostedRuntimeReconciliationFactsWorkspace {
+  const record = requireObject(value, "Hosted runtime reconciliation facts workspace");
+  assertExactKeys(record, "Hosted runtime reconciliation facts workspace", [
+    "nextWakeAt",
+    "nextWakeReason",
+    "version",
+  ]);
+
+  return {
+    nextWakeAt: readRequiredNullableIsoTimestamp(
+      record.nextWakeAt,
+      "Hosted runtime reconciliation facts workspace nextWakeAt",
+    ),
+    nextWakeReason: readRequiredNullableBoundedString(
+      record.nextWakeReason,
+      "Hosted runtime reconciliation facts workspace nextWakeReason",
+    ),
+    version: readRequiredNullableBoundedString(
+      record.version,
+      "Hosted runtime reconciliation facts workspace version",
+    ),
+  };
 }
 
 export function parseHostedRuntimeEnsureProcessingRequest(
@@ -281,16 +197,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
   assertExactKeys(record, "Hosted runtime ensure-processing request", [
     "orchestrationAttemptId",
     "reason",
-    "source",
   ]);
-  if (record.source !== undefined && record.source !== null) {
-    // Legacy wire tolerance only. Runtime ensure-processing is source-less;
-    // validate old source-bearing callers, then drop the field.
-    parseHostedRuntimeDemandRunSource(
-      record.source,
-      "Hosted runtime ensure-processing request source",
-    );
-  }
 
   return {
     orchestrationAttemptId: requireOpaqueIdentifier(
@@ -441,32 +348,6 @@ function parseHostedRuntimeMailboxLaneLagArray(
     .map((entry, index) => parseHostedRuntimeMailboxLaneLag(entry, `${label}[${index}]`));
 }
 
-function parseHostedRuntimeDemandWorkspaceProjection(
-  value: unknown,
-): HostedRuntimeDemandWorkspaceProjection {
-  const record = requireObject(value, "Hosted runtime demand workspace projection");
-  assertExactKeys(record, "Hosted runtime demand workspace projection", [
-    "nextWakeAt",
-    "nextWakeReason",
-    "version",
-  ]);
-
-  return {
-    nextWakeAt: readRequiredNullableIsoTimestamp(
-      record.nextWakeAt,
-      "Hosted runtime demand workspace projection nextWakeAt",
-    ),
-    nextWakeReason: readRequiredNullableBoundedString(
-      record.nextWakeReason,
-      "Hosted runtime demand workspace projection nextWakeReason",
-    ),
-    version: readRequiredNullableBoundedString(
-      record.version,
-      "Hosted runtime demand workspace projection version",
-    ),
-  };
-}
-
 function parseHostedRuntimeMailboxLaneLag(
   value: unknown,
   label: string,
@@ -512,22 +393,6 @@ function requireOpaqueIdentifier(value: unknown, label: string): string {
 
   if (text.length > 192 || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(text)) {
     throw new TypeError(`${label} must be a bounded opaque identifier.`);
-  }
-
-  return text;
-}
-
-function requireSafeRuntimeSignalSource(value: unknown, label: string): string {
-  const text = requireString(value, label);
-
-  if (
-    text.length > 64
-    || text.trim() !== text
-    || !/^[a-z0-9._:-]+$/u.test(text)
-  ) {
-    throw new TypeError(
-      `${label} must be a non-empty trimmed safe source string with at most 64 characters.`,
-    );
   }
 
   return text;

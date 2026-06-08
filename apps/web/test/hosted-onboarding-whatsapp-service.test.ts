@@ -562,7 +562,6 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_whatsapp_123",
       mailboxItemId: "mailbox_whatsapp:message:wamid.test-message-1",
-      source: "whatsapp",
     });
   });
 
@@ -598,7 +597,6 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_whatsapp_123",
       mailboxItemId: "mailbox_whatsapp:message:wamid.test-message-1",
-      source: "whatsapp",
     });
   });
 

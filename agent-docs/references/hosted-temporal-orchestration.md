@@ -23,13 +23,14 @@ The final ownership split is:
   active runtime write fence, container invoke or wake, runtime callback
   authorization, R2/snapshot transport plumbing, and cleanup.
 
-Temporal decides when to ask Murph to run. Cloudflare starts or wakes the
+Temporal decides when to ask Cloudflare to process based on web-owned
+reconciliation facts and pointer-only signals. Cloudflare starts or wakes the
 container. The restored Murph runtime decides what the work means and what wake
 should happen next. Temporal must keep only slim orchestration projections in
-workflow history: demand/result summaries, pointer fields, wake times, and debug
-metadata. Full workspace snapshots, full runtime invocation results, signed
-usage decisions, prompts, payloads, transcripts, and provider responses never
-belong in Temporal history.
+workflow history: reconciliation/result summaries, pointer fields, wake times,
+and debug metadata. Full workspace snapshots, full runtime invocation results,
+signed usage decisions, prompts, payloads, transcripts, and provider responses
+never belong in Temporal history.
 
 This ADR is the target architecture for the hard cut. Existing Vercel Workflow
 nudge paths and Cloudflare semantic scheduling paths are deletion targets, not
@@ -50,14 +51,14 @@ apps/web
   - verifies ingress and product policy
   - appends encrypted mailbox rows
   - records device-sync dirty state
-  - exposes durable runtime demand/status
+  - exposes runtime reconciliation facts/status
         |
         | pointer-only signal-with-start
         v
 Temporal per-user workflow
   - coalesces pointer flags
-  - reads web-owned demand/status
-  - sleeps until web-owned runtime or workspace demand is due
+  - reads web-owned reconciliation facts/status
+  - sleeps until mailbox lag, workspace wake, retry, or recheck is due
   - retries execution adapter calls
         |
         | ensure-processing request
@@ -90,9 +91,10 @@ the owner recheck time arrives, the fence is cleared/replaced/deleted, or a new
 signal interrupts the wait. While that owner exists, durable mailbox lag is recovery
 truth, not a reason for Temporal to poll and re-wake the same hot runner in a
 short loop. Completion is observed only after ownership ends or the owner
-recheck returns the workflow to the demand loop and web-owned demand/status
-shows no mailbox lag, no due web-owned runtime/workspace wake projection, and no
-workflow-local wake flag that still requires an execution attempt.
+recheck returns the workflow to the reconciliation loop and web-owned
+reconciliation facts/status show no mailbox lag, no due workspace wake
+projection, and no workflow-local wake hint that still requires an execution
+attempt.
 
 Web/runtime status is durable truth when no runner owns execution. Cloudflare's
 write fence is the active ownership truth while a run is in flight.
@@ -101,9 +103,9 @@ write fence is the active ownership truth while a run is in flight.
 
 | Owner | Owns | Must not own |
 | --- | --- | --- |
-| `apps/web` | Webhook verification, provider minimization, mailbox append and dedupe, device-sync dirty state, hosted member/billing/usage/product policy, hosted workspace metadata, mailbox lag, redacted runtime logs/status, demand endpoint. | Codex invocation, assistant automation semantics, outbox truth, internal runtime timers, container routing, Temporal workflow state. |
-| Temporal | Per-user workflow identity, pointer-only signals, coalesced wake flags, durable timers from web-owned demand projections, retry policy for web demand reads and Cloudflare processing adapter calls, continue-as-new history bounds, and global device-sync scheduled-wake cadence/retry through a short-lived reconciler workflow. | Raw payloads, decrypted mailbox contents, provider headers, prompts, transcripts, vault data, full workspace state, full runtime invocation results, signed usage decisions, assistant automation logic, device provider semantics, usage policy decisions, Cloudflare state, provider tokens, dirty resource bodies, or canonical dirty/reconcile facts. |
-| `apps/cloudflare` | Durable Object routing, write-fence generation and validation, container invoke/wake, runtime callback authorization, direct R2/snapshot transport, execution cleanup, alarm cleanup for active write fences. | Durable demand derivation, mailbox backlog decisions, assistant wake calculation, browser-vault scheduling policy, device-sync dirty semantics, retry caps as orchestration, queue history, product facts. |
+| `apps/web` | Webhook verification, provider minimization, mailbox append and dedupe, device-sync dirty state, hosted member/billing/usage/product policy, hosted workspace metadata, mailbox lag, redacted runtime logs/status, reconciliation-facts endpoint. | Codex invocation, assistant automation semantics, outbox truth, internal runtime timers, container routing, Temporal workflow state. |
+| Temporal | Per-user workflow identity, pointer-only signals, coalesced wake hints, durable timers from web-owned reconciliation facts, retry policy for web facts reads and Cloudflare processing adapter calls, continue-as-new history bounds, and global device-sync scheduled-wake cadence/retry through a short-lived reconciler workflow. | Raw payloads, decrypted mailbox contents, provider headers, prompts, transcripts, vault data, full workspace state, full runtime invocation results, signed usage decisions, assistant automation logic, device provider semantics, usage policy decisions, Cloudflare state, provider tokens, dirty resource bodies, or canonical dirty/reconcile facts. |
+| `apps/cloudflare` | Durable Object routing, write-fence generation and validation, container invoke/wake, runtime callback authorization, direct R2/snapshot transport, execution cleanup, alarm cleanup for active write fences. | Reconciliation-facts derivation, mailbox backlog decisions, assistant wake calculation, browser-vault scheduling policy, device-sync dirty semantics, retry caps as orchestration, queue history, product facts. |
 | Murph runtime | Mailbox import watermarks, `AssistantInputEvent` staging, active-turn admission, Codex invocation, assistant automation and timers, device-sync runtime execution, outbox/provider cleanup, idle/scheduled-wake checkpointing, `nextWakeAt` and `nextWakeReason` projection. | Temporal workflow state, web product policy, hosted member/billing facts, Durable Object routing, Cloudflare execution lease ownership. |
 
 ## Temporal State
@@ -111,21 +113,20 @@ write fence is the active ownership truth while a run is in flight.
 Allowed Temporal state is tiny and pointer-only:
 
 - Bound workflow user or workspace pointer.
-- Signal counters and booleans.
-- Latest opaque mailbox pointer fields, such as mailbox item pointer, lane, lane
-  sequence, and coarse source label.
-- Explicit wake flags for manual run, browser-vault refresh, lag recovery, and
-  mailbox pointers. Current web producers represent manual, browser-vault
-  refresh, and device-sync requests as durable system-mailbox rows and use
-  Temporal signals only as wake hints.
+- Signal counters and coalesced wake booleans.
+- Latest opaque mailbox pointer fields: mailbox item pointer, lane, and lane
+  sequence.
+- Source-less mailbox and recheck wake hints. Manual runs, browser-vault
+  refreshes, and device-sync requests are durable system-mailbox rows; Temporal
+  signals only wake the reconciliation loop.
 - Global device-sync scheduled-wake Schedule id, interval, Workflow start options, and
   count-only due-reconcile sweep results. The reconciler may remember that a
   sweep ran and how many due-reconcile rows/wakes it touched; it must not
   remember provider tokens, dirty resource bodies, external account state, or
   canonical dirty/reconcile facts.
 - Orchestration attempt identifiers generated by Temporal.
-- Last demand kind/source, last execution result kind, bounded error code, and
-  timestamps.
+- Last reconciliation status, blocked reason/retry timestamp, processing result
+  kind, bounded error code, and timestamps.
 - Slim workspace wake projection fields: `nextWakeAt`, `nextWakeReason`, and
   `version`.
 - Durable timers derived from web-owned runtime/workspace wake projection or
@@ -148,32 +149,35 @@ Forbidden Temporal state:
   policy decisions.
 - Arrays of pending mailbox signals or per-message workflow queues.
 
-Temporal may remember that demand exists. It must not become the place where
-Murph decides what demand means.
+Temporal may remember that reconciliation facts indicate work. It must not
+become the place where Murph decides what that work means.
 
-Manual, browser-vault refresh, and due-reconcile device-sync demand is durable
-web-owned demand. Manual and browser-vault refresh append system-mailbox control
-rows before signaling Temporal with the resulting mailbox pointer.
-Due-reconcile work is selected by the signed scheduled-wake sweep after the
-owning marker is durable, then represented as a bounded `device-sync.wake`
+Manual, browser-vault refresh, and due-reconcile device-sync work is durable
+web-owned mailbox work. Manual and browser-vault refresh append system-mailbox
+control rows before signaling Temporal with the resulting source-less mailbox
+pointer. Due-reconcile work is selected by the signed scheduled-wake sweep after
+the owning marker is durable, then represented as a bounded `device-sync.wake`
 mailbox handoff keyed by connection and reconcile timestamp. Dirty webhook
 freshness is separate: web persists dirty state and appends one deterministic
 `device-sync.wake` handoff on clean-to-dirty transitions, but dirty rows are not
 selected by a global scheduled sweep. Historical `runtime.mailbox-lag-observed`
 and `runtime.device-sync-recovery-requested` rows remain valid runtime-control
-rows for drain compatibility, but web no longer produces them. Legacy
-kind-only signals are parser-accepted deploy-skew inputs only; they carry no
-event id, source label, device reason, dedupe key, or live demand flag. Future
-command surfaces that need
-accepted/duplicate/rejected response semantics should use a durable web command
-ledger or Temporal Updates instead of expanding wake signals.
+rows for drain compatibility, but web no longer produces them.
 
-Workflow implementations must version-gate flag clearing around awaited demand
-and execution calls. If a signal arrives while an Activity is running, the loop
-must keep the existing flags and re-read demand instead of clearing state derived
-from a stale read. Workflow timers that should be preempted by fresh signals,
-including owner-recheck waits after accepted processing, must use a
-signal-aware `condition()` timeout instead of a bare timer sleep.
+Legacy direct demand signals and the old demand Activity are not replay
+compatibility paths in this hard cut. Operators must stop old workers,
+terminate existing `hosted-user-runtime:*` histories, deploy web and Temporal
+together, ensure Cloudflare uses the matching source-less contract, and reseed
+new histories with `runtime_recheck_requested` or mailbox signals.
+
+Workflow implementations must version-gate future command-order changes around
+awaited facts reads and execution calls unless the deployment is another
+documented hard cut with a history reset. If a signal arrives while an Activity
+is running, the loop must keep the existing wake hints and re-read facts instead
+of clearing state derived from a stale read. Workflow timers that should be
+preempted by fresh signals, including owner-recheck waits after accepted
+processing, must use a signal-aware `condition()` timeout instead of a bare
+timer sleep.
 
 The workflow type constant must match the exported workflow function name
 exactly. Temporal TypeScript workflow type names are function names, so renaming
@@ -186,9 +190,9 @@ and worker connection code must support the same API key, TLS enablement,
 client certificate/key, server root CA, and server-name override settings so
 `signalWithStart` and worker polling use the same trust model.
 
-Mailbox signal `source` is a bounded safe string, not a provider enum. Parsers
-should enforce a non-empty trimmed value with a small max length and safe
-characters.
+Mailbox signals must stay source-less. Prewarm signals may carry the single
+bounded `linq.imessage.typing` source because they are best-effort latency hints,
+not mailbox work or reconciliation facts.
 
 ## Global Device-Sync Scheduled Wake Reconciler
 
@@ -220,10 +224,12 @@ the due-reconcile scheduled-wake cadence, while the signed web sweep command
 remains available for authenticated operator recovery.
 
 Do not fold global due-reconcile discovery into `hostedUserRuntimeWorkflow` or
-`readRuntimeDemand`, and do not reintroduce global dirty-row discovery there.
+the per-user reconciliation-facts Activity, and do not reintroduce global
+dirty-row discovery there.
 Per-user workflows remain user-runtime execution loops: they react after
-mailbox/signal nudges and read per-user demand, but they do not scan global
-device-sync tables or keep users alive just to poll for due reconciles.
+mailbox/signal nudges and read per-user reconciliation facts, but they do not
+scan global device-sync tables or keep users alive just to poll for due
+reconciles.
 
 ## Workflow Replay And Versioning
 
@@ -252,25 +258,23 @@ identifiers just to prove replay.
 
 ## Final Minimal Contract
 
-Demand requests include workflow-local wake flags only.
+The per-user workflow reads source-less reconciliation facts from web:
 
-Demand responses include only slim state:
+- `blocked`: nullable product/usage gate block with `reason` and `retryAt`
+- `mailboxLag`: lane lag counters only
+- `workspace`: nullable projection with `nextWakeAt`, `nextWakeReason`, and
+  `version`
 
-- `HostedRuntimeDemandWorkspaceProjection` with `nextWakeAt`,
-  `nextWakeReason`, and `version`
-- `run`, `idle`, or `blocked` state with mailbox lag, demand source/reason, and
-  workspace projection only
+Facts do not contain run/idle decisions, producer source/reason, raw mailbox
+payloads, workspace redacted status, signed usage decisions, or direct wake
+flags. Temporal interprets the facts mechanically: fresh mailbox signals may
+ensure `nudge` directly; carried pointers and timers re-read facts; positive
+mailbox lag ensures `nudge`; due workspace wake ensures `alarm`; future or
+absent wake waits.
 
-Demand priority is conversation mailbox lag, first pending system-mailbox
-control demand, other system mailbox lag, explicit wake flags, due
-web-owned workspace wake projection, then idle until the earliest future
-wake. Web gates `mailbox_backlog` only when the conversation lane has lag;
-system-only mailbox lag still outranks explicit demand but does not consume the
-foreground AI usage gate.
-
-Usage and product policy blocks are successful demand reads with
-`kind: "blocked"`, never Temporal activity failures. Transport, auth, parser,
-and availability failures remain activity exceptions and keep the normal
+Usage and product policy blocks are successful reconciliation reads with a
+non-null `blocked` object, never Temporal activity failures. Transport, auth,
+parser, and availability failures remain activity exceptions and keep the normal
 Temporal retry/error semantics.
 
 The normal execution command response is either `runtime_processing_accepted`
@@ -286,20 +290,16 @@ Temporal treats `recommendedRecheckAt` on accepted processing as an ownership
 recheck horizon, not as a short durable-lag polling interval. Newer signals may
 interrupt that wait and cause one wake/ensure command for the active runner.
 Without a new signal, the workflow waits until the owner recheck before
-returning to durable demand recovery; if the original workspace wake remains due
-because the accepted runner failed before checkpointing, demand may select it
+returning to durable reconciliation; if the original workspace wake remains due
+because the accepted runner failed before checkpointing, facts may trigger it
 again. Runtime wake and retry facts that matter to product behavior must be
 reflected in durable web/runtime state, not returned as the command result.
 
-Legacy device-sync recovery handling is replay compatibility only. Current web
-and shared contracts do not produce or accept live recovery demand; the
-per-user workflow only tolerates old recovery signals, old demand Activity
-inputs, and old `device_sync_recovery` demand results so existing histories can
-drain without turning that compatibility path back into a correctness model.
-Deploy the web/database side that writes durable `device-sync.wake` handoffs
-before deploying the Temporal worker deletion patch. The compatibility branch is
-for replayed worker history, not for letting older web producers continue to use
-recovery-only signals as live wake delivery.
+Legacy direct device-sync recovery signals, old demand Activity inputs, and old
+demand results are physically removed in this hard cut. Do not run this worker
+against existing histories that recorded those commands or signals. Stop old
+workers, terminate existing `hosted-user-runtime:*` workflows, deploy the
+matching web/Temporal/Cloudflare contract set, then reseed new histories.
 
 ## Cloudflare Execution Adapter Contract
 
@@ -317,15 +317,16 @@ shared bearer token for this adapter.
 
 Request summary:
 
-- `reason`: the runtime invocation reason selected by web demand.
+- `reason`: the runtime invocation reason mechanically selected by Temporal
+  from source-less signals and reconciliation facts.
 - `orchestrationAttemptId`: an opaque Temporal attempt id for observability and
   idempotency at the orchestration boundary.
 
-The request does not carry signed AI usage decisions. Web demand gates the
-sources that strongly imply foreground model work before Temporal calls
-Cloudflare, and the runtime/provider layer enforces spend before actual model
-calls. There is no Activity-local signed usage-decision endpoint in the
-Temporal execution path.
+The request does not carry signed AI usage decisions. Web reconciliation facts
+gate mailbox lag and workspace wakes that strongly imply foreground model work
+before Temporal calls Cloudflare, and the runtime/provider layer enforces spend
+before actual model calls. There is no Activity-local signed usage-decision
+endpoint in the Temporal execution path.
 
 Response summary:
 
@@ -342,15 +343,16 @@ Response summary:
   `retryAt`.
 
 The adapter must not return `caught-up`, `mailboxLag`, `nextAlarmAt`, or runtime
-completion status. Those belong to web demand/status plus the Temporal loop.
+completion status. Those belong to web reconciliation facts/status plus the
+Temporal loop.
 Accepted responses set `recommendedRecheckAt` from the active write-fence owner
 recheck timing, bounded by the expected idle checkpoint horizon, rather than from
 a five-second startup poll.
 Transport failures and invalid protocol responses are still Activity
 exceptions. After the Activity retry policy is exhausted, the per-user workflow
 records compact failure metadata, waits on a signal-aware retry timer, and keeps
-running. Business blocked states such as usage denial are demand responses from
-web.
+running. Business blocked states such as usage denial are reconciliation facts
+from web.
 
 Cloudflare may:
 
@@ -364,7 +366,7 @@ Cloudflare may:
 
 Cloudflare must not:
 
-- Read mailbox lag to decide whether durable demand exists.
+- Read mailbox lag to decide whether durable work exists.
 - Derive assistant due work from `workspace.nextWakeAt`.
 - Treat browser-vault refresh, device-sync dirty state, or mailbox backlog as DO
   scheduler state.
@@ -377,7 +379,8 @@ Cloudflare must not:
   clear active fences and record bounded diagnostics without scheduling
   retry/wake state.
 
-Activity timeouts must be config-derived. Demand reads use a short timeout.
+Activity timeouts must be config-derived. Reconciliation-facts reads use a short
+timeout.
 `ensure-processing` uses a short command-acknowledgement budget because the
 response is only `runtime_processing_accepted` or `retry_later`, not runtime
 completion. The foreground Cloudflare pre-accept budget must fit under the
@@ -389,14 +392,12 @@ configured Cloudflare wait.
 
 ## Runtime Status And Completion
 
-Temporal idles only after reading web demand/status.
+Temporal idles only after reading web reconciliation facts/status.
 
 The idle condition is:
 
 - `mailboxLag` is zero across lanes.
 - Workspace wake projection `nextWakeAt` is absent or in the future.
-- Web demand has no explicit manual, browser-vault, or lag recovery flag
-  requiring execution.
 - Usage/product policy does not report a retryable blocked state.
 
 The runtime remains the only owner of assistant timers. Temporal sleeps on the
@@ -414,8 +415,8 @@ Delete or hard-disable these paths during the migration:
   - `use workflow` / `use step` nudge logic
   - direct web-to-Cloudflare nudge fallback wrappers
 - Cloudflare semantic scheduling paths:
-  - `ensureRunnerProgress` as a durable demand owner
-  - progress snapshot demand reads
+  - `ensureRunnerProgress` as a durable work owner
+  - progress snapshot work reads
   - local ensure loops as schedulers
   - post-runtime status reconciliation that schedules follow-up work
   - retry-cap probes as orchestration
@@ -425,7 +426,7 @@ Delete or hard-disable these paths during the migration:
   - mailbox retry truth
   - browser-vault refresh truth
   - device-sync scheduled-wake truth
-  - failure-count/backoff gates that decide whether demand may run
+  - failure-count/backoff gates that decide whether work may run
 - Nudge-as-completion assumptions:
   - accepted Vercel Workflow step means complete
   - Cloudflare nudge accepted means complete
@@ -445,7 +446,7 @@ The hard-cut architecture is accepted when:
   reconciliation must be Temporal-owned or backed by an explicit pending-handoff
   ledger instead of nudging Cloudflare.
 - Web browser/manual/device handoff paths signal Temporal.
-- Temporal has one per-user workflow that reads web demand/status and owns
+- Temporal has one per-user workflow that reads web reconciliation facts/status and owns
   sleeps/retries.
 - Temporal has one global due-reconcile device-sync scheduled wakes Schedule that
   starts a short-lived reconciler workflow whose web command appends bounded
@@ -456,15 +457,16 @@ The hard-cut architecture is accepted when:
 - Temporal imports no assistant-runtime, Prisma, Cloudflare Worker, or app code
   into workflow code.
 - Cloudflare exposes an ensure-processing adapter and no longer computes
-  mailbox, assistant, browser-vault, or device-sync demand.
+  mailbox, assistant, browser-vault, or device-sync work due.
 - Cloudflare alarms are write-fence cleanup only.
 - Murph runtime code does not know about Temporal.
 - Runtime `nextWakeAt` remains the only source for assistant timer wakeups.
 - Temporal stores no full `HostedWorkspaceState`, no full
   `HostedWorkspaceInvocationResult`, and no signed usage decision.
-- Demand returns `blocked` for usage denial or gate unavailability. It does not
-  return signed usage decisions or usage-gating metadata.
-- Workflow flag clearing is version-gated across awaited demand/execution calls.
+- Reconciliation facts return `blocked` for usage denial or gate
+  unavailability. They do not return signed usage decisions or usage-gating
+  metadata.
+- Workflow flag clearing is version-gated across awaited facts/execution calls.
 - Accepted-processing waits use Cloudflare's required owner-recheck
   `recommendedRecheckAt`, not a short durable-lag polling loop.
 - Workflow setup uses an ESM-compatible explicit `workflowsPath`.
@@ -475,7 +477,7 @@ The hard-cut architecture is accepted when:
   methods, and business payload fields in Temporal workflow history surfaces
   cannot re-enter production source silently.
 - Focused tests prove that wake acceptance is not completion and that Temporal
-  idles only after web/runtime demand is idle.
+  idles only after reconciliation facts are idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration
   scenario that starts managed local Temporal, signals through web, queries the
   workflow, and proves the worker reaches Cloudflare ensure-processing. Heavier

@@ -3,8 +3,9 @@
 Private Temporal worker package for hosted runtime orchestration.
 
 Temporal owns only scheduling, sleeps, signal coalescing, and Activity retries.
-Web remains the demand and product-status owner. Cloudflare remains the runtime
-execution adapter. The workflow state and signals must stay pointer-only.
+Web remains the reconciliation-facts and product-status owner. Cloudflare
+remains the runtime execution adapter. The workflow state and signals must stay
+pointer-only.
 The package also owns the global device-sync scheduled-wake reconciler workflow and
 Temporal Schedule helper. That reconciler calls a signed web command and stores
 only count/status metadata in Temporal history; web remains the owner of
@@ -32,11 +33,11 @@ payloads, prompts, transcripts, provider responses, secrets, local paths, or
 direct user identifiers. The durable rule lives in
 `agent-docs/references/hosted-temporal-orchestration.md`.
 
-Legacy `device_sync_recovery_requested`, `deviceSyncRecoveryRequested`, and
-`device_sync_recovery` handling is compatibility-only inside this worker. Web
-and shared contracts no longer produce or accept those fields as current demand;
-the worker only tolerates old signals, Activity inputs, and Activity results so
-pre-deletion histories can drain.
+The current per-user workflow is a hard cut. It is not replay-compatible with
+histories that recorded the old demand Activity or legacy direct signals. Before
+deploying this package version, stop old workers, terminate old
+`hosted-user-runtime:*` workflows, deploy web and Temporal together, then reseed
+users with `runtime_recheck_requested` or mailbox signals.
 
 ## Local Development
 
@@ -67,8 +68,8 @@ server. If you override `MURPH_DEV_TEMPORAL_PORT`, the UI uses that port plus
 you intentionally want a managed local server without the dashboard.
 
 That scenario signals through the web Temporal client, queries the workflow, and
-expects the worker Activities to reach the hosted web demand endpoint and the
-Cloudflare ensure-processing adapter.
+expects the worker Activities to reach the hosted web reconciliation-facts
+endpoint and the Cloudflare ensure-processing adapter.
 
 For manual standalone Temporal development, start the server directly:
 
@@ -120,10 +121,10 @@ export TEMPORAL_TLS_ENABLED=false
 pnpm hosted-orchestration:smoke
 ```
 
-The smoke command sends a pointer-only `manual_run_requested` signal for a
-synthetic local user id and prints a redacted workflow id. It proves the Temporal
-server accepted Signal-With-Start. If the worker is also running, Activity
-execution still requires the local web and Cloudflare adapter endpoints above.
+The smoke command sends a `runtime_recheck_requested` signal for a synthetic
+local user id and prints a redacted workflow id. It proves the Temporal server
+accepted Signal-With-Start. If the worker is also running, Activity execution
+still requires the local web and Cloudflare adapter endpoints above.
 
 ## Device-Sync Reconciler Schedule
 
@@ -205,14 +206,17 @@ Temporal connection:
 
 Activity HTTP targets:
 
-- `HOSTED_WEB_BASE_URL`: hosted web origin for demand calls.
+- `HOSTED_WEB_BASE_URL`: hosted web origin for reconciliation-facts calls.
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`: non-secret signing key id.
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`: P-256 private JWK JSON.
 - `CLOUDFLARE_HOSTED_CONTROL_BASE_URL`: Cloudflare execution adapter base URL.
 - Cloudflare ensure-processing calls use the same hosted callback signing env as
-  web demand calls; Cloudflare must verify the corresponding signed internal
+  web reconciliation-facts calls; Cloudflare must verify the corresponding signed internal
   callback key.
-- `HOSTED_RUNTIME_DEMAND_TIMEOUT_MS`: optional demand timeout, max 30000.
+- `HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS`: optional
+  reconciliation-facts Activity timeout, max `30000`.
+- `HOSTED_RUNTIME_DEMAND_TIMEOUT_MS`: deprecated fallback for the same timeout
+  during the hard-cut deploy window.
 - `HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_TIMEOUT_MS`: optional HTTP timeout for the
   signed web device-sync scheduled wake sweep Activity, default `30000`, max
   `120000`.
@@ -246,8 +250,8 @@ Worker shutdown:
 - The checked-in defaults intentionally leave a small process-exit margin under
   the Render Blueprint's `maxShutdownDelaySeconds: 300` platform cap.
   Ensure-processing calls are short-lived; long runtime execution continues
-  under Cloudflare runner write-fence ownership and is recovered by demand
-  rechecks.
+  under Cloudflare runner write-fence ownership and is recovered by
+  reconciliation rechecks.
 
 Worker concurrency:
 

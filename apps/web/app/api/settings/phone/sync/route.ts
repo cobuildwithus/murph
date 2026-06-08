@@ -54,7 +54,6 @@ export const POST = withJsonError(async (request: Request) => {
     await signalHostedMailboxAppendBestEffort({
       expectedUserId: auth.member.id,
       mailboxItemId: channelSyncDispatch.mailboxItemId,
-      source: "settings.phone.sync",
     });
   }
 
@@ -69,13 +68,11 @@ export const POST = withJsonError(async (request: Request) => {
 async function signalHostedMailboxAppendBestEffort(input: {
   expectedUserId: string;
   mailboxItemId: string;
-  source: string;
 }): Promise<void> {
   try {
     await signalHostedMailboxAppendRuntime({
       expectedUserId: input.expectedUserId,
       mailboxItemId: input.mailboxItemId,
-      source: input.source,
     });
   } catch {
     // Settings sync should not fail if the best-effort runtime wake is unavailable.

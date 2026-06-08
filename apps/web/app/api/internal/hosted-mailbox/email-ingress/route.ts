@@ -58,7 +58,6 @@ export const POST = withJsonError(async (request: Request) => {
     await signalHostedMailboxAppendRuntime({
       expectedUserId: userId,
       mailboxItemId,
-      source: "email",
     });
   } catch (error) {
     console.warn("Hosted email ingress Temporal signal failed after mailbox append.", {
