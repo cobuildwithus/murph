@@ -666,6 +666,7 @@ describe("hosted runner container image contract", () => {
     expect(runnerDockerSmokeScript).toContain("codexHostedCliVaultCommandProofCount=");
     expect(runnerDockerSmokeScript).toContain("codexHostedCliVaultWriteProofCount=");
     expect(runnerDockerSmokeScript).toContain("pythonVersion=");
+    expect(runnerDockerSmokeScript).toContain("ripgrepVersion=");
     expect(runnerPythonPathScript).toContain('const IMAGE_TAG = "murph-cloudflare-runner"');
     expect(runnerDockerSmokeScript).toContain(runnerDockerSmokeFinallyCleanupBlock);
     expect(runnerPythonPathScript).toContain(runnerPythonPathFinallyCleanupBlock);
@@ -693,7 +694,9 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("file")');
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("python")');
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("python3")');
+    expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("rg")');
     expect(hostedRunnerSmokeChild).toContain('runTextCommand("python3", ["--version"])');
+    expect(hostedRunnerSmokeChild).toContain('runTextCommand("rg", ["--version"])');
     expect(hostedRunnerSmokeChild).toContain("buildCodexEnvironmentProbeScript");
     expect(hostedRunnerSmokeChild).toContain('model = "gpt-5.5"');
     expect(hostedRunnerSmokeChild).toContain('model_reasoning_effort = "low"');

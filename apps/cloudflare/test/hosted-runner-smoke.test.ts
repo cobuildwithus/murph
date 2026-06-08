@@ -116,6 +116,8 @@ describe("runHostedRunnerSmokeDetailed", () => {
             pdfTextSha256: "b".repeat(64),
             pythonVersion: "Python 3.11.2",
             reportedVaultIdMatchesExpected: true,
+            ripgrepCommandDiscovered: true,
+            ripgrepVersion: "ripgrep 13.0.0",
             schema: "murph.cloudflare-hosted-runner-smoke.v1",
             vaultCliCommandDiscovered: true,
             vaultRootRebound: true,
@@ -163,6 +165,7 @@ describe("runHostedRunnerSmokeDetailed", () => {
       expect(result.normalizedTranscriptSha256).toBe("c".repeat(64));
       expect(result.pdfParserProviderId).toBe("poppler.pdf");
       expect(result.pythonVersion).toBe("Python 3.11.2");
+      expect(result.ripgrepVersion).toBe("ripgrep 13.0.0");
       expect(result.wavTranscriptProviderId).toBe("whisper.cpp");
       expect(processKillSpy).toHaveBeenCalledWith(-5252, "SIGKILL");
     } finally {

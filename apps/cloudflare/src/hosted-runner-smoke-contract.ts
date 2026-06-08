@@ -38,6 +38,8 @@ export interface HostedRunnerSmokeResult {
   pdfTextSha256: string;
   pythonVersion: string;
   reportedVaultIdMatchesExpected: boolean;
+  ripgrepCommandDiscovered: boolean;
+  ripgrepVersion: string;
   schema: typeof HOSTED_RUNNER_SMOKE_RESULT_SCHEMA;
   vaultCliCommandDiscovered: boolean;
   vaultRootRebound: boolean;
@@ -75,6 +77,8 @@ const HOSTED_RUNNER_SMOKE_RESULT_KEYS = new Set([
   "pdfTextSha256",
   "pythonVersion",
   "reportedVaultIdMatchesExpected",
+  "ripgrepCommandDiscovered",
+  "ripgrepVersion",
   "schema",
   "vaultCliCommandDiscovered",
   "vaultRootRebound",
@@ -225,6 +229,14 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
     reportedVaultIdMatchesExpected: readTrue(
       record.reportedVaultIdMatchesExpected,
       "Hosted runner smoke result.reportedVaultIdMatchesExpected",
+    ),
+    ripgrepCommandDiscovered: readTrue(
+      record.ripgrepCommandDiscovered,
+      "Hosted runner smoke result.ripgrepCommandDiscovered",
+    ),
+    ripgrepVersion: readRipgrepVersionString(
+      record.ripgrepVersion,
+      "Hosted runner smoke result.ripgrepVersion",
     ),
     schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
     vaultCliCommandDiscovered: readTrue(
@@ -394,6 +406,15 @@ function readPython3VersionString(value: unknown, label: string): string {
   const normalized = readNonEmptyString(value, label);
   if (!/^Python\s+3\./u.test(normalized)) {
     throw new TypeError(`${label} must be a Python 3 version string.`);
+  }
+
+  return normalized;
+}
+
+function readRipgrepVersionString(value: unknown, label: string): string {
+  const normalized = readNonEmptyString(value, label);
+  if (!/^ripgrep\s+\d/u.test(normalized)) {
+    throw new TypeError(`${label} must be a ripgrep version string.`);
   }
 
   return normalized;

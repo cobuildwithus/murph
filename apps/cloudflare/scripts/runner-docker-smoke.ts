@@ -90,6 +90,8 @@ async function main(): Promise<void> {
     console.log(`normalizedTranscriptSha256=${result.normalizedTranscriptSha256}`);
     console.log(`normalizedTranscriptMatchesExpectedSnippet=${result.normalizedTranscriptMatchesExpectedSnippet}`);
     console.log(`pythonVersion=${result.pythonVersion}`);
+    console.log(`ripgrepCommandDiscovered=${result.ripgrepCommandDiscovered}`);
+    console.log(`ripgrepVersion=${result.ripgrepVersion}`);
   } finally {
     await rm(SMOKE_BUNDLE_DIR, { force: true, recursive: true });
     await removeHostedRunnerFinalImageBestEffort();

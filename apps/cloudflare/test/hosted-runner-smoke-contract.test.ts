@@ -42,6 +42,8 @@ const validHostedRunnerSmokeResult = {
   pdfTextSha256: "b".repeat(64),
   pythonVersion: "Python 3.11.2",
   reportedVaultIdMatchesExpected: true,
+  ripgrepCommandDiscovered: true,
+  ripgrepVersion: "ripgrep 13.0.0",
   schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
   vaultCliCommandDiscovered: true,
   vaultRootRebound: true,
@@ -98,6 +100,8 @@ describe("parseHostedRunnerSmokeResult", () => {
       pdfParserProviderId: "poppler.pdf",
       pdfTextSha256: "b".repeat(64),
       pythonVersion: "Python 3.11.2",
+      ripgrepCommandDiscovered: true,
+      ripgrepVersion: "ripgrep 13.0.0",
       schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
       healthCommonsCatalogHash: "sha256:catalog",
       healthCommonsCliProtocolListBytes: 768,
@@ -237,6 +241,20 @@ describe("parseHostedRunnerSmokeResult", () => {
 
     expect(() => parseHostedRunnerSmokeResult({
       ...validHostedRunnerSmokeResult,
+      ripgrepVersion: "",
+    })).toThrow(
+      "Hosted runner smoke result.ripgrepVersion must be a non-empty string.",
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      ripgrepVersion: "not ripgrep",
+    })).toThrow(
+      "Hosted runner smoke result.ripgrepVersion must be a ripgrep version string.",
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
       wavTranscriptSha256: "raw transcript text",
     })).toThrow(
       "Hosted runner smoke result.wavTranscriptSha256 must be a SHA-256 hex string.",
@@ -260,6 +278,7 @@ describe("parseHostedRunnerSmokeResult", () => {
       "normalizedTranscriptMatchesExpectedSnippet",
       "operatorHomeRebound",
       "reportedVaultIdMatchesExpected",
+      "ripgrepCommandDiscovered",
       "vaultCliCommandDiscovered",
       "vaultRootRebound",
       "wavTranscriptMatchesExpectedSnippet",
