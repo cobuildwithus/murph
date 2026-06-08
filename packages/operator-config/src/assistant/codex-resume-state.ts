@@ -7,6 +7,7 @@ const codexRolloutRelativePathPattern =
 
 export const codexResumeStateSchema = z
   .object({
+    assistantContractFingerprint: z.string().min(1).optional(),
     rolloutRelativePath: z.string().min(1).nullable().optional(),
     routeFingerprint: z.string().min(1),
     threadId: z.string().min(1),
@@ -73,15 +74,20 @@ export function normalizeCodexResumeState(value: unknown): CodexResumeState | nu
   const rolloutRelativePath =
     normalizeCodexRolloutRelativePath(record.rolloutRelativePath) ??
     normalizeCodexRolloutRelativePath(record.codexRolloutRelativePath)
+  const assistantContractFingerprint = normalizeUnknownString(
+    record.assistantContractFingerprint,
+  )
 
   return codexResumeStateSchema.parse({
     threadId,
     routeFingerprint,
     ...(rolloutRelativePath ? { rolloutRelativePath } : {}),
+    ...(assistantContractFingerprint ? { assistantContractFingerprint } : {}),
   })
 }
 
 export function buildCodexResumeState(input: {
+  assistantContractFingerprint?: string | null
   rolloutRelativePath?: string | null
   routeFingerprint: string | null | undefined
   threadId: string | null | undefined
@@ -98,11 +104,15 @@ export function buildCodexResumeState(input: {
   const rolloutRelativePath = normalizeCodexRolloutRelativePath(
     input.rolloutRelativePath,
   )
+  const assistantContractFingerprint = normalizeNullableString(
+    input.assistantContractFingerprint,
+  )
 
   return codexResumeStateSchema.parse({
     threadId,
     routeFingerprint,
     ...(rolloutRelativePath ? { rolloutRelativePath } : {}),
+    ...(assistantContractFingerprint ? { assistantContractFingerprint } : {}),
   })
 }
 

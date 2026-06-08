@@ -25,8 +25,12 @@ import {
   type AssistantHostedDeviceConnectProvider,
 } from '../execution-context.js'
 import {
+  readCodexThreadRouteFingerprint,
   type CodexThreadIdentity,
 } from '../codex-thread-route.js'
+import {
+  buildAssistantCodexContractFingerprint,
+} from '../codex-contract-fingerprint.js'
 import {
   resolveAssistantDiagnosticsPolicy,
   type AssistantDiagnosticsPolicy,
@@ -65,8 +69,10 @@ import type {
   AssistantProviderConversationMessage,
 } from '../providers/types.js'
 import { normalizeNullableString } from '../shared.js'
+import { MURPH_DYNAMIC_TOOLS } from '../../assistant-codex/dynamic-tools.js'
 
 export interface AssistantRouteTurnPlan {
+  assistantContractFingerprint: string
   assistantCliContract: string | null
   cliEnv: NodeJS.ProcessEnv
   developerInstructions: string | null
@@ -375,6 +381,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       ...input.route.providerOptions,
     }),
   )
+  const routeFingerprint = readCodexThreadRouteFingerprint(input.route)
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread'
   const resolveCommittedTranscriptHistoryMessages = async () =>
@@ -385,44 +392,20 @@ export async function resolveAssistantRouteTurnPlan(input: {
           vault: input.input.vault,
         })
       : []
-  const nativeResumeEnabled =
-    input.profile.threadScope === 'session-thread'
-  const candidateResumeCodexThreadId =
-    nativeResumeEnabled &&
-    routeProviderCapabilities.supportsNativeResume &&
-    resumeBinding !== null
-      ? resolveAssistantEffectiveCodexResumeThreadId({
-          resumeCodexThreadId: resolveAssistantCodexResumeThreadId({
-            resumeState: resumeBinding,
-          }),
-        })
-      : null
-  const threadPlan = resolveAssistantCodexThreadPlan({
-    candidateResumeCodexThreadId,
-    onboardingGuidanceOpen: input.sharedPlan.onboardingGuidanceOpen,
-    promptProfile: input.profile.promptProfile,
-  })
-  const resumeCodexThreadId = threadPlan.resumeCodexThreadId
-  const conversationHistoryMessages = resumeCodexThreadId === null
-    ? await resolveCommittedTranscriptHistoryMessages()
-    : []
-  const shouldInjectBootstrapContext = threadPlan.shouldInjectBootstrapContext
-  const shouldPrepareBootstrapContext = shouldInjectBootstrapContext
-  const shouldPrepareAnyBootstrapContext = shouldPrepareBootstrapContext
-  const shouldResolveFreshThreadFallback = resumeCodexThreadId !== null
   const resolvedChannel = input.input.channel ?? input.session.binding.channel
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
   })
   const shouldInjectOnboardingGuidance =
-    threadPlan.onboardingGuidanceInjected
+    input.profile.promptProfile === 'conversation' &&
+    input.sharedPlan.onboardingGuidanceOpen
   const assistantToolNameAliases = null
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
   const shouldPrepareConversationThreadInstructions =
-    shouldPrepareBootstrapContext && input.profile.promptProfile === 'conversation'
+    input.profile.promptProfile === 'conversation'
   let cliBootstrapElapsedMs: number | null = null
   const bootstrapAssistantCliContract = shouldPrepareConversationThreadInstructions
     ? await measureRoutePlanningAsync(
@@ -514,55 +497,79 @@ export async function resolveAssistantRouteTurnPlan(input: {
         Boolean(normalizeNullableString(section)),
       )
       .join('\n\n')
+  const threadStartPromptResult = measureRoutePlanningSync(
+    routePlanningSpans,
+    'primarySystemPromptElapsedMs',
+    () => buildRouteSystemPromptResult({
+      assistantCliContract: bootstrapAssistantCliContract,
+      injectOnboardingGuidance: shouldInjectOnboardingGuidance,
+    }),
+  )
+  const threadStartDeveloperInstructions = normalizeNullableString(
+    buildDeveloperInstructions(threadStartPromptResult),
+  )
+  const assistantContractFingerprint = buildAssistantCodexContractFingerprint({
+    developerInstructions: threadStartDeveloperInstructions,
+    dynamicTools: MURPH_DYNAMIC_TOOLS,
+    routeFingerprint,
+  })
+  const nativeResumeEnabled =
+    input.profile.threadScope === 'session-thread'
+  const candidateResumeCodexThreadId =
+    nativeResumeEnabled &&
+    routeProviderCapabilities.supportsNativeResume &&
+    resumeBinding !== null &&
+    normalizeNullableString(resumeBinding.assistantContractFingerprint) ===
+      assistantContractFingerprint
+      ? resolveAssistantEffectiveCodexResumeThreadId({
+          resumeCodexThreadId: resolveAssistantCodexResumeThreadId({
+            resumeState: resumeBinding,
+          }),
+        })
+      : null
+  const threadPlan = resolveAssistantCodexThreadPlan({
+    candidateResumeCodexThreadId,
+    onboardingGuidanceOpen: input.sharedPlan.onboardingGuidanceOpen,
+    promptProfile: input.profile.promptProfile,
+  })
+  const resumeCodexThreadId = threadPlan.resumeCodexThreadId
+  const conversationHistoryMessages = resumeCodexThreadId === null
+    ? await resolveCommittedTranscriptHistoryMessages()
+    : []
+  const shouldInjectBootstrapContext = threadPlan.shouldInjectBootstrapContext
+  const shouldPrepareBootstrapContext = shouldInjectBootstrapContext
+  const shouldPrepareAnyBootstrapContext =
+    shouldPrepareBootstrapContext || shouldPrepareConversationThreadInstructions
+  const shouldResolveFreshThreadFallback = resumeCodexThreadId !== null
   const actualAssistantCliContract = shouldPrepareBootstrapContext
     ? bootstrapAssistantCliContract
     : null
   const buildFreshThreadFallbackPlan = async () => {
     const fallbackConversationHistoryMessages =
       await resolveCommittedTranscriptHistoryMessages()
-    const fallbackAssistantCliContract =
-      input.profile.promptProfile === 'conversation'
-        ? await readAssistantCliSurfaceBootstrapContext({
-            sessionId: input.session.sessionId,
-            vault: input.input.vault,
-          })
-        : null
-    const fallbackPromptResult = buildRouteSystemPromptResult({
-      assistantCliContract: fallbackAssistantCliContract,
-      injectOnboardingGuidance: shouldInjectOnboardingGuidance,
-    })
 
     return {
       conversationHistoryMessages:
         fallbackConversationHistoryMessages.length > 0
           ? fallbackConversationHistoryMessages
           : undefined,
-      developerInstructions: normalizeNullableString(
-        buildDeveloperInstructions(fallbackPromptResult),
-      ),
+      developerInstructions: threadStartDeveloperInstructions,
       sessionContext: {
         binding: input.session.binding,
       },
       turnContextPrompt: normalizeNullableString(
-        fallbackPromptResult.layers.dynamicTurnContextPrompt,
+        threadStartPromptResult.layers.dynamicTurnContextPrompt,
       ),
     }
   }
   const prepareFreshThreadFallback = shouldResolveFreshThreadFallback
     ? buildFreshThreadFallbackPlan
     : undefined
-  const systemPromptResult = measureRoutePlanningSync(
-    routePlanningSpans,
-    'primarySystemPromptElapsedMs',
-    () => buildRouteSystemPromptResult({
-      assistantCliContract: actualAssistantCliContract,
-      injectOnboardingGuidance: shouldInjectOnboardingGuidance,
-    }),
-  )
+  const systemPromptResult = threadStartPromptResult
   const systemPrompt = systemPromptResult.prompt
   const developerInstructions =
     resumeCodexThreadId === null
-      ? buildDeveloperInstructions(systemPromptResult)
+      ? threadStartDeveloperInstructions
       : null
   const turnContextPrompt = normalizeNullableString(
     systemPromptResult.layers.dynamicTurnContextPrompt,
@@ -579,6 +586,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     resolveRoutePlanningSlowestSpan(routePlanningSpans)
 
   return {
+    assistantContractFingerprint,
     assistantCliContract: actualAssistantCliContract,
     cliEnv: input.sharedPlan.cliAccess.env,
     developerInstructions: normalizeNullableString(developerInstructions),

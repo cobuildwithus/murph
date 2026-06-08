@@ -33,11 +33,13 @@ export type AssistantProviderResumeStateAction =
   | 'preserve-existing'
 
 export function resolveAssistantResumeStateFromProviderTurn(input: {
+  assistantContractFingerprint?: string | null
   codexRolloutRelativePath?: string | null
   codexThreadId: string | null
   routeFingerprint: string
 }): AssistantSession['resumeState'] {
   return buildCodexResumeState({
+    assistantContractFingerprint: input.assistantContractFingerprint,
     rolloutRelativePath: input.codexRolloutRelativePath,
     routeFingerprint: input.routeFingerprint,
     threadId: input.codexThreadId,
@@ -121,6 +123,7 @@ export async function persistAssistantTurnAndSession(input: {
     : input.session.providerOptions
   const nextResumeState = resolveAssistantNextResumeState({
     action: input.providerResumeStateAction,
+    assistantContractFingerprint: input.providerResult.assistantContractFingerprint,
     codexRolloutRelativePath: input.providerResult.codexRolloutRelativePath,
     codexThreadId: input.providerResult.codexThreadId,
     routeFingerprint: readCodexThreadRouteFingerprint(input.providerResult.route),
@@ -145,6 +148,7 @@ export async function persistAssistantTurnAndSession(input: {
 
 function resolveAssistantNextResumeState(input: {
   action: AssistantProviderResumeStateAction
+  assistantContractFingerprint?: string | null
   codexRolloutRelativePath?: string | null
   codexThreadId: string | null
   routeFingerprint: string
@@ -157,6 +161,7 @@ function resolveAssistantNextResumeState(input: {
       return input.sessionResumeState
     case 'persist-from-provider-turn':
       return resolveAssistantResumeStateFromProviderTurn({
+        assistantContractFingerprint: input.assistantContractFingerprint,
         codexRolloutRelativePath: input.codexRolloutRelativePath,
         codexThreadId: input.codexThreadId,
         routeFingerprint: input.routeFingerprint,

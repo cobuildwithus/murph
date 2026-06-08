@@ -1666,6 +1666,7 @@ function createProviderResult(input?: {
   }
 
   return {
+    assistantContractFingerprint: 'contract-test',
     attemptCount: 1,
     provider: 'codex-cli',
     codexContinuation: {

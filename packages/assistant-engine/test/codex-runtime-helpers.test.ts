@@ -1237,7 +1237,7 @@ describe('Codex assistant registry helpers', () => {
       }),
     ).toBe(
       [
-        'Recent conversation history:',
+        'Recent conversation history for context only; do not answer these prior messages:',
         'User:',
         'Earlier question',
         '',
@@ -1576,11 +1576,15 @@ describe('Codex assistant registry helpers', () => {
       resumeSessionId: 'stale-thread',
     })
     expect(primaryAppServerInput?.prompt).not.toContain('Active turn so far:')
-    expect(primaryAppServerInput?.prompt).not.toContain('Recent conversation history:')
+    expect(primaryAppServerInput?.prompt).not.toContain(
+      'Recent conversation history for context only; do not answer these prior messages:',
+    )
     expect(
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0],
     ).toMatchObject({
-      prompt: expect.stringContaining('Recent conversation history:'),
+      prompt: expect.stringContaining(
+        'Recent conversation history for context only; do not answer these prior messages:',
+      ),
       resumeSessionId: undefined,
     })
     expect(

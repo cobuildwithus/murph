@@ -224,6 +224,7 @@ export const assistantCodexModelTargetSchema = z
 export const assistantModelTargetSchema = assistantCodexModelTargetSchema
 const legacyAssistantSessionResumeStateSchema = z
   .object({
+    assistantContractFingerprint: z.string().min(1).nullable().optional(),
     codexRolloutRelativePath: z.string().min(1).nullable().optional(),
     providerSessionId: z.string().min(1).nullable().default(null),
     resumeRouteId: z.string().min(1).nullable().default(null),

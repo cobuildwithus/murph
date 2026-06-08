@@ -2720,6 +2720,7 @@ function createProviderResult(input?: {
     totalTokens: 13,
   };
   return {
+    assistantContractFingerprint: "contract-test",
     attemptCount: input?.attemptCount ?? 1,
     provider: "codex-cli",
     codexContinuation: {

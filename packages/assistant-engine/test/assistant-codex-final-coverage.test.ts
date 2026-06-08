@@ -512,6 +512,7 @@ describe('Codex model catalog', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        assistantContractFingerprint: 'contract-test',
         assistantCliContract: null,
         cliEnv: {},
         developerInstructions: null,
@@ -622,6 +623,7 @@ describe('Codex model catalog', () => {
       attemptCount: 1,
       route,
       routePlan: {
+        assistantContractFingerprint: 'contract-test',
         assistantCliContract: null,
         cliEnv: {},
         developerInstructions: null,

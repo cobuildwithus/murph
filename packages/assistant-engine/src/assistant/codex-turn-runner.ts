@@ -454,6 +454,8 @@ async function executeAssistantCodexAttempt(input: {
       kind: 'succeeded',
       result: {
         ...result,
+        assistantContractFingerprint:
+          attemptPlan.routePlan.assistantContractFingerprint,
         attemptCount: attemptPlan.attemptCount,
         nonReplayableProviderWork:
           attemptMetadata.executedToolCount > 0 ||
