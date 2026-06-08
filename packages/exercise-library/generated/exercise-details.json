@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:76b9f1742f8c239f05e084ee110c369baa0f09597af23cf9c88a3b428a26b981",
+  "catalogHash": "sha256:299ec8c154e54ccf13305667e1427609ce22a4e6cee4acaaa504b96a7964504e",
   "generatedAt": null,
   "items": [
     {
@@ -35131,7 +35131,18 @@
         "Couch"
       ],
       "id": "EX122",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person setting up for a shoulders-elevated hip thrust with upper back on a couch hips low and feet flat.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/56efa8fe-5d85-45e8-fdf5-dec7517f7000/public"
+        },
+        {
+          "alt": "Person holding the top of a shoulders-elevated hip thrust with hips high upper back supported and feet flat.",
+          "step": "Lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/62594d81-edff-4003-6fa4-f188fe3d6600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",

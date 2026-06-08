@@ -151,6 +151,16 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6112ec51-4742-43bd-09e4-1205b21f5100/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "shoulders-elevated-hip-thrust")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/56efa8fe-5d85-45e8-fdf5-dec7517f7000/public",
+      }),
+      expect.objectContaining({
+        step: "Lift",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/62594d81-edff-4003-6fa4-f188fe3d6600/public",
+      }),
+    ]);
     expect(artifacts.details.items.find((item) => item.slug === "wall-sit")?.images).toEqual([
       expect.objectContaining({
         step: "Setup",
