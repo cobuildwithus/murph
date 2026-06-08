@@ -1300,6 +1300,11 @@ describe("executeHostedMailboxEvent", () => {
       title: "Finish Murph onboarding follow-up",
       vault: "/tmp/assistant-runtime-events",
     });
+    const seedInput = mocks.upsertAssistantCronAutomation.mock.calls.at(0)?.[0];
+    expect(seedInput?.instructions).toContain(
+      "vault-cli automation set-status finish-onboarding-followup --status archived",
+    );
+    expect(seedInput?.instructions).toContain("return skip");
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
