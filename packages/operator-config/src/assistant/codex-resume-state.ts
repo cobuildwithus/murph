@@ -75,7 +75,7 @@ export function normalizeCodexResumeState(value: unknown): CodexResumeState | nu
   const rolloutRelativePath =
     normalizeCodexRolloutRelativePath(record.rolloutRelativePath) ??
     normalizeCodexRolloutRelativePath(record.codexRolloutRelativePath)
-  const assistantContractFingerprint = normalizeUnknownString(
+  const assistantContractFingerprint = normalizeAssistantContractFingerprint(
     record.assistantContractFingerprint,
   )
 
@@ -125,4 +125,11 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 
 function normalizeUnknownString(value: unknown): string | null {
   return normalizeNullableString(typeof value === 'string' ? value : null)
+}
+
+function normalizeAssistantContractFingerprint(value: unknown): string | null {
+  const normalized = normalizeUnknownString(value)
+  return normalized && assistantContractFingerprintSchema.safeParse(normalized).success
+    ? normalized
+    : null
 }

@@ -94,6 +94,24 @@ describe('assistant session resume state normalization', () => {
     expect(session.codexResume).toEqual(session.resumeState)
   })
 
+  it('drops malformed Codex assistant contract fingerprints', () => {
+    const session = parseAssistantSessionRecord(
+      createPersistedSessionRecord({
+        resumeState: {
+          assistantContractFingerprint: 'not-a-valid-contract-fingerprint',
+          providerSessionId,
+          resumeRouteId: 'route-new',
+        },
+      }),
+    )
+
+    expect(session.resumeState).toEqual({
+      routeFingerprint: 'route-new',
+      threadId: providerSessionId,
+    })
+    expect(session.codexResume).toEqual(session.resumeState)
+  })
+
   it('drops legacy thread ids without route fingerprints', () => {
     const session = parseAssistantSessionRecord(
       createPersistedSessionRecord({
