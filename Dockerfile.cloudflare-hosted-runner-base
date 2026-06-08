@@ -76,6 +76,7 @@ RUN apt-get update \
     ca-certificates \
     file \
     ffmpeg \
+    jq \
     mupdf-tools \
     poppler-utils \
     python-is-python3 \
@@ -109,6 +110,7 @@ USER runner
 
 RUN python3 --version \
   && python --version \
+  && jq --version \
   && zstd --version \
   && codex --version \
   && codex app-server --help >/dev/null \

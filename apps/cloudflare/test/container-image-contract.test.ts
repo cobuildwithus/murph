@@ -491,6 +491,7 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).not.toContain("FFMPEG_COMMAND=");
     expect(baseDockerfile).not.toContain("PDFTOTEXT_COMMAND=");
     expect(baseDockerfile).toContain("file \\");
+    expect(baseDockerfile).toContain("jq \\");
     expect(baseDockerfile).toContain("mupdf-tools \\");
     expect(baseDockerfile).toContain("poppler-utils \\");
     expect(baseDockerfile).toContain("python-is-python3 \\");
@@ -500,6 +501,7 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("RUN ldconfig");
     expect(baseDockerfile).toContain("python3 --version");
     expect(baseDockerfile).toContain("python --version");
+    expect(baseDockerfile).toContain("jq --version");
     expect(baseDockerfile).toContain("zstd --version");
     expect(baseDockerfile).toContain("codex --version");
     expect(baseDockerfile).toContain("codex app-server --help >/dev/null");
