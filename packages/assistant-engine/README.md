@@ -10,15 +10,17 @@ Neutral vault services live in `@murphai/vault-usecases/vault-services`, and inb
 
 Codex app-server turns reuse one warm process per Node runtime/container when
 the process launch key matches, including command, args, working directory,
-Codex home, selected provider-table identity, and the exact sanitized child env
-passed to the Codex process. A turn is an RPC into that process rather than a
-per-turn app-server subprocess. Overlapping turns fail busy instead of spawning
-parallel app-server processes.
-Codex config-backed model/provider defaults are resolved before each turn and
-sent through thread RPC so native resume can validate the current effective
-context without making config file content part of process launch identity.
-Changing provider endpoint/env/wire settings under the same provider id changes
-launch identity and starts a fresh app-server process.
+Codex home, and the exact sanitized child env passed to the Codex process.
+A turn is an RPC into that process rather than a per-turn app-server
+subprocess. Overlapping turns fail busy instead of spawning parallel app-server
+processes.
+
+Per-thread settings such as model, model provider, approval policy, sandbox,
+and cwd are sent through thread RPC. Native resume validates Codex's returned
+thread context before starting a turn; if the resume path is stale, the provider
+starts a fresh thread for the same user turn instead of failing to reply.
+Provider-table authority should be passed as explicit `--config` process args
+by the provider path; those args are already part of launch identity.
 
 Turn prompts, session ids, turn ids, and delivery routes are request data, not
 child process env. If a value should not affect warm reuse, keep it out of the

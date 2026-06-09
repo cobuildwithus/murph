@@ -67,7 +67,6 @@ import {
 } from './assistant-codex/app-server-rpc.js'
 import {
   resolveCodexChildEnv,
-  resolveCodexDisplayOptions,
 } from './assistant-codex/config.js'
 import {
   buildCodexProcessExitError,
@@ -403,13 +402,6 @@ export async function executeCodexAppServerTurn(
     codexHome: input.codexHome,
     env: input.env,
   })
-  const codexHome = normalizeNullableString(childEnv.CODEX_HOME)
-  const displayOptions = await resolveCodexDisplayOptions({
-    configPath: codexHome ? path.join(codexHome, 'config.toml') : undefined,
-    model: input.model,
-    modelProvider: input.modelProvider,
-    profile: input.profile,
-  })
   const codexCommand = resolveCodexAppServerCommand(input.codexCommand)
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-'))
   const imagePaths = await materializeCodexImagePaths({
@@ -419,15 +411,12 @@ export async function executeCodexAppServerTurn(
   const normalizedInput = {
     ...input,
     approvalPolicy,
-    model: displayOptions.model,
-    modelProvider: displayOptions.modelProvider,
   }
   const args = buildCodexAppServerArgs(normalizedInput)
   const launchKey = buildCodexAppServerLaunchKey({
     args,
     codexCommand,
     env: childEnv,
-    modelProviderConfigDigest: displayOptions.modelProviderConfigDigest,
     workingDirectory,
   })
   const preparedInput: CodexAppServerPreparedTurnInput = {
@@ -493,14 +482,12 @@ function buildCodexAppServerLaunchKey(input: {
   args: readonly string[]
   codexCommand: string
   env: NodeJS.ProcessEnv
-  modelProviderConfigDigest: string
   workingDirectory: string
 }): string {
   return hashCodexRawString(JSON.stringify({
     args: input.args,
     codexCommand: input.codexCommand,
     env: stableCodexProcessEnv(input.env),
-    modelProviderConfigDigest: input.modelProviderConfigDigest,
     workingDirectory: input.workingDirectory,
   }))
 }

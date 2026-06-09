@@ -433,24 +433,19 @@ describe('assistant codex runtime', () => {
       [
         '# comment',
         'model = "root-model"',
-        'model_provider = "root-provider"',
         'model_reasoning_effort = "medium"',
         'profile = "daily"',
         '[profiles.daily]',
         'model = "daily-model"',
-        'model_provider = "daily-provider"',
         'model_reasoning_effort = "high"',
         '[profiles.empty]',
         'model = ""',
-        'model_provider = ""',
       ].join('\n'),
       'utf8',
     )
 
     await expect(resolveCodexDisplayOptions({ configPath })).resolves.toEqual({
       model: 'daily-model',
-      modelProviderConfigDigest: expect.any(String),
-      modelProvider: 'daily-provider',
       reasoningEffort: 'high',
     })
 
@@ -458,13 +453,10 @@ describe('assistant codex runtime', () => {
       resolveCodexDisplayOptions({
         configPath,
         model: 'manual-model',
-        modelProvider: 'manual-provider',
         profile: 'daily',
       }),
     ).resolves.toEqual({
       model: 'manual-model',
-      modelProviderConfigDigest: expect.any(String),
-      modelProvider: 'manual-provider',
       reasoningEffort: 'high',
     })
 
@@ -474,8 +466,6 @@ describe('assistant codex runtime', () => {
       }),
     ).resolves.toEqual({
       model: null,
-      modelProviderConfigDigest: expect.any(String),
-      modelProvider: null,
       reasoningEffort: null,
     })
   })
@@ -4295,13 +4285,9 @@ describe('assistant codex runtime', () => {
     expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
   })
 
-  it('keeps the warm Codex app-server process when per-thread config file content changes', async () => {
-    const hostedCodexHome = await createTempDir('assistant-codex-warm-config-home-')
-    const workingDirectory = await createTempDir('assistant-codex-warm-config-work-')
-    await writeFile(
-      path.join(hostedCodexHome, 'config.toml'),
-      'model = "gpt-config-first"\nmodel_provider = "openai"\n',
-    )
+  it('keeps the warm Codex app-server process when explicit per-thread model settings change', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-warm-thread-home-')
+    const workingDirectory = await createTempDir('assistant-codex-warm-thread-work-')
     const spawnedChildren: MockChildProcess[] = []
 
     codexMocks.spawn.mockImplementation(() => {
@@ -4387,9 +4373,9 @@ describe('assistant codex runtime', () => {
     await expect(
       executeCodexAppServerTurn({
         env: hostedEnv,
-        model: 'gpt-config-first',
+        model: 'gpt-thread-first',
         modelProvider: 'openai',
-        prompt: 'first config launch',
+        prompt: 'first thread launch',
         workingDirectory,
       }),
     ).resolves.toMatchObject({
@@ -4397,17 +4383,12 @@ describe('assistant codex runtime', () => {
       turnId: 'turn-warm-config-1',
     })
 
-    await writeFile(
-      path.join(hostedCodexHome, 'config.toml'),
-      'model = "gpt-config-second"\nmodel_provider = "venice"\n',
-    )
-
     await expect(
       executeCodexAppServerTurn({
         env: hostedEnv,
-        model: 'gpt-config-second',
+        model: 'gpt-thread-second',
         modelProvider: 'venice',
-        prompt: 'second config launch',
+        prompt: 'second thread launch',
         workingDirectory,
       }),
     ).resolves.toMatchObject({
@@ -4424,174 +4405,32 @@ describe('assistant codex runtime', () => {
       .toHaveLength(1)
     expect(threadStarts).toHaveLength(2)
     expect(asRecord(threadStarts[0]?.params)).toMatchObject({
-      model: 'gpt-config-first',
+      model: 'gpt-thread-first',
       modelProvider: 'openai',
     })
     expect(asRecord(threadStarts[1]?.params)).toMatchObject({
-      model: 'gpt-config-second',
+      model: 'gpt-thread-second',
       modelProvider: 'venice',
     })
   })
 
-  it('resolves current config defaults before resuming on a warm Codex app-server', async () => {
-    const hostedCodexHome = await createTempDir('assistant-codex-warm-config-resume-home-')
-    const workingDirectory = await createTempDir('assistant-codex-warm-config-resume-work-')
-    const configPath = path.join(hostedCodexHome, 'config.toml')
-    await writeFile(
-      configPath,
-      'model = "gpt-config-resume-first"\nmodel_provider = "openai"\n',
-    )
-    const spawnedChildren: MockChildProcess[] = []
-
-    codexMocks.spawn.mockImplementation(() => {
-      const spawnedChild = new MockChildProcess()
-      spawnedChild.pid = 30_500 + spawnedChildren.length
-      spawnedChildren.push(spawnedChild)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          const threadStart = await waitForRpcMethod(spawnedChild, 'thread/start')
-          spawnedChild.stdout.write(jsonLine({
-            id: threadStart.id,
-            result: {
-              thread: {
-                id: 'thread-warm-config-resume',
-              },
-            },
-          }))
-
-          const firstTurn = await waitForRpcMethodCount(spawnedChild, 'turn/start', 1)
-          spawnedChild.stdout.write(jsonLine({
-            id: firstTurn.id,
-            result: {
-              turn: {
-                id: 'turn-warm-config-resume-1',
-              },
-            },
-          }))
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-warm-config-resume-1',
-                status: 'completed',
-              },
-            },
-          }))
-
-          const threadResume = await waitForRpcMethod(spawnedChild, 'thread/resume')
-          spawnedChild.stdout.write(jsonLine({
-            id: threadResume.id,
-            result: {
-              approvalPolicy: 'never',
-              cwd: path.resolve(workingDirectory),
-              model: 'gpt-config-resume-second',
-              modelProvider: 'venice',
-              thread: {
-                id: 'thread-warm-config-resume',
-              },
-            },
-          }))
-
-          const secondTurn = await waitForRpcMethodCount(spawnedChild, 'turn/start', 2)
-          spawnedChild.stdout.write(jsonLine({
-            id: secondTurn.id,
-            result: {
-              turn: {
-                id: 'turn-warm-config-resume-2',
-              },
-            },
-          }))
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-warm-config-resume-2',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
-      })
-
-      return spawnedChild
-    })
-
-    const hostedEnv = {
-      CODEX_HOME: hostedCodexHome,
-      MURPH_HOSTED_RUNTIME_PROCESS: '1',
-      NODE_ENV: 'test',
-      PATH: '/usr/bin',
-    }
-
-    await expect(
-      executeCodexAppServerTurn({
-        env: hostedEnv,
-        prompt: 'first config-default launch',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-warm-config-resume',
-      turnId: 'turn-warm-config-resume-1',
-    })
-
-    await writeFile(
-      configPath,
-      'model = "gpt-config-resume-second"\nmodel_provider = "venice"\n',
-    )
-
-    await expect(
-      executeCodexAppServerTurn({
-        env: hostedEnv,
-        prompt: 'second config-default resume',
-        resumeSessionId: 'thread-warm-config-resume',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-warm-config-resume',
-      turnId: 'turn-warm-config-resume-2',
-    })
-
-    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
-    const messages = readWrittenRpcMessages(
-      requireMockChildProcess(spawnedChildren[0] ?? null),
-    )
-    expect(asRecord(messages.find((message) => message.method === 'thread/start')?.params))
-      .toMatchObject({
-        model: 'gpt-config-resume-first',
-        modelProvider: 'openai',
-      })
-    expect(asRecord(messages.find((message) => message.method === 'thread/resume')?.params))
-      .toMatchObject({
-        model: 'gpt-config-resume-second',
-        modelProvider: 'venice',
-        threadId: 'thread-warm-config-resume',
-      })
-  })
-
-  it('starts a fresh warm Codex app-server when config provider table authority changes', async () => {
-    const hostedCodexHome = await createTempDir('assistant-codex-provider-table-home-')
-    const workingDirectory = await createTempDir('assistant-codex-provider-table-work-')
-    const configPath = path.join(hostedCodexHome, 'config.toml')
-    const writeProviderConfig = async (baseUrl: string) => {
-      await writeFile(
-        configPath,
-        [
-          'model = "gpt-provider-table"',
-          'model_provider = "internal"',
-          '[model_providers.internal]',
-          'name = "Internal"',
-          `base_url = "${baseUrl}"`,
-          'env_key = "INTERNAL_API_KEY"',
-          'wire_api = "responses"',
-          'requires_openai_auth = false',
-        ].join('\n'),
-      )
-    }
-    await writeProviderConfig('https://one.example.test/v1')
+  it('starts a fresh warm Codex app-server when process config overrides change', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-config-overrides-home-')
+    const workingDirectory = await createTempDir('assistant-codex-config-overrides-work-')
+    const firstConfigOverrides = [
+      'model_providers.internal.name="Internal"',
+      'model_providers.internal.base_url="https://one.example.test/v1"',
+      'model_providers.internal.env_key="INTERNAL_API_KEY"',
+      'model_providers.internal.wire_api="responses"',
+      'model_providers.internal.requires_openai_auth=false',
+    ]
+    const secondConfigOverrides = [
+      'model_providers.internal.name="Internal"',
+      'model_providers.internal.base_url="https://two.example.test/v1"',
+      'model_providers.internal.env_key="INTERNAL_API_KEY"',
+      'model_providers.internal.wire_api="responses"',
+      'model_providers.internal.requires_openai_auth=false',
+    ]
 
     const spawnedChildren: MockChildProcess[] = []
     mockProcessGroupSignalsForChildren(spawnedChildren)
@@ -4674,19 +4513,23 @@ describe('assistant codex runtime', () => {
     await expect(
       executeCodexAppServerTurn({
         env: hostedEnv,
-        prompt: 'first provider table launch',
+        configOverrides: firstConfigOverrides,
+        model: 'gpt-provider-table',
+        modelProvider: 'internal',
+        prompt: 'first config override launch',
         workingDirectory,
       }),
     ).resolves.toMatchObject({
       sessionId: 'thread-provider-table-1',
     })
 
-    await writeProviderConfig('https://two.example.test/v1')
-
     await expect(
       executeCodexAppServerTurn({
         env: hostedEnv,
-        prompt: 'second provider table launch',
+        configOverrides: secondConfigOverrides,
+        model: 'gpt-provider-table',
+        modelProvider: 'internal',
+        prompt: 'second config override launch',
         resumeSessionId: 'thread-provider-table-1',
         workingDirectory,
       }),
