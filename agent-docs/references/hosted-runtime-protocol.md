@@ -508,9 +508,10 @@ request, steered through the live Codex turn, or left unaccepted for a later
 normal turn when it misses the live steering window.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
-state. `apps/web` assesses freshness from the latest replica ref, checkpoint
-evidence, source identity when known, and a bounded max-age policy; ref
-presence alone is never freshness. Stale session reads may still serve a usable
+state. `apps/web` assesses browser-session backstops from the latest replica
+ref, client-known ref identity, and a bounded max-age policy; ref presence alone
+is never freshness. Workspace checkpoint timestamps are not content-version
+signals for replica freshness. Stale session reads may still serve a usable
 replica, but they must mark it stale and request refresh after the HTTP response.
 Web represents that request as ordinary low-priority runtime work only when its
 freshness policy explicitly asks for it; normal nudges do not become browser-vault
