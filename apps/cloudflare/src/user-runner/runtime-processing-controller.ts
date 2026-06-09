@@ -29,7 +29,9 @@ import {
 } from "./diagnostics.js";
 import {
   createRuntimeProcessingCommandBudget,
+  isRuntimeProcessingCommandBudgetTimeout,
   readRuntimeProcessingCommandStepTimeoutMs,
+  runRuntimeProcessingCommandStep,
   type RuntimeProcessingCommandBudget,
 } from "./runtime-command-budget.js";
 import {
@@ -576,13 +578,20 @@ export class RuntimeProcessingController {
     }
 
     try {
-      const timeoutMs = readRuntimeProcessingCommandStepTimeoutMs({
+      let timeoutMs = RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS;
+      await runRuntimeProcessingCommandStep({
         budget: input.commandBudget,
+        operation: async () => {
+          timeoutMs = readRuntimeProcessingCommandStepTimeoutMs({
+            budget: input.commandBudget,
+            stepTimeoutMs: RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS,
+          });
+          return await container.ensureReadyForProcessing!({
+            timeoutMs,
+            userId: input.input.userId,
+          });
+        },
         stepTimeoutMs: RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS,
-      });
-      await container.ensureReadyForProcessing({
-        timeoutMs,
-        userId: input.input.userId,
       });
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -600,6 +609,9 @@ export class RuntimeProcessingController {
       return await this.clearWriteFenceAfterStartupConfirmationFailure({
         error,
         input: input.input,
+        retryReason: isRuntimeProcessingCommandBudgetTimeout(error)
+          ? "container_rpc_timeout"
+          : undefined,
         token: input.token,
       });
     }
