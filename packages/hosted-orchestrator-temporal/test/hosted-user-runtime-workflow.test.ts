@@ -65,6 +65,24 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.reconciliationRequests).toEqual([{ userId: "member_test" }]);
   });
 
+  it("uses execution retry waits for runtime execution failures marked non-retryable", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.executions.push(() => {
+      throw nonRetryableError("cloudflare unavailable");
+    });
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([30_000]);
+    expect(continued.state?.lastExecutionErrorCode).toBe("Error");
+  });
+
   it("reads reconciliation facts for carried mailbox pointers", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.facts.push(reconciliationFacts({
@@ -192,10 +210,10 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     );
   });
 
-  it("records reconciliation read failures and uses reconciliation retry waits", async () => {
+  it("records reconciliation read failures and uses retry waits for failures marked non-retryable", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.facts.push(async () => {
-      throw new Error("web unavailable");
+      throw nonRetryableError("web unavailable");
     });
     const machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 1 },
@@ -574,6 +592,12 @@ function processingAccepted(
 
 function pendingPrewarm(): Promise<HostedRuntimePrewarmResponse> {
   return new Promise(() => undefined);
+}
+
+function nonRetryableError(message: string): Error & { nonRetryable: true } {
+  const error = new Error(message) as Error & { nonRetryable: true };
+  error.nonRetryable = true;
+  return error;
 }
 
 function isoAfter(deltaMs: number): string {

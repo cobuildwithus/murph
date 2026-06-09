@@ -165,8 +165,7 @@ describe("hosted email mailbox ingress route", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
-  it("keeps the canonical append committed when the Temporal signal fails", async () => {
-    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("fails the request after canonical append when the Temporal signal fails", async () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
       eventId: "evt_email",
       identityId: "assistant@example.test",
@@ -178,29 +177,28 @@ describe("hosted email mailbox ingress route", () => {
       new Error("Temporal unavailable"),
     );
 
-    try {
-      const { POST } = await import("../app/api/internal/hosted-mailbox/email-ingress/route");
-      const response = await POST(new Request("https://example.test", { method: "POST" }));
+    const { POST } = await import("../app/api/internal/hosted-mailbox/email-ingress/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
 
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual(expect.objectContaining({
-        item: expect.objectContaining({
-          id: "mailbox_item_24",
-        }),
-      }));
-      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-        expectedUserId: "member_123",
-        mailboxItemId: "mailbox_item_24",
-      });
-      expect(consoleWarn).toHaveBeenCalledWith(
-        "Hosted email ingress Temporal signal failed after mailbox append.",
-        expect.objectContaining({
-          errorName: "Error",
-          mailboxItemIdPresent: true,
-        }),
-      );
-    } finally {
-      consoleWarn.mockRestore();
-    }
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: expect.objectContaining({
+        code: "INTERNAL_ERROR",
+      }),
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "evt_email",
+        kind: "conversation.message",
+        userId: "member_123",
+      }),
+      tx: expect.objectContaining({
+        label: "mailbox-route-tx",
+      }),
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_item_24",
+    });
   });
 });

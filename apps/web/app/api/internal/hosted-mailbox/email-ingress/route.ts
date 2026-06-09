@@ -52,19 +52,11 @@ export const POST = withJsonError(async (request: Request) => {
     });
   });
   const mailboxItemId = response.item.id;
-  const mailboxItemIdPresent = mailboxItemId.length > 0;
 
-  try {
-    await signalHostedMailboxAppendRuntime({
-      expectedUserId: userId,
-      mailboxItemId,
-    });
-  } catch (error) {
-    console.warn("Hosted email ingress Temporal signal failed after mailbox append.", {
-      errorName: error instanceof Error ? error.name : typeof error,
-      mailboxItemIdPresent,
-    });
-  }
+  await signalHostedMailboxAppendRuntime({
+    expectedUserId: userId,
+    mailboxItemId,
+  });
 
   return jsonOk(response);
 });

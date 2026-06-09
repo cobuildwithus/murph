@@ -1308,7 +1308,7 @@ https://join.example.test/join/code_first_text`);
     );
   });
 
-  it("skips the Linq read receipt when Temporal signaling fails", async () => {
+  it("fails the Linq webhook before read receipt when Temporal signaling fails", async () => {
     mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("Temporal unavailable"));
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
@@ -1340,10 +1340,7 @@ https://join.example.test/join/code_first_text`);
       }),
       signature: null,
       timestamp: null,
-    })).resolves.toMatchObject({
-      ok: true,
-      reason: "wake-appended-active-member",
-    });
+    })).rejects.toThrow("Temporal unavailable");
 
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_123",
@@ -1353,19 +1350,16 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
-        step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
+        step: "hosted-onboarding.webhook.linq.wake-handoff",
       }),
-      "skipped-handoff-not-started",
+      "failed",
       expect.objectContaining({
-        responseReason: "wake-appended-active-member",
-        wakeHandoffReason: "temporal-signal-failed",
-        wakeHandoffStarted: false,
-        wakeHandoffSignalAccepted: false,
+        errorName: "Error",
       }),
     );
   });
 
-  it("keeps webhook success independent when Temporal signaling fails", async () => {
+  it("fails webhook success when Temporal signaling fails after mailbox append", async () => {
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValueOnce({
       accepted: false,
       alarmScheduled: false,
@@ -1406,10 +1400,7 @@ https://join.example.test/join/code_first_text`);
       }),
       signature: null,
       timestamp: null,
-    })).resolves.toMatchObject({
-      ok: true,
-      reason: "wake-appended-active-member",
-    });
+    })).rejects.toThrow("Temporal unavailable");
 
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_123",

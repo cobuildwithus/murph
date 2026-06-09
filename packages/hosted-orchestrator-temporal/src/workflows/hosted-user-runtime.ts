@@ -281,23 +281,16 @@ export function createHostedUserRuntimeWorkflowMachine(
         return;
       }
       const retryAt = readActivityFailureRetryAt({
-        error,
         retryDelayMs:
           HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
         runtime,
       });
-      if (
-        retryAt === null
-        && shouldContinueAsNewBeforePostReconciliationWait({ options, runtime })
-      ) {
-        await continueAsNewWithCurrentState();
-      }
       await waitUntilTimestampOrSignal(
         runtime,
         retryAt,
         state.signalVersion,
         state,
-        retryAt === null ? "non_retryable_signal_only" : "execution_failure_retry",
+        "execution_failure_retry",
       );
       return;
     }
@@ -392,25 +385,16 @@ export function createHostedUserRuntimeWorkflowMachine(
         }
         lastMailboxSignalVersionRead = mailboxSignalVersion;
         const retryAt = readActivityFailureRetryAt({
-          error,
           retryDelayMs:
             HOSTED_USER_RUNTIME_DEFAULT_RECONCILIATION_FAILURE_RETRY_DELAY_MS,
           runtime,
         });
-        if (
-          retryAt === null
-          && shouldContinueAsNewBeforePostReconciliationWait({ options, runtime })
-        ) {
-          await continueAsNewWithCurrentState();
-        }
         await waitUntilTimestampOrSignal(
           runtime,
           retryAt,
           state.signalVersion,
           state,
-          retryAt === null
-            ? "non_retryable_signal_only"
-            : "reconciliation_failure_retry",
+          "reconciliation_failure_retry",
         );
         continue;
       }
@@ -973,14 +957,9 @@ function isoNow(runtime: HostedUserRuntimeWorkflowRuntime): string {
 }
 
 function readActivityFailureRetryAt(input: {
-  error: unknown;
   retryDelayMs: number;
   runtime: HostedUserRuntimeWorkflowRuntime;
-}): string | null {
-  if (isNonRetryableFailure(input.error)) {
-    return null;
-  }
-
+}): string {
   return new Date(input.runtime.nowMs() + input.retryDelayMs).toISOString();
 }
 
@@ -1022,22 +1001,6 @@ function readApplicationFailureType(
   }
 
   return readApplicationFailureType(readObjectProperty(error, "cause"), depth + 1);
-}
-
-function isNonRetryableFailure(error: unknown): boolean {
-  return hasNonRetryableFailureFlag(error, 0);
-}
-
-function hasNonRetryableFailureFlag(error: unknown, depth: number): boolean {
-  if (!error || typeof error !== "object" || depth > 5) {
-    return false;
-  }
-
-  if (readObjectProperty(error, "nonRetryable") === true) {
-    return true;
-  }
-
-  return hasNonRetryableFailureFlag(readObjectProperty(error, "cause"), depth + 1);
 }
 
 function readObjectProperty(value: object, key: string): unknown {

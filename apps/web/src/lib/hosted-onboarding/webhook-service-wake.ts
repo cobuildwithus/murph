@@ -14,18 +14,12 @@ import {
 import type { HostedWebhookServiceResponse } from "./webhook-service-types";
 
 export type HostedWebhookWakeHandoffResult =
-  | {
-      reason: "temporal-signaled";
-      signalAccepted: true;
-      started: true;
-      workflowId: string;
-    }
-  | {
-      errorName?: string | null;
-      reason: "missing-mailbox-item" | "temporal-signal-failed";
-      signalAccepted: false;
-      started: false;
-    };
+  {
+    reason: "temporal-signaled";
+    signalAccepted: true;
+    started: true;
+    workflowId: string;
+  };
 
 export async function maybeHandoffHostedExecutionWebhookWake(input: {
   eventId: string;
@@ -34,9 +28,10 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   source: "linq" | "telegram" | "whatsapp";
   userId?: string;
 }): Promise<HostedWebhookWakeHandoffResult | null> {
-  if (input.response.reason !== "wake-appended-active-member") {
+  if (!input.mailboxItemId) {
     return null;
   }
+  const mailboxItemId = input.mailboxItemId;
 
   const handoffTiming = startHostedOnboardingTiming(
     `hosted-onboarding.webhook.${input.source}.wake-handoff`,
@@ -47,18 +42,6 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       userIdSuffix: input.userId ? toHostedOnboardingLogIdSuffix(input.userId) : null,
     },
   );
-
-  if (!input.mailboxItemId) {
-    finishHostedOnboardingTiming(handoffTiming, "missing-mailbox-item", {
-      eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
-    });
-    return {
-      reason: "missing-mailbox-item",
-      signalAccepted: false,
-      started: false,
-    };
-  }
-  const mailboxItemId = input.mailboxItemId;
 
   await recordHostedWebhookIngressLatencyAcceptedBestEffort({
     mailboxItemId,
@@ -76,12 +59,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     finishHostedOnboardingTiming(handoffTiming, "failed", {
       errorName,
     });
-    return {
-      errorName,
-      reason: "temporal-signal-failed",
-      signalAccepted: false,
-      started: false,
-    };
+    throw error;
   }
 
   await recordHostedWebhookIngressLatencyTemporalSignalBestEffort({
