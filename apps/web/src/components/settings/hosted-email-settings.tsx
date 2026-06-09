@@ -9,10 +9,7 @@ import {
   useHostedEmailSettingsController,
   type HostedEmailSettingsInitialEmail,
 } from "./hosted-email-settings-controller";
-import {
-  HostedEmailSettingsContent,
-  HostedEmailVerificationDialog,
-} from "./hosted-email-settings-sections";
+import { HostedEmailSettingsContent } from "./hosted-email-settings-sections";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 
 export function HostedEmailSettings(props: {
@@ -54,6 +51,7 @@ export function HostedEmailSettings(props: {
     <div className="space-y-5">
       <HostedEmailSettingsContent
         changeFlow={props.changeFlow}
+        code={controller.code}
         currentEmail={controller.effectiveCurrentEmail}
         currentVerifiedEmail={controller.effectiveVerifiedEmail}
         emailAddress={controller.emailAddress}
@@ -62,13 +60,16 @@ export function HostedEmailSettings(props: {
         canSendEmailUpdateCode={controller.canSendEmailUpdateCode}
         isBusy={controller.isBusy}
         isSendingCode={controller.isSendingCode}
+        isSubmittingCode={controller.isSubmittingCode}
         isSyncingEmailRoute={controller.isSyncingEmailRoute}
         pendingEmailAddress={controller.pendingEmailAddress}
+        onChangeCode={controller.setCode}
         onChangeEmailAddress={controller.setEmailAddress}
-        onOpenDialog={() => controller.setDialogOpen(true)}
         onResendCode={controller.handleResendCode}
         onSendCode={controller.handleSendCode}
         onSyncVerifiedEmail={controller.handleSyncVerifiedEmail}
+        onUseAnotherEmail={controller.handleUseAnotherEmail}
+        onVerifyCode={controller.handleVerifyCode}
       />
 
       {statusMessage ? (
@@ -77,25 +78,6 @@ export function HostedEmailSettings(props: {
           tone={statusTone === "neutral" && controller.isSyncingEmailRoute ? "neutral" : statusTone}
         />
       ) : null}
-
-      <HostedEmailVerificationDialog
-        code={controller.code}
-        dialogOpen={controller.dialogOpen}
-        emailAddress={controller.emailAddress}
-        emailInputRef={emailInputRef}
-        isBusy={controller.isBusy}
-        isSendingCode={controller.isSendingCode}
-        isSubmittingCode={controller.isSubmittingCode}
-        pendingEmailAddress={controller.pendingEmailAddress}
-        onChangeCode={controller.setCode}
-        onOpenChange={(nextOpen) => {
-          if (!controller.isSubmittingCode) {
-            controller.setDialogOpen(nextOpen);
-          }
-        }}
-        onResendCode={controller.handleResendCode}
-        onVerifyCode={controller.handleVerifyCode}
-      />
     </div>
   );
 }
