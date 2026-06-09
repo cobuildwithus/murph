@@ -64,6 +64,65 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
   })
 
+  it('creates over a Linq participant route with a Linq delivery source, preserving deliverySource', async () => {
+    const vaultRoot = await createVaultRoot()
+    const linqParticipantRoute = {
+      channel: 'linq',
+      deliverySource: {
+        fromPhoneNumber: '+15550001111',
+        kind: 'linq' as const,
+      },
+      deliveryTarget: null,
+      identityId: 'hid_linq_identity_participant',
+      participantId: '+15550002222',
+      threadId: null,
+    }
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute: linqParticipantRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 1,
+      skipped: 0,
+      updated: 0,
+    })
+
+    await expect(showAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: linqParticipantRoute,
+      status: 'active',
+    })
+  })
+
+  it('skips creation for a Linq participant route without a Linq delivery source', async () => {
+    const vaultRoot = await createVaultRoot()
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: 'hid_linq_identity_participant',
+        participantId: '+15550002222',
+        threadId: null,
+      },
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 0,
+      skipped: 1,
+      updated: 0,
+    })
+
+    await expect(showAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toBeNull()
+  })
+
   it('is idempotent against the persisted record: a second apply writes nothing', async () => {
     const vaultRoot = await createVaultRoot()
 

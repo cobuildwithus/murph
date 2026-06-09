@@ -130,6 +130,36 @@ export function validateAssistantCronDeliveryTarget(
   })
 }
 
+export function buildCanonicalAutomationRoute(
+  target: AssistantCronTarget,
+): AutomationRoute {
+  return {
+    channel: target.channel ?? '',
+    deliverySource: target.deliverySource,
+    deliveryTarget: target.deliveryTarget,
+    identityId: target.identityId,
+    participantId: target.participantId,
+    threadId: target.threadId,
+  }
+}
+
+// Non-throwing form of validateAssistantCronDeliveryTarget for callers that
+// pre-check deliverability (e.g. managed-automation seeding) instead of
+// surfacing a CLI error. Keep this the only other entry into the route rules
+// so deliverability semantics cannot drift between write paths.
+export function resolveDeliverableAutomationRoute(
+  input: AssistantCronTargetInput,
+): AutomationRoute | null {
+  try {
+    return buildCanonicalAutomationRoute(validateAssistantCronDeliveryTarget(input))
+  } catch (error) {
+    if (error instanceof VaultCliError) {
+      return null
+    }
+    throw error
+  }
+}
+
 export function buildAssistantCronTargetSnapshot(
   job: Pick<AssistantCronJob, 'jobId' | 'name' | 'target'>,
 ): AssistantCronTargetSnapshot {

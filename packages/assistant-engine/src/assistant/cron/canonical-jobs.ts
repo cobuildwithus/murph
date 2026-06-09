@@ -11,7 +11,6 @@ import {
   assistantCronTargetSchema,
   type AssistantCronJob,
   type AssistantCronSchedule,
-  type AssistantCronTarget,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -286,19 +285,6 @@ export function resolveAssistantCronResolvedSchedule(input: {
   }
 
   return input.schedule
-}
-
-export function buildCanonicalAutomationRoute(
-  target: AssistantCronTarget,
-): CanonicalAutomationAssistantCronJobRecord['route'] {
-  return {
-    channel: target.channel ?? '',
-    deliverySource: target.deliverySource,
-    deliveryTarget: target.deliveryTarget,
-    identityId: target.identityId,
-    participantId: target.participantId,
-    threadId: target.threadId,
-  }
 }
 
 export function buildCanonicalAutomationUpsertInput(input: {

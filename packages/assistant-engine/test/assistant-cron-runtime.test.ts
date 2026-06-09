@@ -737,6 +737,46 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
+  it('rejects Linq participant automation seeds without a Linq delivery source', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-upsert-automation-linq-participant-no-source-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+
+    await expect(
+      upsertAssistantCronAutomation({
+        firstOccurrencePolicy: 'after-current-local-day',
+        instructions: 'Check setup progress.',
+        now: new Date('2026-04-08T15:00:00.000Z'),
+        route: {
+          channel: 'linq',
+          deliverySource: null,
+          deliveryTarget: null,
+          identityId: 'hid_linq_identity_participant',
+          participantId: '+15550002222',
+          threadId: null,
+        },
+        schedule: {
+          kind: 'dailyLocal',
+          localTime: '13:30',
+        },
+        slug: 'finish-onboarding-followup',
+        summary: 'Continue setup.',
+        tags: ['assistant', 'onboarding'],
+        title: 'Finish Murph onboarding follow-up',
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CRON_DELIVERY_REQUIRED',
+    })
+
+    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')).toBeUndefined()
+  })
+
   it('recovers onboarding automation seeds after a first runtime-state write failure', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-upsert-automation-write-failure-',

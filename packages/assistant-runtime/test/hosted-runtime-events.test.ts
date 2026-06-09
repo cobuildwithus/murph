@@ -2043,7 +2043,7 @@ describe("executeHostedMailboxEvent", () => {
     );
   });
 
-  it("skips onboarding follow-up seeding for Linq participant routes without delivery source", async () => {
+  it("logs a seed failure when target validation rejects Linq participant routes without delivery source", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_linq_participant_no_source",
       memberId: "member_123",
@@ -2064,6 +2064,17 @@ describe("executeHostedMailboxEvent", () => {
       },
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
+    // Deliverability is enforced by upsertAssistantCronAutomation's target
+    // validation in assistant-engine (covered there); the runtime only
+    // catches the rejection and logs the seed failure.
+    mocks.upsertAssistantCronAutomation.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          "iMessage assistant cron jobs require an explicit delivery target or a participant target with a Linq delivery source.",
+        ),
+        { code: "ASSISTANT_CRON_DELIVERY_REQUIRED" },
+      ),
+    );
 
     const result = await executeHostedMailboxEvent({
       wake,
@@ -2085,7 +2096,16 @@ describe("executeHostedMailboxEvent", () => {
         bindingDeliveryTarget: "+15550002222",
       }),
     );
-    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: expect.objectContaining({
+          channel: "linq",
+          deliverySource: null,
+          deliveryTarget: null,
+          participantId: "+15550002222",
+        }),
+      }),
+    );
     expect(result.redactedLogEntries).toContainEqual(
       expect.objectContaining({
         level: "warn",
