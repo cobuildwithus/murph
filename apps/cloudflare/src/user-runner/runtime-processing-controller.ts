@@ -44,7 +44,6 @@ import {
 } from "./runtime-processing-responses.js";
 import {
   RuntimeInvocationService,
-  type PreparedRuntimeInvocation,
   type RuntimeInvocationInput,
 } from "./runtime-invocation.js";
 import {
@@ -365,14 +364,42 @@ export class RuntimeProcessingController {
     await this.syncRunnerAlarm(await this.input.stateStore.readState());
 
     const executionInput = toRuntimeInvocationInput(input.input);
-    let prepared: PreparedRuntimeInvocation;
-    try {
-      prepared = await this.input.invocationService.prepareWithFence({
-        commandBudget: input.commandBudget,
-        input: executionInput,
-        token,
-      });
-    } catch (error) {
+    const readinessPromise = this.confirmRuntimeContainerStartup({
+      commandBudget: input.commandBudget,
+      input: input.input,
+      runnerContainerName,
+      token,
+    });
+    const readinessResultPromise = readinessPromise.then((startupConfirmed) => ({
+      kind: "startup" as const,
+      startupConfirmed,
+    }));
+    const preparationPromise = this.input.invocationService.prepareWithFence({
+      commandBudget: input.commandBudget,
+      input: executionInput,
+      token,
+    }).then(
+      (prepared) => ({ kind: "prepared" as const, prepared }),
+      (error: unknown) => ({ kind: "failed" as const, error }),
+    );
+
+    const clearPreparationFailure = async (
+      error: unknown,
+    ): Promise<HostedRuntimeEnsureProcessingResponse> => {
+      const current = await this.input.stateStore.readWriteFenceToken();
+      const stillOwnsFreshFence = current !== null
+        && current.attemptId === token.attemptId
+        && current.generation === token.generation
+        && current.kind === token.kind
+        && current.userId === token.userId;
+      if (!stillOwnsFreshFence) {
+        const startupConfirmed = await readinessPromise;
+        if (!startupConfirmed.confirmed) {
+          return startupConfirmed.response;
+        }
+      }
+
+      void readinessResultPromise.catch(() => undefined);
       const failed = await this.clearWriteFenceAfterRuntimeStartFailure({
         error,
         input: input.input,
@@ -380,17 +407,31 @@ export class RuntimeProcessingController {
         token,
       });
       return failed.response;
+    };
+
+    const firstCompleted = await Promise.race([
+      readinessResultPromise,
+      preparationPromise,
+    ]);
+    if (firstCompleted.kind === "failed") {
+      void readinessResultPromise.catch(() => undefined);
+      return await clearPreparationFailure(firstCompleted.error);
     }
 
-    const startupConfirmed = await this.confirmRuntimeContainerStartup({
-      commandBudget: input.commandBudget,
-      input: input.input,
-      runnerContainerName: prepared.runnerContainerName,
-      token: prepared.token,
-    });
+    const startupConfirmed = firstCompleted.kind === "startup"
+      ? firstCompleted.startupConfirmed
+      : await readinessPromise;
     if (!startupConfirmed.confirmed) {
       return startupConfirmed.response;
     }
+
+    const preparation = firstCompleted.kind === "prepared"
+      ? firstCompleted
+      : await preparationPromise;
+    if (preparation.kind === "failed") {
+      return await clearPreparationFailure(preparation.error);
+    }
+    const prepared = preparation.prepared;
 
     const stillOwnsPreparedFence = await this.confirmPreparedRuntimeWriteFenceIsActive({
       input: input.input,
