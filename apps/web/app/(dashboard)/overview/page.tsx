@@ -43,7 +43,7 @@ export default function OverviewPage() {
 }
 
 function OverviewPageContent() {
-  const { client, error, refresh, status } = useBrowserVault();
+  const { client, error, refresh, refreshPending, status } = useBrowserVault();
   const timeZone = useMemo(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     [],
@@ -65,6 +65,7 @@ function OverviewPageContent() {
     [client, overview, timeZone],
   );
   const canRenderContent = status === "empty" || client !== null;
+  const isPreparingEmptyReplica = status === "empty" && refreshPending;
   const isEmpty =
     metrics.every((metric) => metric.value === 0) &&
     weeklyStats.length === 0 &&
@@ -94,7 +95,9 @@ function OverviewPageContent() {
               month: "short",
               year: "numeric",
             })}`
-            : "No overview available yet."}
+            : isPreparingEmptyReplica
+              ? "Preparing overview."
+              : "No overview available yet."}
         </div>
       </div>
 
@@ -124,11 +127,20 @@ function OverviewPageContent() {
       ) : null}
 
       {canRenderContent && isEmpty ? (
-        <Card>
+        <Card
+          aria-live={isPreparingEmptyReplica ? "polite" : undefined}
+          role={isPreparingEmptyReplica ? "status" : undefined}
+        >
           <CardHeader>
-            <CardTitle>Your dashboard is ready for data</CardTitle>
+            <CardTitle>
+              {isPreparingEmptyReplica
+                ? "Preparing your dashboard"
+                : "Your dashboard is ready for data"}
+            </CardTitle>
             <CardDescription>
-              As soon as notes, experiments, or samples land in your vault, this page will fill in automatically.
+              {isPreparingEmptyReplica
+                ? "Your latest dashboard data is still being prepared."
+                : "As soon as notes, experiments, or samples land in your vault, this page will fill in automatically."}
             </CardDescription>
           </CardHeader>
         </Card>
