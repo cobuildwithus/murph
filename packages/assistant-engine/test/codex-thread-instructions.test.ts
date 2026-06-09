@@ -142,20 +142,31 @@ describe('Codex thread instructions', () => {
       })
   })
 
-  it('requires a fresh-thread fallback plan only after native resume is stale', async () => {
-    codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValueOnce(
-      new VaultCliError(
-        'ASSISTANT_CODEX_RESUME_STALE',
-        'thread/resume failed: no rollout found for thread id stale-thread',
-        {
-          retryable: true,
-          staleResume: true,
-        },
-      ),
-    )
+  it('retries stale native resume on a fresh thread when no prepared fallback exists', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn
+      .mockRejectedValueOnce(
+        new VaultCliError(
+          'ASSISTANT_CODEX_RESUME_STALE',
+          'thread/resume failed: no rollout found for thread id stale-thread',
+          {
+            retryable: true,
+            staleResume: true,
+          },
+        ),
+      )
+      .mockResolvedValueOnce({
+        finalMessage: 'done',
+        jsonEvents: [],
+        providerActionCount: 0,
+        sessionId: 'thread-fresh-best-effort',
+        stderr: '',
+        stdout: '',
+        threadId: 'thread-fresh-best-effort',
+        turnId: 'turn-fresh-best-effort',
+      })
 
     await expect(
-      executeCodexAssistantTurnAttemptUnchecked({
+      executeCodexAssistantTurnAttempt({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
         }),
@@ -165,11 +176,20 @@ describe('Codex thread instructions', () => {
         userPrompt: 'Continue.',
         workingDirectory: '/tmp/provider-tests',
       }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_FRESH_FALLBACK_PLAN_MISSING',
+    ).resolves.toMatchObject({
+      ok: true,
     })
 
-    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(2)
+    expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0])
+      .toMatchObject({
+        resumeSessionId: 'stale-thread',
+      })
+    expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0])
+      .toMatchObject({
+        developerInstructions: 'Stable Murph instructions.',
+        resumeSessionId: undefined,
+      })
   })
 
   it('starts stale-resume fallback with fresh thread instructions', async () => {

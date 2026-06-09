@@ -911,6 +911,81 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
+  it('restores a previous null summary after existing automation runtime-state write failure', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-upsert-automation-restore-null-summary-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-existing',
+      continuityPolicy: 'preserve',
+      createdAt: '2026-04-08T14:00:00.000Z',
+      instructions: 'Original setup check.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'room-1',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '13:30',
+      },
+      slug: 'finish-onboarding-followup',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'onboarding'],
+      title: 'Finish Murph onboarding follow-up',
+      updatedAt: '2026-04-08T14:00:00.000Z',
+    })
+    const writeSpy = vi.spyOn(
+      assistantCronRuntimeState,
+      'writeAssistantCronCanonicalRuntimeStore',
+    )
+
+    try {
+      writeSpy.mockRejectedValueOnce(new Error('state store unavailable'))
+      await expect(
+        upsertAssistantCronAutomation({
+          firstOccurrencePolicy: 'after-current-local-day',
+          instructions: 'Updated setup check.',
+          now: new Date('2026-04-08T15:00:00.000Z'),
+          route: {
+            channel: 'telegram',
+            deliverySource: null,
+            deliveryTarget: 'room-1',
+            identityId: null,
+            participantId: null,
+            threadId: null,
+          },
+          schedule: {
+            kind: 'dailyLocal',
+            localTime: '13:30',
+          },
+          slug: 'finish-onboarding-followup',
+          summary: 'Updated summary.',
+          tags: ['assistant', 'onboarding'],
+          title: 'Finish Murph onboarding follow-up',
+          vault: vaultRoot,
+        }),
+      ).rejects.toThrow('state store unavailable')
+    } finally {
+      writeSpy.mockRestore()
+    }
+
+    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')).toMatchObject({
+      instructions: 'Original setup check.',
+      summary: null,
+      updatedAt: expect.any(String),
+    })
+  })
+
   it('does not restore stale automation state over a concurrent edit after runtime-state write failure', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-upsert-automation-concurrent-edit-',

@@ -13,6 +13,7 @@ import {
   buildAutomationMarkdownPreview,
   deleteAutomation,
   listAutomations,
+  patchAutomation,
   readAutomation,
   readAutomationMarkdown,
   scaffoldAutomationPayload,
@@ -273,6 +274,74 @@ describe("markdown document primitives", () => {
     });
 
     expect(updated.record.tags).toEqual(["sleep", "recovery"]);
+  });
+
+  it("patches one automation field while preserving omitted fields", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const created = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        continuityPolicy: "fresh",
+        instructions: "Check sleep trend.",
+        summary: "Sleep prompt.",
+        tags: ["sleep", "scheduled"],
+      }),
+    });
+
+    const patched = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.slug,
+      continuityPolicy: "preserve",
+    });
+
+    expect(patched.created).toBe(false);
+    expect(patched.record.automationId).toBe(created.record.automationId);
+    expect(patched.record.continuityPolicy).toBe("preserve");
+    expect(patched.record.title).toBe(created.record.title);
+    expect(patched.record.instructions).toBe(created.record.instructions);
+    expect(patched.record.schedule).toEqual(created.record.schedule);
+    expect(patched.record.route).toEqual(created.record.route);
+    expect(patched.record.summary).toBe(created.record.summary);
+    expect(patched.record.tags).toEqual(created.record.tags);
+  });
+
+  it("clears automation summary when null is provided explicitly", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const created = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        summary: "Sleep prompt.",
+      }),
+    });
+
+    const clearedByUpsert = await upsertAutomation({
+      vaultRoot,
+      automationId: created.record.automationId,
+      title: created.record.title,
+      slug: created.record.slug,
+      instructions: created.record.instructions,
+      schedule: created.record.schedule,
+      route: created.record.route,
+      continuityPolicy: created.record.continuityPolicy,
+      status: created.record.status,
+      summary: null,
+      tags: created.record.tags,
+    });
+    expect(clearedByUpsert.record.summary).toBeNull();
+
+    const restored = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.slug,
+      summary: "Restored summary.",
+    });
+    expect(restored.record.summary).toBe("Restored summary.");
+
+    const clearedByPatch = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.slug,
+      summary: null,
+    });
+    expect(clearedByPatch.record.summary).toBeNull();
   });
 
   it("lists automations with status/text filters and limit", async () => {

@@ -102,6 +102,21 @@ export interface UpsertAutomationResult {
   record: AutomationRecord;
 }
 
+export interface PatchAutomationInput {
+  continuityPolicy?: AutomationContinuityPolicy;
+  instructions?: string;
+  lookup: string;
+  now?: Date;
+  route?: AutomationRoute;
+  schedule?: AutomationSchedule;
+  slug?: string;
+  status?: AutomationStatus;
+  summary?: string | null;
+  tags?: string[];
+  title?: string;
+  vaultRoot: string;
+}
+
 export interface ReadAutomationInput {
   automationId?: string;
   slug?: string;
@@ -611,6 +626,60 @@ export async function deleteAutomation(
   });
 }
 
+export async function patchAutomation(
+  input: PatchAutomationInput,
+): Promise<UpsertAutomationResult> {
+  assertAutomationPatchHasChanges(input);
+
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    const existingRecord = await readAutomationByLookup({
+      lookup: input.lookup,
+      vaultRoot: input.vaultRoot,
+    });
+    return upsertAutomationWithLatestRegistry({
+      automationId: existingRecord.automationId,
+      continuityPolicy: input.continuityPolicy ?? existingRecord.continuityPolicy,
+      instructions: input.instructions ?? existingRecord.instructions,
+      now: input.now,
+      route: input.route ?? existingRecord.route,
+      schedule: input.schedule ?? existingRecord.schedule,
+      slug: input.slug ?? existingRecord.slug,
+      status: input.status ?? existingRecord.status,
+      summary: input.summary === undefined ? existingRecord.summary : input.summary,
+      tags: input.tags ?? existingRecord.tags,
+      title: input.title ?? existingRecord.title,
+      vaultRoot: input.vaultRoot,
+      allowSlugRename: input.slug !== undefined,
+    });
+  });
+}
+
+function assertAutomationPatchHasChanges(input: PatchAutomationInput): void {
+  const { lookup: _lookup, now: _now, vaultRoot: _vaultRoot, ...patch } = input;
+  if (Object.values(patch).some((value) => value !== undefined)) {
+    return;
+  }
+
+  throw new VaultError(
+    "VAULT_AUTOMATION_EMPTY_PATCH",
+    "Automation edit requires at least one field to update.",
+  );
+}
+
+async function readAutomationByLookup(input: {
+  lookup: string;
+  vaultRoot: string;
+}): Promise<AutomationRecord> {
+  const record = await showAutomation({
+    automationId: input.lookup,
+    slug: input.lookup,
+    vaultRoot: input.vaultRoot,
+  });
+  if (record) return record;
+
+  throw new VaultError("VAULT_AUTOMATION_MISSING", "Automation was not found.");
+}
+
 async function upsertAutomationWithLatestRegistry(
   input: UpsertAutomationInput,
 ): Promise<UpsertAutomationResult> {
@@ -647,9 +716,9 @@ async function upsertAutomationWithLatestRegistry(
     title,
     status: normalizeAutomationStatus(input.status ?? existingRecord?.status),
     summary:
-      normalizeAutomationSummary(input.summary) ??
-      existingRecord?.summary ??
-      null,
+      input.summary === undefined
+        ? existingRecord?.summary ?? null
+        : normalizeAutomationSummary(input.summary),
     schedule:
       input.schedule !== undefined
         ? normalizeAutomationSchedule(input.schedule)

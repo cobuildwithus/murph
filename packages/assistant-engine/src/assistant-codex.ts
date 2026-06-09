@@ -35,6 +35,8 @@ import {
   buildCodexThreadStartParams,
   buildCodexTurnSteerParams,
   buildCodexTurnStartParams,
+  mapCodexAppServerApprovalPolicy,
+  mapCodexAppServerSandboxMode,
   resolveSupportedCodexAppServerApprovalPolicy,
 } from './assistant-codex/app-server-requests.js'
 import {
@@ -105,6 +107,7 @@ const CODEX_RPC_CLIENT_TITLE = 'Murph'
 const CODEX_RPC_CLIENT_VERSION = '1.0.0'
 const CODEX_RPC_DEFAULT_TIMEOUT_MS = 120_000
 const CODEX_RPC_STEER_TIMEOUT_MS = 15_000
+const CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS = 15_000
 const CODEX_PROGRESS_FINAL_DRAIN_TIMEOUT_MS = 2_000
 const CODEX_APP_SERVER_COMMAND = 'app-server'
 const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
@@ -1264,6 +1267,7 @@ async function runCodexAppServerTurnOnProcess(
   const assistantStreamOrder: string[] = []
   let stdinFailure: VaultCliError | null = null
   let lastTimingAt = Date.now()
+  let liveInterruptRequested = false
 
   let completeTurn: (() => void) | null = null
   let failTurn: ((error: unknown) => void) | null = null
@@ -1284,6 +1288,7 @@ async function runCodexAppServerTurnOnProcess(
   })
   void turnCompleted.catch(() => undefined)
   let cleanupAbortListener = () => {}
+  let interruptCleanupTimer: ReturnType<typeof setTimeout> | null = null
 
   const readPendingRpcMethod = (): string | null => {
     return codexProcess.readPendingRpcMethod()
@@ -1327,6 +1332,41 @@ async function runCodexAppServerTurnOnProcess(
     }
   }
 
+  const clearInterruptCleanupTimer = (): void => {
+    if (!interruptCleanupTimer) {
+      return
+    }
+
+    clearTimeout(interruptCleanupTimer)
+    interruptCleanupTimer = null
+  }
+
+  const buildInterruptCleanupTimeoutError = (): VaultCliError =>
+    new VaultCliError(
+      'ASSISTANT_CODEX_APP_SERVER_INTERRUPT_TIMEOUT',
+      'Codex app-server did not finish the interrupted turn.',
+      {
+        diagnostics: buildProcessExitDiagnostics(),
+        interruptCleanupTimeoutMs: CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS,
+        liveInterruptRequested,
+        retryable: true,
+      },
+    )
+
+  const scheduleInterruptCleanupTimeout = (): void => {
+    if (interruptCleanupTimer) {
+      return
+    }
+
+    interruptCleanupTimer = setTimeout(() => {
+      interruptCleanupTimer = null
+      lifecycleStage = 'interrupt_timeout_cleanup'
+      normalShutdown = true
+      rejectOnce(buildInterruptCleanupTimeoutError())
+    }, CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS)
+    interruptCleanupTimer.unref?.()
+  }
+
   const emitAppServerTimingTrace = (stage: string) => {
     if (!input.onTraceEvent) {
       return
@@ -1359,6 +1399,7 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    clearInterruptCleanupTimer()
     annotateTurnFailureContext(error)
     settled = true
     closeLiveTurn()
@@ -1445,6 +1486,7 @@ async function runCodexAppServerTurnOnProcess(
       }
       terminationSignalSent = 'SIGINT'
       codexProcess.signal('SIGINT')
+      scheduleInterruptCleanupTimeout()
     },
   })
 
@@ -2052,6 +2094,8 @@ async function runCodexAppServerTurnOnProcess(
 
   const interruptLiveTurn = async (): Promise<void> => {
     const liveTurn = requireLiveTurnIds()
+    liveInterruptRequested = true
+    scheduleInterruptCleanupTimeout()
     await withCodexRpcTimeout(
       sendRequest('turn/interrupt', buildCodexTurnInterruptParams(liveTurn)),
       CODEX_RPC_STEER_TIMEOUT_MS,
@@ -2143,21 +2187,29 @@ async function runCodexAppServerTurnOnProcess(
       emitAppServerTimingTrace('warm-reused')
     }
 
-    const threadTimingStage = codexThreadId ? 'thread-resumed' : 'thread-started'
-    lifecycleStage = codexThreadId ? 'thread_resume' : 'thread_start'
+    const resumeThreadId = codexThreadId
+    const threadTimingStage = resumeThreadId ? 'thread-resumed' : 'thread-started'
+    lifecycleStage = resumeThreadId ? 'thread_resume' : 'thread_start'
     const threadResult = await withCodexRpcTimeout(
-      codexThreadId
+      resumeThreadId
         ? sendRequest(
             'thread/resume',
             buildCodexThreadResumeParams({
               input,
-              codexThreadId,
+              codexThreadId: resumeThreadId,
             }),
           )
         : sendRequest('thread/start', buildCodexThreadStartParams(input)),
       CODEX_RPC_DEFAULT_TIMEOUT_MS,
-      codexThreadId ? 'thread/resume' : 'thread/start',
+      resumeThreadId ? 'thread/resume' : 'thread/start',
     )
+    if (resumeThreadId) {
+      assertCodexResumeContextMatches({
+        input,
+        requestedThreadId: resumeThreadId,
+        threadResult,
+      })
+    }
     codexThreadId = extractCodexThreadIdFromResult(threadResult) ?? codexThreadId
     rolloutRelativePath = resolveCodexRolloutRelativePath({
       codexHome: input.env.CODEX_HOME,
@@ -2194,6 +2246,7 @@ async function runCodexAppServerTurnOnProcess(
 
     lifecycleStage = 'turn_running'
     await turnCompleted
+    clearInterruptCleanupTimer()
     await drainPendingProgressDeliveries()
     emitActionDiagnosticsTrace()
     lifecycleStage = 'turn_completed'
@@ -2223,6 +2276,7 @@ async function runCodexAppServerTurnOnProcess(
     throw error
   } finally {
     closeLiveTurn()
+    clearInterruptCleanupTimer()
     cleanupAbortListener()
     codexProcess.releaseTurn(activeTurnBinding)
     codexProcess.releaseReservation()
@@ -2294,6 +2348,107 @@ function resolveCodexRolloutRelativePath(input: {
     relativePath.split(path.sep).join('/'),
     codexThreadId,
   )
+}
+
+function assertCodexResumeContextMatches(input: {
+  input: CodexAppServerPreparedTurnInput
+  requestedThreadId: string
+  threadResult: unknown
+}): void {
+  const result = asCodexRecord(input.threadResult)
+  const mismatchedFields: string[] = []
+
+  const resumedThreadId = extractCodexThreadIdFromResult(input.threadResult)
+  if (resumedThreadId && resumedThreadId !== input.requestedThreadId) {
+    mismatchedFields.push('threadId')
+  }
+
+  const expectedApprovalPolicy = mapCodexAppServerApprovalPolicy(
+    input.input.approvalPolicy,
+  )
+  const actualApprovalPolicy = asCodexString(result?.approvalPolicy)
+  if (actualApprovalPolicy !== expectedApprovalPolicy) {
+    mismatchedFields.push('approvalPolicy')
+  }
+
+  const actualCwd = normalizeNullableString(asCodexString(result?.cwd))
+  if (!actualCwd || path.resolve(actualCwd) !== input.input.workingDirectory) {
+    mismatchedFields.push('cwd')
+  }
+
+  const expectedModel = normalizeNullableString(input.input.model)
+  if (
+    expectedModel &&
+    normalizeNullableString(asCodexString(result?.model)) !== expectedModel
+  ) {
+    mismatchedFields.push('model')
+  }
+
+  const expectedModelProvider = normalizeNullableString(input.input.modelProvider)
+  if (
+    expectedModelProvider &&
+    normalizeNullableString(asCodexString(result?.modelProvider)) !==
+      expectedModelProvider
+  ) {
+    mismatchedFields.push('modelProvider')
+  }
+
+  const expectedSandbox = mapCodexAppServerSandboxMode(input.input.sandbox)
+  if (
+    expectedSandbox &&
+    readCodexResumeSandboxMode(result?.sandbox) !== expectedSandbox
+  ) {
+    mismatchedFields.push('sandbox')
+  }
+
+  if (mismatchedFields.length === 0) {
+    return
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_CODEX_RESUME_STALE',
+    'Codex app-server resumed the thread with stale execution context.',
+    {
+      mismatchedFields,
+      resumeContextMismatch: true,
+      retryable: true,
+      staleResume: true,
+    },
+  )
+}
+
+function readCodexResumeSandboxMode(
+  value: unknown,
+): 'danger-full-access' | 'read-only' | 'workspace-write' | null {
+  if (
+    value === 'danger-full-access' ||
+    value === 'read-only' ||
+    value === 'workspace-write'
+  ) {
+    return value
+  }
+
+  const record = asCodexRecord(value)
+  switch (asCodexString(record?.type)) {
+    case 'dangerFullAccess':
+      return 'danger-full-access'
+    case 'readOnly':
+      return 'read-only'
+    case 'workspaceWrite':
+      return 'workspace-write'
+    default:
+      return null
+  }
+}
+
+function asCodexRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+function asCodexString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
 }
 
 const codexRolloutRelativePathPattern =

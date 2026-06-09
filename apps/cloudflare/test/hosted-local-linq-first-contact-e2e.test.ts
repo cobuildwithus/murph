@@ -75,6 +75,8 @@ const typingLoopReplyText = "I saw that and can help from here.";
 const productionLikeAssistantModel = "gpt-5.5";
 const localRunnerIdleTtlMs = "300000";
 const expectedDynamicTools = "murph.send_progress_update,murph.attach_response_media";
+const onboardingFollowupFirstWakeMinDelayMs = 10 * 60 * 60 * 1000;
+const onboardingFollowupFirstWakeMaxDelayMs = 40 * 60 * 60 * 1000;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const fastDeployGate = process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1";
@@ -972,9 +974,10 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
         expect(Number.isFinite(postReplyWakeMs)).toBe(true);
         expect(postReplyWakeMs).toBeGreaterThanOrEqual(replyStartedAtMs);
       }
-      expect(
-        countAssistantCanonicalRuntimeCommitDeferrals(statusAfterReplyIdle, replyStartedAtMs),
-      ).toBeLessThanOrEqual(1);
+      expectNoUnexpectedAssistantCanonicalRuntimeCommitDeferrals({
+        sinceMs: replyStartedAtMs,
+        status: statusAfterReplyIdle,
+      });
 
       const requestCountAfterCleanup = requireLinqStub().observedRequests.length;
       const outboundCountAfterCleanup = requireLinqStub().countObservedSends(expectedReplyPath);
@@ -995,8 +998,6 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
         typingLoopUserId,
         200,
       );
-      const canonicalRuntimeDeferralsAfterAlarm =
-        countAssistantCanonicalRuntimeCommitDeferrals(statusAfterAlarm, alarmStartedAtMs);
       const postReplyTypingStarts = requireLinqStub().observedRequests
         .slice(requestCountAfterCleanup)
         .filter((request) => request.method === "POST" && request.url === expectedTypingPath);
@@ -1011,7 +1012,10 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
         expect(alarmOutcome.status).toBe("idle");
         expect(alarmOutcome.nextWakeAt).toBeNull();
       }
-      expect(canonicalRuntimeDeferralsAfterAlarm).toBeLessThanOrEqual(1);
+      expectNoUnexpectedAssistantCanonicalRuntimeCommitDeferrals({
+        sinceMs: alarmStartedAtMs,
+        status: statusAfterAlarm,
+      });
       expect(postReplyTypingStarts).toHaveLength(0);
       expect(outboundCountAfterAlarm).toBe(outboundCountAfterCleanup);
     },
@@ -1394,16 +1398,43 @@ async function readHostedRunnerStatusWithLogLimit(
   return status;
 }
 
-function countAssistantCanonicalRuntimeCommitDeferrals(
+function listAssistantCanonicalRuntimeCommitDeferrals(
   status: HostedRunnerStatusResponse,
   sinceMs: number,
-): number {
+): NonNullable<HostedRunnerStatusResponse["recentLogs"]> {
   return (status.recentLogs ?? []).filter((entry) =>
     Date.parse(entry.at) >= sinceMs
     && entry.eventCode === "checkpoint.runtime_residue_deferred"
     && entry.redactedJson?.checkpointPhase === "assistant"
     && entry.redactedJson?.checkpointReason === "canonical_runtime_commit"
-  ).length;
+  );
+}
+
+function expectNoUnexpectedAssistantCanonicalRuntimeCommitDeferrals(input: {
+  sinceMs: number;
+  status: HostedRunnerStatusResponse;
+}): void {
+  const deferrals = listAssistantCanonicalRuntimeCommitDeferrals(
+    input.status,
+    input.sinceMs,
+  );
+  if (deferrals.length === 0) {
+    return;
+  }
+
+  expect(deferrals).toHaveLength(1);
+  expect(input.status.workspace?.nextWakeReason ?? null).toBe("assistant");
+
+  const nextWakeAt = input.status.workspace?.nextWakeAt ?? null;
+  expect(nextWakeAt).toEqual(expect.any(String));
+  const nextWakeMs = Date.parse(nextWakeAt ?? "");
+  expect(Number.isFinite(nextWakeMs)).toBe(true);
+  expect(nextWakeMs).toBeGreaterThanOrEqual(
+    input.sinceMs + onboardingFollowupFirstWakeMinDelayMs,
+  );
+  expect(nextWakeMs).toBeLessThanOrEqual(
+    input.sinceMs + onboardingFollowupFirstWakeMaxDelayMs,
+  );
 }
 
 function hasHostedMailboxBacklog(status: HostedRunnerStatusResponse): boolean {

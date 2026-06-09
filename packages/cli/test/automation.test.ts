@@ -310,7 +310,7 @@ test("automation scaffold command returns the canonical scaffold envelope", asyn
   });
 });
 
-test("automation save schema exposes typed fields while automation import-json is the JSON fallback", async () => {
+test("automation save and edit schemas expose typed fields while automation import-json is the JSON fallback", async () => {
   const cli = Cli.create("vault-cli", {
     description: "automation test cli",
     version: "0.0.0-test",
@@ -319,6 +319,7 @@ test("automation save schema exposes typed fields while automation import-json i
 
   const automationCommandNames = requireAutomationCommandNames(cli);
   assert.equal(automationCommandNames.includes("automation save"), true);
+  assert.equal(automationCommandNames.includes("automation edit"), true);
   assert.equal(automationCommandNames.includes("automation import-json"), true);
   assert.equal(automationCommandNames.includes("automation set-status"), true);
   assert.equal(automationCommandNames.includes("automation upsert"), false);
@@ -349,6 +350,15 @@ test("automation save schema exposes typed fields while automation import-json i
     "threadId",
   ]) {
     assert.equal(field in saveSchema.options.properties, true, field);
+  }
+
+  const editSchema = await readCommandSchema(cli, ["automation", "edit"]);
+  assert.deepEqual(editSchema.args.required, ["lookup"]);
+  assert.equal("input" in editSchema.options.properties, false);
+  assert.equal(editSchema.options.required?.includes("instructions") ?? false, false);
+  assert.equal(editSchema.options.required?.includes("channel") ?? false, false);
+  for (const field of ["title", "continuityPolicy", "instructions", "channel"]) {
+    assert.equal(field in editSchema.options.properties, true, field);
   }
 
   const importJsonSchema = await readCommandSchema(cli, ["automation", "import-json"]);
@@ -514,6 +524,161 @@ test("automation save injects a hosted current messaging route without target fl
     assert.equal(shown.envelope.data?.automation?.route.channel, "telegram");
     assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "telegram_thread_real");
     assert.equal(shown.envelope.data?.automation?.route.threadId, null);
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation edit patches sparse fields without implicit route rebinding", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-edit-");
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    channel: "linq",
+    deliveryTarget: "linq_chat_real",
+    token: "test-bridge-token",
+  });
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
+
+    const saved = await runInProcessJsonCli<{
+      automationId: string;
+      created: boolean;
+      lookupId: string;
+    }>(cli, [
+      "automation",
+      "save",
+      "Preserve route reminder",
+      "--slug",
+      "preserve-route-reminder",
+      "--continuity-policy",
+      "fresh",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "08:30",
+      "--channel",
+      "telegram",
+      "--delivery-target",
+      "telegram_thread_real",
+      "--tags",
+      "assistant",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+    assert.equal(saved.envelope.data?.created, true);
+    assert.deepEqual(bridge.requests, []);
+
+    const edited = await runInProcessJsonCli<{
+      automationId: string;
+      created: boolean;
+      lookupId: string;
+    }>(cli, [
+      "automation",
+      "edit",
+      "preserve-route-reminder",
+      "--continuity-policy",
+      "preserve",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(edited.exitCode, null);
+    assert.equal(edited.envelope.ok, true);
+    assert.equal(edited.envelope.data?.automationId, saved.envelope.data?.automationId);
+    assert.equal(edited.envelope.data?.created, false);
+    assert.deepEqual(bridge.requests, []);
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        continuityPolicy: string;
+        instructions: string;
+        route: {
+          channel: string;
+          deliveryTarget: string | null;
+        };
+        schedule: {
+          kind: string;
+          localTime?: string;
+        };
+        tags: string[];
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "preserve-route-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.equal(shown.envelope.data?.automation?.continuityPolicy, "preserve");
+    assert.equal(shown.envelope.data?.automation?.instructions, "Send the reminder.");
+    assert.equal(shown.envelope.data?.automation?.route.channel, "telegram");
+    assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "telegram_thread_real");
+    assert.equal(shown.envelope.data?.automation?.schedule.kind, "dailyLocal");
+    assert.equal(shown.envelope.data?.automation?.schedule.localTime, "08:30");
+    assert.deepEqual(shown.envelope.data?.automation?.tags, ["assistant"]);
+
+    bridge.requests.length = 0;
+    const routeEdited = await runInProcessJsonCli<{
+      automationId: string;
+      created: boolean;
+    }>(cli, [
+      "automation",
+      "edit",
+      "preserve-route-reminder",
+      "--channel",
+      "linq",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(routeEdited.exitCode, null);
+    assert.equal(routeEdited.envelope.ok, true);
+    assert.equal(routeEdited.envelope.data?.automationId, saved.envelope.data?.automationId);
+    assert.equal(routeEdited.envelope.data?.created, false);
+    assert.deepEqual(bridge.requests, [
+      HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+    ]);
+
+    const routeShown = await runInProcessJsonCli<{
+      automation: {
+        instructions: string;
+        route: {
+          channel: string;
+          deliveryTarget: string | null;
+        };
+        schedule: {
+          kind: string;
+          localTime?: string;
+        };
+        tags: string[];
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "preserve-route-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(routeShown.exitCode, null);
+    assert.equal(routeShown.envelope.ok, true);
+    assert.equal(routeShown.envelope.data?.automation?.route.channel, "linq");
+    assert.equal(routeShown.envelope.data?.automation?.route.deliveryTarget, "linq_chat_real");
+    assert.equal(routeShown.envelope.data?.automation?.instructions, "Send the reminder.");
+    assert.equal(routeShown.envelope.data?.automation?.schedule.kind, "dailyLocal");
+    assert.equal(routeShown.envelope.data?.automation?.schedule.localTime, "08:30");
+    assert.deepEqual(routeShown.envelope.data?.automation?.tags, ["assistant"]);
   } finally {
     await bridge.stop();
     await rm(parentRoot, { recursive: true, force: true });

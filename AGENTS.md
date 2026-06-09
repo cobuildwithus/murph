@@ -76,14 +76,14 @@ Always read these before repo code/docs/test/config work:
 - Do not weaken production runtime, auth, or env invariants for tests, smoke checks, or builds. Fix harnesses with test-only config or wrappers instead.
 - Follow the persisted-state placement gate in `agent-docs/operations/agent-workflow-routing.md` and `ARCHITECTURE.md`; user-facing or queryable product truth must not start in assistant runtime state.
 - Historical plan docs under `agent-docs/exec-plans/completed/` are immutable snapshots.
-- Do not create or switch git branches unless explicitly requested in the current task. Do not use branch changes as a workaround for dirty worktrees, deployment scope, or parallel work; preserve the current branch and stop/report the blocker instead.
-- Do not create, switch to, or land work in separate git worktrees or helper checkouts unless explicitly requested in the current task.
 
 ## Workflow Defaults
 
 - Use `agent-docs/operations/agent-workflow-routing.md` to classify task type, ledger/plan needs, audit requirements, verification, and commit path.
 - Repo code/docs/test/config work uses `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`; vault-only data work does not by default. Preserve unrelated ledger or working-tree edits.
 - Preserve unrelated working-tree edits in the current checkout. Do not overwrite, discard, or revert work you did not make.
+- Default most non-trivial repo code/test/config changes to a separate git worktree on a task branch, then open a PR after the normal scoped commit. Use the current checkout directly for review-only work, vault-only data work, prompt-primary changes, text-only docs/process edits, minor copy/static-content changes, and other tiny low-risk edits where isolation would add more process than value.
+- Do not create or switch branches in the current checkout as a dirty-worktree workaround. When isolation is needed, use a separate worktree/branch; if unrelated dirty work blocks safe setup or a scoped commit, stop and report the blocker.
 - Before pushing `main` or another shared default branch, fetch and reconcile with ordinary Git history operations (`pull --rebase`, fast-forward, or a normal merge) when possible. Do not manufacture sibling-history merge commits with low-level commands such as `git commit-tree`/`git update-ref` just to work around a dirty checkout; if unrelated dirty work blocks a safe pull or rebase, stop and report the blocker.
 - Use `agent-docs/operations/completion-workflow.md` for mandatory completion audits. Required local Codex audit subagents are repo-policy pre-authorized; run them when the routed task class requires them.
 - Always run the verification required by `agent-docs/operations/verification-and-runtime.md` unless the user explicitly asks not to. If a required check is blocked by a credibly unrelated pre-existing failure, report the command, failing target, and why the current diff did not cause it.

@@ -137,7 +137,7 @@ export const automationScaffoldPayloadSchema = z
     schedule: automationScheduleSchema,
     slug: z.string().regex(slugPattern).optional(),
     status: z.enum(automationStatusValues).default("active"),
-    summary: z.string().min(1).max(4000).optional(),
+    summary: z.string().min(1).max(4000).nullable().optional(),
     tags: z.array(z.string().min(1)).optional(),
     title: z.string().min(1).max(160),
   })

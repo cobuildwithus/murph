@@ -40,6 +40,7 @@ import {
   pathSchema,
 } from "@murphai/operator-config/vault-cli-contracts";
 import {
+  patchAutomation,
   scaffoldAutomationPayload,
   upsertAutomation,
 } from "@murphai/core";
@@ -63,6 +64,14 @@ interface AutomationScheduleOptions {
   triggerEveryMs?: number;
   triggerKind?: AutomationScheduleKind;
   triggerLocalTime?: string;
+}
+
+interface AutomationRouteOptions {
+  channel?: string;
+  deliveryTarget?: string;
+  identityId?: string;
+  participantId?: string;
+  threadId?: string;
 }
 
 export const automationRecordSchema = z
@@ -129,7 +138,7 @@ function requireStringOption(
   optionName: string,
 ): string {
   if (typeof value === "string" && value.length > 0) return value;
-  return invalidAutomationOption(`--${optionName} is required for this automation save mode.`);
+  return invalidAutomationOption(`--${optionName} is required for this automation command mode.`);
 }
 
 function requireNumberOption(
@@ -137,7 +146,7 @@ function requireNumberOption(
   optionName: string,
 ): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
-  return invalidAutomationOption(`--${optionName} is required for this automation save mode.`);
+  return invalidAutomationOption(`--${optionName} is required for this automation command mode.`);
 }
 
 function resolveAutomationTriggerKind(options: AutomationScheduleOptions): AutomationScheduleKind {
@@ -192,13 +201,15 @@ function buildAutomationScheduleFromOptions(
   }
 }
 
-async function buildAutomationRouteFromOptions(input: {
-  channel?: string;
-  deliveryTarget?: string;
-  identityId?: string;
-  participantId?: string;
-  threadId?: string;
-}): Promise<AutomationRoute> {
+function hasDefinedAutomationOption(options: object): boolean {
+  return Object.values(options).some((value) => value !== undefined);
+}
+
+function automationScheduleOptionsHavePatch(options: AutomationScheduleOptions): boolean {
+  return hasDefinedAutomationOption(options);
+}
+
+async function buildAutomationRouteFromOptions(input: AutomationRouteOptions): Promise<AutomationRoute> {
   const currentRoute = await readAutomationSaveCurrentRoute(input);
   const route = stripPrivateAssistantRoutePlaceholders(
     resolveAssistantDeliveryRouteWithCurrentRoute({
@@ -215,12 +226,7 @@ async function buildAutomationRouteFromOptions(input: {
   return parsed;
 }
 
-async function readAutomationSaveCurrentRoute(input: {
-  channel?: string;
-  deliveryTarget?: string;
-  participantId?: string;
-  threadId?: string;
-}): Promise<HostedCliAssistantCurrentRoute | null> {
+async function readAutomationSaveCurrentRoute(input: AutomationRouteOptions): Promise<HostedCliAssistantCurrentRoute | null> {
   if (!automationSaveNeedsCurrentRoute(input)) {
     return null;
   }
@@ -244,12 +250,7 @@ async function readAutomationSaveCurrentRoute(input: {
   return null;
 }
 
-function automationSaveNeedsCurrentRoute(input: {
-  channel?: string;
-  deliveryTarget?: string;
-  participantId?: string;
-  threadId?: string;
-}): boolean {
+function automationSaveNeedsCurrentRoute(input: AutomationRouteOptions): boolean {
   const channel = normalizeAutomationRouteOption(input.channel);
   const deliveryTarget = normalizeAutomationRouteOption(input.deliveryTarget);
   if (!channel) {
@@ -261,6 +262,10 @@ function automationSaveNeedsCurrentRoute(input: {
   return !deliveryTarget
     && !normalizeAutomationRouteOption(input.participantId)
     && !normalizeAutomationRouteOption(input.threadId);
+}
+
+function automationRouteOptionsHavePatch(options: AutomationRouteOptions): boolean {
+  return hasDefinedAutomationOption(options);
 }
 
 function assertAutomationRouteCanDeliver(route: AutomationRoute): void {
@@ -307,19 +312,11 @@ function normalizeAutomationRouteForSave(route: AutomationRoute): AutomationRout
 }
 
 function normalizeAutomationRouteFieldsForSave(route: unknown): AutomationRoute {
-  const normalized = automationRouteSchema.parse(
+  return automationRouteSchema.parse(
     stripPrivateAssistantRoutePlaceholders(
       automationRouteSchema.parse(route),
     ),
   );
-  if (normalized.channel !== "linq" || !normalized.deliveryTarget) {
-    return normalized;
-  }
-  return {
-    ...normalized,
-    participantId: null,
-    threadId: null,
-  };
 }
 
 function normalizeAutomationRouteOption(
@@ -328,6 +325,124 @@ function normalizeAutomationRouteOption(
   const normalized = value?.trim();
   return normalized && normalized.length > 0 ? normalized : null;
 }
+
+const automationSharedOptionSchemas = {
+  slug: z
+    .string()
+    .regex(automationSlugPattern)
+    .optional()
+    .describe("Optional stable lowercase kebab-case slug."),
+  status: z.enum(automationStatusValues).optional().describe("Optional automation status."),
+  summary: z
+    .string()
+    .min(1)
+    .max(4000)
+    .optional()
+    .describe("Optional automation summary."),
+  tags: z
+    .array(z.string().min(1))
+    .optional()
+    .describe("Optional automation tags. Repeat --tags for multiple values. Do not comma-delimit multiple tags."),
+  continuityPolicy: z
+    .enum(automationContinuityPolicyValues)
+    .optional()
+    .describe("Optional continuity policy for scheduled assistant context."),
+  triggerKind: z.enum(automationScheduleKindValues).optional().describe("Automation trigger discriminator."),
+  triggerAt: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Required timestamp when --trigger-kind=at."),
+  triggerEveryMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Required positive millisecond interval when --trigger-kind=every."),
+  triggerCron: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Required cron expression when --trigger-kind=cron."),
+  triggerLocalTime: z
+    .string()
+    .regex(dailyLocalTimePattern, "Expected a 24-hour HH:MM time.")
+    .optional()
+    .describe("Required HH:MM local time when --trigger-kind=dailyLocal."),
+  deviceSource: z.enum(["whoop", "whoop_v2"]).optional().describe("Optional device activity source filter."),
+  activityKind: z.enum(["walk"]).optional().describe("Optional device activity kind filter."),
+  scheduleKind: z.enum(automationTimeScheduleKindValues).optional().describe("Legacy alias for time-based --trigger-kind values."),
+  scheduleAt: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Required timestamp when --schedule-kind=at."),
+  scheduleEveryMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Required positive millisecond interval when --schedule-kind=every."),
+  scheduleCron: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Required cron expression when --schedule-kind=cron."),
+  scheduleLocalTime: z
+    .string()
+    .regex(dailyLocalTimePattern, "Expected a 24-hour HH:MM time.")
+    .optional()
+    .describe("Required HH:MM local time when --schedule-kind=dailyLocal."),
+  channel: z.string().min(1).optional().describe("Optional outbound route channel."),
+  deliveryTarget: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Optional route delivery target."),
+  identityId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Optional route identity id."),
+  participantId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Optional route participant id."),
+  threadId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Optional route thread id."),
+};
+
+const automationSaveOptionSchemas = {
+  id: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Optional existing automation id to update."),
+  ...automationSharedOptionSchemas,
+  instructions: z
+    .string()
+    .min(1)
+    .describe("Automation instructions to run on the schedule."),
+};
+
+const automationEditOptionSchemas = {
+  title: z
+    .string()
+    .min(1)
+    .max(160)
+    .optional()
+    .describe("Optional automation title."),
+  ...automationSharedOptionSchemas,
+  instructions: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Optional automation instructions."),
+};
 
 export function registerAutomationCommands(cli: Cli.Cli) {
   const automation = Cli.create("automation", {
@@ -371,104 +486,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
       },
     ],
     hint: "Use automation import-json only when importing an advanced JSON payload from @file.json or stdin.",
-    options: withBaseOptions({
-      id: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Optional existing automation id to update."),
-      slug: z
-        .string()
-        .regex(automationSlugPattern)
-        .optional()
-        .describe("Optional stable lowercase kebab-case slug."),
-      status: z.enum(automationStatusValues).optional().describe("Optional automation status."),
-      summary: z
-        .string()
-        .min(1)
-        .max(4000)
-        .optional()
-        .describe("Optional automation summary."),
-      tags: z
-        .array(z.string().min(1))
-        .optional()
-        .describe("Optional automation tags. Repeat --tags for multiple values. Do not comma-delimit multiple tags."),
-      continuityPolicy: z
-        .enum(automationContinuityPolicyValues)
-        .optional()
-        .describe("Optional continuity policy for scheduled assistant context."),
-      instructions: z
-        .string()
-        .min(1)
-        .describe("Automation instructions to run on the schedule."),
-      triggerKind: z.enum(automationScheduleKindValues).optional().describe("Automation trigger discriminator."),
-      triggerAt: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Required timestamp when --trigger-kind=at."),
-      triggerEveryMs: z
-        .number()
-        .int()
-        .positive()
-        .optional()
-        .describe("Required positive millisecond interval when --trigger-kind=every."),
-      triggerCron: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Required cron expression when --trigger-kind=cron."),
-      triggerLocalTime: z
-        .string()
-        .regex(dailyLocalTimePattern, "Expected a 24-hour HH:MM time.")
-        .optional()
-        .describe("Required HH:MM local time when --trigger-kind=dailyLocal."),
-      deviceSource: z.enum(["whoop", "whoop_v2"]).optional().describe("Optional device activity source filter."),
-      activityKind: z.enum(["walk"]).optional().describe("Optional device activity kind filter."),
-      scheduleKind: z.enum(automationTimeScheduleKindValues).optional().describe("Legacy alias for time-based --trigger-kind values."),
-      scheduleAt: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Required timestamp when --schedule-kind=at."),
-      scheduleEveryMs: z
-        .number()
-        .int()
-        .positive()
-        .optional()
-        .describe("Required positive millisecond interval when --schedule-kind=every."),
-      scheduleCron: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Required cron expression when --schedule-kind=cron."),
-      scheduleLocalTime: z
-        .string()
-        .regex(dailyLocalTimePattern, "Expected a 24-hour HH:MM time.")
-        .optional()
-        .describe("Required HH:MM local time when --schedule-kind=dailyLocal."),
-      channel: z.string().min(1).optional().describe("Optional outbound route channel."),
-      deliveryTarget: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Optional route delivery target."),
-      identityId: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Optional route identity id."),
-      participantId: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Optional route participant id."),
-      threadId: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Optional route thread id."),
-    }),
+    options: withBaseOptions(automationSaveOptionSchemas),
     output: automationSaveResultSchema,
     async run(context) {
       const now = new Date().toISOString();
@@ -505,6 +523,79 @@ export function registerAutomationCommands(cli: Cli.Cli) {
       });
       const result = await upsertAutomation({
         ...input,
+        vaultRoot: context.options.vault,
+      });
+
+      return {
+        vault: context.options.vault,
+        automationId: result.record.automationId,
+        lookupId: result.record.slug,
+        path: result.record.relativePath,
+        created: result.created,
+      };
+    },
+  });
+
+  automation.command("edit", {
+    args: z.object({
+      lookup: z.string().min(1).describe("Existing automation id or slug to edit."),
+    }),
+    description: "Patch one existing automation from typed command fields.",
+    examples: [
+      {
+        args: {
+          lookup: "daily-mobility",
+        },
+        description: "Update an automation continuity policy without resubmitting instructions, schedule, or route fields.",
+        options: {
+          continuityPolicy: "preserve",
+          vault: "./vault",
+        },
+      },
+    ],
+    hint: "Use automation save when creating an automation or replacing the full typed automation shape.",
+    options: withBaseOptions(automationEditOptionSchemas),
+    output: automationSaveResultSchema,
+    async run(context) {
+      const now = new Date().toISOString();
+      const routeOptions = {
+        channel: context.options.channel,
+        deliveryTarget: context.options.deliveryTarget,
+        identityId: context.options.identityId,
+        participantId: context.options.participantId,
+        threadId: context.options.threadId,
+      };
+      const scheduleOptions = {
+        activityKind: context.options.activityKind,
+        deviceSource: context.options.deviceSource,
+        scheduleAt: context.options.scheduleAt,
+        scheduleCron: context.options.scheduleCron,
+        scheduleEveryMs: context.options.scheduleEveryMs,
+        scheduleKind: context.options.scheduleKind,
+        scheduleLocalTime: context.options.scheduleLocalTime,
+        triggerAt: context.options.triggerAt,
+        triggerCron: context.options.triggerCron,
+        triggerEveryMs: context.options.triggerEveryMs,
+        triggerKind: context.options.triggerKind,
+        triggerLocalTime: context.options.triggerLocalTime,
+      };
+      const result = await patchAutomation({
+        continuityPolicy: context.options.continuityPolicy,
+        instructions: context.options.instructions,
+        lookup: context.args.lookup,
+        route: automationRouteOptionsHavePatch(routeOptions)
+          ? await buildAutomationRouteFromOptions(routeOptions)
+          : undefined,
+        schedule: automationScheduleOptionsHavePatch(scheduleOptions)
+          ? buildAutomationScheduleFromOptions(scheduleOptions, { now })
+          : undefined,
+        slug: context.options.slug,
+        status: context.options.status,
+        summary: context.options.summary,
+        tags: context.options.tags === undefined
+          ? undefined
+          : normalizeRepeatableFlagOption(context.options.tags, "tags"),
+        title: context.options.title,
         vaultRoot: context.options.vault,
       });
 

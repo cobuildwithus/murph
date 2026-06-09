@@ -242,20 +242,13 @@ export async function executeCodexAssistantTurnAttempt(
     preparedFreshThreadFallback =
       (await input.prepareFreshThreadFallback?.()) ?? null
 
-    if (!preparedFreshThreadFallback) {
-      throw new VaultCliError(
-        'ASSISTANT_CODEX_FRESH_FALLBACK_PLAN_MISSING',
-        'Codex stale-resume fallback requires a prepared fresh-thread fallback plan.',
-      )
-    }
-
     return preparedFreshThreadFallback
   }
   const runFreshThreadFallback = async () => {
     const freshThreadFallback = await resolveFreshThreadFallback()
     const fallbackInput = {
       ...input,
-      ...freshThreadFallback,
+      ...(freshThreadFallback ?? {}),
       freshThreadFallback,
       prepareFreshThreadFallback: undefined,
       resumeCodexThreadId: null,
