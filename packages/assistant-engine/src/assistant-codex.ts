@@ -4,18 +4,9 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import {
-  HOSTED_CLI_BRIDGE_TOKEN_ENV,
-  HOSTED_CLI_BRIDGE_URL_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
-  HOSTED_RUNTIME_PROCESS_ENV,
-} from '@murphai/hosted-execution/cli-runtime-bridge'
 import type {
   HostedExpectedCodexRootProcess,
 } from '@murphai/hosted-execution/runtime-control'
-import {
-  ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS,
-} from '@murphai/operator-config/assistant/target-runtime'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -116,64 +107,11 @@ const CODEX_RPC_DEFAULT_TIMEOUT_MS = 120_000
 const CODEX_RPC_STEER_TIMEOUT_MS = 15_000
 const CODEX_PROGRESS_FINAL_DRAIN_TIMEOUT_MS = 2_000
 const CODEX_APP_SERVER_COMMAND = 'app-server'
-const HOSTED_RUNTIME_PROCESS_ENV_MARKER = HOSTED_RUNTIME_PROCESS_ENV
-const HOSTED_CODEX_APP_SERVER_COMMAND = 'codex'
-const HOSTED_RUNNER_EXECUTABLE_PATH = [
-  '/app/node_modules/.bin',
-  '/usr/local/sbin',
-  '/usr/local/bin',
-  '/usr/sbin',
-  '/usr/bin',
-  '/sbin',
-  '/bin',
-].join(path.delimiter)
 const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   'murph.assistant-codex-app-server-timing.v1'
 const CODEX_APP_SERVER_TIMING_TRACE_TYPE =
   'assistant.codex.app_server_timing'
 const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
-const CODEX_APP_SERVER_PROVIDER_IDENTITY_ENV_NAMES =
-  ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS.map((config) => config.envKey)
-const CODEX_APP_SERVER_PROCESS_IDENTITY_ENV_NAMES = [
-  'ALL_PROXY',
-  'CODEX_ACCESS_TOKEN',
-  'CODEX_API_KEY',
-  'CODEX_CA_CERTIFICATE',
-  'CODEX_HOME',
-  'CURL_CA_BUNDLE',
-  'HOME',
-  HOSTED_CLI_BRIDGE_TOKEN_ENV,
-  HOSTED_CLI_BRIDGE_URL_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
-  HOSTED_RUNTIME_PROCESS_ENV_MARKER,
-  'HOSTED_ASSISTANT_APPROVAL_POLICY',
-  'HOSTED_ASSISTANT_MODEL',
-  'HOSTED_ASSISTANT_REASONING_EFFORT',
-  'HOSTED_ASSISTANT_SANDBOX',
-  'HTTP_PROXY',
-  'HTTPS_PROXY',
-  'MURPH_ASSISTANT_SKILLS_ROOT',
-  'MURPH_HOSTED_CODEX_MODEL_PROVIDER_ID',
-  'NO_PROXY',
-  'NODE_ENV',
-  'NODE_EXTRA_CA_CERTS',
-  'PATH',
-  'REQUESTS_CA_BUNDLE',
-  'SSL_CERT_DIR',
-  'SSL_CERT_FILE',
-  'TEMP',
-  'TMP',
-  'TMPDIR',
-  'TZ',
-  'VAULT',
-  ...CODEX_APP_SERVER_PROVIDER_IDENTITY_ENV_NAMES,
-] as const
-const HOSTED_CODEX_APP_SERVER_REJECTED_CHILD_ENV_NAMES = [
-  'MURPH_HOSTED_CODEX_BOUND_USER_ID',
-  'MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID',
-  'MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION',
-  'MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION',
-] as const
 
 type CodexAppServerProcessState =
   | 'idle'
@@ -186,7 +124,7 @@ type CodexAppServerProcessInput = {
   args: readonly string[]
   codexCommand: string
   env: NodeJS.ProcessEnv
-  identityDigest: string | null
+  launchKey: string
   workingDirectory: string
 }
 
@@ -194,9 +132,8 @@ type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
   args: readonly string[]
   codexCommand: string
   env: NodeJS.ProcessEnv
-  hostedRuntimeProcess: boolean
-  identityDigest: string | null
   imagePaths: readonly string[]
+  launchKey: string
   tempRoot: string
   workingDirectory: string
 }
@@ -456,24 +393,13 @@ export async function executeCodexAppServerTurn(
   input: CodexAppServerTurnInput,
 ): Promise<CodexAppServerTurnResult> {
   const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(input.approvalPolicy)
-  const hostedRuntimeProcess = isHostedCodexAppServerRuntime(input.env)
   const workingDirectory = path.resolve(input.workingDirectory)
   await assertCodexAppServerWorkingDirectory(workingDirectory)
-  const resolvedChildEnv = await resolveCodexChildEnv({
-    codexHome: resolveCodexAppServerCodexHome({
-      codexHome: input.codexHome,
-      hostedRuntimeProcess,
-    }),
+  const childEnv = await resolveCodexChildEnv({
+    codexHome: input.codexHome,
     env: input.env,
   })
-  const childEnv = hostedRuntimeProcess
-    ? projectHostedCodexAppServerChildEnv(resolvedChildEnv)
-    : resolvedChildEnv
-  const codexCommand = resolveCodexAppServerCommand({
-    codexCommand: input.codexCommand,
-    env: childEnv,
-    hostedRuntimeProcess,
-  })
+  const codexCommand = resolveCodexAppServerCommand(input.codexCommand)
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-'))
   const imagePaths = await materializeCodexImagePaths({
     images: input.images,
@@ -484,11 +410,10 @@ export async function executeCodexAppServerTurn(
     approvalPolicy,
   }
   const args = buildCodexAppServerArgs(normalizedInput)
-  const processIdentity = await buildCodexAppServerProcessIdentity({
+  const launchKey = buildCodexAppServerLaunchKey({
     args,
     codexCommand,
     env: childEnv,
-    hostedRuntimeProcess,
     workingDirectory,
   })
   const preparedInput: CodexAppServerPreparedTurnInput = {
@@ -496,9 +421,8 @@ export async function executeCodexAppServerTurn(
     args,
     codexCommand,
     env: childEnv,
-    hostedRuntimeProcess,
-    identityDigest: processIdentity.identityDigest,
     imagePaths,
+    launchKey,
     tempRoot,
     workingDirectory,
   }
@@ -545,79 +469,32 @@ async function assertCodexAppServerWorkingDirectory(
   }
 }
 
-function resolveCodexAppServerCommand(input: {
-  codexCommand?: string | null
-  env?: NodeJS.ProcessEnv
-  hostedRuntimeProcess: boolean
+function resolveCodexAppServerCommand(
+  codexCommand?: string | null,
+): string {
+  return codexCommand?.trim() || 'codex'
+}
+
+function buildCodexAppServerLaunchKey(input: {
+  args: readonly string[]
+  codexCommand: string
+  env: NodeJS.ProcessEnv
+  workingDirectory: string
 }): string {
-  if (input.hostedRuntimeProcess) {
-    return resolveHostedCodexAppServerCommand(input.env ?? {})
-  }
-
-  return input.codexCommand?.trim() || 'codex'
+  return hashCodexRawString(JSON.stringify({
+    args: input.args,
+    codexCommand: input.codexCommand,
+    env: stableCodexProcessEnv(input.env),
+    workingDirectory: input.workingDirectory,
+  }))
 }
 
-function resolveCodexAppServerCodexHome(input: {
-  codexHome?: string | null
-  hostedRuntimeProcess: boolean
-}): string | null | undefined {
-  if (input.hostedRuntimeProcess) {
-    return null
-  }
-
-  return input.codexHome
-}
-
-function isHostedCodexAppServerRuntime(env: NodeJS.ProcessEnv | undefined): boolean {
-  return isHostedRuntimeProcessEnv(env)
-}
-
-function isHostedRuntimeProcessEnv(env: NodeJS.ProcessEnv | undefined): boolean {
-  return env?.[HOSTED_RUNTIME_PROCESS_ENV_MARKER]?.trim() === '1'
-}
-
-function resolveHostedCodexAppServerCommand(env: NodeJS.ProcessEnv): string {
-  const commandOverride = normalizeNullableString(
-    env[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV],
+function stableCodexProcessEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env)
+      .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+      .sort(([left], [right]) => left.localeCompare(right)),
   )
-
-  if (
-    env.NODE_ENV?.trim() === 'test'
-    && commandOverride
-    && path.isAbsolute(commandOverride)
-  ) {
-    return commandOverride
-  }
-
-  return HOSTED_CODEX_APP_SERVER_COMMAND
-}
-
-function projectHostedCodexAppServerChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const codexHome = normalizeNullableString(env.CODEX_HOME)
-  const childEnv = { ...env }
-  for (const key of HOSTED_CODEX_APP_SERVER_REJECTED_CHILD_ENV_NAMES) {
-    delete childEnv[key]
-  }
-
-  return {
-    ...childEnv,
-    ...(codexHome ? { CODEX_HOME: codexHome } : {}),
-    [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: '1',
-    PATH: HOSTED_RUNNER_EXECUTABLE_PATH,
-  }
-}
-
-function projectCodexAppServerProcessIdentityEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const projected: NodeJS.ProcessEnv = {}
-
-  for (const key of CODEX_APP_SERVER_PROCESS_IDENTITY_ENV_NAMES) {
-    const value = env[key]
-    if (typeof value === 'string') {
-      projected[key] = value
-    }
-  }
-
-  return projected
 }
 
 export function buildCodexAppServerArgs(
@@ -626,14 +503,7 @@ export function buildCodexAppServerArgs(
     'approvalPolicy' | 'configOverrides' | 'oss' | 'profile' | 'sandbox'
   >,
 ): string[] {
-  const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(input.approvalPolicy)
   const args: string[] = []
-
-  if (input.sandbox) {
-    args.push('-s', input.sandbox)
-  }
-
-  args.push('-a', approvalPolicy)
 
   for (const override of input.configOverrides ?? []) {
     args.push('--config', override)
@@ -653,7 +523,7 @@ export function buildCodexAppServerArgs(
 
 class CodexAppServerProcess {
   readonly child: ChildProcessWithoutNullStreams
-  readonly identityDigest: string | null
+  readonly launchKey: string
   readonly pendingRequests = new Map<CodexRpcId, PendingCodexRpcRequest>()
   readonly processGroupPid: number | null
   readonly startedAt = Date.now()
@@ -677,7 +547,7 @@ class CodexAppServerProcess {
 
   constructor(input: CodexAppServerProcessInput) {
     this.codexCommand = input.codexCommand
-    this.identityDigest = input.identityDigest
+    this.launchKey = input.launchKey
 
     const useProcessGroup = process.platform !== 'win32'
     this.child = spawn(input.codexCommand, [...input.args], {
@@ -925,9 +795,9 @@ class CodexAppServerProcess {
     await this.stop(reason).catch(() => undefined)
   }
 
-  isReusableFor(identityDigest: string): boolean {
+  isReusableFor(launchKey: string): boolean {
     return (
-      this.identityDigest === identityDigest &&
+      this.launchKey === launchKey &&
       this.initialized &&
       !this.poisoned &&
       this.state === 'idle' &&
@@ -1198,19 +1068,9 @@ async function withWarmCodexSlotLock<T>(
 async function getOrStartWarmCodexProcess(
   input: CodexAppServerProcessInput,
 ): Promise<CodexAppServerProcess> {
-  const identityDigest = input.identityDigest
-  if (!identityDigest) {
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_APP_SERVER_IDENTITY_MISSING',
-      'Codex app-server process identity is missing.',
-      {
-        retryable: false,
-      },
-    )
-  }
-
+  const launchKey = input.launchKey
   return await withWarmCodexSlotLock(async () => {
-    if (warmCodexProcess?.isReusableFor(identityDigest)) {
+    if (warmCodexProcess?.isReusableFor(launchKey)) {
       warmCodexProcess.reserveTurn()
       return warmCodexProcess
     }
@@ -1234,10 +1094,10 @@ async function getOrStartWarmCodexProcess(
 function clearWarmCodexProcessIfUnusable(
   processInstance: CodexAppServerProcess,
 ): void {
-  const identityDigest = processInstance.identityDigest
+  const launchKey = processInstance.launchKey
   if (
     warmCodexProcess === processInstance &&
-    (!identityDigest || !processInstance.isReusableFor(identityDigest)) &&
+    !processInstance.isReusableFor(launchKey) &&
     (processInstance.child.exitCode !== null || processInstance.child.signalCode !== null)
   ) {
     warmCodexProcess = null
@@ -1271,67 +1131,12 @@ export async function snapshotExpectedCodexRootProcess(): Promise<
 > {
   return await withWarmCodexSlotLock(async () => {
     const processInstance = warmCodexProcess
-    const identityDigest = processInstance?.identityDigest
-    if (!identityDigest || !processInstance?.isReusableFor(identityDigest)) {
+    if (!processInstance?.isReusableFor(processInstance.launchKey)) {
       return null
     }
 
     return await processInstance.snapshotExpectedRootProcess()
   })
-}
-
-async function buildCodexAppServerProcessIdentity(input: {
-  args: readonly string[]
-  codexCommand: string
-  env: NodeJS.ProcessEnv
-  hostedRuntimeProcess: boolean
-  workingDirectory: string
-}): Promise<{
-  identityDigest: string
-}> {
-  const commandIdentity = {
-    args: input.args,
-    codexCommand: input.codexCommand,
-  }
-  const configTomlDigest = await readCodexConfigTomlDigest(input.env.CODEX_HOME)
-  const identityEnv = projectCodexAppServerProcessIdentityEnv(input.env)
-  const identity = {
-    ...commandIdentity,
-    codexHome: normalizeNullableString(input.env.CODEX_HOME),
-    configTomlDigest,
-    envDigest: hashStableCodexIdentity(identityEnv),
-    hostedRuntimeProcess: input.hostedRuntimeProcess,
-    hostedCommandOverride:
-      normalizeNullableString(input.env[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]),
-    workingDirectory: input.workingDirectory,
-  }
-
-  return {
-    identityDigest: hashStableCodexIdentity(identity),
-  }
-}
-
-async function readCodexConfigTomlDigest(
-  codexHome: string | undefined,
-): Promise<string | null> {
-  const normalized = normalizeNullableString(codexHome)
-  if (!normalized) {
-    return null
-  }
-
-  try {
-    return hashStableCodexIdentity(
-      await readFile(path.join(normalized, 'config.toml'), 'utf8'),
-    )
-  } catch {
-    return null
-  }
-}
-
-function hashStableCodexIdentity(value: unknown): string {
-  return createHash('sha256')
-    .update(stableCodexIdentityStringify(value))
-    .digest('hex')
 }
 
 function hashCodexRawString(value: string): string {
@@ -1387,24 +1192,6 @@ function isCodexTurnStartedMethod(method: string | null): boolean {
 
 function isCodexTurnCompletedMethod(method: string | null): boolean {
   return method === 'turn/completed' || method === 'turn.completed'
-}
-
-function stableCodexIdentityStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') {
-    return JSON.stringify(value)
-  }
-
-  if (Array.isArray(value)) {
-    return `[${value.map((entry) => stableCodexIdentityStringify(entry)).join(',')}]`
-  }
-
-  const record = value as Record<string, unknown>
-  return `{${Object.keys(record)
-    .sort()
-    .map((key) =>
-      `${JSON.stringify(key)}:${stableCodexIdentityStringify(record[key])}`,
-    )
-    .join(',')}}`
 }
 
 async function readCodexProcState(pid: number): Promise<{
