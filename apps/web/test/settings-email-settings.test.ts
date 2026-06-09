@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { act, createElement, type ReactNode } from "react";
+import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -35,29 +35,6 @@ vi.mock("@privy-io/react-auth", () => ({
   useLinkAccount: mocks.useLinkAccount,
   useUpdateEmail: mocks.useUpdateEmail,
   useUser: mocks.useUser,
-}));
-
-vi.mock("@/src/components/ui/dialog", () => ({
-  Dialog(input: { children: ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void }) {
-    return createElement("div", {
-      "data-dialog-open": String(input.open ?? false),
-    }, input.children);
-  },
-  DialogContent(input: Record<string, unknown> & { children?: ReactNode }) {
-    return createElement("div", {
-      ...input,
-      "data-show-close-button": String(input.showCloseButton ?? true),
-    }, input.children);
-  },
-  DialogDescription(input: Record<string, unknown> & { children?: ReactNode }) {
-    return createElement("p", input, input.children);
-  },
-  DialogHeader(input: Record<string, unknown> & { children?: ReactNode }) {
-    return createElement("div", input, input.children);
-  },
-  DialogTitle(input: Record<string, unknown> & { children?: ReactNode }) {
-    return createElement("h2", input, input.children);
-  },
 }));
 
 let cleanupRender: (() => Promise<void>) | null = null;
@@ -109,6 +86,10 @@ describe("HostedEmailSettings", () => {
     if (cleanupRender) {
       await cleanupRender();
       cleanupRender = null;
+      // input-otp schedules uncleared 0-50ms selection-sync timers that call
+      // setState; drain them while the linkedom globals are still stubbed so
+      // they cannot fire into a torn-down environment.
+      await new Promise((resolve) => setTimeout(resolve, 60));
     }
   });
 
@@ -204,8 +185,8 @@ describe("HostedEmailSettings", () => {
 
     expect(mocks.linkEmail).toHaveBeenCalledTimes(1);
     expect(mocks.sendCode).not.toHaveBeenCalled();
-    expect(container.querySelector('[data-dialog-open="true"]')).toBeNull();
-    expect(container.textContent).not.toContain("We sent a verification code to");
+    expect(container.querySelector("input[data-input-otp]")).toBeNull();
+    expect(container.textContent).not.toContain("We sent a code to");
   });
 
   it("prefills an unverified server-provided email and lets the member send a verification code", async () => {
@@ -378,7 +359,7 @@ describe("HostedEmailSettings", () => {
     });
   });
 
-  it("sends and verifies update-email codes from the live settings inputs", async () => {
+  it("sends an update-email code and verifies it from the inline code step", async () => {
     const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
     const syncFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       emailAddress: "member@example.com",
@@ -424,10 +405,14 @@ describe("HostedEmailSettings", () => {
     expect(mocks.sendCode).toHaveBeenCalledWith({
       newEmailAddress: "member@example.com",
     });
-    expect(container.textContent).toContain("We sent a verification code to");
+    expect(container.textContent).toContain("We sent a code to");
+    expect(container.querySelector('input[id="settings-email-address"]')).toBeNull();
 
+    // The linkedom harness cannot drive React's synthetic onChange, so the
+    // InputOTP auto-submit (onComplete) path cannot fire here; the verify
+    // button exercises the same onSubmit callback, reading the code ref.
     const codeInput = container.querySelector(
-      'input[id="settings-email-code"]',
+      "input[data-input-otp]",
     ) as HTMLInputElement | null;
     const verifyButton = Array.from(container.querySelectorAll("button")).find(
       (candidate) => candidate.textContent?.includes("Verify email"),
@@ -442,6 +427,7 @@ describe("HostedEmailSettings", () => {
       verifyButton?.dispatchEvent(new Event("click", { bubbles: true }));
     });
 
+    expect(mocks.verifyCode).toHaveBeenCalledTimes(1);
     expect(mocks.verifyCode).toHaveBeenCalledWith({
       code: "123456",
     });
@@ -485,7 +471,8 @@ describe("HostedEmailSettings", () => {
     });
 
     expect(container.textContent).toContain("We could not send a verification code to that email address.");
-    expect(container.textContent).not.toContain("We sent a verification code to");
+    expect(container.textContent).not.toContain("We sent a code to");
+    expect(container.querySelector("input[data-input-otp]")).toBeNull();
   });
 
   it("does not sync the hosted email route when Privy reports an update-email verify error", async () => {
@@ -533,11 +520,12 @@ describe("HostedEmailSettings", () => {
     });
 
     const codeInput = container.querySelector(
-      'input[id="settings-email-code"]',
+      "input[data-input-otp]",
     ) as HTMLInputElement | null;
     const verifyButton = Array.from(container.querySelectorAll("button")).find(
       (candidate) => candidate.textContent?.includes("Verify email"),
     );
+    expect(codeInput).toBeTruthy();
 
     await act(async () => {
       if (codeInput) {
@@ -546,11 +534,156 @@ describe("HostedEmailSettings", () => {
       verifyButton?.dispatchEvent(new Event("click", { bubbles: true }));
     });
 
+    expect(mocks.verifyCode).toHaveBeenCalledTimes(1);
     expect(syncFetch).not.toHaveBeenCalled();
     expect(container.textContent).toContain("We could not verify that code.");
   });
 
-  it("does not resend to a stale pending email after the visible email input is cleared", async () => {
+  it("rejects an empty code without calling Privy and trims whitespace from the inline code input", async () => {
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+    const syncFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      emailAddress: "member@example.com",
+      ok: true,
+      runTriggered: true,
+      verifiedAt: "2026-04-25T00:00:00.000Z",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", syncFetch);
+
+    const { cleanup, container, window } = await renderClientComponent(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        initialEmail: {
+          address: "old@example.com",
+          verifiedAt: 1771891200,
+        },
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const emailInput = container.querySelector(
+      'input[id="settings-email-address"]',
+    ) as HTMLInputElement | null;
+    const sendButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Send verification code"),
+    );
+
+    await act(async () => {
+      if (emailInput) {
+        setInputValue(window, emailInput, "member@example.com");
+      }
+      sendButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    const codeInput = container.querySelector(
+      "input[data-input-otp]",
+    ) as HTMLInputElement | null;
+    const verifyButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Verify email"),
+    );
+    expect(codeInput).toBeTruthy();
+    expect(verifyButton).toBeTruthy();
+
+    await act(async () => {
+      verifyButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    expect(mocks.verifyCode).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Enter the verification code we emailed you.");
+    expect(container.querySelector("input[data-input-otp]")).toBeTruthy();
+
+    await act(async () => {
+      if (codeInput) {
+        setInputValue(window, codeInput, "  123456  ");
+      }
+      verifyButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    expect(mocks.verifyCode).toHaveBeenCalledTimes(1);
+    expect(mocks.verifyCode).toHaveBeenCalledWith({
+      code: "123456",
+    });
+  });
+
+  it("disables the inline code step actions and shows the verifying label while the code is submitting", async () => {
+    let updateEmailStatus: "idle" | "submitting-code" = "idle";
+    mocks.useUpdateEmail.mockImplementation((callbacks: UpdateEmailCallbacks) => {
+      mocks.updateEmailCallbacks = callbacks;
+
+      return {
+        sendCode: mocks.sendCode,
+        state: {
+          status: updateEmailStatus,
+        },
+        verifyCode: mocks.verifyCode,
+      };
+    });
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+    const { cleanup, container, window } = await renderClientComponent(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        initialEmail: {
+          address: "old@example.com",
+          verifiedAt: 1771891200,
+        },
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const emailInput = container.querySelector(
+      'input[id="settings-email-address"]',
+    ) as HTMLInputElement | null;
+    const sendButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Send verification code"),
+    );
+
+    await act(async () => {
+      if (emailInput) {
+        setInputValue(window, emailInput, "member@example.com");
+      }
+      sendButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    const verifyButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Verify email"),
+    );
+    expect(verifyButton).toBeTruthy();
+    expect(verifyButton?.hasAttribute("disabled")).toBe(false);
+
+    // Flip the mocked Privy hook into the submitting state, then trigger a
+    // re-render through the empty-code validation path (the harness cannot
+    // drive React onChange, so a state-setting click is the re-render seam).
+    updateEmailStatus = "submitting-code";
+
+    await act(async () => {
+      verifyButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain("Verifying...");
+    expect(container.textContent).not.toContain("Verify email");
+    const pendingVerifyButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Verifying..."),
+    );
+    const resendButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Resend code"),
+    );
+    const useAnotherEmailButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Use another email"),
+    );
+    expect(pendingVerifyButton?.hasAttribute("disabled")).toBe(true);
+    expect(resendButton?.hasAttribute("disabled")).toBe(true);
+    expect(useAnotherEmailButton?.hasAttribute("disabled")).toBe(true);
+    expect(
+      (container.querySelector("input[data-input-otp]") as HTMLInputElement | null)
+        ?.hasAttribute("disabled"),
+    ).toBe(true);
+  });
+
+  it("resends the code to the pending email from the code step", async () => {
     const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
     const { cleanup, container, window } = await renderClientComponent(
       createElement(HostedEmailSettings, {
@@ -585,17 +718,18 @@ describe("HostedEmailSettings", () => {
     expect(resendButton).toBeTruthy();
 
     await act(async () => {
-      if (emailInput) {
-        setInputValue(window, emailInput, " ");
-      }
       resendButton?.dispatchEvent(new Event("click", { bubbles: true }));
     });
 
-    expect(mocks.sendCode).toHaveBeenCalledTimes(1);
-    expect(container.textContent).toContain("Enter a valid email address before we send a code.");
+    expect(mocks.sendCode).toHaveBeenCalledTimes(2);
+    expect(mocks.sendCode).toHaveBeenLastCalledWith({
+      newEmailAddress: "member@example.com",
+    });
+    expect(container.querySelector("input[data-input-otp]")).toBeTruthy();
+    expect(container.textContent).toContain("We sent a code to member@example.com");
   });
 
-  it("does not resend from the verification dialog after the visible email input is cleared", async () => {
+  it("returns to email entry when the member chooses to use another email", async () => {
     const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
     const { cleanup, container, window } = await renderClientComponent(
       createElement(HostedEmailSettings, {
@@ -622,24 +756,20 @@ describe("HostedEmailSettings", () => {
       sendButton?.dispatchEvent(new Event("click", { bubbles: true }));
     });
 
-    await act(async () => {
-      if (emailInput) {
-        setInputValue(window, emailInput, " ");
-      }
-    });
+    expect(container.querySelector("input[data-input-otp]")).toBeTruthy();
 
-    const dialog = container.querySelector('[data-dialog-open="true"]');
-    expect(dialog).toBeTruthy();
-    const dialogResendButton = Array.from(dialog?.querySelectorAll("button") ?? []).find(
-      (candidate) => candidate.textContent?.includes("Resend code"),
+    const useAnotherEmailButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Use another email"),
     );
+    expect(useAnotherEmailButton).toBeTruthy();
 
     await act(async () => {
-      dialogResendButton?.dispatchEvent(new Event("click", { bubbles: true }));
+      useAnotherEmailButton?.dispatchEvent(new Event("click", { bubbles: true }));
     });
 
+    expect(container.querySelector("input[data-input-otp]")).toBeNull();
+    expect(container.querySelector('input[id="settings-email-address"]')).toBeTruthy();
     expect(mocks.sendCode).toHaveBeenCalledTimes(1);
-    expect(container.textContent).toContain("Enter a valid email address before we send a code.");
   });
 });
 

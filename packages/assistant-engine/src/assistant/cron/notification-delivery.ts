@@ -24,6 +24,8 @@ export function buildAssistantCronNotificationDedupeToken(input: {
     input.job.jobId,
     dueAt,
     input.job.target.channel ?? '',
+    input.job.target.deliverySource?.kind ?? '',
+    input.job.target.deliverySource?.fromPhoneNumber ?? '',
     input.job.target.identityId ?? '',
     input.job.target.participantId ?? '',
     input.job.target.threadId ?? '',
@@ -44,6 +46,8 @@ export function buildAssistantCronHostedDeliveryIdempotency(input: {
     assistantTurnOrdinal: 'assistant-cron:1',
     conversationId: stringifyAssistantCronDeliveryKeyParts([
       input.job.target.channel,
+      input.job.target.deliverySource?.kind,
+      input.job.target.deliverySource?.fromPhoneNumber,
       input.job.target.identityId,
       input.job.target.participantId,
       input.job.target.threadId,
@@ -57,6 +61,8 @@ export function buildAssistantCronHostedDeliveryIdempotency(input: {
     ],
     recipientKey: stringifyAssistantCronDeliveryKeyParts([
       input.job.target.channel,
+      input.job.target.deliverySource?.kind,
+      input.job.target.deliverySource?.fromPhoneNumber,
       input.job.target.deliveryTarget,
       input.job.target.identityId,
       input.job.target.participantId,

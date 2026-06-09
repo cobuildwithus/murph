@@ -159,6 +159,7 @@ export function projectCanonicalAssistantCronJob(input: {
       ? input.source.route
       : {
           channel: null,
+          deliverySource: null,
           deliveryTarget: null,
           identityId: null,
           participantId: null,
@@ -168,6 +169,7 @@ export function projectCanonicalAssistantCronJob(input: {
     sessionId: continuitySessionId,
     alias: continuityAlias,
     channel: targetRoute.channel,
+    deliverySource: targetRoute.deliverySource,
     identityId: targetRoute.identityId,
     participantId: targetRoute.participantId,
     threadId: targetRoute.threadId,
@@ -229,15 +231,24 @@ export function resolveCanonicalAssistantCronOccurrenceAt(
     return null
   }
 
-  if (runtimeState.state.pendingOccurrenceAt) {
-    return runtimeState.state.pendingOccurrenceAt
+  const pendingOccurrenceAt = resolveCurrentCanonicalPendingOccurrenceAt({
+    runtimeUpdatedAt: runtimeState.updatedAt,
+    source,
+    state: runtimeState.state,
+  })
+  if (pendingOccurrenceAt) {
+    return pendingOccurrenceAt
   }
 
   if (source.schedule.kind === 'at') {
     return source.schedule.at
   }
 
-  const anchorAt = runtimeState.state.lastSucceededAt ?? runtimeState.state.activatedAt
+  const anchorAt = resolveCanonicalAssistantCronScheduleAnchorAt({
+    pendingOccurrenceIgnored: Boolean(runtimeState.state.pendingOccurrenceAt),
+    source,
+    state: runtimeState.state,
+  })
   if (!anchorAt) {
     return null
   }
@@ -282,6 +293,7 @@ export function buildCanonicalAutomationRoute(
 ): CanonicalAutomationAssistantCronJobRecord['route'] {
   return {
     channel: target.channel ?? '',
+    deliverySource: target.deliverySource,
     deliveryTarget: target.deliveryTarget,
     identityId: target.identityId,
     participantId: target.participantId,
@@ -295,24 +307,29 @@ export function buildCanonicalAutomationUpsertInput(input: {
     CanonicalAutomationAssistantCronJobRecord,
     'continuityPolicy' | 'slug' | 'summary' | 'tags'
   > | null
+  continuityPolicy?: CanonicalAutomationAssistantCronJobRecord['continuityPolicy']
   instructions: string
   route: CanonicalAutomationAssistantCronJobRecord['route']
   schedule: AssistantCronSchedule
+  slug?: string
   status: CanonicalAutomationAssistantCronJobRecord['status'] | 'archived'
+  summary?: string | null
+  tags?: string[]
   title: string
   vault: string
 }): Parameters<typeof upsertAutomation>[0] {
   return {
     vaultRoot: input.vault,
     automationId: input.automationId,
-    slug: input.automation?.slug,
+    slug: input.slug ?? input.automation?.slug,
     title: input.title,
     status: input.status,
-    summary: input.automation?.summary ?? undefined,
+    summary: input.summary ?? input.automation?.summary ?? undefined,
     schedule: input.schedule,
     route: input.route,
-    continuityPolicy: input.automation?.continuityPolicy ?? 'preserve',
-    tags: input.automation?.tags ?? ['assistant', 'scheduled'],
+    continuityPolicy:
+      input.continuityPolicy ?? input.automation?.continuityPolicy ?? 'preserve',
+    tags: input.tags ?? input.automation?.tags ?? ['assistant', 'scheduled'],
     instructions: input.instructions,
   }
 }
@@ -441,6 +458,7 @@ function projectCanonicalAssistantCronJobState(input: {
   runtimeState: AssistantCronCanonicalRuntimeRecord
 }): AssistantCronJob['state'] {
   const nextRunAt = resolveCanonicalAssistantCronNextRunAt({
+    runtimeUpdatedAt: input.runtimeState.updatedAt,
     source: input.source,
     state: input.runtimeState.state,
   })
@@ -481,6 +499,7 @@ function normalizeAssistantCronPublicSchedule(
 }
 
 function resolveCanonicalAssistantCronNextRunAt(input: {
+  runtimeUpdatedAt: string
   source: CanonicalAssistantCronJobRecord
   state: AssistantCronCanonicalRuntimeState
 }): string | null {
@@ -492,15 +511,19 @@ function resolveCanonicalAssistantCronNextRunAt(input: {
     return null
   }
 
-  if (input.state.pendingOccurrenceAt) {
-    return input.state.retryAfterAt ?? input.state.pendingOccurrenceAt
+  const pendingOccurrenceAt = resolveCurrentCanonicalPendingOccurrenceAt(input)
+  if (pendingOccurrenceAt) {
+    return input.state.retryAfterAt ?? pendingOccurrenceAt
   }
 
   if (input.source.schedule.kind === 'at') {
     return input.source.schedule.at
   }
 
-  const anchorAt = input.state.lastSucceededAt ?? input.state.activatedAt
+  const anchorAt = resolveCanonicalAssistantCronScheduleAnchorAt({
+    ...input,
+    pendingOccurrenceIgnored: Boolean(input.state.pendingOccurrenceAt),
+  })
   if (!anchorAt) {
     return null
   }
@@ -512,4 +535,98 @@ function resolveCanonicalAssistantCronNextRunAt(input: {
     }),
     new Date(anchorAt),
   )
+}
+
+function resolveCurrentCanonicalPendingOccurrenceAt(input: {
+  runtimeUpdatedAt: string
+  source: CanonicalAssistantCronJobRecord
+  state: AssistantCronCanonicalRuntimeState
+}): string | null {
+  const pendingOccurrenceAt = input.state.pendingOccurrenceAt
+  if (!pendingOccurrenceAt) {
+    return null
+  }
+
+  if (input.state.runningAt || input.state.pendingDeliveryIntentId) {
+    return pendingOccurrenceAt
+  }
+
+  if (!canonicalSourceChangedAfterRuntimeState(input)) {
+    return pendingOccurrenceAt
+  }
+
+  return isCanonicalPendingOccurrenceForCurrentSchedule({
+    pendingOccurrenceAt,
+    source: input.source,
+    state: input.state,
+  })
+    ? pendingOccurrenceAt
+    : null
+}
+
+function canonicalSourceChangedAfterRuntimeState(input: {
+  runtimeUpdatedAt: string
+  source: CanonicalAssistantCronJobRecord
+}): boolean {
+  const sourceCreatedMs = Date.parse(input.source.createdAt)
+  const sourceUpdatedMs = Date.parse(input.source.updatedAt)
+  const runtimeUpdatedMs = Date.parse(input.runtimeUpdatedAt)
+  if (
+    !Number.isFinite(sourceCreatedMs) ||
+    !Number.isFinite(sourceUpdatedMs) ||
+    !Number.isFinite(runtimeUpdatedMs)
+  ) {
+    return false
+  }
+
+  return sourceUpdatedMs !== sourceCreatedMs && sourceUpdatedMs > runtimeUpdatedMs
+}
+
+function isCanonicalPendingOccurrenceForCurrentSchedule(input: {
+  pendingOccurrenceAt: string
+  source: CanonicalAssistantCronJobRecord
+  state: AssistantCronCanonicalRuntimeState
+}): boolean {
+  const pendingOccurrenceMs = Date.parse(input.pendingOccurrenceAt)
+  if (!Number.isFinite(pendingOccurrenceMs)) {
+    return false
+  }
+
+  if (input.source.schedule.kind === 'at') {
+    return input.pendingOccurrenceAt === input.source.schedule.at
+  }
+
+  if (input.source.schedule.kind === 'every') {
+    const anchorAt = input.state.lastSucceededAt ?? input.state.activatedAt
+    if (!anchorAt) {
+      return true
+    }
+
+    return (
+      computeAssistantCronNextRunAt(input.source.schedule, new Date(anchorAt)) ===
+      input.pendingOccurrenceAt
+    )
+  }
+
+  return (
+    computeAssistantCronNextRunAt(
+      resolveAssistantCronResolvedSchedule({
+        schedule: input.source.schedule,
+        timeZone: input.source.timeZone,
+      }),
+      new Date(pendingOccurrenceMs - 60_000),
+    ) === input.pendingOccurrenceAt
+  )
+}
+
+function resolveCanonicalAssistantCronScheduleAnchorAt(input: {
+  pendingOccurrenceIgnored: boolean
+  source: CanonicalAssistantCronJobRecord
+  state: AssistantCronCanonicalRuntimeState
+}): string | null {
+  if (input.pendingOccurrenceIgnored) {
+    return input.source.updatedAt
+  }
+
+  return input.state.lastSucceededAt ?? input.state.activatedAt
 }

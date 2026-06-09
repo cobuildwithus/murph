@@ -89,6 +89,7 @@ test("automation previews normalize each schedule shape and route selector field
         },
         route: {
           channel: "sms",
+          deliverySource: null,
           deliveryTarget: "phone-thread",
           identityId: null,
           participantId: "participant-01",
@@ -101,6 +102,7 @@ test("automation previews normalize each schedule shape and route selector field
       },
       route: {
         channel: "sms",
+        deliverySource: null,
         deliveryTarget: "phone-thread",
         identityId: null,
         participantId: "participant-01",
@@ -127,6 +129,7 @@ test("automation previews normalize each schedule shape and route selector field
       },
       route: {
         channel: "telegram",
+        deliverySource: null,
         deliveryTarget: null,
         identityId: null,
         participantId: null,
@@ -148,6 +151,7 @@ test("automation previews normalize each schedule shape and route selector field
         },
         route: {
           channel: "telegram",
+          deliverySource: null,
           deliveryTarget: "telegram-thread",
           identityId: "identity-01",
           participantId: null,
@@ -162,6 +166,7 @@ test("automation previews normalize each schedule shape and route selector field
       },
       route: {
         channel: "telegram",
+        deliverySource: null,
         deliveryTarget: "telegram-thread",
         identityId: "identity-01",
         participantId: null,
@@ -188,6 +193,7 @@ test("automation previews normalize each schedule shape and route selector field
       },
       route: {
         channel: "telegram",
+        deliverySource: null,
         deliveryTarget: null,
         identityId: null,
         participantId: null,
@@ -213,6 +219,7 @@ test("automation previews normalize each schedule shape and route selector field
         },
         route: {
           channel: "telegram",
+          deliverySource: null,
           deliveryTarget: null,
           identityId: null,
           participantId: null,
@@ -225,6 +232,7 @@ test("automation previews normalize each schedule shape and route selector field
       },
       route: {
         channel: "telegram",
+        deliverySource: null,
         deliveryTarget: null,
         identityId: null,
         participantId: null,
@@ -555,6 +563,7 @@ test("automation upserts normalize route strings, generated ids, preserve fallba
   assert.equal(created.record.continuityPolicy, "preserve");
   assert.deepEqual(created.record.route, {
     channel: "linq",
+    deliverySource: null,
     deliveryTarget: "123",
     identityId: "identity-01",
     participantId: "participant-01",

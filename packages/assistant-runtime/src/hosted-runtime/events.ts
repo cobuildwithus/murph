@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type {
+  HostedExecutionAssistantNotificationRoute,
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionRedactedLogEntry,
   HostedExecutionLogLevel,
@@ -14,9 +15,12 @@ import {
   buildHostedAssistantContextFingerprintDetails,
   sendAssistantNotification,
   scheduleDeviceActivityTriggeredAutomations,
+  upsertAssistantCronAutomation,
   type AssistantExecutionContext,
+  type AssistantNotificationResult,
   type AssistantTurnEnvironment,
 } from "@murphai/assistant-engine";
+import type { AutomationRoute } from "@murphai/contracts";
 import {
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
@@ -52,6 +56,17 @@ type HostedMailboxOutcome = HostedMailboxEffect & {
 
 const DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE =
   "Hosted conversation wakes must be imported through mailbox AssistantInputEvent staging.";
+const ONBOARDING_FOLLOWUP_AUTOMATION_SLUG = "finish-onboarding-followup";
+const ONBOARDING_FOLLOWUP_AUTOMATION_TITLE = "Finish Murph onboarding follow-up";
+const ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS = [
+  "This scheduled check helps continue Murph setup.",
+  "",
+  "First inspect onboarding status with `vault-cli assistant onboarding status`.",
+  "",
+  "If onboarding is completed or declined, run `vault-cli automation set-status finish-onboarding-followup --status archived` and return skip.",
+  "",
+  "If onboarding is still open, offer one brief, natural in-chat message inviting setup to continue. Keep it low-pressure, do not mention internal state, and do not use a fixed script.",
+].join("\n");
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   "murph.assistant-provider-plan-diagnostics.v1";
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = "assistant.provider.plan";
@@ -583,9 +598,10 @@ export async function executeHostedAssistantNotificationWake(input: {
       wake: input.wake,
     }),
   ];
+  let seededOnboardingFollowupWakeAt: string | null = null;
 
   try {
-    await sendAssistantNotification(
+    const notificationResult = await sendAssistantNotification(
       buildAssistantNotificationInput(
         input.wake,
         input.executionContext,
@@ -598,6 +614,12 @@ export async function executeHostedAssistantNotificationWake(input: {
         },
       ),
     );
+    seededOnboardingFollowupWakeAt = await maybeSeedOnboardingFollowupAutomation({
+      notificationResult,
+      redactedLogEntries,
+      vaultRoot: input.vaultRoot,
+      wake: input.wake,
+    });
   } catch (error) {
     if (!shouldSkipFailedHostedAssistantNotification(input.wake)) {
       redactedLogEntries.push(
@@ -631,8 +653,138 @@ export async function executeHostedAssistantNotificationWake(input: {
   return createNoopMailboxEffect({
     conversationMetrics: null,
     mailboxLane: "assistant-notification",
+    nextWakeAt: seededOnboardingFollowupWakeAt,
+    nextWakeReason: seededOnboardingFollowupWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
     redactedLogEntries,
   });
+}
+
+async function maybeSeedOnboardingFollowupAutomation(input: {
+  notificationResult: AssistantNotificationResult | undefined;
+  redactedLogEntries: HostedExecutionRedactedLogEntry[];
+  vaultRoot: string;
+  wake: HostedExecutionAssistantNotificationRequestedWake;
+}): Promise<string | null> {
+  if (!isSignupWelcomeAssistantNotification(input.wake)) {
+    return null;
+  }
+
+  if (!didAssistantNotificationAcceptDelivery(input.notificationResult)) {
+    return null;
+  }
+
+  try {
+    const route = buildOnboardingFollowupAutomationRoute(
+      input.wake.notification.route,
+    );
+    if (!route) {
+      throw new Error(
+        "Onboarding follow-up route is not seedable: Linq participant delivery has no delivery source.",
+      );
+    }
+
+    const job = await upsertAssistantCronAutomation({
+      firstOccurrencePolicy: "after-current-local-day",
+      instructions: ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS,
+      route,
+      schedule: {
+        kind: "dailyLocal",
+        localTime: "13:30",
+      },
+      slug: ONBOARDING_FOLLOWUP_AUTOMATION_SLUG,
+      summary: "Daily setup continuation check until Murph onboarding is complete.",
+      tags: ["assistant", "onboarding"],
+      title: ONBOARDING_FOLLOWUP_AUTOMATION_TITLE,
+      vault: input.vaultRoot,
+    });
+    return job?.enabled ? job.state.nextRunAt : null;
+  } catch (error) {
+    input.redactedLogEntries.push(
+      emitHostedOnboardingFollowupSeedFailureLog(input.wake, error),
+    );
+    return null;
+  }
+}
+
+function didAssistantNotificationAcceptDelivery(
+  result: AssistantNotificationResult | undefined,
+): boolean {
+  const outcomeKind = result?.deliveryOutcome?.kind;
+  return outcomeKind === "sent" || outcomeKind === "queued";
+}
+
+function isSignupWelcomeAssistantNotification(
+  wake: HostedExecutionAssistantNotificationRequestedWake,
+): boolean {
+  const expectedToken = `signup-welcome:${wake.userId}`;
+  return [
+    wake.notification.deliveryDedupeToken,
+    wake.notification.deliveryIdempotencyKey,
+  ].some((value) => value === expectedToken);
+}
+
+function buildOnboardingFollowupAutomationRoute(
+  route: HostedExecutionAssistantNotificationRoute,
+): AutomationRoute | null {
+  const delivery = route.delivery;
+  if (route.channel === "linq") {
+    if (delivery.kind === "participant" && !delivery.source) {
+      return null;
+    }
+
+    return {
+      channel: route.channel,
+      deliverySource: delivery.source ?? null,
+      deliveryTarget: delivery.kind === "participant" ? null : delivery.target,
+      identityId: route.identityId,
+      participantId: delivery.kind === "participant" ? delivery.target : null,
+      threadId: null,
+    };
+  }
+
+  return {
+    channel: route.channel,
+    deliverySource: delivery.source ?? null,
+    deliveryTarget: delivery.kind === "explicit" ? delivery.target : null,
+    identityId: route.identityId,
+    participantId: delivery.kind === "participant" ? delivery.target : null,
+    threadId:
+      route.threadId ?? (delivery.kind === "thread" ? delivery.target : null),
+  };
+}
+
+function emitHostedOnboardingFollowupSeedFailureLog(
+  wake: HostedExecutionAssistantNotificationRequestedWake,
+  error: unknown,
+): HostedExecutionRedactedLogEntry {
+  const details = {
+    ...buildHostedAssistantNotificationLogDetails(wake),
+    eventCode: "assistant.onboarding_followup_seed_failed",
+  };
+  const redacted = {
+    ...details,
+    ...(extractHostedAssistantNotificationRedactedDetails(error) ?? {}),
+    errorCode: deriveHostedExecutionErrorCode(error),
+  };
+
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details,
+    error,
+    level: "warn",
+    message: "Hosted onboarding follow-up automation seed failed.",
+    phase: "wake.running",
+    wake,
+  });
+
+  return {
+    component: "runtime",
+    eventId: wake.eventId,
+    level: "warn",
+    message: "Hosted onboarding follow-up automation seed failed.",
+    phase: "wake.running",
+    redacted,
+  };
 }
 
 function shouldSkipFailedHostedAssistantNotification(
