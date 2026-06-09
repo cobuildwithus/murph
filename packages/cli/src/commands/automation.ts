@@ -307,19 +307,11 @@ function normalizeAutomationRouteForSave(route: AutomationRoute): AutomationRout
 }
 
 function normalizeAutomationRouteFieldsForSave(route: unknown): AutomationRoute {
-  const normalized = automationRouteSchema.parse(
+  return automationRouteSchema.parse(
     stripPrivateAssistantRoutePlaceholders(
       automationRouteSchema.parse(route),
     ),
   );
-  if (normalized.channel !== "linq" || !normalized.deliveryTarget) {
-    return normalized;
-  }
-  return {
-    ...normalized,
-    participantId: null,
-    threadId: null,
-  };
 }
 
 function normalizeAutomationRouteOption(
