@@ -20,7 +20,7 @@ export function ConnectedAccountCard(props: {
         className,
       )}
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
         <div className="min-w-0 flex flex-col gap-1.5">
           {label ? (
             <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
@@ -29,7 +29,7 @@ export function ConnectedAccountCard(props: {
           ) : null}
           <span
             className={cn(
-              "font-serif leading-tight tracking-tight [overflow-wrap:anywhere]",
+              "font-serif leading-tight tracking-tight break-words",
               isEmpty ? "text-muted-foreground" : "text-foreground",
               "text-lg",
             )}

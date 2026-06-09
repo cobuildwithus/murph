@@ -12,6 +12,7 @@ import {
 import type { HostedPrivyLinkedAccountContainer } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import {
+  resolveHostedPrivyTelegramDisplayState,
   resolveHostedTelegramSettingsDisplayState,
   syncHostedLinkedTelegram,
   toHostedTelegramLinkErrorMessage,
@@ -42,7 +43,6 @@ export function ConnectTelegram(props: {
   const displayState = resolveHostedTelegramSettingsDisplayState({
     initialTelegramAccount,
     syncedTelegramOverride,
-    user: null,
   });
   const currentTelegram = displayState.currentTelegram;
   const canManageTelegram = authenticated;
@@ -118,8 +118,8 @@ export function ConnectTelegram(props: {
     try {
       const refreshedUser = await refreshUser().catch(() => linkedUser);
       const refreshedTelegram =
-        resolveHostedTelegramSettingsDisplayState({ user: refreshedUser }).currentTelegram
-        ?? resolveHostedTelegramSettingsDisplayState({ user: linkedUser }).currentTelegram;
+        resolveHostedPrivyTelegramDisplayState(refreshedUser).currentTelegram
+        ?? resolveHostedPrivyTelegramDisplayState(linkedUser).currentTelegram;
 
       await syncLinkedTelegram("link", refreshedTelegram?.telegramUserId ?? null);
     } finally {

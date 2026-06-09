@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   telegramCardProps: [] as Array<{
     autoLink?: boolean;
     initialTelegramAccount?: { telegramUserId: string; username: string | null } | null;
+    showHeading?: boolean;
   }>,
 }));
 
@@ -78,10 +79,12 @@ vi.mock("@/src/components/settings/hosted-telegram-card-settings", () => ({
     autoLink?: boolean;
     initialTelegramAccount?: { telegramUserId: string; username: string | null } | null;
     onSynced?: (payload: { mode: string }) => void;
+    showHeading?: boolean;
   }) {
     mocks.telegramCardProps.push({
       autoLink: props.autoLink,
       initialTelegramAccount: props.initialTelegramAccount,
+      showHeading: props.showHeading,
     });
 
     return createElement(
@@ -167,6 +170,42 @@ describe("HostedSettingsIdentityLinkDialog", () => {
         {
           autoLink: true,
           initialTelegramAccount: null,
+          showHeading: false,
+        },
+      ]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("seeds the Telegram dialog card from the account snapshot username", async () => {
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+
+    const { cleanup } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account: {
+          ...makeAccountSnapshot(),
+          telegram: {
+            telegramUserId: "12345",
+            username: "sample_user",
+          },
+        },
+        initialMode: "telegram",
+        onOpenChange: mocks.onOpenChange,
+      }),
+    );
+
+    try {
+      expect(mocks.telegramCardProps).toEqual([
+        {
+          autoLink: false,
+          initialTelegramAccount: {
+            telegramUserId: "12345",
+            username: "sample_user",
+          },
+          showHeading: false,
         },
       ]);
     } finally {

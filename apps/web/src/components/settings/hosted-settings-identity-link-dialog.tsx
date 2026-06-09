@@ -46,12 +46,14 @@ export function HostedSettingsIdentityLinkDialog({
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md p-6 md:p-7">
-        <DialogHeader className="pr-10">
-          <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
+      <DialogContent className="max-w-[min(30rem,calc(100vw-2rem))] gap-6 rounded-2xl border border-border/80 bg-popover p-6 text-popover-foreground ring-border sm:max-w-[30rem] md:p-8">
+        <DialogHeader className="gap-2 pr-10">
+          <DialogTitle className="font-serif text-2xl/8 font-semibold tracking-normal text-popover-foreground">
             {copy.title}
           </DialogTitle>
-          <DialogDescription>{copy.description}</DialogDescription>
+          <DialogDescription className="max-w-[34ch] text-base/7 text-muted-foreground">
+            {copy.description}
+          </DialogDescription>
         </DialogHeader>
         {!appId ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
@@ -74,10 +76,11 @@ export function HostedSettingsIdentityLinkDialog({
                 initialTelegramAccount={account.telegram.telegramUserId
                   ? {
                       telegramUserId: account.telegram.telegramUserId,
-                      username: null,
+                      username: account.telegram.username ?? null,
                     }
                   : null}
                 onSynced={closeAndRefresh}
+                showHeading={false}
               />
             ) : null}
             {initialMode === "email" ? (
