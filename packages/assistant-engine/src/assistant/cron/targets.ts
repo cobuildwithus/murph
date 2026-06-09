@@ -3,6 +3,7 @@ import {
   type AssistantCronTarget,
   type AssistantCronTargetSnapshot,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import type { AutomationRoute } from '@murphai/contracts'
 import {
   looksLikePrivateAssistantRoutePlaceholder,
   resolveAssistantDeliveryRouteWithCurrentRoute,
@@ -40,6 +41,7 @@ export async function resolveAssistantCronTargetDefaults<
   return {
     ...input,
     channel: resolvedRoute.channel ?? undefined,
+    deliverySource: input.deliverySource ?? undefined,
     identityId: resolvedRoute.identityId ?? undefined,
     participantId: resolvedRoute.participantId ?? undefined,
     threadId: resolvedRoute.threadId ?? undefined,
@@ -83,11 +85,17 @@ export function validateAssistantCronDeliveryTarget(
   const participantId = normalizedRoute.participantId
   const threadId = normalizedRoute.threadId
   const deliveryTarget = normalizedRoute.deliveryTarget
+  const deliverySource = input.deliverySource ?? null
+  const hasLinqParticipantDelivery =
+    channel === 'linq' && Boolean(participantId) && deliverySource?.kind === 'linq'
   if (channel === 'linq') {
-    if (!deliveryTarget) {
+    if (
+      !deliveryTarget &&
+      !hasLinqParticipantDelivery
+    ) {
       throw new VaultCliError(
         'ASSISTANT_CRON_DELIVERY_REQUIRED',
-        'iMessage assistant cron jobs require an explicit delivery target. Pass --deliveryTarget.',
+        'iMessage assistant cron jobs require an explicit delivery target or a participant target with a Linq delivery source.',
       )
     }
 
@@ -104,7 +112,7 @@ export function validateAssistantCronDeliveryTarget(
     threadId,
   })
 
-  if (!deliveryTarget && !bindingDelivery) {
+  if (!deliveryTarget && !bindingDelivery && !hasLinqParticipantDelivery) {
     throw new VaultCliError(
       'ASSISTANT_CRON_DELIVERY_REQUIRED',
       'Assistant cron jobs must bind an explicit outbound route. Pass --thread, --participant, or --deliveryTarget for the selected channel.',
@@ -114,6 +122,7 @@ export function validateAssistantCronDeliveryTarget(
   return buildAssistantCronTarget({
     ...input,
     channel,
+    deliverySource,
     identityId,
     participantId,
     threadId,
@@ -139,19 +148,48 @@ export function buildAssistantCronTargetSnapshot(
 
 export function assistantCronTargetAudienceEquals(
   left: Pick<
-    AssistantCronTarget,
-    'channel' | 'deliveryTarget' | 'identityId' | 'participantId' | 'threadId'
+    AssistantCronTarget | AutomationRoute,
+    | 'channel'
+    | 'deliverySource'
+    | 'deliveryTarget'
+    | 'identityId'
+    | 'participantId'
+    | 'threadId'
   >,
   right: Pick<
-    AssistantCronTarget,
-    'channel' | 'deliveryTarget' | 'identityId' | 'participantId' | 'threadId'
+    AssistantCronTarget | AutomationRoute,
+    | 'channel'
+    | 'deliverySource'
+    | 'deliveryTarget'
+    | 'identityId'
+    | 'participantId'
+    | 'threadId'
   >,
 ): boolean {
   return (
     left.channel === right.channel &&
+    assistantCronDeliverySourceEquals(
+      left.deliverySource,
+      right.deliverySource,
+    ) &&
     left.identityId === right.identityId &&
     left.participantId === right.participantId &&
     left.threadId === right.threadId &&
     left.deliveryTarget === right.deliveryTarget
   )
+}
+
+function assistantCronDeliverySourceEquals(
+  left: AssistantCronTarget['deliverySource'] | undefined,
+  right: AssistantCronTarget['deliverySource'] | undefined,
+): boolean {
+  const normalizedLeft = left ?? null
+  const normalizedRight = right ?? null
+
+  if (normalizedLeft === null || normalizedRight === null) {
+    return normalizedLeft === normalizedRight
+  }
+
+  return normalizedLeft.kind === normalizedRight.kind &&
+    normalizedLeft.fromPhoneNumber === normalizedRight.fromPhoneNumber
 }

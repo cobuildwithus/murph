@@ -23,6 +23,7 @@ import {
   buildCanonicalAutomationUpsertInput,
   isCanonicalAssistantCronSourceEnabled,
   listCanonicalAssistantCronRecords,
+  resolveCanonicalAssistantCronOccurrenceAt,
   resolveCanonicalAssistantCronJobId,
   type CanonicalAssistantCronJobRecord,
 } from './canonical-jobs.js'
@@ -377,9 +378,20 @@ function reconcileCanonicalAssistantCronRuntimeAfterDelivery(input: {
     }
   }
 
+  const pendingOccurrenceAt = input.source
+    ? resolveCanonicalAssistantCronOccurrenceAt(input.source, {
+        ...input.runtimeState,
+        state: runningClearedState,
+      })
+    : runningClearedState.pendingOccurrenceAt
+  const isRetryingFailedOccurrence =
+    pendingOccurrenceAt !== null &&
+    pendingOccurrenceAt === runningClearedState.pendingOccurrenceAt
   const failureCount = input.runtimeState.state.consecutiveFailures + 1
   const retryAfterAt =
-    input.source && isCanonicalAssistantCronSourceEnabled(input.source)
+    isRetryingFailedOccurrence &&
+    input.source &&
+    isCanonicalAssistantCronSourceEnabled(input.source)
       ? new Date(
           Date.parse(input.terminal.at) +
             resolveAssistantCronFailureBackoffMs(failureCount),
@@ -391,6 +403,7 @@ function reconcileCanonicalAssistantCronRuntimeAfterDelivery(input: {
     updatedAt: input.terminal.at,
     state: {
       ...runningClearedState,
+      pendingOccurrenceAt,
       retryAfterAt,
       lastFailedAt: input.terminal.at,
       lastError: input.terminal.message,

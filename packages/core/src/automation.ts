@@ -110,7 +110,7 @@ export interface PatchAutomationInput {
   schedule?: AutomationSchedule;
   slug?: string;
   status?: AutomationStatus;
-  summary?: string;
+  summary?: string | null;
   tags?: string[];
   title?: string;
   vaultRoot: string;
@@ -260,10 +260,33 @@ function normalizeAutomationRoute(value: unknown): AutomationRoute {
 
   return {
     channel: normalizeAutomationRouteChannel(object.channel),
+    deliverySource: normalizeAutomationRouteDeliverySource(object.deliverySource),
     deliveryTarget: normalizeNullableRouteString(object.deliveryTarget),
     identityId: normalizeNullableRouteString(object.identityId),
     participantId: normalizeNullableRouteString(object.participantId),
     threadId: normalizeNullableRouteString(object.threadId),
+  };
+}
+
+function normalizeAutomationRouteDeliverySource(
+  value: unknown,
+): AutomationRoute["deliverySource"] {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const object = requireObject(value, "route.deliverySource");
+  const kind = requireString(object.kind, "route.deliverySource.kind");
+  if (kind !== "linq") {
+    throw new VaultError("VAULT_INVALID_INPUT", "route.deliverySource.kind must be linq.");
+  }
+
+  return {
+    fromPhoneNumber: requireString(
+      object.fromPhoneNumber,
+      "route.deliverySource.fromPhoneNumber",
+    ),
+    kind,
   };
 }
 
@@ -358,6 +381,7 @@ function buildAutomationScheduleFrontmatter(schedule: AutomationSchedule): Front
 function buildAutomationRouteFrontmatter(route: AutomationRoute): FrontmatterObject {
   return {
     channel: route.channel,
+    deliverySource: route.deliverySource ?? null,
     deliveryTarget: route.deliveryTarget,
     identityId: route.identityId,
     participantId: route.participantId,
@@ -495,6 +519,7 @@ export function scaffoldAutomationPayload(): AutomationScaffoldPayload {
     },
     route: {
       channel: "telegram",
+      deliverySource: null,
       deliveryTarget: null,
       identityId: null,
       participantId: null,
@@ -593,7 +618,7 @@ export async function patchAutomation(
       schedule: input.schedule ?? existingRecord.schedule,
       slug: input.slug ?? existingRecord.slug,
       status: input.status ?? existingRecord.status,
-      summary: input.summary ?? existingRecord.summary ?? undefined,
+      summary: input.summary === undefined ? existingRecord.summary : input.summary,
       tags: input.tags ?? existingRecord.tags,
       title: input.title ?? existingRecord.title,
       vaultRoot: input.vaultRoot,
@@ -650,9 +675,9 @@ async function upsertAutomationWithLatestRegistry(
     title,
     status: normalizeAutomationStatus(input.status ?? existingRecord?.status),
     summary:
-      normalizeAutomationSummary(input.summary) ??
-      existingRecord?.summary ??
-      null,
+      input.summary === undefined
+        ? existingRecord?.summary ?? null
+        : normalizeAutomationSummary(input.summary),
     schedule:
       input.schedule !== undefined
         ? normalizeAutomationSchedule(input.schedule)
