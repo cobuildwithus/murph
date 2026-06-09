@@ -10,17 +10,19 @@ Constraints/Assumptions:
 - Preserve unrelated worktree and ledger rows.
 
 Key decisions:
-- Prefer one shared stale-wake predicate around claimed cron execution over broader orchestration changes.
-- Treat the 30 minute threshold as the existing product stale-send window.
+- Fold the stale check into `executeClaimedAssistantCronJob` (gated on the `scheduled` trigger) instead of keeping a parallel expire path, so claim -> execute -> finalize is the single wake pipeline and the previous `expireNextStaleDueAssistantCronJob` duplicate finalization path is deleted.
+- A stale skip consumes its occurrence like a success (one shared `assistantCronRunConsumedOccurrence` predicate) so one-shots archive and recurring schedules advance with no new state path; manual run-now is exempt and always executes.
+- Treat the 30 minute threshold as the existing product stale-send window; one expiry message for all notification kinds.
+- Accepted gap: legacy local-store jobs anchor staleness on `nextRunAt`, which failure backoff resets, so locally retried sends can outlive the window. New jobs are canonical-only (covered via `pendingOccurrenceAt`); the durable fix is deleting the legacy local store, not adding occurrence state to it.
 
 State:
 - Verification complete; final review/PR handoff pending.
 
 Done:
 - Production diagnosis showed the stale one-shot guard did not cover `dailyLocal` recurring reminders.
-- Added the 30 minute stale notification guard at the cron wake level for one-shot and recurring notification jobs.
-- Reused the existing run finalizers so a stale skip consumes the occurrence and advances recurring schedules without adding another state path.
-- Added canonical, canonical retry, and local recurring stale-skip regressions.
+- Added the 30 minute stale notification guard inside claimed cron execution for one-shot, kept one-shot, and recurring notification jobs; scheduled-log jobs stay exempt.
+- Deleted the separate `expireNextStaleDueAssistantCronJob` path so stale wakes reuse the normal claim/execute/finalize pipeline and run finalizers.
+- Added canonical, canonical retry, local recurring, and kept one-shot stale-skip regressions.
 - Verified with focused assistant cron tests, workspace typecheck, and diff-scoped affected package/app verification.
 
 Now:

@@ -888,7 +888,7 @@ describe('assistant cron runtime orchestration', () => {
       runs: [
         expect.objectContaining({
           error: expect.stringContaining(
-            'Assistant cron one-shot notification expired before delivery.',
+            'Assistant cron notification expired before delivery.',
           ),
           response: null,
           status: 'skipped',
@@ -1046,6 +1046,50 @@ describe('assistant cron runtime orchestration', () => {
     expect(updated.state.lastError).toBeNull()
     expect(updated.state.consecutiveFailures).toBe(0)
     expect(updated.state.nextRunAt).toBe('2026-04-09T09:30:00.000Z')
+    await expect(
+      listAssistantCronRuns({
+        job: job.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      jobId: job.jobId,
+      runs: [
+        expect.objectContaining({
+          error: expect.stringContaining(
+            'Assistant cron notification expired before delivery.',
+          ),
+          status: 'skipped',
+        }),
+      ],
+    })
+  })
+
+  it('skips stale kept one-shot local cron jobs and disables them', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-stale-kept-one-shot-',
+    )
+    const job = await createLocalJob(vaultRoot, 'stale-kept-one-shot', {
+      kind: 'at',
+      at: '2026-04-08T09:30:00.000Z',
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    const updated = await getAssistantCronJob(vaultRoot, job.jobId)
+    expect(updated.enabled).toBe(false)
+    expect(updated.state.nextRunAt).toBeNull()
+    expect(updated.state.lastError).toBeNull()
     await expect(
       listAssistantCronRuns({
         job: job.jobId,
@@ -1459,7 +1503,7 @@ describe('assistant cron runtime orchestration', () => {
 
   it('finalizes a canonical cron run when its own claim becomes stale during execution', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-long-canonical-run-',
     )
@@ -1487,7 +1531,7 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async () => {
-      vi.setSystemTime(new Date('2026-04-08T14:30:00.000Z'))
+      vi.setSystemTime(new Date('2026-04-08T11:50:00.000Z'))
       return {
         response: 'Completed long scheduled check-in.',
         session: {
@@ -1521,7 +1565,7 @@ describe('assistant cron runtime orchestration', () => {
 
     const current = await getAssistantCronJob(vaultRoot, claimed.job.jobId)
     expect(current.state.runningAt).toBeNull()
-    expect(current.state.lastSucceededAt).toBe('2026-04-08T14:30:00.000Z')
+    expect(current.state.lastSucceededAt).toBe('2026-04-08T11:50:00.000Z')
 
     const finalizedRuntimeStore = await readAssistantCronCanonicalRuntimeStore(paths, {
       reclaimStaleRunningClaims: false,
@@ -2120,6 +2164,10 @@ async function createRuntimeContext(prefix: string) {
 async function createLocalJob(
   vaultRoot: string,
   name: string,
+  schedule: AssistantCronJob['schedule'] = {
+    kind: 'dailyLocal',
+    localTime: '09:30',
+  },
 ): Promise<AssistantCronJob> {
   const now = '2026-04-08T08:00:00.000Z'
   const job = assistantCronJobSchema.parse({
@@ -2129,10 +2177,7 @@ async function createLocalJob(
     keepAfterRun: true,
     name,
     prompt: `Check in for ${name}`,
-    schedule: {
-      kind: 'dailyLocal',
-      localTime: '09:30',
-    },
+    schedule,
     schema: 'murph.assistant-cron-job.v1',
     state: {
       consecutiveFailures: 0,
