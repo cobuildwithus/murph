@@ -40,7 +40,7 @@ function hasAssistantProviderUsableNativeResume(
   input: AssistantProviderTurnExecutionInput,
 ): boolean {
   const resumeCodexThreadId = normalizeNullableString(
-    input.resumeCodexThreadId,
+    input.resume?.codexThreadId,
   )
   if (!resumeCodexThreadId) {
     return false

@@ -216,11 +216,10 @@ describe('assistant protocol index planning', () => {
       sharedPlan: createSharedPlan(),
     })
 
-    expect(resumedPlan.resumeCodexThreadId).toBe('thread-resume')
+    expect(resumedPlan.resume?.codexThreadId).toBe('thread-resume')
     expect(resumedPlan.developerInstructions).toBeNull()
     expect(resumedPlan.sessionContext).toBeUndefined()
-    expect(resumedPlan.freshThreadFallback).toBeUndefined()
-    expect(resumedPlan.prepareFreshThreadFallback).toEqual(expect.any(Function))
+    expect(resumedPlan.resume?.prepareFreshThreadFallback).toEqual(expect.any(Function))
     expect(resumedPlan.planningDiagnostics).toMatchObject({
       shouldPrepareBootstrapContext: false,
     })
@@ -232,7 +231,7 @@ describe('assistant protocol index planning', () => {
       vaultRoot: '/vault',
     })
 
-    const fallback = await resumedPlan.prepareFreshThreadFallback?.()
+    const fallback = await resumedPlan.resume?.prepareFreshThreadFallback()
 
     expect(fallback?.developerInstructions).toContain(
       'bootstrap contract',
@@ -276,7 +275,7 @@ describe('assistant protocol index planning', () => {
       sharedPlan: createSharedPlan(),
     })
 
-    expect(plan.resumeCodexThreadId).toBeNull()
+    expect(plan.resume).toBeNull()
     expect(plan.developerInstructions).toContain('bootstrap contract')
     expect(plan.assistantContractFingerprint).toEqual(expect.any(String))
   })
@@ -368,7 +367,7 @@ describe('assistant protocol index planning', () => {
       sharedPlan: createSharedPlan(),
     })
 
-    expect(plan.resumeCodexThreadId).toBeNull()
+    expect(plan.resume).toBeNull()
     expect(plan.developerInstructions).toContain('new bootstrap')
     expect(plan.assistantContractFingerprint).not.toBe(oldPlan.assistantContractFingerprint)
   })
@@ -424,7 +423,7 @@ describe('assistant protocol index planning', () => {
       sharedPlan: createSharedPlan(),
     })
 
-    expect(plan.resumeCodexThreadId).toBeNull()
+    expect(plan.resume).toBeNull()
     expect(plan.assistantContractFingerprint).not.toBe(oldToolContractFingerprint)
   })
 
@@ -477,7 +476,7 @@ describe('assistant protocol index planning', () => {
       sharedPlan: createSharedPlan(),
     })
 
-    expect(resumedPlan.resumeCodexThreadId).toBe('thread-sensitive-resume')
+    expect(resumedPlan.resume?.codexThreadId).toBe('thread-sensitive-resume')
     expect(resumedPlan.developerInstructions).toBeNull()
     expect(resumedPlan.turnContextPrompt).toContain(
       'Cached assistant context snapshot.',
@@ -488,7 +487,7 @@ describe('assistant protocol index planning', () => {
     expect(planningMocks.readAssistantContextSnapshotPrompt).toHaveBeenCalledTimes(1)
 
     planningMocks.readAssistantContextSnapshotPrompt.mockClear()
-    const fallback = await resumedPlan.prepareFreshThreadFallback?.()
+    const fallback = await resumedPlan.resume?.prepareFreshThreadFallback()
 
     expect(fallback?.developerInstructions).toContain('bootstrap contract')
     expect(
@@ -541,13 +540,12 @@ describe('assistant protocol index planning', () => {
       sharedPlan: createSharedPlan(),
     })
 
-    expect(resumedPlan.resumeCodexThreadId).toBe('thread-active-turn')
+    expect(resumedPlan.resume?.codexThreadId).toBe('thread-active-turn')
     expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
     expect(resumedPlan.codexContinuation).toEqual({
       kind: 'provider-state-optimization',
     })
-    expect(resumedPlan.freshThreadFallback).toBeUndefined()
-    expect(resumedPlan.prepareFreshThreadFallback).toEqual(expect.any(Function))
+    expect(resumedPlan.resume?.prepareFreshThreadFallback).toEqual(expect.any(Function))
   })
 
   it('replays bounded committed transcript messages when provider-native resume is unavailable', async () => {
@@ -602,7 +600,7 @@ describe('assistant protocol index planning', () => {
         sharedPlan: createPrivateSharedPlan(),
       })
 
-      expect(plan.resumeCodexThreadId).toBeNull()
+      expect(plan.resume).toBeNull()
       expect(plan.conversationHistoryMessages).toEqual([
         {
           content: 'Earlier welcome.',
@@ -792,7 +790,7 @@ describe('assistant protocol index planning', () => {
         sharedPlan: createPrivateSharedPlan(),
       })
 
-      expect(plan.resumeCodexThreadId).toBeNull()
+      expect(plan.resume).toBeNull()
       expect(plan.conversationHistoryMessages).toEqual([
         {
           content: 'Earlier answer.',
@@ -847,7 +845,7 @@ describe('assistant protocol index planning', () => {
         sharedPlan: createSharedPlan(),
       })
 
-      expect(plan.resumeCodexThreadId).toBeNull()
+      expect(plan.resume).toBeNull()
       expect(plan.conversationHistoryMessages).toEqual([
         {
           content: 'Prior sensitive context.',
@@ -907,7 +905,7 @@ describe('assistant protocol index planning', () => {
         sharedPlan: createSharedPlan(),
       })
 
-      expect(plan.resumeCodexThreadId).toBeNull()
+      expect(plan.resume).toBeNull()
       expect(plan.conversationHistoryMessages).toBeUndefined()
     } finally {
       await rm(vault, { force: true, recursive: true })
@@ -988,9 +986,9 @@ describe('assistant protocol index planning', () => {
         sharedPlan: createPrivateSharedPlan(),
       })
 
-      expect(plan.resumeCodexThreadId).toBe('thread-resume')
+      expect(plan.resume?.codexThreadId).toBe('thread-resume')
       expect(plan.conversationHistoryMessages).toBeUndefined()
-      await expect(plan.prepareFreshThreadFallback?.()).resolves.toMatchObject({
+      await expect(plan.resume?.prepareFreshThreadFallback()).resolves.toMatchObject({
         conversationHistoryMessages: [
           {
             content: 'Earlier protocol context.',
@@ -1077,9 +1075,9 @@ describe('assistant protocol index planning', () => {
         sharedPlan: createSharedPlan(),
       })
 
-      expect(plan.resumeCodexThreadId).toBe('thread-resume')
+      expect(plan.resume?.codexThreadId).toBe('thread-resume')
       expect(plan.conversationHistoryMessages).toBeUndefined()
-      await expect(plan.prepareFreshThreadFallback?.()).resolves.toMatchObject({
+      await expect(plan.resume?.prepareFreshThreadFallback()).resolves.toMatchObject({
         conversationHistoryMessages: [
           {
             content: 'Prior sensitive context.',
@@ -1127,7 +1125,7 @@ describe('assistant protocol index planning', () => {
       sharedPlan: createSharedPlan(),
     })
 
-    expect(plan.resumeCodexThreadId).toBeNull()
+    expect(plan.resume).toBeNull()
     expect(plan.developerInstructions).toContain('bootstrap contract')
     expect(
       planningMocks.readAssistantCliSurfaceBootstrapContext,

@@ -78,12 +78,10 @@ export interface AssistantRouteTurnPlan {
   developerInstructions: string | null
   conversationHistoryMessages?: readonly AssistantProviderConversationMessage[]
   diagnosticsPolicy: AssistantDiagnosticsPolicy
-  freshThreadFallback?: AssistantRouteFreshThreadFallbackPlan
-  prepareFreshThreadFallback?: () => Promise<AssistantRouteFreshThreadFallbackPlan | null>
   onboardingGuidanceInjected: boolean
   codexContinuation: AssistantCodexContinuation
   planningDiagnostics: AssistantRoutePlanningDiagnostics
-  resumeCodexThreadId: string | null
+  resume: AssistantRouteCodexResumePlan | null
   sessionContext?: {
     binding: AssistantSession['binding']
   }
@@ -161,6 +159,11 @@ const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT = 24
 const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_MESSAGE_BYTES = 4_000
 const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_TOTAL_BYTES = 12_000
 const assistantConversationHistoryTextEncoder = new TextEncoder()
+
+export interface AssistantRouteCodexResumePlan {
+  codexThreadId: string
+  prepareFreshThreadFallback: () => Promise<AssistantRouteFreshThreadFallbackPlan>
+}
 
 export interface AssistantRouteFreshThreadFallbackPlan {
   conversationHistoryMessages?: readonly AssistantProviderConversationMessage[]
@@ -508,7 +511,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
     : []
   const shouldInjectBootstrapContext = resumeCodexThreadId === null
   const shouldPrepareBootstrapContext = shouldInjectBootstrapContext
-  const shouldResolveFreshThreadFallback = resumeCodexThreadId !== null
   const actualAssistantCliContract = shouldPrepareBootstrapContext
     ? bootstrapAssistantCliContract
     : null
@@ -530,9 +532,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
       ),
     }
   }
-  const prepareFreshThreadFallback = shouldResolveFreshThreadFallback
-    ? buildFreshThreadFallbackPlan
-    : undefined
+  const resume = resumeCodexThreadId !== null
+    ? {
+        codexThreadId: resumeCodexThreadId,
+        prepareFreshThreadFallback: buildFreshThreadFallbackPlan,
+      }
+    : null
   const systemPromptResult = threadStartPromptResult
   const systemPrompt = systemPromptResult.prompt
   const developerInstructions =
@@ -563,7 +568,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
         ? conversationHistoryMessages
         : undefined,
     diagnosticsPolicy,
-    ...(prepareFreshThreadFallback ? { prepareFreshThreadFallback } : {}),
     onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
     codexContinuation: resolveAssistantCodexContinuation({
       resumeCodexThreadId,
@@ -587,7 +591,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       supportedExperimentProtocolsElapsedMs:
         routePlanningSpans.supportedExperimentProtocolsElapsedMs ?? null,
     },
-    resumeCodexThreadId,
+    resume,
     sessionContext: shouldPrepareBootstrapContext
       ? {
           binding: input.session.binding,
