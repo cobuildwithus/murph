@@ -37,6 +37,8 @@ import {
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
 import {
+  buildExperimentAssistantSupportFromOptions,
+  buildExperimentOnboardingCaptureFromOptions,
   normalizeExperimentMeasurementAnchorFlagOption,
   normalizeExperimentPlannedMeasurementFlagOption,
   normalizeRepeatableFlagOption,
@@ -132,6 +134,60 @@ const experimentContextSeveritySchema = z.enum([
 
 const repeatableTextOptionSchema = (description: string) =>
   z.array(z.string().min(1)).optional().describe(description)
+
+const experimentOnboardingOptionSchemas = {
+  onboardingCompletedAt: isoTimestampSchema
+    .optional()
+    .describe('Timestamp when the protocol onboarding capture completed.'),
+  setupAnswer: repeatableTextOptionSchema(
+    'Setup answer as key=value. Repeat --setup-answer for multiple setup slots.',
+  ),
+  safetyCautionLevel: experimentSafetyCautionLevelSchema
+    .optional()
+    .describe('Onboarding safety caution level.'),
+  safetyDisposition: experimentSafetyDispositionSchema
+    .optional()
+    .describe('Onboarding safety disposition.'),
+  positiveQuestionId: repeatableTextOptionSchema(
+    'Positive safety question ids. Repeat --positive-question-id for multiple values.',
+  ),
+  safetyNote: repeatableTextOptionSchema(
+    'Safety note. Repeat --safety-note for multiple values.',
+  ),
+  contextNote: repeatableTextOptionSchema(
+    'Context note from onboarding. Repeat --context-note for multiple values.',
+  ),
+}
+
+const experimentAssistantSupportOptionSchemas = {
+  reminderPolicy: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Reminder policy id selected during onboarding.'),
+  reminderOptionId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Reminder option id selected during onboarding.'),
+  remindersEnabled: z
+    .boolean()
+    .optional()
+    .describe('Whether assistant reminders are enabled for the run.'),
+  checkInCadence: experimentCheckInCadenceSchema
+    .optional()
+    .describe('Assistant check-in cadence for the run.'),
+  notificationStyle: experimentNotificationStyleSchema
+    .optional()
+    .describe('Assistant notification style for the run.'),
+  missedLogFollowup: experimentMissedLogFollowupSchema
+    .optional()
+    .describe('Assistant follow-up policy for missed logs.'),
+  weeklyDigestEnabled: z
+    .boolean()
+    .optional()
+    .describe('Whether weekly assistant digests are enabled for the run.'),
+}
 
 function hasRunScheduleFlag(options: {
   scheduleKind?: z.infer<typeof experimentRunScheduleKindSchema>
@@ -500,7 +556,18 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
     analysisAnchor?: string[]
     plannedMeasurement?: string[]
     analysisNote?: string[]
+    onboardingCompletedAt?: string
+    setupAnswer?: readonly string[]
+    safetyCautionLevel?: z.infer<typeof experimentSafetyCautionLevelSchema>
+    safetyDisposition?: z.infer<typeof experimentSafetyDispositionSchema>
+    positiveQuestionId?: readonly string[]
+    safetyNote?: readonly string[]
+    contextNote?: readonly string[]
+    reminderPolicy?: string
+    reminderOptionId?: string
     remindersEnabled?: boolean
+    checkInCadence?: z.infer<typeof experimentCheckInCadenceSchema>
+    notificationStyle?: z.infer<typeof experimentNotificationStyleSchema>
     missedLogFollowup?: z.infer<typeof experimentMissedLogFollowupSchema>
     weeklyDigestEnabled?: boolean
   }
@@ -636,6 +703,25 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
     protocolSpec?.sessionFieldIds
   const confounderFields =
     input.options.confounderField ?? onboarding?.trackingHints?.confounderFields
+  const onboardingCapture = buildExperimentOnboardingCaptureFromOptions({
+    onboardingCompletedAt: input.options.onboardingCompletedAt,
+    setupAnswer: input.options.setupAnswer,
+    safetyCautionLevel: input.options.safetyCautionLevel,
+    safetyDisposition: input.options.safetyDisposition,
+    positiveQuestionId: input.options.positiveQuestionId,
+    safetyNote: input.options.safetyNote,
+    contextNote: input.options.contextNote,
+  })
+  const assistantSupport =
+    buildExperimentAssistantSupportFromOptions({
+      reminderPolicy: input.options.reminderPolicy,
+      reminderOptionId: input.options.reminderOptionId,
+      remindersEnabled: input.options.remindersEnabled,
+      checkInCadence: input.options.checkInCadence,
+      notificationStyle: input.options.notificationStyle,
+      missedLogFollowup: input.options.missedLogFollowup,
+      weeklyDigestEnabled: input.options.weeklyDigestEnabled,
+    }) ?? experimentAssistantSupportSchema.parse({})
 
   const runPlan = experimentRunPlanSchema.parse(
     compactRecord({
@@ -726,11 +812,8 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
       effectiveProtocolSnapshot,
       runPlan,
       analysisPlan,
-      assistantSupport: compactRecord({
-        remindersEnabled: input.options.remindersEnabled,
-        missedLogFollowup: input.options.missedLogFollowup,
-        weeklyDigestEnabled: input.options.weeklyDigestEnabled,
-      }),
+      onboarding: onboardingCapture,
+      assistantSupport,
     }),
   )
 }
@@ -1269,17 +1352,8 @@ export function registerExperimentCommands(
       analysisNote: repeatableTextOptionSchema(
         'Analysis plan note. Repeat --analysis-note for multiple values.',
       ),
-      remindersEnabled: z
-        .boolean()
-        .optional()
-        .describe('Whether assistant reminders are enabled for the run.'),
-      missedLogFollowup: experimentMissedLogFollowupSchema
-        .optional()
-        .describe('Assistant follow-up policy for missed logs.'),
-      weeklyDigestEnabled: z
-        .boolean()
-        .optional()
-        .describe('Whether weekly assistant digests are enabled for the run.'),
+      ...experimentOnboardingOptionSchemas,
+      ...experimentAssistantSupportOptionSchemas,
       dryRun: z
         .boolean()
         .optional()
@@ -1312,6 +1386,13 @@ export function registerExperimentCommands(
           analysisAnchor: options.analysisAnchor,
           plannedMeasurement: options.plannedMeasurement,
           analysisNote: normalizeRepeatableTextFlagOption(options.analysisNote),
+          setupAnswer: normalizeSetupAnswerOptions(options.setupAnswer),
+          positiveQuestionId: normalizeRepeatableFlagOption(
+            options.positiveQuestionId,
+            'positive-question-id',
+          ),
+          safetyNote: normalizeRepeatableTextFlagOption(options.safetyNote),
+          contextNote: normalizeRepeatableTextFlagOption(options.contextNote),
         },
       })
 
@@ -1507,54 +1588,8 @@ export function registerExperimentCommands(
       analysisNote: repeatableTextOptionSchema(
         'Analysis plan note. Repeat --analysis-note for multiple values.',
       ),
-      onboardingCompletedAt: isoTimestampSchema
-        .optional()
-        .describe('Timestamp when the protocol onboarding capture completed.'),
-      setupAnswer: repeatableTextOptionSchema(
-        'Setup answer as key=value. Repeat --setup-answer for multiple setup slots.',
-      ),
-      safetyCautionLevel: experimentSafetyCautionLevelSchema
-        .optional()
-        .describe('Onboarding safety caution level.'),
-      safetyDisposition: experimentSafetyDispositionSchema
-        .optional()
-        .describe('Onboarding safety disposition.'),
-      positiveQuestionId: repeatableTextOptionSchema(
-        'Positive safety question ids. Repeat --positive-question-id for multiple values.',
-      ),
-      safetyNote: repeatableTextOptionSchema(
-        'Safety note. Repeat --safety-note for multiple values.',
-      ),
-      contextNote: repeatableTextOptionSchema(
-        'Context note from onboarding. Repeat --context-note for multiple values.',
-      ),
-      reminderPolicy: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Reminder policy id selected during onboarding.'),
-      reminderOptionId: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Reminder option id selected during onboarding.'),
-      remindersEnabled: z
-        .boolean()
-        .optional()
-        .describe('Whether assistant reminders are enabled for the run.'),
-      checkInCadence: experimentCheckInCadenceSchema
-        .optional()
-        .describe('Assistant check-in cadence for the run.'),
-      notificationStyle: experimentNotificationStyleSchema
-        .optional()
-        .describe('Assistant notification style for the run.'),
-      missedLogFollowup: experimentMissedLogFollowupSchema
-        .optional()
-        .describe('Assistant follow-up policy for missed logs.'),
-      weeklyDigestEnabled: z
-        .boolean()
-        .optional()
-        .describe('Whether weekly assistant digests are enabled for the run.'),
+      ...experimentOnboardingOptionSchemas,
+      ...experimentAssistantSupportOptionSchemas,
       hydrateProtocolDefaults: z
         .boolean()
         .optional()

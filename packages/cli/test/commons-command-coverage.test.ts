@@ -186,6 +186,7 @@ test("commons protocol explore expands sauna matches into family variants and a 
       query: string | null;
     };
     groups: Array<{
+      matchReason: string;
       matchedProtocol: {
         key: string;
       };
@@ -450,6 +451,52 @@ test("commons protocol explore distinguishes direct protocol lookup from query f
   assert.equal(
     queryData.starterCandidate?.protocol.key,
     "protocol_variant:norwegian-4x4/norwegian-4x4",
+  );
+});
+
+test("commons protocol explore query fallback keeps the starter candidate on the top query match", async () => {
+  const cli = createCommonsSliceCli();
+  const result = await runInProcessJsonCli<{
+    filters: {
+      query: string | null;
+    };
+    groups: Array<{
+      matchReason: string;
+      matchedProtocol: {
+        key: string;
+      };
+      starterCandidate: {
+        protocol: {
+          key: string;
+        };
+      } | null;
+    }>;
+    starterCandidate: {
+      protocol: {
+        key: string;
+      };
+    } | null;
+  }>(cli, [
+    "commons",
+    "protocol",
+    "explore",
+    "physical therapy low back hip glute rehab",
+    "--limit",
+    "5",
+  ]);
+
+  assert.equal(result.envelope.ok, true);
+  const data = requireData(result.envelope);
+  assert.equal(data.filters.query, "physical therapy low back hip glute rehab");
+  assert.equal(data.groups[0]?.matchReason, "query_match");
+  assert.equal(typeof data.groups[0]?.matchedProtocol.key, "string");
+  assert.equal(
+    data.starterCandidate?.protocol.key,
+    data.groups[0]?.starterCandidate?.protocol.key,
+  );
+  assert.notEqual(
+    data.starterCandidate?.protocol.key,
+    "protocol_variant:daily-step-floor/daily-step-floor",
   );
 });
 

@@ -225,6 +225,112 @@ test("summarizeMealNutritionTotals ignores malformed nutrition and handles fallb
   ]);
 });
 
+test("summarizeMealNutritionTotals keeps the latest imported meal revision", () => {
+  const readModel = createVaultReadModel({
+    vaultRoot: "./vault",
+    entities: [
+      createMealEntity("evt_old_imported_meal", "2026-04-14T08:00:00.000Z", {
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-cronometer-meal",
+          resourceId: "meal-1",
+          facet: "meal",
+        },
+        mealId: "meal_imported_1",
+        nutrition: {
+          totals: {
+            calories: 400,
+            proteinGrams: 10,
+          },
+        },
+        recordedAt: "2026-04-14T08:01:00.000Z",
+        source: "device",
+      }),
+      createMealEntity("evt_new_imported_meal", "2026-04-14T08:00:00.000Z", {
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-cronometer-meal",
+          resourceId: "meal-1",
+          facet: "meal",
+        },
+        mealId: "meal_imported_1",
+        nutrition: {
+          totals: {
+            calories: 425,
+            proteinGrams: 12,
+          },
+        },
+        recordedAt: "2026-04-14T08:05:00.000Z",
+        source: "device",
+      }),
+      createMealEntity("evt_old_imported_no_ref", "2026-04-14T12:00:00.000Z", {
+        mealId: "meal_imported_without_ref",
+        nutrition: {
+          totals: {
+            calories: 500,
+            carbsGrams: 20,
+          },
+        },
+        recordedAt: "2026-04-14T12:01:00.000Z",
+        source: "device",
+      }),
+      createMealEntity("evt_new_imported_no_ref", "2026-04-14T12:00:00.000Z", {
+        mealId: "meal_imported_without_ref",
+        nutrition: {
+          totals: {
+            calories: 540,
+            carbsGrams: 24,
+          },
+        },
+        recordedAt: "2026-04-14T12:03:00.000Z",
+        source: "device",
+      }),
+      // Manual meals stay append-only even when they share the imported
+      // meal's externalRef and mealId.
+      createMealEntity("evt_manual_same_meal", "2026-04-14T19:00:00.000Z", {
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-cronometer-meal",
+          resourceId: "meal-1",
+          facet: "meal",
+        },
+        mealId: "meal_imported_1",
+        nutrition: {
+          totals: {
+            calories: 100,
+          },
+        },
+        recordedAt: "2026-04-14T19:01:00.000Z",
+        source: "manual",
+      }),
+    ],
+  });
+
+  const result = summarizeMealNutritionTotals(readModel);
+
+  assert.equal(result.mealCount, 3);
+  assert.deepEqual(result.totals, {
+    calories: { total: 1065, mealCount: 3 },
+    proteinGrams: { total: 12, mealCount: 1 },
+    carbsGrams: { total: 24, mealCount: 1 },
+    fatGrams: { total: null, mealCount: 0 },
+    fiberGrams: { total: null, mealCount: 0 },
+  });
+  assert.deepEqual(result.days, [
+    {
+      date: "2026-04-14",
+      mealCount: 3,
+      totals: {
+        calories: { total: 1065, mealCount: 3 },
+        proteinGrams: { total: 12, mealCount: 1 },
+        carbsGrams: { total: 24, mealCount: 1 },
+        fatGrams: { total: null, mealCount: 0 },
+        fiberGrams: { total: null, mealCount: 0 },
+      },
+    },
+  ]);
+});
+
 test("readMealNutritionTotals reads the vault before summarizing", async () => {
   const readModel = createVaultReadModel({
     vaultRoot: "./vault",

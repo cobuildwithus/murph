@@ -244,20 +244,27 @@ describe("hosted execution coverage gaps", () => {
       shouldRefresh: true,
     });
     expect(assessBrowserVaultReplicaFreshness({
-      checkpointedAt: "2026-05-04T00:04:00.000Z",
-      now: "2026-05-04T00:04:30.000Z",
-      replicaRef: freshReplica,
-    })).toMatchObject({
-      freshness: "stale",
-      reason: "checkpoint_newer",
-      shouldRefresh: true,
-    });
-    expect(assessBrowserVaultReplicaFreshness({
       now: "2026-05-06T00:03:30.000Z",
       replicaRef: freshReplica,
     })).toMatchObject({
       freshness: "stale",
       reason: "max_age_exceeded",
+      shouldRefresh: true,
+    });
+    expect(assessBrowserVaultReplicaFreshness({
+      now: "2026-05-04T00:03:30.000Z",
+      replicaRef: { ...freshReplica, generatedAt: "not-a-date" },
+    })).toMatchObject({
+      freshness: "stale",
+      reason: "invalid_generated_at",
+      shouldRefresh: true,
+    });
+    expect(assessBrowserVaultReplicaFreshness({
+      now: "not-a-date",
+      replicaRef: freshReplica,
+    })).toMatchObject({
+      freshness: "stale",
+      reason: "invalid_now",
       shouldRefresh: true,
     });
     expect(getBrowserVaultReplicaFreshness({

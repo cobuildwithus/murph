@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 
-import { extractIsoDatePrefix, type WorkoutSession } from "@murphai/contracts";
+import {
+  extractIsoDatePrefix,
+  ID_PREFIXES,
+  type MealNutrition,
+  type WorkoutSession,
+} from "@murphai/contracts";
+import { deterministicContractId } from "@murphai/core";
 import { z } from "zod";
 
 import { stripUndefined } from "../shared.ts";
@@ -9,6 +15,7 @@ import {
   asPlainObject,
   createRawArtifact,
   finiteNumber,
+  kilojoulesToKilocalories,
   makeNormalizedDeviceBatch,
   makeProviderExternalRef,
   minutesBetween,
@@ -103,6 +110,8 @@ export interface JunctionSnapshotInput {
 }
 
 type TimestampSemantics = NonNullable<DeviceDataOrigin["timestampSemantics"]>;
+type MealNutritionTotals = NonNullable<MealNutrition["totals"]>;
+type MealNutritionTotalKey = keyof MealNutritionTotals;
 
 interface ResourceContext {
   resource: string;
@@ -115,6 +124,7 @@ interface ResourceContext {
   artifactFileName: string;
   rawArtifactRoles: string[];
   connection?: PlainObject;
+  fallbackIdentityDisambiguator?: string;
 }
 
 interface NormalizationContext {
@@ -284,6 +294,152 @@ const JUNCTION_GENERIC_SUMMARY_ID_PATHS = [
   "providerId",
   "provider_id",
 ] as const;
+const JUNCTION_MEAL_PROVIDER_ID_PATHS = [
+  "mealId",
+  "meal_id",
+  "providerMealId",
+  "provider_meal_id",
+  "providerId",
+  "provider_id",
+] as const;
+const JUNCTION_MEAL_STABLE_ID_PATHS = [
+  "id",
+  "resourceId",
+  "resource_id",
+  "externalId",
+  "external_id",
+  ...JUNCTION_MEAL_PROVIDER_ID_PATHS,
+] as const;
+const JUNCTION_MEAL_TITLE_PATHS = [
+  "name",
+  "mealName",
+  "meal_name",
+  "mealType",
+  "meal_type",
+  "title",
+  "description",
+] as const;
+const JUNCTION_MEAL_CALENDAR_DATE_PATHS = [
+  "calendarDate",
+  "calendar_date",
+  "localDate",
+  "local_date",
+  "date",
+  "day",
+] as const;
+const JUNCTION_MEAL_ITEM_CONTAINER_PATHS = [
+  "data",
+  "foods",
+  "foodItems",
+  "food_items",
+  "items",
+  "ingredients",
+  "nutrients",
+] as const;
+const JUNCTION_MEAL_ITEM_NAME_PATHS = [
+  "name",
+  "foodName",
+  "food_name",
+  "itemName",
+  "item_name",
+  "title",
+  "description",
+] as const;
+const JUNCTION_MEAL_INGREDIENT_LIST_PATHS = [
+  "ingredients",
+  "ingredientNames",
+  "ingredient_names",
+  "foods",
+  "foodNames",
+  "food_names",
+] as const;
+const JUNCTION_MEAL_CALORIE_PATHS = [
+  "calories",
+  "caloriesKcal",
+  "calories_kcal",
+  "energyKcal",
+  "energy_kcal",
+  "kcal",
+  "nutrition.calories",
+  "nutrition.totals.calories",
+  "totals.calories",
+] as const;
+const JUNCTION_MEAL_ENERGY_VALUE_PATHS = [
+  "energy.value",
+  "nutrition.energy.value",
+  "nutrition.totals.energy.value",
+  "totals.energy.value",
+] as const;
+const JUNCTION_MEAL_ENERGY_UNIT_PATHS = [
+  "energy.unit",
+  "energyUnit",
+  "energy_unit",
+  "nutrition.energy.unit",
+  "nutrition.totals.energy.unit",
+  "totals.energy.unit",
+] as const;
+const JUNCTION_MEAL_PROTEIN_GRAM_PATHS = [
+  "protein",
+  "proteinGrams",
+  "protein_grams",
+  "protein_g",
+  "macros.protein",
+  "macros.proteinGrams",
+  "macros.protein_grams",
+  "nutrition.totals.proteinGrams",
+  "totals.proteinGrams",
+] as const;
+const JUNCTION_MEAL_CARBS_GRAM_PATHS = [
+  "carbs",
+  "carbohydrates",
+  "carbsGrams",
+  "carbs_grams",
+  "carbohydrateGrams",
+  "carbohydrate_grams",
+  "carbohydrate_g",
+  "macros.carbs",
+  "macros.carbohydrates",
+  "nutrition.totals.carbsGrams",
+  "totals.carbsGrams",
+] as const;
+const JUNCTION_MEAL_FAT_GRAM_PATHS = [
+  "fat",
+  "fatGrams",
+  "fat_grams",
+  "fat_g",
+  "macros.fat",
+  "macros.fats",
+  "macros.fats.total",
+  "macros.totalFat",
+  "macros.total_fat",
+  "nutrition.totals.fatGrams",
+  "totals.fatGrams",
+] as const;
+const JUNCTION_MEAL_FIBER_GRAM_PATHS = [
+  // Junction documents the British spelling: macros.fibre.
+  "fibre",
+  "fiber",
+  "fiberGrams",
+  "fiber_grams",
+  "fiber_g",
+  "dietaryFiber",
+  "dietary_fiber",
+  "macros.fibre",
+  "macros.fiber",
+  "macros.fiberGrams",
+  "macros.fiber_grams",
+  "nutrition.totals.fiberGrams",
+  "totals.fiberGrams",
+] as const;
+const JUNCTION_NESTED_RESOURCE_ENTRY_KEYS = ["data", "results", "items", "records"] as const;
+const JUNCTION_MEAL_NESTED_RESOURCE_ENTRY_KEYS = ["meal", "meals", "results", "records"] as const;
+const JUNCTION_MEAL_NUTRITION_TOTAL_KEYS = [
+  "calories",
+  "proteinGrams",
+  "carbsGrams",
+  "fatGrams",
+  "fiberGrams",
+] as const satisfies readonly MealNutritionTotalKey[];
 const JUNCTION_WORKOUT_STABLE_ID_PATHS = [
   ...JUNCTION_WORKOUT_ID_PATHS,
   ...JUNCTION_GENERIC_SUMMARY_ID_PATHS,
@@ -398,13 +554,23 @@ function normalizeSummaries(
   context: NormalizationContext,
 ): void {
   for (const [resource, payload] of allowedResourceEntries(summaries, SUMMARY_RESOURCE_ALLOWLIST)) {
-    const entries = resourceEntries(payload);
+    const entries = resourceEntries(payload, resource);
     const resourceSlug = slugify(resource, "summary");
+    const rawArtifactRole = `junction-summary-${resourceSlug}`;
+    const fallbackIdentityDisambiguators = resource === "meal"
+      ? buildJunctionMealFallbackIdentityDisambiguators({
+          context,
+          entries,
+          fallbackArtifactRole: rawArtifactRole,
+          resource,
+          resourceSlug,
+        })
+      : new Map<number, string>();
     pushRawArtifact(
       context.rawArtifacts,
       createRawArtifact(
-        `junction-summary-${resourceSlug}`,
-        `junction-summary-${resourceSlug}.json`,
+        rawArtifactRole,
+        `${rawArtifactRole}.json`,
         buildRawResourcePayload(resource, payload, context.connectionsByKey),
       ),
     );
@@ -417,7 +583,8 @@ function normalizeSummaries(
         resourceSlug,
         identityKind: "summary",
         index,
-        fallbackArtifactRole: `junction-summary-${resourceSlug}`,
+        fallbackArtifactRole: rawArtifactRole,
+        fallbackIdentityDisambiguator: fallbackIdentityDisambiguators.get(index),
         context,
       });
 
@@ -441,11 +608,82 @@ function normalizeSummaries(
         case "workouts":
           pushWorkoutSummary(entry, resourceContext, context);
           break;
+        case "meal":
+          pushMealSummary(entry, resourceContext, context);
+          break;
         case "profile":
           break;
       }
     });
   }
+}
+
+function buildJunctionMealFallbackIdentityDisambiguators(input: {
+  context: NormalizationContext;
+  entries: readonly JunctionResourceEntry[];
+  fallbackArtifactRole: string;
+  resource: string;
+  resourceSlug: string;
+}): ReadonlyMap<number, string> {
+  const fallbackRecords: Array<{ index: number; key: string }> = [];
+
+  input.entries.forEach(({ entry, originFallback }, index) => {
+    if (firstStringFromPaths(entry, JUNCTION_MEAL_STABLE_ID_PATHS)) {
+      return;
+    }
+
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource: input.resource,
+      resourceSlug: input.resourceSlug,
+      identityKind: "summary",
+      index,
+      fallbackArtifactRole: input.fallbackArtifactRole,
+      context: input.context,
+    });
+    if (!resourceContext) {
+      return;
+    }
+
+    const resolvedTimestamp = resolveJunctionMealTimestamp(
+      entry,
+      input.context,
+      resourceContext.sourceProviderSlug,
+    );
+    if (!resolvedTimestamp) {
+      return;
+    }
+
+    fallbackRecords.push({
+      index,
+      key: JSON.stringify(buildJunctionMealFallbackIdentityParts(
+        resourceContext,
+        entry,
+        resolvedTimestamp.timestamp,
+        { includeDisambiguator: false },
+      )),
+    });
+  });
+
+  const countsByKey = new Map<string, number>();
+  for (const record of fallbackRecords) {
+    countsByKey.set(record.key, (countsByKey.get(record.key) ?? 0) + 1);
+  }
+
+  const nextOrdinalByKey = new Map<string, number>();
+  const disambiguators = new Map<number, string>();
+  for (const record of fallbackRecords) {
+    if ((countsByKey.get(record.key) ?? 0) <= 1) {
+      continue;
+    }
+
+    const ordinal = (nextOrdinalByKey.get(record.key) ?? 0) + 1;
+    nextOrdinalByKey.set(record.key, ordinal);
+    disambiguators.set(record.index, `duplicate-${ordinal}`);
+  }
+
+  return disambiguators;
 }
 
 function normalizeTimeseries(
@@ -1141,6 +1379,356 @@ function pushWorkoutSummary(
   }));
 }
 
+function pushMealSummary(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+  context: NormalizationContext,
+): void {
+  const resolvedTimestamp = resolveJunctionMealTimestamp(entry, context, resourceContext.sourceProviderSlug);
+  if (!resolvedTimestamp) {
+    return;
+  }
+
+  const { occurredAt, timestamp: mealTimestamp } = resolvedTimestamp;
+  const foodItems = listJunctionMealFoodItems(entry);
+  const ingredients = buildJunctionMealIngredients(entry, foodItems);
+  const nutrition = buildJunctionMealNutrition(entry, resourceContext, foodItems);
+
+  context.events.push(stripUndefined({
+    kind: "meal",
+    occurredAt,
+    recordedAt: mealTimestamp.recordedAt,
+    dayKey: mealTimestamp.dayKey,
+    timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
+    source: "device",
+    title: resolveJunctionMealTitle(entry),
+    rawArtifactRoles: resourceContext.rawArtifactRoles,
+    externalRef: makeJunctionExternalRef(resourceContext, entry, mealTimestamp, "meal"),
+    dataOrigin: buildDataOrigin(entry, resourceContext, mealTimestamp),
+    fields: stripUndefined({
+      mealId: buildJunctionMealId(resourceContext, entry, mealTimestamp),
+      ingredients,
+      nutrition,
+    }),
+  }));
+}
+
+function resolveJunctionMealTimestamp(
+  entry: PlainObject,
+  context: Pick<NormalizationContext, "importedAt" | "windowEnd" | "windowStart">,
+  sourceProviderSlug: string | undefined,
+): { occurredAt: string; timestamp: ReturnType<typeof resolveRecordTimestamp> } | null {
+  const timestamp = resolveRecordTimestamp(entry, context, sourceProviderSlug);
+  const calendarDayKey = firstIsoDateFromPaths(entry, JUNCTION_MEAL_CALENDAR_DATE_PATHS);
+  const calendarOccurredAt = calendarDayKey ? `${calendarDayKey}T00:00:00.000Z` : undefined;
+  const shouldUseCalendarOccurredAt = Boolean(
+    calendarOccurredAt
+      && (
+        !timestamp.observedAtRaw
+        || timestamp.timestampSemantics === "floating"
+        || isDateOnlyJunctionTimestamp(timestamp.observedAtRaw)
+      ),
+  );
+  const occurredAt = shouldUseCalendarOccurredAt
+    ? calendarOccurredAt
+    : timestamp.occurredAt ?? calendarOccurredAt;
+
+  if (!occurredAt) {
+    return null;
+  }
+
+  return {
+    occurredAt,
+    timestamp: withTimestampOverride(timestamp, {
+      occurredAt,
+      dayKey: calendarDayKey ?? timestamp.dayKey ?? extractIsoDatePrefix(occurredAt) ?? undefined,
+      observedAtRaw: timestamp.observedAtRaw ?? calendarDayKey ?? occurredAt,
+    }),
+  };
+}
+
+function resolveJunctionMealTitle(entry: PlainObject): string {
+  const title = trimOptionalToLength(
+    firstStringFromPaths(entry, JUNCTION_MEAL_TITLE_PATHS),
+    160,
+  );
+  return title || "Junction meal";
+}
+
+function buildJunctionMealId(
+  resourceContext: ResourceContext,
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+): string {
+  const explicitId = firstStringFromPaths(entry, JUNCTION_MEAL_STABLE_ID_PATHS);
+  const identity = explicitId
+    ? [
+        "junction-meal",
+        resourceContext.sourceProviderSlug,
+        resourceContext.origin.sourceType ?? null,
+        resourceContext.origin.sourceInstanceId ?? null,
+        explicitId,
+      ]
+    : buildJunctionMealFallbackIdentityParts(resourceContext, entry, timestamp);
+
+  return deterministicContractId(ID_PREFIXES.meal, JSON.stringify(identity));
+}
+
+function buildJunctionMealFallbackIdentityParts(
+  resourceContext: ResourceContext,
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  options: { includeDisambiguator?: boolean } = {},
+): unknown[] {
+  return [
+    "junction-meal",
+    resourceContext.sourceProviderSlug,
+    resourceContext.origin.sourceType ?? null,
+    resourceContext.origin.sourceInstanceId ?? null,
+    timestamp.observedAtRaw ?? timestamp.occurredAt ?? null,
+    resolveJunctionMealTitle(entry),
+    ...(
+      options.includeDisambiguator === false || !resourceContext.fallbackIdentityDisambiguator
+        ? []
+        : [resourceContext.fallbackIdentityDisambiguator]
+    ),
+  ];
+}
+
+function buildJunctionMealNutrition(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+  foodItems: readonly JunctionMealFoodItem[],
+): MealNutrition | undefined {
+  const itemTotals = sumJunctionMealNutritionTotals(foodItems.map((item) => item.entry));
+  const directTotals = readJunctionMealNutritionData(entry);
+  const totals = mergeJunctionMealNutritionTotals(itemTotals, directTotals);
+
+  if (!totals) {
+    return undefined;
+  }
+
+  return {
+    totals,
+    provenance: {
+      source: "database",
+      confidence: "high",
+      sourceDetail: trimToLength(`junction:${resourceContext.sourceProviderSlug}:meal`, 240),
+    },
+  };
+}
+
+interface JunctionMealFoodItem {
+  readonly entry: PlainObject;
+  readonly name?: string;
+}
+
+function listJunctionMealFoodItems(entry: PlainObject): JunctionMealFoodItem[] {
+  for (const path of JUNCTION_MEAL_ITEM_CONTAINER_PATHS) {
+    const value = readPath(entry, path);
+    const items = value === undefined || value === entry ? [] : collectJunctionMealFoodItems(value);
+    if (items.length > 0) {
+      return items;
+    }
+  }
+
+  return [];
+}
+
+function collectJunctionMealFoodItems(
+  value: unknown,
+  fallbackName?: string,
+): JunctionMealFoodItem[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectJunctionMealFoodItems(entry, fallbackName));
+  }
+
+  const entry = asPlainObject(value);
+  if (!entry) {
+    return [];
+  }
+
+  const name = firstStringFromPaths(entry, JUNCTION_MEAL_ITEM_NAME_PATHS) ?? fallbackName;
+  if (isJunctionMealNutritionItem(entry)) {
+    return [stripUndefined({ entry, name }) as JunctionMealFoodItem];
+  }
+
+  return Object.entries(entry).flatMap(([key, nested]) => collectJunctionMealFoodItems(nested, key));
+}
+
+function isJunctionMealNutritionItem(entry: PlainObject): boolean {
+  return Boolean(
+    asPlainObject(readPath(entry, "energy"))
+    || asPlainObject(readPath(entry, "macros"))
+    || asPlainObject(readPath(entry, "micros"))
+    || readJunctionMealNutritionData(entry),
+  );
+}
+
+function buildJunctionMealIngredients(
+  entry: PlainObject,
+  foodItems: readonly JunctionMealFoodItem[],
+): string[] | undefined {
+  const candidates = [
+    ...foodItems.map((item) => item.name ?? firstStringFromPaths(item.entry, JUNCTION_MEAL_ITEM_NAME_PATHS)),
+    ...listJunctionMealIngredientNames(entry),
+    ...firstStringArrayFromPaths(entry, JUNCTION_MEAL_INGREDIENT_LIST_PATHS),
+  ];
+  const ingredients: string[] = [];
+  const seen = new Set<string>();
+
+  for (const candidate of candidates) {
+    const ingredient = trimOptionalToLength(candidate, 4000);
+    const dedupeKey = ingredient?.toLowerCase();
+    if (!ingredient || !dedupeKey || seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    ingredients.push(ingredient);
+    if (ingredients.length >= 100) {
+      break;
+    }
+  }
+
+  return ingredients.length > 0 ? ingredients : undefined;
+}
+
+function listJunctionMealIngredientNames(entry: PlainObject): string[] {
+  const names: string[] = [];
+
+  for (const path of JUNCTION_MEAL_ITEM_CONTAINER_PATHS) {
+    const value = readPath(entry, path);
+    if (value === undefined || value === entry) {
+      continue;
+    }
+
+    names.push(...collectJunctionMealIngredientNames(value));
+  }
+
+  return names;
+}
+
+function collectJunctionMealIngredientNames(value: unknown, fallbackName?: string): string[] {
+  const valueId = typeof value === "string" ? stringId(value) : undefined;
+  if (valueId) {
+    return [valueId];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectJunctionMealIngredientNames(entry, fallbackName));
+  }
+
+  const entry = asPlainObject(value);
+  if (!entry) {
+    return [];
+  }
+
+  const name = firstStringFromPaths(entry, JUNCTION_MEAL_ITEM_NAME_PATHS);
+  if (name) {
+    return [name];
+  }
+
+  if (fallbackName && isJunctionMealNutritionItem(entry)) {
+    return [fallbackName];
+  }
+
+  return Object.entries(entry).flatMap(([key, nested]) => {
+    if (!Array.isArray(nested) && !asPlainObject(nested)) {
+      return [];
+    }
+
+    return collectJunctionMealIngredientNames(nested, key);
+  });
+}
+
+function sumJunctionMealNutritionTotals(
+  entries: readonly PlainObject[],
+): MealNutritionTotals | undefined {
+  const totals: Partial<MealNutritionTotals> = {};
+
+  for (const entry of entries) {
+    const nutrition = readJunctionMealNutritionData(entry);
+    if (!nutrition) {
+      continue;
+    }
+
+    addJunctionMealNutritionValue(totals, "calories", nutrition.calories);
+    addJunctionMealNutritionValue(totals, "proteinGrams", nutrition.proteinGrams);
+    addJunctionMealNutritionValue(totals, "carbsGrams", nutrition.carbsGrams);
+    addJunctionMealNutritionValue(totals, "fatGrams", nutrition.fatGrams);
+    addJunctionMealNutritionValue(totals, "fiberGrams", nutrition.fiberGrams);
+  }
+
+  return mealNutritionTotalsOrUndefined(totals);
+}
+
+function readJunctionMealNutritionData(entry: PlainObject): MealNutritionTotals | undefined {
+  const totals: Partial<MealNutritionTotals> = {};
+
+  addJunctionMealNutritionValue(totals, "calories", readJunctionMealCalories(entry));
+  addJunctionMealNutritionValue(totals, "proteinGrams", firstNonNegativeNumberFromPaths(entry, JUNCTION_MEAL_PROTEIN_GRAM_PATHS));
+  addJunctionMealNutritionValue(totals, "carbsGrams", firstNonNegativeNumberFromPaths(entry, JUNCTION_MEAL_CARBS_GRAM_PATHS));
+  addJunctionMealNutritionValue(totals, "fatGrams", firstNonNegativeNumberFromPaths(entry, JUNCTION_MEAL_FAT_GRAM_PATHS));
+  addJunctionMealNutritionValue(totals, "fiberGrams", firstNonNegativeNumberFromPaths(entry, JUNCTION_MEAL_FIBER_GRAM_PATHS));
+
+  return mealNutritionTotalsOrUndefined(totals);
+}
+
+function mergeJunctionMealNutritionTotals(
+  itemTotals: MealNutritionTotals | undefined,
+  directTotals: MealNutritionTotals | undefined,
+): MealNutritionTotals | undefined {
+  const totals: Partial<MealNutritionTotals> = {};
+
+  for (const key of JUNCTION_MEAL_NUTRITION_TOTAL_KEYS) {
+    addJunctionMealNutritionValue(totals, key, directTotals?.[key] ?? itemTotals?.[key]);
+  }
+
+  return mealNutritionTotalsOrUndefined(totals);
+}
+
+function mealNutritionTotalsOrUndefined(
+  totals: Partial<MealNutritionTotals>,
+): MealNutritionTotals | undefined {
+  return Object.keys(totals).length > 0 ? totals : undefined;
+}
+
+function addJunctionMealNutritionValue(
+  totals: Partial<MealNutritionTotals>,
+  key: MealNutritionTotalKey,
+  value: number | undefined,
+): void {
+  if (value === undefined) {
+    return;
+  }
+
+  totals[key] = roundMealNutritionValue((totals[key] ?? 0) + value);
+}
+
+function readJunctionMealCalories(entry: PlainObject): number | undefined {
+  const directCalories = firstNonNegativeNumberFromPaths(entry, JUNCTION_MEAL_CALORIE_PATHS);
+  if (directCalories !== undefined) {
+    return roundMealNutritionValue(directCalories);
+  }
+
+  const energyValue = firstNonNegativeNumberFromPaths(entry, JUNCTION_MEAL_ENERGY_VALUE_PATHS);
+  if (energyValue === undefined) {
+    return undefined;
+  }
+
+  const unit = firstStringFromPaths(entry, JUNCTION_MEAL_ENERGY_UNIT_PATHS);
+  if (!unit || isJunctionKilocalorieUnit(unit)) {
+    return roundMealNutritionValue(energyValue);
+  }
+
+  if (isJunctionKilojouleUnit(unit)) {
+    return roundMealNutritionValue(kilojoulesToKilocalories(energyValue));
+  }
+
+  return undefined;
+}
+
 function buildWorkoutSessionMetrics(entry: PlainObject): WorkoutSessionMetrics | undefined {
   const metrics: WorkoutSessionMetrics = {};
 
@@ -1392,6 +1980,7 @@ function buildResourceContext(input: {
   identityKind: "summary" | "timeseries";
   index: number;
   fallbackArtifactRole: string;
+  fallbackIdentityDisambiguator?: string;
   context: NormalizationContext;
 }): ResourceContext | null {
   const connection = resolveEntryConnection(input.entry, input.context.connectionsByKey);
@@ -1416,6 +2005,7 @@ function buildResourceContext(input: {
     artifactFileName: `${input.fallbackArtifactRole}.json`,
     rawArtifactRoles: [input.fallbackArtifactRole],
     connection,
+    fallbackIdentityDisambiguator: input.fallbackIdentityDisambiguator,
   };
 }
 
@@ -1534,6 +2124,8 @@ function buildStableSummaryResourceId(
 ): string {
   const explicitId = resourceContext.resource === "workouts"
     ? firstStringFromPaths(entry, JUNCTION_WORKOUT_STABLE_ID_PATHS)
+    : resourceContext.resource === "meal"
+      ? firstStringFromPaths(entry, JUNCTION_MEAL_STABLE_ID_PATHS)
     : firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
 
   if (explicitId) {
@@ -1551,6 +2143,10 @@ function buildStableSummaryResourceId(
     resourceContext.origin.sourceType,
     resourceContext.origin.sourceInstanceId,
     timestamp.observedAtRaw ?? timestamp.occurredAt,
+    ...(resourceContext.resource === "meal" ? [
+      resolveJunctionMealTitle(entry),
+      ...(resourceContext.fallbackIdentityDisambiguator ? [resourceContext.fallbackIdentityDisambiguator] : []),
+    ] : []),
   ])}`;
 }
 
@@ -1717,14 +2313,14 @@ function allowedResourceEntries(
 
     mergedEntries.set(
       normalized,
-      mergeJunctionResourcePayloads(mergedEntries.get(normalized), payload),
+      mergeJunctionResourcePayloads(mergedEntries.get(normalized), payload, normalized),
     );
   }
 
   return [...mergedEntries.entries()];
 }
 
-function mergeJunctionResourcePayloads(existing: unknown, next: unknown): unknown {
+function mergeJunctionResourcePayloads(existing: unknown, next: unknown, resource?: string): unknown {
   if (existing === undefined) {
     return next;
   }
@@ -1734,7 +2330,7 @@ function mergeJunctionResourcePayloads(existing: unknown, next: unknown): unknow
     return grouped;
   }
 
-  const nested = mergeJunctionNestedEnvelopePayloads(existing, next);
+  const nested = mergeJunctionNestedEnvelopePayloads(existing, next, resource);
   if (nested) {
     return nested;
   }
@@ -1770,7 +2366,11 @@ function mergeJunctionGroupedPayloads(left: unknown, right: unknown): PlainObjec
   };
 }
 
-function mergeJunctionNestedEnvelopePayloads(left: unknown, right: unknown): PlainObject | null {
+function mergeJunctionNestedEnvelopePayloads(
+  left: unknown,
+  right: unknown,
+  resource?: string,
+): PlainObject | null {
   const leftRecord = asPlainObject(left);
   const rightRecord = asPlainObject(right);
 
@@ -1778,7 +2378,7 @@ function mergeJunctionNestedEnvelopePayloads(left: unknown, right: unknown): Pla
     return null;
   }
 
-  for (const key of ["data", "results", "items", "records"]) {
+  for (const key of nestedResourceEntryKeys(resource)) {
     if (Array.isArray(leftRecord[key]) && Array.isArray(rightRecord[key])) {
       return {
         ...leftRecord,
@@ -1798,13 +2398,13 @@ function toMergedJunctionPayloadItems(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [value];
 }
 
-function resourceEntries(payload: unknown): JunctionResourceEntry[] {
+function resourceEntries(payload: unknown, resource?: string): JunctionResourceEntry[] {
   if (Array.isArray(payload)) {
-    return payload.flatMap((entry) => expandResourceEntry(entry));
+    return payload.flatMap((entry) => expandResourceEntry(entry, resource));
   }
 
   const normalized = asPlainObject(payload);
-  return normalized ? expandResourceEntry(normalized) : [];
+  return normalized ? expandResourceEntry(normalized, resource) : [];
 }
 
 function timeseriesResourceEntries(payload: unknown): JunctionResourceEntry[] {
@@ -1879,13 +2479,13 @@ function collectSleepStageIntervalEntries(value: unknown): PlainObject[] {
   });
 }
 
-function expandResourceEntry(value: unknown): JunctionResourceEntry[] {
+function expandResourceEntry(value: unknown, resource?: string): JunctionResourceEntry[] {
   const entry = asPlainObject(value);
   if (!entry) {
     return [];
   }
 
-  const nestedEntries = readNestedResourceEntries(entry);
+  const nestedEntries = readNestedResourceEntries(entry, resource);
   if (!nestedEntries) {
     return [{ entry }];
   }
@@ -1896,8 +2496,8 @@ function expandResourceEntry(value: unknown): JunctionResourceEntry[] {
   }));
 }
 
-function readNestedResourceEntries(envelope: PlainObject): PlainObject[] | null {
-  for (const key of ["data", "results", "items", "records"]) {
+function readNestedResourceEntries(envelope: PlainObject, resource?: string): PlainObject[] | null {
+  for (const key of nestedResourceEntryKeys(resource)) {
     const directEntry = asPlainObject(envelope[key]);
     const entries = directEntry
       ? [directEntry]
@@ -1911,6 +2511,10 @@ function readNestedResourceEntries(envelope: PlainObject): PlainObject[] | null 
   }
 
   return null;
+}
+
+function nestedResourceEntryKeys(resource: string | undefined): readonly string[] {
+  return resource === "meal" ? JUNCTION_MEAL_NESTED_RESOURCE_ENTRY_KEYS : JUNCTION_NESTED_RESOURCE_ENTRY_KEYS;
 }
 
 function mergeNestedResourceEntry(envelope: PlainObject, nestedEntry: PlainObject): PlainObject {
@@ -2073,6 +2677,10 @@ function firstNumberFromPaths(source: PlainObject | undefined, paths: readonly s
   return undefined;
 }
 
+function firstNonNegativeNumberFromPaths(source: PlainObject | undefined, paths: readonly string[]): number | undefined {
+  return normalizeNonNegativeNumber(firstNumberFromPaths(source, paths));
+}
+
 function firstNullableNumberFromPaths(source: PlainObject | undefined, paths: readonly string[]): number | null | undefined {
   for (const path of paths) {
     const value = readPath(source, path);
@@ -2212,6 +2820,26 @@ function roundStressLevelValue(value: number): number {
   return Number(value.toFixed(4));
 }
 
+function roundMealNutritionValue(value: unknown): number | undefined {
+  const numeric = normalizeNonNegativeNumber(value);
+  return numeric === undefined ? undefined : Number(numeric.toFixed(4));
+}
+
+function isJunctionKilocalorieUnit(value: string): boolean {
+  const unit = normalizeNutritionUnit(value);
+  return unit === "kcal" || unit === "kilocalorie" || unit === "kilocalories"
+    || unit === "cal" || unit === "calorie" || unit === "calories";
+}
+
+function isJunctionKilojouleUnit(value: string): boolean {
+  const unit = normalizeNutritionUnit(value);
+  return unit === "kj" || unit === "kilojoule" || unit === "kilojoules";
+}
+
+function normalizeNutritionUnit(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z]/gu, "");
+}
+
 function compareJunctionDailyTimeseriesAggregates(
   left: JunctionDailyTimeseriesAggregate,
   right: JunctionDailyTimeseriesAggregate,
@@ -2228,6 +2856,43 @@ function firstStringFromPaths(source: PlainObject | undefined, paths: readonly s
     const id = stringId(value);
     if (id) {
       return id;
+    }
+  }
+
+  return undefined;
+}
+
+function firstStringArrayFromPaths(source: PlainObject | undefined, paths: readonly string[]): string[] {
+  for (const path of paths) {
+    const values = stringArrayFromValue(readPath(source, path));
+    if (values.length > 0) {
+      return values;
+    }
+  }
+
+  return [];
+}
+
+function stringArrayFromValue(value: unknown): string[] {
+  if (typeof value === "string") {
+    return value.trim() ? [value.trim()] : [];
+  }
+
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) => {
+    const id = stringId(entry);
+    return id ? [id] : [];
+  });
+}
+
+function firstIsoDateFromPaths(source: PlainObject | undefined, paths: readonly string[]): string | undefined {
+  for (const path of paths) {
+    const date = extractIsoDatePrefix(stringId(readPath(source, path)) ?? "");
+    if (date) {
+      return date;
     }
   }
 

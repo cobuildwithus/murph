@@ -2350,57 +2350,51 @@ function resolveCodexRolloutRelativePath(input: {
   )
 }
 
+// Upstream Codex can rejoin a thread that is still loaded in the warm process
+// and ignore resume overrides with only a server-side warning when listeners
+// remain attached (codex-rs `thread_processor.rs` `resume_running_thread`).
+// The thread/resume response echoes the effective execution context, so this
+// echo check is the only client-visible stale-rejoin signal before turn/start.
+// Fields with no requested value are skipped; requested fields must echo back.
 function assertCodexResumeContextMatches(input: {
   input: CodexAppServerPreparedTurnInput
   requestedThreadId: string
   threadResult: unknown
 }): void {
   const result = asCodexRecord(input.threadResult)
-  const mismatchedFields: string[] = []
-
-  const resumedThreadId = extractCodexThreadIdFromResult(input.threadResult)
-  if (resumedThreadId && resumedThreadId !== input.requestedThreadId) {
-    mismatchedFields.push('threadId')
-  }
-
-  const expectedApprovalPolicy = mapCodexAppServerApprovalPolicy(
-    input.input.approvalPolicy,
-  )
-  const actualApprovalPolicy = asCodexString(result?.approvalPolicy)
-  if (actualApprovalPolicy !== expectedApprovalPolicy) {
-    mismatchedFields.push('approvalPolicy')
-  }
-
   const actualCwd = normalizeNullableString(asCodexString(result?.cwd))
-  if (!actualCwd || path.resolve(actualCwd) !== input.input.workingDirectory) {
-    mismatchedFields.push('cwd')
-  }
+  const checks: [field: string, expected: string | null, actual: string | null][] = [
+    [
+      'threadId',
+      input.requestedThreadId,
+      extractCodexThreadIdFromResult(input.threadResult) ?? input.requestedThreadId,
+    ],
+    [
+      'approvalPolicy',
+      mapCodexAppServerApprovalPolicy(input.input.approvalPolicy),
+      asCodexString(result?.approvalPolicy),
+    ],
+    ['cwd', input.input.workingDirectory, actualCwd ? path.resolve(actualCwd) : null],
+    [
+      'model',
+      normalizeNullableString(input.input.model),
+      normalizeNullableString(asCodexString(result?.model)),
+    ],
+    [
+      'modelProvider',
+      normalizeNullableString(input.input.modelProvider),
+      normalizeNullableString(asCodexString(result?.modelProvider)),
+    ],
+    [
+      'sandbox',
+      mapCodexAppServerSandboxMode(input.input.sandbox) ?? null,
+      readCodexResumeSandboxMode(result?.sandbox),
+    ],
+  ]
 
-  const expectedModel = normalizeNullableString(input.input.model)
-  if (
-    expectedModel &&
-    normalizeNullableString(asCodexString(result?.model)) !== expectedModel
-  ) {
-    mismatchedFields.push('model')
-  }
-
-  const expectedModelProvider = normalizeNullableString(input.input.modelProvider)
-  if (
-    expectedModelProvider &&
-    normalizeNullableString(asCodexString(result?.modelProvider)) !==
-      expectedModelProvider
-  ) {
-    mismatchedFields.push('modelProvider')
-  }
-
-  const expectedSandbox = mapCodexAppServerSandboxMode(input.input.sandbox)
-  if (
-    expectedSandbox &&
-    readCodexResumeSandboxMode(result?.sandbox) !== expectedSandbox
-  ) {
-    mismatchedFields.push('sandbox')
-  }
-
+  const mismatchedFields = checks
+    .filter(([, expected, actual]) => expected !== null && actual !== expected)
+    .map(([field]) => field)
   if (mismatchedFields.length === 0) {
     return
   }
@@ -2417,19 +2411,13 @@ function assertCodexResumeContextMatches(input: {
   )
 }
 
+// The deployed Codex app-server echoes sandbox as a SandboxPolicy tagged
+// object; an unrecognized shape returns null and fails closed as a stale
+// resume, which stays visible through resume-stale trace events.
 function readCodexResumeSandboxMode(
   value: unknown,
 ): 'danger-full-access' | 'read-only' | 'workspace-write' | null {
-  if (
-    value === 'danger-full-access' ||
-    value === 'read-only' ||
-    value === 'workspace-write'
-  ) {
-    return value
-  }
-
-  const record = asCodexRecord(value)
-  switch (asCodexString(record?.type)) {
+  switch (asCodexString(asCodexRecord(value)?.type)) {
     case 'dangerFullAccess':
       return 'danger-full-access'
     case 'readOnly':

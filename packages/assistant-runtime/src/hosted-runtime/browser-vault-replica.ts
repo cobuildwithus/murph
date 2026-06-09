@@ -202,7 +202,6 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
     );
     const source = summarizeHostedBrowserVaultReplicaSource(sourceBefore);
     const freshness = assessBrowserVaultReplicaFreshness({
-      checkpointedAt: input.workspace.checkpointedAt ?? null,
       currentSourceHash: sourceBefore.hash,
       maxAgeMs: input.maxAgeMs,
       now: generatedAt,

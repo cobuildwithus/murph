@@ -39,6 +39,7 @@ beforeEach(async () => {
     dataVersion: clientFixture.replica.source.dataVersion,
     error: null,
     ref: null,
+    refreshPending: false,
     refresh: async () => {},
     status: "ready",
   });
@@ -281,6 +282,43 @@ test("SignalsPage renders the empty signals state", () => {
 
   assert.match(markup, /No wearable signals yet/);
   assert.match(markup, /Connect a source or sync more recent data/i);
+});
+
+test("dashboard empty pages show preparing copy while a replica refresh is pending", () => {
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    dataVersion: null,
+    error: null,
+    ref: null,
+    refreshPending: true,
+    refresh: async () => {},
+    status: "empty",
+  });
+
+  const overviewMarkup = renderToStaticMarkup(createElement(OverviewPage));
+  const historyMarkup = renderToStaticMarkup(createElement(HistoryPage));
+  const signalsMarkup = renderToStaticMarkup(createElement(SignalsPage));
+
+  assert.match(overviewMarkup, /Preparing overview\./);
+  assert.match(overviewMarkup, /Preparing your dashboard/);
+  assert.match(overviewMarkup, /role="status"/);
+  assert.match(overviewMarkup, /aria-live="polite"/);
+  assert.doesNotMatch(overviewMarkup, /Your dashboard is ready for data/);
+  assert.doesNotMatch(overviewMarkup, /No overview available yet/);
+
+  assert.match(historyMarkup, /Preparing timeline\./);
+  assert.match(historyMarkup, /Preparing your timeline/);
+  assert.match(historyMarkup, /role="status"/);
+  assert.match(historyMarkup, /aria-live="polite"/);
+  assert.doesNotMatch(historyMarkup, /No timeline entries yet/);
+  assert.doesNotMatch(historyMarkup, /No history available yet/);
+
+  assert.match(signalsMarkup, /Preparing signals\./);
+  assert.match(signalsMarkup, /Preparing your signals/);
+  assert.match(signalsMarkup, /role="status"/);
+  assert.match(signalsMarkup, /aria-live="polite"/);
+  assert.doesNotMatch(signalsMarkup, /No wearable signals yet/);
+  assert.doesNotMatch(signalsMarkup, /No signals available yet/);
 });
 
 test("SignalsPage renders secondary-only signal days and body-state history", async () => {
