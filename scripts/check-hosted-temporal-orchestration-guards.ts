@@ -58,6 +58,42 @@ const webVercelNudgePatterns = [
   },
 ] as const;
 
+const legacyHostedDemandDecisionTokens = [
+  "HostedRuntime" + "Demand",
+  "readRuntime" + "Demand",
+  "readHostedRuntime" + "Demand",
+  "selectHostedRuntimeRun" + "Demand",
+  "selectHostedRuntimeControlRun" + "Demand",
+  "Demand" + "RunSource",
+  "HOSTED_RUNTIME_" + "DEMAND_BLOCKED",
+  "HOSTED_RUNTIME_" + "DEMAND_KINDS",
+  "HOSTED_RUNTIME_" + "DEMAND_RUN_SOURCES",
+] as const;
+
+const legacyDirectHostedDemandSignalTokens = [
+  "manual_run" + "_requested",
+  "browser_vault_refresh" + "_requested",
+  "mailbox_lag" + "_observed",
+  "device_sync_recovery" + "_requested",
+  "manualRun" + "Requested",
+  "browserVaultRefresh" + "Requested",
+  "browserVaultRefresh" + "RequestedAt",
+  "lagRecovery" + "Observed",
+  "deviceSyncRecovery" + "Requested",
+  "browser_vault_refresh" + "_requested_at",
+] as const;
+
+const legacyHostedDemandPatterns = [
+  {
+    label: "legacy hosted runtime demand decision surface",
+    pattern: buildTokenPattern(legacyHostedDemandDecisionTokens),
+  },
+  {
+    label: "legacy direct hosted runtime demand signal",
+    pattern: buildTokenPattern(legacyDirectHostedDemandSignalTokens),
+  },
+] as const;
+
 const temporalWorkflowHistoryPayloadPatterns = [
   {
     label: "business payload in Temporal workflow history surface",
@@ -103,7 +139,7 @@ export async function main(): Promise<void> {
   }
 
   const lines = [
-    "Hosted Temporal orchestration architecture guard failed. Keep web as ingress/status/demand, Temporal as signal/sleep/retry orchestration, Cloudflare as execution adapter/write fence, and business payloads out of workflow history.",
+    "Hosted Temporal orchestration architecture guard failed. Keep web as ingress/status/reconciliation-facts owner, Temporal as signal/sleep/retry orchestration, Cloudflare as execution adapter/write fence, and business payloads out of workflow history.",
   ];
 
   for (const finding of findings) {
@@ -193,6 +229,15 @@ function selectGuardPatterns(relativePath: string): readonly GuardPattern[] {
     patterns.push(...webVercelNudgePatterns);
   }
 
+  if (
+    relativePath.startsWith("apps/web/app/")
+    || relativePath.startsWith("apps/web/src/")
+    || relativePath.startsWith("apps/cloudflare/src/")
+    || isPackageSourcePath(relativePath)
+  ) {
+    patterns.push(...legacyHostedDemandPatterns);
+  }
+
   return patterns;
 }
 
@@ -233,6 +278,17 @@ function findFirstPatternMatch(
   }
 
   return null;
+}
+
+function buildTokenPattern(tokens: readonly string[]): RegExp {
+  return new RegExp(
+    `\\b(?:${tokens.map(escapeRegExp).join("|")})\\b`,
+    "u",
+  );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function isTestLikePath(relativePath: string): boolean {

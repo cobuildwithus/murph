@@ -138,7 +138,6 @@ describe("settings phone sync route", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_item_channels_phone_123",
-      source: "settings.phone.sync",
     });
     expect(mocks.readHostedPhoneHint).toHaveBeenCalledWith("+14155552671");
     await expect(response.json()).resolves.toEqual({

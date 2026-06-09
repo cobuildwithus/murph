@@ -879,16 +879,6 @@ export interface HostedRuntimeWebStatusResponse {
   workspace: HostedWorkspaceState | null;
 }
 
-export const HOSTED_WORKSPACE_INVOCATION_REASONS = [
-  "nudge",
-  "alarm",
-  "retry",
-  "manual",
-  "browser_vault_refresh",
-] as const;
-
-export type HostedWorkspaceInvocationReason = (typeof HOSTED_WORKSPACE_INVOCATION_REASONS)[number];
-
 export const HOSTED_WORKSPACE_INVOCATION_STATUSES = [
   "idle",
   "budget_exhausted",
@@ -909,7 +899,6 @@ export interface HostedWorkspaceInvocationRequest {
   idleCheckpointDelayMs?: number | null;
   leaseGeneration: string;
   providerEgressToken?: string | null;
-  reason: HostedWorkspaceInvocationReason;
   userId: string;
   workspace?: HostedWorkspaceState | null;
   workspaceVersion: string;

@@ -56,6 +56,11 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
   );
   rejectRemovedHostedAssistantRuntimeField(
     record,
+    "reason",
+    "Hosted assistant workspace runtime job request",
+  );
+  rejectRemovedHostedAssistantRuntimeField(
+    record,
     "run",
     "Hosted assistant workspace runtime job request",
   );
@@ -71,6 +76,11 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
   );
   rejectRemovedHostedAssistantRuntimeField(
     record,
+    "source",
+    "Hosted assistant workspace runtime job request",
+  );
+  rejectRemovedHostedAssistantRuntimeField(
+    record,
     "targetCommittedSeqHint",
     "Hosted assistant workspace runtime job request",
   );
@@ -79,19 +89,6 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
     "wake",
     "Hosted assistant workspace runtime job request",
   );
-  const reason = parseHostedWorkspaceInvocationReason(
-    record.reason,
-    "Hosted assistant workspace runtime job request.reason",
-  );
-  if (record.source !== undefined && record.source !== null) {
-    // Legacy job tolerance only. Runtime behavior should come from reason,
-    // workspace state, and canonical mailbox facts.
-    parseHostedWorkspaceInvocationSource(
-      record.source,
-      "Hosted assistant workspace runtime job request.source",
-    );
-  }
-
   return {
     attemptId: requireString(
       record.attemptId,
@@ -127,7 +124,6 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
             "Hosted assistant workspace runtime job request.providerEgressToken",
           ),
         }),
-    reason,
     userId: requireString(
       record.userId,
       "Hosted assistant workspace runtime job request.userId",
@@ -450,39 +446,6 @@ function parseHostedWorkspaceInvocationBudget(
             : requirePositiveInteger(record.maxRuntimeMs, `${label}.maxRuntimeMs`),
         }),
   };
-}
-
-function parseHostedWorkspaceInvocationReason(
-  value: unknown,
-  label: string,
-): HostedAssistantWorkspaceRuntimeJobInput["request"]["reason"] {
-  const reason = requireString(value, label);
-
-  switch (reason) {
-    case "alarm":
-    case "browser_vault_refresh":
-    case "manual":
-    case "nudge":
-    case "retry":
-      return reason;
-    default:
-      throw new TypeError(`${label} is not supported.`);
-  }
-}
-
-function parseHostedWorkspaceInvocationSource(
-  value: unknown,
-  label: string,
-): void {
-  if (
-    value !== "mailbox_backlog"
-    && value !== "manual"
-    && value !== "browser_vault_refresh"
-    && value !== "workspace_wake"
-    && value !== "lag_recovery"
-  ) {
-    throw new TypeError(`${label} is not supported.`);
-  }
 }
 
 function readNullableString(value: unknown, label: string): string | null {

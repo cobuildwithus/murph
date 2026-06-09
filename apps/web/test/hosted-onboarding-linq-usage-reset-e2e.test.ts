@@ -463,7 +463,6 @@ describe("hosted Linq usage reset e2e", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_evt_after_reset",
-      source: "linq",
     });
     expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
       chatId: CHAT_ID,

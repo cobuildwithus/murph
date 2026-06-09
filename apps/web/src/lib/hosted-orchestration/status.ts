@@ -2,13 +2,15 @@ import "server-only";
 
 import {
   HOSTED_RUNTIME_CURRENT_WAIT_REASONS,
-  HOSTED_RUNTIME_DEMAND_KINDS,
   HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
+  HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
+  HOSTED_RUNTIME_RECONCILIATION_STATUSES,
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
-  type HostedRuntimeDemand,
-  type HostedRuntimeDemandKind,
   type HostedRuntimeEnsureProcessingResponseKind,
   type HostedRuntimeLastRuntimeStatus,
+  type HostedRuntimeReconciliationBlockedReason,
+  type HostedRuntimeReconciliationFacts,
+  type HostedRuntimeReconciliationStatus,
   type HostedRuntimeWorkflowState,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
@@ -21,8 +23,8 @@ import {
   readHostedExecutionControlClientIfConfigured,
 } from "../hosted-execution/control";
 import {
-  readHostedRuntimeDemand,
-} from "./runtime-demand";
+  readHostedRuntimeReconciliationFacts,
+} from "./runtime-reconciliation-facts";
 import {
   hostedUserRuntimeWorkflowId,
 } from "./signal-runtime";
@@ -35,8 +37,8 @@ export interface HostedOrchestrationUserStatus {
     runnerStatus: HostedRunnerStatusProjection | null;
     unavailableReason: HostedCloudflareStatusUnavailableReason;
   };
-  demand: {
-    current: HostedRuntimeDemand;
+  reconciliation: {
+    facts: HostedRuntimeReconciliationFacts;
   };
   temporal: {
     status: HostedRuntimeWorkflowStatusProjection | null;
@@ -94,14 +96,8 @@ export async function readHostedOrchestrationUserStatus(input: {
     }),
     readHostedRunnerStatusIfAvailable(input.userId),
   ]);
-  const demand = await readHostedRuntimeDemand({
-    browserVaultRefreshRequested:
-      temporalStatusResult.status?.browserVaultRefreshRequested === true,
+  const facts = await readHostedRuntimeReconciliationFacts({
     decisionSource: "status",
-    lagRecoveryObserved:
-      temporalStatusResult.status?.lagRecoveryObserved === true,
-    manualRunRequested:
-      temporalStatusResult.status?.manualRunRequested === true,
     usageGateMode: "read_only",
     userId: input.userId,
   });
@@ -113,8 +109,8 @@ export async function readHostedOrchestrationUserStatus(input: {
         : null,
       unavailableReason: cloudflareStatusResult.unavailableReason,
     },
-    demand: {
-      current: demand,
+    reconciliation: {
+      facts,
     },
     temporal: {
       status: temporalStatusResult.status
@@ -306,17 +302,10 @@ function parseHostedRuntimeWorkflowStatusForWeb(
   const record = requireRecord(value);
 
   return {
-    browserVaultRefreshRequested: requireBoolean(
-      record.browserVaultRefreshRequested,
-    ),
     currentWaitReason:
       readNullableCurrentWaitReason(record.currentWaitReason ?? null),
     currentWaitUntil: readNullableString(record.currentWaitUntil ?? null),
     invalidSignalCount: requireSafeInteger(record.invalidSignalCount),
-    lagRecoveryObserved: requireBoolean(record.lagRecoveryObserved),
-    lastDemandKind: readNullableDemandKind(record.lastDemandKind),
-    lastDemandNextWakeAt: readNullableString(record.lastDemandNextWakeAt),
-    lastDemandSource: readNullableString(record.lastDemandSource),
     lastExecutionAt: readNullableString(record.lastExecutionAt),
     lastExecutionErrorCode: readNullableString(record.lastExecutionErrorCode),
     lastExecutionKind: readNullableExecutionKind(record.lastExecutionKind),
@@ -331,6 +320,12 @@ function parseHostedRuntimeWorkflowStatusForWeb(
       readNullableString(record.lastPrewarmErrorCode ?? null),
     lastPrewarmResult:
       readNullablePrewarmResult(record.lastPrewarmResult ?? null),
+    lastReconciliationBlockedReason:
+      readNullableReconciliationBlockedReason(record.lastReconciliationBlockedReason),
+    lastReconciliationNextWakeAt:
+      readNullableString(record.lastReconciliationNextWakeAt),
+    lastReconciliationStatus:
+      readNullableReconciliationStatus(record.lastReconciliationStatus),
     lastRuntimeAttemptId: readNullableString(record.lastRuntimeAttemptId ?? null),
     lastRuntimeStatus: readNullableLastRuntimeStatus(
       record.lastRuntimeStatus ?? null,
@@ -340,7 +335,6 @@ function parseHostedRuntimeWorkflowStatusForWeb(
     latestPrewarmRequestedAt:
       readNullableString(record.latestPrewarmRequestedAt ?? null),
     mailboxSignalCount: requireSafeInteger(record.mailboxSignalCount),
-    manualRunRequested: requireBoolean(record.manualRunRequested),
     prewarmRequested: readOptionalBoolean(record.prewarmRequested, false),
     prewarmSignalCount: readOptionalSafeInteger(record.prewarmSignalCount, 0),
     signalVersion: requireSafeInteger(record.signalVersion),
@@ -365,7 +359,6 @@ function readNullableMailboxPointer(
     lane,
     laneSeq: requireString(record.laneSeq),
     mailboxItemId: requireString(record.mailboxItemId),
-    source: requireString(record.source),
   };
 }
 
@@ -379,14 +372,39 @@ function readNullableObservabilityMailboxPointer(
   }
 }
 
-function readNullableDemandKind(value: unknown): HostedRuntimeDemandKind | null {
+function readNullableReconciliationStatus(
+  value: unknown,
+): HostedRuntimeReconciliationStatus | null {
   if (value === null) {
     return null;
   }
 
-  const kind = requireString(value);
-  if (HOSTED_RUNTIME_DEMAND_KINDS.includes(kind as HostedRuntimeDemandKind)) {
-    return kind as HostedRuntimeDemandKind;
+  const status = requireString(value);
+  if (
+    HOSTED_RUNTIME_RECONCILIATION_STATUSES.includes(
+      status as HostedRuntimeReconciliationStatus,
+    )
+  ) {
+    return status as HostedRuntimeReconciliationStatus;
+  }
+
+  return null;
+}
+
+function readNullableReconciliationBlockedReason(
+  value: unknown,
+): HostedRuntimeReconciliationBlockedReason | null {
+  if (value === null) {
+    return null;
+  }
+
+  const reason = requireString(value);
+  if (
+    HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS.includes(
+      reason as HostedRuntimeReconciliationBlockedReason,
+    )
+  ) {
+    return reason as HostedRuntimeReconciliationBlockedReason;
   }
 
   return null;

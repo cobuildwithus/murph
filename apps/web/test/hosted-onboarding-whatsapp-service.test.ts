@@ -562,7 +562,6 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_whatsapp_123",
       mailboxItemId: "mailbox_whatsapp:message:wamid.test-message-1",
-      source: "whatsapp",
     });
   });
 
@@ -598,17 +597,16 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_whatsapp_123",
       mailboxItemId: "mailbox_whatsapp:message:wamid.test-message-1",
-      source: "whatsapp",
     });
   });
 
   it("dedupes repeated WhatsApp message ids through the hosted mailbox append", async () => {
-    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
+    mocks.appendHostedMailboxEnvelopeTx.mockImplementationOnce(async () => ({
       duplicate: true,
       item: {
         id: "mailbox_existing_whatsapp",
       },
-    });
+    }));
     const prisma = createWhatsAppPrismaHarness({
       consentGranted: true,
       memberId: "member_whatsapp_123",
@@ -631,6 +629,10 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
 
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_whatsapp_123",
+      mailboxItemId: "mailbox_existing_whatsapp",
+    });
   });
 
   it("requires WhatsApp consent before appending linked active member texts", async () => {

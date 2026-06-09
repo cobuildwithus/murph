@@ -64,7 +64,6 @@ export async function signalHostedMemberActivationRuntimeWakeBestEffortResult(
       expectedUserId: activationMailboxItem.userId,
       mailboxItemId: activationMailboxItem.id,
       prisma,
-      source: input.source,
     });
     const signal = await withActivationRuntimeWakeTimeout(signalPromise, input.timeoutMs);
 

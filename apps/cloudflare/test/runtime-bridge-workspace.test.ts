@@ -137,7 +137,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -176,7 +175,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -233,7 +231,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -291,7 +288,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -359,7 +355,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -478,7 +473,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -542,7 +536,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -607,7 +600,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -669,7 +661,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -733,7 +724,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -834,7 +824,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -898,7 +887,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -965,7 +953,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -1067,7 +1054,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -1141,7 +1127,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -1218,7 +1203,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "0",
       },
@@ -1294,7 +1278,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "8",
       },
@@ -1343,7 +1326,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "8",
       },
@@ -1399,7 +1381,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "8",
       },
@@ -1453,7 +1434,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "8",
       },
@@ -1513,7 +1493,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -1611,7 +1590,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -1687,7 +1665,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "8",
       },
@@ -1751,7 +1728,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "8",
       },
@@ -1822,7 +1798,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "8",
       },
@@ -1917,7 +1892,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -1998,7 +1972,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -2103,7 +2076,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -2162,7 +2134,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "7",
       },
@@ -2235,7 +2206,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: item.userId,
         workspaceVersion: "7",
       },
@@ -2511,7 +2481,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "nudge",
         userId: item.userId,
         workspaceVersion: "7",
       },
@@ -2582,7 +2551,6 @@ function createBridgeRequest(userId: string) {
   return {
     attemptId: "attempt_1",
     leaseGeneration: "4",
-    reason: "nudge" as const,
     userId,
     workspaceVersion: "7",
   };

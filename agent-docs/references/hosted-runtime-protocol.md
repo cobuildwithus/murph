@@ -184,12 +184,21 @@ this compatibility invariant first, and only introduce heavier machinery when a
 specific protocol change cannot be made safe with the sequence above.
 Because the Temporal worker can deploy automatically before the manual
 Cloudflare worker rollout, new Temporal-to-Cloudflare `ensure-processing` fields
-must either be accepted by the currently deployed worker or keep the demand
+must either be accepted by the currently deployed worker or keep processing
 pending with `retry_later` until the consumer deployment catches up.
 Web-to-Temporal signal kinds have the same compatibility constraint: add
 workflow `patched()`/version gating for any new signal that changes wait or
-demand behavior, deploy the Temporal worker before web emits that signal, and
+reconciliation behavior, deploy the Temporal worker before web emits that signal, and
 keep old histories replaying the old invalid/no-op signal behavior.
+
+The PR65+PR66 runtime reconciliation change is an explicit hard-cut exception to
+the tolerant deploy sequence above. It deletes the old demand Activity and
+legacy direct demand signals, so operators must stop old Temporal workers,
+terminate old `hosted-user-runtime:*` workflows, deploy matching web,
+Temporal, and Cloudflare builds together, then reseed new histories. Existing
+Cloudflare Durable Object state is not canonical product truth for this
+cutover; the new runner schema drops the retired `runner_bundle_slots` table
+during schema migration instead of requiring a manual Durable Object wipe.
 
 Hosted producers for exact user-visible events append one `HostedMailboxItem` in
 the same transaction as the product/control-plane mutation that made work
@@ -199,7 +208,7 @@ Hosted Linq and Telegram conversation webhook routes read the raw body and
 verification headers only in the route/service process. That code verifies the
 provider payload, appends the canonical encrypted mailbox item transactionally,
 drains any local non-mailbox side effects, and signals the per-user hosted
-Temporal workflow with only `{ mailboxItemId, source }`.
+Temporal workflow with only `{ mailboxItemId, lane, laneSeq }`.
 Cloudflare Email ingress verifies either a signed reply alias for an active
 member or the fixed public sender route plus a trusted authenticated-sender
 verdict, stores the encrypted raw message, appends the canonical encrypted
@@ -212,8 +221,9 @@ matching reply-alias lookup key for route resolution.
 Raw provider bodies, raw email messages, message content, verification headers,
 provider secrets, and decrypted mailbox payloads must not be Temporal workflow
 inputs, outputs, or history payloads. The pointer signal only wakes durable
-orchestration; Temporal then re-reads web-owned demand and, if processing is
-needed, calls Cloudflare's short-lived `ensure-processing` adapter. There is no
+orchestration; Temporal then re-reads web-owned reconciliation facts and, if
+processing is needed, calls Cloudflare's short-lived `ensure-processing`
+adapter. There is no
 webhook-to-Cloudflare runner nudge path and no second wake authority. If the
 Temporal signal cannot be accepted after the mailbox row exists, the failure is
 logged as a post-commit best-effort handoff failure and does not make provider
@@ -228,8 +238,9 @@ import status for workflow completion or status projection. The narrow liveness
 exception is the exact `runner.accepted_attempt_failed` event: after web has
 durably recorded that metadata-only row, it may send a cooldown-throttled,
 payload-free `runtime_recheck_requested` Temporal signal. That signal only
-interrupts the workflow's current wait so Temporal re-reads web-owned demand;
-it sets no mailbox, manual, browser-vault, lag, or device-sync demand flag.
+interrupts the workflow's current wait so Temporal re-reads web-owned
+reconciliation facts; it sets no mailbox, manual, browser-vault, lag, or
+device-sync work flag.
 The cooldown elects the earliest recent same-user accepted-failure log as the
 signal owner, so concurrent first-failure callbacks produce at most one
 immediate recheck and cannot all suppress each other.
@@ -241,7 +252,7 @@ workflow attempts are safe because mailbox append dedupes by event id and
 Temporal signals only coalesce pending work.
 
 Linq typing prewarm is the only conversation-webhook latency hint that does not
-append mailbox demand. After provider verification, web may classify
+append mailbox work. After provider verification, web may classify
 `chat.typing_indicator.started` only when the Linq service is explicitly
 `iMessage`, resolve only an already-active hosted Linq route, throttle by
 user/source, and signal the existing per-user Temporal workflow with
@@ -249,19 +260,19 @@ user/source, and signal the existing per-user Temporal workflow with
 timestamp, and source; chat ids, phone numbers, and raw provider payloads must
 not enter Temporal state or logs. It must not plan
 onboarding, bind routes, append mailbox rows, send read receipts, call
-Cloudflare directly, or add a `readRuntimeDemand` source. Temporal reads real
-web-owned demand first; if mailbox or other durable demand exists, normal
-ensure-processing wins. If demand is idle, Temporal may issue one short
+Cloudflare directly, or add reconciliation work. Temporal reads real
+web-owned reconciliation facts first; if mailbox or other durable work exists,
+normal ensure-processing wins. If facts are idle, Temporal may issue one short
 best-effort Cloudflare prewarm Activity on a dedicated prewarm task queue and
 clears the hint after the attempt. The prewarm attempt uses no Activity retry,
 keeps the Cloudflare readiness budget shorter than the workflow Activity
 timeout, and does not wait on slow container cleanup while holding the prewarm
-lifecycle lock. If a real demand signal arrives while the prewarm Activity is
-pending, the workflow abandons the prewarm wait and immediately re-reads demand.
+lifecycle lock. If a real mailbox signal arrives while the prewarm Activity is
+pending, the workflow abandons the prewarm wait and immediately re-reads facts.
 Mailbox processing must not wait behind a typing hint in workflow state,
 Temporal Activity worker capacity, or Cloudflare container lifecycle locks.
 
-Non-conversation control wakes follow the same durable-demand rule where they
+Non-conversation control wakes follow the same durable-work rule where they
 own durable product/control facts. Manual runs and browser-vault refreshes
 append system-mailbox control rows before Temporal is signaled. Device-sync
 uses the same mailbox handoff shape: due-reconcile work is selected from
@@ -278,9 +289,12 @@ audit/signal facts, widens the per-connection dirty row and safe dirty
 resource/window map, and completes the trace in the same transaction. Dirty
 state is durable runtime work input; the `device-sync.wake` mailbox row is only
 the bounded handoff to the normal Temporal wake path and must not carry provider
-payloads or become the device-sync queue. The assistant runtime runs system-lane
-device sync only when no fresh conversation input is pending, and reschedules a short
-`device-sync.reconcile` wake if foreground work preempts that background pass.
+payloads or become the device-sync queue. Active foreground wake handling stays
+conversation-focused; system-lane work runs through normal invocation and
+reconciliation when no fresh conversation input is pending, and reschedules a
+short `device-sync.reconcile` wake if foreground work preempts that background
+pass. Do not add a separate system-lane active-wake import path unless measured
+latency or product behavior proves the simpler split is insufficient.
 The scheduled-wake sweep is the bounded backstop for active connections whose
 canonical `nextReconcileAt` is due. Temporal owns that cadence through a global
 scheduled reconciler workflow, but web owns the signed legacy-named command that
@@ -308,7 +322,7 @@ payloads, signatures, customer objects, invoice objects, provider headers, and
 mailbox payloads must not be Workflow inputs or step outputs. The minute cron
 drain remains a receipt retry fallback for due Stripe rows.
 
-Cloudflare does not acquire a web run row and does not reconcile durable demand.
+Cloudflare does not acquire a web run row and does not reconcile durable work.
 Only Temporal decides when Cloudflare should process. The short-lived
 `ensure-processing` command asks the per-user Durable Object to make processing
 active by starting a runner, waking a ready child, recording a pending wake while
@@ -345,8 +359,8 @@ completion, outbox truth, assistant channel enablement state, or checkpoint
 recovery truth. When a write-fenced invocation exists, the write fence is commit
 authority and active ownership truth for orchestration; useful runtime progress
 is still proven only by the later durable checkpoint. Local Durable Object
-promises are allowed to coalesce work, but they are not durable demand truth. The
-alarm path only syncs/clears write-fence alarm state; it is not semantic wake or mailbox-demand
+promises are allowed to coalesce work, but they are not durable work truth. The
+alarm path only syncs/clears write-fence alarm state; it is not semantic wake or mailbox-work
 scheduling. Durable mailbox lag is durable recovery truth; when it is observed
 while Cloudflare still owns an active write fence, Cloudflare may coalesce it
 into the active runner instead of starting duplicate execution. The hosted
@@ -354,8 +368,8 @@ runtime owns the foreground
 conversation-mailbox import loop, imports late rows through the same mailbox
 state/input-store path as the initial import, and then notifies the
 assistant-engine active-turn controller. If the foreground wake path does not
-consume or commit appended mailbox rows, Temporal/web demand rechecks are the
-durable recovery path rather than Cloudflare alarm demand inference.
+consume or commit appended mailbox rows, Temporal/web reconciliation rechecks are
+the durable recovery path rather than Cloudflare alarm inference.
 
 The runtime reads `HostedWorkspace`, validates workspace version/user metadata,
 then restores the encrypted local workspace before fetching mailbox rows. A new
@@ -501,8 +515,8 @@ state. `apps/web` assesses freshness from the latest replica ref, checkpoint
 evidence, source identity when known, and a bounded max-age policy; ref
 presence alone is never freshness. Stale session reads may still serve a usable
 replica, but they must mark it stale and request refresh after the HTTP response.
-Cloudflare treats that request as a low-priority `browser_vault_refresh` runtime
-demand only when explicitly asked by web; normal nudges do not become browser-vault
+Web represents that request as ordinary low-priority runtime work only when its
+freshness policy explicitly asks for it; normal nudges do not become browser-vault
 refresh sweeps just because a workspace has no replica yet. Foreground work may
 schedule refresh as ordinary runtime work, but `idle_shutdown` v2 checkpoints write only
 the workspace snapshot ref; they do not publish browser-vault replicas.
@@ -614,10 +628,11 @@ durable queue history.
 ### Temporal Hosted Orchestration Owns
 
 - per-user hosted runtime workflow state
-- pointer-only mailbox, manual, browser-vault, runtime-result, and device-sync
-  signals
-- best-effort `runtime_prewarm_requested` typing hints that never become demand
-- reading web-owned demand and deciding when Cloudflare should process
+- pointer-only mailbox and recheck signals
+- best-effort `runtime_prewarm_requested` typing hints that never become
+  mailbox work
+- reading web-owned reconciliation facts and deciding when Cloudflare should
+  process
 - short-lived Cloudflare `ensure-processing` and prewarm activity calls
 - signal-interruptible waits, retries, and scalar workflow status diagnostics
 

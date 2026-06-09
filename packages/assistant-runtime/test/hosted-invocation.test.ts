@@ -214,7 +214,6 @@ function createWorkspaceJob(): HostedAssistantWorkspaceRuntimeJobInput {
       attemptId: "attempt_invocation",
       leaseGeneration: "3",
       providerEgressToken: "provider-egress-token-invocation",
-      reason: "nudge",
       userId: "member_invocation",
       workspaceVersion: "7",
     },

@@ -28,7 +28,7 @@ describe("ensureRuntimeProcessing", () => {
     vi.restoreAllMocks();
   });
 
-  it("posts a source-less Cloudflare ensure-processing request even for legacy source inputs", async () => {
+  it("posts a source-less and reason-less Cloudflare ensure-processing request", async () => {
     await stubCloudflareEnvironment();
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
 
@@ -46,8 +46,6 @@ describe("ensureRuntimeProcessing", () => {
 
     await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
-      source: "workspace_wake",
       userId: "member_test",
     })).resolves.toEqual(response);
 
@@ -66,8 +64,8 @@ describe("ensureRuntimeProcessing", () => {
     expect(headers.get(HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER)).toBe("10000");
     expect(JSON.parse(String(request.init?.body))).toEqual({
       orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
     });
+    expect(String(request.init?.body)).not.toContain("reason");
     expect(String(request.init?.body)).not.toContain("source");
     expect(String(request.init?.body)).not.toContain("requiresAiUsageDecision");
     expect(String(request.init?.body)).not.toContain("aiUsageAllowDecision");
@@ -118,34 +116,6 @@ describe("ensureRuntimeProcessing", () => {
     expect(timeoutSpy).toHaveBeenCalledWith(5_000);
   });
 
-  it("drops legacy device-sync recovery source from old Activity inputs", async () => {
-    await stubCloudflareEnvironment();
-
-    const response: HostedRuntimeEnsureProcessingResponse = {
-      action: "started",
-      kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-05-20T12:02:30.000Z",
-      runtimeAttemptId: "runtime_attempt_test",
-    };
-    const observedRequests: ObservedRequest[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
-      observedRequests.push({ init, url: String(url) });
-      return jsonResponse(response);
-    }));
-
-    await expect(ensureRuntimeProcessing({
-      orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
-      source: "device_sync_recovery",
-      userId: "member_test",
-    })).resolves.toEqual(response);
-
-    expect(JSON.parse(String(observedRequests[0].init?.body))).toEqual({
-      orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
-    });
-  });
-
   it("does not turn coded current Cloudflare validation failures into retry-later", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-20T12:00:00.000Z"));
@@ -157,8 +127,6 @@ describe("ensureRuntimeProcessing", () => {
 
     await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
-      source: "workspace_wake",
       userId: "member_test",
     })).rejects.toMatchObject({
       message: "Hosted orchestrator runtime ensure processing failed with HTTP 400.",
@@ -178,7 +146,6 @@ describe("ensureRuntimeProcessing", () => {
 
     await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
       userId: "member_test",
     })).rejects.toMatchObject({
       message: "Hosted orchestrator runtime ensure processing failed with HTTP 400.",
@@ -204,7 +171,6 @@ describe("ensureRuntimeProcessing", () => {
 
     await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "manual",
       userId: "member_test",
     })).resolves.toEqual(response);
 
@@ -213,8 +179,8 @@ describe("ensureRuntimeProcessing", () => {
     const cloudflareBody = JSON.parse(String(cloudflareRequest.init?.body));
     expect(cloudflareBody).toEqual({
       orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "manual",
     });
+    expect(cloudflareBody).not.toHaveProperty("reason");
     expect(cloudflareBody).not.toHaveProperty("requiresAiUsageDecision");
     expect(cloudflareBody).not.toHaveProperty("aiUsageAllowDecision");
   });
@@ -236,7 +202,6 @@ describe("ensureRuntimeProcessing", () => {
 
     await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
       userId: "member_test",
     })).resolves.toEqual(response);
 
@@ -254,7 +219,6 @@ describe("ensureRuntimeProcessing", () => {
 
     await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
       userId: "member_test",
     })).rejects.toMatchObject({
       message: expect.stringContaining("Hosted runtime ensure-processing response kind"),
@@ -271,7 +235,6 @@ describe("ensureRuntimeProcessing", () => {
 
     await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
       userId: "member_test",
     })).rejects.toMatchObject({
       name: "HostedOrchestratorTransportError",
@@ -286,7 +249,6 @@ describe("ensureRuntimeProcessing", () => {
 
     await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
       userId: "member_test",
     })).rejects.toMatchObject({
       message: "Hosted orchestrator runtime ensure processing failed with HTTP 401.",
@@ -323,7 +285,6 @@ describe("ensureRuntimeProcessing", () => {
 
     await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
       userId: "member_test",
     })).rejects.toMatchObject({
       name: "HostedOrchestratorHttpResponseError",

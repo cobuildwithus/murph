@@ -90,7 +90,6 @@ describe("cloudflare worker queue backpressure routes", () => {
     const stateStore = new RunnerStateStore(harness.storage.state);
     await stateStore.bindUser("member_123");
     await stateStore.beginInvocation({
-      reason: "manual",
       runnerContainerName: "member_123--v-worker_version_current",
       userId: "member_123",
     });
@@ -116,7 +115,6 @@ describe("cloudflare worker queue backpressure routes", () => {
 
     await expect(harness.durableObject.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "backpressure-active-fence-test",
-      reason: "nudge",
       userId: "member_123",
     })).resolves.toMatchObject({
       kind: "retry_later",

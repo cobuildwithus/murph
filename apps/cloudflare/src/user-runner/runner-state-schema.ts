@@ -24,7 +24,6 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       active_expires_at TEXT,
       active_workspace_version TEXT,
       backoff_until TEXT,
-      browser_vault_refresh_requested_at TEXT,
       failure_count INTEGER NOT NULL DEFAULT 0,
       last_error_at TEXT,
       last_error_code TEXT,
@@ -45,7 +44,6 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     active_expires_at: "TEXT",
     active_workspace_version: "TEXT",
     backoff_until: "TEXT",
-    browser_vault_refresh_requested_at: "TEXT",
     failure_count: "INTEGER NOT NULL DEFAULT 0",
     last_error_at: "TEXT",
     last_error_code: "TEXT",
@@ -55,8 +53,8 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
   }
 
   migrateLegacyRunnerState(sql);
+  dropRetiredRunnerStateTable(sql, "runner_bundle_slots");
   markRunnerStateSchemaVersion(sql);
-  assertRunnerStateTableAbsent(sql, "runner_bundle_slots");
   assertRunnerStateTableColumns(sql, "runner_meta", {
     requiredColumns: [
       "singleton",
@@ -72,7 +70,6 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "active_expires_at",
       "active_workspace_version",
       "backoff_until",
-      "browser_vault_refresh_requested_at",
       "failure_count",
       "last_error_at",
       "last_error_code",
@@ -213,16 +210,11 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
   }
 }
 
-function assertRunnerStateTableAbsent(
+function dropRetiredRunnerStateTable(
   sql: DurableObjectSqlStorageLike,
   tableName: string,
 ): void {
-  const rows = sql.exec<{ name: DurableObjectSqlValue }>(
-    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${tableName}'`,
-  ).toArray();
-  if (rows.length > 0) {
-    throw new Error(`runner_meta schema is unsupported; legacy ${tableName} table remains.`);
-  }
+  sql.exec(`DROP TABLE IF EXISTS ${tableName}`);
 }
 
 function ensureRunnerStateTableColumn(

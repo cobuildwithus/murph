@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   HostedRuntimeWebStatusResponse,
-  HostedWorkspaceInvocationReason,
   HostedWorkspaceInvocationResult,
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
@@ -84,13 +83,6 @@ const FIXED_NOW = "2026-04-27T00:00:00.000Z";
 const WORKSPACE_NEXT_WAKE_AT = "2026-04-27T00:02:00.000Z";
 const ACTIVE_RUNTIME_RECHECK_AT = "2026-04-27T00:01:00.000Z";
 const TEST_USER_ID = "member_123";
-const RUNNER_STATUS_REASON_CASES = [
-  "manual",
-  "browser_vault_refresh",
-  "retry",
-  "nudge",
-] satisfies HostedWorkspaceInvocationReason[];
-
 const TEST_RUNNER_RUNTIME_ENV_SOURCE = {
   HOSTED_ASSISTANT_PROVIDER: "openai",
   OPENAI_API_KEY: "test-openai-key",
@@ -104,11 +96,11 @@ describe("HostedUserRunner execution coordination", () => {
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
   });
 
-  it("accepts one runtime-processing pass without reading status as demand", async () => {
+  it("accepts one runtime-processing pass without reading status as a scheduler", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const onStatusRead = vi.fn(() => {
-      throw new Error("Cloudflare must not read status to schedule runtime demand.");
+      throw new Error("Cloudflare must not read status to schedule runtime work.");
     });
     const readiness = createDeferred<Awaited<
       ReturnType<NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>>
@@ -130,7 +122,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     const accepted = runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     });
     let acceptedSettled = false;
@@ -159,7 +150,6 @@ describe("HostedUserRunner execution coordination", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(invoke).toHaveBeenCalledOnce();
     expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
-      reason: "nudge",
       userId: TEST_USER_ID,
       workspace: expect.objectContaining({
         userId: TEST_USER_ID,
@@ -217,7 +207,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
@@ -315,7 +304,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
@@ -348,7 +336,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
@@ -412,7 +399,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
@@ -486,7 +472,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
@@ -542,7 +527,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
@@ -594,7 +578,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
@@ -624,7 +607,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
@@ -664,7 +646,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     const accepted = runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     });
     let acceptedSettled = false;
@@ -716,7 +697,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt-1",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
@@ -731,7 +711,6 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       commandTimeoutMs: 5_000,
       orchestrationAttemptId: "test-orchestration-attempt-2",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
@@ -764,7 +743,6 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       commandTimeoutMs: 5_000,
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
@@ -798,7 +776,6 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       commandTimeoutMs: 120_000,
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
@@ -830,7 +807,6 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       commandTimeoutMs: 10_000,
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
@@ -876,7 +852,6 @@ describe("HostedUserRunner execution coordination", () => {
     const response = runner.ensureRuntimeProcessingForUser({
       commandTimeoutMs: 5_000,
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     });
     await runnerSecretsReadStarted.promise;
@@ -912,7 +887,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     const accepted = runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     });
 
@@ -1143,7 +1117,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "woken",
@@ -1158,7 +1131,6 @@ describe("HostedUserRunner execution coordination", () => {
         leaseGeneration: String(token.generation),
         userId: TEST_USER_ID,
       },
-      reason: "nudge",
       userId: TEST_USER_ID,
     });
     expect(invoke).not.toHaveBeenCalled();
@@ -1190,7 +1162,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "woken",
@@ -1229,7 +1200,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "woken",
@@ -1263,7 +1233,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt-expired",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "woken",
@@ -1302,7 +1271,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
@@ -1342,7 +1310,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt-replace",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "replaced",
@@ -1397,7 +1364,6 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       commandTimeoutMs: 10_000,
       orchestrationAttemptId: "test-orchestration-attempt-replace",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
@@ -1432,7 +1398,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
@@ -1470,7 +1435,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt-wake-replace",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
@@ -1511,7 +1475,6 @@ describe("HostedUserRunner execution coordination", () => {
     const response = runner.ensureRuntimeProcessingForUser({
       commandTimeoutMs: 5_000,
       orchestrationAttemptId: "test-orchestration-attempt",
-      reason: "nudge",
       userId: TEST_USER_ID,
     });
     await vi.advanceTimersByTimeAsync(4_000);
@@ -1548,7 +1511,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     const firstEnsure = await runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt-first",
-      reason: "nudge",
       userId: TEST_USER_ID,
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
@@ -1559,7 +1521,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt-second",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "woken",
@@ -1590,11 +1551,11 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("does not read web demand while syncing write-fence alarms", async () => {
+  it("does not read web status while syncing write-fence alarms", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const onStatusRead = vi.fn(() => {
-      throw new Error("Alarm must not read web demand.");
+      throw new Error("Alarm must not read web status as runtime work.");
     });
     const { alarms, invoke, runner, sql } = createRunnerHarness({
       onStatusRead,
@@ -1709,7 +1670,6 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.runnerStatus()).resolves.toMatchObject({
       activeWriteFence: {
         attemptId: token.attemptId,
-        reason: "nudge",
         userId: TEST_USER_ID,
         workspaceVersion: "3",
       },
@@ -1719,9 +1679,9 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it.each(RUNNER_STATUS_REASON_CASES)(
-    "reports the active %s write-fence reason in status",
-    async (reason) => {
+  it(
+    "reports active write-fence status without product reason semantics",
+    async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date(FIXED_NOW));
       const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
@@ -1732,8 +1692,7 @@ describe("HostedUserRunner execution coordination", () => {
       await runner.bindUser(TEST_USER_ID);
 
       const ensure = await runner.ensureRuntimeProcessingForUser({
-        orchestrationAttemptId: `test-orchestration-status-${reason}`,
-        reason,
+        orchestrationAttemptId: "test-orchestration-status-reasonless",
         userId: TEST_USER_ID,
       });
       await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
@@ -1749,7 +1708,6 @@ describe("HostedUserRunner execution coordination", () => {
       expect(status).toMatchObject({
         activeWriteFence: {
           attemptId: activeAttemptId,
-          reason,
           userId: TEST_USER_ID,
           workspaceVersion: "12",
         },
@@ -1757,6 +1715,7 @@ describe("HostedUserRunner execution coordination", () => {
         nextAlarmAt: null,
         userId: TEST_USER_ID,
       });
+      expect(status.activeWriteFence).not.toHaveProperty("reason");
 
       invocationResult.resolve({
         nextWakeAt: null,
@@ -2437,7 +2396,6 @@ async function expectFreshRuntimeRetryAndCleared(input: {
 }): Promise<void> {
   await expect(input.runner.ensureRuntimeProcessingForUser({
     orchestrationAttemptId: "test-orchestration-attempt",
-    reason: "nudge",
     userId: TEST_USER_ID,
   })).resolves.toEqual({
     kind: "retry_later",

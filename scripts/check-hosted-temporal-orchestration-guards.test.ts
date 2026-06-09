@@ -90,12 +90,35 @@ describe("check-hosted-temporal-orchestration-guards", () => {
     ]);
   });
 
-  it("does not flag allowed hosted demand source identifiers", () => {
+  it("flags legacy hosted runtime demand decision helpers", () => {
     expect(
       findHostedTemporalGuardFindings(
         "apps/web/src/lib/hosted-orchestration/runtime-demand.ts",
-        'const source = "browser_vault_refresh";',
+        "export async function " + "readRuntime" + "Demand" + "() { return null; }",
       ),
-    ).toEqual([]);
+    ).toEqual([
+      {
+        filePath: "apps/web/src/lib/hosted-orchestration/runtime-demand.ts",
+        label: "legacy hosted runtime demand decision surface",
+        line: 1,
+        token: "readRuntime" + "Demand",
+      },
+    ]);
+  });
+
+  it("flags legacy direct hosted runtime demand signals", () => {
+    expect(
+      findHostedTemporalGuardFindings(
+        "packages/hosted-execution/src/orchestration-control.ts",
+        'const kind = "' + "browser_vault_refresh" + '_requested";',
+      ),
+    ).toEqual([
+      {
+        filePath: "packages/hosted-execution/src/orchestration-control.ts",
+        label: "legacy direct hosted runtime demand signal",
+        line: 1,
+        token: "browser_vault_refresh" + "_requested",
+      },
+    ]);
   });
 });

@@ -508,7 +508,6 @@ function createPhaseInput(input: {
     request: {
       attemptId: "attempt_synthetic_phase",
       leaseGeneration: "3",
-      reason: "nudge",
       userId: "member_synthetic_phase",
       workspaceVersion: "8",
     },

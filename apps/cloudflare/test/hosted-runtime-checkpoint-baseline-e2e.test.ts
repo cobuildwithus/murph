@@ -97,7 +97,6 @@ describe("hosted runtime checkpoint baseline", () => {
       }),
       readCurrentLease: () => createLease({ workspaceVersion: "7" }),
       request: createInvocationRequest({
-        reason: "nudge",
         workspaceVersion: "7",
       }),
       runtime: {},
@@ -159,13 +158,11 @@ function createWorkspaceReadResponse(input: {
 }
 
 function createInvocationRequest(input: {
-  reason?: "nudge";
   workspaceVersion: string;
 }) {
   return {
     attemptId: "attempt_1",
     leaseGeneration: "4",
-    reason: input.reason ?? "nudge",
     userId: "member_1",
     workspaceVersion: input.workspaceVersion,
   };

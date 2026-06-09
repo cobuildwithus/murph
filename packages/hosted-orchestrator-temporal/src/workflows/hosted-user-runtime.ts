@@ -5,7 +5,6 @@ import {
   continueAsNew,
   defineQuery,
   defineSignal,
-  patched,
   proxyActivities,
   setHandler,
   uuid4,
@@ -18,15 +17,18 @@ import {
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
   HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE,
   HOSTED_RUNTIME_PREWARM_SOURCE,
-  type HostedRuntimeDemand,
-  type HostedRuntimeDemandRequest,
   type HostedRuntimeCurrentWaitReason,
   type HostedRuntimeEnsureProcessingResponse,
   type HostedRuntimePrewarmResponse,
   type HostedRuntimePrewarmSource,
+  type HostedRuntimeReconciliationFacts,
+  type HostedRuntimeReconciliationFactsRequest,
   type HostedRuntimeSignal,
   type HostedRuntimeWorkflowState,
 } from "@murphai/hosted-execution/orchestration-control";
+import {
+  isHostedMailboxLane,
+} from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedUserRuntimeWorkflowCarryForwardState,
   HostedUserRuntimeWorkflowInput,
@@ -35,58 +37,21 @@ import type {
 
 export const HOSTED_USER_RUNTIME_DEFAULT_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 500;
 export const HOSTED_USER_RUNTIME_DEFAULT_CONTINUE_AS_NEW_HISTORY_LENGTH = 750;
-export const HOSTED_USER_RUNTIME_DEFAULT_DEMAND_FAILURE_RETRY_DELAY_MS = 30_000;
+export const HOSTED_USER_RUNTIME_DEFAULT_RECONCILIATION_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS = 15_000;
-// Workflow command timeout is replay-sensitive. Keep it pinned with response
-// slack over the shared 5s prewarm HTTP/container budget unless versioned.
+// Workflow command timeout is replay-sensitive. The hard cut terminates old
+// histories first; keep the value pinned with response slack over the shared
+// 5s prewarm HTTP/container budget.
 export const HOSTED_USER_RUNTIME_DEFAULT_PREWARM_START_TO_CLOSE_TIMEOUT_MS = 6_000;
-export const HOSTED_USER_RUNTIME_DEFAULT_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS = 10_000;
+export const HOSTED_USER_RUNTIME_DEFAULT_READ_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS = 10_000;
 export const HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_HISTORY_LENGTH = 10_000;
 export const HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 10_000;
 export const HOSTED_USER_RUNTIME_MAX_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS = 3_600_000;
-export const HOSTED_USER_RUNTIME_MAX_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS = 30_000;
+export const HOSTED_USER_RUNTIME_MAX_READ_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS = 30_000;
 export const HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS = 1_000;
-const HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH =
-  "hosted-user-runtime-non-retryable-failure-signal-wait-v1";
-const HOSTED_USER_RUNTIME_ENSURE_PROCESSING_PATCH =
-  "hosted-user-runtime-ensure-runtime-processing-v1";
-const HOSTED_USER_RUNTIME_SAME_RUNTIME_WAKE_COUNT_PATCH =
-  "hosted-user-runtime-same-runtime-wake-count-v1";
-const HOSTED_USER_RUNTIME_RECHECK_SIGNAL_PATCH =
-  "hosted-user-runtime-recheck-signal-v1";
-const HOSTED_USER_RUNTIME_PREWARM_SIGNAL_PATCH =
-  "hosted-user-runtime-prewarm-signal-v1";
-const HOSTED_USER_RUNTIME_PREWARM_DEDICATED_TASK_QUEUE_PATCH =
-  "hosted-user-runtime-prewarm-dedicated-task-queue-v1";
-const HOSTED_USER_RUNTIME_COALESCED_PENDING_SIGNAL_PATCH =
-  "hosted-user-runtime-coalesced-pending-signal-v1";
-const HOSTED_USER_RUNTIME_ENSURE_PROCESSING_SOURCE_PATCH =
-  "hosted-user-runtime-ensure-processing-source-v1";
-const HOSTED_USER_RUNTIME_DROP_DEVICE_SYNC_RECOVERY_PATCH =
-  "hosted-user-runtime-drop-device-sync-recovery-v1";
-const HOSTED_USER_RUNTIME_HISTORY_LENGTH_CONTINUE_AS_NEW_PATCH =
-  "hosted-user-runtime-history-length-continue-as-new-v1";
-const HOSTED_USER_RUNTIME_UNREAD_DEMAND_BEFORE_CONTINUE_AS_NEW_PATCH =
-  "hosted-user-runtime-unread-demand-before-continue-as-new-v1";
-const HOSTED_USER_RUNTIME_POST_DEMAND_WAIT_CONTINUE_AS_NEW_PATCH =
-  "hosted-user-runtime-post-demand-wait-continue-as-new-v1";
-const HOSTED_USER_RUNTIME_DIRECT_MAILBOX_PROCESSING_PATCH =
-  "hosted-user-runtime-direct-mailbox-processing-v1";
-const HOSTED_USER_RUNTIME_DIRECT_ANY_LANE_MAILBOX_PROCESSING_PATCH =
-  "hosted-user-runtime-direct-any-lane-mailbox-processing-v1";
-const HOSTED_USER_RUNTIME_DROP_ENSURE_PROCESSING_SOURCE_PATCH =
-  "hosted-user-runtime-drop-ensure-processing-source-v1";
-const LEGACY_DEVICE_SYNC_RECOVERY_SOURCE = "device_sync_recovery";
-const HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT = 3;
 
-type HostedUserRuntimeSignal =
-  | HostedRuntimeSignal
-  | {
-      kind: "device_sync_recovery_requested";
-    };
-
-export const runtimeSignal = defineSignal<[HostedUserRuntimeSignal]>(
+export const runtimeSignal = defineSignal<[HostedRuntimeSignal]>(
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
 );
 
@@ -99,13 +64,14 @@ export async function hostedUserRuntimeWorkflow(
   input: HostedUserRuntimeWorkflowInput,
 ): Promise<void> {
   const options = normalizeHostedUserRuntimeWorkflowOptions(input.options);
-  const demandActivities = proxyActivities<typeof activities>({
+  const reconciliationActivities = proxyActivities<typeof activities>({
     retry: {
       initialInterval: "2 seconds",
       maximumAttempts: 6,
       maximumInterval: "1 minute",
     },
-    startToCloseTimeout: options.readRuntimeDemandStartToCloseTimeoutMs,
+    startToCloseTimeout:
+      options.readRuntimeReconciliationFactsStartToCloseTimeoutMs,
   });
   const processingActivities = proxyActivities<typeof activities>({
     retry: {
@@ -115,27 +81,18 @@ export async function hostedUserRuntimeWorkflow(
     },
     startToCloseTimeout: options.ensureRuntimeProcessingStartToCloseTimeoutMs,
   });
-  const sharedQueuePrewarmActivities = proxyActivities<typeof activities>({
-    cancellationType: ActivityCancellationType.ABANDON,
-    retry: {
-      initialInterval: "1 second",
-      maximumAttempts: 1,
-      maximumInterval: "5 seconds",
-    },
-    startToCloseTimeout: HOSTED_USER_RUNTIME_DEFAULT_PREWARM_START_TO_CLOSE_TIMEOUT_MS,
-  });
-  const dedicatedQueuePrewarmActivities = proxyActivities<typeof activities>({
+  const prewarmActivities = proxyActivities<typeof activities>({
     cancellationType: ActivityCancellationType.ABANDON,
     retry: {
       initialInterval: "1 second",
       maximumAttempts: 2,
       maximumInterval: "5 seconds",
     },
+    scheduleToStartTimeout: "2 seconds",
     startToCloseTimeout: Math.min(
       options.ensureRuntimeProcessingStartToCloseTimeoutMs,
       HOSTED_USER_RUNTIME_DEFAULT_PREWARM_START_TO_CLOSE_TIMEOUT_MS,
     ),
-    scheduleToStartTimeout: "2 seconds",
     taskQueue: options.prewarmTaskQueue,
   });
   const machine = createHostedUserRuntimeWorkflowMachine(input, {
@@ -146,15 +103,14 @@ export async function hostedUserRuntimeWorkflow(
     currentHistoryLength: () => workflowInfo().historyLength,
     ensureRuntimeProcessing: processingActivities.ensureRuntimeProcessing,
     nowMs: () => Date.now(),
-    readRuntimeDemand: demandActivities.readRuntimeDemand,
+    readRuntimeReconciliationFacts:
+      reconciliationActivities.readRuntimeReconciliationFacts,
     startRuntimePrewarm: (prewarmInput) => {
       const scope = new CancellationScope();
       return {
         cancel: () => scope.cancel(),
         result: scope.run(() =>
-          patched(HOSTED_USER_RUNTIME_PREWARM_DEDICATED_TASK_QUEUE_PATCH)
-            ? dedicatedQueuePrewarmActivities.prewarmRuntimeContainer(prewarmInput)
-            : sharedQueuePrewarmActivities.prewarmRuntimeContainer(prewarmInput)
+          prewarmActivities.prewarmRuntimeContainer(prewarmInput)
         ),
       };
     },
@@ -171,34 +127,6 @@ export async function hostedUserRuntimeWorkflow(
         }),
       };
     },
-    useEnsureRuntimeProcessingPatch: () =>
-      patched(HOSTED_USER_RUNTIME_ENSURE_PROCESSING_PATCH),
-    preserveSameRuntimeWakeAcceptedCountPatchMarker: () =>
-      patched(HOSTED_USER_RUNTIME_SAME_RUNTIME_WAKE_COUNT_PATCH),
-    useRuntimePrewarmSignalPatch: () =>
-      patched(HOSTED_USER_RUNTIME_PREWARM_SIGNAL_PATCH),
-    useRuntimeRecheckSignalPatch: () =>
-      patched(HOSTED_USER_RUNTIME_RECHECK_SIGNAL_PATCH),
-    useCoalescedPendingSignalPatch: () =>
-      patched(HOSTED_USER_RUNTIME_COALESCED_PENDING_SIGNAL_PATCH),
-    useEnsureRuntimeProcessingSourcePatch: () =>
-      patched(HOSTED_USER_RUNTIME_ENSURE_PROCESSING_SOURCE_PATCH),
-    useDeviceSyncRecoveryDeletionPatch: () =>
-      patched(HOSTED_USER_RUNTIME_DROP_DEVICE_SYNC_RECOVERY_PATCH),
-    useHistoryLengthContinueAsNewPatch: () =>
-      patched(HOSTED_USER_RUNTIME_HISTORY_LENGTH_CONTINUE_AS_NEW_PATCH),
-    useUnreadDemandBeforeContinueAsNewPatch: () =>
-      patched(HOSTED_USER_RUNTIME_UNREAD_DEMAND_BEFORE_CONTINUE_AS_NEW_PATCH),
-    usePostDemandWaitContinueAsNewPatch: () =>
-      patched(HOSTED_USER_RUNTIME_POST_DEMAND_WAIT_CONTINUE_AS_NEW_PATCH),
-    useDirectMailboxProcessingPatch: () =>
-      patched(HOSTED_USER_RUNTIME_DIRECT_MAILBOX_PROCESSING_PATCH),
-    useDirectAnyLaneMailboxProcessingPatch: () =>
-      patched(HOSTED_USER_RUNTIME_DIRECT_ANY_LANE_MAILBOX_PROCESSING_PATCH),
-    useDropEnsureProcessingSourcePatch: () =>
-      patched(HOSTED_USER_RUNTIME_DROP_ENSURE_PROCESSING_SOURCE_PATCH),
-    useSignalOnlyWaitForNonRetryableFailure: () =>
-      patched(HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH),
     uuid: uuid4,
     waitForSignalOrTimeout: async (predicate, timeoutMs) => {
       if (timeoutMs === null) {
@@ -221,12 +149,12 @@ export interface HostedUserRuntimeWorkflowRuntime {
   currentHistoryLength(): number;
   ensureRuntimeProcessing(input: {
     orchestrationAttemptId: string;
-    reason: HostedRuntimeRunDemand["reason"];
-    source?: LegacyHostedRuntimeDemandRunSource | null;
     userId: string;
   }): Promise<HostedRuntimeEnsureProcessingResponse>;
   nowMs(): number;
-  readRuntimeDemand(request: HostedRuntimeDemandRequest): Promise<HostedUserRuntimeDemand>;
+  readRuntimeReconciliationFacts(
+    request: HostedRuntimeReconciliationFactsRequest,
+  ): Promise<HostedRuntimeReconciliationFacts>;
   startRuntimePrewarm(input: {
     prewarmAttemptId: string;
     source: HostedRuntimePrewarmSource;
@@ -236,51 +164,12 @@ export interface HostedUserRuntimeWorkflowRuntime {
     predicate: () => boolean,
     timeoutMs: number | null,
   ): HostedUserRuntimeSignalWaitHandle;
-  useEnsureRuntimeProcessingPatch(): void;
-  useRuntimePrewarmSignalPatch(): boolean;
-  useRuntimeRecheckSignalPatch(): boolean;
-  useCoalescedPendingSignalPatch(): boolean;
-  useEnsureRuntimeProcessingSourcePatch(): boolean;
-  preserveSameRuntimeWakeAcceptedCountPatchMarker(): boolean;
-  useDeviceSyncRecoveryDeletionPatch(): boolean;
-  useHistoryLengthContinueAsNewPatch(): boolean;
-  useUnreadDemandBeforeContinueAsNewPatch(): boolean;
-  usePostDemandWaitContinueAsNewPatch(): boolean;
-  useDirectMailboxProcessingPatch(): boolean;
-  useDirectAnyLaneMailboxProcessingPatch(): boolean;
-  useDropEnsureProcessingSourcePatch(): boolean;
-  useSignalOnlyWaitForNonRetryableFailure(): boolean;
   uuid(): string;
   waitForSignalOrTimeout(
     predicate: () => boolean,
     timeoutMs: number | null,
   ): Promise<void>;
 }
-
-type HostedRuntimeRunDemand = Extract<HostedRuntimeDemand, { kind: "run" }>;
-type LegacyHostedRuntimeDemandRunSource =
-  | HostedRuntimeRunDemand["source"]
-  | typeof LEGACY_DEVICE_SYNC_RECOVERY_SOURCE;
-type HostedRuntimeProcessingIntent = {
-  reason: HostedRuntimeRunDemand["reason"];
-  source: LegacyHostedRuntimeDemandRunSource;
-};
-type LegacyHostedRuntimeRunDemand = Omit<HostedRuntimeRunDemand, "source"> & {
-  source: typeof LEGACY_DEVICE_SYNC_RECOVERY_SOURCE;
-};
-type HostedUserRuntimeDemand = HostedRuntimeDemand | LegacyHostedRuntimeRunDemand;
-type LegacyHostedRuntimeDemandRequest = HostedRuntimeDemandRequest & {
-  deviceSyncRecoveryRequested?: boolean;
-};
-type LegacyHostedUserRuntimeWorkflowCarryForwardState =
-  HostedUserRuntimeWorkflowCarryForwardState & {
-    deviceSyncRecoveryRequested?: boolean;
-    sameRuntimeWakeAcceptedCount?: number;
-  };
-type HostedRuntimeMailboxSignal = Extract<
-  HostedRuntimeSignal,
-  { kind: "mailbox_appended" }
->;
 
 export interface HostedUserRuntimePrewarmHandle {
   cancel(): void;
@@ -303,7 +192,7 @@ interface NormalizedWorkflowOptions {
   continueAsNewAfterIterations: number;
   ensureRuntimeProcessingStartToCloseTimeoutMs: number;
   prewarmTaskQueue: string;
-  readRuntimeDemandStartToCloseTimeoutMs: number;
+  readRuntimeReconciliationFactsStartToCloseTimeoutMs: number;
 }
 
 export function createHostedUserRuntimeWorkflowMachine(
@@ -313,74 +202,36 @@ export function createHostedUserRuntimeWorkflowMachine(
   const options = normalizeHostedUserRuntimeWorkflowOptions(input.options);
   const continueAsNewOptions = normalizeContinueAsNewOptions(input.options);
   const state = createInitialWorkflowState(input.userId, input.state);
-  let legacyDeviceSyncRecoveryRequested =
-    readLegacyBooleanProperty(input.state, "deviceSyncRecoveryRequested");
-  let legacySameRuntimeWakeAcceptedCount =
-    readLegacyNonNegativeIntegerProperty(input.state, "sameRuntimeWakeAcceptedCount");
   let completedIterations = 0;
-  let demandSignalVersion = 0;
-  let latestMailboxSignalDemandVersion: number | null = null;
-  let lastDemandSignalVersionRead =
-    hasPendingCurrentRuntimeDemand(state) ? -1 : demandSignalVersion;
+  let mailboxSignalVersion = 0;
+  let latestMailboxSignalVersion: number | null = null;
+  let lastMailboxSignalVersionRead =
+    state.latestMailboxPointer !== null ? -1 : mailboxSignalVersion;
 
   const readStatus = (): HostedRuntimeWorkflowState => ({ ...state });
 
-  const continueAsNewWithCurrentState = async (): Promise<never> => {
-    const deviceSyncRecoveryDeleted =
-      runtime.useDeviceSyncRecoveryDeletionPatch();
-    return await runtime.continueAsNew({
+  const continueAsNewWithCurrentState = async (): Promise<never> =>
+    await runtime.continueAsNew({
       options: continueAsNewOptions,
-      state: readCarryForwardState(
-        state,
-        deviceSyncRecoveryDeleted
-          ? null
-          : {
-              deviceSyncRecoveryRequested: legacyDeviceSyncRecoveryRequested,
-              sameRuntimeWakeAcceptedCount: legacySameRuntimeWakeAcceptedCount,
-            },
-      ),
+      state: readCarryForwardState(state),
       userId: input.userId,
     });
-  };
-
-  const wakeIndefiniteWaitForCoalescedDemandSignal = (): void => {
-    const shouldWake =
-      state.currentWaitReason === "non_retryable_signal_only"
-      || (
-        state.currentWaitReason === "blocked_retry"
-        && state.currentWaitUntil === null
-        && runtime.usePostDemandWaitContinueAsNewPatch()
-      );
-    if (!shouldWake) {
-      return;
-    }
-    state.signalVersion += 1;
-    demandSignalVersion += 1;
-  };
 
   const applySignal = (rawSignal: unknown): void => {
-    let signal: HostedUserRuntimeSignal;
+    let signal: HostedRuntimeSignal;
     try {
-      signal = parseHostedRuntimeSignal(rawSignal);
+      signal = parseHostedRuntimeWorkflowSignal(rawSignal);
     } catch (error) {
       recordInvalidSignal(state, readExecutionErrorCode(error));
       return;
     }
 
     if (signal.kind === "runtime_recheck_requested") {
-      if (!runtime.useRuntimeRecheckSignalPatch()) {
-        recordInvalidSignal(state, "TypeError");
-        return;
-      }
       state.signalVersion += 1;
       return;
     }
 
     if (signal.kind === "runtime_prewarm_requested") {
-      if (!runtime.useRuntimePrewarmSignalPatch()) {
-        recordInvalidSignal(state, "TypeError");
-        return;
-      }
       state.signalVersion += 1;
       state.prewarmRequested = true;
       state.prewarmSignalCount += 1;
@@ -389,98 +240,35 @@ export function createHostedUserRuntimeWorkflowMachine(
       return;
     }
 
-    switch (signal.kind) {
-      case "mailbox_appended": {
-        state.signalVersion += 1;
-        demandSignalVersion += 1;
-        latestMailboxSignalDemandVersion = demandSignalVersion;
-        state.mailboxSignalCount += 1;
-        state.latestMailboxPointer = {
-          lane: signal.lane,
-          laneSeq: signal.laneSeq,
-          mailboxItemId: signal.mailboxItemId,
-          source: signal.source,
-        };
-        break;
-      }
-      case "manual_run_requested": {
-        state.signalVersion += 1;
-        demandSignalVersion += 1;
-        state.manualRunRequested = true;
-        break;
-      }
-      case "browser_vault_refresh_requested": {
-        if (
-          runtime.useCoalescedPendingSignalPatch() &&
-          state.browserVaultRefreshRequested
-        ) {
-          wakeIndefiniteWaitForCoalescedDemandSignal();
-          break;
-        }
-        state.signalVersion += 1;
-        demandSignalVersion += 1;
-        state.browserVaultRefreshRequested = true;
-        break;
-      }
-      case "device_sync_recovery_requested": {
-        if (runtime.useDeviceSyncRecoveryDeletionPatch()) {
-          state.signalVersion += 1;
-          demandSignalVersion += 1;
-          break;
-        }
-        if (
-          runtime.useCoalescedPendingSignalPatch()
-          && legacyDeviceSyncRecoveryRequested
-        ) {
-          wakeIndefiniteWaitForCoalescedDemandSignal();
-          break;
-        }
-        state.signalVersion += 1;
-        demandSignalVersion += 1;
-        legacyDeviceSyncRecoveryRequested = true;
-        break;
-      }
-      case "mailbox_lag_observed": {
-        if (
-          runtime.useCoalescedPendingSignalPatch() &&
-          state.lagRecoveryObserved
-        ) {
-          wakeIndefiniteWaitForCoalescedDemandSignal();
-          break;
-        }
-        state.signalVersion += 1;
-        demandSignalVersion += 1;
-        state.lagRecoveryObserved = true;
-        break;
-      }
-      default: {
-        const exhaustive: never = signal;
-        throw new Error(`Unsupported hosted runtime signal ${String(exhaustive)}`);
-      }
+    if (signal.kind === "mailbox_appended") {
+      state.signalVersion += 1;
+      mailboxSignalVersion += 1;
+      latestMailboxSignalVersion = mailboxSignalVersion;
+      state.mailboxSignalCount += 1;
+      state.latestMailboxPointer = {
+        lane: signal.lane,
+        laneSeq: signal.laneSeq,
+        mailboxItemId: signal.mailboxItemId,
+      };
+      return;
     }
+
+    const exhaustive: never = signal;
+    throw new Error(`Unsupported hosted runtime signal ${String(exhaustive)}`);
   };
 
-  const executeRuntimeProcessingIntent = async (
-    intent: HostedRuntimeProcessingIntent,
-  ): Promise<void> => {
-    const versionBeforeExecution = state.signalVersion;
-    const demandVersionBeforeExecution = demandSignalVersion;
+  const executeRuntimeProcessing = async (processingInput: {
+    clearMailboxPointerOnAccepted: boolean;
+  }): Promise<void> => {
+    const signalVersionBeforeExecution = state.signalVersion;
+    const mailboxVersionBeforeExecution = mailboxSignalVersion;
     let execution: HostedRuntimeEnsureProcessingResponse;
     const orchestrationAttemptId = runtime.uuid();
     state.lastOrchestrationAttemptId = orchestrationAttemptId;
     clearPendingRuntimePrewarm(state);
     try {
-      runtime.useEnsureRuntimeProcessingPatch();
-      const forwardDemandSource =
-        !runtime.useDropEnsureProcessingSourcePatch()
-        && (
-          runtime.useEnsureRuntimeProcessingSourcePatch()
-          || isLegacyDeviceSyncRecoverySource(intent.source)
-        );
       execution = await runtime.ensureRuntimeProcessing({
         orchestrationAttemptId,
-        reason: intent.reason,
-        ...(forwardDemandSource ? { source: intent.source } : {}),
         userId: input.userId,
       });
     } catch (error) {
@@ -489,27 +277,20 @@ export function createHostedUserRuntimeWorkflowMachine(
       state.lastExecutionKind = "failed";
       state.lastRuntimeAttemptId = null;
       state.lastRuntimeStatus = null;
-      legacySameRuntimeWakeAcceptedCount = 0;
-      if (demandSignalVersion !== demandVersionBeforeExecution) {
+      if (state.signalVersion !== signalVersionBeforeExecution) {
         return;
       }
       const retryAt = readActivityFailureRetryAt({
-        error,
-        retryDelayMs: HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
+        retryDelayMs:
+          HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
         runtime,
       });
-      if (
-        retryAt === null
-        && shouldContinueAsNewBeforePostDemandWait({ options, runtime })
-      ) {
-        await continueAsNewWithCurrentState();
-      }
       await waitUntilTimestampOrSignal(
         runtime,
         retryAt,
         state.signalVersion,
         state,
-        retryAt === null ? "non_retryable_signal_only" : "execution_failure_retry",
+        "execution_failure_retry",
       );
       return;
     }
@@ -518,33 +299,19 @@ export function createHostedUserRuntimeWorkflowMachine(
     state.lastExecutionErrorCode = null;
     state.lastExecutionKind = execution.kind;
     const signalArrivedDuringExecution =
-      state.signalVersion !== versionBeforeExecution;
-    const demandSignalArrivedDuringExecution =
-      demandSignalVersion !== demandVersionBeforeExecution;
+      state.signalVersion !== signalVersionBeforeExecution;
+    const mailboxSignalArrivedDuringExecution =
+      mailboxSignalVersion !== mailboxVersionBeforeExecution;
 
     if (execution.kind === "runtime_processing_accepted") {
-      // Keep this marker for histories that recorded the removed recovery-count patch.
-      const sameRuntimeWakeCountPatchEnabled =
-        runtime.preserveSameRuntimeWakeAcceptedCountPatchMarker();
-      legacySameRuntimeWakeAcceptedCount = recordLegacyRuntimeWakeAcceptedCount({
-        currentCount: legacySameRuntimeWakeAcceptedCount,
-        execution,
-        lastRuntimeAttemptId: state.lastRuntimeAttemptId,
-        patchEnabled: sameRuntimeWakeCountPatchEnabled,
-      });
       recordRuntimeProcessingAccepted(state, execution);
-      if (demandSignalArrivedDuringExecution) {
-        return;
+      if (
+        !mailboxSignalArrivedDuringExecution
+        && processingInput.clearMailboxPointerOnAccepted
+      ) {
+        clearMailboxPointer(state);
       }
-      clearConsumedFlagsAfterRun(state, intent.source);
-      legacyDeviceSyncRecoveryRequested = clearLegacyDeviceSyncRecoveryAfterRun({
-        currentRequested: legacyDeviceSyncRecoveryRequested,
-        execution,
-        source: intent.source,
-        wakeCount: legacySameRuntimeWakeAcceptedCount,
-        wakeLimitEnabled: sameRuntimeWakeCountPatchEnabled,
-      });
-      if (signalArrivedDuringExecution) {
+      if (mailboxSignalArrivedDuringExecution || signalArrivedDuringExecution) {
         return;
       }
       const versionBeforeWakeWait = state.signalVersion;
@@ -561,8 +328,7 @@ export function createHostedUserRuntimeWorkflowMachine(
     if (execution.kind === "retry_later") {
       state.lastRuntimeAttemptId = null;
       state.lastRuntimeStatus = "retry_later";
-      legacySameRuntimeWakeAcceptedCount = 0;
-      if (demandSignalArrivedDuringExecution) {
+      if (mailboxSignalArrivedDuringExecution || signalArrivedDuringExecution) {
         return;
       }
       await waitUntilTimestampOrSignal(
@@ -578,10 +344,10 @@ export function createHostedUserRuntimeWorkflowMachine(
 
   const run = async (): Promise<void> => {
     for (;;) {
-      if (shouldContinueAsNewBeforeDemand({
+      if (shouldContinueAsNewBeforeReconciliation({
         completedIterations,
-        hasUnreadDemandSignal:
-          demandSignalVersion !== lastDemandSignalVersionRead,
+        hasUnreadMailboxSignal:
+          mailboxSignalVersion !== lastMailboxSignalVersionRead,
         options,
         runtime,
       })) {
@@ -592,123 +358,112 @@ export function createHostedUserRuntimeWorkflowMachine(
 
       if (
         state.latestMailboxPointer !== null
-        && latestMailboxSignalDemandVersion === demandSignalVersion
-        && runtime.useDirectMailboxProcessingPatch()
-        && canDirectProcessFreshMailboxPointer({
-          pointer: state.latestMailboxPointer,
-          runtime,
-        })
+        && latestMailboxSignalVersion === mailboxSignalVersion
       ) {
-        latestMailboxSignalDemandVersion = null;
-        lastDemandSignalVersionRead = demandSignalVersion;
-        recordDirectMailboxRunSummary(state);
-        await executeRuntimeProcessingIntent({
-          reason: "nudge",
-          source: "mailbox_backlog",
+        latestMailboxSignalVersion = null;
+        lastMailboxSignalVersionRead = mailboxSignalVersion;
+        recordDirectMailboxProcessingSummary(state);
+        await executeRuntimeProcessing({
+          clearMailboxPointerOnAccepted: true,
         });
         continue;
       }
 
-      const versionBeforeDemand = state.signalVersion;
-      let demand: HostedUserRuntimeDemand;
+      const versionBeforeReconciliation = state.signalVersion;
+      let facts: HostedRuntimeReconciliationFacts;
       try {
-        const deviceSyncRecoveryDeleted =
-          runtime.useDeviceSyncRecoveryDeletionPatch();
-        demand = await runtime.readRuntimeDemand({
-          browserVaultRefreshRequested: state.browserVaultRefreshRequested,
-          ...(!deviceSyncRecoveryDeleted && legacyDeviceSyncRecoveryRequested
-            ? { deviceSyncRecoveryRequested: true }
-            : {}),
-          lagRecoveryObserved: state.lagRecoveryObserved,
-          manualRunRequested: state.manualRunRequested,
+        facts = await runtime.readRuntimeReconciliationFacts({
           userId: input.userId,
-        } satisfies LegacyHostedRuntimeDemandRequest);
+        });
       } catch (error) {
-        state.lastDemandKind = null;
-        state.lastDemandNextWakeAt = null;
-        state.lastDemandSource = "demand_read_failed";
+        state.lastReconciliationStatus = null;
+        state.lastReconciliationNextWakeAt = null;
+        state.lastReconciliationBlockedReason = null;
         state.lastExecutionErrorCode = readExecutionErrorCode(error);
-        if (state.signalVersion !== versionBeforeDemand) {
+        if (state.signalVersion !== versionBeforeReconciliation) {
           continue;
         }
-        lastDemandSignalVersionRead = demandSignalVersion;
+        lastMailboxSignalVersionRead = mailboxSignalVersion;
         const retryAt = readActivityFailureRetryAt({
-          error,
-          retryDelayMs: HOSTED_USER_RUNTIME_DEFAULT_DEMAND_FAILURE_RETRY_DELAY_MS,
+          retryDelayMs:
+            HOSTED_USER_RUNTIME_DEFAULT_RECONCILIATION_FAILURE_RETRY_DELAY_MS,
           runtime,
         });
-        if (
-          retryAt === null
-          && shouldContinueAsNewBeforePostDemandWait({ options, runtime })
-        ) {
-          await continueAsNewWithCurrentState();
-        }
         await waitUntilTimestampOrSignal(
           runtime,
           retryAt,
           state.signalVersion,
           state,
-          retryAt === null ? "non_retryable_signal_only" : "demand_failure_retry",
+          "reconciliation_failure_retry",
         );
         continue;
       }
 
-      if (state.signalVersion !== versionBeforeDemand) {
+      if (state.signalVersion !== versionBeforeReconciliation) {
         continue;
       }
-      lastDemandSignalVersionRead = demandSignalVersion;
+      lastMailboxSignalVersionRead = mailboxSignalVersion;
+      recordReconciliationFactsSummary(state, facts);
 
-      recordDemandSummary(state, demand);
-
-      if (demand.kind === "blocked") {
+      if (facts.blocked !== null) {
         clearPendingRuntimePrewarm(state);
-        if (shouldContinueAsNewBeforePostDemandWait({ options, runtime })) {
+        if (shouldContinueAsNewBeforePostReconciliationWait({ options, runtime })) {
           await continueAsNewWithCurrentState();
         }
         await waitUntilTimestampOrSignal(
           runtime,
-          demand.retryAt,
-          versionBeforeDemand,
+          facts.blocked.retryAt,
+          versionBeforeReconciliation,
           state,
           "blocked_retry",
         );
         continue;
       }
 
-      if (demand.kind === "idle") {
-        if (state.prewarmRequested) {
-          const demandVersionBeforePrewarm = demandSignalVersion;
-          await runRuntimePrewarmUntilDemandSignal({
-            demandSignalVersionBeforePrewarm: demandVersionBeforePrewarm,
-            getDemandSignalVersion: () => demandSignalVersion,
-            workflowInput: input,
-            runtime,
-            state,
-          });
-          if (demandSignalVersion !== demandVersionBeforePrewarm) {
-            continue;
-          }
-          if (state.signalVersion !== versionBeforeDemand) {
-            continue;
-          }
-        }
-        if (clearSatisfiedFlags(state, versionBeforeDemand)) {
-          legacyDeviceSyncRecoveryRequested = false;
-        }
-        if (shouldContinueAsNewBeforePostDemandWait({ options, runtime })) {
-          await continueAsNewWithCurrentState();
-        }
-        await waitUntilTimestampOrSignal(
-          runtime,
-          demand.nextWakeAt,
-          state.signalVersion,
-          state,
-          "idle_next_wake",
-        );
+      if (hasAnyMailboxLag(facts)) {
+        await executeRuntimeProcessing({
+          clearMailboxPointerOnAccepted: true,
+        });
         continue;
       }
 
-      await executeRuntimeProcessingIntent(demand);
+      if (state.prewarmRequested) {
+        const mailboxVersionBeforePrewarm = mailboxSignalVersion;
+        await runRuntimePrewarmUntilMailboxSignal({
+          getMailboxSignalVersion: () => mailboxSignalVersion,
+          mailboxSignalVersionBeforePrewarm: mailboxVersionBeforePrewarm,
+          runtime,
+          state,
+          workflowInput: input,
+        });
+        if (mailboxSignalVersion !== mailboxVersionBeforePrewarm) {
+          continue;
+        }
+        if (state.signalVersion !== versionBeforeReconciliation) {
+          continue;
+        }
+      }
+
+      clearMailboxPointer(state);
+
+      const nextWakeAt = facts.workspace?.nextWakeAt ?? null;
+      if (isDueTimestamp(nextWakeAt, runtime.nowMs())) {
+        await executeRuntimeProcessing({
+          clearMailboxPointerOnAccepted: false,
+        });
+        continue;
+      }
+
+      if (shouldContinueAsNewBeforePostReconciliationWait({ options, runtime })) {
+        await continueAsNewWithCurrentState();
+      }
+      await waitUntilTimestampOrSignal(
+        runtime,
+        nextWakeAt,
+        state.signalVersion,
+        state,
+        nextWakeAt === null ? "non_retryable_signal_only" : "idle_next_wake",
+      );
       continue;
     }
   };
@@ -720,9 +475,9 @@ export function createHostedUserRuntimeWorkflowMachine(
   };
 }
 
-async function runRuntimePrewarmUntilDemandSignal(input: {
-  demandSignalVersionBeforePrewarm: number;
-  getDemandSignalVersion(): number;
+async function runRuntimePrewarmUntilMailboxSignal(input: {
+  getMailboxSignalVersion(): number;
+  mailboxSignalVersionBeforePrewarm: number;
   runtime: HostedUserRuntimeWorkflowRuntime;
   state: HostedRuntimeWorkflowState;
   workflowInput: HostedUserRuntimeWorkflowInput;
@@ -734,10 +489,10 @@ async function runRuntimePrewarmUntilDemandSignal(input: {
     source: HOSTED_RUNTIME_PREWARM_SOURCE,
     userId: input.workflowInput.userId,
   });
-  const demandSignalWait = input.runtime.startSignalWait(
+  const mailboxSignalWait = input.runtime.startSignalWait(
     () =>
-      input.getDemandSignalVersion()
-        !== input.demandSignalVersionBeforePrewarm,
+      input.getMailboxSignalVersion()
+        !== input.mailboxSignalVersionBeforePrewarm,
     null,
   );
 
@@ -746,22 +501,22 @@ async function runRuntimePrewarmUntilDemandSignal(input: {
       (result) => ({ kind: "completed" as const, result }),
       (error: unknown) => ({ error, kind: "failed" as const }),
     ),
-    demandSignalWait.result.then(
-      () => ({ kind: "demand_signal" as const }),
+    mailboxSignalWait.result.then(
+      () => ({ kind: "mailbox_signal" as const }),
       (error: unknown) => ({ error, kind: "wait_failed" as const }),
     ),
   ]);
 
   input.state.prewarmRequested = false;
 
-  if (outcome.kind === "demand_signal") {
+  if (outcome.kind === "mailbox_signal") {
     prewarmHandle.cancel();
     input.state.lastPrewarmResult = null;
-    input.state.lastPrewarmErrorCode = "abandoned_for_demand";
+    input.state.lastPrewarmErrorCode = "abandoned_for_mailbox_signal";
     return;
   }
 
-  demandSignalWait.cancel();
+  mailboxSignalWait.cancel();
 
   if (outcome.kind === "wait_failed") {
     input.state.lastPrewarmResult = "failed";
@@ -790,6 +545,141 @@ function recordInvalidSignal(
   state.lastInvalidSignalErrorCode = errorCode;
 }
 
+function parseHostedRuntimeWorkflowSignal(value: unknown): HostedRuntimeSignal {
+  const record = requireWorkflowRecord(value, "Hosted runtime signal");
+  const kind = requireWorkflowString(record.kind, "Hosted runtime signal kind");
+
+  if (kind === "runtime_recheck_requested") {
+    assertWorkflowExactKeys(record, "Hosted runtime recheck signal", [
+      "kind",
+    ]);
+    return { kind };
+  }
+
+  if (kind === "runtime_prewarm_requested") {
+    assertWorkflowExactKeys(record, "Hosted runtime prewarm signal", [
+      "eventId",
+      "kind",
+      "occurredAt",
+      "source",
+    ]);
+    const source = requireWorkflowString(
+      record.source,
+      "Hosted runtime prewarm signal source",
+    );
+    if (source !== HOSTED_RUNTIME_PREWARM_SOURCE) {
+      throw new TypeError("Unsupported hosted runtime prewarm signal source.");
+    }
+
+    return {
+      eventId: requireWorkflowOpaqueString(
+        record.eventId,
+        "Hosted runtime prewarm signal eventId",
+      ),
+      kind,
+      occurredAt: requireWorkflowIsoTimestamp(
+        record.occurredAt,
+        "Hosted runtime prewarm signal occurredAt",
+      ),
+      source,
+    };
+  }
+
+  if (kind === "mailbox_appended") {
+    assertWorkflowExactKeys(record, "Hosted runtime mailbox signal", [
+      "kind",
+      "lane",
+      "laneSeq",
+      "mailboxItemId",
+    ]);
+    const lane = requireWorkflowString(
+      record.lane,
+      "Hosted runtime mailbox signal lane",
+    );
+    if (!isHostedMailboxLane(lane)) {
+      throw new TypeError("Unsupported hosted runtime mailbox signal lane.");
+    }
+
+    return {
+      kind,
+      lane,
+      laneSeq: requireWorkflowNonNegativeBigIntString(
+        record.laneSeq,
+        "Hosted runtime mailbox signal laneSeq",
+      ),
+      mailboxItemId: requireWorkflowOpaqueString(
+        record.mailboxItemId,
+        "Hosted runtime mailbox signal mailboxItemId",
+      ),
+    };
+  }
+
+  throw new TypeError("Unsupported hosted runtime signal kind.");
+}
+
+function requireWorkflowRecord(
+  value: unknown,
+  label: string,
+): Record<string, unknown> {
+  if (
+    value === null
+    || typeof value !== "object"
+    || Array.isArray(value)
+  ) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function assertWorkflowExactKeys(
+  record: Record<string, unknown>,
+  label: string,
+  expectedKeys: readonly string[],
+): void {
+  const actual = Object.keys(record).sort();
+  const expected = [...expectedKeys].sort();
+  if (
+    actual.length !== expected.length
+    || actual.some((key, index) => key !== expected[index])
+  ) {
+    throw new TypeError(`${label} had unsupported fields.`);
+  }
+}
+
+function requireWorkflowString(value: unknown, label: string): string {
+  if (typeof value !== "string") {
+    throw new TypeError(`${label} must be a string.`);
+  }
+  return value;
+}
+
+function requireWorkflowOpaqueString(value: unknown, label: string): string {
+  const normalized = requireWorkflowString(value, label).trim();
+  if (!normalized) {
+    throw new TypeError(`${label} must be non-empty.`);
+  }
+  return normalized;
+}
+
+function requireWorkflowIsoTimestamp(value: unknown, label: string): string {
+  const timestamp = requireWorkflowString(value, label);
+  if (Number.isNaN(Date.parse(timestamp))) {
+    throw new TypeError(`${label} must be an ISO timestamp.`);
+  }
+  return timestamp;
+}
+
+function requireWorkflowNonNegativeBigIntString(
+  value: unknown,
+  label: string,
+): string {
+  const text = requireWorkflowString(value, label);
+  if (!/^(0|[1-9]\d*)$/.test(text)) {
+    throw new TypeError(`${label} must be a non-negative integer string.`);
+  }
+  return text;
+}
+
 function recordRuntimeProcessingAccepted(
   state: HostedRuntimeWorkflowState,
   execution: Extract<
@@ -801,92 +691,30 @@ function recordRuntimeProcessingAccepted(
   state.lastRuntimeStatus = "scheduled";
 }
 
-function recordLegacyRuntimeWakeAcceptedCount(input: {
-  currentCount: number;
-  execution: Extract<
-    HostedRuntimeEnsureProcessingResponse,
-    { kind: "runtime_processing_accepted" }
-  >;
-  lastRuntimeAttemptId: string | null;
-  patchEnabled: boolean;
-}): number {
-  const wakeAccepted = isRuntimeWakeAcceptedAction(input.execution.action);
-  const sameRuntimeWake =
-    input.lastRuntimeAttemptId === input.execution.runtimeAttemptId
-    && wakeAccepted;
-
-  if (!wakeAccepted) {
-    return 0;
-  }
-
-  if (sameRuntimeWake) {
-    return input.currentCount + 1;
-  }
-
-  return input.patchEnabled ? 1 : 0;
-}
-
-function clearLegacyDeviceSyncRecoveryAfterRun(input: {
-  currentRequested: boolean;
-  execution: Extract<
-    HostedRuntimeEnsureProcessingResponse,
-    { kind: "runtime_processing_accepted" }
-  >;
-  source: string;
-  wakeCount: number;
-  wakeLimitEnabled: boolean;
-}): boolean {
-  if (!input.currentRequested || !isLegacyDeviceSyncRecoverySource(input.source)) {
-    return input.currentRequested;
-  }
-
-  if (!isRuntimeWakeAcceptedAction(input.execution.action)) {
-    return false;
-  }
-
-  if (!input.wakeLimitEnabled) {
-    return true;
-  }
-
-  return input.wakeCount
-    < HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT;
-}
-
-function isRuntimeWakeAcceptedAction(
-  action: Extract<
-    HostedRuntimeEnsureProcessingResponse,
-    { kind: "runtime_processing_accepted" }
-  >["action"],
-): boolean {
-  return action === "woken" || action === "already_running";
-}
-
 function createInitialWorkflowState(
   userId: string,
   carryForward: HostedUserRuntimeWorkflowCarryForwardState | undefined,
 ): HostedRuntimeWorkflowState {
   return {
-    browserVaultRefreshRequested:
-      carryForward?.browserVaultRefreshRequested ?? false,
     currentWaitReason: null,
     currentWaitUntil: null,
     invalidSignalCount: carryForward?.invalidSignalCount ?? 0,
-    lagRecoveryObserved: carryForward?.lagRecoveryObserved ?? false,
     lastOrchestrationAttemptId: carryForward?.lastOrchestrationAttemptId ?? null,
     lastInvalidSignalErrorCode: carryForward?.lastInvalidSignalErrorCode ?? null,
-    lastDemandKind: carryForward?.lastDemandKind ?? null,
-    lastDemandNextWakeAt: carryForward?.lastDemandNextWakeAt ?? null,
-    lastDemandSource: carryForward?.lastDemandSource ?? null,
     lastExecutionAt: carryForward?.lastExecutionAt ?? null,
     lastExecutionErrorCode: carryForward?.lastExecutionErrorCode ?? null,
     lastExecutionKind: carryForward?.lastExecutionKind ?? null,
     lastMailboxLagLaneCount: carryForward?.lastMailboxLagLaneCount ?? 0,
+    lastReconciliationBlockedReason:
+      carryForward?.lastReconciliationBlockedReason ?? null,
+    lastReconciliationNextWakeAt:
+      carryForward?.lastReconciliationNextWakeAt ?? null,
+    lastReconciliationStatus: carryForward?.lastReconciliationStatus ?? null,
     lastRuntimeAttemptId: carryForward?.lastRuntimeAttemptId ?? null,
     lastRuntimeStatus: carryForward?.lastRuntimeStatus ?? null,
     latestMailboxPointer: carryForward?.latestMailboxPointer ?? null,
     latestPrewarmRequestedAt: carryForward?.latestPrewarmRequestedAt ?? null,
     mailboxSignalCount: carryForward?.mailboxSignalCount ?? 0,
-    manualRunRequested: carryForward?.manualRunRequested ?? false,
     lastPrewarmAttemptId: carryForward?.lastPrewarmAttemptId ?? null,
     lastPrewarmErrorCode: carryForward?.lastPrewarmErrorCode ?? null,
     lastPrewarmResult: carryForward?.lastPrewarmResult ?? null,
@@ -901,9 +729,14 @@ function clearPendingRuntimePrewarm(state: HostedRuntimeWorkflowState): void {
   state.prewarmRequested = false;
 }
 
-function shouldContinueAsNewBeforeDemand(input: {
+function clearMailboxPointer(state: HostedRuntimeWorkflowState): void {
+  state.latestMailboxPointer = null;
+  state.mailboxSignalCount = 0;
+}
+
+function shouldContinueAsNewBeforeReconciliation(input: {
   completedIterations: number;
-  hasUnreadDemandSignal: boolean;
+  hasUnreadMailboxSignal: boolean;
   options: NormalizedWorkflowOptions;
   runtime: HostedUserRuntimeWorkflowRuntime;
 }): boolean {
@@ -914,43 +747,26 @@ function shouldContinueAsNewBeforeDemand(input: {
   const iterationThresholdReached =
     input.completedIterations >= input.options.continueAsNewAfterIterations;
   const historyThresholdReached =
-    input.runtime.useHistoryLengthContinueAsNewPatch()
-    && input.runtime.currentHistoryLength()
+    input.runtime.currentHistoryLength()
       >= input.options.continueAsNewAfterHistoryEvents;
 
   if (!iterationThresholdReached && !historyThresholdReached) {
     return false;
   }
 
-  return !(
-    input.hasUnreadDemandSignal
-    && input.runtime.useUnreadDemandBeforeContinueAsNewPatch()
-  );
+  return !input.hasUnreadMailboxSignal;
 }
 
-function shouldContinueAsNewBeforePostDemandWait(input: {
+function shouldContinueAsNewBeforePostReconciliationWait(input: {
   options: NormalizedWorkflowOptions;
   runtime: HostedUserRuntimeWorkflowRuntime;
 }): boolean {
-  if (!input.runtime.usePostDemandWaitContinueAsNewPatch()) {
-    return false;
-  }
   if (input.runtime.continueAsNewSuggested()) {
     return true;
   }
-  return input.runtime.useHistoryLengthContinueAsNewPatch()
-    && input.runtime.currentHistoryLength()
-      >= input.options.continueAsNewAfterHistoryEvents;
-}
 
-function hasPendingCurrentRuntimeDemand(
-  state: HostedRuntimeWorkflowState,
-): boolean {
-  return state.browserVaultRefreshRequested
-    || state.lagRecoveryObserved
-    || state.latestMailboxPointer !== null
-    || state.manualRunRequested
-    || state.prewarmRequested;
+  return input.runtime.currentHistoryLength()
+    >= input.options.continueAsNewAfterHistoryEvents;
 }
 
 export function normalizeHostedUserRuntimeWorkflowOptions(
@@ -979,12 +795,15 @@ export function normalizeHostedUserRuntimeWorkflowOptions(
       options?.prewarmTaskQueue,
       HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE,
     ),
-    readRuntimeDemandStartToCloseTimeoutMs: normalizePositiveIntegerOption({
-      fallback: HOSTED_USER_RUNTIME_DEFAULT_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS,
-      max: HOSTED_USER_RUNTIME_MAX_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS,
-      min: HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
-      value: options?.readRuntimeDemandStartToCloseTimeoutMs,
-    }),
+    readRuntimeReconciliationFactsStartToCloseTimeoutMs:
+      normalizePositiveIntegerOption({
+        fallback:
+          HOSTED_USER_RUNTIME_DEFAULT_READ_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS,
+        max:
+          HOSTED_USER_RUNTIME_MAX_READ_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS,
+        min: HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
+        value: options?.readRuntimeReconciliationFactsStartToCloseTimeoutMs,
+      }),
   };
 }
 
@@ -1004,9 +823,63 @@ function normalizeContinueAsNewOptions(
     continueAsNewAfterIterations: normalized.continueAsNewAfterIterations,
     ensureRuntimeProcessingStartToCloseTimeoutMs,
     prewarmTaskQueue: normalized.prewarmTaskQueue,
-    readRuntimeDemandStartToCloseTimeoutMs:
-      normalized.readRuntimeDemandStartToCloseTimeoutMs,
+    readRuntimeReconciliationFactsStartToCloseTimeoutMs:
+      normalized.readRuntimeReconciliationFactsStartToCloseTimeoutMs,
   };
+}
+
+function readCarryForwardState(
+  state: HostedRuntimeWorkflowState,
+): HostedUserRuntimeWorkflowCarryForwardState {
+  const { userId: _userId, ...carryForward } = state;
+  return carryForward;
+}
+
+function recordReconciliationFactsSummary(
+  state: HostedRuntimeWorkflowState,
+  facts: HostedRuntimeReconciliationFacts,
+): void {
+  state.lastMailboxLagLaneCount = facts.mailboxLag.length;
+
+  if (facts.blocked !== null) {
+    state.lastReconciliationStatus = "blocked";
+    state.lastReconciliationBlockedReason = facts.blocked.reason;
+    state.lastReconciliationNextWakeAt = facts.blocked.retryAt;
+    return;
+  }
+
+  state.lastReconciliationBlockedReason = null;
+
+  if (hasAnyMailboxLag(facts)) {
+    state.lastReconciliationStatus = "work_pending";
+    state.lastReconciliationNextWakeAt = null;
+    return;
+  }
+
+  state.lastReconciliationStatus = "idle";
+  state.lastReconciliationNextWakeAt = facts.workspace?.nextWakeAt ?? null;
+}
+
+function recordDirectMailboxProcessingSummary(
+  state: HostedRuntimeWorkflowState,
+): void {
+  state.lastReconciliationStatus = "work_pending";
+  state.lastReconciliationNextWakeAt = null;
+  state.lastReconciliationBlockedReason = null;
+  state.lastMailboxLagLaneCount = 0;
+}
+
+function hasAnyMailboxLag(facts: HostedRuntimeReconciliationFacts): boolean {
+  return facts.mailboxLag.some((lane) => BigInt(lane.lag) > 0n);
+}
+
+function isDueTimestamp(timestamp: string | null, nowMs: number): boolean {
+  if (timestamp === null) {
+    return false;
+  }
+
+  const targetMs = Date.parse(timestamp);
+  return Number.isFinite(targetMs) && targetMs <= nowMs;
 }
 
 function normalizePositiveIntegerOption(input: {
@@ -1036,160 +909,6 @@ function normalizeTaskQueueOption(
     throw new TypeError("Hosted runtime workflow task queue options must be bounded non-empty strings.");
   }
   return normalized;
-}
-
-function readCarryForwardState(
-  state: HostedRuntimeWorkflowState,
-  legacy: {
-    deviceSyncRecoveryRequested: boolean;
-    sameRuntimeWakeAcceptedCount: number;
-  } | null,
-): LegacyHostedUserRuntimeWorkflowCarryForwardState {
-  const { userId: _userId, ...carryForward } = state;
-  if (legacy === null) {
-    return carryForward;
-  }
-
-  return {
-    ...carryForward,
-    deviceSyncRecoveryRequested: legacy.deviceSyncRecoveryRequested,
-    sameRuntimeWakeAcceptedCount: legacy.sameRuntimeWakeAcceptedCount,
-  };
-}
-
-function recordDemandSummary(
-  state: HostedRuntimeWorkflowState,
-  demand: HostedUserRuntimeDemand,
-): void {
-  state.lastDemandKind = demand.kind;
-  state.lastMailboxLagLaneCount = demand.mailboxLag.length;
-
-  switch (demand.kind) {
-    case "run": {
-      state.lastDemandNextWakeAt = null;
-      state.lastDemandSource = demand.source;
-      break;
-    }
-    case "idle": {
-      state.lastDemandNextWakeAt = demand.nextWakeAt;
-      state.lastDemandSource = null;
-      break;
-    }
-    case "blocked": {
-      state.lastDemandNextWakeAt = demand.retryAt;
-      state.lastDemandSource = demand.reason;
-      break;
-    }
-    default: {
-      const exhaustive: never = demand;
-      throw new Error(`Unsupported hosted runtime demand ${String(exhaustive)}`);
-    }
-  }
-}
-
-function recordDirectMailboxRunSummary(state: HostedRuntimeWorkflowState): void {
-  state.lastDemandKind = "run";
-  state.lastDemandNextWakeAt = null;
-  state.lastDemandSource = "mailbox_backlog";
-  state.lastMailboxLagLaneCount = 0;
-}
-
-function canDirectProcessFreshMailboxPointer(input: {
-  pointer: NonNullable<HostedRuntimeWorkflowState["latestMailboxPointer"]>;
-  runtime: HostedUserRuntimeWorkflowRuntime;
-}): boolean {
-  if (input.pointer.lane === "conversation") {
-    return true;
-  }
-
-  if (!input.runtime.useDirectAnyLaneMailboxProcessingPatch()) {
-    return false;
-  }
-
-  // Compatibility only: old source:"manual" system mailbox signals were
-  // emitted before manual runtime-control append became AI-gated, so keep them
-  // on the demand-read path.
-  return input.pointer.source !== "manual";
-}
-
-function clearSatisfiedFlags(
-  state: HostedRuntimeWorkflowState,
-  expectedSignalVersion: number,
-): boolean {
-  if (state.signalVersion !== expectedSignalVersion) {
-    return false;
-  }
-
-  state.browserVaultRefreshRequested = false;
-  state.lagRecoveryObserved = false;
-  state.latestMailboxPointer = null;
-  state.mailboxSignalCount = 0;
-  state.manualRunRequested = false;
-  return true;
-}
-
-function clearConsumedFlagsAfterRun(
-  state: HostedRuntimeWorkflowState,
-  source: LegacyHostedRuntimeDemandRunSource,
-): void {
-  switch (source) {
-    case "mailbox_backlog": {
-      state.latestMailboxPointer = null;
-      state.mailboxSignalCount = 0;
-      return;
-    }
-    case "manual": {
-      state.manualRunRequested = false;
-      return;
-    }
-    case "browser_vault_refresh": {
-      state.browserVaultRefreshRequested = false;
-      return;
-    }
-    case "device_sync_recovery": {
-      return;
-    }
-    case "lag_recovery": {
-      state.lagRecoveryObserved = false;
-      return;
-    }
-    case "workspace_wake": {
-      return;
-    }
-    default: {
-      const exhaustive: never = source;
-      throw new Error(`Unsupported hosted runtime demand source ${String(exhaustive)}`);
-    }
-  }
-}
-
-function isLegacyDeviceSyncRecoverySource(source: string): boolean {
-  return source === LEGACY_DEVICE_SYNC_RECOVERY_SOURCE;
-}
-
-function readLegacyBooleanProperty(
-  value: object | undefined,
-  key: string,
-): boolean {
-  if (value === undefined) {
-    return false;
-  }
-  return readObjectProperty(value, key) === true;
-}
-
-function readLegacyNonNegativeIntegerProperty(
-  value: object | undefined,
-  key: string,
-): number {
-  if (value === undefined) {
-    return 0;
-  }
-  const property = readObjectProperty(value, key);
-  return typeof property === "number"
-    && Number.isSafeInteger(property)
-    && property >= 0
-    ? property
-    : 0;
 }
 
 async function waitUntilTimestampOrSignal(
@@ -1238,17 +957,9 @@ function isoNow(runtime: HostedUserRuntimeWorkflowRuntime): string {
 }
 
 function readActivityFailureRetryAt(input: {
-  error: unknown;
   retryDelayMs: number;
   runtime: HostedUserRuntimeWorkflowRuntime;
-}): string | null {
-  if (
-    isNonRetryableFailure(input.error)
-    && input.runtime.useSignalOnlyWaitForNonRetryableFailure()
-  ) {
-    return null;
-  }
-
+}): string {
   return new Date(input.runtime.nowMs() + input.retryDelayMs).toISOString();
 }
 
@@ -1292,221 +1003,10 @@ function readApplicationFailureType(
   return readApplicationFailureType(readObjectProperty(error, "cause"), depth + 1);
 }
 
-function isNonRetryableFailure(error: unknown): boolean {
-  return hasNonRetryableFailureFlag(error, 0);
-}
-
-function hasNonRetryableFailureFlag(error: unknown, depth: number): boolean {
-  if (!error || typeof error !== "object" || depth > 5) {
-    return false;
-  }
-
-  if (readObjectProperty(error, "nonRetryable") === true) {
-    return true;
-  }
-
-  return hasNonRetryableFailureFlag(readObjectProperty(error, "cause"), depth + 1);
-}
-
 function readObjectProperty(value: object, key: string): unknown {
   return (value as Record<string, unknown>)[key];
 }
 
 function isSafeErrorCode(value: string): boolean {
   return value.length > 0 && value.length <= 96 && /^[A-Za-z0-9._:-]+$/u.test(value);
-}
-
-function parseHostedRuntimeSignal(value: unknown): HostedUserRuntimeSignal {
-  const record = requireSignalRecord(value, "Hosted runtime signal");
-  const kind = requireString(record.kind, "Hosted runtime signal kind");
-
-  switch (kind) {
-    case "mailbox_appended": {
-      assertExactSignalKeys(record, "Hosted runtime mailbox signal", [
-        "kind",
-        "lane",
-        "laneSeq",
-        "mailboxItemId",
-        "source",
-      ]);
-
-      return {
-        kind,
-        lane: parseHostedMailboxLane(record.lane),
-        laneSeq: requireNonNegativeBigIntString(
-          record.laneSeq,
-          "Hosted runtime mailbox signal laneSeq",
-        ),
-        mailboxItemId: requireOpaqueIdentifier(
-          record.mailboxItemId,
-          "Hosted runtime mailbox signal mailboxItemId",
-        ),
-        source: requireSafeRuntimeSignalSource(
-          record.source,
-          "Hosted runtime mailbox signal source",
-        ),
-      };
-    }
-    case "manual_run_requested": {
-      assertKindOnlySignal(record, "Hosted runtime manual-run signal");
-      return { kind };
-    }
-    case "browser_vault_refresh_requested": {
-      assertKindOnlySignal(record, "Hosted runtime browser-vault refresh signal");
-      return { kind };
-    }
-    case "device_sync_recovery_requested": {
-      assertKindOnlySignal(record, "Hosted runtime device-sync recovery signal");
-      return { kind };
-    }
-    case "mailbox_lag_observed": {
-      assertKindOnlySignal(record, "Hosted runtime mailbox-lag signal");
-      return { kind };
-    }
-    case "runtime_recheck_requested": {
-      assertKindOnlySignal(record, "Hosted runtime recheck signal");
-      return { kind };
-    }
-    case "runtime_prewarm_requested": {
-      assertExactSignalKeys(record, "Hosted runtime prewarm signal", [
-        "eventId",
-        "kind",
-        "occurredAt",
-        "scopeHash",
-        "source",
-      ]);
-      // Legacy replay tolerance: older prewarm signals carried a raw chat-id hash.
-      // New producers must not send it, and the workflow deliberately ignores it.
-      if (record.scopeHash !== undefined && record.scopeHash !== null) {
-        requireOpaqueIdentifier(
-          record.scopeHash,
-          "Hosted runtime prewarm signal scopeHash",
-        );
-      }
-      return {
-        eventId: requireOpaqueIdentifier(
-          record.eventId,
-          "Hosted runtime prewarm signal eventId",
-        ),
-        kind,
-        occurredAt: requireIsoTimestamp(
-          record.occurredAt,
-          "Hosted runtime prewarm signal occurredAt",
-        ),
-        source: requirePrewarmSource(
-          record.source,
-          "Hosted runtime prewarm signal source",
-        ),
-      };
-    }
-    default:
-      throw new TypeError("Hosted runtime signal kind is not supported.");
-  }
-}
-
-function requireSignalRecord(
-  value: unknown,
-  label: string,
-): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
-  }
-
-  return value as Record<string, unknown>;
-}
-
-function requireString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
-  }
-
-  return value;
-}
-
-function parseHostedMailboxLane(value: unknown): HostedRuntimeMailboxSignal["lane"] {
-  const text = requireString(value, "Hosted runtime mailbox signal lane");
-  if (text === "system" || text === "conversation") {
-    return text;
-  }
-
-  throw new TypeError("Hosted runtime mailbox signal lane is not supported.");
-}
-
-function requireOpaqueIdentifier(value: unknown, label: string): string {
-  const text = requireString(value, label);
-
-  if (text.length > 192 || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(text)) {
-    throw new TypeError(`${label} must be a bounded opaque identifier.`);
-  }
-
-  return text;
-}
-
-function requireSafeRuntimeSignalSource(value: unknown, label: string): string {
-  const text = requireString(value, label);
-
-  if (
-    text.length > 64
-    || text.trim() !== text
-    || !/^[a-z0-9._:-]+$/u.test(text)
-  ) {
-    throw new TypeError(
-      `${label} must be a non-empty trimmed safe source string with at most 64 characters.`,
-    );
-  }
-
-  return text;
-}
-
-function requirePrewarmSource(
-  value: unknown,
-  label: string,
-): HostedRuntimePrewarmSource {
-  const text = requireString(value, label);
-  if (text !== HOSTED_RUNTIME_PREWARM_SOURCE) {
-    throw new TypeError(`${label} is not supported.`);
-  }
-  return HOSTED_RUNTIME_PREWARM_SOURCE;
-}
-
-function requireIsoTimestamp(value: unknown, label: string): string {
-  const text = requireString(value, label);
-  if (
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(text)
-    || Number.isNaN(Date.parse(text))
-  ) {
-    throw new TypeError(`${label} must be a valid ISO-8601 timestamp.`);
-  }
-  return text;
-}
-
-function requireNonNegativeBigIntString(value: unknown, label: string): string {
-  const text = requireString(value, label);
-
-  if (!/^[0-9]+$/u.test(text)) {
-    throw new TypeError(`${label} must be a non-negative base-10 integer string.`);
-  }
-
-  return text;
-}
-
-function assertKindOnlySignal(
-  record: Record<string, unknown>,
-  label: string,
-): void {
-  assertExactSignalKeys(record, label, ["kind"]);
-}
-
-function assertExactSignalKeys(
-  record: Record<string, unknown>,
-  label: string,
-  allowedKeys: readonly string[],
-): void {
-  const allowed = new Set(allowedKeys);
-
-  for (const key of Object.keys(record)) {
-    if (!allowed.has(key)) {
-      throw new TypeError(`${label} must not include ${key}.`);
-    }
-  }
 }

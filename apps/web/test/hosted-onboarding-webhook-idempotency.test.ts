@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberSnapshot: vi.fn(),
   resolveHostedAiUsageGate: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
+  sendHostedLinqReadReceipt: vi.fn(),
   nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
     input: { context?: string; timeoutMs?: number; userId: string },
   ) => {
@@ -128,6 +129,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
     ...actual,
     buildHostedInviteReply: vi.fn(({ joinUrl }: { joinUrl: string }) => `invite:${joinUrl}`),
     sendHostedLinqChatMessage: mocks.sendHostedLinqChatMessage,
+    sendHostedLinqReadReceipt: mocks.sendHostedLinqReadReceipt,
     verifyAndParseHostedLinqWebhookRequest: mocks.verifyAndParseHostedLinqWebhookRequest,
   };
 });
@@ -170,6 +172,10 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       userId: "member_123",
     });
     mocks.sendHostedLinqChatMessage.mockResolvedValue(undefined);
+    mocks.sendHostedLinqReadReceipt.mockResolvedValue({
+      ok: true,
+      status: 204,
+    });
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
@@ -485,7 +491,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
-      source: "linq",
     });
     expect(response).not.toHaveProperty("wakeUserId");
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
@@ -574,7 +579,11 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_evt_123",
+    });
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 });
 

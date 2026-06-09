@@ -1,9 +1,5 @@
 import type {
-  HostedWorkspaceInvocationReason,
   HostedWorkspaceInvocationResult,
-} from "@murphai/hosted-execution/runtime-control";
-import {
-  HOSTED_WORKSPACE_INVOCATION_REASONS,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
@@ -41,11 +37,9 @@ import {
 interface HostedLocalTestUserRunnerStubLike extends UserRunnerDurableObjectStubLike {
   runAlarmForTest(input: { userId: string }): Promise<{ ok: true }>;
   runUntilIdleForTest(input: {
-    reason: HostedWorkspaceInvocationReason;
     userId: string;
   }): Promise<HostedWorkspaceInvocationResult>;
   startStuckInvocationForTest(input: {
-    reason?: HostedWorkspaceInvocationReason;
     startedAgoMs?: number;
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult>;
@@ -138,14 +132,12 @@ export async function handleTestRunUntilIdleRoute(
   if (boundUserResponse) {
     return boundUserResponse;
   }
+  if (context.url.searchParams.has("reason")) {
+    return json({ error: "Test run-until-idle reason is no longer supported." }, 400);
+  }
 
   const stub = context.env.USER_RUNNER.getByName(userId) as HostedLocalTestUserRunnerStubLike;
-  const reason = parseTestWorkspaceInvocationReason(context.url.searchParams.get("reason"));
-  if (reason === "invalid") {
-    return json({ error: "Unsupported test workspace invocation reason." }, 400);
-  }
   return json(await stub.runUntilIdleForTest({
-    reason: reason ?? "manual",
     userId,
   }));
 }
@@ -228,10 +220,6 @@ export async function handleTestStartStuckInvocationRoute(
   }
 
   const stub = context.env.USER_RUNNER.getByName(userId) as HostedLocalTestUserRunnerStubLike;
-  const reason = parseTestWorkspaceInvocationReason(context.url.searchParams.get("reason"));
-  if (reason === "invalid") {
-    return json({ error: "Unsupported test stuck invocation reason." }, 400);
-  }
   const startedAgoMs = parseTestPositiveInteger(
     context.url.searchParams.get("startedAgoMs"),
   );
@@ -239,22 +227,9 @@ export async function handleTestStartStuckInvocationRoute(
     return json({ error: "Unsupported test stuck invocation age." }, 400);
   }
   return json(await stub.startStuckInvocationForTest({
-    ...(reason ? { reason } : {}),
     ...(startedAgoMs === null ? {} : { startedAgoMs }),
     userId,
   }));
-}
-
-export function parseTestWorkspaceInvocationReason(
-  value: string | null,
-): HostedWorkspaceInvocationReason | "invalid" | null {
-  if (value === null || value.trim() === "") {
-    return null;
-  }
-  if (HOSTED_WORKSPACE_INVOCATION_REASONS.includes(value as HostedWorkspaceInvocationReason)) {
-    return value as HostedWorkspaceInvocationReason;
-  }
-  return "invalid";
 }
 
 export function parseTestPositiveInteger(value: string | null): number | "invalid" | null {

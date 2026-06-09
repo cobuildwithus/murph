@@ -11,7 +11,6 @@ import {
 import type {
   HostedRuntimeLogRequest,
   HostedRuntimeWebStatusResponse,
-  HostedWorkspaceInvocationReason,
   HostedWorkspaceInvocationResult,
   HostedWorkspaceReadResponse,
   HostedWorkspaceState,
@@ -62,7 +61,6 @@ const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_TEXT_ENCODER = new TextEncoder();
 
 export type RuntimeInvocationInput = {
   orchestrationAttemptId: string;
-  reason: HostedWorkspaceInvocationReason;
   userId: string;
 };
 
@@ -118,7 +116,6 @@ export class RuntimeInvocationService {
     const workspaceRunnerInvocation = await this.prepareWorkspaceRunnerInvocation({
       commandBudget: input.commandBudget,
       token,
-      reason: input.input.reason,
       userId: input.input.userId,
       workspace: workspaceRead.workspace,
       workspaceVersion,
@@ -158,7 +155,6 @@ export class RuntimeInvocationService {
           orchestrationAttemptId: executionInput.orchestrationAttemptId,
           transportFailureFenceCleared: failed.failed,
           workspaceAttemptId: input.token.attemptId,
-          workspaceReason: executionInput.reason,
         },
         level: "warn",
         message: "Hosted runner runtime execution adapter failed.",
@@ -211,7 +207,6 @@ export class RuntimeInvocationService {
               ...buildHostedRunnerMetadataOnlyErrorDetails(error),
               orchestrationAttemptId: executionInput.orchestrationAttemptId,
               workspaceAttemptId: token.attemptId,
-              workspaceReason: executionInput.reason,
               workspaceVersion,
             },
             level: "warn",
@@ -244,7 +239,6 @@ export class RuntimeInvocationService {
           orchestrationAttemptId: executionInput.orchestrationAttemptId,
           transportFailureFenceCleared: failed.failed,
           workspaceAttemptId: token.attemptId,
-          workspaceReason: executionInput.reason,
           workspaceVersion,
         },
         level: "warn",
@@ -301,7 +295,6 @@ export class RuntimeInvocationService {
         details: {
           ...buildHostedRunnerMetadataOnlyErrorDetails(error),
           orchestrationAttemptId: input.executionInput.orchestrationAttemptId,
-          workspaceReason: input.executionInput.reason,
           workspaceVersion: input.workspaceVersion,
         },
         level: "warn",
@@ -347,7 +340,6 @@ export class RuntimeInvocationService {
           details: {
             orchestrationAttemptId: input.input.orchestrationAttemptId,
             workspaceAttemptId: input.token.attemptId,
-            workspaceReason: input.input.reason,
             workspaceVersion: input.workspaceVersion,
           },
           level: "warn",
@@ -366,7 +358,6 @@ export class RuntimeInvocationService {
           ...buildHostedRunnerMetadataOnlyErrorDetails(error),
           orchestrationAttemptId: input.input.orchestrationAttemptId,
           workspaceAttemptId: input.token.attemptId,
-          workspaceReason: input.input.reason,
           workspaceVersion: input.workspaceVersion,
         },
         level: "warn",
@@ -394,7 +385,6 @@ export class RuntimeInvocationService {
           ...buildHostedRunnerMetadataOnlyErrorDetails(error),
           orchestrationAttemptId: input.input.orchestrationAttemptId,
           workspaceAttemptId: input.token.attemptId,
-          workspaceReason: input.input.reason,
           workspaceVersion: input.workspaceVersion,
         },
         level: "warn",
@@ -426,7 +416,6 @@ export class RuntimeInvocationService {
           orchestrationAttemptIdPresent:
             input.executionInput.orchestrationAttemptId.length > 0,
           workspaceAttemptIdPresent: input.token.attemptId.length > 0,
-          workspaceReason: input.executionInput.reason,
           workspaceVersion: input.workspaceVersion,
         },
         level: "warn",
@@ -440,7 +429,6 @@ export class RuntimeInvocationService {
   private async prepareWorkspaceRunnerInvocation(input: {
     commandBudget?: RuntimeProcessingCommandBudget;
     token: RunnerWriteFenceToken;
-    reason: HostedWorkspaceInvocationReason;
     userId: string;
     workspace: HostedWorkspaceState | null;
     workspaceVersion: string;
@@ -487,7 +475,6 @@ export class RuntimeInvocationService {
         idleCheckpointDelayMs: this.input.env.idleCheckpointDelayMs,
         leaseGeneration: input.token.generation,
         providerEgressToken: input.token.providerEgressToken,
-        reason: input.reason,
         userId: input.userId,
         workspace: input.workspace,
         workspaceVersion: input.workspaceVersion,
@@ -512,7 +499,6 @@ export class RuntimeInvocationService {
         runnerContainerWorkerVersionPresent: runnerContainerName !== input.userId,
         workspaceAttemptId: input.token.attemptId,
         workspaceWriteFenceGeneration: input.token.generation,
-        workspaceReason: input.reason,
         workspaceVersion: input.workspaceVersion,
       },
       message: "Hosted runner prepared workspace invocation.",
@@ -621,7 +607,6 @@ export class RuntimeInvocationService {
           orchestrationAttemptIdPresent:
             input.executionInput.orchestrationAttemptId.length > 0,
           workspaceAttemptIdPresent: input.token.attemptId.length > 0,
-          workspaceReason: input.executionInput.reason,
           workspaceVersion: input.workspaceVersion,
         },
         level: "warn",

@@ -250,7 +250,6 @@ describe("hosted workspace runtime entrypoint", () => {
       request: {
         attemptId: "attempt_synthetic_host_abort",
         leaseGeneration: "7",
-        reason: "nudge",
         userId: TEST_USER_ID,
         workspaceVersion: "0",
       },
@@ -312,7 +311,6 @@ describe("hosted workspace runtime entrypoint", () => {
         request: {
           attemptId: "attempt_synthetic_phase_boundaries",
           leaseGeneration: "7",
-          reason: "nudge",
           userId: TEST_USER_ID,
           workspaceVersion: "0",
         },
@@ -609,7 +607,6 @@ describe("hosted workspace runtime entrypoint", () => {
           request: {
             attemptId: "attempt_synthetic_invocation_workspace",
             leaseGeneration: "7",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspace: suppliedWorkspace,
             workspaceVersion: "0",
@@ -664,7 +661,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_durable_effect_success",
             idleCheckpointDelayMs: 1,
             leaseGeneration: "7",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
           },
@@ -737,7 +733,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_import_enrichment_checkpoint_barrier",
             idleCheckpointDelayMs: 1,
             leaseGeneration: "7",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
           },
@@ -845,7 +840,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_durable_effect_checkpoint_wake_drain",
             idleCheckpointDelayMs: 1,
             leaseGeneration: "7",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
           },
@@ -937,7 +931,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_durable_effect_failure_isolated",
             idleCheckpointDelayMs: 1,
             leaseGeneration: "7",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
           },
@@ -1015,7 +1008,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_durable_effect_failure",
             idleCheckpointDelayMs: 1,
             leaseGeneration: "7",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
           },
@@ -1083,7 +1075,6 @@ describe("hosted workspace runtime entrypoint", () => {
           request: {
             attemptId: "attempt_synthetic_invocation_workspace_stale",
             leaseGeneration: "7",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspace: createWorkspaceState({ version: "6" }),
             workspaceVersion: "5",
@@ -1122,7 +1113,6 @@ describe("hosted workspace runtime entrypoint", () => {
           request: {
             attemptId: "attempt_synthetic_invocation_workspace_other_user",
             leaseGeneration: "7",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspace: createWorkspaceState({
               snapshotRef: createBundleRef({
@@ -1193,7 +1183,6 @@ describe("hosted workspace runtime entrypoint", () => {
           attemptId: "attempt_synthetic_phase_checkpoint",
           idleCheckpointDelayMs: 1,
           leaseGeneration: "7",
-          reason: "nudge",
           userId: TEST_USER_ID,
           workspaceVersion: "0",
         },
@@ -1280,7 +1269,6 @@ describe("hosted workspace runtime entrypoint", () => {
         request: {
           attemptId: "attempt_synthetic_phase_failure",
           leaseGeneration: "7",
-          reason: "nudge",
           userId: TEST_USER_ID,
           workspaceVersion: "0",
         },
@@ -1361,7 +1349,6 @@ describe("hosted workspace runtime entrypoint", () => {
         request: {
           attemptId: "attempt_synthetic_restore_phase_failure",
           leaseGeneration: "7",
-          reason: "nudge",
           userId: TEST_USER_ID,
           workspaceVersion: "0",
         },
@@ -1462,7 +1449,6 @@ describe("hosted workspace runtime entrypoint", () => {
               maxMailboxItems: 10,
             },
             leaseGeneration: "7",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
           },
@@ -1565,7 +1551,6 @@ describe("hosted workspace runtime entrypoint", () => {
             },
             idleCheckpointDelayMs: 1,
             leaseGeneration: "7",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
           },
@@ -1678,7 +1663,6 @@ describe("hosted workspace runtime entrypoint", () => {
               maxMailboxItems: 10,
             },
             leaseGeneration: "7",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
           },
@@ -1765,7 +1749,6 @@ describe("hosted workspace runtime entrypoint", () => {
               maxMailboxItems: 10,
             },
             leaseGeneration: "7",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
           },
@@ -1866,7 +1849,6 @@ describe("hosted workspace runtime entrypoint", () => {
               maxMailboxItems: 10,
             },
             leaseGeneration: "7",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
           },
@@ -1940,7 +1922,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint",
             idleCheckpointDelayMs: 1,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -2020,7 +2001,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_foreground_stale_assistant_wake",
             idleCheckpointDelayMs: 1,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -2115,7 +2095,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_wake",
             idleCheckpointDelayMs: 5,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -2197,7 +2176,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_no_progress_wakes",
             idleCheckpointDelayMs,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -2283,7 +2261,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_projected_wake",
             idleCheckpointDelayMs,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -2387,7 +2364,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_projected_runtime_wake",
             idleCheckpointDelayMs: 75,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -2498,7 +2474,6 @@ describe("hosted workspace runtime entrypoint", () => {
             },
             idleCheckpointDelayMs: 1,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -2593,7 +2568,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_wake_during_checkpoint",
             idleCheckpointDelayMs: 1,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -2699,7 +2673,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_pending_wake",
             idleCheckpointDelayMs: 1,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -2819,7 +2792,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_snapshot_wake",
             idleCheckpointDelayMs: 1,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -2924,7 +2896,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_pending_wake_timer",
             idleCheckpointDelayMs: 1,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -3035,7 +3006,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_accumulate_projection",
             idleCheckpointDelayMs: 25,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -3129,7 +3099,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_no_progress_hint",
             idleCheckpointDelayMs: 25,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -3221,7 +3190,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_clear_projection",
             idleCheckpointDelayMs: 1,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -3341,7 +3309,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_idle_timer_clear",
             idleCheckpointDelayMs: 10_000,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -3438,7 +3405,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_timer",
             idleCheckpointDelayMs: 250,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -3497,7 +3463,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_projected_wake",
             idleCheckpointDelayMs,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -3591,7 +3556,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_external_after_projected",
             idleCheckpointDelayMs,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -3677,7 +3641,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_timer_before_projected_wake",
             idleCheckpointDelayMs: 250,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -3744,7 +3707,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_wrong_user",
             idleCheckpointDelayMs: 1,
             leaseGeneration: "9",
-            reason: "nudge",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
@@ -3876,7 +3838,6 @@ describe("hosted workspace runtime entrypoint", () => {
       await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            reason: "alarm",
           },
         }),
         {
@@ -4955,7 +4916,6 @@ describe("hosted workspace runtime entrypoint", () => {
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: `attempt_working_snapshot_restore_${attempt}`,
-              reason: "manual",
               workspaceVersion: "9",
             },
           }),
@@ -5602,7 +5562,6 @@ describe("hosted workspace runtime entrypoint", () => {
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: `attempt_no_progress_cache_${checkpointRequests.length}`,
-              reason: "alarm",
               workspaceVersion: currentWorkspace.version,
             },
           }),
@@ -6938,7 +6897,6 @@ describe("hosted workspace runtime entrypoint", () => {
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            reason: "alarm",
           },
         }),
         {
@@ -7010,7 +6968,6 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_browser_vault_marker_force",
-            reason: "nudge",
             workspaceVersion: "0",
           },
         }),
@@ -7085,7 +7042,6 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             idleCheckpointDelayMs: 1,
-            reason: "alarm",
             workspaceVersion: "0",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),
@@ -7168,7 +7124,6 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_device_sync_first",
-            reason: "alarm",
             workspaceVersion: "0",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),
@@ -7225,7 +7180,6 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_device_sync_follow_up",
-            reason: "alarm",
             workspaceVersion: "1",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),
@@ -7287,7 +7241,6 @@ describe("hosted workspace runtime entrypoint", () => {
     });
 
     assert.equal(parsed.request.attemptId, "attempt_synthetic_workspace_run");
-    assert.equal(parsed.request.reason, "nudge");
     assert.equal(parsed.request.workspace?.version, "0");
     assert.deepEqual(parsed.runtime?.forwardedEnv, {
       HOSTED_ASSISTANT_MODEL: "gpt-synthetic",
@@ -7306,34 +7259,25 @@ describe("hosted workspace runtime entrypoint", () => {
         idleCheckpointDelayMs: 180_000,
       },
     });
-    assert.equal(timedParsed.request.reason, "nudge");
     assert.equal(timedParsed.request.idleCheckpointDelayMs, 180_000);
-
-    const browserVaultRefreshParsed = parseHostedAssistantWorkspaceRuntimeJobInput({
-      request: {
-        ...createWorkspaceRunRequest(),
-        reason: "browser_vault_refresh",
-      },
-    });
-    assert.equal(browserVaultRefreshParsed.request.reason, "browser_vault_refresh");
-
-    const workspaceWakeParsed = parseHostedAssistantWorkspaceRuntimeJobInput({
-      request: {
-        ...createWorkspaceRunRequest(),
-        source: "workspace_wake",
-      },
-    });
-    assert.equal(workspaceWakeParsed.request.reason, "nudge");
-    assert.equal("source" in workspaceWakeParsed.request, false);
 
     expect(() =>
       parseHostedAssistantWorkspaceRuntimeJobInput({
         request: {
           ...createWorkspaceRunRequest(),
-          source: "webhook",
+          reason: "browser_vault_refresh",
         },
       })
-    ).toThrow("Hosted assistant workspace runtime job request.source is not supported.");
+    ).toThrow("Hosted assistant workspace runtime job request.reason is no longer supported.");
+
+    expect(() =>
+      parseHostedAssistantWorkspaceRuntimeJobInput({
+        request: {
+          ...createWorkspaceRunRequest(),
+          source: "manual",
+        },
+      })
+    ).toThrow("Hosted assistant workspace runtime job request.source is no longer supported.");
 
     expect(() =>
       parseHostedAssistantWorkspaceRuntimeJobInput({
@@ -7941,7 +7885,6 @@ function createWorkspaceRunRequest(
     attemptId: "attempt_synthetic_workspace_run",
     idleCheckpointDelayMs: 1,
     leaseGeneration: "1",
-    reason: "nudge" as const,
     userId: TEST_USER_ID,
     workspaceVersion: "0",
     ...overrides,

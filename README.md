@@ -158,12 +158,12 @@ Murph now has three distinct runtime tiers:
 
 - `apps/web` owns hosted onboarding, billing, OAuth callbacks, webhook intake, device-sync control-plane metadata, sparse routing state, encrypted hosted mailbox rows, workspace checkpoint metadata, and hosted runtime status/logs
 - it does not own canonical health data
-- webhook and app paths commit durable demand and signal Temporal only; they do not directly nudge a user runner in Cloudflare
+- webhook and app paths append durable mailbox facts and signal Temporal only; they do not directly nudge a user runner in Cloudflare
 
 ### 3. Hosted execution plane
 
 - `apps/cloudflare` restores encrypted hosted bundles, coordinates per-user runtime passes, keeps only DO-local runner coordination state, and invokes the workspace-private `@murphai/assistant-runtime` package against web-owned mailbox/checkpoint/log ports
-- `packages/hosted-orchestrator-temporal` runs the per-user Temporal workflow worker that reads web-owned demand, calls Cloudflare `ensure-processing`, and stores only pointer-level orchestration state
+- `packages/hosted-orchestrator-temporal` runs the per-user Temporal workflow worker that reads web-owned reconciliation facts, calls Cloudflare `ensure-processing`, and stores only pointer-level orchestration state
 - Cloudflare returns `runtime_processing_accepted` or `retry_later` and owns start, wake, active-fence alarm cleanup, and execution cleanup for the active runner through `ensure-processing`
 - the hosted execution plane is intentionally separate from the public hosted web app
 

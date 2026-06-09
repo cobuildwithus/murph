@@ -108,7 +108,6 @@ describe("hosted local stuck invocation recovery e2e", () => {
     requireScenario().queueAssistantResponses([replyText]);
 
     const stuckInvocation = await requireScenario().harness.startStuckInvocationForTest(userId, {
-      reason: "manual",
       startedAgoMs: 35_000,
     });
     expect(stuckInvocation.ok).toBe(true);

@@ -2175,8 +2175,6 @@ async function emitHostedContainerActiveJobDiagnosticSnapshot(input: {
       stage: input.stage,
       workspaceAttemptId:
         input.job.kind === "workspace-invocation" ? input.job.request.attemptId : null,
-      workspaceReason:
-        input.job.kind === "workspace-invocation" ? input.job.request.reason : null,
       workspaceVersion:
         input.job.kind === "workspace-invocation" ? input.job.request.workspaceVersion : null,
     },

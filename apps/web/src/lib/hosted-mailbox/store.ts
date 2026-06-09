@@ -79,11 +79,6 @@ export interface HostedMailboxItemCheckpointRecord {
   userId: string;
 }
 
-export interface HostedMailboxPendingSystemItemCheckpointRecord
-  extends HostedMailboxItemCheckpointRecord {
-  kind: HostedMailboxKind;
-}
-
 export interface AppendHostedMailboxItemResult {
   duplicate: boolean;
   dedupeConflict: boolean;
@@ -487,21 +482,11 @@ export async function readHostedMailboxMaxSeqByLane(input: {
   return result;
 }
 
-export async function readHostedMailboxFirstPendingSystemKind(input: {
+export async function readHostedMailboxPendingSystemItemsNeedAiUsageGate(input: {
   afterSeq: bigint | number | string;
   prisma?: HostedMailboxStoreClient;
   userId: string;
-}): Promise<HostedMailboxKind | null> {
-  const item = await readHostedMailboxFirstPendingSystemItemCheckpoint(input);
-
-  return item?.kind ?? null;
-}
-
-export async function readHostedMailboxFirstPendingSystemItemCheckpoint(input: {
-  afterSeq: bigint | number | string;
-  prisma?: HostedMailboxStoreClient;
-  userId: string;
-}): Promise<HostedMailboxPendingSystemItemCheckpointRecord | null> {
+}): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
   const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
   const afterSeq = normalizeHostedMailboxSeq(
@@ -509,18 +494,11 @@ export async function readHostedMailboxFirstPendingSystemItemCheckpoint(input: {
     "Hosted mailbox pending system afterSeq",
   );
   const row = await prisma.hostedMailboxItem.findFirst({
-    orderBy: {
-      laneSeq: "asc",
-    },
     select: {
       id: true,
-      kind: true,
-      lane: true,
-      laneSeq: true,
-      occurredAt: true,
-      userId: true,
     },
     where: {
+      kind: "runtime.manual-requested",
       lane: "system",
       laneSeq: {
         gt: afterSeq,
@@ -529,16 +507,7 @@ export async function readHostedMailboxFirstPendingSystemItemCheckpoint(input: {
     },
   });
 
-  return row
-    ? {
-      id: row.id,
-      kind: requireHostedMailboxKind(row.kind),
-      lane: requireHostedMailboxLane(row.lane),
-      laneSeq: row.laneSeq.toString(),
-      occurredAt: row.occurredAt.toISOString(),
-      userId: row.userId,
-    }
-    : null;
+  return row !== null;
 }
 
 export async function readHostedMailboxItemByDedupeKey(input: {

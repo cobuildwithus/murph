@@ -1363,7 +1363,7 @@ async function runHostedAlarmUntilIdleForTest(
   signal: AbortSignal,
 ): Promise<HostedWorkspaceInvocationResult> {
   return await requireScenario().harness.requestJson<HostedWorkspaceInvocationResult>(
-    `/__test/users/${encodeURIComponent(userId)}/run-until-idle?reason=alarm`,
+    `/__test/users/${encodeURIComponent(userId)}/run-until-idle`,
     {
       headers: {
         [HOSTED_EXECUTION_USER_ID_HEADER]: userId,

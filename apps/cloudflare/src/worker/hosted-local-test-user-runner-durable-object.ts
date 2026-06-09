@@ -1,5 +1,4 @@
 import type {
-  HostedWorkspaceInvocationReason,
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -38,10 +37,7 @@ export class HostedLocalTestUserRunnerDurableObject extends UserRunnerDurableObj
     this.testRunner = testRunner;
   }
 
-  async runUntilIdleForTest(input: {
-    reason: HostedWorkspaceInvocationReason;
-    userId: string;
-  }): Promise<HostedWorkspaceInvocationResult> {
+  async runUntilIdleForTest(input: { userId: string }): Promise<HostedWorkspaceInvocationResult> {
     return await this.testRunner.runUntilIdleForTest(input);
   }
 
@@ -52,7 +48,6 @@ export class HostedLocalTestUserRunnerDurableObject extends UserRunnerDurableObj
   }
 
   async startStuckInvocationForTest(input: {
-    reason?: HostedWorkspaceInvocationReason;
     startedAgoMs?: number;
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult> {

@@ -24,7 +24,6 @@ const CURRENT_RUNNER_META_COLUMNS = [
   "active_expires_at",
   "active_workspace_version",
   "backoff_until",
-  "browser_vault_refresh_requested_at",
   "failure_count",
   "last_error_at",
   "last_error_code",
@@ -198,7 +197,7 @@ function runnerBundleSlotsTableExists(db: DatabaseSync): boolean {
 }
 
 describe("RunnerStateStore schema guard", () => {
-  it("fails closed when the legacy split runner bundle schema is still present", () => {
+  it("drops the retired split runner bundle table during schema migration", async () => {
     const setupLegacyBundleSchema = (database: DatabaseSync) => {
       database.exec(`
         DROP TABLE IF EXISTS runner_meta;
@@ -224,9 +223,9 @@ describe("RunnerStateStore schema guard", () => {
 
     expect(readRunnerMetaColumns(db)).not.toContain("bundle_ref_json");
     expect(runnerBundleSlotsTableExists(db)).toBe(true);
-    expect(() => createRunnerStateStoreHarness(setupLegacyBundleSchema)).toThrow(
-      /runner_meta schema is unsupported; legacy runner_bundle_slots table remains/u,
-    );
+    const store = new RunnerStateStore(createDurableObjectState(db));
+    await store.bindUser("user-retired-bundle-slots");
+    expect(runnerBundleSlotsTableExists(db)).toBe(false);
   });
 
   it("creates the current write-fence schema without retired active-invocation columns", async () => {
@@ -234,17 +233,35 @@ describe("RunnerStateStore schema guard", () => {
 
     await store.bindUser("user-current");
 
-    expect(readRunnerMetaColumns(db)).toEqual(expect.arrayContaining(CURRENT_RUNNER_META_COLUMNS));
-    expect(readRunnerMetaColumns(db)).not.toContain("active_invocation_id");
-    expect(readRunnerMetaColumns(db)).not.toContain("pending_nudge");
-    expect(readRunnerMetaColumns(db)).not.toContain("alarm_kind");
+    const columns = readRunnerMetaColumns(db);
+    const retiredBrowserVaultRefreshColumn = [
+      "browser",
+      "vault",
+      "refresh",
+      "requested",
+      "at",
+    ].join("_");
+    const retiredBrowserVaultRefreshProjection = [
+      "browser",
+      "Vault",
+      "Refresh",
+      "Requested",
+      "At",
+    ].join("");
+    expect(columns).toEqual(expect.arrayContaining(CURRENT_RUNNER_META_COLUMNS));
+    expect(columns).not.toContain("active_invocation_id");
+    expect(columns).not.toContain("pending_nudge");
+    expect(columns).not.toContain("alarm_kind");
+    expect(columns).not.toContain(retiredBrowserVaultRefreshColumn);
     expect(readRunnerStateSchemaVersion(db)).toBe(13);
-    await expect(store.readState()).resolves.toMatchObject({
+    const state = await store.readState();
+    expect(state).toMatchObject({
       schema: "murph.hosted-runner.v3",
       userId: "user-current",
       wakeAt: null,
       writeFence: null,
     });
+    expect(state).not.toHaveProperty(retiredBrowserVaultRefreshProjection);
   });
 
   it("migrates legacy active invocation and pending nudge state into the write fence", async () => {
@@ -314,7 +331,7 @@ describe("RunnerStateStore schema guard", () => {
     await expect(store.readState()).resolves.toMatchObject({
       active: {
         attemptId: "workspace-invocation-1",
-        reason: "manual",
+        reason: null,
         workspaceVersion: "42",
       },
       leaseGeneration: 3,
@@ -334,13 +351,11 @@ describe("RunnerStateStore schema guard", () => {
   it("blocks duplicate write fences and validates workspace versions when requested", async () => {
     const { store } = createRunnerStateStoreHarness();
     const lease = await store.beginWriteFence({
-      reason: "nudge",
       runnerContainerName: "user-write",
       userId: "user-write",
     });
 
     await expect(store.beginWriteFence({
-      reason: "alarm",
       runnerContainerName: "user-write",
       userId: "user-write",
     })).rejects.toMatchObject({
@@ -404,7 +419,6 @@ describe("RunnerStateStore schema guard", () => {
   it("validates provider egress tokens without storing the raw token", async () => {
     const { store } = createRunnerStateStoreHarness();
     const lease = await store.beginWriteFence({
-      reason: "nudge",
       runnerContainerName: "user-write",
       userId: "user-write",
     });
@@ -453,7 +467,6 @@ describe("RunnerStateStore schema guard", () => {
   it("validates active write fences by active user and returns runtime metadata", async () => {
     const { store } = createRunnerStateStoreHarness();
     const lease = await store.beginWriteFence({
-      reason: "nudge",
       runnerContainerName: "user-write--v-worker-current",
       userId: "user-write",
     });
@@ -506,7 +519,6 @@ describe("RunnerStateStore schema guard", () => {
   it("validates active fences without requiring runner container state", async () => {
     const { db, store } = createRunnerStateStoreHarness();
     await store.beginWriteFence({
-      reason: "nudge",
       runnerContainerName: "user-legacy",
       userId: "user-legacy",
     });
@@ -528,7 +540,6 @@ describe("RunnerStateStore schema guard", () => {
   it("keeps legacy active_expires_at inert during write-fence validation", async () => {
     const { db, store } = createRunnerStateStoreHarness();
     const lease = await store.beginWriteFence({
-      reason: "nudge",
       runnerContainerName: "user-write",
       userId: "user-write",
     });
@@ -577,7 +588,6 @@ describe("RunnerStateStore schema guard", () => {
   it("projects legacy active_expires_at rows as null", async () => {
     const { db, store } = createRunnerStateStoreHarness();
     await store.beginWriteFence({
-      reason: "nudge",
       runnerContainerName: "user-expired",
       userId: "user-expired",
     });
@@ -601,7 +611,6 @@ describe("RunnerStateStore schema guard", () => {
 
     await expect(store.readState()).resolves.toMatchObject({
       backoffUntil: null,
-      browserVaultRefreshRequestedAt: null,
       nextWakeAt: null,
       retry: {
         at: null,

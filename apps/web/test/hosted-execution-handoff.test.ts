@@ -66,11 +66,10 @@ describe("hosted webhook Temporal handoff", () => {
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
-      source: "linq",
     });
   });
 
-  it("keeps webhook handoff best-effort when Temporal signaling fails", async () => {
+  it("fails webhook handoff when Temporal signaling fails after a mailbox pointer exists", async () => {
     signalMocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
       new Error("Temporal unavailable"),
     );
@@ -86,21 +85,16 @@ describe("hosted webhook Temporal handoff", () => {
         source: "linq",
         userId: "user-123",
       }),
-    ).resolves.toMatchObject({
-      reason: "temporal-signal-failed",
-      signalAccepted: false,
-      started: false,
-    });
+    ).rejects.toThrow("Temporal unavailable");
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
-      source: "linq",
     });
   });
 
-  it("keeps webhook handoff best-effort when no mailbox pointer exists", async () => {
+  it("skips webhook handoff when no mailbox pointer exists", async () => {
     await expect(
       maybeHandoffHostedExecutionWebhookWake({
         eventId: "evt_inline_gap",
@@ -111,14 +105,36 @@ describe("hosted webhook Temporal handoff", () => {
         source: "linq",
         userId: "user-123",
       }),
-    ).resolves.toMatchObject({
-      reason: "missing-mailbox-item",
-      signalAccepted: false,
-      started: false,
-    });
+    ).resolves.toBeNull();
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(signalMocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("signals Temporal for duplicate webhook handoff with an existing mailbox item", async () => {
+    await expect(maybeHandoffHostedExecutionWebhookWake({
+      eventId: "evt_duplicate",
+      mailboxItemId: "mailbox_existing",
+      response: {
+        duplicate: true,
+        ignored: true,
+        ok: true,
+        reason: "duplicate-webhook-event",
+      },
+      source: "linq",
+      userId: "user-123",
+    })).resolves.toMatchObject({
+      reason: "temporal-signaled",
+      signalAccepted: true,
+      started: true,
+      workflowId: "hosted-user-runtime:user-123",
+    });
+
+    expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
+    expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "user-123",
+      mailboxItemId: "mailbox_existing",
+    });
   });
 
   it("signals Temporal for Telegram handoff", async () => {
@@ -142,7 +158,6 @@ describe("hosted webhook Temporal handoff", () => {
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
-      source: "telegram",
     });
   });
 });

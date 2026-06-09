@@ -128,12 +128,9 @@ describe("hosted local Linq typing prewarm e2e", () => {
     expect(prewarmState.latestPrewarmRequestedAt).not.toBeNull();
     expect(prewarmState.mailboxSignalCount).toBe(0);
     expect(prewarmState.latestMailboxPointer).toBeNull();
-    expect(prewarmState.manualRunRequested).toBe(false);
-    expect(prewarmState.browserVaultRefreshRequested).toBe(false);
     expect(prewarmState).not.toHaveProperty("deviceSyncRecoveryRequested");
-    expect(prewarmState.lagRecoveryObserved).toBe(false);
-    expect(prewarmState.lastDemandKind).toBe("idle");
-    expect(prewarmState.lastDemandSource).toBeNull();
+    expect(prewarmState.lastReconciliationStatus).toBe("idle");
+    expect(prewarmState.lastReconciliationBlockedReason).toBeNull();
     expect(prewarmState.lastExecutionAt).toBeNull();
     expect(prewarmState.lastOrchestrationAttemptId).toBeNull();
     expect(prewarmState.lastRuntimeAttemptId).toBeNull();
@@ -172,7 +169,7 @@ describe("hosted local Linq typing prewarm e2e", () => {
       expectedSendPath: replyChatPath,
       predicate: (state) =>
         state.prewarmSignalCount === prewarmState.prewarmSignalCount
-        && state.lastDemandSource === "mailbox_backlog"
+        && state.lastReconciliationStatus === "work_pending"
         && state.lastExecutionAt !== null
         && state.lastExecutionAt !== prewarmState.lastExecutionAt
         && state.lastOrchestrationAttemptId !== null
@@ -450,7 +447,7 @@ async function waitForWorkflowExecutionStateBeforeLinqSend(input: {
           `expected path: ${input.expectedSendPath}`,
           `baseline count: ${input.baselineSendCount}`,
           `observed count: ${sendCount}`,
-          `last demand source: ${state.lastDemandSource ?? "null"}`,
+          `last reconciliation status: ${state.lastReconciliationStatus ?? "null"}`,
           `last execution kind: ${state.lastExecutionKind ?? "null"}`,
         ].join("\n"));
       }

@@ -25,14 +25,14 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberCoreState: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
   resolveHostedAiUsageGate: vi.fn(),
-  resolveHostedRuntimeAiUsageDemandGate: vi.fn(),
+  resolveHostedRuntimeAiUsageGate: vi.fn(),
   signalWithStart: vi.fn(),
 }));
 
 const defaultWorkflowOptions = {
   ensureRuntimeProcessingStartToCloseTimeoutMs: 15_000,
   prewarmTaskQueue: "murph-hosted-runtime-prewarm",
-  readRuntimeDemandStartToCloseTimeoutMs: 10_000,
+  readRuntimeReconciliationFactsStartToCloseTimeoutMs: 10_000,
 };
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
@@ -54,7 +54,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
-  resolveHostedRuntimeAiUsageDemandGate: mocks.resolveHostedRuntimeAiUsageDemandGate,
+  resolveHostedRuntimeAiUsageGate: mocks.resolveHostedRuntimeAiUsageGate,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
@@ -63,7 +63,6 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
 }));
 
 import {
-  sanitizeHostedRuntimeSignalSource,
   signalHostedBrowserVaultRefreshRuntime,
   signalHostedDeviceSyncMailboxRuntime,
   signalHostedMailboxAppendRuntime,
@@ -77,7 +76,7 @@ describe("hosted runtime Temporal signaling", () => {
     mocks.getPrisma.mockReturnValue(mocks.prisma);
     mocks.ensureHostedWorkspace.mockResolvedValue(buildHostedWorkspaceRecord());
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
-    mocks.resolveHostedRuntimeAiUsageDemandGate.mockResolvedValue({
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "allowed",
     });
     mocks.signalWithStart.mockResolvedValue(undefined);
@@ -106,7 +105,6 @@ describe("hosted runtime Temporal signaling", () => {
     await expect(signalHostedMailboxAppendRuntime({
       client: buildClient(),
       mailboxItemId: "mailbox_123",
-      source: "email:agentmail",
     })).resolves.toEqual({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
@@ -125,7 +123,6 @@ describe("hosted runtime Temporal signaling", () => {
           lane: "conversation",
           laneSeq: "42",
           mailboxItemId: "mailbox_123",
-          source: "email:agentmail",
         }],
         taskQueue: HOSTED_USER_RUNTIME_TASK_QUEUE,
         workflowId: "hosted-user-runtime:member_123",
@@ -145,28 +142,8 @@ describe("hosted runtime Temporal signaling", () => {
       "lane",
       "laneSeq",
       "mailboxItemId",
-      "source",
     ]);
     expect(JSON.stringify(signal)).not.toMatch(/Please look|providerHeaders|messageText/u);
-  });
-
-  it("bounds and sanitizes mailbox source strings before signaling", async () => {
-    const source = sanitizeHostedRuntimeSignalSource(
-      " Agent Mail / Provider Hook <> With Spaces And A Very Very Long Tail ",
-    );
-
-    expect(source).toMatch(/^[a-z0-9._:-]+$/u);
-    expect(source.length).toBeLessThanOrEqual(64);
-
-    await signalHostedMailboxAppendRuntime({
-      client: buildClient(),
-      mailboxItemId: "mailbox_123",
-      source,
-    });
-
-    expect(mocks.signalWithStart.mock.calls[0]?.[1]?.signalArgs[0]).toMatchObject({
-      source,
-    });
   });
 
   it("signals duplicate mailbox append attempts safely", async () => {
@@ -175,12 +152,10 @@ describe("hosted runtime Temporal signaling", () => {
     await signalHostedMailboxAppendRuntime({
       client,
       mailboxItemId: "mailbox_123",
-      source: "telegram",
     });
     await signalHostedMailboxAppendRuntime({
       client,
       mailboxItemId: "mailbox_123",
-      source: "telegram",
     });
 
     expect(mocks.signalWithStart).toHaveBeenCalledTimes(2);
@@ -191,7 +166,7 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
-  it("signals device-sync mailbox wakes as normal mailbox demand", async () => {
+  it("signals device-sync mailbox wakes as normal mailbox work", async () => {
     mocks.readHostedMailboxItemCheckpointById.mockResolvedValueOnce({
       id: "mailbox_123",
       lane: "system",
@@ -214,7 +189,6 @@ describe("hosted runtime Temporal signaling", () => {
           lane: "system",
           laneSeq: "42",
           mailboxItemId: "mailbox_123",
-          source: "device-sync",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),
@@ -229,7 +203,7 @@ describe("hosted runtime Temporal signaling", () => {
     });
   });
 
-  it("signals typing prewarm without workspace or mailbox demand", async () => {
+  it("signals typing prewarm without workspace or mailbox work", async () => {
     await signalHostedRuntimePrewarm({
       client: buildClient(),
       eventId: "linq_event_123",
@@ -254,7 +228,7 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
-  it("persists browser-vault refresh as durable control demand before signaling", async () => {
+  it("persists browser-vault refresh as durable control mailbox work before signaling", async () => {
     await signalHostedBrowserVaultRefreshRuntime({
       client: buildClient(),
       userId: "member_123",
@@ -276,7 +250,6 @@ describe("hosted runtime Temporal signaling", () => {
           lane: "system",
           laneSeq: "77",
           mailboxItemId: "mailbox_runtime.browser-vault-refresh-requested",
-          source: "browser-vault-refresh",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),
@@ -322,7 +295,6 @@ describe("hosted runtime Temporal signaling", () => {
           lane: "system",
           laneSeq: "77",
           mailboxItemId: "mailbox_runtime.browser-vault-refresh-requested",
-          source: "browser-vault-refresh",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),
@@ -332,7 +304,7 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
-  it("dedupes browser-vault control demands for the same workspace version within a short window", async () => {
+  it("dedupes browser-vault control mailbox work for the same workspace version within a short window", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-28T08:15:31.000Z"));
     try {
@@ -364,14 +336,12 @@ describe("hosted runtime Temporal signaling", () => {
           lane: "system",
           laneSeq: "77",
           mailboxItemId: "mailbox_runtime.browser-vault-refresh-requested",
-          source: "browser-vault-refresh",
         },
         {
           kind: "mailbox_appended",
           lane: "system",
           laneSeq: "77",
           mailboxItemId: "mailbox_runtime.browser-vault-refresh-requested",
-          source: "browser-vault-refresh",
         },
       ]);
     } finally {
@@ -379,7 +349,7 @@ describe("hosted runtime Temporal signaling", () => {
     }
   });
 
-  it("creates a new browser-vault control demand after the workspace version advances", async () => {
+  it("creates new browser-vault control mailbox work after the workspace version advances", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-28T08:15:31.000Z"));
     mocks.ensureHostedWorkspace
@@ -417,13 +387,13 @@ describe("hosted runtime Temporal signaling", () => {
     }
   });
 
-  it("persists manual runs as durable control demand before signaling", async () => {
+  it("persists manual runs as durable control mailbox work before signaling", async () => {
     await signalHostedManualRunRuntime({
       client: buildClient(),
       userId: "member_123",
     });
 
-    expect(mocks.resolveHostedRuntimeAiUsageDemandGate).toHaveBeenCalledWith({
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       prisma: mocks.prisma,
       userId: "member_123",
     });
@@ -442,7 +412,6 @@ describe("hosted runtime Temporal signaling", () => {
           lane: "system",
           laneSeq: "77",
           mailboxItemId: "mailbox_runtime.manual-requested",
-          source: "manual-ai-gated",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),
@@ -458,7 +427,7 @@ describe("hosted runtime Temporal signaling", () => {
   });
 
   it("does not append or signal manual runs when AI usage is denied", async () => {
-    mocks.resolveHostedRuntimeAiUsageDemandGate.mockResolvedValueOnce({
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
       status: "denied",
     });
 
@@ -477,7 +446,7 @@ describe("hosted runtime Temporal signaling", () => {
   });
 
   it("does not append or signal manual runs when the AI usage gate is unavailable", async () => {
-    mocks.resolveHostedRuntimeAiUsageDemandGate.mockResolvedValueOnce({
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
       retryAt: "2026-05-20T12:00:30.000Z",
       status: "unavailable",
     });
@@ -522,7 +491,7 @@ describe("hosted runtime Temporal signaling", () => {
       userId: "member_123",
     });
 
-    expect(mocks.resolveHostedRuntimeAiUsageDemandGate).toHaveBeenCalledWith({
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       prisma: explicitPrisma,
       userId: "member_123",
     });
@@ -549,7 +518,7 @@ describe("hosted runtime Temporal signaling", () => {
           options: {
             ensureRuntimeProcessingStartToCloseTimeoutMs: 17_000,
             prewarmTaskQueue: "explicit-testkit-task-queue-prewarm",
-            readRuntimeDemandStartToCloseTimeoutMs: 10_000,
+            readRuntimeReconciliationFactsStartToCloseTimeoutMs: 10_000,
           },
           userId: "member_123",
         }],
@@ -561,9 +530,9 @@ describe("hosted runtime Temporal signaling", () => {
 
   it("forwards explicit Prisma through the runtime usage gate resolver", async () => {
     const {
-      resolveHostedRuntimeAiUsageDemandGate,
+      resolveHostedRuntimeAiUsageGate,
     } = await vi.importActual<{
-      resolveHostedRuntimeAiUsageDemandGate: (input: {
+      resolveHostedRuntimeAiUsageGate: (input: {
         now: string;
         prisma: typeof mocks.prisma;
         userId: string;
@@ -575,7 +544,7 @@ describe("hosted runtime Temporal signaling", () => {
     const explicitPrisma = mocks.prisma;
     mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({ allowed: true });
 
-    await expect(resolveHostedRuntimeAiUsageDemandGate({
+    await expect(resolveHostedRuntimeAiUsageGate({
       now: "2026-05-20T12:00:00.000Z",
       prisma: explicitPrisma,
       userId: "member_123",
@@ -612,7 +581,6 @@ describe("hosted runtime Temporal signaling", () => {
           lane: "system",
           laneSeq: "42",
           mailboxItemId: "mailbox_123",
-          source: "device-sync",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),
@@ -685,7 +653,6 @@ describe("hosted runtime Temporal signaling", () => {
     await expect(signalHostedMailboxAppendRuntime({
       client: buildClient(),
       mailboxItemId: "mailbox_123",
-      source: "email:agentmail",
     })).rejects.toThrow("Hosted runtime user is not active.");
 
     expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({

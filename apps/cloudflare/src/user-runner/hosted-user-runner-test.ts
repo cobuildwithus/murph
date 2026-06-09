@@ -1,5 +1,4 @@
 import type {
-  HostedWorkspaceInvocationReason,
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -31,10 +30,7 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
     this.testState = args[0];
   }
 
-  async runUntilIdleForTest(input: {
-    reason: HostedWorkspaceInvocationReason;
-    userId: string;
-  }): Promise<HostedWorkspaceInvocationResult> {
+  async runUntilIdleForTest(input: { userId: string }): Promise<HostedWorkspaceInvocationResult> {
     await this.stateStore.bindUser(input.userId);
     const record = await this.stateStore.readState();
     if (record.writeFence) {
@@ -52,7 +48,6 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
     let token: RunnerWriteFenceToken;
     try {
       token = await this.stateStore.beginWriteFence({
-        reason: input.reason,
         runnerContainerName: input.userId,
         userId: input.userId,
       });
@@ -77,7 +72,6 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
     return await this.runtimeInvocation.invokeWithFence({
       input: {
         orchestrationAttemptId,
-        reason: input.reason,
         userId: input.userId,
       },
       runtimeWakeStartedAt,
@@ -86,13 +80,11 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
   }
 
   async startStuckInvocationForTest(input: {
-    reason?: HostedWorkspaceInvocationReason;
     startedAgoMs?: number;
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult> {
     await this.stateStore.bindUser(input.userId);
     const token = await this.stateStore.beginWriteFence({
-      reason: input.reason ?? "manual",
       runnerContainerName: input.userId,
       userId: input.userId,
     });

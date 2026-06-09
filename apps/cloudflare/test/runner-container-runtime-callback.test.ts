@@ -123,7 +123,6 @@ function createWorkspaceRunnerJob(userId: string): HostedExecutionWorkspaceInvoc
     request: {
       attemptId: `attempt_${userId}`,
       leaseGeneration: "11",
-      reason: "nudge",
       userId,
       workspaceVersion: "6",
     },
