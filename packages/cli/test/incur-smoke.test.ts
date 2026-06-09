@@ -1497,7 +1497,7 @@ test('root stop alias keeps the same command schema as assistant stop', async ()
   assert.deepEqual(rootSchema.options, assistantSchema.options)
 })
 
-test('automation save schema exposes typed automation fields and a separate JSON import fallback', async () => {
+test('automation save and edit schemas expose typed automation fields and a separate JSON import fallback', async () => {
   const saveSchema = JSON.parse(
     await runSourceCliRaw(['automation', 'save', '--schema', '--format', 'json']),
   ) as {
@@ -1534,6 +1534,27 @@ test('automation save schema exposes typed automation fields and a separate JSON
     'threadId',
   ]) {
     assert.equal(field in saveSchema.options.properties, true, field)
+  }
+
+  const editSchema = JSON.parse(
+    await runSourceCliRaw(['automation', 'edit', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('lookup' in editSchema.args.properties, true)
+  assert.deepEqual(editSchema.args.required, ['lookup'])
+  assert.equal('input' in editSchema.options.properties, false)
+  assert.equal(editSchema.options.required?.includes('instructions') ?? false, false)
+  for (const field of ['title', 'continuityPolicy', 'instructions', 'channel']) {
+    assert.equal(field in editSchema.options.properties, true, field)
   }
 
   const importJsonSchema = JSON.parse(

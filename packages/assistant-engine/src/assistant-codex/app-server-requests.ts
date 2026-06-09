@@ -57,6 +57,7 @@ export function buildCodexThreadResumeParams(input: {
   codexThreadId: string
 }): Record<string, unknown> {
   return stripUndefinedRpcParams({
+    ...buildCodexThreadResumeContextParams(input.input),
     excludeTurns: input.input.excludeResumeTurns === false ? undefined : true,
     threadId: input.codexThreadId,
   })
@@ -84,6 +85,20 @@ export function buildCodexThreadContextParams(input: {
     sandbox: mapCodexAppServerSandboxMode(input.input.sandbox),
     serviceName: input.includeServiceName ? CODEX_RPC_CLIENT_NAME : undefined,
   })
+}
+
+function buildCodexThreadResumeContextParams(
+  input: CodexAppServerTurnInput & {
+    workingDirectory: string
+  },
+): Record<string, unknown> {
+  return {
+    approvalPolicy: mapCodexAppServerApprovalPolicy(input.approvalPolicy),
+    cwd: input.workingDirectory,
+    model: normalizeNullableString(input.model),
+    modelProvider: normalizeNullableString(input.modelProvider),
+    sandbox: mapCodexAppServerSandboxMode(input.sandbox),
+  }
 }
 
 function resolveCodexAppServerDynamicTools(): typeof MURPH_DYNAMIC_TOOLS {

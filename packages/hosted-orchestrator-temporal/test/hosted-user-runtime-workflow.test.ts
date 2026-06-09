@@ -7,9 +7,6 @@ import type {
   HostedRuntimeSignal,
   HostedUserRuntimeWorkflowInput,
 } from "../src/index.js";
-import type {
-  HostedRuntimePrewarmResponse,
-} from "@murphai/hosted-execution/orchestration-control";
 import {
   createHostedUserRuntimeWorkflowMachine,
   HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
@@ -227,40 +224,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(continued.state?.lastExecutionErrorCode).toBe("Error");
   });
 
-  it("prewarms while idle and cancels prewarm when a mailbox signal wins", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.facts.push(reconciliationFacts());
-    runtime.executions.push(processingAccepted());
-    runtime.prewarms.push(pendingPrewarm());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    machine.applySignal(runtimePrewarmSignal());
-    runtime.onSignalWait = () => {
-      machine.applySignal(mailboxSignal());
-      runtime.resolveSignalWaits();
-    };
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.prewarmRequests).toEqual([
-      {
-        prewarmAttemptId: "orchestration-attempt-1",
-        source: "linq.imessage.typing",
-        userId: "member_test",
-      },
-    ]);
-    expect(runtime.prewarmCancelCount).toBe(1);
-    expect(runtime.executionRequests).toEqual([
-      {
-        orchestrationAttemptId: "orchestration-attempt-2",
-        userId: "member_test",
-      },
-    ]);
-  });
-
   it("rejects legacy direct runtime signals instead of storing flags", () => {
     const runtime = new FakeWorkflowRuntime();
     const machine = createMachine(runtime, {
@@ -285,7 +248,6 @@ function normalizedContinuedOptions(
     continueAsNewAfterIterations: 500,
     ensureRuntimeProcessingStartToCloseTimeoutMs:
       HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
-    prewarmTaskQueue: "murph-hosted-runtime-prewarm",
     readRuntimeReconciliationFactsStartToCloseTimeoutMs: 10_000,
     ...overrides,
   };
@@ -309,13 +271,6 @@ type ExecutionInput = Parameters<
 type ExecutionHandler = (
   request: ExecutionInput,
 ) => HostedRuntimeEnsureProcessingResponse | Promise<HostedRuntimeEnsureProcessingResponse>;
-type PrewarmInput = Parameters<
-  HostedUserRuntimeWorkflowRuntime["startRuntimePrewarm"]
->[0];
-type PrewarmHandler = (
-  request: PrewarmInput,
-) => HostedRuntimePrewarmResponse | Promise<HostedRuntimePrewarmResponse>;
-
 class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   continuedInput: HostedUserRuntimeWorkflowInput | null = null;
   readonly reconciliationRequests: ReconciliationInput[] = [];
@@ -323,25 +278,11 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   readonly executionRequests: ExecutionInput[] = [];
   readonly executions: Array<ExecutionHandler | HostedRuntimeEnsureProcessingResponse> = [];
   now = BASE_TIME_MS;
-  onSignalWait: (() => void) | null = null;
   onWait: (() => void) | null = null;
-  prewarmCancelCount = 0;
-  readonly prewarmRequests: PrewarmInput[] = [];
-  readonly prewarms: Array<
-    PrewarmHandler
-    | HostedRuntimePrewarmResponse
-    | Promise<HostedRuntimePrewarmResponse>
-  > = [];
   suggestContinueAsNew = false;
   historyLength = 0;
   readonly waits: Array<number | null> = [];
   private uuidCounter = 0;
-  private readonly signalWaits: Array<{
-    cancelled: boolean;
-    predicate: () => boolean;
-    reject(error: unknown): void;
-    resolve(): void;
-  }> = [];
 
   async continueAsNew(input: HostedUserRuntimeWorkflowInput): Promise<never> {
     this.continuedInput = input;
@@ -380,63 +321,6 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
       throw new Error("Unexpected readRuntimeReconciliationFacts call.");
     }
     return typeof next === "function" ? next(request) : next;
-  }
-
-  startRuntimePrewarm(request: PrewarmInput) {
-    this.prewarmRequests.push(request);
-    const next = this.prewarms.shift();
-    if (!next) {
-      throw new Error("Unexpected prewarmRuntimeContainer call.");
-    }
-    const result = Promise.resolve(
-      typeof next === "function" ? next(request) : next,
-    );
-    return {
-      cancel: () => {
-        this.prewarmCancelCount += 1;
-      },
-      result,
-    };
-  }
-
-  startSignalWait(predicate: () => boolean, _timeoutMs: number | null) {
-    this.onSignalWait?.();
-    if (predicate()) {
-      return {
-        cancel: () => undefined,
-        result: Promise.resolve(),
-      };
-    }
-
-    let resolveWait!: () => void;
-    let rejectWait!: (error: unknown) => void;
-    const result = new Promise<void>((resolve, reject) => {
-      resolveWait = resolve;
-      rejectWait = reject;
-    });
-    const wait = {
-      cancelled: false,
-      predicate,
-      reject: rejectWait,
-      resolve: resolveWait,
-    };
-    this.signalWaits.push(wait);
-    return {
-      cancel: () => {
-        wait.cancelled = true;
-        rejectWait(new Error("signal wait cancelled"));
-      },
-      result,
-    };
-  }
-
-  resolveSignalWaits(): void {
-    for (const wait of this.signalWaits) {
-      if (!wait.cancelled && wait.predicate()) {
-        wait.cancelled = true;
-        wait.resolve();
-      }
-    }
   }
 
   uuid(): string {
@@ -495,13 +379,7 @@ function emptyCarryForwardState(): NonNullable<HostedUserRuntimeWorkflowInput["s
     lastRuntimeAttemptId: null,
     lastRuntimeStatus: null,
     latestMailboxPointer: null,
-    latestPrewarmRequestedAt: null,
     mailboxSignalCount: 0,
-    lastPrewarmAttemptId: null,
-    lastPrewarmErrorCode: null,
-    lastPrewarmResult: null,
-    prewarmRequested: false,
-    prewarmSignalCount: 0,
     signalVersion: 0,
   };
 }
@@ -515,15 +393,6 @@ function mailboxSignal(
     laneSeq: "7",
     mailboxItemId: "mailbox_item_test",
     ...overrides,
-  };
-}
-
-function runtimePrewarmSignal(): HostedRuntimeSignal {
-  return {
-    eventId: "runtime-prewarm:event-test",
-    kind: "runtime_prewarm_requested",
-    occurredAt: "2026-05-20T11:59:58.000Z",
-    source: "linq.imessage.typing",
   };
 }
 
@@ -588,10 +457,6 @@ function processingAccepted(
     recommendedRecheckAt: input.recommendedRecheckAt ?? isoAfter(0),
     runtimeAttemptId: input.runtimeAttemptId ?? "runtime_attempt_test",
   };
-}
-
-function pendingPrewarm(): Promise<HostedRuntimePrewarmResponse> {
-  return new Promise(() => undefined);
 }
 
 function nonRetryableError(message: string): Error & { nonRetryable: true } {

@@ -8,37 +8,24 @@ export const HOSTED_USER_RUNTIME_WORKFLOW_TYPE =
 
 export const HOSTED_USER_RUNTIME_TASK_QUEUE =
   "murph-hosted-runtime" as const;
-export const HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE =
-  "murph-hosted-runtime-prewarm" as const;
 
 export const HOSTED_USER_RUNTIME_SIGNAL_NAME = "runtimeSignal" as const;
 
 export const HOSTED_USER_RUNTIME_STATUS_QUERY_NAME =
   "runtimeWorkflowStatus" as const;
 
-export function deriveHostedUserRuntimePrewarmTaskQueue(
-  taskQueue: string,
-): string {
-  const normalized = taskQueue.trim();
-  if (!normalized || normalized === HOSTED_USER_RUNTIME_TASK_QUEUE) {
-    return HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE;
-  }
-  return `${normalized}-prewarm`;
-}
-
 export const HOSTED_RUNTIME_SIGNAL_KINDS = [
   "mailbox_appended",
   "runtime_recheck_requested",
-  "runtime_prewarm_requested",
 ] as const;
 
 export type HostedRuntimeSignalKind = (typeof HOSTED_RUNTIME_SIGNAL_KINDS)[number];
 
-export const HOSTED_RUNTIME_PREWARM_SOURCE =
-  "linq.imessage.typing" as const;
+export const HOSTED_RUNTIME_LINQ_MESSAGE_PREWARM_SOURCE =
+  "linq.message.ingress" as const;
 
 export const HOSTED_RUNTIME_PREWARM_SOURCES = [
-  HOSTED_RUNTIME_PREWARM_SOURCE,
+  HOSTED_RUNTIME_LINQ_MESSAGE_PREWARM_SOURCE,
 ] as const;
 
 export type HostedRuntimePrewarmSource =
@@ -53,12 +40,6 @@ export type HostedRuntimeSignal =
     }
   | {
       kind: "runtime_recheck_requested";
-    }
-  | {
-      eventId: string;
-      kind: "runtime_prewarm_requested";
-      occurredAt: string;
-      source: HostedRuntimePrewarmSource;
     };
 
 export interface HostedRuntimeMailboxPointer {
@@ -188,12 +169,6 @@ export type HostedRuntimeLastRuntimeStatus =
   | "scheduled"
   | null;
 
-export type HostedRuntimeLastPrewarmResult =
-  | "accepted"
-  | "retry_later"
-  | "failed"
-  | null;
-
 export const HOSTED_RUNTIME_RECONCILIATION_STATUSES = [
   "blocked",
   "idle",
@@ -219,13 +194,7 @@ export interface HostedRuntimeWorkflowState {
   lastRuntimeAttemptId: string | null;
   lastRuntimeStatus: HostedRuntimeLastRuntimeStatus;
   latestMailboxPointer: HostedRuntimeMailboxPointer | null;
-  latestPrewarmRequestedAt: string | null;
   mailboxSignalCount: number;
-  lastPrewarmAttemptId: string | null;
-  lastPrewarmErrorCode: string | null;
-  lastPrewarmResult: HostedRuntimeLastPrewarmResult;
-  prewarmRequested: boolean;
-  prewarmSignalCount: number;
   signalVersion: number;
   userId: string;
 }

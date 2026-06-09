@@ -462,9 +462,15 @@ function resolveHostedCliBridgeCurrentDeliveryRoute(
   if (!channel || !deliveryTarget) {
     return null;
   }
+  const identityId = normalizeHostedCliBridgeRouteValue(value?.identityId);
+  const participantId = normalizeHostedCliBridgeRouteValue(value?.participantId);
+  const threadId = normalizeHostedCliBridgeRouteValue(value?.threadId);
   return {
     channel,
     deliveryTarget,
+    ...(identityId ? { identityId } : {}),
+    ...(participantId ? { participantId } : {}),
+    ...(threadId ? { threadId } : {}),
   };
 }
 

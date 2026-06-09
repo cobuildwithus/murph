@@ -265,6 +265,36 @@ test("hosted CLI runtime bridge exposes current route without device sync", asyn
   });
 });
 
+test("hosted CLI runtime bridge exposes current route continuity locators", async () => {
+  await withHostedCliBridgeInvocation({
+    currentDeliveryRoute: {
+      channel: "linq",
+      deliveryTarget: "linq_chat_real",
+      identityId: "h1_111111111111111111111111",
+      participantId: "h1_222222222222222222222222",
+      threadId: "h1_333333333333333333333333",
+    },
+    deviceSyncPort: null,
+  }, async (bridge) => {
+    const result = await requestHostedCliAssistantCurrentRoute({
+      bridge: {
+        token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+        url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+      },
+    });
+
+    assert.deepEqual(result, {
+      route: {
+        channel: "linq",
+        deliveryTarget: "linq_chat_real",
+        identityId: "h1_111111111111111111111111",
+        participantId: "h1_222222222222222222222222",
+        threadId: "h1_333333333333333333333333",
+      },
+    });
+  });
+});
+
 test("hosted CLI runtime bridge records off-invocation current route requests", async () => {
   await stopHostedCliRuntimeBridge();
   const bridge = await getOrCreateHostedCliRuntimeBridge();

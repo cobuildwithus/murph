@@ -165,6 +165,43 @@ describe("hosted CLI runtime bridge client", () => {
     });
   });
 
+  it("preserves assistant current route continuity locator fields", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          route: {
+            channel: "linq",
+            deliveryTarget: "linq_chat_real",
+            identityId: "h1_111111111111111111111111",
+            participantId: "h1_222222222222222222222222",
+            threadId: "h1_333333333333333333333333",
+          },
+        }),
+        {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        },
+      );
+
+    const result = await requestHostedCliAssistantCurrentRoute({
+      bridge: {
+        token: "bridge-token",
+        url: "http://127.0.0.1:8787/",
+      },
+      fetchImpl,
+    });
+
+    assert.deepEqual(result, {
+      route: {
+        channel: "linq",
+        deliveryTarget: "linq_chat_real",
+        identityId: "h1_111111111111111111111111",
+        participantId: "h1_222222222222222222222222",
+        threadId: "h1_333333333333333333333333",
+      },
+    });
+  });
+
   it("requests hosted device account lists through the bridge", async () => {
     let requestedPath = "";
     let requestBody: unknown = null;

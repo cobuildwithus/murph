@@ -190,7 +190,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.prewarmRuntimeContainerForUser({
       prewarmAttemptId: "prewarm_attempt_1",
-      source: "linq.imessage.typing",
+      source: "linq.message.ingress",
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       action: "started",
@@ -232,7 +232,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.prewarmRuntimeContainerForUser({
       prewarmAttemptId: "prewarm_attempt_2",
-      source: "linq.imessage.typing",
+      source: "linq.message.ingress",
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       action: "already_running",
@@ -269,7 +269,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.prewarmRuntimeContainerForUser({
       prewarmAttemptId: "prewarm_attempt_expired",
-      source: "linq.imessage.typing",
+      source: "linq.message.ingress",
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       action: "already_running",

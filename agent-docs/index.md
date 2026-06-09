@@ -56,7 +56,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/references/data-model-seams.md` | Current shared-owner notes for high-leverage data-model seams. | Data-model seam guidance | Medium | 2026-04-07 |
 | `agent-docs/references/giant-file-composability-seams.md` | Paused giant-file cleanup planning guidance and current worth-planning/keep-together notes for oversized multi-responsibility files. | Giant-file composability seam guidance | Medium | 2026-06-03 |
 | `agent-docs/research/murph-age-autoresearch.md` | Murph Age autoresearch operating rules, including the ReviewGPT-vs-Codex role split, transition gates, and source/privacy boundaries. | Murph Age research workflow | High | 2026-05-09 |
-| `agent-docs/operations/agent-workflow-routing.md` | Workflow router for task classes, plans, audits, verification, commit paths, and paused giant-file policy status. | Agent workflow routing | High | 2026-06-07 |
+| `agent-docs/operations/agent-workflow-routing.md` | Workflow router for task classes, plans, audits, verification, commit paths, default worktree/PR isolation, and paused giant-file policy status. | Agent workflow routing | High | 2026-06-09 |
 | `agent-docs/operations/verification-and-runtime.md` | Verification rules, build command semantics, hosted Temporal guard coverage, runtime assumptions, and doc-gardening scope for repo work. | Verification policy | High | 2026-06-05 |
 | `agent-docs/operations/completion-workflow.md` | Required post-implementation audit and completion flow. | Completion workflow | High | 2026-06-07 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |

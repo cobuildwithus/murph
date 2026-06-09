@@ -17,6 +17,9 @@ export interface NormalizedAssistantDeliveryRouteFields {
 export interface AssistantCurrentDeliveryRoute {
   channel: string
   deliveryTarget: string
+  identityId?: string | null
+  participantId?: string | null
+  threadId?: string | null
 }
 
 export function resolveAssistantDeliveryRouteWithCurrentRoute(
@@ -28,24 +31,32 @@ export function resolveAssistantDeliveryRouteWithCurrentRoute(
     ?? normalizedCurrentRoute?.channel
     ?? null
   const explicitDeliveryTarget = normalizeAssistantRouteString(input.deliveryTarget)
+  const useCurrentRoute =
+    explicitDeliveryTarget === null &&
+    channel !== null &&
+    normalizedCurrentRoute?.channel === channel
   const deliveryTarget =
     explicitDeliveryTarget ??
-    (channel && normalizedCurrentRoute?.channel === channel
-      ? normalizedCurrentRoute.deliveryTarget
-      : null)
+    (useCurrentRoute ? normalizedCurrentRoute.deliveryTarget : null)
 
   return {
     channel,
     deliveryTarget,
-    identityId: normalizeAssistantRouteString(input.identityId),
-    participantId: normalizeAssistantRouteString(input.participantId),
-    threadId: normalizeAssistantRouteString(input.threadId),
+    identityId:
+      normalizeAssistantRouteString(input.identityId) ??
+      (useCurrentRoute ? normalizedCurrentRoute.identityId : null),
+    participantId:
+      normalizeAssistantRouteString(input.participantId) ??
+      (useCurrentRoute ? normalizedCurrentRoute.participantId : null),
+    threadId:
+      normalizeAssistantRouteString(input.threadId) ??
+      (useCurrentRoute ? normalizedCurrentRoute.threadId : null),
   }
 }
 
 function normalizeAssistantCurrentDeliveryRoute(
   currentRoute: AssistantCurrentDeliveryRoute | null | undefined,
-): AssistantCurrentDeliveryRoute | null {
+): NormalizedAssistantDeliveryRouteFields | null {
   const channel = normalizeAssistantRouteString(currentRoute?.channel)
   const deliveryTarget = normalizeAssistantRouteString(currentRoute?.deliveryTarget)
   if (!channel || !deliveryTarget) {
@@ -54,6 +65,9 @@ function normalizeAssistantCurrentDeliveryRoute(
   return {
     channel,
     deliveryTarget,
+    identityId: normalizeAssistantRouteString(currentRoute?.identityId),
+    participantId: normalizeAssistantRouteString(currentRoute?.participantId),
+    threadId: normalizeAssistantRouteString(currentRoute?.threadId),
   }
 }
 
@@ -66,13 +80,30 @@ export function stripPrivateAssistantRoutePlaceholders(
 
   return {
     ...input,
-    participantId: looksLikePrivateAssistantRoutePlaceholder(input.participantId)
+    identityId: looksLikeRedactedAssistantRoutePlaceholder(input.identityId)
+      ? null
+      : input.identityId,
+    participantId: looksLikeRedactedAssistantRoutePlaceholder(input.participantId)
       ? null
       : input.participantId,
-    threadId: looksLikePrivateAssistantRoutePlaceholder(input.threadId)
+    threadId: looksLikeRedactedAssistantRoutePlaceholder(input.threadId)
       ? null
       : input.threadId,
   }
+}
+
+function looksLikeRedactedAssistantRoutePlaceholder(
+  value: string | null | undefined,
+): boolean {
+  const target = normalizeAssistantRouteString(value)
+  return (
+    target !== null &&
+    (/(?:^|:)hid_[A-Za-z0-9_-]+/u.test(target) ||
+      /(?:^|:)ain_[A-Za-z0-9_-]+/u.test(target) ||
+      target.includes('hbid:') ||
+      target.includes('hbidx:') ||
+      target.startsWith('[redacted'))
+  )
 }
 
 export function looksLikePrivateAssistantRoutePlaceholder(

@@ -23,6 +23,7 @@ describe("createCloudflareHostedControlClient", () => {
       "createBrowserVaultSession",
       "deleteUserData",
       "getRunnerStatus",
+      "prewarmRuntime",
     ]);
   });
 
@@ -80,6 +81,13 @@ describe("createCloudflareHostedControlClient", () => {
     expect(() => client.deleteUserData("")).toThrow(
       "Cloudflare hosted control userId must not be blank.",
     );
+    expect(() =>
+      client.prewarmRuntime({
+        prewarmAttemptId: "prewarm_attempt_test",
+        source: "linq.message.ingress",
+        userId: "",
+      })
+    ).toThrow("Cloudflare hosted control userId must not be blank.");
     expect(() =>
       client.createBrowserVaultSession({
         browserPublicKeyJwk: {
@@ -479,6 +487,39 @@ describe("createCloudflareHostedControlClient", () => {
     expect(request.init?.redirect).toBe("error");
     expect(request.init?.signal).toBeInstanceOf(AbortSignal);
     expectNoRunContractFields(status);
+  });
+
+  it("posts runtime prewarm hints through the OIDC control route", async () => {
+    let observedRequest: ObservedRequest | null = null;
+    const responseBody = {
+      action: "already_warm",
+      kind: "runtime_prewarm_accepted",
+    };
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async (url, init) => {
+        observedRequest = { init, url: String(url) };
+        return createJsonResponse(responseBody);
+      }) as typeof fetch,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.prewarmRuntime({
+      prewarmAttemptId: "prewarm_attempt_test",
+      source: "linq.message.ingress",
+      userId: "user_123",
+    })).resolves.toEqual(responseBody);
+
+    const request = requireObservedRequest(observedRequest);
+    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/runtime/prewarm-hint");
+    expect(request.init?.method).toBe("POST");
+    expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
+    expect(request.init?.body).toBe(JSON.stringify({
+      prewarmAttemptId: "prewarm_attempt_test",
+      source: "linq.message.ingress",
+    }));
   });
 
   it("rejects runner status responses for another user", async () => {
