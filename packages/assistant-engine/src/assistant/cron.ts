@@ -37,7 +37,6 @@ import {
   claimNextDueAssistantCronJob,
   claimResolvedAssistantCronJob,
   executeClaimedAssistantCronJob,
-  expireNextStaleDueAssistantCronJob,
 } from './cron/execution.ts'
 import type { AssistantRunEvent } from './automation/shared.ts'
 import type { AssistantTurnEnvironment } from './service-contracts.ts'
@@ -48,9 +47,11 @@ import type { AssistantExecutionContext } from './execution-context.ts'
 import {
   addAssistantCronJob,
   installAssistantCronPreset,
+  upsertAssistantCronAutomation,
   type AddAssistantCronJobInput,
   type InstallAssistantCronPresetInput,
   type InstallAssistantCronPresetResult,
+  type UpsertAssistantCronAutomationInput,
 } from './cron/authoring.ts'
 import {
   assertResolvedAssistantCronJobNotRunning,
@@ -81,11 +82,12 @@ export {
   reconcileAssistantCronDeliveryIntent,
   repairPendingAssistantCronDeliveries,
 }
-export { addAssistantCronJob, installAssistantCronPreset }
+export { addAssistantCronJob, installAssistantCronPreset, upsertAssistantCronAutomation }
 export type {
   AddAssistantCronJobInput,
   InstallAssistantCronPresetInput,
   InstallAssistantCronPresetResult,
+  UpsertAssistantCronAutomationInput,
 }
 
 export interface AssistantCronStatusSnapshot {
@@ -540,22 +542,6 @@ export async function processDueAssistantCronJobsLocal(
   })
 
   while (!input.signal?.aborted && summary.processed < limit) {
-    const expired = await expireNextStaleDueAssistantCronJob({
-      paths,
-      vault: input.vault,
-    })
-    if (expired) {
-      summary.processed += 1
-      emitAssistantCronJobCompletedEvent({
-        errorPresent: expired.run.error !== null,
-        job: expired.job,
-        onEvent: input.onEvent,
-        runStatus: expired.run.status,
-        sourceKind: expired.sourceKind,
-      })
-      continue
-    }
-
     const claimed = await claimNextDueAssistantCronJob(paths, input.vault)
     if (!claimed) {
       break

@@ -1382,6 +1382,33 @@
                     }
                   }
                 },
+                "set-status": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "active",
+                            "paused",
+                            "archived"
+                          ],
+                          "description": "New automation status."
+                        }
+                      }
+                    }
+                  }
+                },
                 "list": {
                   "type": "object",
                   "additionalProperties": false,

@@ -662,7 +662,14 @@ export class RunnerContainer extends Container {
       signal: smokeSignal,
     });
     if (!response.ok || payload.ok !== true) {
-      throw new Error(`Hosted runner container Codex shell smoke failed with HTTP ${response.status}.`);
+      // The container reports content-free smoke diagnostics; carry them so
+      // deploy failures stay debuggable through the worker layer.
+      const smokeErrorMessage = typeof payload.smokeErrorMessage === "string"
+        ? ` ${payload.smokeErrorMessage.slice(0, 512)}`
+        : "";
+      throw new Error(
+        `Hosted runner container Codex shell smoke failed with HTTP ${response.status}.${smokeErrorMessage}`,
+      );
     }
     const result = readRunnerContainerMetadataRecordProperty(payload.codexShell);
     return {

@@ -20,7 +20,6 @@ let workflowInfoResponse = {
 const workflowInfo = vi.fn(() => workflowInfoResponse);
 const proxyActivities = vi.fn(() => ({
   ensureRuntimeProcessing,
-  prewarmRuntimeContainer,
   readRuntimeReconciliationFacts,
 }));
 const readRuntimeReconciliationFacts = vi.fn(
@@ -31,7 +30,6 @@ const readRuntimeReconciliationFacts = vi.fn(
   }),
 );
 const ensureRuntimeProcessing = vi.fn();
-const prewarmRuntimeContainer = vi.fn();
 
 class MockCancellationScope {
   cancel = vi.fn();

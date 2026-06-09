@@ -224,7 +224,9 @@ inputs, outputs, or history payloads. The pointer signal only wakes durable
 orchestration; Temporal then re-reads web-owned reconciliation facts and, if
 processing is needed, calls Cloudflare's short-lived `ensure-processing`
 adapter. There is no
-webhook-to-Cloudflare runner nudge path and no second wake authority. If the
+webhook-to-Cloudflare runner nudge path and no second wake authority; the
+only direct Linq message path to Cloudflare is a best-effort prewarm hint that
+cannot start runtime work. If the
 Temporal signal cannot be accepted after the mailbox row exists, the failure is
 logged as a post-commit best-effort handoff failure and does not make provider
 ingress fail. Web does not run a mailbox-lag cron backstop: missed post-commit
@@ -251,26 +253,20 @@ Duplicate provider retries, duplicate email delivery attempts, or duplicate
 workflow attempts are safe because mailbox append dedupes by event id and
 Temporal signals only coalesce pending work.
 
-Linq typing prewarm is the only conversation-webhook latency hint that does not
-append mailbox work. After provider verification, web may classify
-`chat.typing_indicator.started` only when the Linq service is explicitly
-`iMessage`, resolve only an already-active hosted Linq route, throttle by
-user/source, and signal the existing per-user Temporal workflow with
-`runtime_prewarm_requested`. That signal carries only an opaque event id,
-timestamp, and source; chat ids, phone numbers, and raw provider payloads must
-not enter Temporal state or logs. It must not plan
-onboarding, bind routes, append mailbox rows, send read receipts, call
-Cloudflare directly, or add reconciliation work. Temporal reads real
-web-owned reconciliation facts first; if mailbox or other durable work exists,
-normal ensure-processing wins. If facts are idle, Temporal may issue one short
-best-effort Cloudflare prewarm Activity on a dedicated prewarm task queue and
-clears the hint after the attempt. The prewarm attempt uses no Activity retry,
-keeps the Cloudflare readiness budget shorter than the workflow Activity
-timeout, and does not wait on slow container cleanup while holding the prewarm
-lifecycle lock. If a real mailbox signal arrives while the prewarm Activity is
-pending, the workflow abandons the prewarm wait and immediately re-reads facts.
-Mailbox processing must not wait behind a typing hint in workflow state,
-Temporal Activity worker capacity, or Cloudflare container lifecycle locks.
+Linq prewarm is a best-effort conversation-webhook latency hint, not durable
+work. Typing events are verified and ignored; they must not plan onboarding,
+bind routes, append mailbox rows, signal Temporal, call Cloudflare, send read
+receipts, or add reconciliation work.
+
+For a verified active-member Linq message that already produced mailbox work,
+web may send one Vercel OIDC `runtime/prewarm-hint` directly to Cloudflare
+before the Temporal mailbox signal. That hint is allowed to touch only the
+prewarm-only Durable Object adapter; it must not start runtime work, create a
+write fence, read workspace state, import mailbox rows, send read receipts, or
+add reconciliation work. The hint keeps the Cloudflare readiness budget short
+and does not wait on slow container cleanup while holding the prewarm lifecycle
+lock. Mailbox processing must not wait behind Cloudflare container lifecycle
+locks.
 
 Non-conversation control wakes follow the same durable-work rule where they
 own durable product/control facts. Manual runs and browser-vault refreshes
@@ -347,13 +343,14 @@ runtime fence whose child is missing is replaced after the startup grace window
 when a later ensure command observes it. A wake-unconfirmed active child is not
 replaced; the caller retries until the child finishes, becomes wakeable, or is no
 longer active.
-The separate signed `runtime/prewarm` command exists only for Temporal-mediated
-typing hints. It may bind the per-user Durable Object and touch the runner
-container readiness path, but it must not begin a write fence, read hosted
-workspace state, import mailbox rows, invoke the assistant runtime, checkpoint,
-record usage, or enqueue cleanup as if runtime work began. If a write fence is
-already active it returns `already_running`; if the shell is already responsive
-it returns `already_warm`; otherwise it returns `started` or `retry_later`.
+The Vercel OIDC `runtime/prewarm-hint` command exists only for message-ingress
+shell warming after web has already appended mailbox work. It may bind the
+per-user Durable Object and touch the runner container readiness path, but it
+must not begin a write fence, read hosted workspace state, import mailbox rows,
+invoke the assistant runtime, checkpoint, record usage, or enqueue cleanup as
+if runtime work began. If a write fence is already active it returns
+`already_running`; if the shell is already responsive it returns
+`already_warm`; otherwise it returns `started` or `retry_later`.
 Prewarm readiness must be preemptible by real workspace invocation or
 ensure-processing calls.
 The Durable Object keeps lease, in-flight invocation, alarm, and short-lived
@@ -632,11 +629,9 @@ durable queue history.
 
 - per-user hosted runtime workflow state
 - pointer-only mailbox and recheck signals
-- best-effort `runtime_prewarm_requested` typing hints that never become
-  mailbox work
 - reading web-owned reconciliation facts and deciding when Cloudflare should
   process
-- short-lived Cloudflare `ensure-processing` and prewarm activity calls
+- short-lived Cloudflare `ensure-processing` activity calls
 - signal-interruptible waits, retries, and scalar workflow status diagnostics
 
 Temporal does not own raw webhook payloads, provider verification headers,

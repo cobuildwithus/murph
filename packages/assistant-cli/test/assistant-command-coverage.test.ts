@@ -1118,6 +1118,7 @@ test('self-target commands normalize channels, enforce email identity, and surfa
   )
   assert.deepEqual(commandMocks.saveAssistantSelfDeliveryTarget.mock.calls[0]?.[0], {
     channel: 'email',
+    deliverySource: null,
     deliveryTarget: 'recipient@example.com',
     identityId: 'inbox_123',
     participantId: null,

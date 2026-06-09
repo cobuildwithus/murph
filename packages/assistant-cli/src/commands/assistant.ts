@@ -986,6 +986,7 @@ export function registerAssistantCommands(
 
         const target = await saveAssistantSelfDeliveryTarget({
           channel,
+          deliverySource: null,
           identityId: context.options.identity ?? null,
           participantId: context.options.participant ?? null,
           threadId: context.options.thread ?? null,

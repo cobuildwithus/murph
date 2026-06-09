@@ -105,12 +105,15 @@ describe("hosted-local E2E suite preparation", () => {
     );
     expect(vitestCalls[1]).toEqual(expect.objectContaining({
       args: expect.arrayContaining([
-        "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
+        "apps/cloudflare/test/hosted-local-onboarding-followup-e2e.test.ts",
       ]),
       command: "pnpm",
-      label: "Hosted local full-stack e2e scenario 2/4 linq-scheduled-reminder",
+      label: "Hosted local full-stack e2e scenario 2/4 linq-onboarding-followup",
     }));
     expect(vitestCalls[1]?.args).not.toContain("--bail");
+    expect(vitestCalls[1]?.args).not.toContain(
+      "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
+    );
     expect(vitestCalls[1]?.env).toEqual(expect.objectContaining({
       MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
       MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
@@ -123,16 +126,24 @@ describe("hosted-local E2E suite preparation", () => {
       .toBeUndefined();
     expect(vitestCalls[2]).toEqual(expect.objectContaining({
       args: expect.arrayContaining([
-        "apps/cloudflare/test/hosted-local-linq-typing-prewarm-e2e.test.ts",
+        "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
       ]),
       command: "pnpm",
-      label: "Hosted local full-stack e2e scenario 3/4 linq-typing-prewarm",
+      label: "Hosted local full-stack e2e scenario 3/4 linq-scheduled-reminder",
     }));
     expect(vitestCalls[2]?.args).not.toContain("--bail");
     expect(vitestCalls[2]?.args).not.toContain(
       "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
     );
+    expect(vitestCalls[2]?.env).toEqual(expect.objectContaining({
+      MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
+      MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID:
+        expect.stringMatching(/^hosted-local-e2e-/u),
+    }));
     expect(vitestCalls[2]?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE)
+      .toBeUndefined();
+    expect(vitestCalls[2]?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID)
       .toBeUndefined();
     expect(vitestCalls[3]).toEqual(expect.objectContaining({
       args: expect.arrayContaining([

@@ -8,8 +8,6 @@ import {
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
   HOSTED_USER_RUNTIME_TASK_QUEUE,
   HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
-  HOSTED_RUNTIME_PREWARM_SOURCE,
-  type HostedRuntimePrewarmSource,
   type HostedRuntimeSignal,
   type HostedExecutionRuntimeControlWakeKind,
 } from "@murphai/hosted-execution";
@@ -88,15 +86,6 @@ export interface SignalHostedManualRunInput {
 export interface SignalHostedRuntimeRecheckInput {
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
-  userId: string;
-}
-
-export interface SignalHostedRuntimePrewarmInput {
-  client?: HostedRuntimeTemporalSignalClient | null;
-  environment?: NodeJS.ProcessEnv;
-  eventId: string;
-  occurredAt: string;
-  source?: HostedRuntimePrewarmSource;
   userId: string;
 }
 
@@ -195,26 +184,6 @@ export async function signalHostedRuntimeRecheckRuntime(
     ensureWorkspace: false,
     signal: parseHostedRuntimeSignal({
       kind: "runtime_recheck_requested",
-    }),
-    userId: input.userId,
-  });
-}
-
-export async function signalHostedRuntimePrewarm(
-  input: SignalHostedRuntimePrewarmInput,
-): Promise<HostedRuntimeSignalResult> {
-  return signalHostedUserRuntimeWorkflow({
-    client: input.client,
-    environment: input.environment,
-    ensureWorkspace: false,
-    signal: parseHostedRuntimeSignal({
-      eventId: buildHostedRuntimePrewarmEventId({
-        eventId: input.eventId,
-        source: input.source ?? HOSTED_RUNTIME_PREWARM_SOURCE,
-      }),
-      kind: "runtime_prewarm_requested",
-      occurredAt: input.occurredAt,
-      source: input.source ?? HOSTED_RUNTIME_PREWARM_SOURCE,
     }),
     userId: input.userId,
   });
@@ -348,22 +317,6 @@ function buildHostedBrowserVaultRefreshRuntimeControlEvent(input: {
     eventId: `runtime-control:browser-vault-refresh:${fingerprint}`,
     occurredAt: new Date(bucketMs).toISOString(),
   };
-}
-
-function buildHostedRuntimePrewarmEventId(input: {
-  eventId: string;
-  source: HostedRuntimePrewarmSource;
-}): string {
-  const fingerprint = createHash("sha256")
-    .update(JSON.stringify({
-      eventId: input.eventId,
-      source: input.source,
-      version: 1,
-    }))
-    .digest("hex")
-    .slice(0, 32);
-
-  return `runtime-prewarm:${fingerprint}`;
 }
 
 function normalizeHostedRuntimeControlEventId(

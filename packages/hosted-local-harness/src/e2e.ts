@@ -42,8 +42,8 @@ export type HostedLocalE2eScenarioName =
   | "mailbox-platform-env"
   | "linq-first-contact"
   | "linq-delivery"
+  | "linq-onboarding-followup"
   | "linq-scheduled-reminder"
-  | "linq-typing-prewarm"
   | "linq-webhook"
   | "runner-warm-reuse"
   | "snapshot-stress"
@@ -138,13 +138,13 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     name: "linq-first-contact",
   },
   {
-    file: "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
-    name: "linq-scheduled-reminder",
+    file: "apps/cloudflare/test/hosted-local-onboarding-followup-e2e.test.ts",
+    name: "linq-onboarding-followup",
     processIsolation: true,
   },
   {
-    file: "apps/cloudflare/test/hosted-local-linq-typing-prewarm-e2e.test.ts",
-    name: "linq-typing-prewarm",
+    file: "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
+    name: "linq-scheduled-reminder",
     processIsolation: true,
   },
   {
