@@ -415,6 +415,353 @@ describe("RunnerContainer", () => {
     expect(executeCalls).toHaveLength(0);
   });
 
+  it("reuses immediate startup readiness proof for the following workspace invocation", async () => {
+    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "started",
+      kind: "ready",
+    });
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_after_startup_confirm"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    const healthCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/health")
+    );
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(healthCalls).toHaveLength(1);
+    expect(executeCalls).toHaveLength(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "container",
+        details: expect.objectContaining({
+          readinessProofReused: true,
+        }),
+        message: "Hosted execution container is ready.",
+        phase: "container.ready",
+      }),
+    );
+  });
+
+  it("keeps reused readiness-only proof available for the following workspace invocation", async () => {
+    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "started",
+      kind: "ready",
+    });
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "already_warm",
+      kind: "ready",
+    });
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_after_reused_readiness_confirm"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    const healthCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/health")
+    );
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(healthCalls).toHaveLength(1);
+    expect(executeCalls).toHaveLength(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears reused readiness proof after a workspace invocation accepts it", async () => {
+    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "started",
+      kind: "ready",
+    });
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_after_startup_confirm"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "already_warm",
+      kind: "ready",
+    });
+
+    const healthCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/health")
+    );
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(healthCalls).toHaveLength(2);
+    expect(executeCalls).toHaveLength(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reuse readiness proof across users", async () => {
+    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "started",
+      kind: "ready",
+    });
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_456",
+    })).resolves.toEqual({
+      action: "already_warm",
+      kind: "ready",
+    });
+
+    const healthCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/health")
+    );
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(healthCalls).toHaveLength(2);
+    expect(executeCalls).toHaveLength(0);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to warm health when startup readiness proof is stale", async () => {
+    let nowMs = 1_000;
+    const dateNow = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    try {
+      const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
+
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 7_500,
+        userId: "member_123",
+      })).resolves.toEqual({
+        action: "started",
+        kind: "ready",
+      });
+
+      nowMs += 5_001;
+      await expect(container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_after_stale_startup_confirm"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      })).resolves.toEqual(createRunnerResult());
+
+      const healthCalls = containerFetch.mock.calls.filter(([url]) =>
+        String(url).endsWith("/health")
+      );
+      const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+        String(url).endsWith("/internal/workspace-invocation")
+      );
+      expect(healthCalls).toHaveLength(2);
+      expect(executeCalls).toHaveLength(1);
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    } finally {
+      dateNow.mockRestore();
+    }
+  });
+
+  it("measures readiness proof age after container state is read", async () => {
+    let currentStatus = "stopped";
+    let nowMs = 1_000;
+    const dateNow = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    try {
+      const getState = vi.fn(async () => {
+        if (getState.mock.calls.length === 2) {
+          nowMs += 5_001;
+        }
+        return {
+          lastChange: nowMs,
+          status: currentStatus,
+        };
+      });
+      const { container, containerFetch, startAndWaitForPorts } = createContainerDouble({
+        getState,
+        startAndWaitForPorts: vi.fn(async () => {
+          currentStatus = "running";
+        }),
+      });
+
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 7_500,
+        userId: "member_123",
+      })).resolves.toEqual({
+        action: "started",
+        kind: "ready",
+      });
+
+      await expect(container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_after_slow_state_read"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      })).resolves.toEqual(createRunnerResult());
+
+      const healthCalls = containerFetch.mock.calls.filter(([url]) =>
+        String(url).endsWith("/health")
+      );
+      const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+        String(url).endsWith("/internal/workspace-invocation")
+      );
+      expect(healthCalls).toHaveLength(2);
+      expect(executeCalls).toHaveLength(1);
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    } finally {
+      dateNow.mockRestore();
+    }
+  });
+
+  it("does not reuse readiness proof for transitional container status", async () => {
+    let currentStatus = "stopped";
+    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble({
+      getState: vi.fn(async () => ({
+        lastChange: Date.now(),
+        status: currentStatus,
+      })),
+      startAndWaitForPorts: vi.fn(async () => {
+        currentStatus = "running";
+      }),
+    });
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "started",
+      kind: "ready",
+    });
+
+    currentStatus = "stopping";
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_after_transitional_status"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    const healthCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/health")
+    );
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(healthCalls).toHaveLength(2);
+    expect(executeCalls).toHaveLength(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to warm health after lifecycle error clears startup readiness proof", async () => {
+    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "started",
+      kind: "ready",
+    });
+
+    expect(() => container.onError(new Error("synthetic lifecycle failure"))).toThrow(
+      "synthetic lifecycle failure",
+    );
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_after_lifecycle_error"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    const healthCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/health")
+    );
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(healthCalls).toHaveLength(2);
+    expect(executeCalls).toHaveLength(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to warm health after a container stop invalidates startup readiness proof", async () => {
+    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "started",
+      kind: "ready",
+    });
+
+    container.onStop({ exitCode: 0, reason: "exit" });
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_after_container_stop"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    const healthCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/health")
+    );
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(healthCalls).toHaveLength(2);
+    expect(executeCalls).toHaveLength(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
   it("preempts container prewarm when a workspace invocation arrives", async () => {
     const firstStartEntered = createDeferred<void>();
     const startAndWaitForPorts = vi.fn(async (input: {

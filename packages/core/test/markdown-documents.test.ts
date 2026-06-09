@@ -12,6 +12,7 @@ import {
 import {
   buildAutomationMarkdownPreview,
   listAutomations,
+  patchAutomation,
   readAutomation,
   readAutomationMarkdown,
   scaffoldAutomationPayload,
@@ -236,6 +237,35 @@ describe("markdown document primitives", () => {
     });
 
     expect(updated.record.tags).toEqual(["sleep", "recovery"]);
+  });
+
+  it("patches one automation field while preserving omitted fields", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const created = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        continuityPolicy: "fresh",
+        instructions: "Check sleep trend.",
+        summary: "Sleep prompt.",
+        tags: ["sleep", "scheduled"],
+      }),
+    });
+
+    const patched = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.slug,
+      continuityPolicy: "preserve",
+    });
+
+    expect(patched.created).toBe(false);
+    expect(patched.record.automationId).toBe(created.record.automationId);
+    expect(patched.record.continuityPolicy).toBe("preserve");
+    expect(patched.record.title).toBe(created.record.title);
+    expect(patched.record.instructions).toBe(created.record.instructions);
+    expect(patched.record.schedule).toEqual(created.record.schedule);
+    expect(patched.record.route).toEqual(created.record.route);
+    expect(patched.record.summary).toBe(created.record.summary);
+    expect(patched.record.tags).toEqual(created.record.tags);
   });
 
   it("lists automations with status/text filters and limit", async () => {

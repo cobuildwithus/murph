@@ -768,6 +768,12 @@ Automation schedules execute while ${code(
 function buildAssistantSharedAutomationPreferenceText(): string {
   return `Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.
 
+When creating automations, choose continuity deliberately. Use ${code(
+    "--continuity-policy preserve"
+  )} for simple reminders, check-ins, and lightweight support where recent prior automation context can help. Use ${code(
+    "--continuity-policy fresh"
+  )} for larger automations such as research, audits, roundups, content inspection, or any recurring task likely to need multiple tool calls, so each run starts from current vault/tool evidence instead of prior run transcript context.
+
 Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.`;
 }
 

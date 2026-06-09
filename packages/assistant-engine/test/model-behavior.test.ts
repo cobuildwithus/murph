@@ -127,6 +127,21 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
   })
+
+  it('guides automation continuity policy by task size', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('When creating automations, choose continuity deliberately.')
+    expect(prompt).toContain(
+      'Use `--continuity-policy preserve` for simple reminders, check-ins, and lightweight support where recent prior automation context can help.',
+    )
+    expect(prompt).toContain(
+      'Use `--continuity-policy fresh` for larger automations such as research, audits, roundups, content inspection, or any recurring task likely to need multiple tool calls',
+    )
+    expect(prompt).toContain(
+      'so each run starts from current vault/tool evidence instead of prior run transcript context.',
+    )
+  })
 })
 
 describe('assistant local PDF evidence guidance', () => {
