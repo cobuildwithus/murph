@@ -89,7 +89,7 @@ beforeEach(() => {
   mocks.readHostedMemberRoutingState.mockResolvedValue(null);
 });
 
-test("SidebarChatWithMurphAction prefers the member assigned Murph text number", async () => {
+test("SidebarChatWithMurphAction opens a contact picker when multiple channels are connected", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -123,6 +123,7 @@ test("SidebarChatWithMurphAction prefers the member assigned Murph text number",
   mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
     email: {
       address: "member@example.test",
+      murphEmailAddress: "murph+alias123@mail.withmurph.ai",
       verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
     },
     phone: {
@@ -137,8 +138,9 @@ test("SidebarChatWithMurphAction prefers the member assigned Murph text number",
   );
   const markup = await renderSidebarMarkup(await SidebarChatWithMurphAction());
 
-  assert.match(markup, /href="sms:\+15550100001"[^>]*data-slot="sidebar-menu-button"/);
-  assert.match(markup, /aria-label="Chat with Murph in Messages"/);
+  assert.match(markup, /data-slot="sidebar-menu-button"[^>]*aria-label="Chat with Murph"/);
+  assert.doesNotMatch(markup, /href="sms:/);
+  assert.doesNotMatch(markup, /href="mailto:/);
   assert.doesNotMatch(markup, /\+14045550123/);
   assert.doesNotMatch(markup, /member@example\.test/);
   assert.equal(mocks.getHostedPageAuthSnapshot.mock.calls.length, 1);
@@ -186,6 +188,89 @@ test("SidebarChatWithMurphAction routes signed-in members without a chat channel
   assert.match(markup, /aria-label="Link a contact method to chat with Murph"/);
 });
 
+test("SidebarChatWithMurphAction does not treat a checkout email as a chat channel", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      id: "member_checkout_email",
+    },
+    linkedAccounts: [],
+    memberLookup: null,
+    session: null,
+  });
+  mocks.readHostedMemberRoutingState.mockResolvedValue({
+    linqChatId: null,
+    linqRecipientPhone: null,
+    memberId: "member_checkout_email",
+    pendingLinqChatId: null,
+    pendingLinqRecipientPhone: null,
+    telegramThreadId: null,
+    telegramUserId: null,
+    telegramUserLookupKey: null,
+  });
+  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
+    email: {
+      address: "payer@example.test",
+      murphEmailAddress: null,
+      verifiedAt: null,
+    },
+    phone: null,
+    telegram: null,
+  });
+
+  const { SidebarChatWithMurphAction } = await import(
+    "@/src/components/dashboard/sidebar-chat-action"
+  );
+  const markup = await renderSidebarMarkup(await SidebarChatWithMurphAction());
+
+  assert.match(markup, /href="\/settings"/);
+  assert.doesNotMatch(markup, /href="mailto:/);
+  assert.doesNotMatch(markup, /payer@example\.test/);
+});
+
+test("SidebarChatWithMurphAction skips verified email without a reply alias", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      id: "member_email_without_alias",
+    },
+    linkedAccounts: [],
+    memberLookup: null,
+    session: null,
+  });
+  mocks.readHostedMemberRoutingState.mockResolvedValue({
+    linqChatId: null,
+    linqRecipientPhone: "+15550100001",
+    memberId: "member_email_without_alias",
+    pendingLinqChatId: null,
+    pendingLinqRecipientPhone: null,
+    telegramThreadId: null,
+    telegramUserId: null,
+    telegramUserLookupKey: null,
+  });
+  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
+    email: {
+      address: "member@example.test",
+      murphEmailAddress: null,
+      verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
+    },
+    phone: {
+      number: "+14045550123",
+      verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
+    },
+    telegram: null,
+  });
+
+  const { SidebarChatWithMurphAction } = await import(
+    "@/src/components/dashboard/sidebar-chat-action"
+  );
+  const markup = await renderSidebarMarkup(await SidebarChatWithMurphAction());
+
+  assert.match(markup, /href="sms:\+15550100001"[^>]*data-slot="sidebar-menu-button"/);
+  assert.doesNotMatch(markup, /href="mailto:/);
+  assert.doesNotMatch(markup, /member@example\.test/);
+});
+
 test("SidebarChatWithMurphAction does not use assigned SMS without a connected phone channel", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -215,6 +300,7 @@ test("SidebarChatWithMurphAction does not use assigned SMS without a connected p
   mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
     email: {
       address: "member@example.test",
+      murphEmailAddress: "murph+alias123@mail.withmurph.ai",
       verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
     },
     phone: null,
@@ -226,7 +312,7 @@ test("SidebarChatWithMurphAction does not use assigned SMS without a connected p
   );
   const markup = await renderSidebarMarkup(await SidebarChatWithMurphAction());
 
-  assert.match(markup, /href="mailto:murph@mail\.withmurph\.ai\?subject=Hey%20Murph"/);
+  assert.match(markup, /href="mailto:murph\+alias123@mail\.withmurph\.ai\?subject=Hey%20Murph"/);
   assert.doesNotMatch(markup, /href="sms:\+15550100001"/);
   assert.doesNotMatch(markup, /member@example\.test/);
 });

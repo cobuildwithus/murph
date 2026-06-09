@@ -319,9 +319,13 @@ run_typecheck_packages() {
     filter_args+=("--filter" "./${package_dir}")
   done
 
+  # The package/app typecheck scripts are no-emit: they read sibling sources or
+  # already-built dist and produce nothing another package's typecheck consumes.
+  # The one real prerequisite (the contracts build) is sequenced explicitly
+  # before this fanout, so topological ordering would only serialize the lane.
   run_command_with_retry \
     "Workspace package typecheck" \
-    pnpm -r --sort --workspace-concurrency="$typecheck_workspace_concurrency" "${filter_args[@]}" typecheck
+    pnpm -r --no-sort --workspace-concurrency="$typecheck_workspace_concurrency" "${filter_args[@]}" typecheck
 }
 
 run_command_with_retry() {
@@ -467,27 +471,11 @@ wait_for_background_jobs_allow_failures() {
 }
 
 run_test_packages_common() {
-  if [[ "$test_lane_parallel" == "1" ]]; then
-    local pids=()
-
-    run_timed_step "Contracts package test" pnpm --dir "packages/contracts" test &
-    local contracts_test_pid="$!"
-    pids+=("$contracts_test_pid")
-    register_background_pid "$contracts_test_pid"
-    run_timed_step "OpenClaw plugin test" pnpm --dir "packages/openclaw-plugin" test &
-    local openclaw_test_pid="$!"
-    pids+=("$openclaw_test_pid")
-    register_background_pid "$openclaw_test_pid"
-
-    if ! wait_for_background_jobs "${pids[@]}"; then
-      return 1
-    fi
-
-    return 0
-  fi
-
-  run_timed_step "Contracts package test" pnpm --dir "packages/contracts" test
-  run_timed_step "OpenClaw plugin test" pnpm --dir "packages/openclaw-plugin" test
+  # The contracts and OpenClaw Vitest suites already run inside the root
+  # multi-project Vitest lane, so the only prerequisite here is the contracts
+  # artifact verification, which rebuilds the shared contracts dist that
+  # built-runtime consumers import and must finish before that lane starts.
+  run_timed_step "Contracts artifact verification" pnpm --dir "packages/contracts" test:artifacts
 }
 
 run_test_apps() {

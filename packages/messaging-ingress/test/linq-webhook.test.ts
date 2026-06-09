@@ -11,12 +11,10 @@ import {
   minimizeLinqMessageReceivedEvent,
   minimizeLinqWebhookEvent,
   parseLinqMessageReceivedEvent,
-  parseLinqTypingIndicatorStartedEvent,
   parseLinqWebhookEvent,
   readLinqRecipientLineHandle,
   readLinqWebhookHeader,
   parseRawLinqMessageReceivedEvent,
-  resolveLinqTypingIndicatorOccurredAt,
   resolveLinqWebhookOccurredAt,
   summarizeLinqMessageReceivedEvent,
   verifyAndParseLinqWebhookRequest,
@@ -426,37 +424,6 @@ test("parseLinqWebhookEvent surfaces payload errors through the exported type gu
       now: 1711360800_000,
       toleranceMs: 0,
     }),
-  );
-});
-
-test("parseLinqTypingIndicatorStartedEvent keeps only active-route routing metadata", () => {
-  const event = parseLinqTypingIndicatorStartedEvent({
-    api_version: "v3",
-    created_at: "2026-03-25T10:00:00Z",
-    data: {
-      chat_id: "chat_typing_123",
-      service: "iMessage",
-    },
-    event_id: "evt_typing_123",
-    event_type: "chat.typing_indicator.started",
-  });
-
-  assert.deepEqual(event, {
-    api_version: "v3",
-    created_at: "2026-03-25T10:00:00.000Z",
-    data: {
-      chat_id: "chat_typing_123",
-      service: "iMessage",
-    },
-    event_id: "evt_typing_123",
-    event_type: "chat.typing_indicator.started",
-    partner_id: null,
-    trace_id: null,
-    webhook_version: undefined,
-  });
-  assert.equal(
-    resolveLinqTypingIndicatorOccurredAt(event),
-    "2026-03-25T10:00:00.000Z",
   );
 });
 

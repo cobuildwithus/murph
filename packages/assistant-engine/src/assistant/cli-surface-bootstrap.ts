@@ -18,8 +18,20 @@ const assistantCliSurfaceBootstrapSchemaVersion =
 export const assistantCliSurfacePrebuiltSchemaVersion =
   'murph.assistant-cli-surface-prebuilt.v2'
 const assistantCliSurfaceBootstrapRenderPolicyVersion =
-  'murph.assistant-cli-surface-render-policy.v3'
-const assistantCliSurfaceBootstrapContractCharBudget = 40_000
+  'murph.assistant-cli-surface-render-policy.v4'
+const assistantCliSurfaceBootstrapContractCharBudget = 45_000
+// Hot-path commands keep full option signatures in every render mode so
+// budget-driven fallback degrades the rest of the surface first. The final
+// truncation tier (description-only render still over budget) can still cut
+// these lines; the hosted deploy smoke fails loudly if that ever happens.
+// Keep this set aligned with assistantCliSurfaceHotPathProofs in
+// apps/cloudflare/src/hosted-runner-smoke-contract.ts.
+const assistantCliSurfaceBootstrapAllOptionsCommandNames = new Set([
+  'device account list',
+  'device connect',
+  'goal save',
+  'memory upsert',
+])
 export const assistantCliSurfacePrebuiltArtifactFileName =
   'cli-surface-contract.generated.json'
 const assistantCliSurfacePrebuiltArtifactPathEnv =
@@ -616,6 +628,10 @@ function readAssistantCliContractCommandLineMode(
   command: AssistantCliLlmsManifestCommand,
   mode: AssistantCliContractRenderMode,
 ): AssistantCliContractCommandLineMode {
+  if (assistantCliSurfaceBootstrapAllOptionsCommandNames.has(command.name)) {
+    return 'all-options'
+  }
+
   return assistantCliSurfaceBootstrapNameOnlyCommandFamilies.has(
     readAssistantCliCommandFamily(command.name),
   )
