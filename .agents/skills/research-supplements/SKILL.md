@@ -30,6 +30,7 @@ Never print `.env`, `.env.local`, database URLs, credentials, tokens, or raw con
 
 3. **Normalize rows**
    - Emit JSON rows with: `id`, `dataOrigin`, `dataOriginId`, `dataOriginUrl`, `source`, `sourceId`, `name`, `brand`, optional `upc`, `offMarket`, and `label`. Do not provide custom `searchText`; the DB helper derives compact search text from normalized product fields.
+   - Treat `search_text` as a compact derived search document only. It should contain product identity and searchable ingredient names, not raw evidence, page bodies, marketing copy, statements, contacts, daily values, dosage-panel detail, or whole label payloads. Preserve raw/full source evidence, including ingredient amounts and units, in `label`.
    - `dataOrigin` must be `brand_site`. Use `dataOriginId = <brand-slug>:<sourceId>` and `id = dataOriginId`.
    - `sourceId` must be stable within the brand. Use the product handle for one-formula products and `handle--variant-slug` for variant-specific rows.
    - Production rows must include normalized `label.ingredientRows` and `label.servingSizes`. Raw `factsText` and `ingredientText` are allowed as source evidence, but they are not a substitute for normalized rows.

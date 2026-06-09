@@ -21,6 +21,13 @@ describe("supplements query helpers", () => {
       new URL("../sql/supplements/import.sql", import.meta.url),
       "utf8",
     );
+    const dsldBackfillSql = await readFile(
+      new URL(
+        "../sql/supplements/backfill-dsld-search-text.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const dailymedImportSql = await readFile(
       new URL("../sql/supplements/import-dailymed.sql", import.meta.url),
       "utf8",
@@ -33,7 +40,27 @@ describe("supplements query helpers", () => {
     expect(dsldImportSql).toContain(`cat "$DSLD_NDJSON_PATH"`);
     expect(dsldImportSql).toContain("WITH (FORMAT csv");
     expect(dsldImportSql).toContain("btrim(COALESCE(");
+    expect(dsldImportSql).toContain("ingredient->>'name'");
+    expect(dsldImportSql).toContain("nested_ingredient->>'name'");
+    expect(dsldImportSql).toContain("nestedRows");
+    expect(dsldImportSql).toContain("search_text_raw");
+    expect(dsldImportSql).toContain("left(regexp_replace(btrim(search_text_raw)");
+    expect(dsldImportSql).toContain("6000");
+    expect(dsldImportSql).not.toContain("ingredient->>'amount'");
+    expect(dsldImportSql).not.toContain("ingredient->>'unit'");
+    expect(dsldImportSql).not.toContain("dailyValue");
     expect(dsldImportSql).not.toContain(":'DSLD_NDJSON_PATH'");
+
+    expect(dsldBackfillSql).toContain("WHERE supplements.data_origin = 'dsld'");
+    expect(dsldBackfillSql).toContain("SET search_text = dsld_search_text.search_text");
+    expect(dsldBackfillSql).toContain("nestedRows");
+    expect(dsldBackfillSql).toContain("ingredient->>'name'");
+    expect(dsldBackfillSql).toContain("nested_ingredient->>'name'");
+    expect(dsldBackfillSql).toContain("6000");
+    expect(dsldBackfillSql).toContain("ANALYZE supplements");
+    expect(dsldBackfillSql).not.toContain("ingredient->>'amount'");
+    expect(dsldBackfillSql).not.toContain("ingredient->>'unit'");
+    expect(dsldBackfillSql).not.toContain("dailyValue");
 
     expect(dailymedImportSql).toContain(
       `FROM PROGRAM 'if [ -n "$DAILYMED_NDJSON_PATH" ]`,

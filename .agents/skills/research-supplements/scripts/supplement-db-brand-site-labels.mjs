@@ -343,24 +343,14 @@ function nullableUpc(value) {
 
 function buildSearchText(item) {
   const parts = [];
-  appendSearchValue(parts, item.source);
-  appendSearchValue(parts, item.sourceId);
-  appendSearchValue(parts, item.dataOrigin);
-  appendSearchValue(parts, item.dataOriginId);
   appendSearchValue(parts, item.name);
   appendSearchValue(parts, item.brand);
   appendSearchValue(parts, item.upc);
-  appendSearchValue(parts, item.dataOriginUrl);
 
   const label = item.label && typeof item.label === "object" ? item.label : {};
-  appendSearchValue(parts, label.productType);
-  appendSearchValue(parts, label.netContents);
-  appendSearchValue(parts, label.servingSizes);
-  appendSearchValue(parts, label.servingSize);
-  appendIngredientRows(parts, label.ingredientRows);
-  appendSearchValue(parts, label.activeIngredients);
-  appendSearchValue(parts, label.otherIngredients);
-  appendSearchValue(parts, label.ingredientText ?? label.ingredients, INGREDIENT_TEXT_MAX_LENGTH);
+  appendIngredientNames(parts, label.ingredientRows);
+  appendIngredientNames(parts, label.otherIngredients);
+  appendIngredientNames(parts, label.otheringredients?.ingredients);
   appendVariantSummary(parts, label.variant);
 
   return compactSearchText(parts.join(" "));
@@ -387,31 +377,34 @@ function appendSearchValue(parts, value, maxLength = 240) {
     return;
   }
   if (typeof value === "object") {
-    for (const key of [
-      "name",
-      "ingredient",
-      "title",
-      "amount",
-      "quantity",
-      "unit",
-      "dailyValue",
-      "dv",
-      "servingSize",
-      "servingsPerContainer",
-      "count",
-      "form",
-      "sku",
-      "barcode",
-    ]) {
+    for (const key of ["name", "title", "sku", "barcode", "upc"]) {
       appendSearchValue(parts, value[key], maxLength);
     }
   }
 }
 
-function appendIngredientRows(parts, rows) {
-  if (!Array.isArray(rows)) return;
-  for (const row of rows.slice(0, 120)) {
-    appendSearchValue(parts, row);
+function appendIngredientNames(parts, value) {
+  if (value === null || value === undefined) return;
+
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    appendSearchValue(parts, value);
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const entry of value.slice(0, 160)) {
+      appendIngredientNames(parts, entry);
+    }
+    return;
+  }
+
+  if (typeof value === "object") {
+    for (const key of ["name", "ingredient", "title"]) {
+      appendSearchValue(parts, value[key]);
+    }
+    appendIngredientNames(parts, value.nestedRows);
+    appendIngredientNames(parts, value.ingredients);
+    appendIngredientNames(parts, value.children);
   }
 }
 

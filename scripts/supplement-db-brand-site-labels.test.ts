@@ -61,20 +61,32 @@ describe("supplement brand-site DB helper", () => {
         factsText: "Supplement Facts ".repeat(500),
         rawPageText: "faq copy ".repeat(500),
         ingredientRows: [
-          { name: "Magnesium", amount: "200", unit: "mg" },
-          { name: "Glycine", amount: "1", unit: "g" },
+          {
+            name: "Magnesium",
+            amount: "200",
+            unit: "mg",
+            dailyValue: "48%",
+            nestedRows: [{ name: "Glycine", amount: "1", unit: "g" }],
+          },
         ],
         servingSizes: ["2 capsules"],
-        ingredientText: "Other ingredients: vegetable capsule.",
+        otherIngredients: "vegetable capsule",
+        ingredientText: "Other ingredients raw evidence ".repeat(200),
       },
     });
 
     assert.equal(searchText.length <= SEARCH_TEXT_MAX_LENGTH, true);
     assert.match(searchText, /Example Magnesium/u);
-    assert.match(searchText, /Magnesium 200 mg/u);
-    assert.match(searchText, /2 capsules/u);
+    assert.match(searchText, /Example Brand/u);
+    assert.match(searchText, /Magnesium/u);
+    assert.match(searchText, /Glycine/u);
+    assert.match(searchText, /vegetable capsule/u);
+    assert.doesNotMatch(searchText, /Magnesium 200 mg/u);
+    assert.doesNotMatch(searchText, /2 capsules/u);
+    assert.doesNotMatch(searchText, /48%/u);
     assert.doesNotMatch(searchText, /marketing body marketing body/u);
     assert.doesNotMatch(searchText, /Supplement Facts Supplement Facts/u);
+    assert.doesNotMatch(searchText, /Other ingredients raw evidence/u);
     assert.doesNotMatch(searchText, /rawPageText/u);
   });
 
@@ -95,6 +107,8 @@ describe("supplement brand-site DB helper", () => {
     });
 
     assert.match(normalized.searchText, /Example Magnesium/u);
+    assert.doesNotMatch(normalized.searchText, /Magnesium 200 mg/u);
+    assert.doesNotMatch(normalized.searchText, /2 capsules/u);
     assert.doesNotMatch(normalized.searchText, /bad copied page text/u);
     assert.deepEqual(normalized.reviewIssues, []);
   });
@@ -156,12 +170,12 @@ describe("supplement brand-site DB helper", () => {
     assert.throws(() => assertProductionReady([food]), /likely_food_or_non_supplement/u);
 
     const flavoredProtein = normalizeItem({
-      id: "example-brand:protein-oatmeal-cookie",
+      id: "example-brand:protein-vanilla",
       dataOrigin: "brand_site",
-      dataOriginId: "example-brand:protein-oatmeal-cookie",
+      dataOriginId: "example-brand:protein-vanilla",
       source: "example-brand",
-      sourceId: "protein-oatmeal-cookie",
-      name: "Vegan Protein - Oatmeal Cookie",
+      sourceId: "protein-vanilla",
+      name: "Vegan Protein - Vanilla",
       brand: "Example Brand",
       label: {
         ingredientRows: [{ name: "Protein blend", amount: "20", unit: "g" }],
@@ -1885,7 +1899,10 @@ describe("supplement brand-site repair preview", () => {
     assert.equal(preview.parsedServingSizes, 1);
     assert.equal(preview.searchTextWouldChange, true);
     assert.deepEqual(preview.removableFieldCandidates, ["bodyText"]);
-    assert.match(preview.proposedSearchTextPreview, /Magnesium 200 mg/u);
+    assert.match(preview.proposedSearchTextPreview, /Magnesium/u);
+    assert.doesNotMatch(preview.proposedSearchTextPreview, /Magnesium 200 mg/u);
+    assert.doesNotMatch(preview.proposedSearchTextPreview, /2 Capsules/u);
+    assert.doesNotMatch(preview.proposedSearchTextPreview, /48%/u);
     assert.doesNotMatch(preview.proposedSearchTextPreview, /page copy page copy/u);
     assert.equal(preview.productionCandidate?.label.bodyText, undefined);
     assert.deepEqual(preview.productionCandidate?.label.servingSizes, [
