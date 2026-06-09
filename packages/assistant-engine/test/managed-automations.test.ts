@@ -58,6 +58,7 @@ vi.mock('../src/assistant/channel-adapters.ts', () => ({
 import {
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   applyMurphManagedAutomations,
+  type MurphManagedAutomationSeed,
 } from '../src/assistant/managed-automations.ts'
 
 const vaultRoot = '/tmp/murph-managed-automations/vault'
@@ -320,6 +321,45 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
+      created: 0,
+      skipped: 1,
+      updated: 0,
+    })
+    expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
+  })
+
+  it('creates a timely one-shot seed but skips it once stale', async () => {
+    const featureDropSeed: MurphManagedAutomationSeed = {
+      automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3G0',
+      slug: 'feature-drop-test',
+      title: 'Feature drop test',
+      schedule: {
+        kind: 'at',
+        at: '2026-06-09T14:00:00.000Z',
+      },
+      instructions: 'Produce one product update.',
+    }
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T14:10:00.000Z'),
+      seeds: [featureDropSeed],
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 1,
+      skipped: 0,
+      updated: 0,
+    })
+
+    managedAutomationMocks.records.clear()
+    managedAutomationMocks.upsertAutomation.mockClear()
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T14:31:00.000Z'),
+      seeds: [featureDropSeed],
+      vaultRoot,
+    })).resolves.toEqual({
       created: 0,
       skipped: 1,
       updated: 0,
