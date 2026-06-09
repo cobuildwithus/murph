@@ -44,7 +44,7 @@ vi.mock("@/src/components/hosted-onboarding/hosted-app-session-client", () => ({
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-privy-logout", () => ({
-  HostedPrivyLogout({ onDone }: { onDone: () => void }) {
+  HostedPrivyLogout: ({ onDone }: { onDone: () => void }) => {
     useEffect(() => {
       onDone();
     }, [onDone]);

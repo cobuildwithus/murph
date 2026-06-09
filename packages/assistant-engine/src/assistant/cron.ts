@@ -47,9 +47,11 @@ import type { AssistantExecutionContext } from './execution-context.ts'
 import {
   addAssistantCronJob,
   installAssistantCronPreset,
+  upsertAssistantCronAutomation,
   type AddAssistantCronJobInput,
   type InstallAssistantCronPresetInput,
   type InstallAssistantCronPresetResult,
+  type UpsertAssistantCronAutomationInput,
 } from './cron/authoring.ts'
 import {
   assertResolvedAssistantCronJobNotRunning,
@@ -80,11 +82,12 @@ export {
   reconcileAssistantCronDeliveryIntent,
   repairPendingAssistantCronDeliveries,
 }
-export { addAssistantCronJob, installAssistantCronPreset }
+export { addAssistantCronJob, installAssistantCronPreset, upsertAssistantCronAutomation }
 export type {
   AddAssistantCronJobInput,
   InstallAssistantCronPresetInput,
   InstallAssistantCronPresetResult,
+  UpsertAssistantCronAutomationInput,
 }
 
 export interface AssistantCronStatusSnapshot {

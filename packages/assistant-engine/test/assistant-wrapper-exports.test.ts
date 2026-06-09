@@ -63,6 +63,7 @@ const wrapperCases = [
     [
       'addAssistantCronJob',
       'getAssistantCronPresetDefinition',
+      'upsertAssistantCronAutomation',
     ],
   ],
   [

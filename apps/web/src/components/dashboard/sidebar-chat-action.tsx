@@ -4,7 +4,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/src/components/ui/sidebar";
-import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
+import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { cn } from "@/src/lib/utils";
 import {
@@ -15,6 +15,7 @@ import {
   SidebarChatWithMurphAuthGate,
   SidebarChatWithMurphSettingsGate,
 } from "./sidebar-chat-auth-gate";
+import { SidebarChatWithMurphContactDialog } from "./sidebar-chat-contact-dialog";
 
 export function SidebarChatWithMurphFallback() {
   return (
@@ -33,15 +34,20 @@ export function SidebarChatWithMurphFallback() {
 }
 
 export async function SidebarChatWithMurphAction() {
-  const option = await resolveHostedMurphContactOption();
+  const options = await resolveHostedMurphContactOptions();
 
-  if (!option) {
+  if (options.length === 0) {
     const auth = await getHostedPageAuthSnapshot();
     return auth.authenticated
       ? <SidebarChatWithMurphSettingsGate />
       : <SidebarChatWithMurphAuthGate />;
   }
 
+  if (options.length > 1) {
+    return <SidebarChatWithMurphContactDialog options={options} />;
+  }
+
+  const option = options[0];
   const opensInNewTab = option.target === "_blank";
 
   return (

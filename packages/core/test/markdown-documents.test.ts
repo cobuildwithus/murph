@@ -268,6 +268,45 @@ describe("markdown document primitives", () => {
     expect(patched.record.tags).toEqual(created.record.tags);
   });
 
+  it("clears automation summary when null is provided explicitly", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const created = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        summary: "Sleep prompt.",
+      }),
+    });
+
+    const clearedByUpsert = await upsertAutomation({
+      vaultRoot,
+      automationId: created.record.automationId,
+      title: created.record.title,
+      slug: created.record.slug,
+      instructions: created.record.instructions,
+      schedule: created.record.schedule,
+      route: created.record.route,
+      continuityPolicy: created.record.continuityPolicy,
+      status: created.record.status,
+      summary: null,
+      tags: created.record.tags,
+    });
+    expect(clearedByUpsert.record.summary).toBeNull();
+
+    const restored = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.slug,
+      summary: "Restored summary.",
+    });
+    expect(restored.record.summary).toBe("Restored summary.");
+
+    const clearedByPatch = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.slug,
+      summary: null,
+    });
+    expect(clearedByPatch.record.summary).toBeNull();
+  });
+
   it("lists automations with status/text filters and limit", async () => {
     const vaultRoot = await makeVaultRoot();
     const now = new Date("2026-04-08T00:00:00.000Z");
