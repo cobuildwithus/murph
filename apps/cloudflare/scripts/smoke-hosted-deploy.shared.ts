@@ -248,8 +248,8 @@ async function assertRunnerContainerSmoke(input: {
       }
 
       input.log(
-        `Runner container smoke attempt ${attempt}/${retryPolicy.maxAttempts} did not observe `
-          + `the expected runner bundle; retrying in ${retryPolicy.retryDelayMs}ms.`,
+        `Runner container smoke attempt ${attempt}/${retryPolicy.maxAttempts} failed `
+          + `(${error.message}); retrying in ${retryPolicy.retryDelayMs}ms.`,
       );
       await sleep(retryPolicy.retryDelayMs);
     }
