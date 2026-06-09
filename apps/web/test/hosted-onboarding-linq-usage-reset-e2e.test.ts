@@ -106,10 +106,6 @@ const mocks = vi.hoisted(() => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_usage_reset",
     })),
-    signalHostedRuntimePrewarm: vi.fn(async () => ({
-      signalAccepted: true,
-      workflowId: "hosted-user-runtime:member_usage_reset",
-    })),
     upsertHostedMemberHomeLinqBindingTx: vi.fn(async () => undefined),
   };
 
@@ -185,7 +181,6 @@ vi.mock("@/src/lib/hosted-runner/control", () => ({
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
-  signalHostedRuntimePrewarm: mocks.signalHostedRuntimePrewarm,
 }));
 
 vi.mock("../src/lib/hosted-onboarding/linq", async () => {

@@ -631,7 +631,7 @@ test("automation edit patches sparse fields without implicit route rebinding", a
     assert.deepEqual(shown.envelope.data?.automation?.tags, ["assistant"]);
 
     bridge.requests.length = 0;
-    const routeEdited = await runInProcessJsonCli<{
+    const routePartial = await runInProcessJsonCli<{
       automationId: string;
       created: boolean;
     }>(cli, [
@@ -643,13 +643,29 @@ test("automation edit patches sparse fields without implicit route rebinding", a
       "--vault",
       vaultRoot,
     ]);
+    assert.equal(routePartial.exitCode, 1);
+    assert.equal(routePartial.envelope.ok, false);
+    assert.deepEqual(bridge.requests, []);
+
+    const routeEdited = await runInProcessJsonCli<{
+      automationId: string;
+      created: boolean;
+    }>(cli, [
+      "automation",
+      "edit",
+      "preserve-route-reminder",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      "linq_chat_explicit",
+      "--vault",
+      vaultRoot,
+    ]);
     assert.equal(routeEdited.exitCode, null);
     assert.equal(routeEdited.envelope.ok, true);
     assert.equal(routeEdited.envelope.data?.automationId, saved.envelope.data?.automationId);
     assert.equal(routeEdited.envelope.data?.created, false);
-    assert.deepEqual(bridge.requests, [
-      HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
-    ]);
+    assert.deepEqual(bridge.requests, []);
 
     const routeShown = await runInProcessJsonCli<{
       automation: {
@@ -674,7 +690,7 @@ test("automation edit patches sparse fields without implicit route rebinding", a
     assert.equal(routeShown.exitCode, null);
     assert.equal(routeShown.envelope.ok, true);
     assert.equal(routeShown.envelope.data?.automation?.route.channel, "linq");
-    assert.equal(routeShown.envelope.data?.automation?.route.deliveryTarget, "linq_chat_real");
+    assert.equal(routeShown.envelope.data?.automation?.route.deliveryTarget, "linq_chat_explicit");
     assert.equal(routeShown.envelope.data?.automation?.instructions, "Send the reminder.");
     assert.equal(routeShown.envelope.data?.automation?.schedule.kind, "dailyLocal");
     assert.equal(routeShown.envelope.data?.automation?.schedule.localTime, "08:30");

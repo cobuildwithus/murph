@@ -165,7 +165,6 @@ describe("readHostedRuntimeTemporalWorkflowOptions", () => {
       HOSTED_TEMPORAL_TASK_QUEUE: "hosted-runtime-custom",
     })).toEqual({
       ensureRuntimeProcessingStartToCloseTimeoutMs: 17_000,
-      prewarmTaskQueue: "hosted-runtime-custom-prewarm",
       readRuntimeReconciliationFactsStartToCloseTimeoutMs: 15_000,
     });
   });
@@ -182,14 +181,6 @@ describe("readHostedRuntimeTemporalWorkflowOptions", () => {
       HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS: "15000",
     })).toMatchObject({
       readRuntimeReconciliationFactsStartToCloseTimeoutMs: 15_000,
-    });
-  });
-
-  it("allows an explicit dedicated prewarm task queue", () => {
-    expect(readHostedRuntimeTemporalWorkflowOptions({
-      HOSTED_TEMPORAL_PREWARM_TASK_QUEUE: "hosted-runtime-prewarm-custom",
-    })).toMatchObject({
-      prewarmTaskQueue: "hosted-runtime-prewarm-custom",
     });
   });
 

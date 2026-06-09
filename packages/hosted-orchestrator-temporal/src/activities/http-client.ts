@@ -15,7 +15,6 @@ import {
   normalizeHostedExecutionString,
 } from "@murphai/hosted-execution/env";
 import {
-  HOSTED_RUNTIME_PREWARM_ACCEPTED_ACTIONS,
   HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
@@ -85,11 +84,8 @@ export interface HostedTemporalActivityObservation {
   activity:
     | "runHostedDeviceSyncRecoverySweep"
     | "readRuntimeReconciliationFacts"
-    | "ensureRuntimeProcessing"
-    | "prewarmRuntimeContainer";
+    | "ensureRuntimeProcessing";
   orchestrationAttemptId?: string | null;
-  prewarmAttemptId?: string | null;
-  reason?: string | null;
   userId: string;
 }
 
@@ -333,8 +329,6 @@ export async function observeHostedTemporalActivity<TResponse>(
       component: "temporal.activity",
       durationMs: Date.now() - startedAt,
       orchestrationAttemptId: observation.orchestrationAttemptId ?? null,
-      prewarmAttemptId: observation.prewarmAttemptId ?? null,
-      reason: observation.reason ?? null,
       resultAction: resultDetails.resultAction,
       resultKind: resultDetails.resultKind,
       userIdPresent: observation.userId.length > 0,
@@ -348,8 +342,6 @@ export async function observeHostedTemporalActivity<TResponse>(
       errorCode: readHostedTemporalActivityErrorCode(error),
       nonRetryable: readHostedTemporalActivityNonRetryable(error),
       orchestrationAttemptId: observation.orchestrationAttemptId ?? null,
-      prewarmAttemptId: observation.prewarmAttemptId ?? null,
-      reason: observation.reason ?? null,
       resultAction: null,
       resultKind: null,
       userIdPresent: observation.userId.length > 0,
@@ -442,9 +434,6 @@ function readHostedTemporalActivityResultAction(
 ): string | null {
   if (resultKind === "runtime_processing_accepted") {
     return readKnownString(value, HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS);
-  }
-  if (resultKind === "runtime_prewarm_accepted") {
-    return readKnownString(value, HOSTED_RUNTIME_PREWARM_ACCEPTED_ACTIONS);
   }
   return null;
 }

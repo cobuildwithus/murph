@@ -386,13 +386,38 @@ export async function startHostedContainerEntrypoint(input: {
         activeHostedRunnerJobCount += 1;
         claimedRunnerSlot = true;
         discardUnreadRequestBody(request);
-        const result = await runtime.runCodexShellSmoke({
-          signal: requestAbort.signal,
-        });
-        writeJsonResponse(response, 200, {
-          codexShell: result,
-          ok: true,
-        });
+        try {
+          const result = await runtime.runCodexShellSmoke({
+            signal: requestAbort.signal,
+          });
+          writeJsonResponse(response, 200, {
+            codexShell: result,
+            ok: true,
+          });
+        } catch (error) {
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            error,
+            level: "error",
+            message: "Hosted container entrypoint failed the Codex shell smoke.",
+            phase: "failed",
+            userId: null,
+          });
+          if (requestAbort.signal.aborted || response.destroyed) {
+            return;
+          }
+          // Deploy-smoke diagnostics are locally constructed and content-free
+          // (labels, byte counts, proof counts), so surface the message
+          // instead of the redacted generic error; otherwise smoke failures
+          // are undebuggable from CI logs.
+          writeJsonResponse(response, 500, {
+            error: "Hosted Codex shell smoke failed.",
+            ok: false,
+            smokeErrorMessage: error instanceof Error
+              ? error.message
+              : String(error),
+          });
+        }
         return;
       }
 

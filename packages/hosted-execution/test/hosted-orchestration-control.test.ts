@@ -2,11 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
-  HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE,
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
   HOSTED_USER_RUNTIME_TASK_QUEUE,
   HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
-  deriveHostedUserRuntimePrewarmTaskQueue,
   type HostedRuntimeReconciliationFactsWorkspace,
   type HostedRuntimeSignal,
 } from "../src/orchestration-control.ts";
@@ -30,23 +28,8 @@ describe("hosted orchestration control contracts", () => {
   it("freezes the Temporal workflow, task queue, signal, and query names", () => {
     expect(HOSTED_USER_RUNTIME_WORKFLOW_TYPE).toBe("hostedUserRuntimeWorkflow");
     expect(HOSTED_USER_RUNTIME_TASK_QUEUE).toBe("murph-hosted-runtime");
-    expect(HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE).toBe(
-      "murph-hosted-runtime-prewarm",
-    );
     expect(HOSTED_USER_RUNTIME_SIGNAL_NAME).toBe("runtimeSignal");
     expect(HOSTED_USER_RUNTIME_STATUS_QUERY_NAME).toBe("runtimeWorkflowStatus");
-  });
-
-  it("derives a separate prewarm task queue from the runtime task queue", () => {
-    expect(deriveHostedUserRuntimePrewarmTaskQueue("")).toBe(
-      HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE,
-    );
-    expect(deriveHostedUserRuntimePrewarmTaskQueue(" murph-hosted-runtime ")).toBe(
-      HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE,
-    );
-    expect(deriveHostedUserRuntimePrewarmTaskQueue("hosted-runtime-custom")).toBe(
-      "hosted-runtime-custom-prewarm",
-    );
   });
 
   it("parses every pointer-only runtime signal variant", () => {
@@ -59,12 +42,6 @@ describe("hosted orchestration control contracts", () => {
       },
       {
         kind: "runtime_recheck_requested",
-      },
-      {
-        eventId: "runtime-prewarm:event-test",
-        kind: "runtime_prewarm_requested",
-        occurredAt: "2026-05-20T12:00:00.000Z",
-        source: "linq.imessage.typing",
       },
     ];
 
@@ -125,9 +102,8 @@ describe("hosted orchestration control contracts", () => {
       eventId: "runtime-prewarm:event-test",
       kind: "runtime_prewarm_requested",
       occurredAt: "2026-05-20T12:00:00.000Z",
-      scopeHash: "linq-chat:legacy-scope",
-      source: "linq.imessage.typing",
-    })).toThrow("Hosted runtime prewarm signal must not include scopeHash.");
+      source: "linq.message.ingress",
+    })).toThrow("Hosted runtime signal kind is not supported.");
   });
 
   it("parses reconciliation facts requests and responses", () => {
@@ -336,10 +312,10 @@ describe("hosted orchestration control contracts", () => {
   it("parses prewarm request and response variants without mailbox fields", () => {
     expect(parseHostedRuntimePrewarmRequest({
       prewarmAttemptId: "prewarm_attempt_test",
-      source: "linq.imessage.typing",
+      source: "linq.message.ingress",
     })).toEqual({
       prewarmAttemptId: "prewarm_attempt_test",
-      source: "linq.imessage.typing",
+      source: "linq.message.ingress",
     });
 
     for (const action of [
@@ -369,8 +345,13 @@ describe("hosted orchestration control contracts", () => {
     expect(() => parseHostedRuntimePrewarmRequest({
       prewarmAttemptId: "prewarm_attempt_test",
       reason: "nudge",
-      source: "linq.imessage.typing",
+      source: "linq.message.ingress",
     })).toThrow("Hosted runtime prewarm request must not include reason.");
+
+    expect(() => parseHostedRuntimePrewarmRequest({
+      prewarmAttemptId: "prewarm_attempt_test",
+      source: "linq.imessage.typing",
+    })).toThrow("Hosted runtime prewarm request source is not supported.");
 
     expect(() => parseHostedRuntimePrewarmResponse({
       action: "already_warm",
@@ -388,13 +369,6 @@ describe("hosted orchestration control contracts", () => {
       "Hosted runtime prewarm retry-later response must not include mailboxLag.",
     );
 
-    expect(() => parseHostedRuntimeSignal({
-      eventId: "runtime-prewarm:event-test",
-      kind: "runtime_prewarm_requested",
-      occurredAt: "2026-05-20T12:00:00.000Z",
-      scopeHash: "linq-chat:scope-test",
-      source: "linq.imessage.typing",
-    })).toThrow("Hosted runtime prewarm signal must not include scopeHash.");
   });
 });
 
