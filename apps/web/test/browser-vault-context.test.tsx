@@ -196,6 +196,42 @@ test("browser-vault provider exposes pending device imports without showing a gl
   await rendered.cleanup();
 });
 
+test("browser-vault provider polls pending refreshes without a global sync indicator", async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+    encryptedReplica: null,
+    freshness: "stale",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: null,
+    refreshPending: true,
+    state: "empty",
+    workspaceVersion: "1",
+  }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, "empty:none");
+  assert.equal(rendered.container.textContent?.includes("Preparing dashboard..."), false);
+  assert.equal(rendered.container.textContent?.includes("Syncing latest changes..."), false);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2_000);
+  });
+
+  assert.equal(fetchMock.mock.calls.length > 1, true);
+  assert.equal(rendered.container.textContent?.includes("Preparing dashboard..."), false);
+  assert.equal(rendered.container.textContent?.includes("Syncing latest changes..."), false);
+
+  await rendered.cleanup();
+});
+
 test("browser-vault provider hides ready data immediately when auth context becomes anonymous", async () => {
   const ref = createReplicaRef();
   const fetchMock = vi.fn()

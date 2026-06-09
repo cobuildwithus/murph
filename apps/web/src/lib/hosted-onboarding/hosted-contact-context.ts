@@ -13,6 +13,7 @@ import { getHostedPageAuthSnapshot } from "./page-auth";
 
 export interface HostedMurphContactContext {
   initialContactChannels: MurphContactChannels;
+  murphEmailAddress: string | null;
   murphPhoneNumber: string | null;
 }
 
@@ -34,11 +35,12 @@ export async function readHostedMurphContactContext():
   return {
     initialContactChannels: authenticatedMember
       ? {
-          email: Boolean(account?.email?.address),
+          email: Boolean(account?.email?.murphEmailAddress),
           telegram: Boolean(account?.telegram?.telegramUserId),
           text: Boolean(account?.phone?.number),
         }
       : DEFAULT_MURPH_CONTACT_CHANNELS,
+    murphEmailAddress: account?.email?.murphEmailAddress ?? null,
     murphPhoneNumber: routing?.linqRecipientPhone ?? null,
   };
 }

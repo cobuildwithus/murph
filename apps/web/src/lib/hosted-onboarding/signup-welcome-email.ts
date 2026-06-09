@@ -359,7 +359,7 @@ function buildHostedSignupWelcomeEmailText(input: {
     nextStep,
     ...(murphStartLine ? ["", murphStartLine] : []),
     "",
-    "Hit reply if anything's confusing or broken. We're early and shipping fast, and I want to hear it.",
+    "Hit reply if anything's confusing or broken. We're early and shipping fast.",
     "",
     `- ${input.founderName}`,
   ].join("\n");

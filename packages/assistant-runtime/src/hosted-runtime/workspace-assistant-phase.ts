@@ -11,6 +11,8 @@ import type {
   HostedRuntimeRedactedScalar,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  applyMurphManagedAutomations,
+  getAssistantCronStatus,
   refreshAssistantContextSnapshotBestEffort,
   scheduleDeviceActivityTriggeredAutomations,
   type AssistantExecutionContext,
@@ -378,15 +380,22 @@ export async function runHostedWorkspaceAssistantPhase(
       input,
       wake,
     });
+    const managedAutomationsResult = hasFreshConversationInput
+      ? null
+      : await applyHostedManagedAutomationsBestEffort({
+          input,
+        });
+    const shouldContinueAssistantLane = systemMailboxMaintenance.continueAssistantLane
+      || managedAutomationsResult !== null;
     if (
       systemMailboxMaintenance.result
-      && !systemMailboxMaintenance.continueAssistantLane
+      && !shouldContinueAssistantLane
     ) {
       return systemMailboxMaintenance.result;
     }
-    const continuingSystemMailboxResult = systemMailboxMaintenance.continueAssistantLane
-      ? systemMailboxMaintenance.result
-      : null;
+    const continuingSystemMailboxResult = shouldContinueAssistantLane
+      ? mergeHostedAssistantPhaseResults(systemMailboxMaintenance.result, managedAutomationsResult)
+      : managedAutomationsResult;
     const initialProviderCleanupCheckpoint =
       systemMailboxMaintenance.initialProviderCleanupCheckpoint;
     const mergeContinuingSystemMailboxResult = (
@@ -714,6 +723,78 @@ function hasFreshHostedMailboxInput(
   return input.initialMailboxImport.importResult.fetchedCount > 0;
 }
 
+async function applyHostedManagedAutomationsBestEffort(input: {
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<HostedWorkspaceRunnerAssistantPhaseResult | null> {
+  if (input.input.shouldYieldBackgroundMaintenance?.() === true) {
+    return null;
+  }
+
+  try {
+    const result = await applyMurphManagedAutomations({
+      now: new Date(resolveHostedAssistantPhaseNowMs(input.input)),
+      operatorHomeRoot: input.input.restored.operatorHomeRoot,
+      vaultRoot: input.input.restored.vaultRoot,
+    });
+    const changed = result.created + result.updated;
+    if (changed === 0) {
+      return null;
+    }
+
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields({
+          attemptId: input.input.request.attemptId,
+          leaseGeneration: input.input.request.leaseGeneration,
+          workspaceVersion: input.input.request.workspaceVersion,
+        }),
+        component: "runtime",
+        eventCode: "assistant.pass_finished",
+        level: "info",
+        phase: "invoke",
+        redactedJson: {
+          murphManagedAutomationCreated: result.created,
+          murphManagedAutomationSkipped: result.skipped,
+          murphManagedAutomationUpdated: result.updated,
+        },
+      },
+      platform: input.input.runtime.platform,
+    });
+
+    return {
+      checkpointReason: "assistant_runtime_commit",
+      progressed: true,
+      redactedStatus: {
+        murphManagedAutomationCreated: result.created,
+        murphManagedAutomationSkipped: result.skipped,
+        murphManagedAutomationUpdated: result.updated,
+      },
+    };
+  } catch (error) {
+    const errorCode = toHostedRuntimeLogCode(deriveHostedExecutionErrorCode(error));
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields({
+          attemptId: input.input.request.attemptId,
+          leaseGeneration: input.input.request.leaseGeneration,
+          workspaceVersion: input.input.request.workspaceVersion,
+        }),
+        component: "runtime",
+        errorCode,
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: {
+          errorCode,
+          murphManagedAutomationFailed: true,
+        },
+      },
+      platform: input.input.runtime.platform,
+    });
+    return null;
+  }
+}
+
 function resolveHostedForegroundReplayInputIds(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): readonly string[] {
@@ -740,6 +821,23 @@ function isHostedForegroundAssistantDeliveryPass(input: {
   return input.currentTurnDeliveryIntentIds.length > 0
     || input.hasFreshConversationInput
     || input.assistantMetrics.activeTurnInputIngested === true;
+}
+
+function mergeHostedAssistantPhaseResults(
+  first: HostedWorkspaceRunnerAssistantPhaseResult | null,
+  second: HostedWorkspaceRunnerAssistantPhaseResult | null,
+): HostedWorkspaceRunnerAssistantPhaseResult | null {
+  if (!first) {
+    return second;
+  }
+  if (!second) {
+    return first;
+  }
+
+  return mergeContinuingSystemMailboxAssistantPhaseResult({
+    assistantResult: second,
+    systemMailboxResult: first,
+  });
 }
 
 function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
@@ -2186,11 +2284,19 @@ async function drainHostedPostCheckpointDelivery(input: {
   const postOutboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
   });
+  const postAssistantCronStatus = await getAssistantCronStatus(
+    input.input.restored.vaultRoot,
+  );
+  const postAssistantCronWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+    input: input.input,
+    nextWakeAt: postAssistantCronStatus.nextRunAt,
+  });
   const postSystemMailboxWakeAt = await resolveHostedSystemMailboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
   });
   const postNextWake = selectHostedRuntimeWakeCandidate([
     input.baseNextWake,
+    createHostedRuntimeWakeCandidate(postAssistantCronWakeAt, null),
     createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(providerCleanupNextWakeAt, "assistant"),

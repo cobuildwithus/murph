@@ -324,6 +324,14 @@ export async function executeClaimedAssistantCronJob(input: {
         participantId: claimedJob.target.participantId,
         responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
         threadId: claimedJob.target.threadId,
+        // Only participant routes without an explicit target need a delivery
+        // kind hint (Linq chat materialization); explicit and thread routes
+        // resolve from the target and conversation as before.
+        deliveryKind:
+          !claimedJob.target.deliveryTarget && claimedJob.target.participantId
+            ? 'participant'
+            : undefined,
+        deliverySource: claimedJob.target.deliverySource,
         deliveryTarget: claimedJob.target.deliveryTarget,
         operatorAuthority: 'direct-operator',
         workingDirectory: input.vault,

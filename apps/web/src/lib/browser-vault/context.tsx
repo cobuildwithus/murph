@@ -259,30 +259,10 @@ function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }
     status,
     workspaceVersion,
   }), [client, deviceSyncImportPending, error, freshness, load, ref, refreshPending, status, workspaceVersion]);
-  const showSyncIndicator =
-    status !== "error"
-    && refreshPending;
 
   return (
     <BrowserVaultContext.Provider value={value}>
       {children}
-      {showSyncIndicator ? (
-        <div
-          aria-live="polite"
-          className="fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-lg"
-          role="status"
-        >
-          <span
-            aria-hidden="true"
-            className="h-2 w-2 shrink-0 rounded-full bg-emerald-500"
-          />
-          <span>
-            {status === "empty"
-              ? "Preparing dashboard..."
-              : "Syncing latest changes..."}
-          </span>
-        </div>
-      ) : null}
     </BrowserVaultContext.Provider>
   );
 }

@@ -1920,7 +1920,7 @@ test("prepareDeviceProviderSnapshotImport drops Junction floating raw-only times
   assert.doesNotMatch(JSON.stringify(payload.rawArtifacts ?? []), /72\.4|apple-health|device-1/u);
 });
 
-test("prepareDeviceProviderSnapshotImport strips direct Junction identities from raw-only resources", async () => {
+test("prepareDeviceProviderSnapshotImport strips direct Junction identities from configured summaries", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",
     snapshot: {
@@ -2004,7 +2004,9 @@ test("prepareDeviceProviderSnapshotImport strips direct Junction identities from
 
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-meal"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-menstrual-cycle"));
-  assert.equal(payload.events?.length ?? 0, 0);
+  const mealEvents = payload.events?.filter((event) => event.kind === "meal") ?? [];
+  assert.equal(mealEvents.length, 1);
+  assert.equal(mealEvents[0]?.title, "Greek yogurt bowl");
   assert.equal(payload.samples?.length ?? 0, 0);
 
   const rawArtifactText = JSON.stringify(payload.rawArtifacts);

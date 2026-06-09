@@ -179,6 +179,7 @@ test("automation scaffold payload uses the canonical default shape", () => {
     },
     route: {
       channel: "telegram",
+      deliverySource: null,
       deliveryTarget: null,
       identityId: null,
       participantId: null,
@@ -320,6 +321,7 @@ test("automation save and edit schemas expose typed fields while automation impo
   assert.equal(automationCommandNames.includes("automation save"), true);
   assert.equal(automationCommandNames.includes("automation edit"), true);
   assert.equal(automationCommandNames.includes("automation import-json"), true);
+  assert.equal(automationCommandNames.includes("automation set-status"), true);
   assert.equal(automationCommandNames.includes("automation upsert"), false);
 
   const saveSchema = await readCommandSchema(cli, ["automation", "save"]);
@@ -364,6 +366,11 @@ test("automation save and edit schemas expose typed fields while automation impo
   assert.equal("input" in importJsonSchema.options.properties, true);
   assert.equal(importJsonSchema.options.required?.includes("input") ?? false, true);
   assert.deepEqual(importJsonSchema.args.required ?? [], []);
+
+  const setStatusSchema = await readCommandSchema(cli, ["automation", "set-status"]);
+  assert.deepEqual(setStatusSchema.args.required, ["lookup"]);
+  assert.equal("status" in setStatusSchema.options.properties, true);
+  assert.equal(setStatusSchema.options.required?.includes("status") ?? false, true);
 });
 
 test("automation save guidance keeps examples shell-copyable", async () => {
@@ -1014,6 +1021,78 @@ test("automation commands round-trip save, import-json, show, and list through t
     assert.equal(shownData.automation.route.participantId, "participant_daily");
     assert.equal(shownData.automation.route.threadId, "thread_daily");
 
+    const archived = await runInProcessJsonCli<{
+      automationId: string;
+      created: boolean;
+      lookupId: string;
+      path: string;
+      vault: string;
+    }>(cli, [
+      "automation",
+      "set-status",
+      payload.slug,
+      "--status",
+      "archived",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(archived.exitCode, null);
+    assert.equal(archived.envelope.ok, true);
+    assert.equal(archived.envelope.data?.created, false);
+    assert.equal(archived.envelope.data?.automationId, savedData.automationId);
+
+    const archivedShown = await runInProcessJsonCli<{
+      automation: {
+        automationId: string;
+        instructions: string;
+        route: {
+          deliveryTarget: string | null;
+          identityId: string | null;
+          participantId: string | null;
+          threadId: string | null;
+        };
+        schedule: {
+          kind: string;
+          localTime?: string;
+        };
+        status: string;
+      } | null;
+      vault: string;
+    }>(cli, [
+      "automation",
+      "show",
+      payload.slug,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(archivedShown.exitCode, null);
+    assert.equal(archivedShown.envelope.ok, true);
+    assert.equal(archivedShown.envelope.data?.automation?.status, "archived");
+    assert.equal(
+      archivedShown.envelope.data?.automation?.instructions,
+      payload.instructions,
+    );
+    assert.equal(
+      archivedShown.envelope.data?.automation?.schedule.localTime,
+      "08:30",
+    );
+    assert.equal(
+      archivedShown.envelope.data?.automation?.route.deliveryTarget,
+      "agentmail:daily",
+    );
+    assert.equal(
+      archivedShown.envelope.data?.automation?.route.identityId,
+      "identity_daily",
+    );
+    assert.equal(
+      archivedShown.envelope.data?.automation?.route.participantId,
+      "participant_daily",
+    );
+    assert.equal(
+      archivedShown.envelope.data?.automation?.route.threadId,
+      "thread_daily",
+    );
+
     const listed = await runInProcessJsonCli<{
       count: number;
       filters: {
@@ -1049,6 +1128,90 @@ test("automation commands round-trip save, import-json, show, and list through t
       importedPayload.slug,
     ]);
     assert.equal(listedData.items[0]?.automationId, savedData.automationId);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("automation import-json accepts Linq participant routes with delivery source", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-linq-participant-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+
+    const payload = {
+      ...createAutomationScaffoldPayload(),
+      title: "Linq setup continuation",
+      slug: "linq-setup-continuation",
+      instructions: "Continue setup over Linq.",
+      route: {
+        channel: "linq",
+        deliverySource: {
+          fromPhoneNumber: "+15550001111",
+          kind: "linq",
+        },
+        deliveryTarget: null,
+        identityId: "identity_linq",
+        participantId: "+15550002222",
+        threadId: null,
+      },
+    };
+    const payloadPath = path.join(parentRoot, "automation-linq-participant.json");
+    await writeFile(payloadPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+
+    const imported = await runInProcessJsonCli<{
+      automationId: string;
+      created: boolean;
+      lookupId: string;
+      path: string;
+      vault: string;
+    }>(cli, [
+      "automation",
+      "import-json",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(imported.exitCode, null);
+    assert.equal(imported.envelope.ok, true);
+    assert.equal(imported.envelope.data?.created, true);
+    assert.equal(imported.envelope.data?.lookupId, payload.slug);
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        route: {
+          deliverySource: { fromPhoneNumber: string; kind: string } | null;
+          deliveryTarget: string | null;
+          identityId: string | null;
+          participantId: string | null;
+          threadId: string | null;
+        };
+      } | null;
+      vault: string;
+    }>(cli, [
+      "automation",
+      "show",
+      payload.slug,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.deepEqual(shown.envelope.data?.automation?.route.deliverySource, {
+      fromPhoneNumber: "+15550001111",
+      kind: "linq",
+    });
+    assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, null);
+    assert.equal(shown.envelope.data?.automation?.route.identityId, "identity_linq");
+    assert.equal(shown.envelope.data?.automation?.route.participantId, "+15550002222");
+    assert.equal(shown.envelope.data?.automation?.route.threadId, null);
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
   }

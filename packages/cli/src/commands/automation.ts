@@ -284,14 +284,19 @@ function assertAutomationRouteCanDeliver(route: AutomationRoute): void {
   }
 
   if (route.channel === "linq") {
-    if (!route.deliveryTarget) {
+    const hasParticipantSource =
+      Boolean(route.participantId) && route.deliverySource?.kind === "linq";
+    if (!route.deliveryTarget && !hasParticipantSource) {
       throw new VaultCliError(
         "invalid_option",
-        "iMessage automation routes require an explicit delivery target. Pass --delivery-target.",
+        "iMessage automation routes require an explicit delivery target or a participant route with a delivery source.",
       );
     }
 
-    if (looksLikePrivateAssistantRoutePlaceholder(route.deliveryTarget)) {
+    if (
+      route.deliveryTarget &&
+      looksLikePrivateAssistantRoutePlaceholder(route.deliveryTarget)
+    ) {
       throw new VaultCliError(
         "invalid_option",
         "iMessage automation routes cannot use redacted conversation placeholders as delivery targets.",
@@ -648,6 +653,48 @@ export function registerAutomationCommands(cli: Cli.Cli) {
       return {
         vault: context.options.vault,
         automation: await showAutomation(context.options.vault, context.args.lookup),
+      };
+    },
+  });
+
+  automation.command("set-status", {
+    args: z.object({
+      lookup: z.string().min(1).describe("Automation id or slug to update."),
+    }),
+    description: "Update one automation status while preserving its existing definition.",
+    options: withBaseOptions({
+      status: z.enum(automationStatusValues).describe("New automation status."),
+    }),
+    output: automationSaveResultSchema,
+    async run(context) {
+      const existing = await showAutomation(context.options.vault, context.args.lookup);
+      if (!existing) {
+        throw new VaultCliError(
+          "automation_not_found",
+          "Automation was not found.",
+        );
+      }
+
+      const result = await upsertAutomation({
+        automationId: existing.automationId,
+        continuityPolicy: existing.continuityPolicy,
+        instructions: existing.instructions,
+        route: existing.route,
+        schedule: existing.schedule,
+        slug: existing.slug,
+        status: context.options.status,
+        summary: existing.summary ?? undefined,
+        tags: existing.tags,
+        title: existing.title,
+        vaultRoot: context.options.vault,
+      });
+
+      return {
+        vault: context.options.vault,
+        automationId: result.record.automationId,
+        lookupId: result.record.slug,
+        path: result.record.relativePath,
+        created: result.created,
       };
     },
   });

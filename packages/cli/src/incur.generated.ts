@@ -39,6 +39,7 @@ declare module 'incur' {
       'automation list': { args: {}; options: { requestId?: string; status?: ("active" | "paused" | "archived")[]; text?: string; limit: number } }
       'automation save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "archived"; summary?: string; tag?: string[]; tags?: string[]; continuityPolicy?: "fresh" | "preserve"; triggerKind?: "at" | "every" | "cron" | "dailyLocal" | "deviceActivity"; triggerAt?: string; triggerEveryMs?: number; triggerCron?: string; triggerLocalTime?: string; deviceSource?: "whoop" | "whoop_v2"; activityKind?: "walk"; scheduleKind?: "at" | "every" | "cron" | "dailyLocal"; scheduleAt?: string; scheduleEveryMs?: number; scheduleCron?: string; scheduleLocalTime?: string; channel?: string; deliveryTarget?: string; identityId?: string; participantId?: string; threadId?: string; instructions: string } }
       'automation scaffold': { args: {}; options: { requestId?: string } }
+      'automation set-status': { args: { lookup: string }; options: { requestId?: string; status: "active" | "paused" | "archived" } }
       'automation show': { args: { lookup: string }; options: { requestId?: string } }
       'blood-test import-json': { args: {}; options: { requestId?: string; input: string } }
       'blood-test list': { args: {}; options: { requestId?: string; status?: string; from?: string; to?: string; limit: number } }
