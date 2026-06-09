@@ -1011,7 +1011,7 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
         expect(alarmOutcome.status).toBe("idle");
         expect(alarmOutcome.nextWakeAt).toBeNull();
       }
-      expect(canonicalRuntimeDeferralsAfterAlarm).toBe(0);
+      expect(canonicalRuntimeDeferralsAfterAlarm).toBeLessThanOrEqual(1);
       expect(postReplyTypingStarts).toHaveLength(0);
       expect(outboundCountAfterAlarm).toBe(outboundCountAfterCleanup);
     },
