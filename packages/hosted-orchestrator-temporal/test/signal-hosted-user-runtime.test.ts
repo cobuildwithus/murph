@@ -19,7 +19,6 @@ import {
 
 const defaultWorkflowOptions = {
   ensureRuntimeProcessingStartToCloseTimeoutMs: 15_000,
-  prewarmTaskQueue: "murph-hosted-runtime-prewarm",
   readRuntimeReconciliationFactsStartToCloseTimeoutMs: 10_000,
 };
 

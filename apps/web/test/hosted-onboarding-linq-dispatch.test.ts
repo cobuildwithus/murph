@@ -52,6 +52,11 @@ const mocks = vi.hoisted(() => {
       telegramBotUsername: null,
       telegramWebhookSecret: null,
     },
+    prewarmRuntime: vi.fn(async () => ({
+      action: "started",
+      kind: "runtime_prewarm_accepted",
+    })),
+    readHostedExecutionControlClientIfConfigured: vi.fn(),
     incrementHostedLinqInboundDailyState: vi.fn(),
     incrementHostedLinqOutboundDailyState: vi.fn(),
     nudgeHostedRunnerUserBestEffort: vi.fn(async () => ({
@@ -106,10 +111,6 @@ const mocks = vi.hoisted(() => {
     sendHostedLinqReadReceipt: vi.fn(),
     startHostedLinqTypingIndicator: vi.fn(),
     signalHostedMailboxAppendRuntime: vi.fn(async () => ({
-      signalAccepted: true,
-      workflowId: "hosted-user-runtime:member_123",
-    })),
-    signalHostedRuntimePrewarm: vi.fn(async () => ({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     })),
@@ -209,9 +210,12 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
 }));
 
+vi.mock("@/src/lib/hosted-execution/control", () => ({
+  readHostedExecutionControlClientIfConfigured: mocks.readHostedExecutionControlClientIfConfigured,
+}));
+
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
-  signalHostedRuntimePrewarm: mocks.signalHostedRuntimePrewarm,
 }));
 
 vi.mock("../src/lib/hosted-onboarding/linq", async () => {
@@ -431,6 +435,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       remainingUsdMicros: 100_000n,
       spentUsdMicros: 0n,
     });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
+    mocks.prewarmRuntime.mockResolvedValue({
+      action: "started",
+      kind: "runtime_prewarm_accepted",
+    });
     mocks.sendHostedLinqReadReceipt.mockResolvedValue({
       ok: true,
       status: 204,
@@ -443,10 +452,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     });
-    mocks.signalHostedRuntimePrewarm.mockResolvedValue({
-      signalAccepted: true,
-      workflowId: "hosted-user-runtime:member_123",
-    });
   });
 
   it("builds the inactive signup invite with the concise Murph positioning line", () => {
@@ -456,6 +461,23 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
 Verify your phone to finish signup here:
 https://join.example.test/join/code_first_text`);
+  });
+
+  it("accepts Linq typing events without prewarming or signaling runtime work", async () => {
+    const response = await handleHostedOnboardingLinqWebhook({
+      rawBody: buildTypingWebhookBody(),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toEqual({
+      ignored: true,
+      ok: true,
+      reason: "typing-ignored",
+    });
+    expect(mocks.prewarmRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it.each(["sms", "RCS"] as const)(
@@ -597,6 +619,133 @@ https://join.example.test/join/code_first_text`);
       );
     },
   );
+
+  it("starts a best-effort Cloudflare prewarm hint before signaling active-member Linq message work", async () => {
+    const afterResponseTasks: Array<() => Promise<void>> = [];
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      prewarmRuntime: mocks.prewarmRuntime,
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+        }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        service: "iMessage",
+      }),
+      scheduleAfterResponse: (task) => afterResponseTasks.push(task),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    expect(mocks.readHostedExecutionControlClientIfConfigured).toHaveBeenCalledWith(6_000);
+    expect(mocks.prewarmRuntime).toHaveBeenCalledWith({
+      prewarmAttemptId: expect.stringMatching(/^linq-message:[0-9a-f-]{36}$/u),
+      source: "linq.message.ingress",
+      userId: "member_123",
+    });
+    const prewarmOrder = mocks.prewarmRuntime.mock.invocationCallOrder[0];
+    const mailboxSignalOrder = mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0];
+    if (typeof prewarmOrder !== "number" || typeof mailboxSignalOrder !== "number") {
+      throw new Error("Expected prewarm and mailbox signal calls.");
+    }
+    expect(prewarmOrder).toBeLessThan(mailboxSignalOrder);
+    expect(afterResponseTasks).toHaveLength(2);
+
+    await Promise.all(afterResponseTasks.map((task) => task()));
+
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.webhook.linq.message-prewarm",
+      }),
+      "runtime_prewarm_accepted",
+      expect.objectContaining({
+        responseReason: "wake-appended-active-member",
+        runtimePrewarmAction: "started",
+      }),
+    );
+  });
+
+  it("still signals active-member Linq message work when the best-effort prewarm hint fails", async () => {
+    const afterResponseTasks: Array<() => Promise<void>> = [];
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      prewarmRuntime: mocks.prewarmRuntime,
+    });
+    mocks.prewarmRuntime.mockRejectedValueOnce(new Error("cloudflare prewarm unavailable"));
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+        }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        service: "iMessage",
+      }),
+      scheduleAfterResponse: (task) => afterResponseTasks.push(task),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    expectHostedLinqPointerSignalAccepted();
+    await expect(Promise.all(afterResponseTasks.map((task) => task()))).resolves.toBeDefined();
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.webhook.linq.message-prewarm",
+      }),
+      "failed",
+      expect.objectContaining({
+        errorName: "Error",
+        responseReason: "wake-appended-active-member",
+      }),
+    );
+  });
 
   it("ignores non-allowlisted local Linq inbound messages before member lookup or wake handoff", async () => {
     mocks.hostedOnboardingEnvironment.linqLocalAllowedInboundPhoneNumbers = ["+15559999999"];
@@ -4032,6 +4181,22 @@ function buildHostedLinqWebhookBody(input: {
     },
     event_id: input.eventId ?? "evt_123",
     event_type: "message.received",
+  });
+}
+
+function buildTypingWebhookBody(input: {
+  eventId?: string;
+  service?: string;
+} = {}): string {
+  return JSON.stringify({
+    api_version: "v3",
+    created_at: "2026-03-26T12:00:00.000Z",
+    data: {
+      chat_id: "chat_typing_123",
+      service: input.service ?? "iMessage",
+    },
+    event_id: input.eventId ?? "evt_typing_123",
+    event_type: "chat.typing_indicator.started",
   });
 }
 

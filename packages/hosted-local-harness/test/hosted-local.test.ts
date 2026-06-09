@@ -98,14 +98,8 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("temporal-orchestration")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-temporal-orchestration-e2e.test.ts",
     );
-    expect(resolveHostedLocalE2eScenarios("linq-typing-prewarm")[0]?.file).toBe(
-      "apps/cloudflare/test/hosted-local-linq-typing-prewarm-e2e.test.ts",
-    );
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
       "temporal-orchestration",
-    );
-    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
-      "linq-typing-prewarm",
     );
   });
 

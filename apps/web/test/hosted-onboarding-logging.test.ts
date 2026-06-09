@@ -53,22 +53,22 @@ describe("hosted onboarding timing logging", () => {
   it("emits sanitized searchable diagnostic payloads", () => {
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
 
-    logHostedOnboardingDiagnostic("linq.typing-prewarm-decision", {
+    logHostedOnboardingDiagnostic("hosted.test-diagnostic", {
       decision: "ignored-no-active-route",
       eventIdSuffix: "abc123",
       memberEmail: "user@example.com",
-      responseReason: "typing-prewarm-ignored-no-active-route",
+      responseReason: "ignored-no-active-route",
       unsafeUrl: "https://example.test/raw",
     });
 
     expect(consoleInfo).toHaveBeenCalledWith(
-      "Hosted onboarding diagnostic: linq.typing-prewarm-decision.",
+      "Hosted onboarding diagnostic: hosted.test-diagnostic.",
       {
         decision: "ignored-no-active-route",
-        diagnostic: "linq.typing-prewarm-decision",
+        diagnostic: "hosted.test-diagnostic",
         eventIdSuffix: "abc123",
         memberEmail: "<redacted-email>",
-        responseReason: "typing-prewarm-ignored-no-active-route",
+        responseReason: "ignored-no-active-route",
         unsafeUrl: "<redacted-url>",
       },
     );
