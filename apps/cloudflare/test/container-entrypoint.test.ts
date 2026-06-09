@@ -783,6 +783,40 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
+  it("surfaces content-free Codex shell smoke failure diagnostics", async () => {
+    const runCodexShellSmoke = vi.fn(async () => {
+      throw new Error(
+        "Hosted Codex shell smoke assistant CLI surface contract was missing hot-path schemas. proofCount=1",
+      );
+    });
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        runCodexShellSmoke,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await sendHostedContainerJsonRequest({
+      body: "",
+      path: "/internal/deploy-codex-shell-smoke",
+      port: address.port,
+    });
+
+    expect(response.status).toBe(500);
+    expect(response.json).toEqual({
+      error: "Hosted Codex shell smoke failed.",
+      ok: false,
+      smokeErrorMessage:
+        "Hosted Codex shell smoke assistant CLI surface contract was missing hot-path schemas. proofCount=1",
+    });
+  });
+
   it("runs the managed-container direct R2 presigned PUT smoke through the container network", async () => {
     const runDirectR2PresignedPutSmoke = vi.fn(async () => ({
       byteLength: 4096,

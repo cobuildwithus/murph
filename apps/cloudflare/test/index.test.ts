@@ -391,6 +391,49 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("returns smoke failure detail instead of a redacted 500 from the container smoke route", async () => {
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      RUNNER_CONTAINER_SMOKE: {
+        getByName() {
+          return {
+            async destroyInstance() {},
+            async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
+              throw new Error("Runner container should not be invoked by smoke route tests.");
+            },
+            async smokeHealth() {
+              throw new Error(
+                "Hosted runner container Codex shell smoke failed with HTTP 500. "
+                  + "Hosted Codex shell smoke assistant CLI surface contract was missing hot-path schemas. proofCount=1",
+              );
+            },
+          };
+        },
+      },
+    });
+    const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
+    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
+    const request = new Request(url, {
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: callbackSigning,
+        method: "POST",
+        path: url.pathname,
+        payload: "",
+        search: url.search,
+      }),
+      method: "POST",
+    });
+
+    const response = await worker.fetch(request, env);
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      detail: "Hosted runner container Codex shell smoke failed with HTTP 500. "
+        + "Hosted Codex shell smoke assistant CLI surface contract was missing hot-path schemas. proofCount=1",
+      error: "Deploy container smoke failed.",
+      ok: false,
+    });
+  });
+
   it("can run deploy-signed direct R2 presigned PUT smoke against the bundles bucket", async () => {
     const uploadedObjects = new Map<string, { customMetadata: Record<string, string>; size: number }>();
     const deletedKeys: string[] = [];
