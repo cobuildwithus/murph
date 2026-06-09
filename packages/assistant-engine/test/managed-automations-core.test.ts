@@ -64,6 +64,29 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
   })
 
+  it('is idempotent against the persisted record: a second apply writes nothing', async () => {
+    const vaultRoot = await createVaultRoot()
+
+    await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      vaultRoot,
+    })
+
+    // Guards against seed/persistence normalization drift (trimming, markdown
+    // round-tripping, tag dedup order): the persisted record must compare
+    // equal to the seed so background wakes never rewrite it.
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T13:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 0,
+      skipped: 1,
+      updated: 0,
+    })
+  })
+
   it('does not overwrite a user automation that already owns the managed slug', async () => {
     const vaultRoot = await createVaultRoot()
     const userAutomation = await upsertAutomation({
