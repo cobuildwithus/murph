@@ -9,17 +9,19 @@ Neutral vault services live in `@murphai/vault-usecases/vault-services`, and inb
 ## Codex Warmth
 
 Codex app-server turns reuse one warm process per Node runtime/container when
-the process identity matches, including command, args, working directory, Codex
-home/config, and child-env authority. A turn is an RPC into that process rather
-than a per-turn app-server subprocess. Overlapping turns fail busy instead of
-spawning parallel app-server processes.
+the process launch key matches, including command, args, working directory,
+Codex home, and a small allowlist of child-env launch inputs such as PATH,
+Codex auth, hosted CLI bridge coordinates, and provider credentials. A turn is
+an RPC into that process rather than a per-turn app-server subprocess.
+Overlapping turns fail busy instead of spawning parallel app-server processes.
 
 Turn prompts, session ids, turn ids, and delivery routes are request data, not
 child process env. Hosted turns read the current delivery route through the CLI
 bridge when a command needs that invocation-scoped context; local assistant
 commands must pass explicit route flags instead of relying on ambient env.
 
-Hosted runtime env projection remains hosted-specific, but the app-server
-lifecycle is not. Identity/config mismatch, abort cleanup, malformed output,
-off-turn output, process failure, or idle explicit shutdown stops or poisons the
-warm process before a later turn can reuse it.
+Hosted runtime env projection remains owned by the hosted runtime before it
+calls assistant-engine. The app-server lifecycle is shared: launch-key mismatch,
+abort cleanup, malformed output, off-turn output, process failure, or idle
+explicit shutdown stops or poisons the warm process before a later turn can
+reuse it.
