@@ -1226,6 +1226,89 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
+  it("bounds unresolved startup readiness RPCs with timeout retry cadence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const neverReady = new Promise<never>(() => undefined);
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => await neverReady);
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const response = runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 10_000,
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    });
+    await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 8_000,
+      userId: TEST_USER_ID,
+    }));
+
+    await vi.advanceTimersByTimeAsync(8_000);
+    await expect(response).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:18.050Z",
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      failure_count: 1,
+      wake_at: null,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          runtimeProcessingRetryReason: "container_rpc_timeout",
+        }),
+      }),
+    );
+  });
+
+  it("invokes startup readiness directly on the container stub", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    let readinessReceiver: unknown = null;
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async function (
+      this: unknown,
+      input,
+    ) {
+      readinessReceiver = this;
+      expect(input).toEqual({
+        timeoutMs: 8_000,
+        userId: TEST_USER_ID,
+      });
+      return { kind: "ready" };
+    });
+    const { invoke, runner } = createRunnerHarness({
+      ensureReadyForProcessing,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    expect(ensureReadyForProcessing).toHaveBeenCalledOnce();
+    expect(readinessReceiver).toEqual(expect.objectContaining({
+      invoke: expect.any(Function),
+      smokeHealth: expect.any(Function),
+    }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+  });
+
   it("returns rpc-error retry cadence and clears the fresh fence when startup readiness is unsupported", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -2258,8 +2341,12 @@ function createRunnerHarness(input: {
   const ensureReadyForProcessing = input.ensureReadyForProcessing === null
     ? null
     : createDirectOnlyRpcMethod<NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>>(
-        async (ensureInput) =>
-          await input.ensureReadyForProcessing?.(ensureInput) ?? { kind: "ready" },
+        async function (
+          this: HostedExecutionContainerStubLike,
+          ensureInput,
+        ) {
+          return await input.ensureReadyForProcessing?.call(this, ensureInput) ?? { kind: "ready" };
+        },
       );
   const prewarmForProcessing = input.prewarmForProcessing === null
     ? null

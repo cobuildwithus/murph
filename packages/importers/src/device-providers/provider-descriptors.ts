@@ -580,7 +580,7 @@ export const JUNCTION_DEVICE_PROVIDER_DESCRIPTOR = {
     windows: {
       backfillDays: DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
       reconcileDays: 7,
-      reconcileIntervalMs: 6 * 60 * 60_000,
+      reconcileIntervalMs: 60 * 60_000,
     },
     jobKinds: ["backfill", "reconcile", "resource"],
     supportsRemoteDisconnect: true,
