@@ -192,8 +192,37 @@ function sourceIdFromOriginId(dataOriginId) {
   return String(dataOriginId).includes(":") ? String(dataOriginId).slice(String(dataOriginId).indexOf(":") + 1) : String(dataOriginId);
 }
 
+function repairSourceForRow(row, label) {
+  const originSource = sourceFromOriginId(row.dataOriginId);
+  const labelSource = typeof label.source === "string" ? cleanValue(label.source) : "";
+  return labelSource && String(row.dataOriginId).startsWith(`${labelSource}:`) ? labelSource : originSource;
+}
+
+function repairSourceIdForRow(row, label, source) {
+  const originSourceId = sourceIdFromOriginId(row.dataOriginId);
+  const labelSourceId = typeof label.sourceId === "string" ? cleanValue(label.sourceId) : "";
+  return labelSourceId && String(row.dataOriginId) === `${source}:${labelSourceId}` ? labelSourceId : originSourceId;
+}
+
 function repairBrandForSource(source, fallbackBrand) {
   return REPAIR_SOURCE_BRAND_OVERRIDES.get(cleanValue(source)) ?? fallbackBrand;
+}
+
+function parserBlockerForProductionReviewIssue(issue) {
+  if (issue === "non_standalone_product") return "non_standalone_product";
+  if (issue === "likely_food_or_non_supplement") return "likely_food_or_non_supplement";
+  return `production_${issue}`;
+}
+
+function hasIngredientRowNameContamination(rows) {
+  return Array.isArray(rows) && rows.some((row) => hasParsedIngredientNameContamination(row));
+}
+
+function wouldShrinkExistingIngredientRows(existingLabel, proposedLabel) {
+  const existingRows = existingLabel?.ingredientRows;
+  const proposedRows = proposedLabel?.ingredientRows;
+  if (!Array.isArray(existingRows) || !Array.isArray(proposedRows)) return false;
+  return existingRows.length > 0 && proposedRows.length < existingRows.length;
 }
 
 function hasArray(value) {
@@ -227,8 +256,8 @@ function repairPreviewForRow(row) {
     ...(parsedServingSizes.length > 0 ? { servingSizes: parsedServingSizes } : {}),
     ...(parsedIngredientRows.length > 0 ? { ingredientRows: parsedIngredientRows } : {}),
   };
-  const source = label.source || sourceFromOriginId(row.dataOriginId);
-  const sourceId = label.sourceId || sourceIdFromOriginId(row.dataOriginId);
+  const source = repairSourceForRow(row, label);
+  const sourceId = repairSourceIdForRow(row, label, source);
   const brand = repairBrandForSource(source, row.brand);
   const proposedSearchText = buildSearchText({
     source,
@@ -241,13 +270,13 @@ function repairPreviewForRow(row) {
     dataOriginUrl: row.dataOriginUrl,
     label: proposedLabel,
   });
-  const parserBlockers = parserBlockersForRow(row, label, parsedIngredientRows, parsedServingSizes, parserState);
+  let parserBlockers = parserBlockersForRow(row, label, parsedIngredientRows, parsedServingSizes, parserState);
   const currentParserStatus = parserStatus(parsedIngredientRows, parsedServingSizes, parserState);
-  const automatedBackfillReady = currentParserStatus === "structured_ready" && parserBlockers.length === 0;
-  const removableFieldCandidates = findRemovableFieldCandidates(label, {
-    allowRawEvidenceRemoval: automatedBackfillReady,
+  const parserBackfillReady = currentParserStatus === "structured_ready" && parserBlockers.length === 0;
+  const draftRemovableFieldCandidates = findRemovableFieldCandidates(label, {
+    allowRawEvidenceRemoval: parserBackfillReady,
   });
-  const productionCandidate = automatedBackfillReady
+  const draftProductionCandidate = parserBackfillReady
     ? normalizeItem({
       id: row.dataOriginId,
       dataOrigin: "brand_site",
@@ -259,9 +288,22 @@ function repairPreviewForRow(row) {
       brand,
       upc: row.upc,
       offMarket: row.offMarket,
-      label: removeLabelFields(proposedLabel, removableFieldCandidates),
+      label: removeLabelFields(proposedLabel, draftRemovableFieldCandidates),
     })
     : null;
+  const productionReviewBlockers = (draftProductionCandidate?.reviewIssues ?? []).map(parserBlockerForProductionReviewIssue);
+  if (hasIngredientRowNameContamination(draftProductionCandidate?.label?.ingredientRows)) {
+    productionReviewBlockers.push("ingredient_name_contamination");
+  }
+  if (wouldShrinkExistingIngredientRows(label, draftProductionCandidate?.label)) {
+    productionReviewBlockers.push("existing_ingredient_rows_would_decrease");
+  }
+  if (productionReviewBlockers.length > 0) {
+    parserBlockers = uniqueStrings([...parserBlockers, ...productionReviewBlockers]);
+  }
+  const automatedBackfillReady = parserBackfillReady && productionReviewBlockers.length === 0;
+  const removableFieldCandidates = automatedBackfillReady ? draftRemovableFieldCandidates : [];
+  const productionCandidate = automatedBackfillReady ? draftProductionCandidate : null;
   const parsedIngredientRowSources = uniqueStrings(parsedIngredientRows.map((ingredientRow) => ingredientRow.source));
   const evidenceRecoveryHint = evidenceRecoveryHintForRow(label, {
     parserStatus: currentParserStatus,
@@ -297,7 +339,9 @@ function repairPreviewForRow(row) {
 
 function evidenceRecoveryHintForRow(label, state) {
   if (state.parserStatus === "structured_ready" && state.parserBlockers.length === 0) return "structured_ready";
-  if (state.parserBlockers.includes("likely_food_or_non_supplement")) return "not_standalone_supplement_review";
+  if (state.parserBlockers.includes("likely_food_or_non_supplement") || state.parserBlockers.includes("non_standalone_product")) {
+    return "not_standalone_supplement_review";
+  }
   if (state.parserBlockers.includes("page_body_contamination") || state.parserBlockers.includes("facts_panel_too_long")) {
     return "official_refetch_page_body";
   }
@@ -345,6 +389,7 @@ function parserBlockersForRow(row, label, ingredientRows, servingSizes, state) {
   if (hasLikelyMissingProminentFactsRows(label, ingredientRows)) blockers.push("likely_missing_facts_rows");
   if (hasMissingProminentFactsRows(label, ingredientRows)) blockers.push("missing_prominent_facts_rows");
   if (ingredientRows.some((row) => !isUsefulIngredientRow(row))) blockers.push("invalid_parsed_ingredient_row");
+  if (ingredientRows.some((row) => hasParsedIngredientNameContamination(row))) blockers.push("parsed_ingredient_name_contamination");
   if (isLikelyFoodOrNonSupplementRow(row, label)) blockers.push("likely_food_or_non_supplement");
   if (ingredientRows.some((row) => row.source === "factsText_amount_pattern")) blockers.push("fallback_amount_pattern_rows");
   return uniqueStrings(blockers);
@@ -399,6 +444,7 @@ function hasHighConfidenceParsedIngredientRows(label, rows) {
   if (hasStackedTableContinuationRisk(label) && !hasStrongParsedTableRows(rows)) return false;
   if (maxFactsPanelLength(label) > 6000) return false;
   if (rows.some((row) => !isUsefulIngredientRow(row))) return false;
+  if (rows.some((row) => hasParsedIngredientNameContamination(row))) return false;
 
   const amountPatternRows = rows.filter((row) => row.source === "factsText_amount_pattern");
   if (amountPatternRows.length === 0) return true;
@@ -1669,6 +1715,23 @@ function isHeaderText(text) {
 
 function isIngredientTableHeaderCell(text) {
   return /^(?:nutritional\s+value|active\s+ingredients?|nutrition\s+information|nutritional\s+information)(?:\s*\/\s*|\b|:)/iu.test(cleanValue(text));
+}
+
+function hasParsedIngredientNameContamination(row) {
+  const name = cleanValue(row?.name);
+  if (!name) return true;
+  return [
+    /\b(?:supplement|nutrition)\s+facts\b/iu,
+    /\bservings?\s+size\b/iu,
+    /\bamount\s+per\s+serving\b/iu,
+    /%\s*(?:daily\s+value|dv|nrv|referencyjnej|referen)/iu,
+    /\bwarto[śs]ci\s+od[żz]ywcze\b/iu,
+    /\bskładnik\s+w\s+porcji\b/iu,
+    /\bzusammensetzung\b/iu,
+    /stosowa[ćc]/iu,
+    /\btake\s+\d\b/iu,
+    /\bdirections?\b/iu,
+  ].some((pattern) => pattern.test(name));
 }
 
 function isFootnoteText(text) {
