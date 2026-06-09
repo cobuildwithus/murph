@@ -26,6 +26,9 @@ import {
   readAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import {
+  type AssistantCurrentDeliveryRoute,
+} from "@murphai/operator-config/assistant/current-delivery-route";
+import {
   normalizeHostedAssistantRuntimeConfig,
   projectHostedRuntimeTrustStoreEnv,
 } from "./hosted-runtime/environment.ts";
@@ -37,7 +40,7 @@ import {
 } from "./hosted-runtime/cli-runtime-bridge.ts";
 import {
   readHostedAssistantInputCurrentDeliveryRoute,
-  type HostedForegroundCurrentDeliveryRoute,
+  resolveUnambiguousCurrentDeliveryRoute,
 } from "./hosted-runtime/current-delivery-route.ts";
 import {
   executeHostedMailboxEvent,
@@ -2245,9 +2248,9 @@ function resolveHostedWorkspaceRunMailboxFetchLimit(importLimit: number): number
 async function resolveHostedForegroundCurrentDeliveryRoute(input: {
   initialMailboxImport: HostedWorkspaceRunnerInput["initialMailboxImport"] | undefined;
   vaultRoot: string;
-}): Promise<HostedForegroundCurrentDeliveryRoute | null> {
+}): Promise<AssistantCurrentDeliveryRoute | null> {
   const assistantInputIds = input.initialMailboxImport?.importResult.assistantInputIds ?? [];
-  const routes = new Map<string, HostedForegroundCurrentDeliveryRoute>();
+  const routes: AssistantCurrentDeliveryRoute[] = [];
   for (const inputId of assistantInputIds) {
     if (!inputId) {
       continue;
@@ -2262,26 +2265,14 @@ async function resolveHostedForegroundCurrentDeliveryRoute(input: {
         replyTarget: event?.replyTarget ?? null,
       });
       if (route) {
-        routes.set(
-          [
-            route.channel,
-            route.deliveryTarget,
-            route.identityId ?? "",
-            route.participantId ?? "",
-            route.threadId ?? "",
-          ].join("\0"),
-          route,
-        );
+        routes.push(route);
       }
     } catch {
       return null;
     }
   }
 
-  if (routes.size !== 1) {
-    return null;
-  }
-  return [...routes.values()][0] ?? null;
+  return resolveUnambiguousCurrentDeliveryRoute(routes);
 }
 
 function resolveHostedWorkspaceInvocationStatus(input: {

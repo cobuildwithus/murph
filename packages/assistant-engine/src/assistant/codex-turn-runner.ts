@@ -312,8 +312,7 @@ async function executeAssistantCodexAttempt(input: {
     at: attemptAt,
     codexContinuation: attemptPlan.routePlan.codexContinuation.kind,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
-    resumeCodexThreadIdPresent:
-      attemptPlan.routePlan.resumeCodexThreadId !== null,
+    resumeCodexThreadIdPresent: attemptPlan.routePlan.resume !== null,
     route: attemptPlan.route,
     sessionId: attemptPlan.session.sessionId,
     turnId: executionPlan.turnId,
@@ -326,15 +325,13 @@ async function executeAssistantCodexAttempt(input: {
     codexContinuation: attemptPlan.routePlan.codexContinuation.kind,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
     routePlanningDiagnostics: attemptPlan.routePlan.planningDiagnostics,
-    resumeCodexThreadIdPresent:
-      attemptPlan.routePlan.resumeCodexThreadId !== null,
+    resumeCodexThreadIdPresent: attemptPlan.routePlan.resume !== null,
     workingDirectory: attemptPlan.routePlan.workingDirectory,
   })
   await recordCodexAttemptStarted({
     attemptCount: attemptPlan.attemptCount,
     at: attemptAt,
-    hasResumeCodexThreadId:
-      attemptPlan.routePlan.resumeCodexThreadId !== null,
+    hasResumeCodexThreadId: attemptPlan.routePlan.resume !== null,
     codexContinuationKind: attemptPlan.routePlan.codexContinuation.kind,
     route: attemptPlan.route,
     sessionId: attemptPlan.session.sessionId,
@@ -395,10 +392,7 @@ async function executeAssistantCodexAttempt(input: {
             binding: attemptPlan.session.binding,
           }
         : undefined,
-      freshThreadFallback: attemptPlan.routePlan.freshThreadFallback,
-      prepareFreshThreadFallback:
-        attemptPlan.routePlan.prepareFreshThreadFallback,
-      resumeCodexThreadId: attemptPlan.routePlan.resumeCodexThreadId,
+      resume: attemptPlan.routePlan.resume,
       codexCommand:
         attemptPlan.route.codexCommand ??
         executionPlan.input.codexCommand ??
