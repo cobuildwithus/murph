@@ -1079,6 +1079,65 @@ describe("HostedUserRunner execution coordination", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
+  it("ignores preparation that finishes after readiness fails with a workspace version bound", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const runnerSecretsReadStarted = createDeferred<void>();
+    const runnerSecretsKey = await hostedRunnerSecretsObjectKey({ userId: TEST_USER_ID });
+    const bucket = new DelayedGetMemoryEncryptedR2Bucket({
+      delayMs: 10_000,
+      key: runnerSecretsKey,
+      onDelayedGet: () => runnerSecretsReadStarted.resolve(),
+    });
+    const readiness = createDeferred<Awaited<
+      ReturnType<NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>>
+    >>();
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => await readiness.promise);
+    const { invoke, runner, sql } = createRunnerHarness({
+      bucket,
+      ensureReadyForProcessing,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const response = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    });
+    await runnerSecretsReadStarted.promise;
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: expect.stringMatching(/^runtime-write-/u),
+      active_workspace_version: "5",
+      failure_count: 0,
+      wake_at: null,
+    });
+
+    readiness.reject(createRuntimeStartupTimeoutError());
+    await expect(response).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:10.000Z",
+    });
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      active_workspace_version: null,
+      failure_count: 1,
+      wake_at: null,
+    });
+    expect(invoke).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await Promise.resolve();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      active_workspace_version: null,
+      failure_count: 1,
+      wake_at: null,
+    });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it("returns retry_later and clears the fresh fence when prepared workspace ownership mismatches", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

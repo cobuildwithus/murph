@@ -58,6 +58,7 @@ import type {
 } from "./types.js";
 import {
   RunnerAlarmCoordinator,
+  runnerWriteFenceIdentityMatches,
   runnerWriteFenceTokensMatch,
 } from "./alarm-coordinator.js";
 
@@ -462,11 +463,7 @@ export class RuntimeProcessingController {
       void readinessResultPromise.catch(() => undefined);
 
       const current = await this.input.stateStore.readWriteFenceToken();
-      const stillOwnsFreshFence = current !== null
-        && current.attemptId === token.attemptId
-        && current.generation === token.generation
-        && current.kind === token.kind
-        && current.userId === token.userId;
+      const stillOwnsFreshFence = runnerWriteFenceIdentityMatches(current, token);
       if (!stillOwnsFreshFence) {
         const startupConfirmed = await readinessPromise;
         if (!startupConfirmed.confirmed) {
