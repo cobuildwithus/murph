@@ -39,38 +39,36 @@ export const DEFAULT_MURPH_CONTACT_CHANNELS: MurphContactChannels = {
   text: false,
 };
 
-export function resolvePreferredMurphContactOption(input: {
+export function resolveMurphContactOptions(input: {
   contactChannels?: Partial<MurphContactChannels> | null;
   message?: MurphContactMessage | null;
+  murphEmailAddress?: string | null;
   murphPhoneNumber?: string | null;
-}): MurphContactOption | null {
+}): MurphContactOption[] {
   const contactChannels = normalizeMurphContactChannels(input.contactChannels);
   const message = normalizeMurphContactMessage(input.message);
   const murphPhoneNumber = normalizePhoneNumber(input.murphPhoneNumber);
+  const options: MurphContactOption[] = [];
 
   if (murphPhoneNumber && contactChannels.text) {
-    return buildMurphTextContactOption({
+    options.push(buildMurphTextContactOption({
       message,
       murphPhoneNumber,
-    });
+    }));
   }
 
   if (contactChannels.telegram) {
-    return buildMurphTelegramContactOption({ message });
+    options.push(buildMurphTelegramContactOption({ message }));
   }
 
   if (contactChannels.email) {
-    return buildMurphEmailContactOption({ message });
+    options.push(buildMurphEmailContactOption({
+      message,
+      murphEmailAddress: input.murphEmailAddress ?? null,
+    }));
   }
 
-  return null;
-}
-
-export function resolvePreferredMurphChatContactOption(input: {
-  contactChannels?: Partial<MurphContactChannels> | null;
-  murphPhoneNumber?: string | null;
-}): MurphContactOption | null {
-  return resolvePreferredMurphContactOption(input);
+  return options;
 }
 
 export function resolveMurphContactChannels(input: {
@@ -107,9 +105,11 @@ export function buildMurphSmsHref(input: {
 }
 
 export function buildMurphEmailHref(input: {
+  address?: string | null;
   body?: string | null;
   subject?: string | null;
 } = {}): string {
+  const address = normalizeOptionalString(input.address) ?? MURPH_CONTACT_EMAIL;
   const query: string[] = [];
   const subject = normalizeOptionalString(input.subject);
   const body = normalizeOptionalString(input.body);
@@ -124,8 +124,8 @@ export function buildMurphEmailHref(input: {
 
   const queryString = query.join("&");
   return queryString
-    ? `mailto:${MURPH_CONTACT_EMAIL}?${queryString}`
-    : `mailto:${MURPH_CONTACT_EMAIL}`;
+    ? `mailto:${address}?${queryString}`
+    : `mailto:${address}`;
 }
 
 export function normalizeMurphContactChannels(
@@ -174,9 +174,11 @@ function buildMurphTelegramContactOption(input: {
 
 function buildMurphEmailContactOption(input: {
   message: NormalizedMurphContactMessage;
+  murphEmailAddress: string | null;
 }): MurphContactOption {
   return {
     href: buildMurphEmailHref({
+      address: input.murphEmailAddress,
       body: input.message.body,
       subject: input.message.subject ?? "Hey Murph",
     }),
