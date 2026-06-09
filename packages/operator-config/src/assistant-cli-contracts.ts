@@ -866,9 +866,10 @@ export const assistantCronScheduleSchema = automationTimeScheduleSchema
 export const assistantCronScheduleInputSchema = automationTimeScheduleSchema
 
 const assistantCronRouteSchema = automationRouteSchema
-  .omit({ channel: true, threadId: true })
+  .omit({ channel: true, deliverySource: true, threadId: true })
   .extend({
     channel: z.string().min(1).nullable(),
+    deliverySource: assistantDeliverySourceSchema.nullable().default(null),
     threadId: z.string().min(1).nullable(),
   })
   .strict()
@@ -881,6 +882,11 @@ export const assistantCronTargetSchema = assistantCronRouteSchema
   .strict()
 
 export const assistantSelfDeliveryTargetSchema = automationRouteSchema
+  .omit({ deliverySource: true })
+  .extend({
+    deliverySource: assistantDeliverySourceSchema.nullable().default(null),
+  })
+  .strict()
 
 export const assistantCronJobStateSchema = z
   .object({
@@ -1281,9 +1287,13 @@ export type AssistantSessionShowResult = z.infer<
 >
 export type AssistantCronSchedule = z.infer<typeof assistantCronScheduleSchema>
 export type AssistantCronScheduleInput = z.infer<typeof assistantCronScheduleInputSchema>
-export type AssistantCronTarget = Omit<AutomationRoute, 'channel' | 'threadId'> & {
+export type AssistantCronTarget = Omit<
+  AutomationRoute,
+  'channel' | 'deliverySource' | 'threadId'
+> & {
   alias: string | null
   channel: string | null
+  deliverySource: Exclude<AutomationRoute['deliverySource'], undefined>
   sessionId: string | null
   threadId: string | null
 }
@@ -1332,7 +1342,7 @@ export type AssistantCronPresetShowResult = z.infer<
 export type AssistantCronPresetInstallResult = z.infer<
   typeof assistantCronPresetInstallResultSchema
 >
-export type AssistantSelfDeliveryTarget = AutomationRoute
+export type AssistantSelfDeliveryTarget = z.infer<typeof assistantSelfDeliveryTargetSchema>
 export type AssistantSelfDeliveryTargetListResult = z.infer<
   typeof assistantSelfDeliveryTargetListResultSchema
 >

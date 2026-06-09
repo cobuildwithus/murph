@@ -730,6 +730,7 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     },
     route: {
       channel: "telegram",
+      deliverySource: null,
       deliveryTarget: "chat-123",
       identityId: "identity-telegram-bot",
       participantId: "participant-user",
@@ -1192,6 +1193,7 @@ schedule:
   localTime: 19:30
 route:
   channel: telegram
+  deliverySource: null
   deliveryTarget: chat-123
   identityId: identity-telegram-bot
   participantId: participant-user

@@ -5,6 +5,7 @@ import {
   cloneElement,
   createElement,
   isValidElement,
+  useEffect,
   type ReactNode,
 } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -40,6 +41,16 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/hosted-app-session-client", () => ({
   logoutHostedAppSession: mocks.logoutHostedAppSession,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-privy-logout", () => ({
+  HostedPrivyLogout: ({ onDone }: { onDone: () => void }) => {
+    useEffect(() => {
+      onDone();
+    }, [onDone]);
+
+    return null;
+  },
 }));
 
 vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
