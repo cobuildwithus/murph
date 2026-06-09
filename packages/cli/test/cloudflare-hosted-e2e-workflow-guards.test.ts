@@ -6,6 +6,24 @@ import { describe, expect, it } from 'vitest'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const hostedE2eWorkflowPath = path.join(repoRoot, '.github', 'workflows', 'cloudflare-hosted-e2e.yml')
+const hostedDeviceSyncE2eWorkflowPath = path.join(
+  repoRoot,
+  '.github',
+  'workflows',
+  'cloudflare-hosted-device-sync-e2e.yml',
+)
+
+function expectPostgresServiceContract(workflow: string, expectedServiceCount: number): void {
+  expect(workflow.match(/image: postgres:17/g)).toHaveLength(expectedServiceCount)
+  expect(workflow.match(/POSTGRES_DB: murph_test/g)).toHaveLength(expectedServiceCount)
+  expect(workflow.match(/POSTGRES_PASSWORD: postgres/g)).toHaveLength(expectedServiceCount)
+  expect(workflow.match(/POSTGRES_USER: postgres/g)).toHaveLength(expectedServiceCount)
+  expect(workflow.match(/--health-cmd "pg_isready -U postgres -d murph_test"/g)).toHaveLength(
+    expectedServiceCount,
+  )
+  expect(workflow.match(/--health-retries 10/g)).toHaveLength(expectedServiceCount)
+  expect(workflow.match(/- 5432:5432/g)).toHaveLength(expectedServiceCount)
+}
 
 describe('cloudflare hosted e2e workflow guards', () => {
   it('provisions a real local postgres service for hosted local e2e jobs', () => {
@@ -27,12 +45,7 @@ describe('cloudflare hosted e2e workflow guards', () => {
     expect(workflow).not.toContain('DEVICE_SYNC_ENCRYPTION_KEY_VERSION')
     expect(hostedLocalE2eScenarios).not.toHaveLength(0)
     expect(postgresBackedScenarioCount).toBeGreaterThan(0)
-    expect(workflow.match(/image: postgres/g)).toHaveLength(postgresBackedScenarioCount)
-    expect(workflow.match(/POSTGRES_DB: murph_test/g)).toHaveLength(postgresBackedScenarioCount)
-    expect(workflow.match(/POSTGRES_PASSWORD: postgres/g)).toHaveLength(postgresBackedScenarioCount)
-    expect(workflow.match(/POSTGRES_USER: postgres/g)).toHaveLength(postgresBackedScenarioCount)
-    expect(workflow.match(/--health-cmd pg_isready/g)).toHaveLength(postgresBackedScenarioCount)
-    expect(workflow.match(/- 5432:5432/g)).toHaveLength(postgresBackedScenarioCount)
+    expectPostgresServiceContract(workflow, postgresBackedScenarioCount)
     expect(workflow).toContain('pnpm hosted-local e2e device-connect')
     expect(workflow).toContain('pnpm hosted-local e2e linq-delivery')
     expect(workflow).toContain('pnpm hosted-local e2e linq-scheduled-reminder')
@@ -42,5 +55,15 @@ describe('cloudflare hosted e2e workflow guards', () => {
     expect(workflow.match(/\.artifacts\/hosted-local\/\*\*\/state\.json/g)).toHaveLength(postgresBackedScenarioCount)
     expect(workflow).not.toContain('pnpm --dir apps/cloudflare test:e2e:linq-delivery:local')
     expect(workflow).not.toContain('pnpm --dir apps/cloudflare test:e2e:telegram:local')
+  })
+
+  it('keeps the device-sync hosted e2e job on the same postgres service contract', () => {
+    const workflow = readFileSync(hostedDeviceSyncE2eWorkflowPath, 'utf8')
+
+    expect(workflow).toContain('DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test')
+    expect(workflow).toContain('pnpm hosted-local e2e device-sync-junction-wearable-direct-resource-replay')
+    expectPostgresServiceContract(workflow, 1)
+    expect(workflow).toContain('.artifacts/cloudflare-hosted-device-sync-e2e/junction-wearable-direct-resource-replay.log')
+    expect(workflow).toContain('.artifacts/hosted-local/**/state.json')
   })
 })

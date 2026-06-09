@@ -28,16 +28,16 @@ jobs:
     timeout-minutes: 35
     services:
       postgres:
-        image: postgres
+        image: postgres:17
         env:
           POSTGRES_DB: murph_test
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres -d murph_test"
           --health-interval 10s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
         ports:
           - 5432:5432
     concurrency:
