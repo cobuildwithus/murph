@@ -86,10 +86,12 @@ export function validateAssistantCronDeliveryTarget(
   const threadId = normalizedRoute.threadId
   const deliveryTarget = normalizedRoute.deliveryTarget
   const deliverySource = input.deliverySource ?? null
+  const hasLinqParticipantDelivery =
+    channel === 'linq' && Boolean(participantId) && deliverySource?.kind === 'linq'
   if (channel === 'linq') {
     if (
       !deliveryTarget &&
-      !(participantId && deliverySource?.kind === 'linq')
+      !hasLinqParticipantDelivery
     ) {
       throw new VaultCliError(
         'ASSISTANT_CRON_DELIVERY_REQUIRED',
@@ -110,7 +112,7 @@ export function validateAssistantCronDeliveryTarget(
     threadId,
   })
 
-  if (!deliveryTarget && !bindingDelivery) {
+  if (!deliveryTarget && !bindingDelivery && !hasLinqParticipantDelivery) {
     throw new VaultCliError(
       'ASSISTANT_CRON_DELIVERY_REQUIRED',
       'Assistant cron jobs must bind an explicit outbound route. Pass --thread, --participant, or --deliveryTarget for the selected channel.',

@@ -598,6 +598,7 @@ export async function executeHostedAssistantNotificationWake(input: {
       wake: input.wake,
     }),
   ];
+  let seededOnboardingFollowupWakeAt: string | null = null;
 
   try {
     const notificationResult = await sendAssistantNotification(
@@ -613,7 +614,7 @@ export async function executeHostedAssistantNotificationWake(input: {
         },
       ),
     );
-    await maybeSeedOnboardingFollowupAutomation({
+    seededOnboardingFollowupWakeAt = await maybeSeedOnboardingFollowupAutomation({
       notificationResult,
       redactedLogEntries,
       vaultRoot: input.vaultRoot,
@@ -652,6 +653,8 @@ export async function executeHostedAssistantNotificationWake(input: {
   return createNoopMailboxEffect({
     conversationMetrics: null,
     mailboxLane: "assistant-notification",
+    nextWakeAt: seededOnboardingFollowupWakeAt,
+    nextWakeReason: seededOnboardingFollowupWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
     redactedLogEntries,
   });
 }
@@ -661,13 +664,13 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   vaultRoot: string;
   wake: HostedExecutionAssistantNotificationRequestedWake;
-}): Promise<void> {
+}): Promise<string | null> {
   if (!isSignupWelcomeAssistantNotification(input.wake)) {
-    return;
+    return null;
   }
 
   if (!didAssistantNotificationAcceptDelivery(input.notificationResult)) {
-    return;
+    return null;
   }
 
   try {
@@ -675,10 +678,10 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
       input.wake.notification.route,
     );
     if (!route) {
-      return;
+      return null;
     }
 
-    await upsertAssistantCronAutomation({
+    const job = await upsertAssistantCronAutomation({
       firstOccurrencePolicy: "after-current-local-day",
       instructions: ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS,
       route,
@@ -692,10 +695,12 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
       title: ONBOARDING_FOLLOWUP_AUTOMATION_TITLE,
       vault: input.vaultRoot,
     });
+    return job?.enabled ? job.state.nextRunAt : null;
   } catch (error) {
     input.redactedLogEntries.push(
       emitHostedOnboardingFollowupSeedFailureLog(input.wake, error),
     );
+    return null;
   }
 }
 

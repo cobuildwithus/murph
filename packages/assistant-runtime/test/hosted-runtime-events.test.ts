@@ -1161,7 +1161,8 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-thread-id");
   });
 
-  it("sends generic assistant notifications and returns noop wake metrics", async () => {
+  it("sends signup assistant notifications and returns the seeded follow-up wake", async () => {
+    const seededNextWakeAt = "2026-04-09T17:30:00.000Z";
     const bootstrapResult = {
       assistantConfigStatus: "saved",
       assistantConfigured: true,
@@ -1216,6 +1217,12 @@ describe("executeHostedMailboxEvent", () => {
         updates: [],
       });
       return createQueuedNotificationResult();
+    });
+    mocks.upsertAssistantCronAutomation.mockResolvedValueOnce({
+      enabled: true,
+      state: {
+        nextRunAt: seededNextWakeAt,
+      },
     });
 
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
@@ -1402,7 +1409,8 @@ describe("executeHostedMailboxEvent", () => {
       bootstrapResult,
       conversationMetrics: null,
       mailboxLane: "assistant-notification",
-      nextWakeAt: null,
+      nextWakeAt: seededNextWakeAt,
+      nextWakeReason: "assistant",
       postCheckpointRecord: null,
       redactedLogEntries: [
         {
