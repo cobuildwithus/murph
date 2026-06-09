@@ -325,10 +325,13 @@ active by starting a runner, waking a ready child, recording a pending wake whil
 the child is still starting, or replacing an old runtime write fence after
 startup grace only when no active child exists. The command returns
 `retry_later` instead of pretending success when Cloudflare cannot confirm fresh
-start or fresh wake acceptance. Fresh starts read the hosted workspace,
-bind the workspace version to the write fence, build runtime config/secrets, and
-construct the container job before returning accepted; failures in that
-pre-handoff path clear the fresh fence and return `retry_later`. The Temporal
+start or fresh wake acceptance. Fresh starts begin the runtime write fence, then
+overlap container readiness with hosted workspace read, workspace-version
+binding, runtime config/secrets preparation, and container job construction
+before returning accepted; failures in that pre-handoff path clear the fresh
+fence and return `retry_later`. Because readiness is overlapped, a failed
+preparation may still leave a best-effort warm shell behind; write-fence
+ownership remains the only authority to invoke or commit runtime work. The Temporal
 caller sends its existing ensure-processing HTTP timeout as an internal header.
 Cloudflare treats that value as an operational hint only: the foreground
 pre-accept budget is clamped by Cloudflare's configured web-control timeout, and
@@ -508,9 +511,10 @@ request, steered through the live Codex turn, or left unaccepted for a later
 normal turn when it misses the live steering window.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
-state. `apps/web` assesses freshness from the latest replica ref, checkpoint
-evidence, source identity when known, and a bounded max-age policy; ref
-presence alone is never freshness. Stale session reads may still serve a usable
+state. `apps/web` assesses browser-session backstops from the latest replica
+ref, client-known ref identity, and a bounded max-age policy; ref presence alone
+is never freshness. Workspace checkpoint timestamps are not content-version
+signals for replica freshness. Stale session reads may still serve a usable
 replica, but they must mark it stale and request refresh after the HTTP response.
 Web represents that request as ordinary low-priority runtime work only when its
 freshness policy explicitly asks for it; normal nudges do not become browser-vault

@@ -58,6 +58,7 @@ import type {
 } from "./types.js";
 import {
   RunnerAlarmCoordinator,
+  runnerWriteFenceIdentityMatches,
   runnerWriteFenceTokensMatch,
 } from "./alarm-coordinator.js";
 
@@ -72,6 +73,16 @@ export type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
 export type RuntimePrewarmInput = HostedRuntimePrewarmRequest & {
   userId: string;
 };
+
+type FreshRuntimeStartPreparation =
+  | {
+      kind: "ready";
+      prepared: PreparedRuntimeInvocation;
+    }
+  | {
+      kind: "retry";
+      response: HostedRuntimeEnsureProcessingResponse;
+    };
 
 function toRuntimeInvocationInput(input: RuntimeProcessingInput): RuntimeInvocationInput {
   return {
@@ -364,33 +375,16 @@ export class RuntimeProcessingController {
 
     await this.syncRunnerAlarm(await this.input.stateStore.readState());
 
-    const executionInput = toRuntimeInvocationInput(input.input);
-    let prepared: PreparedRuntimeInvocation;
-    try {
-      prepared = await this.input.invocationService.prepareWithFence({
-        commandBudget: input.commandBudget,
-        input: executionInput,
-        token,
-      });
-    } catch (error) {
-      const failed = await this.clearWriteFenceAfterRuntimeStartFailure({
-        error,
-        input: input.input,
-        message: "Hosted runner runtime processing preparation failed.",
-        token,
-      });
-      return failed.response;
-    }
-
-    const startupConfirmed = await this.confirmRuntimeContainerStartup({
+    const preparation = await this.prepareFreshRuntimeStart({
       commandBudget: input.commandBudget,
       input: input.input,
-      runnerContainerName: prepared.runnerContainerName,
-      token: prepared.token,
+      runnerContainerName,
+      token,
     });
-    if (!startupConfirmed.confirmed) {
-      return startupConfirmed.response;
+    if (preparation.kind === "retry") {
+      return preparation.response;
     }
+    const prepared = preparation.prepared;
 
     const stillOwnsPreparedFence = await this.confirmPreparedRuntimeWriteFenceIsActive({
       input: input.input,
@@ -430,6 +424,95 @@ export class RuntimeProcessingController {
       kind: "runtime_processing_accepted",
       recommendedRecheckAt: this.computeRuntimeProcessingOwnerRecheckAt(),
       runtimeAttemptId: prepared.token.attemptId,
+    };
+  }
+
+  private async prepareFreshRuntimeStart(input: {
+    commandBudget: RuntimeProcessingCommandBudget;
+    input: RuntimeProcessingInput;
+    runnerContainerName: string;
+    token: RunnerWriteFenceToken;
+  }): Promise<FreshRuntimeStartPreparation> {
+    const executionInput = toRuntimeInvocationInput(input.input);
+    const token = input.token;
+    const readinessPromise = this.confirmRuntimeContainerStartup({
+      commandBudget: input.commandBudget,
+      input: input.input,
+      runnerContainerName: input.runnerContainerName,
+      token,
+    });
+    const readinessResultPromise = readinessPromise.then((startupConfirmed) => ({
+      kind: "startup" as const,
+      startupConfirmed,
+    }));
+    const preparationPromise = this.input.invocationService.prepareWithFence({
+      commandBudget: input.commandBudget,
+      input: executionInput,
+      token,
+    }).then(
+      (prepared) => ({ kind: "prepared" as const, prepared }),
+      (error: unknown) => ({ kind: "failed" as const, error }),
+    );
+
+    const clearPreparationFailure = async (
+      error: unknown,
+    ): Promise<FreshRuntimeStartPreparation> => {
+      // Preparation is the invocation authority. Once it fails, clear this
+      // fresh fence and return; any still-pending readiness RPC may finish as a
+      // best-effort warm shell, but it cannot commit runtime work without the fence.
+      void readinessResultPromise.catch(() => undefined);
+
+      const current = await this.input.stateStore.readWriteFenceToken();
+      const stillOwnsFreshFence = runnerWriteFenceIdentityMatches(current, token);
+      if (!stillOwnsFreshFence) {
+        const startupConfirmed = await readinessPromise;
+        if (!startupConfirmed.confirmed) {
+          return {
+            kind: "retry",
+            response: startupConfirmed.response,
+          };
+        }
+      }
+
+      const failed = await this.clearWriteFenceAfterRuntimeStartFailure({
+        error,
+        input: input.input,
+        message: "Hosted runner runtime processing preparation failed.",
+        token,
+      });
+      return {
+        kind: "retry",
+        response: failed.response,
+      };
+    };
+
+    const firstCompleted = await Promise.race([
+      readinessResultPromise,
+      preparationPromise,
+    ]);
+    if (firstCompleted.kind === "failed") {
+      return await clearPreparationFailure(firstCompleted.error);
+    }
+
+    const startupConfirmed = firstCompleted.kind === "startup"
+      ? firstCompleted.startupConfirmed
+      : await readinessPromise;
+    if (!startupConfirmed.confirmed) {
+      return {
+        kind: "retry",
+        response: startupConfirmed.response,
+      };
+    }
+
+    const preparation = firstCompleted.kind === "prepared"
+      ? firstCompleted
+      : await preparationPromise;
+    if (preparation.kind === "failed") {
+      return await clearPreparationFailure(preparation.error);
+    }
+    return {
+      kind: "ready",
+      prepared: preparation.prepared,
     };
   }
 

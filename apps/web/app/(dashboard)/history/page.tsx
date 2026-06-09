@@ -38,10 +38,11 @@ export default function HistoryPage() {
 }
 
 function HistoryPageContent() {
-  const { client, error, refresh, status } = useBrowserVault();
+  const { client, error, refresh, refreshPending, status } = useBrowserVault();
   const history = useMemo(() => client ? selectBrowserVaultHistory(client) : null, [client]);
   const timeline = history?.timeline ?? [];
   const canRenderContent = status === "empty" || client !== null;
+  const isPreparingEmptyReplica = status === "empty" && refreshPending;
 
   return (
     <div className="flex flex-col gap-8">
@@ -58,7 +59,11 @@ function HistoryPageContent() {
           </p>
         </div>
         <div className="text-sm text-muted-foreground">
-          {client ? `Updated ${formatIsoDate(client.replica.generatedAt)}` : "No history available yet."}
+          {client
+            ? `Updated ${formatIsoDate(client.replica.generatedAt)}`
+            : isPreparingEmptyReplica
+              ? "Preparing timeline."
+              : "No history available yet."}
         </div>
       </div>
 
@@ -88,11 +93,18 @@ function HistoryPageContent() {
       ) : null}
 
       {canRenderContent && timeline.length === 0 ? (
-        <Card>
+        <Card
+          aria-live={isPreparingEmptyReplica ? "polite" : undefined}
+          role={isPreparingEmptyReplica ? "status" : undefined}
+        >
           <CardHeader>
-            <CardTitle>No timeline entries yet</CardTitle>
+            <CardTitle>
+              {isPreparingEmptyReplica ? "Preparing your timeline" : "No timeline entries yet"}
+            </CardTitle>
             <CardDescription>
-              No notes, events, assessments, or daily summaries are available yet.
+              {isPreparingEmptyReplica
+                ? "Your latest timeline data is still being prepared."
+                : "No notes, events, assessments, or daily summaries are available yet."}
             </CardDescription>
           </CardHeader>
         </Card>

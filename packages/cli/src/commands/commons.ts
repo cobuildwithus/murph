@@ -263,15 +263,10 @@ export function registerCommonsCommands(cli: Cli.Cli) {
       const groups = matchedProtocols.map((entry) =>
         buildProtocolExploreGroup(reader, entry.protocol, entry.matchReason),
       );
-      const starterCandidate = chooseStarterCandidate(
-        uniqueProtocolVariants(groups.flatMap((group) => [
-          {
-            protocol: group.matchedProtocol,
-            traits: group.traits,
-          },
-          ...group.relatedProtocolVariants,
-        ])),
-      );
+      const starterCandidate = chooseProtocolExploreStarterCandidate({
+        matchedEntity,
+        groups,
+      });
 
       return {
         catalogHash: reader.catalogHash,
@@ -372,6 +367,25 @@ function buildProtocolExploreGroup(
       ...relatedProtocolVariants,
     ]),
   };
+}
+
+function chooseProtocolExploreStarterCandidate(input: {
+  matchedEntity: CommonsProtocolEntity | null;
+  groups: ReturnType<typeof buildProtocolExploreGroup>[];
+}) {
+  if (input.matchedEntity === null) {
+    return input.groups[0]?.starterCandidate ?? null;
+  }
+
+  return chooseStarterCandidate(
+    uniqueProtocolVariants(input.groups.flatMap((group) => [
+      {
+        protocol: group.matchedProtocol,
+        traits: group.traits,
+      },
+      ...group.relatedProtocolVariants,
+    ])),
+  );
 }
 
 function uniqueProtocolVariants<TProtocol extends { key: string }>(

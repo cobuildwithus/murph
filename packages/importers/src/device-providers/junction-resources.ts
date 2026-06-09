@@ -4,6 +4,7 @@ export const JUNCTION_DEFAULT_SUMMARY_RESOURCES = Object.freeze([
   "sleep_cycle",
   "workouts",
   "body",
+  "meal",
 ] as const);
 
 export const JUNCTION_KNOWN_TIMESERIES_RESOURCES = Object.freeze([
@@ -33,7 +34,6 @@ export const JUNCTION_OPT_IN_SUMMARY_RESOURCES = Object.freeze([
 ] as const);
 
 export const JUNCTION_RAW_ONLY_SUMMARY_RESOURCES = Object.freeze([
-  "meal",
   "menstrual_cycle",
 ] as const);
 

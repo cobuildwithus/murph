@@ -51,7 +51,7 @@ import {
 import { VaultError } from "./errors.ts";
 import { pathExists, readUtf8File, writeVaultTextFile } from "./fs.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
-import { generateRecordId } from "./ids.ts";
+import { deterministicContractId, generateRecordId } from "./ids.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
 import { buildEventSpineLifecycle, eventSpineRevision } from "./history/event-spine.ts";
 import { loadEventLedgerShardsById, selectLatestMatchedEvent } from "./domains/events/ledger.ts";
@@ -667,7 +667,6 @@ const NUMERIC_UNIT_ALIASES = {
   },
 } as const;
 
-const CROCKFORD_BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const EVENT_VALIDATION_PLACEHOLDER_ID = `${ID_PREFIXES.event}_00000000000000000000000000`;
 const SAMPLE_VALIDATION_PLACEHOLDER_ID = `${ID_PREFIXES.sample}_00000000000000000000000000`;
 
@@ -690,33 +689,6 @@ function normalizeNumericUnit(stream: SampleStream, unit: unknown): string {
   }
 
   return candidate;
-}
-
-function encodeBase32(bytes: Uint8Array, length: number): string {
-  let output = "";
-  let buffer = 0;
-  let bits = 0;
-
-  for (const byte of bytes) {
-    buffer = (buffer << 8) | byte;
-    bits += 8;
-
-    while (bits >= 5 && output.length < length) {
-      bits -= 5;
-      output += CROCKFORD_BASE32_ALPHABET[(buffer >> bits) & 31];
-    }
-  }
-
-  if (bits > 0 && output.length < length) {
-    output += CROCKFORD_BASE32_ALPHABET[(buffer << (5 - bits)) & 31];
-  }
-
-  return output.padEnd(length, "0").slice(0, length);
-}
-
-function deterministicContractId(prefix: string, seed: string): string {
-  const hash = createHash("sha256").update(seed).digest();
-  return `${prefix}_${encodeBase32(hash, 26)}`;
 }
 
 function sampleRecordTimeBounds(records: readonly SampleRecord[]): {
