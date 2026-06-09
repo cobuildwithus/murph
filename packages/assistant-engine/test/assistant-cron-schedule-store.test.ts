@@ -325,6 +325,7 @@ describe('assistant cron store helpers', () => {
     ).toEqual({
       alias: 'morning',
       channel: 'telegram',
+      deliverySource: null,
       deliveryTarget: 'thread-123',
       identityId: 'ident-1',
       participantId: 'person-1',
@@ -556,6 +557,7 @@ function createCronTarget(): AssistantCronTarget {
   return {
     alias: null,
     channel: null,
+    deliverySource: null,
     deliveryTarget: null,
     identityId: null,
     participantId: null,

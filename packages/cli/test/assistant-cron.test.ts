@@ -216,6 +216,7 @@ test('assistant cron jobs reuse the sole saved self-delivery target when no rout
     await saveAssistantSelfDeliveryTarget(
       {
         channel: 'telegram',
+        deliverySource: null,
         participantId: 'saved-chat',
         threadId: 'saved-chat',
         deliveryTarget: null,

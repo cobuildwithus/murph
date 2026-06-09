@@ -269,6 +269,7 @@ function createCronTarget(
   return {
     alias: null,
     channel: null,
+    deliverySource: null,
     deliveryTarget: null,
     identityId: null,
     participantId: null,

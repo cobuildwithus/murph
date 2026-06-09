@@ -156,6 +156,7 @@ const TEST_CRON_JOB: AssistantCronJob = {
     participantId: 'chat-123',
     threadId: 'chat-123',
     deliveryTarget: null,
+    deliverySource: null,
   },
   createdAt: '2026-03-28T00:00:00.000Z',
   updatedAt: '2026-03-28T00:00:00.000Z',
