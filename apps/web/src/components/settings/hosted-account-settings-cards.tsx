@@ -8,6 +8,7 @@ import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/
 
 import { SettingsContactLink } from "./connected-account-card";
 import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
+import { formatHostedTelegramDisplayValue } from "./hosted-telegram-settings-helpers";
 
 type HostedSettingsIdentityLinkMode = "phone" | "email" | "telegram";
 
@@ -31,6 +32,7 @@ export function HostedAccountSettingsCards({
   const phoneNumber = account.phone.number;
   const phoneVerified = Boolean(account.phone.verifiedAt);
   const telegramUserId = account.telegram.telegramUserId;
+  const telegramValue = formatHostedTelegramDisplayValue(account.telegram) ?? "Not connected";
   const emailAddress = account.email.address;
   const emailVerified = Boolean(account.email.verifiedAt);
   const murphEmailAddress = account.email.murphEmailAddress;
@@ -56,7 +58,7 @@ export function HostedAccountSettingsCards({
         />
         <SettingsRow
           label="Telegram"
-          value={telegramUserId ? `Telegram user ${telegramUserId}` : "Not connected"}
+          value={telegramValue}
           empty={!telegramUserId}
           action={
             <Button type="button" size="default" variant={telegramUserId ? "ghost" : "secondary"} onClick={() => setLinkMode("telegram")}>
@@ -106,12 +108,12 @@ function SettingsRow(props: {
   value: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0">
+    <div className="grid gap-3 py-4 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
       <div className="min-w-0 flex-1">
         <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
           {props.label}
         </span>
-        <p className={`font-serif text-base tracking-tight ${props.empty ? "text-muted-foreground" : "text-foreground"}`}>
+        <p className={`break-words font-serif text-base tracking-tight ${props.empty ? "text-muted-foreground" : "text-foreground"}`}>
           {props.value}
         </p>
         {props.meta ? <div className="mt-1 [overflow-wrap:anywhere]">{props.meta}</div> : null}

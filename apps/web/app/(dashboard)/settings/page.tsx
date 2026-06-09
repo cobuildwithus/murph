@@ -6,7 +6,10 @@ import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
 import Link from "next/link";
 import { PageHeader } from "@/src/components/ui/page-header";
-import { readHostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
+import {
+  readHostedAccountSettingsSnapshot,
+  withServerApprovedTelegramUsernameHint,
+} from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 import {
   canStartHostedPulseTrialPaidPlan,
   canSwitchHostedBillingPlanToPulse,
@@ -14,6 +17,7 @@ import {
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -24,14 +28,14 @@ export const metadata: Metadata = createMurphPageMetadata({
 });
 
 export default async function SettingsPage() {
-  const { authenticated, authenticatedMember } = await getHostedPageAuthSnapshot();
+  const { authenticated, authenticatedMember, session } = await getHostedPageAuthSnapshot();
 
   if (!authenticated) {
     redirect("/");
   }
 
   const prisma = getPrisma();
-  const [routing, account, billingRef] = authenticatedMember
+  const [routing, account, billingRef, freshPrivySession] = authenticatedMember
     ? await Promise.all([
         readHostedMemberRoutingState({
           memberId: authenticatedMember.id,
@@ -44,8 +48,20 @@ export default async function SettingsPage() {
           memberId: authenticatedMember.id,
           prisma,
         }),
+        getHostedPrivySession().catch(() => null),
       ])
-    : [null, null, null];
+    : [null, null, null, null];
+  const privySessionMatchesAppSession =
+    freshPrivySession !== null && freshPrivySession.identity.userId === session?.privyUserId;
+  const serverApprovedPrivyLinkedAccounts = privySessionMatchesAppSession
+    ? freshPrivySession.linkedAccounts
+    : null;
+  const accountWithPrivyDisplay = account
+    ? withServerApprovedTelegramUsernameHint({
+        snapshot: account,
+        serverApprovedPrivyLinkedAccounts,
+      })
+    : account;
 
   return (
     <div className="flex flex-col gap-8">
@@ -96,9 +112,9 @@ export default async function SettingsPage() {
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Messaging
         </div>
-        {account ? (
+        {accountWithPrivyDisplay ? (
           <HostedAccountSettingsCards
-            account={account}
+            account={accountWithPrivyDisplay}
             murphPhoneNumber={routing?.linqRecipientPhone ?? null}
           />
         ) : null}

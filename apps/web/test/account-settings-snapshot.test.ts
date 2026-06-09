@@ -23,7 +23,11 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
   };
 });
 
-import { readHostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
+import {
+  readHostedAccountSettingsSnapshot,
+  withServerApprovedTelegramUsernameHint,
+  type HostedAccountSettingsSnapshot,
+} from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 
 const originalHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
 const originalHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
@@ -109,6 +113,42 @@ describe("hosted account settings snapshot", () => {
       },
     });
   });
+
+  it("adds a server-approved Privy Telegram username only when it matches the stored Telegram id", () => {
+    expect(withServerApprovedTelegramUsernameHint({
+      snapshot: makeAccountSettingsSnapshot({ telegramUserId: "456" }),
+      serverApprovedPrivyLinkedAccounts: [
+        {
+          id: 456,
+          type: "telegram",
+          username: "sample_user",
+        },
+      ],
+    })).toMatchObject({
+      telegram: {
+        telegramUserId: "456",
+        username: "sample_user",
+      },
+    });
+  });
+
+  it("does not add a server-approved Privy Telegram username from a different Telegram id", () => {
+    expect(withServerApprovedTelegramUsernameHint({
+      snapshot: makeAccountSettingsSnapshot({ telegramUserId: "456" }),
+      serverApprovedPrivyLinkedAccounts: [
+        {
+          id: 789,
+          type: "telegram",
+          username: "sample_user",
+        },
+      ],
+    })).toMatchObject({
+      telegram: {
+        telegramUserId: "456",
+        username: null,
+      },
+    });
+  });
 });
 
 function restoreEnv(key: string, value: string | undefined): void {
@@ -118,4 +158,22 @@ function restoreEnv(key: string, value: string | undefined): void {
   }
 
   process.env[key] = value;
+}
+
+function makeAccountSettingsSnapshot(input: {
+  telegramUserId: string | null;
+}): HostedAccountSettingsSnapshot {
+  return {
+    email: {
+      address: null,
+      verifiedAt: null,
+    },
+    phone: {
+      number: null,
+      verifiedAt: null,
+    },
+    telegram: {
+      telegramUserId: input.telegramUserId,
+    },
+  };
 }

@@ -4,6 +4,7 @@ import { Button } from "@/src/components/ui/button";
 import type { HostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import { SettingsContactLink } from "./connected-account-card";
+import { formatHostedTelegramDisplayValue } from "./hosted-telegram-settings-helpers";
 
 const MURPH_TELEGRAM_BOT_USERNAME = "withmurph_bot";
 const MURPH_TELEGRAM_BOT_URL = `https://t.me/${MURPH_TELEGRAM_BOT_USERNAME}`;
@@ -34,9 +35,7 @@ export function HostedTelegramSettingsContent(props: {
     );
   }
 
-  const telegramValue = currentTelegram.username
-    ? `@${currentTelegram.username}`
-    : `Telegram user ${currentTelegram.telegramUserId}`;
+  const telegramValue = formatHostedTelegramDisplayValue(currentTelegram) ?? "Connected";
 
   return (
     <div className="space-y-3">

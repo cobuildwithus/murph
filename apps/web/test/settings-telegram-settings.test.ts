@@ -539,6 +539,90 @@ describe("HostedTelegramCardSettings", () => {
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   });
 
+  it("renders the server-seeded username for a server-bound Telegram account", async () => {
+    const { HostedTelegramCardSettings } = await import(
+      "@/src/components/settings/hosted-telegram-card-settings"
+    );
+    mocks.requestHostedOnboardingJson.mockResolvedValue({
+      botLink: "https://t.me/murph_bot?start=connect",
+      runTriggered: true,
+      telegramUserId: "12345",
+      telegramUsername: "sample_user",
+    });
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        linkedAccounts: [
+          {
+            id: 12345,
+            type: "telegram",
+            username: "client_user",
+          },
+        ],
+      },
+    });
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedTelegramCardSettings, {
+        authenticated: true,
+        initialTelegramAccount: {
+          telegramUserId: "12345",
+          username: "sample_user",
+        },
+      }),
+    );
+    cleanupRender = cleanup;
+
+    expect(container.textContent).toContain("@sample_user");
+    expect(container.textContent).not.toContain("@client_user");
+    expect(container.textContent).not.toContain("Telegram user 12345");
+  });
+
+  it("does not render a client-only Privy username for a server-bound Telegram account", async () => {
+    const { HostedTelegramCardSettings } = await import(
+      "@/src/components/settings/hosted-telegram-card-settings"
+    );
+    mocks.requestHostedOnboardingJson.mockResolvedValue({
+      botLink: "https://t.me/murph_bot?start=connect",
+      runTriggered: true,
+      telegramUserId: "12345",
+      telegramUsername: null,
+    });
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        linkedAccounts: [
+          {
+            id: 12345,
+            type: "telegram",
+            username: "sample_user",
+          },
+        ],
+      },
+    });
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      botLink: "https://t.me/murph_bot?start=connect",
+      runTriggered: true,
+      telegramUserId: "12345",
+      telegramUsername: null,
+    });
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedTelegramCardSettings, {
+        authenticated: true,
+        initialTelegramAccount: {
+          telegramUserId: "12345",
+          username: null,
+        },
+      }),
+    );
+    cleanupRender = cleanup;
+
+    expect(container.textContent).toContain("Connected");
+    expect(container.textContent).not.toContain("@sample_user");
+    expect(container.textContent).not.toContain("Telegram user 12345");
+  });
+
   it("notifies its parent after a manual Telegram link sync succeeds", async () => {
     const { HostedTelegramCardSettings } = await import(
       "@/src/components/settings/hosted-telegram-card-settings"
