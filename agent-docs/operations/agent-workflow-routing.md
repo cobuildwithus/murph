@@ -1,6 +1,6 @@
 # Agent Workflow Routing
 
-Last verified: 2026-06-07
+Last verified: 2026-06-09
 
 This doc is the durable workflow map behind `AGENTS.md`.
 Use it to classify the task, load only the relevant docs, and choose the right verification, audit, and commit path.
@@ -42,8 +42,8 @@ Then load only the task-relevant docs listed below.
 
 - Same-turn task completion counts as acceptance unless the user explicitly says `review first` or `do not commit`.
 - Preserve unrelated working-tree edits in the current checkout and never revert work you did not make.
-- Do not create or switch git branches unless the user explicitly asks for that in the current task. Do not use branch changes as a workaround for dirty worktrees, deployment scope, or parallel work; preserve the current branch and stop/report the blocker instead.
-- Do not create, switch to, or land work in separate git worktrees or helper checkouts unless the user explicitly asks for that in the current task. Use the current checkout plus this ledger/plan workflow for coordination instead.
+- Default most non-trivial repo code/test/config changes to an isolated git worktree with a dedicated task branch, then open a PR after the normal scoped commit. Treat this as the expected lane for standard, high-risk, cross-cutting, or likely-overlapping work. Before creating the worktree, inspect current status and this ledger, choose a task-scoped branch/worktree name, and keep the normal plan, audit, verification, and commit workflow inside that worktree.
+- Use the current checkout directly for review-only work, vault-only data work, prompt-primary changes, text-only docs/process edits, minor copy/static-content changes, and other tiny low-risk edits where a worktree/PR would add more process than isolation value. Do not create or switch branches in the current checkout as a dirty-worktree workaround; if isolation is needed, use a separate worktree/branch or stop/report when setup is unsafe.
 - Prefer narrow ledger rows and narrow plans.
 - Treat supplied patches as behavioral intent, not overwrite authority.
 - If a change introduces or changes a durable repo rule, update the durable doc in the same turn.
