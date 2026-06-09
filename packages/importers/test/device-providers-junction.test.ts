@@ -124,7 +124,8 @@ function makeJunctionCronometerMealSnapshot(options: {
                 saturated: 98,
                 total: 100,
               },
-              fiber: 3,
+              // Junction documents the British spelling.
+              fibre: 3,
               protein: options.chickenProtein ?? 10,
               sugar: 25,
             },
@@ -846,6 +847,31 @@ test("Junction normalizer preserves name-only meal item ingredients", () => {
     proteinGrams: 18,
     carbsGrams: 48,
     fatGrams: 8,
+  });
+});
+
+test("Junction normalizer keeps micros-only meal item ingredients", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      meal: [{
+        calendar_date: "2019-08-24",
+        data: {
+          Eggs: { energy: { unit: "kcal", value: 140 } },
+          Multivitamin: { micros: { minerals: { iron: 8 } } },
+        },
+        id: "micros-only-item-1",
+        name: "Breakfast",
+        source: { provider: "cronometer", type: "app" },
+        timestamp: "2019-08-24T08:00:00Z",
+      }],
+    },
+  });
+  const meal = payload.events?.find((event) => event.kind === "meal");
+
+  assert.deepEqual(meal?.fields?.ingredients, ["Eggs", "Multivitamin"]);
+  assert.deepEqual((meal?.fields?.nutrition as { totals?: Record<string, unknown> } | undefined)?.totals, {
+    calories: 140,
   });
 });
 

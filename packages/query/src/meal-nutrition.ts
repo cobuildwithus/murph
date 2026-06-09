@@ -150,7 +150,10 @@ function mealDate(record: CanonicalEntity): string | null {
 }
 
 function mealRevisionKey(record: CanonicalEntity): string | null {
-  if (!isRecord(record.attributes)) {
+  // Only device imports produce revisions of the same upstream meal; manual
+  // meals are append-only and never collapse, even when they carry an
+  // externalRef.
+  if (!isRecord(record.attributes) || readString(record.attributes.source) !== "device") {
     return null;
   }
 
@@ -165,9 +168,8 @@ function mealRevisionKey(record: CanonicalEntity): string | null {
     }
   }
 
-  const source = readString(record.attributes.source);
   const mealId = readString(record.attributes.mealId);
-  return source === "device" && mealId ? JSON.stringify(["deviceMeal", mealId]) : null;
+  return mealId ? JSON.stringify(["deviceMeal", mealId]) : null;
 }
 
 function revisionTimestampMillis(value: unknown): number {
@@ -196,6 +198,9 @@ function isLaterMealRevision(candidate: CanonicalEntity, current: CanonicalEntit
   return candidate.entityId.localeCompare(current.entityId) > 0;
 }
 
+// Imported meal corrections land as distinct ledger records (each revision
+// hashes to its own event id), so totals must collapse them here rather than
+// relying on the read model's same-id revision collapse.
 function selectLatestMealRevisions(meals: readonly CanonicalEntity[]): CanonicalEntity[] {
   const unkeyedMeals: CanonicalEntity[] = [];
   const latestByKey = new Map<string, CanonicalEntity>();

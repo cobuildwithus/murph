@@ -285,7 +285,15 @@ test("summarizeMealNutritionTotals keeps the latest imported meal revision", () 
         recordedAt: "2026-04-14T12:03:00.000Z",
         source: "device",
       }),
+      // Manual meals stay append-only even when they share the imported
+      // meal's externalRef and mealId.
       createMealEntity("evt_manual_same_meal", "2026-04-14T19:00:00.000Z", {
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-cronometer-meal",
+          resourceId: "meal-1",
+          facet: "meal",
+        },
         mealId: "meal_imported_1",
         nutrition: {
           totals: {

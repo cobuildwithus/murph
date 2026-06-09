@@ -6,6 +6,7 @@ import {
   type MealNutrition,
   type WorkoutSession,
 } from "@murphai/contracts";
+import { deterministicContractId } from "@murphai/core";
 import { z } from "zod";
 
 import { stripUndefined } from "../shared.ts";
@@ -415,12 +416,15 @@ const JUNCTION_MEAL_FAT_GRAM_PATHS = [
   "totals.fatGrams",
 ] as const;
 const JUNCTION_MEAL_FIBER_GRAM_PATHS = [
+  // Junction documents the British spelling: macros.fibre.
+  "fibre",
   "fiber",
   "fiberGrams",
   "fiber_grams",
   "fiber_g",
   "dietaryFiber",
   "dietary_fiber",
+  "macros.fibre",
   "macros.fiber",
   "macros.fiberGrams",
   "macros.fiber_grams",
@@ -1467,7 +1471,7 @@ function buildJunctionMealId(
       ]
     : buildJunctionMealFallbackIdentityParts(resourceContext, entry, timestamp);
 
-  return deterministicContractId(ID_PREFIXES.meal, identity);
+  return deterministicContractId(ID_PREFIXES.meal, JSON.stringify(identity));
 }
 
 function buildJunctionMealFallbackIdentityParts(
@@ -1556,6 +1560,7 @@ function isJunctionMealNutritionItem(entry: PlainObject): boolean {
   return Boolean(
     asPlainObject(readPath(entry, "energy"))
     || asPlainObject(readPath(entry, "macros"))
+    || asPlainObject(readPath(entry, "micros"))
     || readJunctionMealNutritionData(entry),
   );
 }
@@ -2185,35 +2190,6 @@ function buildStableSleepStageResourceId(
     stage,
     index,
   ])}`;
-}
-
-const CONTRACT_ID_CROCKFORD_BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-
-function deterministicContractId(prefix: string, parts: readonly unknown[]): string {
-  const hash = createHash("sha256").update(JSON.stringify(parts)).digest();
-  return `${prefix}_${encodeCrockfordBase32(hash, 26)}`;
-}
-
-function encodeCrockfordBase32(bytes: Uint8Array, length: number): string {
-  let output = "";
-  let buffer = 0;
-  let bits = 0;
-
-  for (const byte of bytes) {
-    buffer = (buffer << 8) | byte;
-    bits += 8;
-
-    while (bits >= 5 && output.length < length) {
-      bits -= 5;
-      output += CONTRACT_ID_CROCKFORD_BASE32_ALPHABET[(buffer >> bits) & 31];
-    }
-  }
-
-  if (bits > 0 && output.length < length) {
-    output += CONTRACT_ID_CROCKFORD_BASE32_ALPHABET[(buffer << (5 - bits)) & 31];
-  }
-
-  return output.padEnd(length, "0").slice(0, length);
 }
 
 function shortHash(parts: readonly unknown[]): string {
