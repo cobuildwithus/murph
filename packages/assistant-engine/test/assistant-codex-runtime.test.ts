@@ -4778,280 +4778,167 @@ describe('assistant codex runtime', () => {
     expect(process.kill).toHaveBeenCalledWith(-20_000, 'SIGTERM')
   })
 
-  it('rejects and frees the warm slot when an aborted turn never completes', async () => {
-    const hostedCodexHome = await createTempDir('assistant-codex-warm-abort-timeout-home-')
-    const workingDirectory = await createTempDir('assistant-codex-warm-abort-timeout-work-')
-    const controller = new AbortController()
-    const interruptSeen = createDeferred<void>()
-    const liveTurnReady = createDeferred<CodexAppServerLiveTurn>()
-    const spawnedChildren: MockChildProcess[] = []
+  it.each([
+    {
+      liveInterruptRequested: false,
+      pidBase: 21_000,
+      slug: 'warm-abort-timeout',
+      trigger: 'an aborted turn',
+    },
+    {
+      liveInterruptRequested: true,
+      pidBase: 22_000,
+      slug: 'warm-live-interrupt-timeout',
+      trigger: 'a live interrupt',
+    },
+  ])(
+    'rejects and frees the warm slot when $trigger never completes',
+    async ({ liveInterruptRequested, pidBase, slug }) => {
+      const hostedCodexHome = await createTempDir(`assistant-codex-${slug}-home-`)
+      const workingDirectory = await createTempDir(`assistant-codex-${slug}-work-`)
+      const controller = new AbortController()
+      const interruptSeen = createDeferred<void>()
+      const liveTurnReady = createDeferred<CodexAppServerLiveTurn>()
+      const spawnedChildren: MockChildProcess[] = []
 
-    vi.mocked(process.kill).mockImplementation((pid, signal) => {
-      const child = spawnedChildren.find((candidate) => pid === -candidate.pid)
-      if (child && signal === 'SIGTERM') {
+      vi.mocked(process.kill).mockImplementation((pid, signal) => {
+        const child = spawnedChildren.find((candidate) => pid === -candidate.pid)
+        if (child && signal === 'SIGTERM') {
+          queueMicrotask(() => {
+            child.emit('exit', null, signal)
+            child.emit('close', null, signal)
+          })
+        }
+        return true
+      })
+
+      codexMocks.spawn.mockImplementation(() => {
+        const spawnedChild = new MockChildProcess()
+        spawnedChild.pid = pidBase + spawnedChildren.length
+        spawnedChildren.push(spawnedChild)
+        const processNumber = spawnedChildren.length
+
         queueMicrotask(() => {
-          child.emit('exit', null, signal)
-          child.emit('close', null, signal)
-        })
-      }
-      return true
-    })
+          void (async () => {
+            const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
+            spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
 
-    codexMocks.spawn.mockImplementation(() => {
-      const spawnedChild = new MockChildProcess()
-      spawnedChild.pid = 21_000 + spawnedChildren.length
-      spawnedChildren.push(spawnedChild)
-      const processNumber = spawnedChildren.length
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
-          spawnedChild.stdout.write(jsonLine({
-            id: thread.id,
-            result: {
-              thread: {
-                id: `thread-warm-abort-timeout-${processNumber}`,
-              },
-            },
-          }))
-
-          const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
-          spawnedChild.stdout.write(jsonLine({
-            id: turn.id,
-            result: {
-              turn: {
-                id: `turn-warm-abort-timeout-${processNumber}`,
-              },
-            },
-          }))
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/started',
-            params: {
-              turn: {
-                id: `turn-warm-abort-timeout-${processNumber}`,
-              },
-            },
-          }))
-
-          if (processNumber === 1) {
-            const interrupt = await waitForRpcMethod(spawnedChild, 'turn/interrupt')
-            interruptSeen.resolve()
+            const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
             spawnedChild.stdout.write(jsonLine({
-              id: interrupt.id,
-              result: {},
+              id: thread.id,
+              result: {
+                thread: {
+                  id: `thread-${slug}-${processNumber}`,
+                },
+              },
             }))
-            return
-          }
 
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: `turn-warm-abort-timeout-${processNumber}`,
-                status: 'completed',
-              },
-            },
-          }))
-        })()
-      })
-
-      return spawnedChild
-    })
-
-    const hostedEnv = {
-      CODEX_HOME: hostedCodexHome,
-      MURPH_HOSTED_RUNTIME_PROCESS: '1',
-      NODE_ENV: 'test',
-      PATH: '/usr/bin',
-    }
-
-    const abortedTurn = executeCodexAppServerTurn({
-      abortSignal: controller.signal,
-      env: hostedEnv,
-      onLiveTurn: (turn) => {
-        liveTurnReady.resolve(turn)
-      },
-      prompt: 'abort without completion',
-      workingDirectory,
-    })
-    void abortedTurn.catch(() => undefined)
-
-    await liveTurnReady.promise
-
-    try {
-      vi.useFakeTimers()
-      controller.abort()
-      await vi.advanceTimersByTimeAsync(1)
-      await interruptSeen.promise
-      expect(process.kill).toHaveBeenCalledWith(-21_000, 'SIGINT')
-
-      await vi.advanceTimersByTimeAsync(15_000)
-      await expect(abortedTurn).rejects.toMatchObject({
-        code: 'ASSISTANT_CODEX_APP_SERVER_INTERRUPT_TIMEOUT',
-        context: {
-          interruptCleanupTimeoutMs: 15_000,
-          liveInterruptRequested: false,
-          retryable: true,
-        },
-      })
-    } finally {
-      vi.useRealTimers()
-    }
-
-    await expect(
-      executeCodexAppServerTurn({
-        env: hostedEnv,
-        prompt: 'next turn after abort timeout',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-warm-abort-timeout-2',
-      turnId: 'turn-warm-abort-timeout-2',
-    })
-
-    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
-    expect(process.kill).toHaveBeenCalledWith(-21_000, 'SIGTERM')
-  })
-
-  it('rejects and frees the warm slot when a live interrupt never completes', async () => {
-    const hostedCodexHome = await createTempDir('assistant-codex-warm-live-interrupt-timeout-home-')
-    const workingDirectory = await createTempDir('assistant-codex-warm-live-interrupt-timeout-work-')
-    const interruptSeen = createDeferred<void>()
-    const liveTurnReady = createDeferred<CodexAppServerLiveTurn>()
-    const spawnedChildren: MockChildProcess[] = []
-
-    vi.mocked(process.kill).mockImplementation((pid, signal) => {
-      const child = spawnedChildren.find((candidate) => pid === -candidate.pid)
-      if (child && signal === 'SIGTERM') {
-        queueMicrotask(() => {
-          child.emit('exit', null, signal)
-          child.emit('close', null, signal)
-        })
-      }
-      return true
-    })
-
-    codexMocks.spawn.mockImplementation(() => {
-      const spawnedChild = new MockChildProcess()
-      spawnedChild.pid = 22_000 + spawnedChildren.length
-      spawnedChildren.push(spawnedChild)
-      const processNumber = spawnedChildren.length
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
-          spawnedChild.stdout.write(jsonLine({
-            id: thread.id,
-            result: {
-              thread: {
-                id: `thread-warm-live-interrupt-timeout-${processNumber}`,
-              },
-            },
-          }))
-
-          const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
-          spawnedChild.stdout.write(jsonLine({
-            id: turn.id,
-            result: {
-              turn: {
-                id: `turn-warm-live-interrupt-timeout-${processNumber}`,
-              },
-            },
-          }))
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/started',
-            params: {
-              turn: {
-                id: `turn-warm-live-interrupt-timeout-${processNumber}`,
-              },
-            },
-          }))
-
-          if (processNumber === 1) {
-            const interrupt = await waitForRpcMethod(spawnedChild, 'turn/interrupt')
-            interruptSeen.resolve()
+            const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
             spawnedChild.stdout.write(jsonLine({
-              id: interrupt.id,
-              result: {},
-            }))
-            return
-          }
-
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: `turn-warm-live-interrupt-timeout-${processNumber}`,
-                status: 'completed',
+              id: turn.id,
+              result: {
+                turn: {
+                  id: `turn-${slug}-${processNumber}`,
+                },
               },
-            },
-          }))
-        })()
+            }))
+            spawnedChild.stdout.write(jsonLine({
+              method: 'turn/started',
+              params: {
+                turn: {
+                  id: `turn-${slug}-${processNumber}`,
+                },
+              },
+            }))
+
+            if (processNumber === 1) {
+              const interrupt = await waitForRpcMethod(spawnedChild, 'turn/interrupt')
+              interruptSeen.resolve()
+              spawnedChild.stdout.write(jsonLine({
+                id: interrupt.id,
+                result: {},
+              }))
+              return
+            }
+
+            spawnedChild.stdout.write(jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: `turn-${slug}-${processNumber}`,
+                  status: 'completed',
+                },
+              },
+            }))
+          })()
+        })
+
+        return spawnedChild
       })
 
-      return spawnedChild
-    })
+      const hostedEnv = {
+        CODEX_HOME: hostedCodexHome,
+        MURPH_HOSTED_RUNTIME_PROCESS: '1',
+        NODE_ENV: 'test',
+        PATH: '/usr/bin',
+      }
 
-    const hostedEnv = {
-      CODEX_HOME: hostedCodexHome,
-      MURPH_HOSTED_RUNTIME_PROCESS: '1',
-      NODE_ENV: 'test',
-      PATH: '/usr/bin',
-    }
-
-    const interruptedTurn = executeCodexAppServerTurn({
-      env: hostedEnv,
-      onLiveTurn: (turn) => {
-        liveTurnReady.resolve(turn)
-      },
-      prompt: 'interrupt without completion',
-      workingDirectory,
-    })
-    void interruptedTurn.catch(() => undefined)
-
-    const liveTurn = await liveTurnReady.promise
-
-    try {
-      vi.useFakeTimers()
-      const interruptPromise = liveTurn.interrupt()
-      await vi.advanceTimersByTimeAsync(1)
-      await interruptSeen.promise
-      await interruptPromise
-      expect(process.kill).not.toHaveBeenCalledWith(-22_000, 'SIGINT')
-
-      await vi.advanceTimersByTimeAsync(15_000)
-      await expect(interruptedTurn).rejects.toMatchObject({
-        code: 'ASSISTANT_CODEX_APP_SERVER_INTERRUPT_TIMEOUT',
-        context: {
-          interruptCleanupTimeoutMs: 15_000,
-          liveInterruptRequested: true,
-          retryable: true,
-        },
-      })
-    } finally {
-      vi.useRealTimers()
-    }
-
-    await expect(
-      executeCodexAppServerTurn({
+      const timedOutTurn = executeCodexAppServerTurn({
+        abortSignal: liveInterruptRequested ? undefined : controller.signal,
         env: hostedEnv,
-        prompt: 'next turn after live interrupt timeout',
+        onLiveTurn: (turn) => {
+          liveTurnReady.resolve(turn)
+        },
+        prompt: 'interrupt without completion',
         workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-warm-live-interrupt-timeout-2',
-      turnId: 'turn-warm-live-interrupt-timeout-2',
-    })
+      })
+      void timedOutTurn.catch(() => undefined)
 
-    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
-    expect(process.kill).toHaveBeenCalledWith(-22_000, 'SIGTERM')
-  })
+      const liveTurn = await liveTurnReady.promise
+
+      try {
+        vi.useFakeTimers()
+        const interruptPromise = liveInterruptRequested ? liveTurn.interrupt() : null
+        if (!liveInterruptRequested) {
+          controller.abort()
+        }
+        await vi.advanceTimersByTimeAsync(1)
+        await interruptSeen.promise
+        if (interruptPromise) {
+          await interruptPromise
+          expect(process.kill).not.toHaveBeenCalledWith(-pidBase, 'SIGINT')
+        } else {
+          expect(process.kill).toHaveBeenCalledWith(-pidBase, 'SIGINT')
+        }
+
+        await vi.advanceTimersByTimeAsync(15_000)
+        await expect(timedOutTurn).rejects.toMatchObject({
+          code: 'ASSISTANT_CODEX_APP_SERVER_INTERRUPT_TIMEOUT',
+          context: {
+            interruptCleanupTimeoutMs: 15_000,
+            liveInterruptRequested,
+            retryable: true,
+          },
+        })
+      } finally {
+        vi.useRealTimers()
+      }
+
+      await expect(
+        executeCodexAppServerTurn({
+          env: hostedEnv,
+          prompt: 'next turn after interrupt timeout',
+          workingDirectory,
+        }),
+      ).resolves.toMatchObject({
+        sessionId: `thread-${slug}-2`,
+        turnId: `turn-${slug}-2`,
+      })
+
+      expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+      expect(process.kill).toHaveBeenCalledWith(-pidBase, 'SIGTERM')
+    },
+  )
 
   it('keeps one Codex app-server process open and steers late input into the active turn', async () => {
     const workingDirectory = await createTempDir('assistant-codex-live-steer-')
@@ -5881,12 +5768,7 @@ describe('assistant codex runtime', () => {
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_RESUME_STALE',
       context: {
-        mismatchedFields: expect.arrayContaining([
-          'cwd',
-          'model',
-          'modelProvider',
-          'sandbox',
-        ]),
+        mismatchedFields: ['cwd', 'model', 'modelProvider', 'sandbox'],
         resumeContextMismatch: true,
         retryable: true,
         staleResume: true,
@@ -5960,6 +5842,64 @@ describe('assistant codex runtime', () => {
       readWrittenRpcMessages(child).some((message) => message.method === 'turn/start'),
     ).toBe(false)
     expect(process.kill).toHaveBeenCalledWith(-35_200, 'SIGTERM')
+  })
+
+  it('fails closed on missing echoed fields and skips unrequested ones', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-resume-missing-echo-')
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 35_300 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const threadResume = await waitForRpcMethod(child, 'thread/resume')
+          child.stdout.write(
+            jsonLine({
+              id: threadResume.id,
+              result: {
+                cwd: '',
+                model: 'unrequested-model',
+                modelProvider: 'unrequested-provider',
+                sandbox: codexSandboxPolicyForMode('read-only'),
+                thread: {},
+              },
+            }),
+          )
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        prompt: 'resume with missing echoed context',
+        resumeSessionId: 'requested-thread',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_RESUME_STALE',
+      context: {
+        mismatchedFields: ['approvalPolicy', 'cwd'],
+        resumeContextMismatch: true,
+        retryable: true,
+        staleResume: true,
+      },
+    })
+
+    const child = requireMockChildProcess(spawnedChildren[0] ?? null)
+    expect(
+      readWrittenRpcMessages(child).some((message) => message.method === 'turn/start'),
+    ).toBe(false)
+    expect(process.kill).toHaveBeenCalledWith(-35_300, 'SIGTERM')
   })
 
   it.each([
