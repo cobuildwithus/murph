@@ -1,13 +1,10 @@
 import {
   type LinqMessageReceivedEvent,
-  type LinqTypingIndicatorStartedEvent,
   type LinqWebhookEvent,
   isLinqWebhookPayloadError,
   isLinqWebhookVerificationError,
   parseLinqMessageReceivedEvent,
-  parseLinqTypingIndicatorStartedEvent,
   parseLinqWebhookEvent,
-  resolveLinqTypingIndicatorOccurredAt,
   resolveLinqWebhookOccurredAt,
   summarizeLinqMessageReceivedEvent,
   verifyAndParseLinqWebhookRequest,
@@ -24,8 +21,6 @@ import { getHostedOnboardingEnvironment } from "./runtime";
 
 export type HostedLinqWebhookEvent = LinqWebhookEvent;
 export type HostedLinqMessageReceivedEvent = LinqMessageReceivedEvent;
-export type HostedLinqTypingIndicatorStartedEvent =
-  LinqTypingIndicatorStartedEvent;
 
 export function parseHostedLinqWebhookEvent(rawBody: string): HostedLinqWebhookEvent {
   try {
@@ -43,33 +38,6 @@ export function requireHostedLinqMessageReceivedEvent(
 ): HostedLinqMessageReceivedEvent {
   try {
     return parseLinqMessageReceivedEvent(event);
-  } catch (error) {
-    if (error instanceof TypeError) {
-      if (error.message.startsWith("Invalid ISO timestamp:")) {
-        const timestampField = readHostedLinqInvalidTimestampField(event);
-        throw hostedOnboardingError({
-          code: "LINQ_PAYLOAD_INVALID",
-          message: `${timestampField} must be a valid timestamp`,
-          httpStatus: 400,
-        });
-      }
-
-      throw hostedOnboardingError({
-        code: "LINQ_PAYLOAD_INVALID",
-        message: error.message,
-        httpStatus: 400,
-      });
-    }
-
-    throw error;
-  }
-}
-
-export function requireHostedLinqTypingIndicatorStartedEvent(
-  event: HostedLinqWebhookEvent,
-): HostedLinqTypingIndicatorStartedEvent {
-  try {
-    return parseLinqTypingIndicatorStartedEvent(event);
   } catch (error) {
     if (error instanceof TypeError) {
       if (error.message.startsWith("Invalid ISO timestamp:")) {
@@ -215,12 +183,6 @@ export function resolveHostedLinqRecipientPhoneNumber(
 
 export function resolveHostedLinqOccurredAt(event: HostedLinqMessageReceivedEvent): string {
   return resolveLinqWebhookOccurredAt(event);
-}
-
-export function resolveHostedLinqTypingOccurredAt(
-  event: HostedLinqTypingIndicatorStartedEvent,
-): string {
-  return resolveLinqTypingIndicatorOccurredAt(event);
 }
 
 export function shouldIgnoreHostedLinqForLocalInboundGuard(input: {
