@@ -161,6 +161,26 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/62594d81-edff-4003-6fa4-f188fe3d6600/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "single-leg-hip-thrust")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1d64d08d-a472-49af-a8ae-5686fb0df000/public",
+      }),
+      expect.objectContaining({
+        step: "Single-leg lift",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/881f5bc2-9175-47ab-3d4e-9657cbc24400/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "long-lever-glute-bridge")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/34d37366-f985-4fd3-4c67-df9d07348400/public",
+      }),
+      expect.objectContaining({
+        step: "Lift",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6422b8f4-6a49-4288-4a7b-5201aa6caf00/public",
+      }),
+    ]);
     expect(artifacts.details.items.find((item) => item.slug === "wall-sit")?.images).toEqual([
       expect.objectContaining({
         step: "Setup",

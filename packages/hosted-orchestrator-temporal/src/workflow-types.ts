@@ -24,7 +24,7 @@ export interface HostedUserRuntimeWorkflowOptions {
   continueAsNewAfterIterations?: number;
   ensureRuntimeProcessingStartToCloseTimeoutMs?: number;
   prewarmTaskQueue?: string;
-  readRuntimeDemandStartToCloseTimeoutMs?: number;
+  readRuntimeReconciliationFactsStartToCloseTimeoutMs?: number;
 }
 
 export interface HostedDeviceSyncReconcilerWorkflowInput {

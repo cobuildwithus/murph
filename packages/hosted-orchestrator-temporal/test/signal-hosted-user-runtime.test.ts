@@ -20,7 +20,7 @@ import {
 const defaultWorkflowOptions = {
   ensureRuntimeProcessingStartToCloseTimeoutMs: 15_000,
   prewarmTaskQueue: "murph-hosted-runtime-prewarm",
-  readRuntimeDemandStartToCloseTimeoutMs: 10_000,
+  readRuntimeReconciliationFactsStartToCloseTimeoutMs: 10_000,
 };
 
 describe("hostedUserRuntimeWorkflowId", () => {
@@ -57,7 +57,6 @@ describe("signalHostedUserRuntimeWorkflow", () => {
       lane: "conversation",
       laneSeq: "42",
       mailboxItemId: "mailbox_item_test",
-      source: "unknown",
     };
 
     const result = await signalHostedUserRuntimeWorkflow({

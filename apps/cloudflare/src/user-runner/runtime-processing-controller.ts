@@ -76,7 +76,6 @@ export type RuntimePrewarmInput = HostedRuntimePrewarmRequest & {
 function toRuntimeInvocationInput(input: RuntimeProcessingInput): RuntimeInvocationInput {
   return {
     orchestrationAttemptId: input.orchestrationAttemptId,
-    reason: input.reason,
     userId: input.userId,
   };
 }
@@ -252,7 +251,6 @@ export class RuntimeProcessingController {
       },
       commandBudget: input.commandBudget,
       env: this.input.env,
-      reason: input.input.reason,
       runnerContainerName: activeFence.runnerContainerName,
       runnerContainerNamespace: this.input.runnerContainerNamespace,
       runnerRuntimeEnvSource: this.input.runnerRuntimeEnvSource,
@@ -321,7 +319,6 @@ export class RuntimeProcessingController {
       details: {
         ...buildRunnerRecordTimingLogDetails(initialRecord),
         orchestrationAttemptId: input.input.orchestrationAttemptId,
-        runtimeReason: input.input.reason,
       },
       message: "Hosted runner runtime processing start requested.",
       phase: "runtime.starting",
@@ -349,7 +346,6 @@ export class RuntimeProcessingController {
     let token: RunnerWriteFenceToken;
     try {
       token = await this.input.stateStore.beginWriteFence({
-        reason: input.input.reason,
         runnerContainerName,
         userId: input.input.userId,
       });
@@ -423,7 +419,6 @@ export class RuntimeProcessingController {
         orchestrationAttemptId: input.input.orchestrationAttemptId,
         runtimeProcessingAction: input.action,
         workspaceAttemptId: prepared.token.attemptId,
-        workspaceReason: input.input.reason,
       },
       message: "Hosted runner runtime processing accepted.",
       phase: "runtime.starting",
@@ -454,7 +449,6 @@ export class RuntimeProcessingController {
       details: {
         orchestrationAttemptId: input.input.orchestrationAttemptId,
         workspaceAttemptId: input.token.attemptId,
-        workspaceReason: input.input.reason,
       },
       level: "warn",
       message: "Hosted runner runtime processing startup confirmation finished after its write fence changed.",
@@ -513,7 +507,6 @@ export class RuntimeProcessingController {
           orchestrationAttemptId: input.input.orchestrationAttemptId,
           runtimeStartupConfirmTimeoutMs: timeoutMs,
           workspaceAttemptId: input.token.attemptId,
-          workspaceReason: input.input.reason,
         },
         message: "Hosted runner runtime processing startup confirmed.",
         phase: "runtime.starting",
@@ -572,7 +565,6 @@ export class RuntimeProcessingController {
         orchestrationAttemptId: input.input.orchestrationAttemptId,
         transportFailureFenceCleared: failed.failed,
         workspaceAttemptId: input.token.attemptId,
-        workspaceReason: input.input.reason,
       },
       level: "warn",
       message: input.message,

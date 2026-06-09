@@ -1,7 +1,6 @@
 import type {
   HostedMailboxLane,
   HostedMailboxLaneLag,
-  HostedWorkspaceInvocationReason,
 } from "./runtime-control.ts";
 
 export const HOSTED_USER_RUNTIME_WORKFLOW_TYPE =
@@ -29,16 +28,11 @@ export function deriveHostedUserRuntimePrewarmTaskQueue(
 
 export const HOSTED_RUNTIME_SIGNAL_KINDS = [
   "mailbox_appended",
-  "manual_run_requested",
-  "browser_vault_refresh_requested",
-  "mailbox_lag_observed",
   "runtime_recheck_requested",
   "runtime_prewarm_requested",
 ] as const;
 
 export type HostedRuntimeSignalKind = (typeof HOSTED_RUNTIME_SIGNAL_KINDS)[number];
-
-export type HostedRuntimeMailboxSignalSource = string;
 
 export const HOSTED_RUNTIME_PREWARM_SOURCE =
   "linq.imessage.typing" as const;
@@ -56,16 +50,6 @@ export type HostedRuntimeSignal =
       mailboxItemId: string;
       lane: HostedMailboxLane;
       laneSeq: string;
-      source: HostedRuntimeMailboxSignalSource;
-    }
-  | {
-      kind: "manual_run_requested";
-    }
-  | {
-      kind: "browser_vault_refresh_requested";
-    }
-  | {
-      kind: "mailbox_lag_observed";
     }
   | {
       kind: "runtime_recheck_requested";
@@ -81,76 +65,41 @@ export interface HostedRuntimeMailboxPointer {
   mailboxItemId: string;
   lane: HostedMailboxLane;
   laneSeq: string;
-  source: HostedRuntimeMailboxSignalSource;
 }
 
-export interface HostedRuntimeDemandRequest {
-  browserVaultRefreshRequested?: boolean;
-  lagRecoveryObserved?: boolean;
-  manualRunRequested?: boolean;
+export const HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS = [
+  "ai_usage_denied",
+  "ai_usage_gate_unavailable",
+  "hosted_runtime_not_configured",
+  "user_not_active",
+] as const;
+
+export type HostedRuntimeReconciliationBlockedReason =
+  (typeof HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS)[number];
+
+export interface HostedRuntimeReconciliationFactsRequest {
   userId: string;
 }
 
-export const HOSTED_RUNTIME_DEMAND_KINDS = [
-  "run",
-  "idle",
-  "blocked",
-] as const;
-
-export type HostedRuntimeDemandKind = (typeof HOSTED_RUNTIME_DEMAND_KINDS)[number];
-
-export const HOSTED_RUNTIME_DEMAND_RUN_SOURCES = [
-  "mailbox_backlog",
-  "manual",
-  "browser_vault_refresh",
-  "workspace_wake",
-  "lag_recovery",
-] as const;
-
-export type HostedRuntimeDemandRunSource =
-  (typeof HOSTED_RUNTIME_DEMAND_RUN_SOURCES)[number];
-
-export const HOSTED_RUNTIME_DEMAND_BLOCKED_REASONS = [
-  "ai_usage_denied",
-  "ai_usage_gate_unavailable",
-  "user_not_active",
-  "hosted_runtime_not_configured",
-] as const;
-
-export type HostedRuntimeDemandBlockedReason =
-  (typeof HOSTED_RUNTIME_DEMAND_BLOCKED_REASONS)[number];
-
-export interface HostedRuntimeDemandWorkspaceProjection {
+export interface HostedRuntimeReconciliationFactsWorkspace {
   nextWakeAt: string | null;
   nextWakeReason: string | null;
   version: string | null;
 }
 
-export type HostedRuntimeDemand =
-  | {
-      kind: "run";
-      mailboxLag: HostedMailboxLaneLag[];
-      reason: HostedWorkspaceInvocationReason;
-      source: HostedRuntimeDemandRunSource;
-      workspace: HostedRuntimeDemandWorkspaceProjection | null;
-    }
-  | {
-      kind: "idle";
-      mailboxLag: HostedMailboxLaneLag[];
-      nextWakeAt: string | null;
-      workspace: HostedRuntimeDemandWorkspaceProjection | null;
-    }
-  | {
-      kind: "blocked";
-      mailboxLag: HostedMailboxLaneLag[];
-      reason: HostedRuntimeDemandBlockedReason;
-      retryAt: string | null;
-      workspace: HostedRuntimeDemandWorkspaceProjection | null;
-    };
+export interface HostedRuntimeReconciliationFactsBlocked {
+  reason: HostedRuntimeReconciliationBlockedReason;
+  retryAt: string | null;
+}
+
+export interface HostedRuntimeReconciliationFacts {
+  blocked: HostedRuntimeReconciliationFactsBlocked | null;
+  mailboxLag: HostedMailboxLaneLag[];
+  workspace: HostedRuntimeReconciliationFactsWorkspace | null;
+}
 
 export interface HostedRuntimeEnsureProcessingRequest {
   orchestrationAttemptId: string;
-  reason: HostedWorkspaceInvocationReason;
 }
 
 export const HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS = [
@@ -218,7 +167,7 @@ export type HostedRuntimePrewarmResponse =
 export const HOSTED_RUNTIME_CURRENT_WAIT_REASONS = [
   "idle_next_wake",
   "blocked_retry",
-  "demand_failure_retry",
+  "reconciliation_failure_retry",
   "execution_failure_retry",
   "processing_retry_later",
   "runtime_wake_recheck",
@@ -245,27 +194,33 @@ export type HostedRuntimeLastPrewarmResult =
   | "failed"
   | null;
 
+export const HOSTED_RUNTIME_RECONCILIATION_STATUSES = [
+  "blocked",
+  "idle",
+  "work_pending",
+] as const;
+
+export type HostedRuntimeReconciliationStatus =
+  (typeof HOSTED_RUNTIME_RECONCILIATION_STATUSES)[number];
+
 export interface HostedRuntimeWorkflowState {
-  browserVaultRefreshRequested: boolean;
   currentWaitReason: HostedRuntimeCurrentWaitReason;
   currentWaitUntil: string | null;
   invalidSignalCount: number;
-  lagRecoveryObserved: boolean;
   lastOrchestrationAttemptId: string | null;
   lastInvalidSignalErrorCode: string | null;
-  lastDemandKind: HostedRuntimeDemandKind | null;
-  lastDemandNextWakeAt: string | null;
-  lastDemandSource: string | null;
   lastExecutionAt: string | null;
   lastExecutionErrorCode: string | null;
   lastExecutionKind: HostedRuntimeLastExecutionKind;
   lastMailboxLagLaneCount: number;
+  lastReconciliationBlockedReason: HostedRuntimeReconciliationBlockedReason | null;
+  lastReconciliationNextWakeAt: string | null;
+  lastReconciliationStatus: HostedRuntimeReconciliationStatus | null;
   lastRuntimeAttemptId: string | null;
   lastRuntimeStatus: HostedRuntimeLastRuntimeStatus;
   latestMailboxPointer: HostedRuntimeMailboxPointer | null;
   latestPrewarmRequestedAt: string | null;
   mailboxSignalCount: number;
-  manualRunRequested: boolean;
   lastPrewarmAttemptId: string | null;
   lastPrewarmErrorCode: string | null;
   lastPrewarmResult: HostedRuntimeLastPrewarmResult;

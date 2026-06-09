@@ -975,9 +975,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "start",
       });
       const refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
-        force:
-          browserVaultReplicaRefreshRequested
-          || input.request.reason === "browser_vault_refresh",
+        force: browserVaultReplicaRefreshRequested,
         generatedAt: new Date().toISOString(),
         platform: guardedRuntime.platform,
         runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -1361,8 +1359,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       workspace: workspaceRead.workspace,
     });
     const shouldRunNoProgressBrowserVaultRefresh =
-      browserVaultReplicaRefreshRequested
-      || input.request.reason === "browser_vault_refresh";
+      browserVaultReplicaRefreshRequested;
     const noProgressBrowserVaultRefresh =
       shouldRunNoProgressBrowserVaultRefresh
         ? await runBrowserVaultRefreshMaintenance({

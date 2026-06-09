@@ -184,20 +184,31 @@ describe('assistant skill assets', () => {
 
     const raw = await readSkillFile(murphOnboardingSkill)
     expect(murphOnboardingSkill.triggerHint).toContain(
-      'Use only when onboarding is eligible or open',
+      'Use when Murph onboarding is open',
     )
     expect(murphOnboardingSkill.triggerHint).toContain(
-      'Do not read or follow this skill before handling concrete help',
+      'the assistant needs the next unresolved onboarding step',
     )
     expect(murphOnboardingSkill.triggerHint).toContain(
-      'Concrete help includes user questions, health data, attachments, PDFs, lab results',
+      'when the user clearly declines/skips onboarding',
+    )
+    expect(murphOnboardingSkill.triggerHint).toContain(
+      'mark onboarding complete with the declined reason',
+    )
+    expect(murphOnboardingSkill.triggerHint).toContain(
+      'files, labs, supplement labels, wearable data, medications, meals, workouts, symptoms, or setup answers',
     )
 
     expect(raw).toContain(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)
     expect(raw).toContain(
-      'Use this skill only when the current prompt includes the `Murph onboarding:` activation',
+      'Use this skill only when the current prompt includes the `Murph onboarding:` activation that says first-run Murph onboarding is open',
     )
     expect(raw).toContain('roughly 9-10 short assistant messages')
+    expect(raw).toContain(
+      'If the user has an immediate request, handle it first',
+    )
+    expect(raw).not.toContain('or have an immediate request')
+    expect(raw).not.toContain('unless the user has an immediate request')
     expect(raw).toContain(
       'age plus gender first, then the wearable/app checkpoint',
     )

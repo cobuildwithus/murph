@@ -45,7 +45,6 @@ describe("hosted runtime abort guard", () => {
           attemptId: "attempt_synthetic_provider_abort_guard",
           idleCheckpointDelayMs: 1,
           leaseGeneration: "1",
-          reason: "nudge",
           userId: TEST_USER_ID,
           workspace: createWorkspaceState(),
           workspaceVersion: "0",

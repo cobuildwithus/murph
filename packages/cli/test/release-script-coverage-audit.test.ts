@@ -43,6 +43,7 @@ const hostedWebPackageJson = JSON.parse(
 ) as {
   scripts?: Record<string, string>
 }
+const auditZipEntryListMaxBufferBytes = 16 * 1024 * 1024
 
 function runNodeScript(...args: string[]) {
   return spawnSync('node', args, {
@@ -138,6 +139,7 @@ function listZipEntries(zipPath: string) {
     cwd: repoRoot,
     encoding: 'utf8',
     env: withoutNodeV8Coverage(),
+    maxBuffer: auditZipEntryListMaxBufferBytes,
   })
     .split(/\r?\n/u)
     .map((entry) => entry.trim())

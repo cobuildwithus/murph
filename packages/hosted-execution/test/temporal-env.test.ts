@@ -161,12 +161,27 @@ describe("readHostedRuntimeTemporalWorkflowOptions", () => {
   it("reads shared workflow timing options", () => {
     expect(readHostedRuntimeTemporalWorkflowOptions({
       HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS: "12000",
-      HOSTED_RUNTIME_DEMAND_TIMEOUT_MS: "15000",
+      HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS: "15000",
       HOSTED_TEMPORAL_TASK_QUEUE: "hosted-runtime-custom",
     })).toEqual({
       ensureRuntimeProcessingStartToCloseTimeoutMs: 17_000,
       prewarmTaskQueue: "hosted-runtime-custom-prewarm",
-      readRuntimeDemandStartToCloseTimeoutMs: 15_000,
+      readRuntimeReconciliationFactsStartToCloseTimeoutMs: 15_000,
+    });
+  });
+
+  it("keeps the old demand timeout env as a reconciliation-facts fallback", () => {
+    expect(readHostedRuntimeTemporalWorkflowOptions({
+      HOSTED_RUNTIME_DEMAND_TIMEOUT_MS: "14000",
+    })).toMatchObject({
+      readRuntimeReconciliationFactsStartToCloseTimeoutMs: 14_000,
+    });
+
+    expect(readHostedRuntimeTemporalWorkflowOptions({
+      HOSTED_RUNTIME_DEMAND_TIMEOUT_MS: "14000",
+      HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS: "15000",
+    })).toMatchObject({
+      readRuntimeReconciliationFactsStartToCloseTimeoutMs: 15_000,
     });
   });
 
@@ -178,11 +193,11 @@ describe("readHostedRuntimeTemporalWorkflowOptions", () => {
     });
   });
 
-  it("bounds runtime demand timeout", () => {
+  it("bounds runtime reconciliation facts timeout", () => {
     expect(() => readHostedRuntimeTemporalWorkflowOptions({
-      HOSTED_RUNTIME_DEMAND_TIMEOUT_MS: "30001",
+      HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS: "30001",
     })).toThrow(
-      "HOSTED_RUNTIME_DEMAND_TIMEOUT_MS must be less than or equal to 30000.",
+      "HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS must be less than or equal to 30000.",
     );
   });
 

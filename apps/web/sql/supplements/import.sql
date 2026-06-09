@@ -24,11 +24,11 @@ WITH normalized AS (
     ) AS name,
 
     NULLIF(
-      COALESCE(
+      btrim(COALESCE(
         label->>'brandName',
         label->>'brand',
         label->>'brand_name'
-      ),
+      )),
       ''
     ) AS brand,
 
@@ -73,8 +73,60 @@ WITH normalized AS (
     END AS other_ingredient_rows
 
   FROM dsld_import_raw
-)
+),
+rows_to_import AS (
+  SELECT
+    id_text::BIGINT::text AS id,
+    'dsld:' || id_text::BIGINT::text AS canonical_key,
+    'dsld' AS data_origin,
+    id_text::BIGINT::text AS data_origin_id,
+    NULL::text AS data_origin_url,
+    10::smallint AS data_origin_priority,
+    name,
+    brand,
+    upc,
+    off_market,
 
+    CONCAT_WS(
+      ' ',
+      name,
+      brand,
+      upc,
+      (
+        SELECT string_agg(term, ' ')
+        FROM (
+          SELECT ingredient->>'name' AS term
+          FROM jsonb_array_elements(ingredient_rows) AS ingredient
+
+          UNION ALL
+
+          SELECT nested_ingredient->>'name' AS term
+          FROM jsonb_array_elements(ingredient_rows) AS ingredient
+          CROSS JOIN LATERAL jsonb_array_elements(
+            CASE
+              WHEN jsonb_typeof(ingredient->'nestedRows') = 'array'
+              THEN ingredient->'nestedRows'
+              ELSE '[]'::jsonb
+            END
+          ) AS nested_ingredient
+        ) ingredient_terms
+      ),
+      (
+        SELECT string_agg(ingredient->>'name', ' ')
+        FROM jsonb_array_elements(other_ingredient_rows) AS ingredient
+      )
+    ) AS search_text_raw,
+
+    label
+  FROM normalized
+  WHERE id_text ~ '^\d+$'
+),
+prepared AS (
+  SELECT
+    *,
+    left(regexp_replace(btrim(search_text_raw), '\s+', ' ', 'g'), 6000) AS search_text
+  FROM rows_to_import
+)
 INSERT INTO supplements (
   id,
   canonical_key,
@@ -90,35 +142,19 @@ INSERT INTO supplements (
   label
 )
 SELECT
-  id_text::BIGINT::text,
-  'dsld:' || id_text::BIGINT::text,
-  'dsld',
-  id_text::BIGINT::text,
-  NULL::text,
-  10::smallint,
+  id,
+  canonical_key,
+  data_origin,
+  data_origin_id,
+  data_origin_url,
+  data_origin_priority,
   name,
   brand,
   upc,
   off_market,
-
-  CONCAT_WS(
-    ' ',
-    name,
-    brand,
-    upc,
-    (
-      SELECT string_agg(ingredient->>'name', ' ')
-      FROM jsonb_array_elements(ingredient_rows) AS ingredient
-    ),
-    (
-      SELECT string_agg(ingredient->>'name', ' ')
-      FROM jsonb_array_elements(other_ingredient_rows) AS ingredient
-    )
-  ) AS search_text,
-
+  search_text,
   label
-FROM normalized
-WHERE id_text ~ '^\d+$'
+FROM prepared
 ON CONFLICT (id) DO UPDATE SET
   canonical_key = EXCLUDED.canonical_key,
   data_origin = EXCLUDED.data_origin,

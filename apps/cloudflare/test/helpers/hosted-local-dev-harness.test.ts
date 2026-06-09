@@ -390,7 +390,7 @@ it("does not treat recent foreground conversation imports as completion while du
     },
   } satisfies HostedRunnerStatusResponse;
   const fetch = vi.fn(async (request: RequestInfo | URL) => {
-    if (String(request).includes("/__test/users/member_local_import/run-until-idle?reason=manual")) {
+    if (String(request).includes("/__test/users/member_local_import/run-until-idle")) {
       return Response.json({ status: "idle" });
     }
 
@@ -414,7 +414,7 @@ it("does not treat recent foreground conversation imports as completion while du
     })).rejects.toThrow(/Timed out waiting for hosted completion/u);
 
     expect(fetch.mock.calls.some(([request]) =>
-      String(request).includes("/__test/users/member_local_import/run-until-idle?reason=manual")
+      String(request).includes("/__test/users/member_local_import/run-until-idle")
     )).toBe(true);
   } finally {
     await harness.stop();
@@ -487,7 +487,7 @@ it("waits for durable conversation lag to clear after local import evidence", as
   } satisfies HostedRunnerStatusResponse;
   let statusRequests = 0;
   const fetch = vi.fn(async (request: RequestInfo | URL) => {
-    if (String(request).includes("/__test/users/member_local_import_wait/run-until-idle?reason=manual")) {
+    if (String(request).includes("/__test/users/member_local_import_wait/run-until-idle")) {
       return Response.json({ status: "idle" });
     }
 
@@ -527,7 +527,7 @@ it("waits for durable conversation lag to clear after local import evidence", as
 
     expect(statusRequests).toBe(3);
     expect(fetch.mock.calls.some(([request]) =>
-      String(request).includes("/__test/users/member_local_import_wait/run-until-idle?reason=manual")
+      String(request).includes("/__test/users/member_local_import_wait/run-until-idle")
     )).toBe(true);
   } finally {
     await harness.stop();
@@ -584,7 +584,7 @@ it("does not treat processed foreground system imports as completion while durab
     },
   } satisfies HostedRunnerStatusResponse;
   const fetch = vi.fn(async (request: RequestInfo | URL) => {
-    if (String(request).includes("/__test/users/member_local_system_import/run-until-idle?reason=manual")) {
+    if (String(request).includes("/__test/users/member_local_system_import/run-until-idle")) {
       return Response.json({ status: "idle" });
     }
 
@@ -608,7 +608,7 @@ it("does not treat processed foreground system imports as completion while durab
     })).rejects.toThrow(/Timed out waiting for hosted completion/u);
 
     expect(fetch.mock.calls.some(([request]) =>
-      String(request).includes("/__test/users/member_local_system_import/run-until-idle?reason=manual")
+      String(request).includes("/__test/users/member_local_system_import/run-until-idle")
     )).toBe(true);
   } finally {
     await harness.stop();
@@ -655,7 +655,7 @@ it("does not treat foreground system imports as completion without a durable che
     },
   } satisfies HostedRunnerStatusResponse;
   const fetch = vi.fn(async (request: RequestInfo | URL) => {
-    if (String(request).includes("/__test/users/member_local_import_checkpoint/run-until-idle?reason=manual")) {
+    if (String(request).includes("/__test/users/member_local_import_checkpoint/run-until-idle")) {
       return Response.json({ status: "idle" });
     }
 
@@ -679,7 +679,7 @@ it("does not treat foreground system imports as completion without a durable che
     })).rejects.toThrow(/Timed out waiting for hosted completion/u);
 
     expect(fetch.mock.calls.some(([request]) =>
-      String(request).includes("/__test/users/member_local_import_checkpoint/run-until-idle?reason=manual")
+      String(request).includes("/__test/users/member_local_import_checkpoint/run-until-idle")
     )).toBe(true);
   } finally {
     await harness.stop();
@@ -754,7 +754,7 @@ it("calls the hosted-local activity-expiry route with bound user headers and a t
   }
 });
 
-it("calls the hosted-local run-until-idle route with idle checkpoint reason", async () => {
+it("calls the hosted-local run-until-idle route without an idle checkpoint reason", async () => {
   const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
     return Response.json({ status: "idle" });
   });
@@ -776,7 +776,7 @@ it("calls the hosted-local run-until-idle route with idle checkpoint reason", as
     expect(fetch).toHaveBeenCalledTimes(1);
     const [request, init] = fetch.mock.calls[0]!;
     expect(String(request)).toBe(
-      "http://127.0.0.1:8787/__test/users/member_manual_invocation/run-until-idle?reason=manual",
+      "http://127.0.0.1:8787/__test/users/member_manual_invocation/run-until-idle",
     );
     const headers = new Headers(init?.headers);
     expect(headers.get("authorization")).toBe("Bearer oidc-token");
@@ -790,7 +790,7 @@ it("calls the hosted-local run-until-idle route with idle checkpoint reason", as
   }
 });
 
-it("calls the hosted-local run-until-idle route with alarm reason", async () => {
+it("calls the hosted-local run-until-idle route without an alarm reason", async () => {
   const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
     return Response.json({ nextWakeAt: null, status: "idle" });
   });
@@ -812,7 +812,7 @@ it("calls the hosted-local run-until-idle route with alarm reason", async () => 
     expect(fetch).toHaveBeenCalledTimes(1);
     const [request, init] = fetch.mock.calls[0]!;
     expect(String(request)).toBe(
-      "http://127.0.0.1:8787/__test/users/member_alarm_invocation/run-until-idle?reason=alarm",
+      "http://127.0.0.1:8787/__test/users/member_alarm_invocation/run-until-idle",
     );
     const headers = new Headers(init?.headers);
     expect(headers.get("authorization")).toBe("Bearer oidc-token");

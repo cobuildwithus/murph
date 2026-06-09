@@ -1,10 +1,6 @@
 import {
   summarizeHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
-import {
-  HOSTED_WORKSPACE_INVOCATION_REASONS,
-  type HostedWorkspaceInvocationReason,
-} from "@murphai/hosted-execution/runtime-control";
 import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import type {
@@ -25,7 +21,6 @@ export interface RunnerMetaRow {
   active_started_at: string | null;
   active_workspace_version: string | null;
   backoff_until: string | null;
-  browser_vault_refresh_requested_at: string | null;
   failure_count: number;
   last_error_at: string | null;
   last_error_code: string | null;
@@ -46,7 +41,6 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
     active_started_at: null,
     active_workspace_version: null,
     backoff_until: null,
-    browser_vault_refresh_requested_at: null,
     failure_count: 0,
     last_error_at: null,
     last_error_code: null,
@@ -73,9 +67,6 @@ export function projectRunnerStateRecord(input: {
         workspaceVersion: input.meta.active_workspace_version,
       }
     : null;
-  const activeReason = writeFence
-    ? readHostedWorkspaceInvocationReasonOrNull(input.meta.active_reason)
-    : null;
   const failureCount = normalizeNonNegativeInteger(input.meta.failure_count);
   const lastError = summarizeHostedExecutionErrorCode(input.meta.last_error_code);
 
@@ -90,7 +81,7 @@ export function projectRunnerStateRecord(input: {
           attemptId: writeFence.attemptId,
           expiresAt: writeFence.expiresAt,
           leaseGeneration: String(writeFence.generation),
-          reason: activeReason,
+          reason: null,
           startedAt: writeFence.startedAt,
           workspaceVersion: writeFence.workspaceVersion,
         }
@@ -102,7 +93,6 @@ export function projectRunnerStateRecord(input: {
     lastErrorAt: input.meta.last_error_at,
     lastErrorCode: input.meta.last_error_code,
     lastInvocationAt: input.meta.last_invocation_at,
-    browserVaultRefreshRequestedAt: null,
     leaseGeneration: writeFenceGeneration,
     failureCount,
     nextWakeAt: null,
@@ -127,19 +117,12 @@ export function projectRunnerStateRecord(input: {
           attemptId: writeFence.attemptId,
           lastHeartbeatAt: null,
           orphanObservedAt: null,
-          reason: activeReason,
+          reason: null,
           startedAt: writeFence.startedAt,
           workspaceVersion: writeFence.workspaceVersion,
         }
       : null,
   };
-}
-
-function readHostedWorkspaceInvocationReasonOrNull(value: unknown): string | null {
-  return typeof value === "string"
-    && HOSTED_WORKSPACE_INVOCATION_REASONS.includes(value as HostedWorkspaceInvocationReason)
-    ? value
-    : null;
 }
 
 function readRunnerContainerNameOrNull(value: unknown): string | null {

@@ -156,10 +156,10 @@ describe('assistant protocol index planning', () => {
     expect(plan.systemPrompt).toContain(skillRef)
     expect(plan.turnContextPrompt).toContain('Murph onboarding:')
     expect(plan.turnContextPrompt).toContain(
-      `Use \`${skillRef}\` only when the current user message is a greeting`,
+      `Use \`${skillRef}\` when onboarding is open and you need the next unresolved onboarding step`,
     )
     expect(plan.turnContextPrompt).toContain(
-      'Do not read or follow the onboarding skill before handling concrete help',
+      'Before ending a normal reply while onboarding is open, keep onboarding moving unless a skip condition applies',
     )
     expect(plan.turnContextPrompt).not.toContain(
       'roughly 5-6 short assistant messages',

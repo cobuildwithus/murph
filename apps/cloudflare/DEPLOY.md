@@ -209,7 +209,7 @@ Hosted usage-reporting secrets:
 - `HOSTED_AI_USAGE_REPORTING_SECRET` when stable anonymized usage attribution should be added by the Worker/web-control proxy before records reach hosted web. This secret must stay Worker-owned and must not be forwarded into the hosted runtime env.
 - Cloudflare runner start authority does not accept signed usage-allowance
   decisions and does not fall back to a live web usage-gate call. Web gates
-  model-capable demand before signaling Temporal, and runtime/provider spend
+  model-capable work before appending/signaling Temporal, and runtime/provider spend
   enforcement still happens before model calls.
 
 Hosted web data API secrets:

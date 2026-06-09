@@ -148,7 +148,7 @@ describe("readHostedUserRuntimeWorkflowOptions", () => {
     expect(readHostedUserRuntimeWorkflowOptions({})).toEqual({
       ensureRuntimeProcessingStartToCloseTimeoutMs: 15_000,
       prewarmTaskQueue: "murph-hosted-runtime-prewarm",
-      readRuntimeDemandStartToCloseTimeoutMs: 10_000,
+      readRuntimeReconciliationFactsStartToCloseTimeoutMs: 10_000,
     });
   });
 

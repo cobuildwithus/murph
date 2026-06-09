@@ -329,7 +329,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:321",
-      source: "telegram",
     });
     expect(response).not.toHaveProperty("wakeUserId");
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
@@ -741,7 +740,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:654",
-      source: "telegram",
     });
   });
 
@@ -812,7 +810,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:655",
-      source: "telegram",
     });
   });
 

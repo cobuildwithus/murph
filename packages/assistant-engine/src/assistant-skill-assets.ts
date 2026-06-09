@@ -12,7 +12,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'murph-onboarding',
     name: 'murph-onboarding',
     triggerHint:
-      'Use only when onboarding is eligible or open and the current user message is a greeting, vague getting-started message, answer to a prior onboarding question, explicit setup/onboarding request, or onboarding decline. Do not read or follow this skill before handling concrete help. Concrete help includes user questions, health data, attachments, PDFs, lab results, logging requests, device connection requests, research requests, urgent symptoms, or requests to inspect, save, update, compare, or troubleshoot anything.',
+      'Use when Murph onboarding is open and the assistant needs the next unresolved onboarding step, or when the user clearly declines/skips onboarding and the assistant needs to mark onboarding complete with the declined reason. This includes after the user supplies onboarding-relevant context such as files, labs, supplement labels, wearable data, medications, meals, workouts, symptoms, or setup answers.',
   },
   {
     slug: 'experiment-onboarding',

@@ -157,7 +157,6 @@ describe("hosted runner container identity", () => {
 
     await expect(controller.ensureForUser({
       orchestrationAttemptId: "orchestration_attempt_1",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
@@ -202,7 +201,6 @@ describe("hosted runner container identity", () => {
 
     await expect(controller.ensureForUser({
       orchestrationAttemptId: "orchestration_attempt_1",
-      reason: "nudge",
       userId: " member_123 ",
     })).rejects.toThrow(
       "Hosted runner container identity did not match the runtime start user.",
@@ -233,7 +231,6 @@ describe("hosted runner container identity", () => {
       state: durable.state,
     });
     const token = await stateStore.beginWriteFence({
-      reason: "nudge",
       runnerContainerName: "member_123--v-version_1",
       userId: TEST_USER_ID,
     });
@@ -241,7 +238,6 @@ describe("hosted runner container identity", () => {
     const prepared = await service.prepareWithFence({
       input: {
         orchestrationAttemptId: "orchestration_attempt_1",
-        reason: "nudge",
         userId: TEST_USER_ID,
       },
       token,
@@ -266,7 +262,6 @@ describe("hosted runner container identity", () => {
     const stateStore = new RunnerStateStore(durable.state);
     await stateStore.bindUser(TEST_USER_ID);
     const token = await stateStore.beginWriteFence({
-      reason: "nudge",
       runnerContainerName: "member_123--v-version-a",
       userId: TEST_USER_ID,
     });
@@ -289,7 +284,6 @@ describe("hosted runner container identity", () => {
 
     await expect(controller.ensureForUser({
       orchestrationAttemptId: "orchestration_attempt_1",
-      reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "already_running",
@@ -319,7 +313,6 @@ describe("hosted runner container identity", () => {
       state: durable.state,
     });
     const token = await stateStore.beginWriteFence({
-      reason: "nudge",
       runnerContainerName: "member_456--v-version_1",
       userId: TEST_USER_ID,
     });
@@ -327,7 +320,6 @@ describe("hosted runner container identity", () => {
     await expect(service.prepareWithFence({
       input: {
         orchestrationAttemptId: "orchestration_attempt_1",
-        reason: "nudge",
         userId: TEST_USER_ID,
       },
       token,
@@ -373,7 +365,6 @@ class RecordingRuntimeInvocationService extends RuntimeInvocationService {
     return {
       input: input.input,
       job: createWorkspaceInvocationJob({
-        reason: input.input.reason,
         token: input.token,
         userId: input.input.userId,
       }),
@@ -576,7 +567,6 @@ function createRunnerContainerStub(input: {
 }
 
 function createWorkspaceInvocationJob(input: {
-  reason: PreparedRuntimeInvocation["input"]["reason"];
   token: RunnerWriteFenceToken;
   userId: string;
 }): HostedExecutionWorkspaceInvocationJobInput {
@@ -586,7 +576,6 @@ function createWorkspaceInvocationJob(input: {
       attemptId: input.token.attemptId,
       idleCheckpointDelayMs: 54_000,
       leaseGeneration: input.token.generation,
-      reason: input.reason,
       userId: input.userId,
       workspace: null,
       workspaceVersion: input.token.workspaceVersion ?? "0",

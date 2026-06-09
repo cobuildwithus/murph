@@ -63,6 +63,7 @@ export async function planHostedOnboardingWhatsAppWebhook(input: {
   let duplicateCount = 0;
   let ignoredCount = 0;
   let lastIgnoredReason = "whatsapp-routing-not-configured";
+  let routedTextCount = 0;
 
   for (const inboundText of inboundTexts) {
     const messagePlan = await planHostedOnboardingWhatsAppInboundText({
@@ -78,10 +79,12 @@ export async function planHostedOnboardingWhatsAppWebhook(input: {
     }
     if (messagePlan.wakeHandoff) {
       wakeHandoffs.push(messagePlan.wakeHandoff);
+      if (!messagePlan.duplicate) {
+        routedTextCount += 1;
+      }
     }
   }
 
-  const routedTextCount = wakeHandoffs.length;
   const handledCount = routedTextCount + commandHandledCount + duplicateCount;
   const ignored = handledCount === 0 || ignoredCount === inboundTexts.length;
   const reason = resolveWhatsAppWebhookResponseReason({
@@ -246,7 +249,12 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
       duplicate: true,
       ignored: true,
       reason: "duplicate-webhook-event",
-      wakeHandoff: null,
+      wakeHandoff: {
+        eventId,
+        mailboxItemId: mailboxAppend.item.id,
+        source: "whatsapp",
+        userId: member.id,
+      },
     };
   }
 

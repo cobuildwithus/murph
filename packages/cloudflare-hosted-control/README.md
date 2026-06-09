@@ -13,7 +13,7 @@ surface is limited to browser-vault session creation plus processing/status, and
 the runner contracts intentionally do not expose `runId`, committed sequence,
 target sequence, or web-owned turn adoption state.
 
-Normal webhook and app paths commit durable demand in web-owned storage and
+Normal webhook and app paths append durable mailbox facts in web-owned storage and
 signal Temporal only. Temporal calls Cloudflare `ensure-processing`; Cloudflare
 returns `runtime_processing_accepted` or `retry_later` and owns runner start,
 wake, active-fence alarm cleanup, and execution cleanup.

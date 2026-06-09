@@ -14,7 +14,6 @@ import {
 import type {
   HostedRunnerStatusResponse,
   HostedWorkspaceInvocationResult,
-  HostedWorkspaceInvocationReason,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
@@ -53,7 +52,6 @@ export interface HostedLocalDevHarness {
   runHostedManualInvocationForTest(userId: string): Promise<HostedWorkspaceInvocationResult>;
   runHostedAlarmForTest(userId: string): Promise<{ ok: true }>;
   startStuckInvocationForTest(userId: string, input?: {
-    reason?: HostedWorkspaceInvocationReason;
     startedAgoMs?: number;
   }): Promise<{
     attemptId: string;
@@ -199,7 +197,6 @@ export async function startHostedLocalDevHarness(input: {
       startStuckInvocationForTest: async (
         userId: string,
         stuckInput?: {
-          reason?: HostedWorkspaceInvocationReason;
           startedAgoMs?: number;
         },
       ): Promise<{
@@ -208,9 +205,6 @@ export async function startHostedLocalDevHarness(input: {
         ok: true;
       }> => {
         const searchParams = new URLSearchParams();
-        if (stuckInput?.reason) {
-          searchParams.set("reason", stuckInput.reason);
-        }
         if (typeof stuckInput?.startedAgoMs === "number") {
           searchParams.set("startedAgoMs", String(stuckInput.startedAgoMs));
         }
@@ -453,7 +447,6 @@ export async function startHostedLocalDevHarness(input: {
     const url = new URL(pathname, `${workerBaseUrl}/`);
     const requestBody = JSON.stringify(parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: `hosted-local-nudge:${userId}`,
-      reason: "nudge",
     }));
     const headers = {
       [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
@@ -495,21 +488,20 @@ export async function startHostedLocalDevHarness(input: {
   async function runHostedManualInvocationForTest(
     userId: string,
   ): Promise<HostedWorkspaceInvocationResult> {
-    return await runHostedWorkspaceInvocationForTest(userId, "manual");
+    return await runHostedWorkspaceInvocationForTest(userId);
   }
 
   async function runHostedAlarmInvocationForTest(
     userId: string,
   ): Promise<HostedWorkspaceInvocationResult> {
-    return await runHostedWorkspaceInvocationForTest(userId, "alarm");
+    return await runHostedWorkspaceInvocationForTest(userId);
   }
 
   async function runHostedWorkspaceInvocationForTest(
     userId: string,
-    reason: HostedWorkspaceInvocationReason,
   ): Promise<HostedWorkspaceInvocationResult> {
     return await requestJsonForRuntime<HostedWorkspaceInvocationResult>(
-      `/__test/users/${encodeURIComponent(userId)}/run-until-idle?reason=${encodeURIComponent(reason)}`,
+      `/__test/users/${encodeURIComponent(userId)}/run-until-idle`,
       {
         headers: {
           [HOSTED_EXECUTION_USER_ID_HEADER]: userId,

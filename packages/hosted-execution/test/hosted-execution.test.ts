@@ -498,13 +498,7 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWorkspaceCheckpointRequest" in rootModule).toBe(false);
     expect(rootModule.HOSTED_USER_RUNTIME_WORKFLOW_TYPE).toBe("hostedUserRuntimeWorkflow");
     expect(runtimeControlModule.HOSTED_MAILBOX_LANES).toEqual(["system", "conversation"]);
-    expect(runtimeControlModule.HOSTED_WORKSPACE_INVOCATION_REASONS).toEqual([
-      "nudge",
-      "alarm",
-      "retry",
-      "manual",
-      "browser_vault_refresh",
-    ]);
+    expect("HOSTED_WORKSPACE_INVOCATION_REASONS" in runtimeControlModule).toBe(false);
     expect(runtimeControlModule.HOSTED_WORKSPACE_INVOCATION_STATUSES).toEqual([
       "idle",
       "budget_exhausted",

@@ -45,7 +45,7 @@ import {
   type HostedRuntimeTemporalSignalClient,
 } from "./temporal-client";
 import {
-  resolveHostedRuntimeAiUsageDemandGate,
+  resolveHostedRuntimeAiUsageGate,
 } from "./runtime-usage-decision";
 
 export interface HostedRuntimeSignalResult {
@@ -69,7 +69,6 @@ export interface SignalHostedMailboxAppendInput {
   expectedUserId?: string | null;
   mailboxItemId: string;
   prisma?: PrismaClient;
-  source: string;
 }
 
 export interface SignalHostedBrowserVaultRefreshInput {
@@ -143,7 +142,6 @@ export async function signalHostedMailboxAppendRuntime(
       lane: mailboxItem.lane,
       laneSeq: mailboxItem.laneSeq,
       mailboxItemId: mailboxItem.id,
-      source: sanitizeHostedRuntimeSignalSource(input.source),
     }),
     userId: mailboxItem.userId,
   });
@@ -166,7 +164,6 @@ export async function signalHostedBrowserVaultRefreshRuntime(
     kind: "runtime.browser-vault-refresh-requested",
     occurredAt: control.occurredAt,
     prisma,
-    source: "browser-vault-refresh",
     userId: input.userId,
   });
 }
@@ -185,7 +182,6 @@ export async function signalHostedManualRunRuntime(
     environment: input.environment,
     kind: "runtime.manual-requested",
     prisma,
-    source: HOSTED_RUNTIME_MANUAL_AI_GATED_SIGNAL_SOURCE,
     userId: input.userId,
   });
 }
@@ -246,7 +242,6 @@ export async function signalHostedDeviceSyncMailboxRuntime(
       lane: mailboxItem.lane,
       laneSeq: mailboxItem.laneSeq,
       mailboxItemId: mailboxItem.id,
-      source: "device-sync",
     }),
     userId: mailboxItem.userId,
   });
@@ -256,7 +251,7 @@ async function assertHostedManualRunAiUsageAllowed(input: {
   prisma: PrismaClient;
   userId: string;
 }): Promise<void> {
-  const gate = await resolveHostedRuntimeAiUsageDemandGate({
+  const gate = await resolveHostedRuntimeAiUsageGate({
     prisma: input.prisma,
     userId: input.userId,
   });
@@ -291,7 +286,6 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
   kind: HostedExecutionRuntimeControlWakeKind;
   occurredAt?: string | null;
   prisma?: PrismaClient;
-  source: string;
   userId: string;
 }): Promise<HostedRuntimeSignalResult> {
   const prisma = input.prisma ?? getPrisma();
@@ -322,14 +316,12 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
       lane: mailboxItem.lane,
       laneSeq: mailboxItem.laneSeq,
       mailboxItemId: mailboxItem.id,
-      source: sanitizeHostedRuntimeSignalSource(input.source),
     }),
     userId: input.userId,
   });
 }
 
 const HOSTED_RUNTIME_CONTROL_DETERMINISTIC_OCCURRED_AT = "1970-01-01T00:00:00.000Z";
-const HOSTED_RUNTIME_MANUAL_AI_GATED_SIGNAL_SOURCE = "manual-ai-gated";
 
 const BROWSER_VAULT_REFRESH_CONTROL_DEDUPE_WINDOW_MS = 60_000;
 
@@ -454,18 +446,6 @@ async function ensureHostedRuntimeWorkspaceForActiveUser(
     prisma,
     userId,
   });
-}
-
-export function sanitizeHostedRuntimeSignalSource(source: string): string {
-  const lowered = source.trim().toLowerCase();
-  const safe = lowered
-    .replace(/[^a-z0-9._:-]+/gu, "-")
-    .replace(/^[^a-z0-9]+/u, "")
-    .replace(/[^a-z0-9]+$/u, "")
-    .slice(0, 64)
-    .replace(/[^a-z0-9]+$/u, "");
-
-  return safe || "unknown";
 }
 
 function assertExpectedHostedMailboxOwner(input: {

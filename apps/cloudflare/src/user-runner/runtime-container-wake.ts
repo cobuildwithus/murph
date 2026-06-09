@@ -1,9 +1,6 @@
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
-import type {
-  HostedWorkspaceInvocationReason,
-} from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedExecutionEnvironment } from "../env.js";
 import {
@@ -30,7 +27,6 @@ export async function ensureActiveRuntimeProcessing(
     activeRuntime: RunnerRuntimeWakeInput;
     commandBudget: RuntimeProcessingCommandBudget;
     env: HostedExecutionEnvironment;
-    reason: HostedWorkspaceInvocationReason;
     runnerContainerName: string | null;
     runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
     runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
@@ -69,7 +65,6 @@ export async function ensureActiveRuntimeProcessing(
         budget: input.commandBudget,
         operation: async () => await ensureProcessing({
           activeRuntime: input.activeRuntime,
-          reason: input.reason,
           userId: input.activeRuntime.userId,
         }),
         stepTimeoutMs: input.env.webControlTimeoutMs,

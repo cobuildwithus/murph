@@ -79,7 +79,6 @@ export interface RunnerStateRecord {
   lastErrorAt: string | null;
   lastErrorCode: string | null;
   lastInvocationAt: string | null;
-  browserVaultRefreshRequestedAt: string | null;
   leaseGeneration: number;
   failureCount: number;
   nextWakeAt: string | null;

@@ -36,9 +36,13 @@ Constraints and indexes:
 - `data_origin` must match `^[a-z][a-z0-9_]*$`.
 - `id`, `canonical_key`, and `data_origin_id` must be non-empty.
 - Full-text GIN search index over `search_text`.
+- Trigram GIN index over `name`.
+- Partial btree index over non-empty `brand`.
 - UPC, `canonical_key`, and `(data_origin, data_origin_id)` indexes.
 
 Legacy tables may still exist with `_legacy` suffixes. Do not write new brand data to them.
+
+`search_text` is a compact derived search document, not raw source evidence. It should include product identity and searchable ingredient names such as name, brand, UPC, top-level ingredients, and nested ingredient names. Do not store daily values, dosage-panel detail, statements, contacts, page bodies, marketing copy, or whole label payloads in `search_text`; preserve raw/full evidence, including ingredient amounts and units, in `label`.
 
 ## Brand-Site Rows
 

@@ -2,20 +2,12 @@ import type {
   HostedRuntimeEnsureProcessingResponse,
 } from "../index.js";
 import {
-  parseHostedRuntimeDemandRunSource,
   parseHostedRuntimeEnsureProcessingRequest,
   parseHostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/parsers";
-import type {
-  HostedRuntimeDemandRunSource,
-} from "@murphai/hosted-execution/orchestration-control";
 import {
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
 } from "@murphai/hosted-execution/contracts";
-import {
-  HOSTED_WORKSPACE_INVOCATION_REASONS,
-  type HostedWorkspaceInvocationReason,
-} from "@murphai/hosted-execution/runtime-control";
 
 import {
   observeHostedTemporalActivity,
@@ -23,18 +15,10 @@ import {
   requestHostedOrchestratorJson,
 } from "./http-client.js";
 
-const LEGACY_DEVICE_SYNC_RECOVERY_SOURCE = "device_sync_recovery";
-
 export interface EnsureRuntimeProcessingInput {
   orchestrationAttemptId: string;
-  reason: HostedWorkspaceInvocationReason;
-  source?: EnsureRuntimeProcessingInputSource | null;
   userId: string;
 }
-
-type EnsureRuntimeProcessingInputSource =
-  | HostedRuntimeDemandRunSource
-  | typeof LEGACY_DEVICE_SYNC_RECOVERY_SOURCE;
 
 const CLOUDFLARE_RUNTIME_ENSURE_PROCESSING_PATH_PREFIX = "/internal/users/";
 const CLOUDFLARE_RUNTIME_ENSURE_PROCESSING_PATH_SUFFIX =
@@ -47,13 +31,11 @@ export async function ensureRuntimeProcessing(
   const cloudflareEnvironment = readHostedOrchestratorTemporalCloudflareEnvironment();
   const cloudflareRequest = parseHostedRuntimeEnsureProcessingRequest({
     orchestrationAttemptId: parsedRequest.orchestrationAttemptId,
-    reason: parsedRequest.reason,
   });
 
   return observeHostedTemporalActivity({
     activity: "ensureRuntimeProcessing",
     orchestrationAttemptId: parsedRequest.orchestrationAttemptId,
-    reason: parsedRequest.reason,
     userId: parsedRequest.userId,
   }, async () =>
     await requestHostedOrchestratorJson(
@@ -86,8 +68,6 @@ function parseEnsureRuntimeProcessingInput(
   const record = value;
   assertExactKeys(record, "Hosted runtime ensure-processing Activity input", [
     "orchestrationAttemptId",
-    "reason",
-    "source",
     "userId",
   ]);
 
@@ -96,32 +76,11 @@ function parseEnsureRuntimeProcessingInput(
       record.orchestrationAttemptId,
       "Hosted runtime ensure-processing Activity input orchestrationAttemptId",
     ),
-    reason: parseHostedWorkspaceInvocationReason(
-      record.reason,
-      "Hosted runtime ensure-processing Activity input reason",
-    ),
-    ...(record.source === undefined || record.source === null
-      ? {}
-      : {
-          source: parseEnsureRuntimeProcessingInputSource(record.source),
-        }),
     userId: requireOpaqueIdentifier(
       record.userId,
       "Hosted runtime ensure-processing Activity input userId",
     ),
   };
-}
-
-function parseEnsureRuntimeProcessingInputSource(
-  value: unknown,
-): EnsureRuntimeProcessingInputSource {
-  if (value === LEGACY_DEVICE_SYNC_RECOVERY_SOURCE) {
-    return LEGACY_DEVICE_SYNC_RECOVERY_SOURCE;
-  }
-  return parseHostedRuntimeDemandRunSource(
-    value,
-    "Hosted runtime ensure-processing Activity input source",
-  );
 }
 
 function buildCloudflareRuntimeEnsureProcessingPath(userId: string): string {
@@ -155,19 +114,4 @@ function requireOpaqueIdentifier(value: unknown, label: string): string {
     throw new TypeError(`${label} must be a bounded opaque identifier.`);
   }
   return value;
-}
-
-function parseHostedWorkspaceInvocationReason(
-  value: unknown,
-  label: string,
-): HostedWorkspaceInvocationReason {
-  if (
-    typeof value !== "string"
-    || !HOSTED_WORKSPACE_INVOCATION_REASONS.includes(
-      value as HostedWorkspaceInvocationReason,
-    )
-  ) {
-    throw new TypeError(`${label} must be a supported invocation reason.`);
-  }
-  return value as HostedWorkspaceInvocationReason;
 }

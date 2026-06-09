@@ -16,8 +16,11 @@ export {
 export const HOSTED_RUNTIME_TEMPORAL_DEFAULT_ADDRESS = "localhost:7233";
 export const HOSTED_RUNTIME_TEMPORAL_DEFAULT_NAMESPACE = "default";
 
-const DEFAULT_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS = 10_000;
-const MAX_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS = 30_000;
+const HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_ENV =
+  "HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS";
+const HOSTED_RUNTIME_DEMAND_TIMEOUT_ENV = "HOSTED_RUNTIME_DEMAND_TIMEOUT_MS";
+const DEFAULT_HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS = 10_000;
+const MAX_HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS = 30_000;
 const MAX_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS = 30_000;
 const MAX_HOSTED_RUNTIME_PROCESSING_START_TO_CLOSE_TIMEOUT_MS = 3_600_000;
 export const HOSTED_TEMPORAL_ENSURE_PROCESSING_REPORTING_SLACK_MS = 5_000;
@@ -53,7 +56,7 @@ export interface HostedRuntimeTemporalTlsConfig {
 export interface HostedRuntimeTemporalWorkflowOptions {
   ensureRuntimeProcessingStartToCloseTimeoutMs: number;
   prewarmTaskQueue: string;
-  readRuntimeDemandStartToCloseTimeoutMs: number;
+  readRuntimeReconciliationFactsStartToCloseTimeoutMs: number;
 }
 
 export interface HostedRuntimeEnsureProcessingTimeouts {
@@ -93,6 +96,11 @@ export function readHostedRuntimeTemporalWorkflowOptions(
 ): HostedRuntimeTemporalWorkflowOptions {
   const ensureRuntimeProcessingTimeouts =
     readHostedRuntimeEnsureProcessingTimeouts(source);
+  const reconciliationFactsTimeout = readOptionalEnvEntry(
+    source,
+    HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_ENV,
+    HOSTED_RUNTIME_DEMAND_TIMEOUT_ENV,
+  );
   const taskQueue =
     readOptionalEnv(source, "HOSTED_TEMPORAL_TASK_QUEUE", "TEMPORAL_TASK_QUEUE")
     ?? HOSTED_USER_RUNTIME_TASK_QUEUE;
@@ -107,11 +115,12 @@ export function readHostedRuntimeTemporalWorkflowOptions(
         "TEMPORAL_PREWARM_TASK_QUEUE",
       )
       ?? deriveHostedUserRuntimePrewarmTaskQueue(taskQueue),
-    readRuntimeDemandStartToCloseTimeoutMs: parseBoundedPositiveInteger(
-      readOptionalEnv(source, "HOSTED_RUNTIME_DEMAND_TIMEOUT_MS"),
-      DEFAULT_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS,
-      MAX_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS,
-      "HOSTED_RUNTIME_DEMAND_TIMEOUT_MS",
+    readRuntimeReconciliationFactsStartToCloseTimeoutMs: parseBoundedPositiveInteger(
+      reconciliationFactsTimeout?.value ?? null,
+      DEFAULT_HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS,
+      MAX_HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_MS,
+      reconciliationFactsTimeout?.key
+        ?? HOSTED_RUNTIME_RECONCILIATION_FACTS_TIMEOUT_ENV,
     ),
   };
 }

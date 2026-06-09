@@ -10,4 +10,6 @@ export {
   runHostedDeviceSyncRecoverySweep,
   type HostedDeviceSyncRecoverySweepResult,
 } from "./run-device-sync-recovery-sweep.js";
-export { readRuntimeDemand } from "./read-runtime-demand.js";
+export {
+  readRuntimeReconciliationFacts,
+} from "./read-runtime-reconciliation-facts.js";

@@ -61,20 +61,32 @@ describe("supplement brand-site DB helper", () => {
         factsText: "Supplement Facts ".repeat(500),
         rawPageText: "faq copy ".repeat(500),
         ingredientRows: [
-          { name: "Magnesium", amount: "200", unit: "mg" },
-          { name: "Glycine", amount: "1", unit: "g" },
+          {
+            name: "Magnesium",
+            amount: "200",
+            unit: "mg",
+            dailyValue: "48%",
+            nestedRows: [{ name: "Glycine", amount: "1", unit: "g" }],
+          },
         ],
         servingSizes: ["2 capsules"],
-        ingredientText: "Other ingredients: vegetable capsule.",
+        otherIngredients: "vegetable capsule",
+        ingredientText: "Other ingredients raw evidence ".repeat(200),
       },
     });
 
     assert.equal(searchText.length <= SEARCH_TEXT_MAX_LENGTH, true);
     assert.match(searchText, /Example Magnesium/u);
-    assert.match(searchText, /Magnesium 200 mg/u);
-    assert.match(searchText, /2 capsules/u);
+    assert.match(searchText, /Example Brand/u);
+    assert.match(searchText, /Magnesium/u);
+    assert.match(searchText, /Glycine/u);
+    assert.match(searchText, /vegetable capsule/u);
+    assert.doesNotMatch(searchText, /Magnesium 200 mg/u);
+    assert.doesNotMatch(searchText, /2 capsules/u);
+    assert.doesNotMatch(searchText, /48%/u);
     assert.doesNotMatch(searchText, /marketing body marketing body/u);
     assert.doesNotMatch(searchText, /Supplement Facts Supplement Facts/u);
+    assert.doesNotMatch(searchText, /Other ingredients raw evidence/u);
     assert.doesNotMatch(searchText, /rawPageText/u);
   });
 
@@ -95,6 +107,8 @@ describe("supplement brand-site DB helper", () => {
     });
 
     assert.match(normalized.searchText, /Example Magnesium/u);
+    assert.doesNotMatch(normalized.searchText, /Magnesium 200 mg/u);
+    assert.doesNotMatch(normalized.searchText, /2 capsules/u);
     assert.doesNotMatch(normalized.searchText, /bad copied page text/u);
     assert.deepEqual(normalized.reviewIssues, []);
   });
@@ -156,12 +170,12 @@ describe("supplement brand-site DB helper", () => {
     assert.throws(() => assertProductionReady([food]), /likely_food_or_non_supplement/u);
 
     const flavoredProtein = normalizeItem({
-      id: "example-brand:protein-oatmeal-cookie",
+      id: "example-brand:protein-vanilla",
       dataOrigin: "brand_site",
-      dataOriginId: "example-brand:protein-oatmeal-cookie",
+      dataOriginId: "example-brand:protein-vanilla",
       source: "example-brand",
-      sourceId: "protein-oatmeal-cookie",
-      name: "Vegan Protein - Oatmeal Cookie",
+      sourceId: "protein-vanilla",
+      name: "Vegan Protein - Vanilla",
       brand: "Example Brand",
       label: {
         ingredientRows: [{ name: "Protein blend", amount: "20", unit: "g" }],
@@ -1885,7 +1899,10 @@ describe("supplement brand-site repair preview", () => {
     assert.equal(preview.parsedServingSizes, 1);
     assert.equal(preview.searchTextWouldChange, true);
     assert.deepEqual(preview.removableFieldCandidates, ["bodyText"]);
-    assert.match(preview.proposedSearchTextPreview, /Magnesium 200 mg/u);
+    assert.match(preview.proposedSearchTextPreview, /Magnesium/u);
+    assert.doesNotMatch(preview.proposedSearchTextPreview, /Magnesium 200 mg/u);
+    assert.doesNotMatch(preview.proposedSearchTextPreview, /2 Capsules/u);
+    assert.doesNotMatch(preview.proposedSearchTextPreview, /48%/u);
     assert.doesNotMatch(preview.proposedSearchTextPreview, /page copy page copy/u);
     assert.equal(preview.productionCandidate?.label.bodyText, undefined);
     assert.deepEqual(preview.productionCandidate?.label.servingSizes, [
@@ -1970,6 +1987,233 @@ describe("supplement brand-site repair preview", () => {
     assert.deepEqual(preview.parserBlockers, []);
     assert.equal(preview.parsedIngredientRows, 1);
     assert.deepEqual(preview.removableFieldCandidates, ["bodyText"]);
+  });
+
+  test("repair preview keeps row source identity when label source stores refetch provenance", () => {
+    const preview = repairPreviewForRow({
+      id: "alani-nu:pre-workout-cherry-twist",
+      dataOriginId: "alani-nu:pre-workout-cherry-twist",
+      dataOriginUrl: "https://www.alaninu.com/products/pre-workout",
+      name: "Pre-Workout - Cherry Twist",
+      brand: "Alani Nu",
+      upc: "810030519837",
+      offMarket: false,
+      searchText: "legacy search text",
+      label: {
+        source: "official_facts_image_ocr_preview",
+        sourceId: "pre-workout-cherry-twist",
+        evidenceStatus: "structured_facts_from_official_facts_image_ocr",
+        sourceUrl: "https://www.alaninu.com/products/pre-workout",
+        ingredientRows: [
+          { name: "L-Citrulline", amount: "6", unit: "g" },
+          { name: "Beta-Alanine", amount: "1.6", unit: "g" },
+        ],
+        servingSizes: [{ text: "1 scoop", source: "official_facts_image_ocr" }],
+        factsText: "Supplement Facts Serving Size 1 scoop L-Citrulline 6 g Beta-Alanine 1.6 g",
+      },
+    });
+
+    assert.equal(preview.automatedBackfillReady, true);
+    assert.equal(preview.productionCandidate?.source, "alani-nu");
+    assert.equal(preview.productionCandidate?.sourceId, "pre-workout-cherry-twist");
+    assert.equal(preview.productionCandidate?.dataOriginId, "alani-nu:pre-workout-cherry-twist");
+    assert.equal(preview.productionCandidate?.label.source, "official_facts_image_ocr_preview");
+    assert.deepEqual(preview.productionCandidate?.reviewIssues, []);
+  });
+
+  test("repair preview excludes production review issues from automated candidates", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:starter-kit",
+      dataOriginId: "example-brand:starter-kit",
+      dataOriginUrl: "https://example.test/products/starter-kit",
+      name: "Example Starter Kit",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "starter-kit",
+        ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg" }],
+        servingSizes: [{ text: "2 capsules", source: "official_facts_table" }],
+        factsText: "Supplement Facts Serving Size 2 capsules Magnesium 200 mg",
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.deepEqual(preview.parserBlockers, ["non_standalone_product"]);
+    assert.equal(preview.automatedBackfillReady, false);
+    assert.equal(preview.productionCandidate, null);
+    assert.deepEqual(preview.removableFieldCandidates, []);
+  });
+
+  test("repair preview blocks parsed ingredient names contaminated by table headers", () => {
+    const preview = repairPreviewForRow({
+      id: "activlab:activ-t061-ws",
+      dataOriginId: "activlab:activ-t061-ws",
+      dataOriginUrl: "https://activlab.pl/products/k-mag-b6-shot",
+      name: "K-MAG B6 shot",
+      brand: "Activlab",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "activlab",
+        sourceId: "activ-t061-ws",
+        ingredientRows: [
+          { name: "% referencyjnej wartości spożycia Magnez" },
+          { name: "375 mg" },
+        ],
+        servingSizes: [{ text: "1 shot o pojemności 80 ml przed treningiem", source: "directions_serving" }],
+        factsText: [
+          "WARTOŚCI ODŻYWCZE Składnik w porcji % referencyjnej wartości spożycia",
+          "Magnez 375 mg 100%",
+          "Potas 430 mg 22%",
+          "Witamina B6 1,4 mg 100%",
+          "Stosować 1 shot o pojemności 80 ml",
+        ].join(" "),
+      },
+    });
+
+    assert.equal(preview.automatedBackfillReady, false);
+    assert.ok(preview.parserBlockers.includes("parsed_ingredient_name_contamination"));
+    assert.equal(preview.productionCandidate, null);
+    assert.deepEqual(preview.removableFieldCandidates, []);
+  });
+
+  test("repair preview blocks retained legacy ingredient names contaminated by table headers", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:legacy-reference-intake",
+      dataOriginId: "example-brand:legacy-reference-intake",
+      dataOriginUrl: "https://example.test/products/legacy-reference-intake",
+      name: "Example Legacy Reference Intake",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "legacy-reference-intake",
+        ingredientRows: [
+          { name: "Vitamin C", amount: "90", unit: "mg" },
+          { name: "%Reference Intake*", amount: "100", unit: "%" },
+        ],
+        servingSizes: [{ text: "1 tablet", source: "official_facts_table" }],
+        factsText: "Supplement Facts Serving Size 1 tablet Vitamin C 90 mg",
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.ok(preview.parserBlockers.includes("ingredient_name_contamination"));
+    assert.equal(preview.automatedBackfillReady, false);
+    assert.equal(preview.productionCandidate, null);
+  });
+
+  test("repair preview blocks automated candidates that would shrink existing ingredient rows", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:shrinking-facts",
+      dataOriginId: "example-brand:shrinking-facts",
+      dataOriginUrl: "https://example.test/products/shrinking-facts",
+      name: "Example Magnesium",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "shrinking-facts",
+        ingredientRows: [
+          { name: "Serving Size" },
+          { name: "% der empf. Tageszufuhr pro Kapsel * Magnesium", amount: "240", unit: "mg" },
+          { name: "Magnesium", amount: "240", unit: "mg" },
+        ],
+        servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
+        factsText: "Supplement Facts Serving Size 1 capsule Magnesium 240 mg 64%",
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.ok(preview.parserBlockers.includes("existing_ingredient_rows_would_decrease"));
+    assert.equal(preview.automatedBackfillReady, false);
+    assert.equal(preview.productionCandidate, null);
+  });
+
+  test("repair preview blocks parser artifact ingredient names", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:directions-as-ingredient",
+      dataOriginId: "example-brand:directions-as-ingredient",
+      dataOriginUrl: "https://example.test/products/directions-as-ingredient",
+      name: "Example Liquid Herbal",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "directions-as-ingredient",
+        ingredientRows: [{ name: "How to Use: Take", amount: "30", unit: "ml" }],
+        servingSizes: [{ text: "30 ml", source: "official_facts_table" }],
+        factsText: "Supplement Facts Serving Size 30 ml How to Use: Take 30 ml",
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.ok(preview.parserBlockers.includes("ingredient_name_contamination"));
+    assert.equal(preview.automatedBackfillReady, false);
+    assert.equal(preview.productionCandidate, null);
+  });
+
+  test("repair preview blocks extraction-rate rows as automated ingredients", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:herbal-extraction-rate",
+      dataOriginId: "example-brand:herbal-extraction-rate",
+      dataOriginUrl: "https://example.test/products/herbal-extraction-rate",
+      name: "Example Cotton",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "herbal-extraction-rate",
+        ingredientRows: [{ name: "Extraction rate 467 mg fresh herb per", amount: "0.7", unit: "ml" }],
+        servingSizes: [{ text: "0.7 ml", source: "official_facts_table" }],
+        factsText: "Supplement Facts Serving Size 0.7 ml Extraction rate 467 mg fresh herb per 0.7 ml",
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.ok(preview.parserBlockers.includes("ingredient_name_contamination"));
+    assert.equal(preview.automatedBackfillReady, false);
+    assert.equal(preview.productionCandidate, null);
+  });
+
+  test("repair preview blocks products whose promised active is missing from parsed rows", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:bcaa-watermelon",
+      dataOriginId: "example-brand:bcaa-watermelon",
+      dataOriginUrl: "https://example.test/products/bcaa-watermelon",
+      name: "Example BCAA Powder - Watermelon",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "bcaa-watermelon",
+        factsText: [
+          "Supplement Facts",
+          "Serving Size 1 scoop (9 g)",
+          "Amount Per Serving",
+          "Total Carbohydrate 1 g",
+        ].join("\n"),
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.ok(preview.parserBlockers.includes("likely_missing_product_active"));
+    assert.equal(preview.automatedBackfillReady, false);
+    assert.equal(preview.productionCandidate, null);
   });
 
   test("ingredient parser rejects nutritional-value header rows", () => {

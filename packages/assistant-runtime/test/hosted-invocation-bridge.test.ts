@@ -41,7 +41,6 @@ const TEST_REQUEST = {
   attemptId: "attempt_bridge",
   leaseGeneration: "4",
   providerEgressToken: "provider-egress-token-bridge",
-  reason: "nudge",
   userId: "member_bridge",
   workspaceVersion: "7",
 } satisfies HostedWorkspaceInvocationRequest;

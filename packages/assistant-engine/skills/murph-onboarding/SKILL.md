@@ -1,6 +1,6 @@
 ---
 name: murph-onboarding
-description: Use only when the current prompt marks first-run Murph onboarding as eligible or open, including the welcome, name and health-context collection, wearable/app checkpoint, first experiment setup, and onboarding completion.
+description: Use only when the current prompt marks first-run Murph onboarding as open, including the welcome, name and health-context collection, wearable/app checkpoint, first experiment setup, and onboarding completion.
 ---
 
 # Murph onboarding
@@ -9,7 +9,7 @@ description: Use only when the current prompt marks first-run Murph onboarding a
 
 Introduce the user to Murph, understand what they care about health-wise, complete a wearable/app checkpoint before first experiment setup, help them start sharing context over time, and guide them toward setting up a first bounded experiment.
 
-Expect roughly 9-10 short assistant messages after the welcome unless the user moves straight into concrete help. Do not compress the whole orientation into one "send me things" reply or one bundled setup questionnaire.
+Expect roughly 9-10 short assistant messages after the welcome across normal onboarding turns. Do not compress the whole orientation into one "send me things" reply or one bundled setup questionnaire.
 
 ## Outcomes
 
@@ -61,7 +61,7 @@ What's your name? And is there anything health-wise you've been curious about, w
 
 If they already gave their name or context, skip this.
 
-3. High-level setup context. After the user answers the opening context question, ask a natural optional question for age and gender context before the wearable/app checkpoint or more detailed protocol/supplement questions unless they already supplied these details, declined onboarding, or moved into concrete help. Do not use a fixed script for this turn. Phrase it conversationally for the channel and visible context. The question should explain that age and gender can help Murph interpret health context, make both fields optional, ask gender in plain language with wording like "are you a guy, girl, or prefer not to say?", and avoid bundling in other setup questions. Do not turn this into a question about labels or phrasing.
+3. High-level setup context. After the user answers the opening context question, ask a natural optional question for age and gender context before the wearable/app checkpoint or more detailed protocol/supplement questions unless they already supplied these details or declined onboarding. Do not use a fixed script for this turn. Phrase it conversationally for the channel and visible context. The question should explain that age and gender can help Murph interpret health context, make both fields optional, ask gender in plain language with wording like "are you a guy, girl, or prefer not to say?", and avoid bundling in other setup questions. Do not turn this into a question about labels or phrasing.
 
 Treat partial answers as enough to continue. Do not press for skipped demographic details, birth date, birth month/year, or sex assigned at birth.
 
@@ -69,7 +69,7 @@ Treat partial answers as enough to continue. Do not press for skipped demographi
 
 5. Hosted wearable handling. If a supported hosted wearable connection is already visible in context or `vault-cli device account list --format json` shows an active user-facing provider account or connected upstream source, acknowledge that connected wearable data is already available. Name the underlying provider/source rather than bridge plumbing. Do not ask the user to message wearable-derived activity, steps, workouts, sleep, or recovery data unless it is missing or an experiment specifically needs a user-provided note. Do not proactively mention Apple Health, HealthKit, Health Connect, or other unsupported sources as caveats during onboarding. If the user names an unsupported source, say Murph does not support that source yet and suggest a supported source from the current provider list or texting notes for now. If no connected wearable/app source is visible and the user asks to connect a wearable without naming a provider, ask which supported provider they use from the current prompt's supported provider list. If the user mentions a supported provider during onboarding and it is not already connected, use `vault-cli device connect <provider> --format json` and send the returned `connectUrl` on its own final line. Do not merely say they can connect later.
 
-6. Movement and training context. Ask a natural optional question about the user's current fitness level, activity, workout routine, and movement/training context after the wearable/app checkpoint and before current protocol or experiment questions unless they already supplied this context, declined onboarding, or moved into concrete help. Do not use a fixed script for this turn. The goal is to invite a rough, stream-of-consciousness context dump, not a structured questionnaire. Include a short examples list to help the user answer; keep the examples in list form, not one long paragraph. Useful examples can include:
+6. Movement and training context. Ask a natural optional question about the user's current fitness level, activity, workout routine, and movement/training context after the wearable/app checkpoint and before current protocol or experiment questions unless they already supplied this context or declined onboarding. Do not use a fixed script for this turn. The goal is to invite a rough, stream-of-consciousness context dump, not a structured questionnaire. Include a short examples list to help the user answer; keep the examples in list form, not one long paragraph. Useful examples can include:
 
 - usual weekly exercise rhythm
 - classes, lifting, running, cardio, sports, or walking
@@ -79,19 +79,19 @@ Treat partial answers as enough to continue. Do not press for skipped demographi
 
 Follow the movement/training input affordance. Do not add a separate "messy answer" line, typed-vs-voice line, or extra reassurance line. If a voice memo or audio answer already has a transcript, use it directly, save useful movement/training context, and keep setup moving. No progress update is needed solely because the answer arrived as automatically parsed audio. Treat partial answers as enough to continue. Save useful movement/training context to Context memory before asking the next onboarding question when a matching command is available.
 
-7. Current protocols or experiments. Ask a natural optional question about whether they are already trying any health protocols or experiments, or whether they are mostly starting fresh. Do this after the movement/training context prompt unless they already supplied current protocol or experiment context, declined onboarding, or moved into concrete help. Do not use a fixed script for this turn. If examples help, use examples such as cold exposure, sauna, a new workout plan, a diet pattern change, a sleep routine change, a recovery practice, or caffeine/alcohol timing.
+7. Current protocols or experiments. Ask a natural optional question about whether they are already trying any health protocols or experiments, or whether they are mostly starting fresh. Do this after the movement/training context prompt unless they already supplied current protocol or experiment context or declined onboarding. Do not use a fixed script for this turn. If examples help, use examples such as cold exposure, sauna, a new workout plan, a diet pattern change, a sleep routine change, a recovery practice, or caffeine/alcohol timing.
 
 Treat partial answers as enough to continue. Ask follow-up questions about protocol adherence only when the user asks to set up a specific experiment where that detail materially affects safety or measurement.
 
-8. Supplements. Ask a natural optional question about current supplements after current protocol/experiment context unless they already supplied supplement context, declined onboarding, or moved into concrete help. Do not use a fixed script for this turn. When relevant, invite product or brand names plus roughly how long they have taken each one or since when. Follow the supplement input affordance. Keep the question lightweight.
+8. Supplements. Ask a natural optional question about current supplements after current protocol/experiment context unless they already supplied supplement context or declined onboarding. Do not use a fixed script for this turn. When relevant, invite product or brand names plus roughly how long they have taken each one or since when. Follow the supplement input affordance. Keep the question lightweight.
 
 When their supplement answer will require ingredient lookup, call `send_progress_update` once before the first lookup so the user knows you are checking ingredient lists. Default to `vault-cli supplement search-labels` for one supplement or `vault-cli supplement search-labels-batch` for several. For batch lookup, pass one repeated `--query` flag per product; do not pass product names as positional arguments. The default lookup returns one match per query; pass an explicit higher limit only when the first result is ambiguous, generic, or missing likely product variants. The label database covers many supplements but is not exhaustive, so fall back to web search for products or ingredients it misses. Do not use a progress update for a quick memory save or a single follow-up question.
 
 Treat partial answers as enough to continue. After lookup when useful, save every current supplement product through `vault-cli supplement save`. If the user did not say how long they have taken a product or when they started it, ask one short follow-up for duration or start timing after the structured save or on the next onboarding turn, but do not block saving; use the current prompt's local date as fallback `startedOn`. Ask follow-up questions about dosage only when the user asks to set up a specific experiment where that detail materially affects safety or measurement, and only if the supplement lookup does not already provide a usable serving, dose, or amount.
 
-9. Medical context. After supplements and before blood tests, ask one optional open question covering medications, diagnosed conditions, allergies or intolerances, and pregnancy or nursing. Frame it as helping Murph keep future experiment suggestions safe, not as a medical questionnaire. Skip if the user already shared this context, declined onboarding, or moved into concrete help. One open question, not four separate turns; any answer — including "none" or skipping — is enough to continue.
+9. Medical context. After supplements and before blood tests, ask one optional open question covering medications, diagnosed conditions, allergies or intolerances, and pregnancy or nursing. Frame it as helping Murph keep future experiment suggestions safe, not as a medical questionnaire. Skip if the user already shared this context or declined onboarding. One open question, not four separate turns; any answer — including "none" or skipping — is enough to continue.
 
-10. Blood tests. Ask a natural optional question about recent blood tests or lab panels after the medical-context prompt unless they already supplied recent lab context, declined onboarding, or moved into concrete help. Do not use a fixed script for this turn. Examples such as Function Health or doctor-ordered labs are okay when they make the question clearer. Make clear that lab sharing is optional and can be deferred; if they do not have results handy, they can skip this now and send PDFs or pasted results later if they want Murph to use them. Do not imply they need to leave the conversation to retrieve anything.
+10. Blood tests. Ask a natural optional question about recent blood tests or lab panels after the medical-context prompt unless they already supplied recent lab context or declined onboarding. Do not use a fixed script for this turn. Examples such as Function Health or doctor-ordered labs are okay when they make the question clearer. Make clear that lab sharing is optional and can be deferred; if they do not have results handy, they can skip this now and send PDFs or pasted results later if they want Murph to use them. Do not imply they need to leave the conversation to retrieve anything.
 
 If the user sends lab PDFs, pasted lab results, or blood-test documents and the assistant will inspect, parse, summarize, import, or save them, call `send_progress_update` before reading the content or using file/import tools.
 
@@ -123,10 +123,10 @@ If the user chooses an option to set up, or if baseline logging is needed as par
 
 ## Constraints
 
-- Use this skill only when the current prompt includes the `Murph onboarding:` activation that says first-run Murph onboarding is eligible. If onboarding is not open, answer ordinary Murph introduction questions without using this flow or marking onboarding complete.
+- Use this skill only when the current prompt includes the `Murph onboarding:` activation that says first-run Murph onboarding is open. If onboarding is not open, answer ordinary Murph introduction questions without using this flow or marking onboarding complete.
 - Use this as a private guide, not a script. Advance items from the visible transcript when already answered.
 - One question per turn. Keep each turn short: one paragraph and at most one question, except the movement/training context turn may include a compact examples list.
-- If the user asks for concrete help, pause onboarding and help directly.
+- If the user has an immediate request, handle it first. Then continue from the next unresolved onboarding step unless the system prompt's skip conditions apply.
 - A short problem mention like sleep, stress, or "I work too much" is setup context, not permission to start troubleshooting. Acknowledge briefly and orient.
 - If the user mentions urgent or safety-sensitive symptoms, respond with safety guidance.
 - Never turn onboarding into a health questionnaire.

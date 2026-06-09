@@ -290,6 +290,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
             ok: true,
             reason: "duplicate-webhook-event",
           },
+          wakeMailboxItemId: existingMailboxItem.id,
+          wakeUserId: existingMember.id,
         }),
         buildHostedLinqWebhookPlannerDetails(input.event, context, {
           duplicate: true,

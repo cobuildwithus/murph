@@ -103,7 +103,6 @@ describe("hosted local Temporal orchestration e2e", () => {
       environment: activeScenario.runtimeEnv,
       expectedUserId: mailboxWorkspaceUserId,
       mailboxItemId: append.wake.id,
-      source: "hosted-local-temporal-e2e",
     });
 
     const workflowState = await waitForWorkflowExecutionState({
@@ -111,7 +110,7 @@ describe("hosted local Temporal orchestration e2e", () => {
       workflowId: signal.workflowId,
     });
     expect(workflowState.userId).toBe(mailboxWorkspaceUserId);
-    expect(workflowState.lastDemandSource).toBe("mailbox_backlog");
+    expect(workflowState.lastReconciliationStatus).toBe("work_pending");
     expect(workflowState.lastExecutionAt).not.toBeNull();
     expect(workflowState.lastExecutionErrorCode).toBeNull();
 

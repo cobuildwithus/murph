@@ -19,7 +19,6 @@ import {
   HOSTED_MAILBOX_LANES,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
-  HOSTED_WORKSPACE_INVOCATION_REASONS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
   buildHostedMailboxPayloadScope,
   buildHostedMailboxPayloadSecureBoxAad,
@@ -136,13 +135,6 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runner.provider_egress_diagnostic");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("workspace.codex_home_snapshot_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).not.toContain("run.acquired");
-    expect(HOSTED_WORKSPACE_INVOCATION_REASONS).toEqual([
-      "nudge",
-      "alarm",
-      "retry",
-      "manual",
-      "browser_vault_refresh",
-    ]);
     expect(HOSTED_WORKSPACE_INVOCATION_STATUSES).toEqual([
       "idle",
       "budget_exhausted",
@@ -210,7 +202,6 @@ describe("hosted runtime control contracts", () => {
       idleCheckpointDelayMs: 180_000,
       leaseGeneration: "7",
       providerEgressToken: "provider-egress-token-contract",
-      reason: "nudge" as const,
       userId: "member_123",
       workspaceVersion: "4",
     };
@@ -229,16 +220,6 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedWorkspaceInvocationRequest(workspaceInvocationRequest)).toEqual(
       workspaceInvocationRequest,
     );
-    const legacySourceInvocationRequest = parseHostedWorkspaceInvocationRequest({
-      ...workspaceInvocationRequest,
-      source: "workspace_wake",
-      workspace: null,
-    });
-    expect(legacySourceInvocationRequest).toEqual({
-      ...workspaceInvocationRequest,
-      workspace: null,
-    });
-    expect(legacySourceInvocationRequest).not.toHaveProperty("source");
     expect(parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
       workspace: workspaceState,
@@ -248,15 +229,20 @@ describe("hosted runtime control contracts", () => {
     });
     expect(() => parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
-      source: "device_sync_recovery",
+      reason: "nudge",
     })).toThrow(
-      "Hosted workspace invocation request source is not supported.",
+      "Hosted workspace invocation request.reason is no longer supported.",
+    );
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      source: "manual",
+    })).toThrow(
+      "Hosted workspace invocation request.source is no longer supported.",
     );
     expect(() => parseHostedWorkspaceInvocationRequest({
       attemptId: "attempt_3",
       checkpointNextWakeAt: null,
       leaseGeneration: "9",
-      reason: "nudge",
       userId: "member_123",
       workspaceVersion: "4",
     })).toThrow(
@@ -282,7 +268,6 @@ describe("hosted runtime control contracts", () => {
       expect(() => parseHostedWorkspaceInvocationRequest({
         attemptId: "attempt_1",
         leaseGeneration: "7",
-        reason: "nudge",
         [field]: field === "events" ? [] : "legacy",
         userId: "member_123",
         workspaceVersion: "4",

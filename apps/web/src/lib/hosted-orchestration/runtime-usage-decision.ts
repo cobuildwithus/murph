@@ -10,7 +10,7 @@ export type HostedRuntimeUsageGateCheck =
   | { status: "denied" }
   | { retryAt: string; status: "unavailable" };
 
-export async function resolveHostedRuntimeAiUsageDemandGate(input: {
+export async function resolveHostedRuntimeAiUsageGate(input: {
   mode?: "mutating" | "read_only";
   now?: Date | string;
   prisma?: Parameters<typeof resolveHostedAiUsageGate>[0]["prisma"];

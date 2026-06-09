@@ -210,7 +210,6 @@ describe("settings email sync route", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_item_channels_email_123",
-      source: "settings.email.sync",
     });
     await expect(response.json()).resolves.toEqual({
       emailAddress: "user@example.com",
@@ -310,7 +309,6 @@ describe("settings email sync route", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_item_channels_email_123",
-      source: "settings.email.sync",
     });
     expect(warnSpy).toHaveBeenCalledWith(
       "Hosted signup welcome email send failed after settings email sync.",

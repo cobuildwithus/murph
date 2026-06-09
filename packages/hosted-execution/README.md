@@ -43,7 +43,7 @@ as deleted state.
 - app-local auth adapters still own deployment-specific bearer token acquisition plus callback signing and verification
 - operator-facing hosted public-origin fallback and Cloudflare callback-key config stay app-local and are intentionally documented in `apps/web/README.md`, not here
 - Cloudflare operational control routes are private owner APIs, not part of this public package
-- normal webhook and app paths commit durable demand and signal Temporal only;
+- normal webhook and app paths append durable mailbox facts and signal Temporal only;
   they do not send user-level runner nudges directly to Cloudflare
 - Temporal calls Cloudflare `ensure-processing`; Cloudflare returns
   `runtime_processing_accepted` or `retry_later` and owns runner start, wake,

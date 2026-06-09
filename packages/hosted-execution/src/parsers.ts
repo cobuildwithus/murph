@@ -98,9 +98,6 @@ export {
   parseHostedWorkspaceSnapshotV2Ref,
 } from "./parsers/workspace-snapshot-v2.ts";
 export {
-  parseHostedRuntimeDemandRunSource,
-} from "./parsers/demand-source.ts";
-export {
   parseHostedMailboxFetchRequest,
   parseHostedMailboxFetchResponse,
   parseHostedMailboxItem,
@@ -135,12 +132,14 @@ export {
   parseHostedWorkspaceState,
 } from "./parsers/runtime-control.ts";
 export {
-  parseHostedRuntimeDemand,
-  parseHostedRuntimeDemandRequest,
   parseHostedRuntimeEnsureProcessingRequest,
   parseHostedRuntimeEnsureProcessingResponse,
   parseHostedRuntimePrewarmRequest,
   parseHostedRuntimePrewarmResponse,
+  parseHostedRuntimeReconciliationFacts,
+  parseHostedRuntimeReconciliationFactsBlocked,
+  parseHostedRuntimeReconciliationFactsRequest,
+  parseHostedRuntimeReconciliationFactsWorkspace,
   parseHostedRuntimeSignal,
 } from "./parsers/orchestration-control.ts";
 
