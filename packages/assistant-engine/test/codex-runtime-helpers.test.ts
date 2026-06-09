@@ -1534,6 +1534,12 @@ describe('Codex assistant registry helpers', () => {
           'thread/resume failed: no rollout found for thread id stale-thread',
         ),
       )
+      .mockRejectedValueOnce(
+        new VaultCliError(
+          'ASSISTANT_CODEX_RESUME_STALE',
+          'thread/resume failed: no rollout found for thread id stale-thread',
+        ),
+      )
       .mockResolvedValueOnce({
         finalMessage: 'final after fallback',
         jsonEvents: [],
@@ -1569,7 +1575,7 @@ describe('Codex assistant registry helpers', () => {
     })
 
     expect(attempt.ok).toBe(true)
-    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(2)
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(3)
     const primaryAppServerInput =
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
     expect(primaryAppServerInput).toMatchObject({
@@ -1579,8 +1585,18 @@ describe('Codex assistant registry helpers', () => {
     expect(primaryAppServerInput?.prompt).not.toContain(
       'Recent conversation history for context only; do not answer these prior messages:',
     )
+    const retryAppServerInput =
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]
+    expect(retryAppServerInput).toMatchObject({
+      resumeSessionId: 'stale-thread',
+    })
+    expect(retryAppServerInput?.prompt).toBe(primaryAppServerInput?.prompt)
+    expect(retryAppServerInput?.prompt).not.toContain('Active turn so far:')
+    expect(retryAppServerInput?.prompt).not.toContain(
+      'Recent conversation history for context only; do not answer these prior messages:',
+    )
     expect(
-      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0],
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[2]?.[0],
     ).toMatchObject({
       prompt: expect.stringContaining(
         'Recent conversation history for context only; do not answer these prior messages:',
@@ -1588,10 +1604,10 @@ describe('Codex assistant registry helpers', () => {
       resumeSessionId: undefined,
     })
     expect(
-      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]?.prompt,
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[2]?.[0]?.prompt,
     ).not.toContain('Active turn so far:')
     expect(
-      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]?.prompt,
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[2]?.[0]?.prompt,
     ).toContain('earlier committed assistant context')
     if (!attempt.ok) {
       throw new Error('expected successful provider attempt')

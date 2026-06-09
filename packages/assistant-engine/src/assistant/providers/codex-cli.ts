@@ -269,7 +269,44 @@ export async function executeCodexAssistantTurnAttempt(
     })
     return appServerResult
   }
+  const buildFailureAttemptResult = (
+    error: unknown,
+    failureContext: CodexAppServerTurnFailureContext | null,
+  ): AssistantProviderTurnAttemptResult => {
+    const rawEvents = failureContext?.jsonEvents ?? []
+    const usage = rawEvents.length > 0
+      ? extractCodexAssistantProviderUsage({
+          providerConfig,
+          rawEvents,
+        })
+      : null
+    const surfacedError = addCodexModelProviderFailureHint({
+      error,
+      failureHint: providerFailureHint,
+      providerSecretValue,
+    })
 
+    return {
+      error: surfacedError,
+      metadata: {
+        activityLabels: [],
+        executedToolCount: 0,
+        providerActionCount: failureContext?.providerActionCount ?? 0,
+        rawToolEvents: [],
+      },
+      ok: false,
+      ...(failureContext
+        ? {
+            codexThreadId: failureContext.codexThreadId,
+            providerTurnId: failureContext.providerTurnId,
+            rawEvents,
+          }
+        : {}),
+      ...(hasCodexAssistantProviderUsageData(usage) ? { usage } : {}),
+    }
+  }
+
+  let primaryPrompt: string | null = null
   try {
     const primaryInput =
       input.resumeCodexThreadId
@@ -279,6 +316,7 @@ export async function executeCodexAssistantTurnAttempt(
           }
         : input
     const prompt = resolveAssistantProviderPrompt(primaryInput)
+    primaryPrompt = prompt
     emitAssistantProviderPromptSizeTraceEvent({
       diagnosticKind: 'primary',
       input: primaryInput,
@@ -313,9 +351,31 @@ export async function executeCodexAssistantTurnAttempt(
       error instanceof VaultCliError &&
       error.code === 'ASSISTANT_CODEX_RESUME_STALE'
     ) {
-      result = await runFreshThreadFallback()
-      codexContinuation = {
-        kind: 'thread-start' as const,
+      if (primaryPrompt === null) {
+        return buildFailureAttemptResult(error, failureContext)
+      }
+      try {
+        result = await executeCodexAppServerTurn({
+          ...baseAppServerInput,
+          prompt: primaryPrompt,
+          resumeSessionId: input.resumeCodexThreadId,
+        })
+      } catch (retryError) {
+        if (
+          !(
+            retryError instanceof VaultCliError &&
+            retryError.code === 'ASSISTANT_CODEX_RESUME_STALE'
+          )
+        ) {
+          return buildFailureAttemptResult(
+            retryError,
+            readCodexAppServerTurnFailureContext(retryError),
+          )
+        }
+        result = await runFreshThreadFallback()
+        codexContinuation = {
+          kind: 'thread-start' as const,
+        }
       }
     } else if (
       input.resumeCodexThreadId &&
@@ -365,36 +425,7 @@ export async function executeCodexAssistantTurnAttempt(
         kind: 'thread-start' as const,
       }
     } else {
-      const rawEvents = failureContext?.jsonEvents ?? []
-      const usage = rawEvents.length > 0
-        ? extractCodexAssistantProviderUsage({
-            providerConfig,
-            rawEvents,
-          })
-        : null
-      const surfacedError = addCodexModelProviderFailureHint({
-        error,
-        failureHint: providerFailureHint,
-        providerSecretValue,
-      })
-      return {
-        error: surfacedError,
-        metadata: {
-          activityLabels: [],
-          executedToolCount: 0,
-          providerActionCount: failureContext?.providerActionCount ?? 0,
-          rawToolEvents: [],
-        },
-        ok: false,
-        ...(failureContext
-          ? {
-              codexThreadId: failureContext.codexThreadId,
-              providerTurnId: failureContext.providerTurnId,
-              rawEvents,
-            }
-          : {}),
-        ...(hasCodexAssistantProviderUsageData(usage) ? { usage } : {}),
-      }
+      return buildFailureAttemptResult(error, failureContext)
     }
   }
 
