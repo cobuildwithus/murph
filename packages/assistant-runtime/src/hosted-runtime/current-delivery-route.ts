@@ -3,24 +3,55 @@ import {
   type AssistantInputConversationRef,
   type AssistantInputReplyTarget,
 } from "@murphai/assistant-engine";
+import { assistantChannelNameValues } from "@murphai/operator-config/assistant-cli-contracts";
+import {
+  normalizeAssistantRouteString,
+  type AssistantCurrentDeliveryRoute,
+} from "@murphai/operator-config/assistant/current-delivery-route";
 
-export interface HostedForegroundCurrentDeliveryRoute {
-  channel: string;
-  deliveryTarget: string;
-  identityId: string | null;
-  participantId: string | null;
-  threadId: string | null;
+const deliveryChannels: readonly string[] = assistantChannelNameValues;
+
+// A conversation is identified by channel + delivery target. Locators are
+// per-message details of that conversation, so they survive only when every
+// message agrees on them.
+export function resolveUnambiguousCurrentDeliveryRoute(
+  routes: readonly AssistantCurrentDeliveryRoute[],
+): AssistantCurrentDeliveryRoute | null {
+  const byConversation = new Map<string, AssistantCurrentDeliveryRoute>();
+  for (const route of routes) {
+    const key = `${route.channel}\0${route.deliveryTarget}`;
+    const existing = byConversation.get(key);
+    byConversation.set(key, existing ? mergeAgreedRouteLocators(existing, route) : route);
+  }
+  if (byConversation.size !== 1) {
+    return null;
+  }
+  return [...byConversation.values()][0] ?? null;
+}
+
+function mergeAgreedRouteLocators(
+  a: AssistantCurrentDeliveryRoute,
+  b: AssistantCurrentDeliveryRoute,
+): AssistantCurrentDeliveryRoute {
+  return {
+    channel: a.channel,
+    deliveryTarget: a.deliveryTarget,
+    identityId: a.identityId === b.identityId ? a.identityId : null,
+    participantId: a.participantId === b.participantId ? a.participantId : null,
+    threadId: a.threadId === b.threadId ? a.threadId : null,
+  };
 }
 
 export function readHostedAssistantInputCurrentDeliveryRoute(input: {
   conversation: AssistantInputConversationRef | null;
   replyTarget: AssistantInputReplyTarget | null;
-}): HostedForegroundCurrentDeliveryRoute | null {
-  const channel = normalizeHostedCurrentDeliveryRouteValue(input.replyTarget?.channel);
-  if (!channel || !hostedReplyTargetThreadIsDeliveryTarget(channel)) {
+}): AssistantCurrentDeliveryRoute | null {
+  const channel = normalizeAssistantRouteString(input.replyTarget?.channel);
+  // Every delivery channel uses the reply-target thread id as the delivery target.
+  if (!channel || !deliveryChannels.includes(channel)) {
     return null;
   }
-  const deliveryTarget = normalizeHostedCurrentDeliveryRouteValue(input.replyTarget?.threadId);
+  const deliveryTarget = normalizeAssistantRouteString(input.replyTarget?.threadId);
   if (!deliveryTarget) {
     return null;
   }
@@ -32,27 +63,13 @@ export function readHostedAssistantInputCurrentDeliveryRoute(input: {
     channel,
     deliveryTarget,
     identityId: useConversationLocator
-      ? normalizeHostedCurrentDeliveryRouteValue(conversationRoute.identityId)
+      ? normalizeAssistantRouteString(conversationRoute.identityId)
       : null,
     participantId: useConversationLocator
-      ? normalizeHostedCurrentDeliveryRouteValue(conversationRoute.participantId)
+      ? normalizeAssistantRouteString(conversationRoute.participantId)
       : null,
     threadId: useConversationLocator
-      ? normalizeHostedCurrentDeliveryRouteValue(conversationRoute.threadId)
+      ? normalizeAssistantRouteString(conversationRoute.threadId)
       : null,
   };
-}
-
-function hostedReplyTargetThreadIsDeliveryTarget(channel: string): boolean {
-  return channel === "linq"
-    || channel === "telegram"
-    || channel === "email"
-    || channel === "whatsapp";
-}
-
-function normalizeHostedCurrentDeliveryRouteValue(
-  value: string | null | undefined,
-): string | null {
-  const normalized = value?.trim();
-  return normalized && normalized.length > 0 ? normalized : null;
 }

@@ -27,31 +27,27 @@ export function resolveAssistantDeliveryRouteWithCurrentRoute(
   currentRoute: AssistantCurrentDeliveryRoute | null | undefined,
 ): NormalizedAssistantDeliveryRouteFields {
   const normalizedCurrentRoute = normalizeAssistantCurrentDeliveryRoute(currentRoute)
-  const channel = normalizeAssistantRouteString(input.channel)
-    ?? normalizedCurrentRoute?.channel
-    ?? null
-  const explicitDeliveryTarget = normalizeAssistantRouteString(input.deliveryTarget)
-  const useCurrentRoute =
-    explicitDeliveryTarget === null &&
-    channel !== null &&
-    normalizedCurrentRoute?.channel === channel
-  const deliveryTarget =
-    explicitDeliveryTarget ??
-    (useCurrentRoute ? normalizedCurrentRoute.deliveryTarget : null)
-
-  return {
-    channel,
-    deliveryTarget,
-    identityId:
-      normalizeAssistantRouteString(input.identityId) ??
-      (useCurrentRoute ? normalizedCurrentRoute.identityId : null),
-    participantId:
-      normalizeAssistantRouteString(input.participantId) ??
-      (useCurrentRoute ? normalizedCurrentRoute.participantId : null),
-    threadId:
-      normalizeAssistantRouteString(input.threadId) ??
-      (useCurrentRoute ? normalizedCurrentRoute.threadId : null),
+  const explicit: NormalizedAssistantDeliveryRouteFields = {
+    channel: normalizeAssistantRouteString(input.channel)
+      ?? normalizedCurrentRoute?.channel
+      ?? null,
+    deliveryTarget: normalizeAssistantRouteString(input.deliveryTarget),
+    identityId: normalizeAssistantRouteString(input.identityId),
+    participantId: normalizeAssistantRouteString(input.participantId),
+    threadId: normalizeAssistantRouteString(input.threadId),
   }
+  // The target and locator fields together describe one conversation, so the
+  // current route is inherited atomically: mixing explicit and inherited
+  // fields would fabricate a route that never existed.
+  const useCurrentRoute =
+    explicit.deliveryTarget === null &&
+    explicit.identityId === null &&
+    explicit.participantId === null &&
+    explicit.threadId === null &&
+    explicit.channel !== null &&
+    normalizedCurrentRoute?.channel === explicit.channel
+
+  return useCurrentRoute ? normalizedCurrentRoute : explicit
 }
 
 function normalizeAssistantCurrentDeliveryRoute(
@@ -111,17 +107,12 @@ export function looksLikePrivateAssistantRoutePlaceholder(
 ): boolean {
   const target = normalizeAssistantRouteString(value)
   return (
-    target !== null &&
-    (/^h1_[a-f0-9]{24}$/iu.test(target) ||
-      /(?:^|:)hid_[A-Za-z0-9_-]+/u.test(target) ||
-      /(?:^|:)ain_[A-Za-z0-9_-]+/u.test(target) ||
-      target.includes('hbid:') ||
-      target.includes('hbidx:') ||
-      target.startsWith('[redacted'))
+    (target !== null && /^h1_[a-f0-9]{24}$/iu.test(target)) ||
+    looksLikeRedactedAssistantRoutePlaceholder(value)
   )
 }
 
-function normalizeAssistantRouteString(
+export function normalizeAssistantRouteString(
   value: string | null | undefined,
 ): string | null {
   const normalized = value?.trim()
