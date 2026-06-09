@@ -6,6 +6,9 @@ import path from "node:path";
 import { test } from "vitest";
 
 import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
+} from "@murphai/hosted-execution/cli-runtime-bridge";
+import {
   ensureHostedAssistantOperatorDefaults,
 } from "@murphai/operator-config/hosted-assistant-config";
 
@@ -72,6 +75,21 @@ test("hosted assistant injected env overrides a stale saved platform profile", a
   });
 });
 
+test("hosted assistant target uses the prepared test Codex command override", async () => {
+  await withTemporaryHostedAssistantEnv(async () => {
+    const defaultTarget = await readHostedAssistantExecutionDefaultTarget({
+      runtimeEnv: {
+        ...HOSTED_ASSISTANT_RUNTIME_ENV,
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: "/tmp/hosted-local-codex",
+        NODE_ENV: "test",
+      },
+    });
+
+    assert.equal(defaultTarget?.codexCommand, "/tmp/hosted-local-codex");
+    assert.equal(defaultTarget?.modelProvider, "hosted-openai");
+  });
+});
+
 test("hosted assistant hydration applies runtime env over stale saved platform profile", async () => {
   await withTemporaryHostedAssistantEnv(async () => {
     await ensureHostedAssistantOperatorDefaults({
@@ -106,6 +124,7 @@ async function withTemporaryHostedAssistantEnv(
   const previousEnv = captureEnv([
     "HOME",
     HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
+    HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
     ...Object.keys(HOSTED_ASSISTANT_ENV),
   ]);
 
