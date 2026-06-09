@@ -8,7 +8,7 @@ Success criteria:
 
 - Repair preview runs without crashing on refetch/OCR provenance rows.
 - Only `automatedBackfillReady` candidates are considered for writes.
-- A random 25-row candidate spot check confirms normalized facts are added while raw evidence, amounts, units, serving sizes, provenance, and source URLs are not lost.
+- Seeded random 100-row candidate spot checks confirm normalized facts are added while raw evidence, amounts, units, serving sizes, provenance, and source URLs are not lost.
 - Existing `brand_site` candidate rows are proven through preview plus dry-run only.
 - DB write remains deferred until the user explicitly approves it after spot-check results.
 
@@ -32,7 +32,7 @@ Success criteria:
 - `node --check .agents/skills/research-supplements/scripts/supplement-db-brand-site-repair-preview.mjs`
 - Focused supplement helper tests
 - Full repair preview
-- 25-row random candidate spot check before writes
+- 100-row random candidate spot check before writes
 - Candidate dry-run through `supplement-db-brand-site-labels.mjs dry-run`
 - No DB write
 - Current DB summary remains unchanged except for read-only inspection
@@ -41,15 +41,16 @@ Success criteria:
 
 ## State
 
-Read-only fix and spot check complete; DB write deferred.
+Read-only blocker hardening and spot checks complete; DB write deferred.
 
 Findings:
 
-- Repair preview now runs without crashing on refetch/OCR provenance rows.
-- Automated-backfill gating now rejects production review issues, contaminated parsed/retained ingredient names, and rows where an existing `ingredientRows` array would shrink.
-- Full preview produced 13,293 `automatedBackfillReady` candidates from 25,735 `brand_site` rows.
+- Repair preview runs without crashing on refetch/OCR provenance rows.
+- Automated-backfill gating rejects production review issues, contaminated parsed/retained ingredient names, rows where an existing `ingredientRows` array would shrink, missing visible actives, missing visible blend constituents, CJK continuation amount tables, OCR unit shifts, and sampled food/page-body/non-standalone artifacts.
+- Full preview produced 4,868 `automatedBackfillReady` candidates from 25,735 `brand_site` rows.
 - Candidate dry-run found zero production-blocked rows, zero missing serving sizes, zero missing ingredient rows, zero duplicate input rows, and zero oversized search-text rows.
-- Aggregate contamination scan over the candidate artifact found zero suspicious ingredient-name rows.
-- A seeded 25-row candidate spot check found no unexpected non-structured label key removal, no source URL changes, no search-text limit violations, no missing normalized facts, and no ingredient-row decreases.
+- Aggregate contamination scan over the regenerated candidate artifact found zero sampled suspicious ingredient-name rows and zero sampled implausible amount/unit rows.
+- Seeded 100-row candidate spot checks found additional blocker gaps; those rows are now blocked or clean after normalization. No DB writes were run.
+- `pnpm typecheck` currently fails outside this supplement work in `apps/web/test/hosted-execution-handoff.test.ts` because a hosted-control mock lacks `prewarmRuntime`.
 
 Conclusion: the regenerated candidate artifact is clean for the read-only checks performed here. No supplement DB writes were run; the actual backfill remains deferred until explicit approval.
