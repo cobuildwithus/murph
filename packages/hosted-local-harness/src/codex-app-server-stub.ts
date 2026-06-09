@@ -150,6 +150,37 @@ function appendThreadRolloutEvent(threadId, event) {
   return rolloutPath;
 }
 
+// Mirror the real app-server's ThreadResumeResponse: echo the effective
+// execution context, with sandbox in its SandboxPolicy tagged-object form.
+// Murph validates this echo before turn/start; omitting it makes every
+// resume look stale and silently falls back to a fresh thread.
+function buildThreadResumeContextEcho(params) {
+  const sandboxPolicyByMode = {
+    "danger-full-access": { type: "dangerFullAccess" },
+    "read-only": { networkAccess: false, type: "readOnly" },
+    "workspace-write": {
+      excludeSlashTmp: false,
+      excludeTmpdirEnvVar: false,
+      networkAccess: false,
+      type: "workspaceWrite",
+      writableRoots: [],
+    },
+  };
+  return {
+    ...(typeof params.approvalPolicy === "string"
+      ? { approvalPolicy: params.approvalPolicy }
+      : {}),
+    ...(typeof params.cwd === "string" ? { cwd: params.cwd } : {}),
+    ...(typeof params.model === "string" ? { model: params.model } : {}),
+    ...(typeof params.modelProvider === "string"
+      ? { modelProvider: params.modelProvider }
+      : {}),
+    ...(sandboxPolicyByMode[params.sandbox]
+      ? { sandbox: sandboxPolicyByMode[params.sandbox] }
+      : {}),
+  };
+}
+
 function readThreadStartDynamicToolNames(params) {
   const dynamicTools = params && Array.isArray(params.dynamicTools)
     ? params.dynamicTools
@@ -868,6 +899,7 @@ async function handleRpc(message) {
     writeRpc({
       id,
       result: {
+        ...(method === "thread/resume" ? buildThreadResumeContextEcho(params) : {}),
         thread: {
           id: threadId,
           ...(threadPath ? { path: threadPath } : {}),
