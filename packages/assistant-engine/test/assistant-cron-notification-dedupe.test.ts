@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { AssistantCronJob } from '@murphai/operator-config/assistant-cli-contracts'
 
 import {
   buildAssistantCronHostedDeliveryIdempotency,
@@ -6,7 +7,7 @@ import {
 } from '../src/assistant/cron/notification-delivery.js'
 
 describe('buildAssistantCronNotificationDedupeToken', () => {
-  const baseJob = {
+  const baseJob: Pick<AssistantCronJob, 'jobId' | 'state' | 'target'> = {
     jobId: 'cron_walk_reminder',
     state: {
       nextRunAt: '2026-04-14T08:00:00.000Z',
@@ -21,6 +22,7 @@ describe('buildAssistantCronNotificationDedupeToken', () => {
     target: {
       alias: null,
       channel: 'telegram',
+      deliverySource: null,
       sessionId: null,
       identityId: null,
       participantId: 'user_123',
@@ -36,7 +38,7 @@ describe('buildAssistantCronNotificationDedupeToken', () => {
         trigger: 'scheduled',
       }),
     ).toBe(
-      'assistant-cron|cron_walk_reminder|2026-04-14T08:00:00.000Z|telegram||user_123|thread_123|',
+      'assistant-cron|cron_walk_reminder|2026-04-14T08:00:00.000Z|telegram||||user_123|thread_123|',
     )
   })
 
@@ -59,6 +61,59 @@ describe('buildAssistantCronNotificationDedupeToken', () => {
     expect(second).not.toBe(first)
   })
 
+  it('changes when a Linq participant source changes', () => {
+    const firstJob = {
+      ...baseJob,
+      target: {
+        ...baseJob.target,
+        channel: 'linq',
+        deliverySource: {
+          fromPhoneNumber: '+15550001111',
+          kind: 'linq' as const,
+        },
+        deliveryTarget: null,
+        identityId: 'identity_linq',
+        participantId: '+15550002222',
+        threadId: null,
+      },
+    }
+    const secondJob = {
+      ...baseJob,
+      target: {
+        ...baseJob.target,
+        channel: 'linq',
+        deliverySource: {
+          fromPhoneNumber: '+15550003333',
+          kind: 'linq' as const,
+        },
+        deliveryTarget: null,
+        identityId: 'identity_linq',
+        participantId: '+15550002222',
+        threadId: null,
+      },
+    }
+    const first = buildAssistantCronNotificationDedupeToken({
+      job: firstJob,
+      trigger: 'scheduled',
+    })
+    const second = buildAssistantCronNotificationDedupeToken({
+      job: secondJob,
+      trigger: 'scheduled',
+    })
+    const firstHosted = buildAssistantCronHostedDeliveryIdempotency({
+      job: firstJob,
+      trigger: 'scheduled',
+    })
+    const secondHosted = buildAssistantCronHostedDeliveryIdempotency({
+      job: secondJob,
+      trigger: 'scheduled',
+    })
+
+    expect(second).not.toBe(first)
+    expect(secondHosted?.conversationId).not.toBe(firstHosted?.conversationId)
+    expect(secondHosted?.recipientKey).not.toBe(firstHosted?.recipientKey)
+  })
+
   it('does not dedupe manual runs', () => {
     expect(
       buildAssistantCronNotificationDedupeToken({
@@ -79,6 +134,8 @@ describe('buildAssistantCronNotificationDedupeToken', () => {
       conversationId: JSON.stringify([
         'telegram',
         null,
+        null,
+        null,
         'user_123',
         'thread_123',
       ]),
@@ -91,6 +148,8 @@ describe('buildAssistantCronNotificationDedupeToken', () => {
       ],
       recipientKey: JSON.stringify([
         'telegram',
+        null,
+        null,
         null,
         null,
         'user_123',

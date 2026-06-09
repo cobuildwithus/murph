@@ -79,9 +79,19 @@ export const automationScheduleSchema = z.discriminatedUnion("kind", [
   automationScheduleDeviceActivitySchema,
 ]);
 
+const automationRouteDeliverySourceSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("linq"),
+      fromPhoneNumber: z.string().min(1),
+    })
+    .strict(),
+]);
+
 export const automationRouteSchema = z
   .object({
     channel: z.string().min(1),
+    deliverySource: automationRouteDeliverySourceSchema.nullable().optional(),
     deliveryTarget: z.string().min(1).nullable(),
     identityId: z.string().min(1).nullable(),
     participantId: z.string().min(1).nullable(),
@@ -127,7 +137,7 @@ export const automationScaffoldPayloadSchema = z
     schedule: automationScheduleSchema,
     slug: z.string().regex(slugPattern).optional(),
     status: z.enum(automationStatusValues).default("active"),
-    summary: z.string().min(1).max(4000).optional(),
+    summary: z.string().min(1).max(4000).nullable().optional(),
     tags: z.array(z.string().min(1)).optional(),
     title: z.string().min(1).max(160),
   })

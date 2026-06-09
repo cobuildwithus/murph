@@ -1473,6 +1473,49 @@ describe("RunnerContainer", () => {
     expect(JSON.stringify(error)).not.toContain("private diagnostic text");
   });
 
+  it("forwards content-free Codex shell smoke diagnostics from the container", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+            ok: true,
+            service: "cloudflare-hosted-runner-node",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+          return new Response(JSON.stringify({
+            error: "Hosted Codex shell smoke failed.",
+            ok: false,
+            smokeErrorMessage:
+              "Hosted Codex shell smoke assistant CLI surface contract was missing hot-path schemas. proofCount=1",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 500,
+          });
+        }
+
+        throw new Error(`Unexpected deploy smoke URL: ${url}`);
+      }),
+    });
+
+    const error = await container.smokeHealth().catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Hosted runner container Codex shell smoke failed with HTTP 500. "
+        + "Hosted Codex shell smoke assistant CLI surface contract was missing hot-path schemas. proofCount=1",
+    );
+  });
+
   it("recycles any warm deploy smoke shell before checking container health", async () => {
     const { container, destroy, startAndWaitForPorts } = createContainerDouble({
       initialStatus: "running",

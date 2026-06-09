@@ -36,7 +36,6 @@ export function useHostedEmailSettingsController(input: {
     linkedAccounts,
   });
   const [code, setCode] = useState("");
-  const [dialogOpen, setDialogOpen] = useState(false);
   const [emailAddress, setEmailAddress] = useState(() => baseDisplayState.currentEmail?.address ?? "");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSyncingEmailRoute, setIsSyncingEmailRoute] = useState(false);
@@ -72,11 +71,9 @@ export function useHostedEmailSettingsController(input: {
   const normalizedCurrentEmail = overrideDisplayState.normalizedCurrentEmail;
   const canManageEmail = input.authenticated;
   const canSendEmailUpdateCode = Boolean(effectiveCurrentEmail?.address);
-  const isAwaitingCode = state.status === "awaiting-code-input";
   const isSendingCode = state.status === "sending-code";
   const isSubmittingCode = state.status === "submitting-code";
   const isBusy = isSendingCode || isSubmittingCode || isSyncingEmailRoute;
-  const effectiveDialogOpen = dialogOpen || isAwaitingCode || isSubmittingCode;
 
   async function requestCodeForEmail(nextEmailAddress: string) {
     setErrorMessage(null);
@@ -109,7 +106,6 @@ export function useHostedEmailSettingsController(input: {
       }
 
       setPendingEmailAddress(nextEmailAddress);
-      setDialogOpen(true);
       setCode("");
     } catch (error) {
       setErrorMessage(toErrorMessage(error, "We could not send a verification code to that email address."));
@@ -136,41 +132,32 @@ export function useHostedEmailSettingsController(input: {
     await requestCodeForEmail(nextEmailAddress);
   }
 
-  async function handleResendCode(rawEmailAddress?: string) {
-    if (!canSendEmailUpdateCode) {
-      handleLinkEmail();
+  async function handleResendCode() {
+    // Resend only renders in the code-entry step, where a pending email
+    // address is always set; bail quietly if that invariant ever breaks.
+    if (!pendingEmailAddress) {
       return;
     }
 
-    const nextEmailAddress = rawEmailAddress === undefined
-      ? normalizeEmailAddress(emailAddress)
-      : normalizeEmailAddress(rawEmailAddress);
+    await requestCodeForEmail(pendingEmailAddress);
+  }
 
-    if (!nextEmailAddress) {
-      setErrorMessage("Enter a valid email address before we send a code.");
-      return;
-    }
-
-    if (nextEmailAddress !== emailAddress) {
-      setEmailAddress(nextEmailAddress);
-    }
-
-    await requestCodeForEmail(nextEmailAddress);
+  function handleUseAnotherEmail() {
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    setCode("");
+    setPendingEmailAddress(null);
   }
 
   async function handleVerifyCode(rawCode?: string) {
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    const normalizedCode = typeof rawCode === "string" ? rawCode.trim() : code.trim();
+    const normalizedCode = (rawCode ?? code).trim();
 
     if (!normalizedCode) {
       setErrorMessage("Enter the verification code we emailed you.");
       return;
-    }
-
-    if (normalizedCode !== code) {
-      setCode(normalizedCode);
     }
 
     let verifiedEmailAddress: string | null = null;
@@ -195,7 +182,6 @@ export function useHostedEmailSettingsController(input: {
       verifiedEmailAddress = nextEmail?.address ?? pendingEmailAddress ?? normalizeEmailAddress(emailAddress);
 
       setCode("");
-      setDialogOpen(false);
       setPendingEmailAddress(null);
       setEmailAddress(verifiedEmailAddress ?? emailAddress);
 
@@ -206,6 +192,7 @@ export function useHostedEmailSettingsController(input: {
         });
       }
     } catch (error) {
+      setCode("");
       setErrorMessage(toErrorMessage(error, "We could not verify that code."));
       return;
     }
@@ -223,7 +210,6 @@ export function useHostedEmailSettingsController(input: {
     setSuccessMessage(null);
     setCode("");
     setPendingEmailAddress(null);
-    setDialogOpen(false);
 
     if (!input.authenticated) {
       setErrorMessage("Sign in with your existing hosted account before you try to link an email address.");
@@ -302,7 +288,6 @@ export function useHostedEmailSettingsController(input: {
     authenticated: input.authenticated,
     canManageEmail,
     code,
-    dialogOpen: effectiveDialogOpen,
     effectiveCurrentEmail,
     effectiveVerifiedEmail,
     emailAddress,
@@ -315,11 +300,11 @@ export function useHostedEmailSettingsController(input: {
     pendingEmailAddress,
     successMessage,
     setCode,
-    setDialogOpen,
     setEmailAddress,
     handleResendCode,
     handleSendCode,
     handleSyncVerifiedEmail,
+    handleUseAnotherEmail,
     handleVerifyCode,
   };
 }

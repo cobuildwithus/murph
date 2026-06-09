@@ -544,7 +544,7 @@ function redactE2ECommandOutput(value) {
   return output.slice(-4000);
 }
 
-function validateE2EVaultCliAutomationSaveArgs(args) {
+function validateE2EVaultCliCommandArgs(args) {
   if (args.length < 3 || args.length > 64) {
     throw new Error("E2E vault-cli directive must include 3 to 64 arguments");
   }
@@ -553,9 +553,34 @@ function validateE2EVaultCliAutomationSaveArgs(args) {
       throw new Error("E2E vault-cli directive includes an invalid argument");
     }
   }
-  if (args[0] !== "automation" || args[1] !== "save") {
-    throw new Error("E2E vault-cli directive only supports automation save");
+  if (args[0] === "assistant") {
+    if (
+      args.length === 5
+      && args[1] === "onboarding"
+      && args[2] === "complete"
+      && args[3] === "--reason"
+      && args[4] === "manual"
+    ) {
+      return;
+    }
+    throw new Error("E2E vault-cli directive only supports assistant onboarding complete");
   }
+  if (args[0] !== "automation") {
+    throw new Error("E2E vault-cli directive only supports automation commands or assistant onboarding complete");
+  }
+  if (args[1] === "save") {
+    return;
+  }
+  if (
+    args[1] === "set-status"
+    && args.length === 5
+    && args[2] === "finish-onboarding-followup"
+    && args[3] === "--status"
+    && args[4] === "archived"
+  ) {
+    return;
+  }
+  throw new Error("E2E vault-cli directive only supports automation save or automation set-status");
 }
 
 function resolveE2EVaultCliInvocation(args) {
@@ -642,7 +667,7 @@ function isE2EPathWithin(candidate, root) {
 }
 
 function callVaultCliCommand(command) {
-  validateE2EVaultCliAutomationSaveArgs(command.args);
+  validateE2EVaultCliCommandArgs(command.args);
   const invocation = resolveE2EVaultCliInvocation(command.args);
   const result = childProcess.spawnSync(invocation.command, invocation.args, {
     encoding: "utf8",
@@ -652,11 +677,11 @@ function callVaultCliCommand(command) {
     timeout: 30000,
   });
   if (result.error) {
-    throw new Error("E2E vault-cli automation save failed: " + redactE2ECommandOutput(result.error.message));
+    throw new Error("E2E vault-cli automation command failed: " + redactE2ECommandOutput(result.error.message));
   }
   if (result.status !== 0) {
     throw new Error([
-      "E2E vault-cli automation save failed with exit code " + result.status,
+      "E2E vault-cli automation command failed with exit code " + result.status,
       redactE2ECommandOutput(result.stderr),
       redactE2ECommandOutput(result.stdout),
     ].filter(Boolean).join("\\n"));
@@ -722,7 +747,12 @@ async function fetchAssistantResponse(providerInput) {
   const rawBody = await response.text();
 
   if (!response.ok) {
-    throw new Error("assistant provider stub failed with HTTP " + response.status);
+    throw new Error(
+      "assistant provider stub failed with HTTP "
+        + response.status
+        + ": "
+        + redactE2ECommandOutput(rawBody),
+    );
   }
 
   return extractResponseText(JSON.parse(rawBody));
@@ -771,6 +801,7 @@ async function completeTurn(turn) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    console.error("[hosted-e2e-codex-shim] turn failed: " + redactE2ECommandOutput(message));
     writeRpc({
       type: "error",
       params: {

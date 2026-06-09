@@ -31,6 +31,7 @@ import {
 import {
   supportsAnyAssistantRichUserMessageContent,
   type AssistantProviderCapabilities,
+  type AssistantProviderCodexResume,
   type AssistantProviderTurnAttemptResult,
   type AssistantProviderTurnExecutionInput,
   type AssistantProviderUsage,
@@ -233,25 +234,14 @@ export async function executeCodexAssistantTurnAttempt(
 
   let result: Awaited<ReturnType<typeof executeCodexAppServerTurn>>
   let codexContinuation
-  let preparedFreshThreadFallback = input.freshThreadFallback ?? null
-  const resolveFreshThreadFallback = async () => {
-    if (preparedFreshThreadFallback) {
-      return preparedFreshThreadFallback
-    }
-
-    preparedFreshThreadFallback =
-      (await input.prepareFreshThreadFallback?.()) ?? null
-
-    return preparedFreshThreadFallback
-  }
-  const runFreshThreadFallback = async () => {
-    const freshThreadFallback = await resolveFreshThreadFallback()
+  const runFreshThreadFallback = async (
+    resume: AssistantProviderCodexResume,
+  ) => {
+    const freshThreadFallback = await resume.prepareFreshThreadFallback()
     const fallbackInput = {
       ...input,
-      ...(freshThreadFallback ?? {}),
-      freshThreadFallback,
-      prepareFreshThreadFallback: undefined,
-      resumeCodexThreadId: null,
+      ...freshThreadFallback,
+      resume: null,
     }
     const prompt = resolveAssistantProviderPrompt(fallbackInput)
     emitAssistantProviderPromptSizeTraceEvent({
@@ -272,7 +262,7 @@ export async function executeCodexAssistantTurnAttempt(
 
   try {
     const primaryInput =
-      input.resumeCodexThreadId
+      input.resume
         ? {
             ...input,
             conversationHistoryMessages: undefined,
@@ -287,14 +277,14 @@ export async function executeCodexAssistantTurnAttempt(
     result = await executeCodexAppServerTurn({
       ...baseAppServerInput,
       prompt,
-      resumeSessionId: input.resumeCodexThreadId,
+      resumeSessionId: input.resume?.codexThreadId,
     })
   } catch (error) {
     const failureContext = readCodexAppServerTurnFailureContext(error)
     const invalidOutputResumeFailure =
       error instanceof VaultCliError && isCodexInvalidOutputResumeFailure(error)
     if (
-      input.resumeCodexThreadId &&
+      input.resume &&
       isCodexDiagnosticTraceError(error) &&
       !invalidOutputResumeFailure
     ) {
@@ -303,22 +293,22 @@ export async function executeCodexAssistantTurnAttempt(
         rawEvent: buildCodexResumeFailureTraceEvent({
           error,
           failureContext,
-          resumeCodexThreadId: input.resumeCodexThreadId,
+          resumeCodexThreadId: input.resume.codexThreadId,
         }),
       })
     }
 
     if (
-      input.resumeCodexThreadId &&
+      input.resume &&
       error instanceof VaultCliError &&
       error.code === 'ASSISTANT_CODEX_RESUME_STALE'
     ) {
-      result = await runFreshThreadFallback()
+      result = await runFreshThreadFallback(input.resume)
       codexContinuation = {
         kind: 'thread-start' as const,
       }
     } else if (
-      input.resumeCodexThreadId &&
+      input.resume &&
       error instanceof VaultCliError &&
       invalidOutputResumeFailure
     ) {
@@ -327,12 +317,12 @@ export async function executeCodexAssistantTurnAttempt(
         rawEvent: buildCodexInvalidOutputResumeFailureTraceEvent({
           error,
           failureContext,
-          resumeCodexThreadId: input.resumeCodexThreadId,
+          resumeCodexThreadId: input.resume.codexThreadId,
         }),
       })
 
       try {
-        result = await runFreshThreadFallback()
+        result = await runFreshThreadFallback(input.resume)
       } catch (fallbackError) {
         emitCodexInvalidOutputTraceEvent({
           onTraceEvent: input.onTraceEvent,
@@ -341,7 +331,7 @@ export async function executeCodexAssistantTurnAttempt(
             failureContext,
             fallbackError,
             fallbackResult: 'failed',
-            resumeCodexThreadId: input.resumeCodexThreadId,
+            resumeCodexThreadId: input.resume.codexThreadId,
           }),
         })
         throw addCodexModelProviderFailureHint({
@@ -358,7 +348,7 @@ export async function executeCodexAssistantTurnAttempt(
           failureContext,
           fallbackResult: 'succeeded',
           result,
-          resumeCodexThreadId: input.resumeCodexThreadId,
+          resumeCodexThreadId: input.resume.codexThreadId,
         }),
       })
       codexContinuation = {
@@ -479,7 +469,7 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
         conversationContextBytes: byteLength(conversationContextPrompt),
         conversationContextPresent,
         resumeCodexThreadIdPresent:
-          normalizeNullableString(input.input.resumeCodexThreadId) !== null,
+          normalizeNullableString(input.input.resume?.codexThreadId) !== null,
       },
       updates: [],
     })

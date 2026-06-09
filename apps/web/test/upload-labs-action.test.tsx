@@ -204,6 +204,7 @@ test("UploadLabsMurphContactAction falls back to a prefilled email when SMS is n
   mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
     email: {
       address: "member@example.test",
+      murphEmailAddress: "murph+alias123@mail.withmurph.ai",
       verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
     },
     phone: null,
@@ -215,13 +216,60 @@ test("UploadLabsMurphContactAction falls back to a prefilled email when SMS is n
   );
   const markup = renderToStaticMarkup(await UploadLabsMurphContactAction());
 
-  assert.match(markup, /href="mailto:murph@mail\.withmurph\.ai\?/);
+  assert.match(markup, /href="mailto:murph\+alias123@mail\.withmurph\.ai\?/);
   assert.match(markup, /subject=Lab%20reports%20for%20Murph/);
   assert.match(
     markup,
     /body=Here%20are%20some%20lab%20reports%20I%20want%20you%20to%20check%20out%3A/,
   );
   assert.doesNotMatch(markup, /href="sms:\+15550100001/);
+  assert.doesNotMatch(markup, /member@example\.test/);
+});
+
+test("UploadLabsMurphContactAction skips verified email without a reply alias", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      id: "member_labs_email_without_alias",
+    },
+    linkedAccounts: [
+      {
+        address: "member@example.test",
+        latest_verified_at: 1771977600,
+        type: "email",
+      },
+    ],
+    memberLookup: null,
+    session: null,
+  });
+  mocks.readHostedMemberRoutingState.mockResolvedValue({
+    linqChatId: null,
+    linqRecipientPhone: null,
+    memberId: "member_labs_email_without_alias",
+    pendingLinqChatId: null,
+    pendingLinqRecipientPhone: null,
+    telegramThreadId: null,
+    telegramUserId: null,
+    telegramUserLookupKey: null,
+  });
+  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
+    email: {
+      address: "member@example.test",
+      murphEmailAddress: null,
+      verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
+    },
+    phone: null,
+    telegram: null,
+  });
+
+  const { UploadLabsMurphContactAction } = await import(
+    "@/src/components/home/upload-labs-action"
+  );
+  const markup = renderToStaticMarkup(await UploadLabsMurphContactAction());
+
+  assert.match(markup, /data-slot="auth-button"/);
+  assert.doesNotMatch(markup, /href="mailto:/);
+  assert.doesNotMatch(markup, /murph@mail\.withmurph\.ai/);
   assert.doesNotMatch(markup, /member@example\.test/);
 });
 
@@ -250,6 +298,7 @@ test("UploadLabsMurphContactAction prefers Telegram over email with the lab-repo
   mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
     email: {
       address: "member@example.test",
+      murphEmailAddress: "murph+alias123@mail.withmurph.ai",
       verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
     },
     phone: null,

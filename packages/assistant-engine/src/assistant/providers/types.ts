@@ -80,9 +80,7 @@ export interface AssistantProviderTurnInput {
   prompt?: string | null
   provider?: AssistantChatProvider | null
   reasoningEffort?: string | null
-  resumeCodexThreadId?: string | null
-  freshThreadFallback?: AssistantProviderFreshThreadFallbackInput | null
-  prepareFreshThreadFallback?: AssistantProviderFreshThreadFallbackResolver | null
+  resume?: AssistantProviderCodexResume | null
   sandbox?: AssistantSandbox | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null
@@ -107,7 +105,12 @@ export interface AssistantProviderFreshThreadFallbackInput {
 }
 
 export type AssistantProviderFreshThreadFallbackResolver =
-  () => Promise<AssistantProviderFreshThreadFallbackInput | null>
+  () => Promise<AssistantProviderFreshThreadFallbackInput>
+
+export interface AssistantProviderCodexResume {
+  codexThreadId: string
+  prepareFreshThreadFallback: AssistantProviderFreshThreadFallbackResolver
+}
 
 export interface AssistantProviderTurnExecutionInput {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
@@ -122,9 +125,7 @@ export interface AssistantProviderTurnExecutionInput {
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   prompt?: string | null
   providerConfig: AssistantProviderConfig
-  resumeCodexThreadId?: string | null
-  freshThreadFallback?: AssistantProviderFreshThreadFallbackInput | null
-  prepareFreshThreadFallback?: AssistantProviderFreshThreadFallbackResolver | null
+  resume?: AssistantProviderCodexResume | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null
   }

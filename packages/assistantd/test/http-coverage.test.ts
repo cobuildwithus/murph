@@ -34,6 +34,7 @@ const TEST_CRON_JOB = {
     participantId: 'chat-123',
     threadId: 'chat-123',
     deliveryTarget: null,
+    deliverySource: null,
     deliverResponse: true,
   },
   createdAt: '2026-04-09T00:00:00.000Z',

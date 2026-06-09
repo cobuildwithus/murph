@@ -205,12 +205,16 @@ function hasDefinedAutomationOption(options: object): boolean {
   return Object.values(options).some((value) => value !== undefined);
 }
 
-function automationScheduleOptionsHavePatch(options: AutomationScheduleOptions): boolean {
-  return hasDefinedAutomationOption(options);
+// Only save/create may inherit the hosted assistant's current conversation as
+// the route; edit always requires a complete explicit route.
+async function buildAutomationSaveRouteFromOptions(input: AutomationRouteOptions): Promise<AutomationRoute> {
+  return buildAutomationRouteFromOptions(input, await readAutomationSaveCurrentRoute(input));
 }
 
-async function buildAutomationRouteFromOptions(input: AutomationRouteOptions): Promise<AutomationRoute> {
-  const currentRoute = await readAutomationSaveCurrentRoute(input);
+function buildAutomationRouteFromOptions(
+  input: AutomationRouteOptions,
+  currentRoute: HostedCliAssistantCurrentRoute | null,
+): AutomationRoute {
   const route = stripPrivateAssistantRoutePlaceholders(
     resolveAssistantDeliveryRouteWithCurrentRoute({
       channel: input.channel,
@@ -264,10 +268,6 @@ function automationSaveNeedsCurrentRoute(input: AutomationRouteOptions): boolean
     && !normalizeAutomationRouteOption(input.threadId);
 }
 
-function automationRouteOptionsHavePatch(options: AutomationRouteOptions): boolean {
-  return hasDefinedAutomationOption(options);
-}
-
 function assertAutomationRouteCanDeliver(route: AutomationRoute): void {
   if (!route.channel) {
     throw new VaultCliError(
@@ -284,14 +284,19 @@ function assertAutomationRouteCanDeliver(route: AutomationRoute): void {
   }
 
   if (route.channel === "linq") {
-    if (!route.deliveryTarget) {
+    const hasParticipantSource =
+      Boolean(route.participantId) && route.deliverySource?.kind === "linq";
+    if (!route.deliveryTarget && !hasParticipantSource) {
       throw new VaultCliError(
         "invalid_option",
-        "iMessage automation routes require an explicit delivery target. Pass --delivery-target.",
+        "iMessage automation routes require an explicit delivery target or a participant route with a delivery source.",
       );
     }
 
-    if (looksLikePrivateAssistantRoutePlaceholder(route.deliveryTarget)) {
+    if (
+      route.deliveryTarget &&
+      looksLikePrivateAssistantRoutePlaceholder(route.deliveryTarget)
+    ) {
       throw new VaultCliError(
         "invalid_option",
         "iMessage automation routes cannot use redacted conversation placeholders as delivery targets.",
@@ -489,7 +494,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         automationId: context.options.id,
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,
-        route: await buildAutomationRouteFromOptions({
+        route: await buildAutomationSaveRouteFromOptions({
           channel: context.options.channel,
           deliveryTarget: context.options.deliveryTarget,
           identityId: context.options.identityId,
@@ -578,10 +583,13 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,
         lookup: context.args.lookup,
-        route: automationRouteOptionsHavePatch(routeOptions)
-          ? await buildAutomationRouteFromOptions(routeOptions)
+        // Route flags replace the stored route wholesale: a route names one
+        // conversation, so it is never merged field-wise or inherited from the
+        // assistant's current conversation.
+        route: hasDefinedAutomationOption(routeOptions)
+          ? buildAutomationRouteFromOptions(routeOptions, null)
           : undefined,
-        schedule: automationScheduleOptionsHavePatch(scheduleOptions)
+        schedule: hasDefinedAutomationOption(scheduleOptions)
           ? buildAutomationScheduleFromOptions(scheduleOptions, { now })
           : undefined,
         slug: context.options.slug,
@@ -615,6 +623,48 @@ export function registerAutomationCommands(cli: Cli.Cli) {
       return {
         vault: context.options.vault,
         automation: await showAutomation(context.options.vault, context.args.lookup),
+      };
+    },
+  });
+
+  automation.command("set-status", {
+    args: z.object({
+      lookup: z.string().min(1).describe("Automation id or slug to update."),
+    }),
+    description: "Update one automation status while preserving its existing definition.",
+    options: withBaseOptions({
+      status: z.enum(automationStatusValues).describe("New automation status."),
+    }),
+    output: automationSaveResultSchema,
+    async run(context) {
+      const existing = await showAutomation(context.options.vault, context.args.lookup);
+      if (!existing) {
+        throw new VaultCliError(
+          "automation_not_found",
+          "Automation was not found.",
+        );
+      }
+
+      const result = await upsertAutomation({
+        automationId: existing.automationId,
+        continuityPolicy: existing.continuityPolicy,
+        instructions: existing.instructions,
+        route: existing.route,
+        schedule: existing.schedule,
+        slug: existing.slug,
+        status: context.options.status,
+        summary: existing.summary ?? undefined,
+        tags: existing.tags,
+        title: existing.title,
+        vaultRoot: context.options.vault,
+      });
+
+      return {
+        vault: context.options.vault,
+        automationId: result.record.automationId,
+        lookupId: result.record.slug,
+        path: result.record.relativePath,
+        created: result.created,
       };
     },
   });
