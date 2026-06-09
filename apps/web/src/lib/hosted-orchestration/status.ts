@@ -314,12 +314,6 @@ function parseHostedRuntimeWorkflowStatusForWeb(
     lastMailboxLagLaneCount: requireSafeInteger(record.lastMailboxLagLaneCount),
     lastOrchestrationAttemptId:
       readNullableString(record.lastOrchestrationAttemptId ?? null),
-    lastPrewarmAttemptId:
-      readNullableString(record.lastPrewarmAttemptId ?? null),
-    lastPrewarmErrorCode:
-      readNullableString(record.lastPrewarmErrorCode ?? null),
-    lastPrewarmResult:
-      readNullablePrewarmResult(record.lastPrewarmResult ?? null),
     lastReconciliationBlockedReason:
       readNullableReconciliationBlockedReason(record.lastReconciliationBlockedReason),
     lastReconciliationNextWakeAt:
@@ -332,11 +326,7 @@ function parseHostedRuntimeWorkflowStatusForWeb(
     ),
     latestMailboxPointer:
       readNullableObservabilityMailboxPointer(record.latestMailboxPointer),
-    latestPrewarmRequestedAt:
-      readNullableString(record.latestPrewarmRequestedAt ?? null),
     mailboxSignalCount: requireSafeInteger(record.mailboxSignalCount),
-    prewarmRequested: readOptionalBoolean(record.prewarmRequested, false),
-    prewarmSignalCount: readOptionalSafeInteger(record.prewarmSignalCount, 0),
     signalVersion: requireSafeInteger(record.signalVersion),
     userId: requireString(record.userId),
   };
@@ -452,21 +442,6 @@ function readNullableExecutionKind(
   return null;
 }
 
-function readNullablePrewarmResult(
-  value: unknown,
-): HostedRuntimeWorkflowState["lastPrewarmResult"] {
-  if (value === null) {
-    return null;
-  }
-
-  const result = requireString(value);
-  if (result === "accepted" || result === "retry_later" || result === "failed") {
-    return result;
-  }
-
-  return null;
-}
-
 function readNullableLastRuntimeStatus(
   value: unknown,
 ): HostedRuntimeLastRuntimeStatus {
@@ -492,22 +467,6 @@ function readNullableString(value: unknown): string | null {
   }
 
   return requireString(value);
-}
-
-function requireBoolean(value: unknown): boolean {
-  if (typeof value !== "boolean") {
-    throw new TypeError("Hosted runtime workflow status boolean is invalid.");
-  }
-
-  return value;
-}
-
-function readOptionalBoolean(value: unknown, fallback: boolean): boolean {
-  return value === undefined ? fallback : requireBoolean(value);
-}
-
-function readOptionalSafeInteger(value: unknown, fallback: number): number {
-  return value === undefined ? fallback : requireSafeInteger(value);
 }
 
 function requireSafeInteger(value: unknown): number {

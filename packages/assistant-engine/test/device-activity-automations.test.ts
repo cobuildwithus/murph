@@ -206,6 +206,7 @@ function createDeviceActivityAutomation(input: {
     relativePath: 'bank/automations/after-walk.md',
     route: {
       channel: 'linq',
+      deliverySource: null,
       deliveryTarget: 'linq-target-walk',
       identityId: null,
       participantId: null,

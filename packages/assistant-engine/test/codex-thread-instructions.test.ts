@@ -84,11 +84,13 @@ describe('Codex thread instructions', () => {
       }),
       env: {},
       developerInstructions: 'Stable Murph instructions.',
-      freshThreadFallback: {
-        developerInstructions: 'Stable Murph instructions.',
-        turnContextPrompt: 'Current Murph runtime context.',
+      resume: {
+        codexThreadId: 'thread-resume',
+        prepareFreshThreadFallback: async () => ({
+          developerInstructions: 'Stable Murph instructions.',
+          turnContextPrompt: 'Current Murph runtime context.',
+        }),
       },
-      resumeCodexThreadId: 'thread-resume',
       systemPrompt: 'Stable Murph instructions.',
       turnContextPrompt: 'Current Murph runtime context.',
       userPrompt: 'Continue.',
@@ -120,6 +122,10 @@ describe('Codex thread instructions', () => {
       turnId: 'turn-resume',
     })
 
+    const prepareFreshThreadFallback = vi.fn(async () => ({
+      developerInstructions: 'Stable Murph instructions.',
+    }))
+
     await expect(
       executeCodexAssistantTurnAttemptUnchecked({
         providerConfig: normalizeAssistantProviderConfig({
@@ -127,7 +133,10 @@ describe('Codex thread instructions', () => {
         }),
         env: {},
         developerInstructions: 'Stable Murph instructions.',
-        resumeCodexThreadId: 'thread-resume',
+        resume: {
+          codexThreadId: 'thread-resume',
+          prepareFreshThreadFallback,
+        },
         userPrompt: 'Continue.',
         workingDirectory: '/tmp/provider-tests',
       }),
@@ -135,41 +144,12 @@ describe('Codex thread instructions', () => {
       ok: true,
     })
 
+    expect(prepareFreshThreadFallback).not.toHaveBeenCalled()
     expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
     expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0])
       .toMatchObject({
         resumeSessionId: 'thread-resume',
       })
-  })
-
-  it('requires a fresh-thread fallback plan only after native resume is stale', async () => {
-    codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValueOnce(
-      new VaultCliError(
-        'ASSISTANT_CODEX_RESUME_STALE',
-        'thread/resume failed: no rollout found for thread id stale-thread',
-        {
-          retryable: true,
-          staleResume: true,
-        },
-      ),
-    )
-
-    await expect(
-      executeCodexAssistantTurnAttemptUnchecked({
-        providerConfig: normalizeAssistantProviderConfig({
-          provider: 'codex-cli',
-        }),
-        env: {},
-        developerInstructions: 'Stable Murph instructions.',
-        resumeCodexThreadId: 'stale-thread',
-        userPrompt: 'Continue.',
-        workingDirectory: '/tmp/provider-tests',
-      }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_FRESH_FALLBACK_PLAN_MISSING',
-    })
-
-    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
   })
 
   it('starts stale-resume fallback with fresh thread instructions', async () => {
@@ -218,8 +198,10 @@ describe('Codex thread instructions', () => {
         }),
         env: {},
         developerInstructions: null,
-        prepareFreshThreadFallback,
-        resumeCodexThreadId: 'stale-thread',
+        resume: {
+          codexThreadId: 'stale-thread',
+          prepareFreshThreadFallback,
+        },
         userPrompt: 'Continue.',
         workingDirectory: '/tmp/provider-tests',
       }),

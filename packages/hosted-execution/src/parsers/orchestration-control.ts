@@ -69,30 +69,6 @@ export function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
         kind,
       };
     }
-    case "runtime_prewarm_requested": {
-      assertExactKeys(record, "Hosted runtime prewarm signal", [
-        "eventId",
-        "kind",
-        "occurredAt",
-        "source",
-      ]);
-
-      return {
-        eventId: requireOpaqueIdentifier(
-          record.eventId,
-          "Hosted runtime prewarm signal eventId",
-        ),
-        kind,
-        occurredAt: readRequiredIsoTimestamp(
-          record.occurredAt,
-          "Hosted runtime prewarm signal occurredAt",
-        ),
-        source: parseHostedRuntimePrewarmSource(
-          record.source,
-          "Hosted runtime prewarm signal source",
-        ),
-      };
-    }
     default: {
       const exhaustive: never = kind;
       throw new TypeError(`Unsupported hosted runtime signal kind: ${String(exhaustive)}.`);

@@ -78,7 +78,25 @@ export async function handleDeployContainerSmokeRoute(
     }
   } catch (error) {
     primaryError = error;
-    throw error;
+    emitHostedExecutionStructuredLog({
+      component: "cloudflare.worker",
+      details: {
+        errorCode: deriveHostedExecutionErrorCode(error),
+        errorName: readHostedExecutionSafeErrorName(error),
+      },
+      error,
+      level: "error",
+      message: "Deploy container smoke failed.",
+      phase: "failed",
+    });
+    // This internal deploy-only route carries content-free smoke diagnostics
+    // in the error message; return them instead of the redacted generic 500
+    // so CI smoke logs name the real failure.
+    return json({
+      detail: error instanceof Error ? error.message : String(error),
+      error: "Deploy container smoke failed.",
+      ok: false,
+    }, 500);
   } finally {
     if (directR2Smoke) {
       await deleteDeployContainerDirectR2PresignedPutSmokeObject(context, directR2Smoke.objectKey)

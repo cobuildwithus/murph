@@ -24,8 +24,10 @@ import {
 } from "@murphai/hosted-execution";
 import {
   readAssistantInputEvent,
-  type AssistantInputReplyTarget,
 } from "@murphai/assistant-engine";
+import {
+  type AssistantCurrentDeliveryRoute,
+} from "@murphai/operator-config/assistant/current-delivery-route";
 import {
   normalizeHostedAssistantRuntimeConfig,
   projectHostedRuntimeTrustStoreEnv,
@@ -36,6 +38,10 @@ import {
 import {
   getOrCreateHostedCliRuntimeBridge,
 } from "./hosted-runtime/cli-runtime-bridge.ts";
+import {
+  readHostedAssistantInputCurrentDeliveryRoute,
+  resolveUnambiguousCurrentDeliveryRoute,
+} from "./hosted-runtime/current-delivery-route.ts";
 import {
   executeHostedMailboxEvent,
 } from "./hosted-runtime/events.ts";
@@ -2242,15 +2248,9 @@ function resolveHostedWorkspaceRunMailboxFetchLimit(importLimit: number): number
 async function resolveHostedForegroundCurrentDeliveryRoute(input: {
   initialMailboxImport: HostedWorkspaceRunnerInput["initialMailboxImport"] | undefined;
   vaultRoot: string;
-}): Promise<{
-  channel: string;
-  deliveryTarget: string;
-} | null> {
+}): Promise<AssistantCurrentDeliveryRoute | null> {
   const assistantInputIds = input.initialMailboxImport?.importResult.assistantInputIds ?? [];
-  const routes = new Map<string, {
-    channel: string;
-    deliveryTarget: string;
-  }>();
+  const routes: AssistantCurrentDeliveryRoute[] = [];
   for (const inputId of assistantInputIds) {
     if (!inputId) {
       continue;
@@ -2260,52 +2260,19 @@ async function resolveHostedForegroundCurrentDeliveryRoute(input: {
         inputId,
         vault: input.vaultRoot,
       });
-      const route = readHostedAssistantInputCurrentDeliveryRoute(event?.replyTarget ?? null);
+      const route = readHostedAssistantInputCurrentDeliveryRoute({
+        conversation: event?.conversation ?? null,
+        replyTarget: event?.replyTarget ?? null,
+      });
       if (route) {
-        routes.set(`${route.channel}\0${route.deliveryTarget}`, route);
+        routes.push(route);
       }
     } catch {
       return null;
     }
   }
 
-  if (routes.size !== 1) {
-    return null;
-  }
-  return [...routes.values()][0] ?? null;
-}
-
-function readHostedAssistantInputCurrentDeliveryRoute(
-  replyTarget: AssistantInputReplyTarget | null,
-): {
-  channel: string;
-  deliveryTarget: string;
-} | null {
-  const channel = normalizeHostedCurrentDeliveryRouteValue(replyTarget?.channel);
-  if (!channel || !hostedReplyTargetThreadIsDeliveryTarget(channel)) {
-    return null;
-  }
-  const deliveryTarget = normalizeHostedCurrentDeliveryRouteValue(replyTarget?.threadId);
-  return deliveryTarget
-    ? {
-        channel,
-        deliveryTarget,
-      }
-    : null;
-}
-
-function hostedReplyTargetThreadIsDeliveryTarget(channel: string): boolean {
-  return channel === "linq"
-    || channel === "telegram"
-    || channel === "email"
-    || channel === "whatsapp";
-}
-
-function normalizeHostedCurrentDeliveryRouteValue(
-  value: string | null | undefined,
-): string | null {
-  const normalized = value?.trim();
-  return normalized && normalized.length > 0 ? normalized : null;
+  return resolveUnambiguousCurrentDeliveryRoute(routes);
 }
 
 function resolveHostedWorkspaceInvocationStatus(input: {

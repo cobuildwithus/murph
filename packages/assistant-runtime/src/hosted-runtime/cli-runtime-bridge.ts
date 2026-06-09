@@ -15,6 +15,7 @@ import {
   type HostedCliAssistantCurrentRoute,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 
+import { normalizeAssistantRouteString } from "@murphai/operator-config/assistant/current-delivery-route";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
@@ -457,22 +458,21 @@ function resolveHostedCliBridgeCurrentDeliveryRoute(
   source: HostedCliRuntimeBridgeCurrentDeliveryRouteSource,
 ): HostedCliAssistantCurrentRoute | null {
   const value = typeof source === "function" ? source() : source;
-  const channel = normalizeHostedCliBridgeRouteValue(value?.channel);
-  const deliveryTarget = normalizeHostedCliBridgeRouteValue(value?.deliveryTarget);
+  const channel = normalizeAssistantRouteString(value?.channel);
+  const deliveryTarget = normalizeAssistantRouteString(value?.deliveryTarget);
   if (!channel || !deliveryTarget) {
     return null;
   }
+  const identityId = normalizeAssistantRouteString(value?.identityId);
+  const participantId = normalizeAssistantRouteString(value?.participantId);
+  const threadId = normalizeAssistantRouteString(value?.threadId);
   return {
     channel,
     deliveryTarget,
+    ...(identityId ? { identityId } : {}),
+    ...(participantId ? { participantId } : {}),
+    ...(threadId ? { threadId } : {}),
   };
-}
-
-function normalizeHostedCliBridgeRouteValue(
-  value: string | null | undefined,
-): string | null {
-  const normalized = value?.trim();
-  return normalized && normalized.length > 0 ? normalized : null;
 }
 
 async function readHostedCliBridgeJsonBody(request: IncomingMessage): Promise<unknown> {

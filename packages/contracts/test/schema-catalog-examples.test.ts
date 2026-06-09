@@ -221,6 +221,25 @@ describe("schema catalog and example seam", () => {
     }
   });
 
+  it("keeps automation route delivery source optional for legacy frontmatter", () => {
+    const routeSchema = (
+      automationFrontmatterSchema as {
+        properties?: Record<string, { required?: string[] }>;
+      }
+    ).properties?.route;
+
+    expect(routeSchema?.required).toEqual(expect.arrayContaining([
+      "channel",
+      "deliveryTarget",
+      "identityId",
+      "participantId",
+      "threadId",
+    ]));
+    expect(routeSchema?.required).toEqual(
+      expect.not.arrayContaining(["deliverySource"]),
+    );
+  });
+
   it("keeps every validated vault family on the schema-artifact seam", () => {
     const catalogSchemaIds = new Set(
       Object.values(schemaCatalog)

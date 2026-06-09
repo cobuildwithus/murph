@@ -101,6 +101,21 @@ export interface UpsertAutomationResult {
   record: AutomationRecord;
 }
 
+export interface PatchAutomationInput {
+  continuityPolicy?: AutomationContinuityPolicy;
+  instructions?: string;
+  lookup: string;
+  now?: Date;
+  route?: AutomationRoute;
+  schedule?: AutomationSchedule;
+  slug?: string;
+  status?: AutomationStatus;
+  summary?: string | null;
+  tags?: string[];
+  title?: string;
+  vaultRoot: string;
+}
+
 export interface ReadAutomationInput {
   automationId?: string;
   slug?: string;
@@ -245,10 +260,33 @@ function normalizeAutomationRoute(value: unknown): AutomationRoute {
 
   return {
     channel: normalizeAutomationRouteChannel(object.channel),
+    deliverySource: normalizeAutomationRouteDeliverySource(object.deliverySource),
     deliveryTarget: normalizeNullableRouteString(object.deliveryTarget),
     identityId: normalizeNullableRouteString(object.identityId),
     participantId: normalizeNullableRouteString(object.participantId),
     threadId: normalizeNullableRouteString(object.threadId),
+  };
+}
+
+function normalizeAutomationRouteDeliverySource(
+  value: unknown,
+): AutomationRoute["deliverySource"] {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const object = requireObject(value, "route.deliverySource");
+  const kind = requireString(object.kind, "route.deliverySource.kind");
+  if (kind !== "linq") {
+    throw new VaultError("VAULT_INVALID_INPUT", "route.deliverySource.kind must be linq.");
+  }
+
+  return {
+    fromPhoneNumber: requireString(
+      object.fromPhoneNumber,
+      "route.deliverySource.fromPhoneNumber",
+    ),
+    kind,
   };
 }
 
@@ -343,6 +381,7 @@ function buildAutomationScheduleFrontmatter(schedule: AutomationSchedule): Front
 function buildAutomationRouteFrontmatter(route: AutomationRoute): FrontmatterObject {
   return {
     channel: route.channel,
+    deliverySource: route.deliverySource ?? null,
     deliveryTarget: route.deliveryTarget,
     identityId: route.identityId,
     participantId: route.participantId,
@@ -480,6 +519,7 @@ export function scaffoldAutomationPayload(): AutomationScaffoldPayload {
     },
     route: {
       channel: "telegram",
+      deliverySource: null,
       deliveryTarget: null,
       identityId: null,
       participantId: null,
@@ -531,7 +571,14 @@ export async function showAutomation(
   input: ReadAutomationInput,
 ): Promise<AutomationRecord | null> {
   const records = await loadAutomationRecords(input.vaultRoot);
-  const existing = selectExistingRegistryRecord({
+  return selectAutomationRecord(records, input);
+}
+
+function selectAutomationRecord(
+  records: AutomationRecord[],
+  input: { automationId?: string; slug?: string },
+): AutomationRecord | null {
+  return selectExistingRegistryRecord({
     records,
     recordId: input.automationId,
     slug: input.slug,
@@ -540,8 +587,6 @@ export async function showAutomation(
     conflictCode: "VAULT_AUTOMATION_CONFLICT",
     conflictMessage: "Automation id and slug resolve to different records.",
   });
-
-  return existing;
 }
 
 export async function upsertAutomation(
@@ -550,17 +595,61 @@ export async function upsertAutomation(
   return withAutomationRegistryLock(input.vaultRoot, () => upsertAutomationWithLatestRegistry(input));
 }
 
+export async function patchAutomation(
+  input: PatchAutomationInput,
+): Promise<UpsertAutomationResult> {
+  assertAutomationPatchHasChanges(input);
+
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    const records = await loadAutomationRecords(input.vaultRoot);
+    const existingRecord = selectAutomationRecord(records, {
+      automationId: input.lookup,
+      slug: input.lookup,
+    });
+    if (!existingRecord) {
+      throw new VaultError("VAULT_AUTOMATION_MISSING", "Automation was not found.");
+    }
+    return upsertAutomationWithLatestRegistry({
+      automationId: existingRecord.automationId,
+      continuityPolicy: input.continuityPolicy ?? existingRecord.continuityPolicy,
+      instructions: input.instructions ?? existingRecord.instructions,
+      now: input.now,
+      route: input.route ?? existingRecord.route,
+      schedule: input.schedule ?? existingRecord.schedule,
+      slug: input.slug ?? existingRecord.slug,
+      status: input.status ?? existingRecord.status,
+      summary: input.summary === undefined ? existingRecord.summary : input.summary,
+      tags: input.tags ?? existingRecord.tags,
+      title: input.title ?? existingRecord.title,
+      vaultRoot: input.vaultRoot,
+      allowSlugRename: input.slug !== undefined,
+    }, records);
+  });
+}
+
+function assertAutomationPatchHasChanges(input: PatchAutomationInput): void {
+  const { lookup: _lookup, now: _now, vaultRoot: _vaultRoot, ...patch } = input;
+  if (Object.values(patch).some((value) => value !== undefined)) {
+    return;
+  }
+
+  throw new VaultError(
+    "VAULT_AUTOMATION_EMPTY_PATCH",
+    "Automation edit requires at least one field to update.",
+  );
+}
+
 async function upsertAutomationWithLatestRegistry(
   input: UpsertAutomationInput,
+  records?: AutomationRecord[],
 ): Promise<UpsertAutomationResult> {
   const normalizedId = normalizeId(input.automationId, "automationId", "automation");
   const title = normalizeAutomationTitle(input.title);
   const requestedSlug = normalizeSlug(input.slug, "slug", title);
-  const existingRecord = await showAutomation({
-    automationId: normalizedId,
-    slug: requestedSlug,
-    vaultRoot: input.vaultRoot,
-  });
+  const existingRecord = selectAutomationRecord(
+    records ?? await loadAutomationRecords(input.vaultRoot),
+    { automationId: normalizedId, slug: requestedSlug },
+  );
   const now = (input.now ?? new Date()).toISOString();
   const recordId = existingRecord?.automationId ?? normalizedId ?? generateRecordId("automation");
   const createdAt = existingRecord?.createdAt ?? now;
@@ -586,9 +675,9 @@ async function upsertAutomationWithLatestRegistry(
     title,
     status: normalizeAutomationStatus(input.status ?? existingRecord?.status),
     summary:
-      normalizeAutomationSummary(input.summary) ??
-      existingRecord?.summary ??
-      null,
+      input.summary === undefined
+        ? existingRecord?.summary ?? null
+        : normalizeAutomationSummary(input.summary),
     schedule:
       input.schedule !== undefined
         ? normalizeAutomationSchedule(input.schedule)

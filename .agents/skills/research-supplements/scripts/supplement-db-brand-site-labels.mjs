@@ -449,9 +449,10 @@ function isLikelyNonStandaloneProduct(item, label) {
     label.itemType,
     Array.isArray(label.tags) ? label.tags.join(" ") : label.tags,
   ].filter(Boolean).join(" ").toLowerCase();
-  return /\b(bundle|kit|regimen|combo pack|variety pack|support plan|supplement plan)\b/u.test(haystack)
+  return /\b(bundle|kit|regimen|combo pack|variety pack|support plan|supplement plan|multi[-\s]?pack)\b/u.test(haystack)
     || /\b(sample|promo)\b/u.test(haystack)
-    || /\b[2-9]\s*[- ]?\s*pack\b/u.test(haystack);
+    || /\b[2-9]\s*[- ]?\s*pack\b/u.test(haystack)
+    || /\b[2-9]\s+(?:bottles?|jars?|containers?|boxes?)\b/u.test(haystack);
 }
 
 function isLikelyFoodOrNonSupplement(item, label) {
@@ -466,7 +467,7 @@ function isLikelyFoodOrNonSupplement(item, label) {
     label.itemType,
     Array.isArray(label.tags) ? label.tags.join(" ") : label.tags,
   ].filter(Boolean).join(" ").toLowerCase();
-  return /\b(?:snacks?|protein\s+bars?|nutrition\s+bars?|energy\s+bars?|meal\s+(?:replacement\s+)?bars?|ready[-\s]?to[-\s]?(?:eat|drink)|rtd\s+(?:drink|shake|beverage)|protein\s+cookies?|cookies?|brownies?|chips?|crisps?|candy|oil\s+spray|flavou?r\s+drops?|chunky\s+flavou?r|seed\s+mix|cacao\s+powder|cocoa\s+powder|breakfast\s+(?:mix|cereal|porridge)|(?:protein\s+)?oatmeal(?:\s+\d|\s*[-–]\s*\d|\s*$)|muesli|granola)\b/u.test(haystack);
+  return /\b(?:snacks?|protein\s+bars?|nutrition\s+bars?|energy\s+bars?|meal\s+(?:replacement\s+)?bars?|ready[-\s]?to[-\s]?(?:eat|drink)|rtd\s+(?:drink|shake|beverage)|protein\s+cookies?|cookies?|brownies?|chips?|crisps?|candy|oil\s+spray|flavou?r\s+drops?|chunky\s+flavou?r|seed\s+mix|table[-\s]?top\s+sweeteners?|stevia\s+(?:powder|sweetener)|cacao\s+powder|cocoa\s+powder|breakfast\s+(?:mix|cereal|porridge)|(?:protein\s+)?oatmeal(?:\s+\d|\s*[-–]\s*\d|\s*$)|muesli|granola)\b/u.test(haystack);
 }
 
 function assertProductionReady(items) {

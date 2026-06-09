@@ -631,6 +631,7 @@ function buildAssistantNotificationDecisionGuidanceText(
 - Decide whether to skip or send exactly one outbound message. Default to skip.
 - This turn is a scheduled notification decision, not a normal chat reply. The user prompt contains private execution instructions for this run.
 - You may inspect relevant vault context with read-only CLI commands before deciding.
+- The only write exception is self-disabling the current scheduled automation when the private instructions explicitly require it after confirming the scheduled check is no longer needed. In that case, run exactly the requested \`vault-cli automation set-status <lookup> --status archived\` command, then return \`skip\`.
 - For experiment-related scheduled checks other than session-support, first-session prep, or first-week habit support, call \`vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --format json\` first. If it returns \`skip\`, skip.
 - Session-support automations close the loop; they are not nagging reminders. Before sending, use the saved experiment, protocol, and progress/due checks to decide whether the session still needs user input. When deterministic missed-log due logic applies, call \`vault-cli experiment followup due <id> --kind missed-log --date <sessionDate> --format json\`; for pre-bed sessions, use the prior local session date as \`<sessionDate>\`. If the automation is pre-session, give compact guidance for what to do now. If it is after-session missed-log recovery, ask one neutral question to recover what happened and any missing subjective fields. Do not tell the user to remember to log later.
 - Retrieval budget for session-support automations: read the saved experiment, protocol, and progress/due decision. Do not search memory, timeline, or broad vault history unless the automation instructions name a concrete missing field that those surfaces can answer. Once skip/send is clear, stop.
@@ -767,6 +768,12 @@ Automation schedules execute while ${code(
 
 function buildAssistantSharedAutomationPreferenceText(): string {
   return `Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.
+
+When creating automations, choose continuity deliberately. Use ${code(
+    "--continuity-policy preserve"
+  )} for simple reminders, check-ins, and lightweight support where recent prior automation context can help. Use ${code(
+    "--continuity-policy fresh"
+  )} for larger automations such as research, audits, roundups, content inspection, or any recurring task likely to need multiple tool calls, so each run starts from current vault/tool evidence instead of prior run transcript context.
 
 Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.`;
 }

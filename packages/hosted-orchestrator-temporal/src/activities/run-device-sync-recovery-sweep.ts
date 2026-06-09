@@ -32,7 +32,6 @@ export async function runHostedDeviceSyncRecoverySweep(): Promise<
 
   return observeHostedTemporalActivity({
     activity: "runHostedDeviceSyncRecoverySweep",
-    reason: "device_sync_scheduled_wake",
     userId: "",
   }, async () =>
     requestHostedOrchestratorJson(environment.hostedWebBaseUrl, {

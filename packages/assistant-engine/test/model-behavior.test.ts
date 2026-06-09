@@ -127,6 +127,21 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
   })
+
+  it('guides automation continuity policy by task size', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('When creating automations, choose continuity deliberately.')
+    expect(prompt).toContain(
+      'Use `--continuity-policy preserve` for simple reminders, check-ins, and lightweight support where recent prior automation context can help.',
+    )
+    expect(prompt).toContain(
+      'Use `--continuity-policy fresh` for larger automations such as research, audits, roundups, content inspection, or any recurring task likely to need multiple tool calls',
+    )
+    expect(prompt).toContain(
+      'so each run starts from current vault/tool evidence instead of prior run transcript context.',
+    )
+  })
 })
 
 describe('assistant local PDF evidence guidance', () => {
@@ -849,6 +864,12 @@ describe('assistant notification decision guidance', () => {
 
     expect(prompt).toContain('This turn is a scheduled notification decision')
     expect(prompt).toContain('read-only CLI commands before deciding')
+    expect(prompt).toContain(
+      'The only write exception is self-disabling the current scheduled automation',
+    )
+    expect(prompt).toContain(
+      'vault-cli automation set-status <lookup> --status archived',
+    )
     expect(prompt).not.toContain('Normal conversation logging:')
     expect(prompt).not.toContain(
       'treat raw health, meal, supplement, workout, activity, symptom, body, or physical-state data as implicit logging intent',

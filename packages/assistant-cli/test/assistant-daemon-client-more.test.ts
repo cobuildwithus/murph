@@ -46,6 +46,7 @@ const TEST_CRON_JOB = {
     sessionId: null,
     alias: null,
     channel: 'telegram',
+    deliverySource: null,
     identityId: 'identity_123',
     participantId: 'participant_123',
     threadId: 'thread_123',

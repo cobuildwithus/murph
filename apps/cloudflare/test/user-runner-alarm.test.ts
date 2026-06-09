@@ -190,7 +190,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.prewarmRuntimeContainerForUser({
       prewarmAttemptId: "prewarm_attempt_1",
-      source: "linq.imessage.typing",
+      source: "linq.message.ingress",
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       action: "started",
@@ -232,7 +232,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.prewarmRuntimeContainerForUser({
       prewarmAttemptId: "prewarm_attempt_2",
-      source: "linq.imessage.typing",
+      source: "linq.message.ingress",
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       action: "already_running",
@@ -269,7 +269,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.prewarmRuntimeContainerForUser({
       prewarmAttemptId: "prewarm_attempt_expired",
-      source: "linq.imessage.typing",
+      source: "linq.message.ingress",
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       action: "already_running",
@@ -626,7 +626,7 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("waits for workspace preparation before accepting a fresh runtime start", async () => {
+  it("starts container readiness while workspace preparation is in flight", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspaceRead = createDeferred<void>();
@@ -660,8 +660,10 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       )
     );
-    await Promise.resolve();
-    expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 8_000,
+      userId: TEST_USER_ID,
+    }));
     expect(invoke).not.toHaveBeenCalled();
     expect(acceptedSettled).toBe(false);
     expect(workspaceReadTimeouts).toHaveLength(1);
@@ -670,13 +672,21 @@ describe("HostedUserRunner execution coordination", () => {
 
     workspaceRead.resolve();
 
-    await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledOnce());
     await expect(accepted).resolves.toMatchObject({
       action: "started",
       kind: "runtime_processing_accepted",
       runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const preparedLog = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([entry]) => entry)
+      .find((entry) => entry.message === "Hosted runner prepared workspace invocation.");
+    expect(preparedLog).toEqual(expect.objectContaining({
+      details: expect.objectContaining({
+        runnerContainerWorkerVersionPresent: false,
+      }),
+    }));
+    expect(preparedLog?.details).not.toHaveProperty("runnerContainerName");
   });
 
   it("reuses cached runner stores when applying a caller command budget", async () => {
@@ -813,7 +823,10 @@ describe("HostedUserRunner execution coordination", () => {
       retryAt: "2026-04-27T00:00:19.500Z",
     });
 
-    expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 8_000,
+      userId: TEST_USER_ID,
+    });
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: null,
@@ -861,7 +874,10 @@ describe("HostedUserRunner execution coordination", () => {
       kind: "retry_later",
       retryAt: "2026-04-27T00:00:14.000Z",
     });
-    expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 4_000,
+      userId: TEST_USER_ID,
+    });
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: null,
@@ -917,9 +933,12 @@ describe("HostedUserRunner execution coordination", () => {
   it("returns retry_later and clears the fresh fence when workspace preparation fails", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const readiness = createDeferred<Awaited<
+      ReturnType<NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>>
+    >>();
     const ensureReadyForProcessing = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
-    >(async () => ({ kind: "ready" }));
+    >(async () => await readiness.promise);
     const { invoke, runner, sql } = createRunnerHarness({
       ensureReadyForProcessing,
       onWorkspaceRead: () => {
@@ -929,13 +948,193 @@ describe("HostedUserRunner execution coordination", () => {
     });
     await runner.bindUser(TEST_USER_ID);
 
-    await expectFreshRuntimeRetryAndCleared({
-      retryAt: "2026-04-27T00:00:30.000Z",
-      runner,
-      sql,
+    const response = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
     });
 
-    expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    await expect(response).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:30.000Z",
+    });
+    expect(ensureReadyForProcessing).toHaveBeenCalledOnce();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      failure_count: 1,
+      wake_at: null,
+    });
+
+    expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 8_000,
+      userId: TEST_USER_ID,
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    readiness.resolve({ kind: "ready" });
+    await Promise.resolve();
+  });
+
+  it("does not double-count when readiness fails after preparation already cleared the fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const readiness = createDeferred<Awaited<
+      ReturnType<NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>>
+    >>();
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => await readiness.promise);
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      onWorkspaceRead: () => {
+        throw new Error("Hosted workspace read failed with HTTP 503.");
+      },
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const response = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    });
+
+    await expect(response).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:30.000Z",
+    });
+    expect(ensureReadyForProcessing).toHaveBeenCalledOnce();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      failure_count: 1,
+      wake_at: null,
+    });
+    expect(invoke).not.toHaveBeenCalled();
+
+    readiness.reject(createRuntimeStartupTimeoutError());
+    await vi.waitFor(() =>
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: expect.objectContaining({
+            transportFailureFenceCleared: false,
+          }),
+          message: "Hosted runner runtime processing startup confirmation failed.",
+        }),
+      )
+    );
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      failure_count: 1,
+      wake_at: null,
+    });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke or double-count when readiness fails before preparation settles", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspaceRead = createDeferred<void>();
+    let workspaceReadStarted = false;
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => {
+      throw createRuntimeStartupTimeoutError();
+    });
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      onWorkspaceRead: async () => {
+        workspaceReadStarted = true;
+        await workspaceRead.promise;
+      },
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const response = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    });
+
+    await expect(response).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:10.000Z",
+    });
+    expect(workspaceReadStarted).toBe(true);
+    expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 8_000,
+      userId: TEST_USER_ID,
+    });
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      failure_count: 1,
+      wake_at: null,
+    });
+    expect(invoke).not.toHaveBeenCalled();
+
+    workspaceRead.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      failure_count: 1,
+      wake_at: null,
+    });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("ignores preparation that finishes after readiness fails with a workspace version bound", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const runnerSecretsReadStarted = createDeferred<void>();
+    const runnerSecretsKey = await hostedRunnerSecretsObjectKey({ userId: TEST_USER_ID });
+    const bucket = new DelayedGetMemoryEncryptedR2Bucket({
+      delayMs: 10_000,
+      key: runnerSecretsKey,
+      onDelayedGet: () => runnerSecretsReadStarted.resolve(),
+    });
+    const readiness = createDeferred<Awaited<
+      ReturnType<NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>>
+    >>();
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => await readiness.promise);
+    const { invoke, runner, sql } = createRunnerHarness({
+      bucket,
+      ensureReadyForProcessing,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const response = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    });
+    await runnerSecretsReadStarted.promise;
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: expect.stringMatching(/^runtime-write-/u),
+      active_workspace_version: "5",
+      failure_count: 0,
+      wake_at: null,
+    });
+
+    readiness.reject(createRuntimeStartupTimeoutError());
+    await expect(response).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:10.000Z",
+    });
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      active_workspace_version: null,
+      failure_count: 1,
+      wake_at: null,
+    });
+    expect(invoke).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await Promise.resolve();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      active_workspace_version: null,
+      failure_count: 1,
+      wake_at: null,
+    });
     expect(invoke).not.toHaveBeenCalled();
   });
 
@@ -960,7 +1159,10 @@ describe("HostedUserRunner execution coordination", () => {
       sql,
     });
 
-    expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 8_000,
+      userId: TEST_USER_ID,
+    });
     expect(invoke).not.toHaveBeenCalled();
   });
 
@@ -983,7 +1185,10 @@ describe("HostedUserRunner execution coordination", () => {
       sql,
     });
 
-    expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 8_000,
+      userId: TEST_USER_ID,
+    });
     expect(invoke).not.toHaveBeenCalled();
   });
 
@@ -993,9 +1198,7 @@ describe("HostedUserRunner execution coordination", () => {
     const ensureReadyForProcessing = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
     >(async () => {
-      const error = new Error("The operation timed out.");
-      error.name = "TimeoutError";
-      throw error;
+      throw createRuntimeStartupTimeoutError();
     });
     const { invoke, runner, sql } = createRunnerHarness({
       ensureReadyForProcessing,
@@ -1061,15 +1264,6 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       }),
     );
-    const preparedLog = mocks.emitHostedExecutionStructuredLog.mock.calls
-      .map(([entry]) => entry)
-      .find((entry) => entry.message === "Hosted runner prepared workspace invocation.");
-    expect(preparedLog).toEqual(expect.objectContaining({
-      details: expect.objectContaining({
-        runnerContainerWorkerVersionPresent: false,
-      }),
-    }));
-    expect(preparedLog?.details).not.toHaveProperty("runnerContainerName");
   });
 
   it("returns rpc-error retry cadence when startup readiness RPC is missing", async () => {
@@ -1549,6 +1743,58 @@ describe("HostedUserRunner execution coordination", () => {
         wake_at: null,
       })
     );
+  });
+
+  it("serializes simultaneous fresh ensure calls behind one write fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      invocationResults: [invocationResult.promise],
+      workspace: createWorkspaceState({ version: "8" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const results = await Promise.all([
+      runner.ensureRuntimeProcessingForUser({
+        orchestrationAttemptId: "test-orchestration-attempt-first",
+        userId: TEST_USER_ID,
+      }),
+      runner.ensureRuntimeProcessingForUser({
+        orchestrationAttemptId: "test-orchestration-attempt-second",
+        userId: TEST_USER_ID,
+      }),
+    ]);
+
+    expect(results.filter((result) =>
+      result.kind === "runtime_processing_accepted"
+      && result.action === "started"
+    )).toHaveLength(1);
+    expect(results.filter((result) => result.kind === "retry_later")).toHaveLength(1);
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_expires_at: null,
+      active_workspace_version: "8",
+      wake_at: null,
+    });
+
+    invocationResult.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await flushWaitUntil();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      wake_at: null,
+    });
   });
 
   it("does not read web status while syncing write-fence alarms", async () => {
@@ -2387,6 +2633,12 @@ function createMailboxLag(
     maxSeq: "1",
     ...overrides,
   };
+}
+
+function createRuntimeStartupTimeoutError(): Error {
+  const error = new Error("The operation timed out.");
+  error.name = "TimeoutError";
+  return error;
 }
 
 async function expectFreshRuntimeRetryAndCleared(input: {

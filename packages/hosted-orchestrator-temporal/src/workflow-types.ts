@@ -23,7 +23,6 @@ export interface HostedUserRuntimeWorkflowOptions {
   continueAsNewAfterHistoryEvents?: number;
   continueAsNewAfterIterations?: number;
   ensureRuntimeProcessingStartToCloseTimeoutMs?: number;
-  prewarmTaskQueue?: string;
   readRuntimeReconciliationFactsStartToCloseTimeoutMs?: number;
 }
 

@@ -17,6 +17,9 @@ export interface NormalizedAssistantDeliveryRouteFields {
 export interface AssistantCurrentDeliveryRoute {
   channel: string
   deliveryTarget: string
+  identityId?: string | null
+  participantId?: string | null
+  threadId?: string | null
 }
 
 export function resolveAssistantDeliveryRouteWithCurrentRoute(
@@ -24,28 +27,32 @@ export function resolveAssistantDeliveryRouteWithCurrentRoute(
   currentRoute: AssistantCurrentDeliveryRoute | null | undefined,
 ): NormalizedAssistantDeliveryRouteFields {
   const normalizedCurrentRoute = normalizeAssistantCurrentDeliveryRoute(currentRoute)
-  const channel = normalizeAssistantRouteString(input.channel)
-    ?? normalizedCurrentRoute?.channel
-    ?? null
-  const explicitDeliveryTarget = normalizeAssistantRouteString(input.deliveryTarget)
-  const deliveryTarget =
-    explicitDeliveryTarget ??
-    (channel && normalizedCurrentRoute?.channel === channel
-      ? normalizedCurrentRoute.deliveryTarget
-      : null)
-
-  return {
-    channel,
-    deliveryTarget,
+  const explicit: NormalizedAssistantDeliveryRouteFields = {
+    channel: normalizeAssistantRouteString(input.channel)
+      ?? normalizedCurrentRoute?.channel
+      ?? null,
+    deliveryTarget: normalizeAssistantRouteString(input.deliveryTarget),
     identityId: normalizeAssistantRouteString(input.identityId),
     participantId: normalizeAssistantRouteString(input.participantId),
     threadId: normalizeAssistantRouteString(input.threadId),
   }
+  // The target and locator fields together describe one conversation, so the
+  // current route is inherited atomically: mixing explicit and inherited
+  // fields would fabricate a route that never existed.
+  const useCurrentRoute =
+    explicit.deliveryTarget === null &&
+    explicit.identityId === null &&
+    explicit.participantId === null &&
+    explicit.threadId === null &&
+    explicit.channel !== null &&
+    normalizedCurrentRoute?.channel === explicit.channel
+
+  return useCurrentRoute ? normalizedCurrentRoute : explicit
 }
 
 function normalizeAssistantCurrentDeliveryRoute(
   currentRoute: AssistantCurrentDeliveryRoute | null | undefined,
-): AssistantCurrentDeliveryRoute | null {
+): NormalizedAssistantDeliveryRouteFields | null {
   const channel = normalizeAssistantRouteString(currentRoute?.channel)
   const deliveryTarget = normalizeAssistantRouteString(currentRoute?.deliveryTarget)
   if (!channel || !deliveryTarget) {
@@ -54,6 +61,9 @@ function normalizeAssistantCurrentDeliveryRoute(
   return {
     channel,
     deliveryTarget,
+    identityId: normalizeAssistantRouteString(currentRoute?.identityId),
+    participantId: normalizeAssistantRouteString(currentRoute?.participantId),
+    threadId: normalizeAssistantRouteString(currentRoute?.threadId),
   }
 }
 
@@ -66,23 +76,25 @@ export function stripPrivateAssistantRoutePlaceholders(
 
   return {
     ...input,
-    participantId: looksLikePrivateAssistantRoutePlaceholder(input.participantId)
+    identityId: looksLikeRedactedAssistantRoutePlaceholder(input.identityId)
+      ? null
+      : input.identityId,
+    participantId: looksLikeRedactedAssistantRoutePlaceholder(input.participantId)
       ? null
       : input.participantId,
-    threadId: looksLikePrivateAssistantRoutePlaceholder(input.threadId)
+    threadId: looksLikeRedactedAssistantRoutePlaceholder(input.threadId)
       ? null
       : input.threadId,
   }
 }
 
-export function looksLikePrivateAssistantRoutePlaceholder(
+function looksLikeRedactedAssistantRoutePlaceholder(
   value: string | null | undefined,
 ): boolean {
   const target = normalizeAssistantRouteString(value)
   return (
     target !== null &&
-    (/^h1_[a-f0-9]{24}$/iu.test(target) ||
-      /(?:^|:)hid_[A-Za-z0-9_-]+/u.test(target) ||
+    (/(?:^|:)hid_[A-Za-z0-9_-]+/u.test(target) ||
       /(?:^|:)ain_[A-Za-z0-9_-]+/u.test(target) ||
       target.includes('hbid:') ||
       target.includes('hbidx:') ||
@@ -90,7 +102,17 @@ export function looksLikePrivateAssistantRoutePlaceholder(
   )
 }
 
-function normalizeAssistantRouteString(
+export function looksLikePrivateAssistantRoutePlaceholder(
+  value: string | null | undefined,
+): boolean {
+  const target = normalizeAssistantRouteString(value)
+  return (
+    (target !== null && /^h1_[a-f0-9]{24}$/iu.test(target)) ||
+    looksLikeRedactedAssistantRoutePlaceholder(value)
+  )
+}
+
+export function normalizeAssistantRouteString(
   value: string | null | undefined,
 ): string | null {
   const normalized = value?.trim()

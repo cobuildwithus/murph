@@ -1048,7 +1048,7 @@ test('buildAssistantCliSurfaceContract falls back to a truncated description-onl
   })
 
   assert.ok(contract)
-  assert.ok(contract.length <= 40_000)
+  assert.ok(contract.length <= 45_000)
   assert.match(
     contract,
     /- `event command-0`: Long description Long description/u,
@@ -1056,6 +1056,77 @@ test('buildAssistantCliSurfaceContract falls back to a truncated description-onl
   assert.doesNotMatch(contract, /args <query>/u)
   assert.doesNotMatch(contract, /common --verbose/u)
   assert.equal(contract.endsWith(' '), false)
+})
+
+test('buildAssistantCliSurfaceContract keeps hot-path option signatures when budget fallback degrades the surface', async () => {
+  const {
+    buildAssistantCliSurfaceContract,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  const oversizedDescription = 'Long description '.repeat(400)
+  const contract = buildAssistantCliSurfaceContract({
+    commands: [
+      {
+        description: 'Create or update one goal from typed command fields.',
+        name: 'goal save',
+        schema: {
+          args: {
+            properties: {
+              title: {
+                type: 'string',
+              },
+            },
+            required: ['title'],
+          },
+          options: {
+            properties: {
+              horizon: {
+                enum: ['short_term', 'medium_term', 'long_term', 'ongoing'],
+              },
+              priority: {
+                type: 'integer',
+              },
+              status: {
+                enum: ['active', 'paused', 'completed', 'abandoned'],
+              },
+            },
+          },
+        },
+      },
+      ...Array.from({ length: 170 }, (_, index) => ({
+        description: oversizedDescription,
+        name: `event command-${index}`,
+        schema: {
+          options: {
+            properties: {
+              labels: {
+                type: 'array',
+              },
+              verbose: {
+                type: 'boolean',
+              },
+            },
+          },
+        },
+      })),
+    ],
+  })
+
+  assert.ok(contract)
+  // The oversized surface forces a fallback below all-options, but the
+  // contract still fits the budget untruncated at required-only.
+  assert.doesNotMatch(contract, /command-0`[^\n]*options /u)
+  assert.match(contract, /`event command-169`/u)
+  assert.ok(contract.length <= 45_000)
+  // ...but hot-path commands keep their full option signatures on one line.
+  const goalSaveLine = contract
+    .split('\n')
+    .find((line) => line.includes('`goal save`'))
+  assert.ok(goalSaveLine)
+  assert.match(goalSaveLine, /args <title>/u)
+  assert.match(goalSaveLine, /--status=active\|paused\|completed\|abandoned/u)
+  assert.match(goalSaveLine, /--horizon=short_term\|medium_term\|long_term\|ongoing/u)
+  assert.match(goalSaveLine, /--priority=integer/u)
 })
 
 test('resolveAssistantCliSurfaceBootstrapContext reuses a persisted contract payload when manifest fingerprints match', async () => {
@@ -1683,7 +1754,7 @@ test('resolveAssistantCliSurfaceBootstrapContext keys the in-memory cache by man
 
 function createAssistantCliSurfaceManifestFingerprint(manifest: unknown): string {
   return createHash('sha256')
-    .update('murph.assistant-cli-surface-render-policy.v3')
+    .update('murph.assistant-cli-surface-render-policy.v4')
     .update('\0')
     .update(JSON.stringify(manifest))
     .digest('hex')

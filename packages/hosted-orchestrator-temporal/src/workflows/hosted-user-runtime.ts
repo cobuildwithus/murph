@@ -1,6 +1,4 @@
 import {
-  ActivityCancellationType,
-  CancellationScope,
   condition,
   continueAsNew,
   defineQuery,
@@ -15,12 +13,8 @@ import type * as activities from "../activities/index.js";
 import {
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
-  HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE,
-  HOSTED_RUNTIME_PREWARM_SOURCE,
   type HostedRuntimeCurrentWaitReason,
   type HostedRuntimeEnsureProcessingResponse,
-  type HostedRuntimePrewarmResponse,
-  type HostedRuntimePrewarmSource,
   type HostedRuntimeReconciliationFacts,
   type HostedRuntimeReconciliationFactsRequest,
   type HostedRuntimeSignal,
@@ -40,10 +34,6 @@ export const HOSTED_USER_RUNTIME_DEFAULT_CONTINUE_AS_NEW_HISTORY_LENGTH = 750;
 export const HOSTED_USER_RUNTIME_DEFAULT_RECONCILIATION_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS = 15_000;
-// Workflow command timeout is replay-sensitive. The hard cut terminates old
-// histories first; keep the value pinned with response slack over the shared
-// 5s prewarm HTTP/container budget.
-export const HOSTED_USER_RUNTIME_DEFAULT_PREWARM_START_TO_CLOSE_TIMEOUT_MS = 6_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_READ_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS = 10_000;
 export const HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_HISTORY_LENGTH = 10_000;
 export const HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 10_000;
@@ -81,20 +71,6 @@ export async function hostedUserRuntimeWorkflow(
     },
     startToCloseTimeout: options.ensureRuntimeProcessingStartToCloseTimeoutMs,
   });
-  const prewarmActivities = proxyActivities<typeof activities>({
-    cancellationType: ActivityCancellationType.ABANDON,
-    retry: {
-      initialInterval: "1 second",
-      maximumAttempts: 2,
-      maximumInterval: "5 seconds",
-    },
-    scheduleToStartTimeout: "2 seconds",
-    startToCloseTimeout: Math.min(
-      options.ensureRuntimeProcessingStartToCloseTimeoutMs,
-      HOSTED_USER_RUNTIME_DEFAULT_PREWARM_START_TO_CLOSE_TIMEOUT_MS,
-    ),
-    taskQueue: options.prewarmTaskQueue,
-  });
   const machine = createHostedUserRuntimeWorkflowMachine(input, {
     continueAsNew: async (nextInput) => continueAsNew<typeof hostedUserRuntimeWorkflow>(
       nextInput,
@@ -105,28 +81,6 @@ export async function hostedUserRuntimeWorkflow(
     nowMs: () => Date.now(),
     readRuntimeReconciliationFacts:
       reconciliationActivities.readRuntimeReconciliationFacts,
-    startRuntimePrewarm: (prewarmInput) => {
-      const scope = new CancellationScope();
-      return {
-        cancel: () => scope.cancel(),
-        result: scope.run(() =>
-          prewarmActivities.prewarmRuntimeContainer(prewarmInput)
-        ),
-      };
-    },
-    startSignalWait: (predicate, timeoutMs) => {
-      const scope = new CancellationScope();
-      return {
-        cancel: () => scope.cancel(),
-        result: scope.run(async () => {
-          if (timeoutMs === null) {
-            await condition(predicate);
-            return;
-          }
-          await condition(predicate, timeoutMs);
-        }),
-      };
-    },
     uuid: uuid4,
     waitForSignalOrTimeout: async (predicate, timeoutMs) => {
       if (timeoutMs === null) {
@@ -155,30 +109,11 @@ export interface HostedUserRuntimeWorkflowRuntime {
   readRuntimeReconciliationFacts(
     request: HostedRuntimeReconciliationFactsRequest,
   ): Promise<HostedRuntimeReconciliationFacts>;
-  startRuntimePrewarm(input: {
-    prewarmAttemptId: string;
-    source: HostedRuntimePrewarmSource;
-    userId: string;
-  }): HostedUserRuntimePrewarmHandle;
-  startSignalWait(
-    predicate: () => boolean,
-    timeoutMs: number | null,
-  ): HostedUserRuntimeSignalWaitHandle;
   uuid(): string;
   waitForSignalOrTimeout(
     predicate: () => boolean,
     timeoutMs: number | null,
   ): Promise<void>;
-}
-
-export interface HostedUserRuntimePrewarmHandle {
-  cancel(): void;
-  result: Promise<HostedRuntimePrewarmResponse>;
-}
-
-export interface HostedUserRuntimeSignalWaitHandle {
-  cancel(): void;
-  result: Promise<void>;
 }
 
 export interface HostedUserRuntimeWorkflowMachine {
@@ -191,7 +126,6 @@ interface NormalizedWorkflowOptions {
   continueAsNewAfterHistoryEvents: number;
   continueAsNewAfterIterations: number;
   ensureRuntimeProcessingStartToCloseTimeoutMs: number;
-  prewarmTaskQueue: string;
   readRuntimeReconciliationFactsStartToCloseTimeoutMs: number;
 }
 
@@ -231,15 +165,6 @@ export function createHostedUserRuntimeWorkflowMachine(
       return;
     }
 
-    if (signal.kind === "runtime_prewarm_requested") {
-      state.signalVersion += 1;
-      state.prewarmRequested = true;
-      state.prewarmSignalCount += 1;
-      state.latestPrewarmRequestedAt = signal.occurredAt;
-      state.lastPrewarmErrorCode = null;
-      return;
-    }
-
     if (signal.kind === "mailbox_appended") {
       state.signalVersion += 1;
       mailboxSignalVersion += 1;
@@ -265,7 +190,6 @@ export function createHostedUserRuntimeWorkflowMachine(
     let execution: HostedRuntimeEnsureProcessingResponse;
     const orchestrationAttemptId = runtime.uuid();
     state.lastOrchestrationAttemptId = orchestrationAttemptId;
-    clearPendingRuntimePrewarm(state);
     try {
       execution = await runtime.ensureRuntimeProcessing({
         orchestrationAttemptId,
@@ -406,7 +330,6 @@ export function createHostedUserRuntimeWorkflowMachine(
       recordReconciliationFactsSummary(state, facts);
 
       if (facts.blocked !== null) {
-        clearPendingRuntimePrewarm(state);
         if (shouldContinueAsNewBeforePostReconciliationWait({ options, runtime })) {
           await continueAsNewWithCurrentState();
         }
@@ -425,23 +348,6 @@ export function createHostedUserRuntimeWorkflowMachine(
           clearMailboxPointerOnAccepted: true,
         });
         continue;
-      }
-
-      if (state.prewarmRequested) {
-        const mailboxVersionBeforePrewarm = mailboxSignalVersion;
-        await runRuntimePrewarmUntilMailboxSignal({
-          getMailboxSignalVersion: () => mailboxSignalVersion,
-          mailboxSignalVersionBeforePrewarm: mailboxVersionBeforePrewarm,
-          runtime,
-          state,
-          workflowInput: input,
-        });
-        if (mailboxSignalVersion !== mailboxVersionBeforePrewarm) {
-          continue;
-        }
-        if (state.signalVersion !== versionBeforeReconciliation) {
-          continue;
-        }
       }
 
       clearMailboxPointer(state);
@@ -475,68 +381,6 @@ export function createHostedUserRuntimeWorkflowMachine(
   };
 }
 
-async function runRuntimePrewarmUntilMailboxSignal(input: {
-  getMailboxSignalVersion(): number;
-  mailboxSignalVersionBeforePrewarm: number;
-  runtime: HostedUserRuntimeWorkflowRuntime;
-  state: HostedRuntimeWorkflowState;
-  workflowInput: HostedUserRuntimeWorkflowInput;
-}): Promise<void> {
-  const prewarmAttemptId = input.runtime.uuid();
-  input.state.lastPrewarmAttemptId = prewarmAttemptId;
-  const prewarmHandle = input.runtime.startRuntimePrewarm({
-    prewarmAttemptId,
-    source: HOSTED_RUNTIME_PREWARM_SOURCE,
-    userId: input.workflowInput.userId,
-  });
-  const mailboxSignalWait = input.runtime.startSignalWait(
-    () =>
-      input.getMailboxSignalVersion()
-        !== input.mailboxSignalVersionBeforePrewarm,
-    null,
-  );
-
-  const outcome = await Promise.race([
-    prewarmHandle.result.then(
-      (result) => ({ kind: "completed" as const, result }),
-      (error: unknown) => ({ error, kind: "failed" as const }),
-    ),
-    mailboxSignalWait.result.then(
-      () => ({ kind: "mailbox_signal" as const }),
-      (error: unknown) => ({ error, kind: "wait_failed" as const }),
-    ),
-  ]);
-
-  input.state.prewarmRequested = false;
-
-  if (outcome.kind === "mailbox_signal") {
-    prewarmHandle.cancel();
-    input.state.lastPrewarmResult = null;
-    input.state.lastPrewarmErrorCode = "abandoned_for_mailbox_signal";
-    return;
-  }
-
-  mailboxSignalWait.cancel();
-
-  if (outcome.kind === "wait_failed") {
-    input.state.lastPrewarmResult = "failed";
-    input.state.lastPrewarmErrorCode = readExecutionErrorCode(outcome.error);
-    return;
-  }
-
-  if (outcome.kind === "failed") {
-    input.state.lastPrewarmResult = "failed";
-    input.state.lastPrewarmErrorCode = readExecutionErrorCode(outcome.error);
-    return;
-  }
-
-  input.state.lastPrewarmErrorCode = null;
-  input.state.lastPrewarmResult =
-    outcome.result.kind === "runtime_prewarm_accepted"
-      ? "accepted"
-      : "retry_later";
-}
-
 function recordInvalidSignal(
   state: HostedRuntimeWorkflowState,
   errorCode: string,
@@ -554,35 +398,6 @@ function parseHostedRuntimeWorkflowSignal(value: unknown): HostedRuntimeSignal {
       "kind",
     ]);
     return { kind };
-  }
-
-  if (kind === "runtime_prewarm_requested") {
-    assertWorkflowExactKeys(record, "Hosted runtime prewarm signal", [
-      "eventId",
-      "kind",
-      "occurredAt",
-      "source",
-    ]);
-    const source = requireWorkflowString(
-      record.source,
-      "Hosted runtime prewarm signal source",
-    );
-    if (source !== HOSTED_RUNTIME_PREWARM_SOURCE) {
-      throw new TypeError("Unsupported hosted runtime prewarm signal source.");
-    }
-
-    return {
-      eventId: requireWorkflowOpaqueString(
-        record.eventId,
-        "Hosted runtime prewarm signal eventId",
-      ),
-      kind,
-      occurredAt: requireWorkflowIsoTimestamp(
-        record.occurredAt,
-        "Hosted runtime prewarm signal occurredAt",
-      ),
-      source,
-    };
   }
 
   if (kind === "mailbox_appended") {
@@ -661,14 +476,6 @@ function requireWorkflowOpaqueString(value: unknown, label: string): string {
   return normalized;
 }
 
-function requireWorkflowIsoTimestamp(value: unknown, label: string): string {
-  const timestamp = requireWorkflowString(value, label);
-  if (Number.isNaN(Date.parse(timestamp))) {
-    throw new TypeError(`${label} must be an ISO timestamp.`);
-  }
-  return timestamp;
-}
-
 function requireWorkflowNonNegativeBigIntString(
   value: unknown,
   label: string,
@@ -713,20 +520,10 @@ function createInitialWorkflowState(
     lastRuntimeAttemptId: carryForward?.lastRuntimeAttemptId ?? null,
     lastRuntimeStatus: carryForward?.lastRuntimeStatus ?? null,
     latestMailboxPointer: carryForward?.latestMailboxPointer ?? null,
-    latestPrewarmRequestedAt: carryForward?.latestPrewarmRequestedAt ?? null,
     mailboxSignalCount: carryForward?.mailboxSignalCount ?? 0,
-    lastPrewarmAttemptId: carryForward?.lastPrewarmAttemptId ?? null,
-    lastPrewarmErrorCode: carryForward?.lastPrewarmErrorCode ?? null,
-    lastPrewarmResult: carryForward?.lastPrewarmResult ?? null,
-    prewarmRequested: carryForward?.prewarmRequested ?? false,
-    prewarmSignalCount: carryForward?.prewarmSignalCount ?? 0,
     signalVersion: carryForward?.signalVersion ?? 0,
     userId,
   };
-}
-
-function clearPendingRuntimePrewarm(state: HostedRuntimeWorkflowState): void {
-  state.prewarmRequested = false;
 }
 
 function clearMailboxPointer(state: HostedRuntimeWorkflowState): void {
@@ -791,10 +588,6 @@ export function normalizeHostedUserRuntimeWorkflowOptions(
       min: HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
       value: options?.ensureRuntimeProcessingStartToCloseTimeoutMs,
     }),
-    prewarmTaskQueue: normalizeTaskQueueOption(
-      options?.prewarmTaskQueue,
-      HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE,
-    ),
     readRuntimeReconciliationFactsStartToCloseTimeoutMs:
       normalizePositiveIntegerOption({
         fallback:
@@ -822,7 +615,6 @@ function normalizeContinueAsNewOptions(
       normalized.continueAsNewAfterHistoryEvents,
     continueAsNewAfterIterations: normalized.continueAsNewAfterIterations,
     ensureRuntimeProcessingStartToCloseTimeoutMs,
-    prewarmTaskQueue: normalized.prewarmTaskQueue,
     readRuntimeReconciliationFactsStartToCloseTimeoutMs:
       normalized.readRuntimeReconciliationFactsStartToCloseTimeoutMs,
   };
@@ -895,20 +687,6 @@ function normalizePositiveIntegerOption(input: {
     throw new TypeError("Hosted runtime workflow numeric options must be integers.");
   }
   return Math.min(Math.max(input.value, input.min), input.max);
-}
-
-function normalizeTaskQueueOption(
-  value: string | undefined,
-  fallback: string,
-): string {
-  if (value === undefined) {
-    return fallback;
-  }
-  const normalized = value.trim();
-  if (normalized.length === 0 || normalized.length > 128) {
-    throw new TypeError("Hosted runtime workflow task queue options must be bounded non-empty strings.");
-  }
-  return normalized;
 }
 
 async function waitUntilTimestampOrSignal(

@@ -46,6 +46,7 @@ const RUNNER_STOPPED_REQUEST_SETTLE_MS = 1_000;
 const RUNNER_DESTROY_SETTLE_TIMEOUT_MS = 5_000;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
+const RUNNER_RECENT_READINESS_PROOF_MAX_AGE_MS = 5_000;
 const RUNNER_METADATA_RESPONSE_BODY_MAX_BYTES = 64 * 1024;
 const RUNNER_METADATA_RESPONSE_BODY_DRAIN_TIMEOUT_MS = 5_000;
 const HOSTED_RUNNER_CONTAINER_SAFE_ERROR_MESSAGES = new Set([
@@ -192,6 +193,12 @@ interface RunnerContainerReadinessOptions {
   failureCleanup: "await" | "skip";
 }
 
+interface RunnerContainerReadinessProof {
+  checkedAtMs: number;
+  stopGeneration: number;
+  userId: string;
+}
+
 type RunnerContainerStartObservation =
   | "cold-start-ready"
   | "deploy-smoke-ready"
@@ -336,6 +343,7 @@ export class RunnerContainer extends Container {
   private lastActivityObservedAtMs: number | null = null;
   private lastActivityObservedStage: string | null = null;
   private lastDestroyRequest: RunnerContainerDestroyRequestRecord | null = null;
+  private recentReadinessProof: RunnerContainerReadinessProof | null = null;
   private stopGeneration = 0;
   private stopObservers = new Set<() => void>();
   private successfulWarmInvocationCount = 0;
@@ -654,7 +662,14 @@ export class RunnerContainer extends Container {
       signal: smokeSignal,
     });
     if (!response.ok || payload.ok !== true) {
-      throw new Error(`Hosted runner container Codex shell smoke failed with HTTP ${response.status}.`);
+      // The container reports content-free smoke diagnostics; carry them so
+      // deploy failures stay debuggable through the worker layer.
+      const smokeErrorMessage = typeof payload.smokeErrorMessage === "string"
+        ? ` ${payload.smokeErrorMessage.slice(0, 512)}`
+        : "";
+      throw new Error(
+        `Hosted runner container Codex shell smoke failed with HTTP ${response.status}.${smokeErrorMessage}`,
+      );
     }
     const result = readRunnerContainerMetadataRecordProperty(payload.codexShell);
     return {
@@ -786,6 +801,7 @@ export class RunnerContainer extends Container {
       idleTtlDeltaMs: readNullableNumber(lifecycleDetails.idleTtlDeltaMs),
     });
     this.stopGeneration += 1;
+    this.clearRecentReadinessProof();
     this.successfulWarmInvocationCount = 0;
     this.warmShellInvalidatedByUnsettledDestroy = false;
     this.resolveStopObservers();
@@ -816,6 +832,7 @@ export class RunnerContainer extends Container {
 
   override onError(error: unknown): never {
     const context = this.currentLogContext;
+    this.clearRecentReadinessProof();
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
@@ -873,6 +890,7 @@ export class RunnerContainer extends Container {
         userId: routeUserId,
       });
       await this.ensureContainerReady(input, operationAbortController.signal);
+      this.clearRecentReadinessProof();
       cleanupWarmContainerOnFailure = true;
       this.noteRunnerActivity("container-ready");
       throwIfRunnerContainerOperationAborted(operationAbortController.signal);
@@ -1017,10 +1035,13 @@ export class RunnerContainer extends Container {
     const status = readContainerStatus(await this.getState());
     const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
     const readinessBudgetMs = input.timeoutMs ?? readyTimeoutMs;
+    throwIfRunnerContainerOperationAborted(operationAbortSignal);
 
     if (isRunnerContainerStopped(status)) {
+      this.clearRecentReadinessProof();
       this.warmShellInvalidatedByUnsettledDestroy = false;
     } else if (this.warmShellInvalidatedByUnsettledDestroy) {
+      this.clearRecentReadinessProof();
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -1038,6 +1059,31 @@ export class RunnerContainer extends Container {
         reason: "warm-invalidated",
       });
     } else if (!isRunnerContainerStopped(status)) {
+      if (isRunnerContainerRunning(status)) {
+        const recentReadinessProof = this.readRecentReadinessProof(
+          Date.now(),
+          input.userId,
+        );
+        if (recentReadinessProof) {
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            details: {
+              readinessLatencyMs: Date.now() - readinessStartedAt,
+              readinessProofAgeMs: recentReadinessProof.ageMs,
+              readinessProofMaxAgeMs: RUNNER_RECENT_READINESS_PROOF_MAX_AGE_MS,
+              readinessProofReused: true,
+              startMode: "warm",
+              statusBeforeStart: status,
+            },
+            message: "Hosted execution container is ready.",
+            phase: "container.ready",
+            userId: input.userId,
+          });
+          return "already_warm";
+        }
+      } else {
+        this.clearRecentReadinessProof();
+      }
       const readinessTimeoutMs = Math.min(readinessBudgetMs, readyTimeoutMs);
       try {
         await assertRunnerHealthy(
@@ -1045,6 +1091,7 @@ export class RunnerContainer extends Container {
           readinessTimeoutMs,
           operationAbortSignal,
         );
+        this.recordRecentReadinessProof(input.userId);
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -1119,6 +1166,7 @@ export class RunnerContainer extends Container {
         },
       });
       await assertRunnerHealthy(this, readinessTimeoutMs, operationAbortSignal);
+      this.recordRecentReadinessProof(input.userId);
       this.recordContainerStartObserved("cold-start-ready");
     } catch (error) {
       if (isRunnerContainerPrewarmPreempted(operationAbortSignal)) {
@@ -1420,6 +1468,7 @@ export class RunnerContainer extends Container {
     failClosed?: boolean;
     reason?: RunnerContainerDestroyReason;
   }): Promise<boolean> {
+    this.clearRecentReadinessProof();
     const failClosed = input?.failClosed ?? true;
     const reason = input?.reason ?? "destroy-instance";
     let destroyed: boolean;
@@ -1589,6 +1638,34 @@ export class RunnerContainer extends Container {
     if (controller && !controller.signal.aborted) {
       controller.abort(new Error(RUNNER_CONTAINER_PREWARM_PREEMPTED_ABORT_MESSAGE));
     }
+  }
+
+  private recordRecentReadinessProof(userId: string): void {
+    this.recentReadinessProof = {
+      checkedAtMs: Date.now(),
+      stopGeneration: this.stopGeneration,
+      userId,
+    };
+  }
+
+  private clearRecentReadinessProof(): void {
+    this.recentReadinessProof = null;
+  }
+
+  private readRecentReadinessProof(nowMs: number, userId: string): { ageMs: number } | null {
+    const proof = this.recentReadinessProof;
+    if (!proof || proof.stopGeneration !== this.stopGeneration || proof.userId !== userId) {
+      this.clearRecentReadinessProof();
+      return null;
+    }
+
+    const ageMs = nowMs - proof.checkedAtMs;
+    if (ageMs < 0 || ageMs > RUNNER_RECENT_READINESS_PROOF_MAX_AGE_MS) {
+      this.clearRecentReadinessProof();
+      return null;
+    }
+
+    return { ageMs };
   }
 }
 
@@ -2490,6 +2567,10 @@ function readContainerStatus(state: unknown): string | null {
 
 function isRunnerContainerStopped(status: string | null): boolean {
   return status === "stopped" || status === "stopped_with_code";
+}
+
+function isRunnerContainerRunning(status: string | null): boolean {
+  return status === "running";
 }
 
 async function watchWorkspaceRequestContainerStop(input: {

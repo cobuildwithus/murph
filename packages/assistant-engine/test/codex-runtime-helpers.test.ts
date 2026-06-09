@@ -63,6 +63,13 @@ const TEST_FRESH_THREAD_FALLBACK = {
   turnContextPrompt: 'Fresh thread runtime context.',
 } as const
 
+function testCodexResume(codexThreadId: string) {
+  return {
+    codexThreadId,
+    prepareFreshThreadFallback: async () => TEST_FRESH_THREAD_FALLBACK,
+  }
+}
+
 afterEach(() => {
   codexAppServerMocks.executeCodexAppServerTurn.mockReset()
   codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReset()
@@ -1171,7 +1178,7 @@ describe('Codex assistant registry helpers', () => {
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
         }),
-        resumeCodexThreadId: 'codex-session-1',
+        resume: testCodexResume('codex-session-1'),
         systemPrompt: 'You are Murph.',
         userPrompt: '  What changed today?  ',
         workingDirectory: '/tmp/provider-tests',
@@ -1183,7 +1190,7 @@ describe('Codex assistant registry helpers', () => {
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
         }),
-        resumeCodexThreadId: 'codex-session-1',
+        resume: testCodexResume('codex-session-1'),
         sessionContext: {
           binding,
         },
@@ -1559,11 +1566,10 @@ describe('Codex assistant registry helpers', () => {
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
-      freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
       onTraceEvent: (event) => {
         traceEvents.push(event)
       },
-      resumeCodexThreadId: 'stale-thread',
+      resume: testCodexResume('stale-thread'),
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
     })
@@ -1708,11 +1714,10 @@ describe('Codex assistant registry helpers', () => {
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
-      freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
       onTraceEvent: (event) => {
         traceEvents.push(event)
       },
-      resumeCodexThreadId: 'corrupt-thread',
+      resume: testCodexResume('corrupt-thread'),
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
     })
@@ -1816,8 +1821,7 @@ describe('Codex assistant registry helpers', () => {
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
-      freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
-      resumeCodexThreadId: 'corrupt-thread',
+      resume: testCodexResume('corrupt-thread'),
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
     })
@@ -1925,8 +1929,7 @@ describe('Codex assistant registry helpers', () => {
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
-      freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
-      resumeCodexThreadId: 'resume-thread',
+      resume: testCodexResume('resume-thread'),
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
     })
@@ -2027,8 +2030,7 @@ describe('Codex assistant registry helpers', () => {
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
-      freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
-      resumeCodexThreadId: 'resume-thread',
+      resume: testCodexResume('resume-thread'),
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
     })
@@ -2099,8 +2101,7 @@ describe('Codex assistant registry helpers', () => {
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
-      freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
-      resumeCodexThreadId: 'corrupt-thread',
+      resume: testCodexResume('corrupt-thread'),
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
     })
@@ -2164,8 +2165,7 @@ describe('Codex assistant registry helpers', () => {
       env: {
         VENICE_API_KEY: sentinel,
       },
-      freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
-      resumeCodexThreadId: 'corrupt-venice-thread',
+      resume: testCodexResume('corrupt-venice-thread'),
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
     })
