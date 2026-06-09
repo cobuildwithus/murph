@@ -43,6 +43,7 @@ import {
   createCodexActionDiagnosticsReducer,
 } from './assistant-codex/action-diagnostics.js'
 import {
+  executeMurphDynamicToolRequest,
   readMurphDynamicToolRequest,
 } from './assistant-codex/dynamic-tools.js'
 import {
@@ -87,12 +88,20 @@ import {
   type CodexAppServerImageInput,
 } from './assistant-codex/images.js'
 import type {
+  AssistantHostedGeneratedImageUploader,
+} from './assistant/execution-context.js'
+import type {
+  AssistantProviderUsageDraft,
+} from './assistant/providers/types.js'
+import {
+  normalizeAssistantResponseMediaList,
+} from './assistant/response-media.js'
+import type {
   AssistantProviderTraceEvent,
   AssistantProviderTraceUpdate,
 } from './assistant/provider-traces.js'
 import type {
   AssistantProgressDelivery,
-  AssistantProgressDeliveryResult,
   AssistantProgressDeliverySource,
 } from './assistant/turn-progress.js'
 
@@ -135,6 +144,8 @@ type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
   args: readonly string[]
   codexCommand: string
   env: NodeJS.ProcessEnv
+  fetchImpl: typeof fetch
+  hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
   imagePaths: readonly string[]
   launchKey: string
   tempRoot: string
@@ -219,43 +230,6 @@ async function waitForCodexProgressDrain(
   }
 }
 
-function resolveCodexProgressToolResultText(
-  result: AssistantProgressDeliveryResult,
-): { success: boolean; text: string } {
-  if (result.kind === 'sent') {
-    return {
-      success: true,
-      text: 'progress update sent',
-    }
-  }
-
-  if (result.kind === 'failed') {
-    return {
-      success: false,
-      text: 'progress update failed during best-effort delivery',
-    }
-  }
-
-  if (result.reason === 'limit') {
-    return {
-      success: false,
-      text: 'progress update skipped: progress update limit reached',
-    }
-  }
-
-  if (result.reason === 'duplicate') {
-    return {
-      success: false,
-      text: 'progress update skipped: duplicate progress update',
-    }
-  }
-
-  return {
-    success: false,
-    text: 'progress update skipped: empty progress update',
-  }
-}
-
 function resolveCodexCurrentChannelProgressSource(
   normalizedEvent: CodexNormalizedEvent,
 ): AssistantProgressDeliverySource | null {
@@ -285,6 +259,7 @@ export interface CodexAppServerTurnInput {
   codexCommand?: string
   codexHome?: string | null
   env?: NodeJS.ProcessEnv
+  fetchImpl?: typeof fetch | null
   baseInstructions?: string | null
   developerInstructions?: string | null
   excludeResumeTurns?: boolean
@@ -294,6 +269,7 @@ export interface CodexAppServerTurnInput {
   onProgress?: ((event: CodexProgressEvent) => void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
+  hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   oss?: boolean
   profile?: string | null
   prompt: string
@@ -302,11 +278,14 @@ export interface CodexAppServerTurnInput {
   resumeSessionId?: string | null
   sandbox?: AssistantSandbox
   progressDelivery?: AssistantProgressDelivery | null
+  providerRequestOrdinal?: number | null
+  requireHostedGeneratedImageUploader?: boolean | null
   workingDirectory: string
 }
 
 export interface CodexAppServerTurnFailureContext {
   jsonEvents: unknown[]
+  additionalUsages: AssistantProviderUsageDraft[]
   providerActionCount: number
   codexThreadId: string | null
   providerTurnId: string | null
@@ -338,6 +317,7 @@ export function readCodexAppServerTurnFailureContext(
 
   return {
     jsonEvents: [...context.jsonEvents],
+    additionalUsages: [...context.additionalUsages],
     providerActionCount: context.providerActionCount,
     codexThreadId: context.codexThreadId,
     providerTurnId: context.providerTurnId,
@@ -346,6 +326,7 @@ export function readCodexAppServerTurnFailureContext(
 
 export interface CodexAppServerTurnResult {
   finalMessage: string
+  additionalUsages: AssistantProviderUsageDraft[]
   responseMedia: AssistantResponseMedia[]
   jsonEvents: unknown[]
   providerActionCount: number
@@ -424,6 +405,8 @@ export async function executeCodexAppServerTurn(
     args,
     codexCommand,
     env: childEnv,
+    fetchImpl: input.fetchImpl ?? fetch,
+    hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
     imagePaths,
     launchKey,
     tempRoot,
@@ -1255,6 +1238,8 @@ async function runCodexAppServerTurnOnProcess(
   let lastAgentMessage: string | null = null
   let lastEventError: string | null = null
   let responseMedia: AssistantResponseMedia[] = []
+  const additionalUsages: AssistantProviderUsageDraft[] = []
+  let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
   let rolloutRelativePath: string | null = null
   let providerActionCount = 0
   const providerActionItemIds = new Set<string>()
@@ -1277,6 +1262,8 @@ async function runCodexAppServerTurnOnProcess(
   let contextCompactionProgressNotified = false
   let releaseLiveTurn = () => {}
   const pendingProgressDeliveries = new Set<Promise<void>>()
+  let dynamicToolExecutionChain: Promise<void> = Promise.resolve()
+  const dynamicToolAbortController = new AbortController()
   const pendingPreStartMessages: Array<{
     kind: 'event' | 'server_request'
     message: CodexRpcMessage
@@ -1316,6 +1303,7 @@ async function runCodexAppServerTurnOnProcess(
 
     const context = {
       jsonEvents: [...jsonEvents],
+      additionalUsages: [...additionalUsages],
       providerActionCount,
       codexThreadId,
       providerTurnId: turnId,
@@ -1569,6 +1557,37 @@ async function runCodexAppServerTurnOnProcess(
     }
   }
 
+  // Media-mutating dynamic tools run serialized in request order so
+  // response-media patches apply deterministically even if Codex issues
+  // overlapping tool requests.
+  const trackDynamicToolExecution = (run: () => Promise<unknown>): void => {
+    dynamicToolExecutionChain = dynamicToolExecutionChain
+      .then(run)
+      .then(
+        () => undefined,
+        (error) => {
+          rejectOnce(error)
+        },
+      )
+  }
+
+  const drainPendingDynamicToolExecutions = async (): Promise<void> => {
+    let drained: Promise<void>
+    do {
+      drained = dynamicToolExecutionChain
+      await drained
+    } while (drained !== dynamicToolExecutionChain)
+  }
+
+  const applyResponseMediaPatch = (patch: {
+    media: AssistantResponseMedia[]
+    op: 'append' | 'replace'
+  }): void => {
+    responseMedia = patch.op === 'replace'
+      ? patch.media
+      : normalizeAssistantResponseMediaList([...responseMedia, ...patch.media])
+  }
+
   const buildUnknownRpcResponseError = (): VaultCliError =>
     new VaultCliError(
       'ASSISTANT_CODEX_APP_SERVER_LATE_RESPONSE',
@@ -1724,7 +1743,47 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    if (dynamicToolRequest.kind === 'invalid-progress-arguments') {
+    const runDynamicTool = () => executeMurphDynamicToolRequest({
+      abortSignal: input.abortSignal
+        ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
+        : dynamicToolAbortController.signal,
+      codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
+      env: input.env,
+      fetchImpl: input.fetchImpl,
+      hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+      nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
+      progressDelivery: resolveCodexAppServerProgressDelivery(input),
+      request: dynamicToolRequest,
+      requireHostedGeneratedImageUploader:
+        input.requireHostedGeneratedImageUploader ?? false,
+    }).then((result) => {
+      if (result.usageDraft) {
+        additionalUsages.push(result.usageDraft)
+      }
+      if (result.responseMediaPatch) {
+        try {
+          applyResponseMediaPatch(result.responseMediaPatch)
+        } catch {
+          void tryWriteRpcMessage({
+            id: requestId,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'response media limit reached',
+                },
+              ],
+            },
+          })
+          return
+        }
+      }
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: result.rpcResult,
+      })
+    }).catch(() => {
       void tryWriteRpcMessage({
         id: requestId,
         result: {
@@ -1732,98 +1791,23 @@ async function runCodexAppServerTurnOnProcess(
           contentItems: [
             {
               type: 'inputText',
-              text: 'invalid progress update arguments',
+              text: 'dynamic tool failed',
             },
           ],
         },
       })
-      return
-    }
+    })
 
-    if (dynamicToolRequest.kind === 'invalid-response-media-arguments') {
-      void tryWriteRpcMessage({
-        id: requestId,
-        result: {
-          success: false,
-          contentItems: [
-            {
-              type: 'inputText',
-              text: 'invalid response media arguments',
-            },
-          ],
-        },
-      })
-      return
+    if (
+      dynamicToolRequest.kind === 'generate-image' ||
+      dynamicToolRequest.kind === 'attach-response-media'
+    ) {
+      trackDynamicToolExecution(runDynamicTool)
+    } else {
+      // Non-media tools answer immediately; progress sends drain on the
+      // bounded progress-delivery path instead of the media tool chain.
+      trackProgressDelivery(runDynamicTool())
     }
-
-    if (dynamicToolRequest.kind === 'attach-response-media') {
-      responseMedia = dynamicToolRequest.media
-      void tryWriteRpcMessage({
-        id: requestId,
-        result: {
-          success: true,
-          contentItems: [
-            {
-              type: 'inputText',
-              text: responseMedia.length === 0
-                ? 'response media cleared'
-                : `${responseMedia.length} response image${responseMedia.length === 1 ? '' : 's'} attached`,
-            },
-          ],
-        },
-      })
-      return
-    }
-
-    const progressDelivery = resolveCodexAppServerProgressDelivery(input)
-    if (!progressDelivery) {
-      void tryWriteRpcMessage({
-        id: requestId,
-        result: {
-          success: false,
-          contentItems: [
-            {
-              type: 'inputText',
-              text: 'progress updates are not available for this turn',
-            },
-          ],
-        },
-      })
-      return
-    }
-
-    const progressToolResponse = progressDelivery
-      .send(dynamicToolRequest.text, { source: 'model' })
-      .then((progressResult) => {
-        const toolResult = resolveCodexProgressToolResultText(progressResult)
-        void tryWriteRpcMessage({
-          id: requestId,
-          result: {
-            success: toolResult.success,
-            contentItems: [
-              {
-                type: 'inputText',
-                text: toolResult.text,
-              },
-            ],
-          },
-        })
-      })
-      .catch(() => {
-        void tryWriteRpcMessage({
-          id: requestId,
-          result: {
-            success: false,
-            contentItems: [
-              {
-                type: 'inputText',
-                text: 'progress update failed during best-effort delivery',
-              },
-            ],
-          },
-        })
-      })
-    trackProgressDelivery(progressToolResponse)
   }
 
   const handleAcceptedEvent = (
@@ -2247,6 +2231,7 @@ async function runCodexAppServerTurnOnProcess(
     lifecycleStage = 'turn_running'
     await turnCompleted
     clearInterruptCleanupTimer()
+    await drainPendingDynamicToolExecutions()
     await drainPendingProgressDeliveries()
     emitActionDiagnosticsTrace()
     lifecycleStage = 'turn_completed'
@@ -2268,6 +2253,8 @@ async function runCodexAppServerTurnOnProcess(
     }
   } catch (error) {
     emitActionDiagnosticsTrace()
+    dynamicToolAbortController.abort()
+    await drainPendingDynamicToolExecutions()
     annotateTurnFailureContext(error)
     closeLiveTurn()
     normalShutdown = true
@@ -2292,6 +2279,7 @@ async function runCodexAppServerTurnOnProcess(
 
   return {
     finalMessage,
+    additionalUsages,
     responseMedia,
     jsonEvents,
     providerActionCount,

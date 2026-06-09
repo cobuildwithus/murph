@@ -33,6 +33,7 @@ import {
   buildCodexAppServerSteerRequest,
   buildCodexAppServerArgs,
   executeCodexAppServerTurn,
+  readCodexAppServerTurnFailureContext,
   resolveCodexDisplayOptions,
   snapshotExpectedCodexRootProcess,
   stopWarmCodexAppServer,
@@ -910,6 +911,570 @@ describe('assistant codex runtime', () => {
       finalMessage: 'Tool media complete',
       responseMedia: [],
     })
+  })
+
+  it('applies overlapping dynamic media tools in request order', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-image-order-work-')
+    const releaseImageFetch = createDeferred<void>()
+    const webpBytes = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46,
+      0x00, 0x00, 0x00, 0x00,
+      0x57, 0x45, 0x42, 0x50,
+    ])
+    const fetchImpl = vi.fn(async () => {
+      await releaseImageFetch.promise
+      return new Response(JSON.stringify({
+        data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
+        usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 },
+      }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      })
+    })
+    const uploader = {
+      uploadGeneratedImage: vi.fn(async (uploadInput: { alt: string | null; source: string | null }) => ({
+        alt: uploadInput.alt,
+        kind: 'image' as const,
+        source: uploadInput.source,
+        url: 'https://imagedelivery.net/account/generated/public',
+      })),
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-image-order',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-image-order',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              id: 61,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'generate_image',
+                arguments: {
+                  prompt: 'Render the product.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              id: 62,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'attach_response_media',
+                arguments: {
+                  media: [],
+                },
+              },
+            }),
+          )
+          releaseImageFetch.resolve()
+
+          const messages = await waitForRpcMessages(child, 6)
+          expect(messages[4]).toMatchObject({
+            id: 61,
+            result: { success: true },
+          })
+          expect(messages[5]).toMatchObject({
+            id: 62,
+            result: { success: true },
+          })
+
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-image-order',
+                  type: 'assistant_message',
+                  message: 'Ordered media complete',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-image-order',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: { OPENAI_API_KEY: 'openai-test-key' },
+        fetchImpl,
+        hostedGeneratedImageUploader: uploader,
+        prompt: 'generate then clear media',
+        requireHostedGeneratedImageUploader: true,
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Ordered media complete',
+      responseMedia: [],
+      additionalUsages: [
+        { provider: 'openai-images' },
+      ],
+    })
+    expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
+  })
+
+  it('aborts and drains in-flight image generation when the turn fails', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-image-failure-work-')
+    const codexHome = await createTempDir('assistant-codex-image-failure-home-')
+    const webpBytes = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46,
+      0x00, 0x00, 0x00, 0x00,
+      0x57, 0x45, 0x42, 0x50,
+    ])
+    let fetchAborted = false
+    const fetchImpl = vi.fn(
+      (_url: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((resolve) => {
+          // Settle only after the failing turn aborts in-flight dynamic tools,
+          // proving the drain waits for completed image usage.
+          const respond = () => {
+            fetchAborted = true
+            resolve(new Response(JSON.stringify({
+              data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
+              usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 },
+            }), {
+              headers: { 'content-type': 'application/json' },
+              status: 200,
+            }))
+          }
+          if (init?.signal?.aborted) {
+            respond()
+            return
+          }
+          init?.signal?.addEventListener('abort', respond)
+        }),
+    )
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-image-failure',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-image-failure',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              id: 71,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'generate_image',
+                arguments: {
+                  prompt: 'Render the product.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-image-failure',
+                  status: 'failed',
+                },
+              },
+            }),
+          )
+          child.emit('exit', 0, null)
+          child.emit('close', 0, null)
+        })()
+      })
+
+      return child
+    })
+
+    const error: unknown = await executeCodexAppServerTurn({
+      codexHome,
+      env: { OPENAI_API_KEY: 'openai-test-key' },
+      fetchImpl,
+      prompt: 'generate during turn failure',
+      workingDirectory,
+    }).then(
+      () => {
+        throw new Error('expected the Codex turn to fail')
+      },
+      (turnError: unknown) => turnError,
+    )
+
+    expect(error).toMatchObject({
+      code: 'ASSISTANT_CODEX_FAILED',
+    })
+    expect(fetchAborted).toBe(true)
+    const failureContext = readCodexAppServerTurnFailureContext(error)
+    expect(failureContext?.additionalUsages).toMatchObject([
+      {
+        provider: 'openai-images',
+        providerRequestOrdinal: 1,
+      },
+    ])
+  })
+
+  it('answers progress updates immediately while image generation is in flight', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-image-progress-work-')
+    const releaseImageFetch = createDeferred<void>()
+    const webpBytes = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46,
+      0x00, 0x00, 0x00, 0x00,
+      0x57, 0x45, 0x42, 0x50,
+    ])
+    const fetchImpl = vi.fn(async () => {
+      await releaseImageFetch.promise
+      return new Response(JSON.stringify({
+        data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
+        usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 },
+      }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      })
+    })
+    const uploader = {
+      uploadGeneratedImage: vi.fn(async (uploadInput: { alt: string | null; source: string | null }) => ({
+        alt: uploadInput.alt,
+        kind: 'image' as const,
+        source: uploadInput.source,
+        url: 'https://imagedelivery.net/account/generated/public',
+      })),
+    }
+    const progressDelivery = {
+      send: vi.fn(async (_text: string) => sentProgressResult()),
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-image-progress',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-image-progress',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              id: 81,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'generate_image',
+                arguments: {
+                  prompt: 'Render the product.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              id: 82,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'send_progress_update',
+                arguments: {
+                  text: 'Still generating the image.',
+                },
+              },
+            }),
+          )
+
+          // The progress response must arrive while the image fetch is held.
+          const messages = await waitForRpcMessages(child, 5)
+          expect(messages[4]).toMatchObject({
+            id: 82,
+            result: { success: true },
+          })
+          releaseImageFetch.resolve()
+
+          const allMessages = await waitForRpcMessages(child, 6)
+          expect(allMessages[5]).toMatchObject({
+            id: 81,
+            result: { success: true },
+          })
+
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-image-progress',
+                  type: 'assistant_message',
+                  message: 'Progress and image complete',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-image-progress',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: { OPENAI_API_KEY: 'openai-test-key' },
+        fetchImpl,
+        hostedGeneratedImageUploader: uploader,
+        progressDelivery,
+        prompt: 'generate with progress',
+        requireHostedGeneratedImageUploader: true,
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Progress and image complete',
+      responseMedia: [
+        {
+          url: 'https://imagedelivery.net/account/generated/public',
+        },
+      ],
+    })
+    expect(progressDelivery.send).toHaveBeenCalledWith(
+      'Still generating the image.',
+      { source: 'model' },
+    )
+  })
+
+  it('reports a structured failure when a generated image exceeds the media limit', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-image-limit-work-')
+    const webpBytes = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46,
+      0x00, 0x00, 0x00, 0x00,
+      0x57, 0x45, 0x42, 0x50,
+    ])
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({
+        data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
+        usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 },
+      }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      }))
+    const uploader = {
+      uploadGeneratedImage: vi.fn(async (uploadInput: { alt: string | null; source: string | null }) => ({
+        alt: uploadInput.alt,
+        kind: 'image' as const,
+        source: uploadInput.source,
+        url: 'https://imagedelivery.net/account/generated/public',
+      })),
+    }
+    const attachedMedia = Array.from({ length: 40 }, (_, index) => ({
+      kind: 'image' as const,
+      url: `https://cdn.example.test/assistant/full-${index}.png`,
+      alt: `Image ${index}`,
+      source: 'media-limit-source',
+    }))
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-image-limit',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-image-limit',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              id: 91,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'attach_response_media',
+                arguments: {
+                  media: attachedMedia,
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              id: 92,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'generate_image',
+                arguments: {
+                  prompt: 'Render one more image.',
+                },
+              },
+            }),
+          )
+
+          const messages = await waitForRpcMessages(child, 6)
+          expect(messages[4]).toMatchObject({
+            id: 91,
+            result: { success: true },
+          })
+          expect(messages[5]).toEqual({
+            id: 92,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'response media limit reached',
+                },
+              ],
+            },
+          })
+
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-image-limit',
+                  type: 'assistant_message',
+                  message: 'Media limit handled',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-image-limit',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+        })()
+      })
+
+      return child
+    })
+
+    const result = await executeCodexAppServerTurn({
+      env: { OPENAI_API_KEY: 'openai-test-key' },
+      fetchImpl,
+      hostedGeneratedImageUploader: uploader,
+      prompt: 'attach media then exceed the limit',
+      requireHostedGeneratedImageUploader: true,
+      workingDirectory,
+    })
+
+    expect(result.finalMessage).toBe('Media limit handled')
+    expect(result.responseMedia).toHaveLength(40)
+    // The image was generated and paid for, so its usage is still recorded.
+    expect(result.additionalUsages).toMatchObject([
+      { provider: 'openai-images' },
+    ])
   })
 
   it('reuses the warm Codex app-server across stable local turns', async () => {

@@ -20,7 +20,10 @@ import {
   readCodexThreadRouteFingerprint,
   type CodexThreadIdentity,
 } from './codex-thread-route.js'
-import { recordAssistantUsageEvent } from './service-usage.js'
+import {
+  recordAdditionalAssistantUsageEvents,
+  recordAssistantUsageEvent,
+} from './service-usage.js'
 import { persistAssistantTurnAndSession } from './turn-finalizer.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
 import { createAssistantTurnId } from './turns.js'
@@ -212,18 +215,25 @@ export async function sendAssistantNotificationLocal(
           turnId,
         })
         if (providerOutcome.kind === 'failed_terminal') {
+          const failedProviderResult = {
+            attemptCount: providerOutcome.attemptCount,
+            provider: providerOutcome.route.provider,
+            providerOptions: providerOutcome.route.providerOptions,
+            route: providerOutcome.route,
+            session: providerOutcome.session ?? resolved.session,
+            usage: providerOutcome.usage,
+            usageAttribution: providerOutcome.usageAttribution,
+          }
           await recordAssistantUsageEvent({
             executionContext,
             providerRequestOutcome: providerOutcome.providerRequestOutcome,
-            providerResult: {
-              attemptCount: providerOutcome.attemptCount,
-              provider: providerOutcome.route.provider,
-              providerOptions: providerOutcome.route.providerOptions,
-              route: providerOutcome.route,
-              session: providerOutcome.session ?? resolved.session,
-              usage: providerOutcome.usage,
-              usageAttribution: providerOutcome.usageAttribution,
-            },
+            providerResult: failedProviderResult,
+            turnId,
+          })
+          await recordAdditionalAssistantUsageEvents({
+            additionalUsages: providerOutcome.additionalUsages,
+            executionContext,
+            providerResult: failedProviderResult,
             turnId,
           })
           throw annotateAssistantNotificationError(
@@ -240,6 +250,12 @@ export async function sendAssistantNotificationLocal(
         const providerResult = providerOutcome.providerTurn
         const selectedRoute = providerResult.route
         await recordAssistantUsageEvent({
+          executionContext,
+          providerResult,
+          turnId,
+        })
+        await recordAdditionalAssistantUsageEvents({
+          additionalUsages: providerResult.additionalUsages,
           executionContext,
           providerResult,
           turnId,

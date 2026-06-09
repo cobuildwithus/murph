@@ -1,5 +1,8 @@
 import type { AssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
+import type {
+  AssistantResponseMedia,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
@@ -37,6 +40,26 @@ export interface AssistantUsageRecorder {
   recordUsage(record: AssistantUsageRecord): Promise<void>
 }
 
+export type AssistantGeneratedImageContentType =
+  | 'image/jpeg'
+  | 'image/png'
+  | 'image/webp'
+
+export interface AssistantHostedGeneratedImageUploadInput {
+  alt: string | null
+  bytes: Uint8Array
+  contentType: AssistantGeneratedImageContentType
+  filename: string
+  metadata: Record<string, string>
+  source: string
+}
+
+export interface AssistantHostedGeneratedImageUploader {
+  uploadGeneratedImage(
+    input: AssistantHostedGeneratedImageUploadInput,
+  ): Promise<AssistantResponseMedia>
+}
+
 export interface AssistantWorkspaceArtifactMaterializationResult {
   materializedArtifactPaths: ReadonlySet<string>
   missingArtifactPaths: ReadonlySet<string>
@@ -53,9 +76,12 @@ export interface AssistantHostedExecutionContext {
   issueDeviceConnectLink?(
     input: AssistantHostedDeviceConnectRequest,
   ): Promise<AssistantHostedDeviceConnectLink>
+  generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
+  generatedImageUploaderRequired?: boolean | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   memberId: string
   progressDeliveryDependencies?: AssistantHostedProgressDeliveryDependencies
+  providerFetch?: typeof fetch | null
   usageRecorder?: AssistantUsageRecorder | null
   userEnvKeys: readonly string[]
 }
@@ -79,6 +105,9 @@ export function normalizeAssistantExecutionContext(
   const deviceConnectProviders = normalizeAssistantHostedDeviceConnectProviders(
     hosted?.deviceConnectProviders,
   )
+  const generatedImageUploader = normalizeAssistantGeneratedImageUploader(
+    hosted?.generatedImageUploader,
+  )
   const usageRecorder = normalizeAssistantUsageRecorder(hosted?.usageRecorder)
   if (!memberId) {
     return {
@@ -92,6 +121,10 @@ export function normalizeAssistantExecutionContext(
         ? {
             issueDeviceConnectLink: hosted.issueDeviceConnectLink,
           }
+        : {}),
+      ...(generatedImageUploader ? { generatedImageUploader } : {}),
+      ...(hosted?.generatedImageUploaderRequired === true
+        ? { generatedImageUploaderRequired: true }
         : {}),
       ...(typeof hosted?.materializeWorkspaceArtifacts === 'function'
         ? {
@@ -120,6 +153,9 @@ export function normalizeAssistantExecutionContext(
             progressDeliveryDependencies,
           }
         : {}),
+      ...(typeof hosted?.providerFetch === 'function'
+        ? { providerFetch: hosted.providerFetch }
+        : {}),
       userEnvKeys:
         hosted?.userEnvKeys
           .map((key) => normalizeNullableString(key))
@@ -137,6 +173,18 @@ function normalizeAssistantUsageRecorder(
 
   return {
     recordUsage: input.recordUsage,
+  }
+}
+
+function normalizeAssistantGeneratedImageUploader(
+  input: AssistantHostedExecutionContext['generatedImageUploader'] | undefined,
+): AssistantHostedGeneratedImageUploader | undefined {
+  if (!input || typeof input.uploadGeneratedImage !== 'function') {
+    return undefined
+  }
+
+  return {
+    uploadGeneratedImage: input.uploadGeneratedImage,
   }
 }
 

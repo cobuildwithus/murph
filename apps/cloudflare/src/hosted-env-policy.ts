@@ -90,6 +90,11 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   ...HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
   ...HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
   "HOME",
+  // Generated image uploads use Worker-owned Cloudflare Images config. Runner
+  // secrets must not override the account, token, or delivery variant.
+  "CLOUDFLARE_IMAGES_ACCOUNT_ID",
+  "CLOUDFLARE_IMAGES_API_KEY",
+  "CLOUDFLARE_IMAGES_VARIANT",
   // This is a platform metering secret forwarded by the assistant env profile,
   // not a member-supplied runner secret. Letting userEnv override it would
   // break stable anonymized usage reporting IDs.

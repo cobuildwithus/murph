@@ -69,7 +69,10 @@ import {
 } from './service-result.js'
 import { persistFailedAssistantPromptAttempt } from './prompt-attempts.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
-import { recordAssistantUsageEvent } from './service-usage.js'
+import {
+  recordAdditionalAssistantUsageEvents,
+  recordAssistantUsageEvent,
+} from './service-usage.js'
 import {
   type AssistantActiveTurnInputAdmissionResult,
 } from './turn-input.js'
@@ -622,19 +625,26 @@ export async function sendAssistantMessageLocal(
             continuation: providerOutcome.codexContinuation,
             sessionId: providerOutcome.session.sessionId,
           })
+          const failedProviderResult = {
+            attemptCount: providerOutcome.attemptCount,
+            provider: providerOutcome.route.provider,
+            providerOptions: providerOutcome.route.providerOptions,
+            route: providerOutcome.route,
+            session: providerOutcome.session,
+            usage: providerOutcome.usage,
+            usageAttribution: providerOutcome.usageAttribution,
+          }
           await recordAssistantUsageEvent({
             executionContext,
             providerRequestOrdinal,
             providerRequestOutcome: providerOutcome.providerRequestOutcome,
-            providerResult: {
-              attemptCount: providerOutcome.attemptCount,
-              provider: providerOutcome.route.provider,
-              providerOptions: providerOutcome.route.providerOptions,
-              route: providerOutcome.route,
-              session: providerOutcome.session,
-              usage: providerOutcome.usage,
-              usageAttribution: providerOutcome.usageAttribution,
-            },
+            providerResult: failedProviderResult,
+            turnId: currentUserTurn.turnId,
+          })
+          await recordAdditionalAssistantUsageEvents({
+            additionalUsages: providerOutcome.additionalUsages,
+            executionContext,
+            providerResult: failedProviderResult,
             turnId: currentUserTurn.turnId,
           })
           throw providerOutcome.error
@@ -669,6 +679,12 @@ export async function sendAssistantMessageLocal(
         await recordAssistantUsageEvent({
           executionContext,
           providerRequestOrdinal,
+          providerResult,
+          turnId: currentUserTurn.turnId,
+        })
+        await recordAdditionalAssistantUsageEvents({
+          additionalUsages: providerResult.additionalUsages,
+          executionContext,
           providerResult,
           turnId: currentUserTurn.turnId,
         })

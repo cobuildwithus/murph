@@ -351,7 +351,10 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(input.materializeWorkspaceArtifacts
           ? { materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts }
           : {}),
+        generatedImageUploader: input.runtime.platform.generatedImageUploader ?? null,
+        generatedImageUploaderRequired: true,
         memberId: input.request.userId,
+        providerFetch: input.runtime.platform.providerFetch ?? null,
         ...(input.runtime.platform.usageRecordPort
           ? {
               usageRecorder: {

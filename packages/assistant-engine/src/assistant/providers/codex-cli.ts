@@ -191,6 +191,8 @@ export async function executeCodexAssistantTurnAttempt(
       showThinkingTraces: input.showThinkingTraces ?? false,
     }),
     env: prepareAssistantDirectCliEnv(input.env),
+    fetchImpl: input.providerFetch ?? undefined,
+    hostedGeneratedImageUploader: input.generatedImageUploader ?? null,
     model: providerConfig.target.model ?? undefined,
     modelProvider: providerConfig.target.modelProvider ?? undefined,
     onLiveTurn:
@@ -225,6 +227,9 @@ export async function executeCodexAssistantTurnAttempt(
     oss: providerConfig.target.oss,
     profile: providerConfig.target.profile ?? undefined,
     progressDelivery: input.progressDelivery ?? undefined,
+    providerRequestOrdinal: input.providerRequestOrdinal ?? null,
+    requireHostedGeneratedImageUploader:
+      input.requireGeneratedImageUploader ?? false,
     images: extractCodexAppServerUserMessageImages(input.userMessageContent),
     excludeResumeTurns: true,
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
@@ -368,6 +373,7 @@ export async function executeCodexAssistantTurnAttempt(
         providerSecretValue,
       })
       return {
+        additionalUsages: failureContext?.additionalUsages ?? [],
         error: surfacedError,
         metadata: {
           activityLabels: [],
@@ -402,6 +408,7 @@ export async function executeCodexAssistantTurnAttempt(
     ok: true,
     result: {
       provider: resolveAssistantChatProviderFromConfig(providerConfig),
+      additionalUsages: result.additionalUsages,
       ...(codexContinuation
         ? {
             codexContinuation,
