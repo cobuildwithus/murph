@@ -388,11 +388,43 @@ function parserBlockersForRow(row, label, ingredientRows, servingSizes, state) {
   if (maxFactsPanelLength(label) > 6000) blockers.push("facts_panel_too_long");
   if (hasLikelyMissingProminentFactsRows(label, ingredientRows)) blockers.push("likely_missing_facts_rows");
   if (hasMissingProminentFactsRows(label, ingredientRows)) blockers.push("missing_prominent_facts_rows");
+  if (hasLikelyMissingProductActive(row, ingredientRows)) blockers.push("likely_missing_product_active");
   if (ingredientRows.some((row) => !isUsefulIngredientRow(row))) blockers.push("invalid_parsed_ingredient_row");
   if (ingredientRows.some((row) => hasParsedIngredientNameContamination(row))) blockers.push("parsed_ingredient_name_contamination");
   if (isLikelyFoodOrNonSupplementRow(row, label)) blockers.push("likely_food_or_non_supplement");
   if (ingredientRows.some((row) => row.source === "factsText_amount_pattern")) blockers.push("fallback_amount_pattern_rows");
   return uniqueStrings(blockers);
+}
+
+function hasLikelyMissingProductActive(row, ingredientRows) {
+  const productName = cleanValue(row?.name);
+  if (!productName || !Array.isArray(ingredientRows) || ingredientRows.length === 0) return false;
+  const product = productName.toLowerCase();
+  const ingredients = ingredientRows.map((ingredientRow) => cleanValue(ingredientRow?.name).toLowerCase()).join(" | ");
+  const hasAny = (patterns) => patterns.some((pattern) => pattern.test(ingredients));
+  const electrolyteMatches = ingredients.match(/\b(?:sodium|potassium|magnesium|chloride|calcium)\b/gu) ?? [];
+
+  if (/\bbcaas?\b/u.test(product)) return !hasAny([/\bbcaas?\b/u, /\bleucine\b/u, /\bisoleucine\b/u, /\bvaline\b/u]);
+  if (/\beaas?\b|\bessential\s+amino/u.test(product)) {
+    return !hasAny([/\beaas?\b/u, /\bessential\s+amino/u, /\bleucine\b/u, /\bisoleucine\b/u, /\bvaline\b/u, /\blysine\b/u, /\bthreonine\b/u, /\btryptophan\b/u, /\bmethionine\b/u, /\bphenylalanine\b/u, /\bhistidine\b/u]);
+  }
+  if (/\bamino(?:\s+acid|\s+complex)?\b|\bamino[aá]cido/u.test(product)) {
+    return !hasAny([/\bamino/u, /\bleucine\b/u, /\bisoleucine\b/u, /\bvaline\b/u, /\blysine\b/u, /\bthreonine\b/u, /\btryptophan\b/u, /\btript[oó]fano\b/u, /\bmethionine\b/u, /\bphenylalanine\b/u, /\bhistidine\b/u, /\barginine\b/u, /\bcitrulline\b/u, /\bcitrulina\b/u, /\btaurine\b/u, /\btaurina\b/u, /\bcarnitine\b/u, /\bcarnitina\b/u, /\btyrosine\b/u, /\btirosina\b/u]);
+  }
+  if (/\bwhey\b|\bprotein\s+(?:powder|isolate|capsules?|packets?|sticks?|blend|supplement)\b/u.test(product)) {
+    return !hasAny([/\bprotein\b/u, /\bwhey\b/u, /\bcasein\b/u, /\bcollagen\b/u, /\bgelatin\b/u, /\bpea\s+protein\b/u, /\brice\s+protein\b/u, /\bhemp\s+protein\b/u]);
+  }
+  if (/\belectrolytes?\b|\bhydrate\s+electrolytes?\b|\belectrolyte\s+powder\b/u.test(product)) {
+    return new Set(electrolyteMatches).size < 2;
+  }
+  if (/\bcreatine\b/u.test(product)) return !hasAny([/\bcreatine\b/u]);
+  if (/\bcollagen\b/u.test(product)) return !hasAny([/\bcollagen\b/u, /\bcartilage\b/u, /\bgelatin\b/u, /\beggshell\s+membrane\b/u, /\bprotein\b/u]);
+  if (/\bcarnitine\b|\bcarnitina\b/u.test(product)) return !hasAny([/\bcarnitine\b/u, /\bcarnitina\b/u]);
+  if (/\bturmeric\b|\bcurcumin\b/u.test(product)) return !hasAny([/\bturmeric\b/u, /\bcurcumin\b/u, /\bcurcuma\b/u]);
+  if (/^cinnamon\b|\bcinnamon\s+(?:\d|bark|extract|capsules?|tablets?|supplement)\b/u.test(product)) {
+    return !hasAny([/\bcinnamon\b/u, /\bcinnamomum\b/u]);
+  }
+  return false;
 }
 
 function isLikelyFoodOrNonSupplementRow(row, label) {
@@ -1724,13 +1756,25 @@ function hasParsedIngredientNameContamination(row) {
     /\b(?:supplement|nutrition)\s+facts\b/iu,
     /\bservings?\s+size\b/iu,
     /\bamount\s+per\s+serving\b/iu,
+    /^amount\s+(?!per\s+serving\b)/iu,
     /%\s*(?:daily\s+value|dv|nrv|referencyjnej|referen)/iu,
+    /^\s*\d+\s*%[#*]?\s+/iu,
+    /^\s*\[/iu,
     /\bwarto[śs]ci\s+od[żz]ywcze\b/iu,
     /\bskładnik\s+w\s+porcji\b/iu,
     /\bzusammensetzung\b/iu,
+    /\bhow\s+to\s+use\b/iu,
+    /^yielding\b/iu,
+    /^extraction\s+rate\b/iu,
+    /^tamper\b/iu,
+    /^\d+\s+extract,\s+equivalent\s+to\b/iu,
+    /^[-•]\s*(?:third|non[-\s]?gm|gluten)\b/iu,
     /stosowa[ćc]/iu,
     /\btake\s+\d\b/iu,
     /\bdirections?\b/iu,
+    /\$\d/u,
+    /\bvitamin\s+be\b/iu,
+    /\b(?:C-isoleucine|CTryptophan)\b/u,
   ].some((pattern) => pattern.test(name));
 }
 

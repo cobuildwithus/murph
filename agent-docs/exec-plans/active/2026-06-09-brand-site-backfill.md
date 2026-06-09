@@ -41,15 +41,15 @@ Success criteria:
 
 ## State
 
-Read-only spot check complete; DB write deferred.
+Read-only fix and spot check complete; DB write deferred.
 
 Findings:
 
 - Repair preview now runs without crashing on refetch/OCR provenance rows.
-- Full preview produced 17,086 `automatedBackfillReady` candidates from 25,735 `brand_site` rows.
-- Candidate dry-run found 97 production-blocked rows with `non_standalone_product`; the raw candidate artifact is not directly writable.
-- A seeded 25-row spot check of production-unblocked candidates found no unexpected non-structured label key removal, no source URL changes, no search-text limit violations, and no missing normalized facts.
-- The same spot check found two quality-risk rows where a larger malformed existing `ingredientRows` array would be replaced by fewer parsed rows that still include table header/directions text.
-- Aggregate scan found 564 production-unblocked candidate rows with suspicious parsed ingredient names containing table header/directions markers such as `% NRV`, `Zusammensetzung`, or `WARTOŚCI ODŻYWCZE`.
+- Automated-backfill gating now rejects production review issues, contaminated parsed/retained ingredient names, and rows where an existing `ingredientRows` array would shrink.
+- Full preview produced 13,293 `automatedBackfillReady` candidates from 25,735 `brand_site` rows.
+- Candidate dry-run found zero production-blocked rows, zero missing serving sizes, zero missing ingredient rows, zero duplicate input rows, and zero oversized search-text rows.
+- Aggregate contamination scan over the candidate artifact found zero suspicious ingredient-name rows.
+- A seeded 25-row candidate spot check found no unexpected non-structured label key removal, no source URL changes, no search-text limit violations, no missing normalized facts, and no ingredient-row decreases.
 
-Conclusion: do not write the current candidate artifact as-is. Next step is to tighten automated-backfill gating or parser cleanup for those suspicious parsed rows, regenerate candidates, and spot-check again before any DB write.
+Conclusion: the regenerated candidate artifact is clean for the read-only checks performed here. No supplement DB writes were run; the actual backfill remains deferred until explicit approval.

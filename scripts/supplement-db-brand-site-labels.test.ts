@@ -2138,6 +2138,84 @@ describe("supplement brand-site repair preview", () => {
     assert.equal(preview.productionCandidate, null);
   });
 
+  test("repair preview blocks parser artifact ingredient names", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:directions-as-ingredient",
+      dataOriginId: "example-brand:directions-as-ingredient",
+      dataOriginUrl: "https://example.test/products/directions-as-ingredient",
+      name: "Example Liquid Herbal",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "directions-as-ingredient",
+        ingredientRows: [{ name: "How to Use: Take", amount: "30", unit: "ml" }],
+        servingSizes: [{ text: "30 ml", source: "official_facts_table" }],
+        factsText: "Supplement Facts Serving Size 30 ml How to Use: Take 30 ml",
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.ok(preview.parserBlockers.includes("ingredient_name_contamination"));
+    assert.equal(preview.automatedBackfillReady, false);
+    assert.equal(preview.productionCandidate, null);
+  });
+
+  test("repair preview blocks extraction-rate rows as automated ingredients", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:herbal-extraction-rate",
+      dataOriginId: "example-brand:herbal-extraction-rate",
+      dataOriginUrl: "https://example.test/products/herbal-extraction-rate",
+      name: "Example Cotton",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "herbal-extraction-rate",
+        ingredientRows: [{ name: "Extraction rate 467 mg fresh herb per", amount: "0.7", unit: "ml" }],
+        servingSizes: [{ text: "0.7 ml", source: "official_facts_table" }],
+        factsText: "Supplement Facts Serving Size 0.7 ml Extraction rate 467 mg fresh herb per 0.7 ml",
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.ok(preview.parserBlockers.includes("ingredient_name_contamination"));
+    assert.equal(preview.automatedBackfillReady, false);
+    assert.equal(preview.productionCandidate, null);
+  });
+
+  test("repair preview blocks products whose promised active is missing from parsed rows", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:bcaa-watermelon",
+      dataOriginId: "example-brand:bcaa-watermelon",
+      dataOriginUrl: "https://example.test/products/bcaa-watermelon",
+      name: "Example BCAA Powder - Watermelon",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "bcaa-watermelon",
+        factsText: [
+          "Supplement Facts",
+          "Serving Size 1 scoop (9 g)",
+          "Amount Per Serving",
+          "Total Carbohydrate 1 g",
+        ].join("\n"),
+      },
+    });
+
+    assert.equal(preview.parserStatus, "structured_ready");
+    assert.ok(preview.parserBlockers.includes("likely_missing_product_active"));
+    assert.equal(preview.automatedBackfillReady, false);
+    assert.equal(preview.productionCandidate, null);
+  });
+
   test("ingredient parser rejects nutritional-value header rows", () => {
     const rows = extractIngredientRowsFromText([
       "Nutritional Value / Active Ingredients: | 3 g (1 serving) Creatine malate | 2400 mg",
