@@ -234,6 +234,65 @@ test("hosted-local Codex app-server stub preserves text from vault-cli directive
   }
 });
 
+test("hosted-local Codex app-server stub allows onboarding completion directives", async () => {
+  const root = await createTemporaryDirectory();
+  const cliCallsPath = path.join(root, "cli-calls.jsonl");
+  const trustedCliPath = await installTrustedMurphCliFixture(root, cliCallsPath);
+  const requests: string[] = [];
+  const server = await startResponsesStubServer({
+    requests,
+    responseText: JSON.stringify({
+      __murphE2eVaultCliCommands: [
+        {
+          args: [
+            "assistant",
+            "onboarding",
+            "complete",
+            "--reason",
+            "manual",
+          ],
+        },
+        {
+          args: [
+            "automation",
+            "set-status",
+            "finish-onboarding-followup",
+            "--status",
+            "archived",
+          ],
+        },
+      ],
+      text: "Onboarding complete.",
+    }),
+  });
+
+  try {
+    const { codexHome, command } = await installStubCommand({
+      baseUrl: `${readServerBaseUrl(server)}/v1`,
+      root,
+      runtimeEnv: {
+        [HOSTED_LOCAL_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV]: trustedCliPath,
+      },
+    });
+    const messages = await runHostedLocalCodexStubTurn(
+      spawnStubCommand(command, codexHome),
+    );
+
+    assert.equal(readAssistantMessage(messages), "Onboarding complete.");
+    const cliCalls = await readFile(cliCallsPath, "utf8");
+    assert.match(
+      cliCalls,
+      /"assistant","onboarding","complete","--reason","manual"/u,
+    );
+    assert.match(
+      cliCalls,
+      /"automation","set-status","finish-onboarding-followup","--status","archived"/u,
+    );
+  } finally {
+    await closeHttpServer(server);
+  }
+});
+
 test("hosted-local Codex app-server stub resolves bundled murph CLI from cwd", async () => {
   const root = await createTemporaryDirectory();
   const cliCallsPath = path.join(root, "cli-calls.jsonl");

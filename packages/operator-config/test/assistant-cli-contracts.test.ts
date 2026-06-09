@@ -321,9 +321,7 @@ describe('assistant CLI automation shape ownership', () => {
     })
   })
 
-  it('reuses the canonical automation route for saved self-delivery targets', () => {
-    expect(assistantSelfDeliveryTargetSchema).toBe(automationRouteSchema)
-
+  it('normalizes saved self-delivery targets from canonical automation routes', () => {
     const route = {
       channel: 'slack',
       deliveryTarget: 'channel:alerts',
@@ -332,9 +330,11 @@ describe('assistant CLI automation shape ownership', () => {
       threadId: 'thread_123',
     }
 
-    expect(assistantSelfDeliveryTargetSchema.parse(route)).toEqual(
-      automationRouteSchema.parse(route),
-    )
+    expect(automationRouteSchema.parse(route)).toEqual(route)
+    expect(assistantSelfDeliveryTargetSchema.parse(route)).toEqual({
+      ...route,
+      deliverySource: null,
+    })
   })
 
   it('composes canonical route fields into cron targets while keeping local selector fields', () => {
@@ -377,6 +377,7 @@ describe('assistant CLI automation shape ownership', () => {
       }),
     ).toEqual({
       channel: null,
+      deliverySource: null,
       deliveryTarget: null,
       identityId: null,
       participantId: null,

@@ -207,6 +207,7 @@ test('operator config saves, sorts, resolves, and clears assistant self-delivery
   await saveAssistantSelfDeliveryTarget(
     {
       channel: ' Telegram ',
+      deliverySource: null,
       deliveryTarget: ' chat-123 ',
       identityId: ' identity-1 ',
       participantId: ' person-1 ',
@@ -217,6 +218,7 @@ test('operator config saves, sorts, resolves, and clears assistant self-delivery
   await saveAssistantSelfDeliveryTarget(
     {
       channel: 'email',
+      deliverySource: null,
       deliveryTarget: 'person@example.test',
       identityId: null,
       participantId: null,
@@ -232,6 +234,7 @@ test('operator config saves, sorts, resolves, and clears assistant self-delivery
   )
   assert.deepEqual(await resolveAssistantSelfDeliveryTarget(' TELEGRAM ', homeDirectory), {
     channel: 'telegram',
+    deliverySource: null,
     deliveryTarget: 'chat-123',
     identityId: 'identity-1',
     participantId: 'person-1',
@@ -324,10 +327,11 @@ test('operator config trims explicit self-target defaults and normalizes legacy 
   await assert.rejects(
     () =>
       saveAssistantSelfDeliveryTarget(
-        {
-          channel: '   ',
-          deliveryTarget: 'chat-123',
-          identityId: null,
+          {
+            channel: '   ',
+            deliverySource: null,
+            deliveryTarget: 'chat-123',
+            identityId: null,
           participantId: null,
           threadId: null,
         },
@@ -344,6 +348,7 @@ test('assistant self delivery targets treat iMessage as the linq route alias', a
   await saveAssistantSelfDeliveryTarget(
     {
       channel: ' iMessage ',
+      deliverySource: null,
       deliveryTarget: ' chat-123 ',
       identityId: ' identity-1 ',
       participantId: null,
@@ -355,6 +360,7 @@ test('assistant self delivery targets treat iMessage as the linq route alias', a
   assert.deepEqual(await listAssistantSelfDeliveryTargets(homeDirectory), [
     {
       channel: 'linq',
+      deliverySource: null,
       deliveryTarget: 'chat-123',
       identityId: 'identity-1',
       participantId: null,
@@ -364,6 +370,7 @@ test('assistant self delivery targets treat iMessage as the linq route alias', a
 
   assert.deepEqual(await resolveAssistantSelfDeliveryTarget('i-message', homeDirectory), {
     channel: 'linq',
+    deliverySource: null,
     deliveryTarget: 'chat-123',
     identityId: 'identity-1',
     participantId: null,

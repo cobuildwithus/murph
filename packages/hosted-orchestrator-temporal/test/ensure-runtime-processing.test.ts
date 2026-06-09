@@ -7,15 +7,11 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import type {
   HostedRuntimeEnsureProcessingResponse,
-  HostedRuntimePrewarmResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 
 import {
   ensureRuntimeProcessing,
 } from "../src/activities/ensure-runtime-processing.js";
-import {
-  prewarmRuntimeContainer,
-} from "../src/activities/prewarm-runtime-container.js";
 import {
   requestHostedOrchestratorJson,
 } from "../src/activities/http-client.js";
@@ -70,50 +66,6 @@ describe("ensureRuntimeProcessing", () => {
     expect(String(request.init?.body)).not.toContain("requiresAiUsageDecision");
     expect(String(request.init?.body)).not.toContain("aiUsageAllowDecision");
     expect(timeoutSpy).toHaveBeenCalledWith(10_000);
-  });
-
-  it("posts a prewarm-only Cloudflare request without processing fields", async () => {
-    await stubCloudflareEnvironment();
-    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
-
-    const response: HostedRuntimePrewarmResponse = {
-      action: "already_warm",
-      kind: "runtime_prewarm_accepted",
-    };
-    const observedRequests: ObservedRequest[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
-      observedRequests.push({ init, url: String(url) });
-      return jsonResponse(response);
-    }));
-
-    await expect(prewarmRuntimeContainer({
-      prewarmAttemptId: "prewarm_attempt_test",
-      source: "linq.imessage.typing",
-      userId: "member_test",
-    })).resolves.toEqual(response);
-
-    expect(observedRequests).toHaveLength(1);
-    const request = observedRequests[0];
-    const url = new URL(request.url);
-    const headers = new Headers(request.init?.headers);
-    const body = JSON.parse(String(request.init?.body));
-
-    expect(url.toString()).toBe(
-      "https://runner.example.test/root/internal/users/member_test/runtime/prewarm",
-    );
-    expect(request.init?.method).toBe("POST");
-    expect(headers.has("authorization")).toBe(false);
-    expect(headers.has(HOSTED_EXECUTION_SIGNATURE_HEADER)).toBe(true);
-    expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_test");
-    expect(headers.has(HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER)).toBe(false);
-    expect(body).toEqual({
-      prewarmAttemptId: "prewarm_attempt_test",
-      source: "linq.imessage.typing",
-    });
-    expect(String(request.init?.body)).not.toMatch(
-      /orchestrationAttemptId|mailbox|reason|usage/u,
-    );
-    expect(timeoutSpy).toHaveBeenCalledWith(5_000);
   });
 
   it("does not turn coded current Cloudflare validation failures into retry-later", async () => {

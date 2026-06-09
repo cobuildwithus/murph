@@ -217,10 +217,36 @@ function normalizeAutomationRoute(value: unknown): AutomationRoute {
   const object = value as Record<string, unknown>;
   return {
     channel: requireStringValue(object.channel, "route.channel"),
+    deliverySource: normalizeAutomationRouteDeliverySource(object.deliverySource),
     deliveryTarget: normalizeNullableRouteString(object.deliveryTarget),
     identityId: normalizeNullableRouteString(object.identityId),
     participantId: normalizeNullableRouteString(object.participantId),
     threadId: normalizeNullableRouteString(object.threadId),
+  };
+}
+
+function normalizeAutomationRouteDeliverySource(
+  value: unknown,
+): AutomationRoute["deliverySource"] {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("route.deliverySource must be an object.");
+  }
+
+  const object = value as Record<string, unknown>;
+  const kind = requireStringValue(object.kind, "route.deliverySource.kind");
+  if (kind !== "linq") {
+    throw new Error("route.deliverySource.kind must be linq.");
+  }
+
+  return {
+    fromPhoneNumber: requireStringValue(
+      object.fromPhoneNumber,
+      "route.deliverySource.fromPhoneNumber",
+    ),
+    kind,
   };
 }
 

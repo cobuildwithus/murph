@@ -149,6 +149,9 @@ export class RunnerStateStore {
     runnerContainerName: string;
     userId: string;
   }): Promise<RunnerWriteFenceToken> {
+    const providerEgressToken = createProviderEgressToken();
+    const providerEgressTokenHash = await hashProviderEgressToken(providerEgressToken);
+
     await this.bindUser(input.userId);
 
     const meta = this.requireMetaRowSync();
@@ -159,14 +162,13 @@ export class RunnerStateStore {
     const nextGeneration = normalizeNonNegativeInteger(meta.active_generation) + 1;
     const startedAt = new Date().toISOString();
     const attemptId = createRuntimeWriteAttemptId();
-    const providerEgressToken = createProviderEgressToken();
     const kind: RunnerWriteFenceKind = "runtime";
 
     meta.active_attempt_id = attemptId;
     meta.active_expires_at = null;
     meta.active_generation = nextGeneration;
     meta.active_kind = kind;
-    meta.active_provider_egress_token_hash = await hashProviderEgressToken(providerEgressToken);
+    meta.active_provider_egress_token_hash = providerEgressTokenHash;
     meta.active_reason = null;
     meta.active_runner_container_name = requireRunnerContainerName(input.runnerContainerName);
     meta.active_started_at = startedAt;

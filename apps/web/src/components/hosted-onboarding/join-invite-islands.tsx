@@ -140,6 +140,7 @@ export function JoinInvitePhoneVerificationIsland({
   verificationMode: HostedInviteVerificationMode;
 }) {
   const router = useRouter();
+  const { logout } = usePrivy();
   if (verificationMode === "invite_email") {
     return (
       <HostedEmailAuthButton
@@ -168,7 +169,7 @@ export function JoinInvitePhoneVerificationIsland({
       phoneAuthTarget={resolvedPhoneAuthTarget}
       phoneHint={resolvedPhoneHint}
       onSignOut={async () => {
-        await logoutHostedAppSession();
+        await logoutHostedAppSession({ logoutPrivy: logout });
         router.refresh();
       }}
       onCompleted={() => {

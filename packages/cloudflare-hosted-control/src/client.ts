@@ -13,15 +13,22 @@ import {
 import {
   parseHostedRunnerStatusResponse,
   parseHostedBrowserVaultReplicaRef,
+  parseHostedRuntimePrewarmRequest,
+  parseHostedRuntimePrewarmResponse,
 } from "@murphai/hosted-execution/parsers";
 import type {
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedRuntimePrewarmResponse,
+  HostedRuntimePrewarmSource,
+} from "@murphai/hosted-execution/orchestration-control";
 import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   buildCloudflareHostedControlBrowserVaultSessionPath,
+  buildCloudflareHostedControlRuntimePrewarmHintPath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
 } from "./routes.ts";
@@ -71,6 +78,11 @@ export interface CloudflareHostedControlClient {
   }): Promise<CloudflareHostedControlBrowserVaultSession>;
   deleteUserData(userId: string): Promise<CloudflareHostedControlUserDataDeletionResult>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
+  prewarmRuntime(input: {
+    prewarmAttemptId: string;
+    source: HostedRuntimePrewarmSource;
+    userId: string;
+  }): Promise<HostedRuntimePrewarmResponse>;
 }
 
 export interface CloudflareHostedControlClientOptions {
@@ -179,6 +191,31 @@ export function createCloudflareHostedControlClient(
         parse: (value) => parseHostedRunnerStatusForExpectedUser(value, expectedUserId),
         path: buildCloudflareHostedControlUserStatusPath(expectedUserId),
         request: { method: "GET" },
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    prewarmRuntime(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      const prewarmRequest = parseHostedRuntimePrewarmRequest({
+        prewarmAttemptId: input.prewarmAttemptId,
+        source: input.source,
+      });
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: userId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "runtime prewarm",
+        parse: parseHostedRuntimePrewarmResponse,
+        path: buildCloudflareHostedControlRuntimePrewarmHintPath(userId),
+        request: {
+          body: JSON.stringify(prewarmRequest),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
         timeoutMs: options.timeoutMs,
       });
     },

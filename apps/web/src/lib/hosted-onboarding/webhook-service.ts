@@ -1,25 +1,19 @@
+import { randomUUID } from "node:crypto";
 import type {
   Prisma,
   PrismaClient,
 } from "@prisma/client";
 import {
-  HOSTED_RUNTIME_PREWARM_SOURCE,
+  HOSTED_RUNTIME_LINQ_MESSAGE_PREWARM_SOURCE,
+  HOSTED_RUNTIME_PREWARM_TIMEOUT_MS,
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
 import {
-  signalHostedRuntimePrewarm,
-} from "../hosted-orchestration/signal-runtime";
-import {
-  hasHostedMemberActiveAccess,
-} from "./entitlement";
-import {
-  lookupHostedMemberRoutingByHomeLinqChatId,
-} from "./hosted-member-routing-store";
+  readHostedExecutionControlClientIfConfigured,
+} from "../hosted-execution/control";
 import {
   requireHostedLinqMessageReceivedEvent,
-  requireHostedLinqTypingIndicatorStartedEvent,
-  resolveHostedLinqTypingOccurredAt,
   sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
@@ -28,9 +22,6 @@ import {
   planHostedOnboardingLinqWebhook,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
-import {
-  isHostedLinqIMessageService,
-} from "./webhook-provider-linq-shared";
 import {
   planHostedOnboardingTelegramWebhook,
   type HostedOnboardingTelegramWebhookResponse,
@@ -46,11 +37,8 @@ import {
 import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
-  logHostedOnboardingDiagnostic,
   startHostedOnboardingTiming,
   toHostedOnboardingLogIdSuffix,
-  type HostedOnboardingTimingDetails,
-  type HostedOnboardingTimingHandle,
 } from "./logging";
 import {
   drainHostedLinqSideEffectsDirect,
@@ -67,10 +55,6 @@ export type {
 } from "./webhook-service-types";
 
 type HostedWebhookPostResponseScheduler = (task: () => Promise<void>) => void;
-
-const HOSTED_LINQ_TYPING_PREWARM_COOLDOWN_MS = 30_000;
-// Process-local only; Temporal still coalesces duplicate prewarm hints.
-const hostedLinqTypingPrewarmLastSignalByUser = new Map<string, number>();
 
 export async function handleHostedOnboardingLinqWebhook(input: {
   rawBody: string;
@@ -112,10 +96,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
 
     if (event.event_type === "chat.typing_indicator.started") {
-      const response = await handleHostedLinqTypingPrewarm({
-        event,
-        prisma: input.prisma ?? getPrisma(),
-      });
+      const response: HostedOnboardingLinqWebhookResponse = {
+        ignored: true,
+        ok: true,
+        reason: "typing-ignored",
+      };
       responseReason = response.reason ?? null;
       finishHostedOnboardingTiming(timing, "completed", {
         eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
@@ -160,6 +145,16 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       ok: plan.response.ok,
       wakeUserPresent: Boolean(plan.wakeUserId),
     });
+
+    const messagePrewarm = maybeStartHostedLinqMessagePrewarm({
+      eventId: event.event_id,
+      mailboxItemId: plan.wakeMailboxItemId,
+      response: plan.response,
+      userId: plan.wakeUserId,
+    });
+    if (messagePrewarm && input.scheduleAfterResponse) {
+      input.scheduleAfterResponse(() => messagePrewarm);
+    }
 
     if (plan.desiredSideEffects.length > 0) {
       await drainHostedLinqSideEffectsDirect({
@@ -211,149 +206,69 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   }
 }
 
-async function handleHostedLinqTypingPrewarm(input: {
-  event: ReturnType<typeof verifyAndParseHostedLinqWebhookRequest>;
-  prisma: PrismaClient;
-}): Promise<HostedOnboardingLinqWebhookResponse> {
-  const typingEvent = requireHostedLinqTypingIndicatorStartedEvent(input.event);
+function maybeStartHostedLinqMessagePrewarm(input: {
+  eventId: string;
+  mailboxItemId?: string;
+  response: HostedOnboardingLinqWebhookResponse;
+  userId?: string;
+}): Promise<void> | null {
+  if (
+    input.response.duplicate
+    || !input.response.ok
+    || !input.mailboxItemId
+    || !input.userId
+  ) {
+    return null;
+  }
+
   const timing = startHostedOnboardingTiming(
-    "hosted.linq.typing-prewarm",
+    "hosted-onboarding.webhook.linq.message-prewarm",
     {
-      eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
-      eventType: typingEvent.event_type,
-      scopeHashPresent: false,
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
+      mailboxItemPresent: true,
+      responseReason: input.response.reason ?? null,
+      userIdPresent: true,
+      userIdSuffix: toHostedOnboardingLogIdSuffix(input.userId),
     },
   );
 
-  if (!isHostedLinqIMessageService(typingEvent.data.service)) {
-    finishHostedLinqTypingPrewarmDecision(timing, "ignored-unsupported-service", {
-      decision: "ignored-unsupported-service",
-      eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
-      responseReason: "typing-prewarm-ignored-unsupported-service",
-      servicePresent: Boolean(typingEvent.data.service),
-      scopeHashPresent: false,
-    });
-    return {
-      ignored: true,
-      ok: true,
-      reason: "typing-prewarm-ignored-unsupported-service",
-    };
-  }
-
-  const routing = await lookupHostedMemberRoutingByHomeLinqChatId({
-    linqChatId: typingEvent.data.chat_id,
-    prisma: input.prisma,
-  });
-  if (!routing) {
-    finishHostedLinqTypingPrewarmDecision(timing, "ignored-no-active-route", {
-      decision: "ignored-no-active-route",
-      eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
-      responseReason: "typing-prewarm-ignored-no-active-route",
-      routeFound: false,
-      scopeHashPresent: false,
-    });
-    return {
-      ignored: true,
-      ok: true,
-      reason: "typing-prewarm-ignored-no-active-route",
-    };
-  }
-
-  if (!hasHostedMemberActiveAccess(routing.core)) {
-    finishHostedLinqTypingPrewarmDecision(timing, "ignored-inactive-member", {
-      decision: "ignored-inactive-member",
-      eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
-      memberActive: false,
-      responseReason: "typing-prewarm-ignored-inactive-member",
-      routeFound: true,
-      scopeHashPresent: false,
-      userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
-    });
-    return {
-      ignored: true,
-      ok: true,
-      reason: "typing-prewarm-ignored-inactive-member",
-    };
-  }
-
-  if (!canSignalHostedLinqTypingPrewarm(routing.core.id)) {
-    finishHostedLinqTypingPrewarmDecision(timing, "coalesced", {
-      decision: "coalesced",
-      eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
-      memberActive: true,
-      responseReason: "typing-prewarm-coalesced",
-      routeFound: true,
-      scopeHashPresent: false,
-      userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
-    });
-    return {
-      ignored: true,
-      ok: true,
-      reason: "typing-prewarm-coalesced",
-    };
-  }
-
+  let client: ReturnType<typeof readHostedExecutionControlClientIfConfigured>;
   try {
-    await signalHostedRuntimePrewarm({
-      eventId: typingEvent.event_id,
-      occurredAt: resolveHostedLinqTypingOccurredAt(typingEvent),
-      source: HOSTED_RUNTIME_PREWARM_SOURCE,
-      userId: routing.core.id,
-    });
+    client = readHostedExecutionControlClientIfConfigured(
+      HOSTED_RUNTIME_PREWARM_TIMEOUT_MS + 1_000,
+    );
   } catch (error) {
-    finishHostedLinqTypingPrewarmDecision(timing, "temporal-signal-failed", {
-      decision: "temporal-signal-failed",
+    finishHostedOnboardingTiming(timing, "failed", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
-      eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
-      memberActive: true,
-      responseReason: "typing-prewarm-temporal-signal-failed",
-      routeFound: true,
-      scopeHashPresent: false,
-      userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
     });
-    return {
-      ignored: true,
-      ok: true,
-      reason: "typing-prewarm-temporal-signal-failed",
-    };
+    return null;
   }
 
-  finishHostedLinqTypingPrewarmDecision(timing, "signaled", {
-    decision: "signaled",
-    eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
-    memberActive: true,
-    responseReason: "typing-prewarm-signaled",
-    routeFound: true,
-    scopeHashPresent: false,
-    temporalSignalAttempted: true,
-    userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
-  });
-  recordHostedLinqTypingPrewarmSignal(routing.core.id);
-  return {
-    ignored: true,
-    ok: true,
-    reason: "typing-prewarm-signaled",
-  };
-}
+  if (!client) {
+    finishHostedOnboardingTiming(timing, "skipped-not-configured", {
+      responseReason: input.response.reason ?? null,
+    });
+    return null;
+  }
 
-function finishHostedLinqTypingPrewarmDecision(
-  timing: HostedOnboardingTimingHandle,
-  outcome: string,
-  details: HostedOnboardingTimingDetails,
-): void {
-  finishHostedOnboardingTiming(timing, outcome, details);
-  logHostedOnboardingDiagnostic("linq.typing-prewarm-decision", details);
-}
-
-function canSignalHostedLinqTypingPrewarm(userId: string): boolean {
-  const now = Date.now();
-  const lastSignaledAt = hostedLinqTypingPrewarmLastSignalByUser.get(userId);
-  return lastSignaledAt === undefined
-    || now - lastSignaledAt >= HOSTED_LINQ_TYPING_PREWARM_COOLDOWN_MS;
-}
-
-function recordHostedLinqTypingPrewarmSignal(userId: string): void {
-  hostedLinqTypingPrewarmLastSignalByUser.set(userId, Date.now());
+  return client.prewarmRuntime({
+    prewarmAttemptId: `linq-message:${randomUUID()}`,
+    source: HOSTED_RUNTIME_LINQ_MESSAGE_PREWARM_SOURCE,
+    userId: input.userId,
+  }).then(
+    (result) => {
+      finishHostedOnboardingTiming(timing, result.kind, {
+        responseReason: input.response.reason ?? null,
+        runtimePrewarmAction: result.kind === "runtime_prewarm_accepted" ? result.action : null,
+      });
+    },
+    (error: unknown) => {
+      finishHostedOnboardingTiming(timing, "failed", {
+        errorName: deriveHostedOnboardingTimingErrorName(error),
+        responseReason: input.response.reason ?? null,
+      });
+    },
+  );
 }
 
 async function maybeSendHostedLinqIngressReadReceipt(input: {

@@ -240,6 +240,7 @@ test("hosted experiment start context resolves the assigned member phone", async
   mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
     email: {
       address: "member@example.test",
+      murphEmailAddress: "murph+alias123@mail.withmurph.ai",
       verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
     },
     phone: {
@@ -265,6 +266,7 @@ test("hosted experiment start context resolves the assigned member phone", async
     telegram: false,
     text: true,
   });
+  expect(context.murphEmailAddress).toBe("murph+alias123@mail.withmurph.ai");
   expect(context.murphPhoneNumber).toBe("+15550100001");
 });
 

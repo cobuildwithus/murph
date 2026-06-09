@@ -63,19 +63,18 @@ const runtimeEnsureProcessingRoute = {
   wrongMethodResponse: "method-not-allowed",
 } satisfies DeclarativeRoute<WorkerRouteContext>;
 
-const runtimePrewarmRoute = {
+const runtimePrewarmHintRoute = {
   authorizeBeforeMethod: true,
-  authorization: "web-callback-signature",
+  authorization: "vercel-oidc",
   beforeMethod(context, params) {
-    return requireBoundInternalRouteUser(context, params, "runtime-prewarm");
+    return requireBoundInternalRouteUser(context, params, "runtime-prewarm-hint");
   },
   async handle(context, params) {
-    return handleRuntimePrewarmRoute(context, params.userId);
+    return handleRuntimePrewarmRoute(context, params.userId, "runtime-prewarm-hint");
   },
-  match: (pathname) => matchCloudflareHostedControlUserRoutePath("runtimePrewarm", pathname),
-  methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.runtimePrewarm.method],
-  name: "runtime-prewarm",
-  signatureBodyLimitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+  match: (pathname) => matchCloudflareHostedControlUserRoutePath("runtimePrewarmHint", pathname),
+  methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.runtimePrewarmHint.method],
+  name: "runtime-prewarm-hint",
   wrongMethodResponse: "method-not-allowed",
 } satisfies DeclarativeRoute<WorkerRouteContext>;
 
@@ -96,7 +95,7 @@ const userStatusRoute = {
 
 export const runtimeProcessingRoutes = [
   runtimeEnsureProcessingRoute,
-  runtimePrewarmRoute,
+  runtimePrewarmHintRoute,
 ] as const;
 
 export const userStatusRoutes = [
@@ -179,6 +178,7 @@ export async function handleRuntimeEnsureProcessingRoute(
 export async function handleRuntimePrewarmRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
+  routeName: "runtime-prewarm-hint",
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
   let prewarmRequest: HostedRuntimePrewarmRequest;
@@ -194,7 +194,7 @@ export async function handleRuntimePrewarmRoute(
       component: "worker",
       details: buildWorkerRouteLogDetails({
         reason: "runtime-prewarm-request-invalid",
-        routeName: "runtime-prewarm",
+        routeName,
       }, context.request, userId),
       error,
       level: "warn",
@@ -220,7 +220,7 @@ export async function handleRuntimePrewarmRoute(
       component: "worker",
       details: buildWorkerRouteLogDetails({
         reason: "runtime-prewarm-rpc-failed",
-        routeName: "runtime-prewarm",
+        routeName,
       }, context.request, userId),
       error,
       level: "warn",

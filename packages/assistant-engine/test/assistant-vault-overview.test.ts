@@ -204,6 +204,7 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
     },
     route: {
       channel: 'telegram',
+      deliverySource: null,
       deliveryTarget: 'self',
       identityId: 'identity-01',
       participantId: 'participant-01',

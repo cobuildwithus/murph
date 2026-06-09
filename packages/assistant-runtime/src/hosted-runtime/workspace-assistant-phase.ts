@@ -11,6 +11,7 @@ import type {
   HostedRuntimeRedactedScalar,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  getAssistantCronStatus,
   refreshAssistantContextSnapshotBestEffort,
   scheduleDeviceActivityTriggeredAutomations,
   type AssistantExecutionContext,
@@ -2186,11 +2187,19 @@ async function drainHostedPostCheckpointDelivery(input: {
   const postOutboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
   });
+  const postAssistantCronStatus = await getAssistantCronStatus(
+    input.input.restored.vaultRoot,
+  );
+  const postAssistantCronWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+    input: input.input,
+    nextWakeAt: postAssistantCronStatus.nextRunAt,
+  });
   const postSystemMailboxWakeAt = await resolveHostedSystemMailboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
   });
   const postNextWake = selectHostedRuntimeWakeCandidate([
     input.baseNextWake,
+    createHostedRuntimeWakeCandidate(postAssistantCronWakeAt, null),
     createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(providerCleanupNextWakeAt, "assistant"),

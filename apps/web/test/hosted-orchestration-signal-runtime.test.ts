@@ -31,7 +31,6 @@ const mocks = vi.hoisted(() => ({
 
 const defaultWorkflowOptions = {
   ensureRuntimeProcessingStartToCloseTimeoutMs: 15_000,
-  prewarmTaskQueue: "murph-hosted-runtime-prewarm",
   readRuntimeReconciliationFactsStartToCloseTimeoutMs: 10_000,
 };
 
@@ -67,7 +66,6 @@ import {
   signalHostedDeviceSyncMailboxRuntime,
   signalHostedMailboxAppendRuntime,
   signalHostedManualRunRuntime,
-  signalHostedRuntimePrewarm,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 
 describe("hosted runtime Temporal signaling", () => {
@@ -201,31 +199,6 @@ describe("hosted runtime Temporal signaling", () => {
       memberId: "member_123",
       prisma: mocks.prisma,
     });
-  });
-
-  it("signals typing prewarm without workspace or mailbox work", async () => {
-    await signalHostedRuntimePrewarm({
-      client: buildClient(),
-      eventId: "linq_event_123",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      userId: "member_123",
-    });
-
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
-    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
-    expect(mocks.signalWithStart).toHaveBeenCalledWith(
-      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
-      expect.objectContaining({
-        signalArgs: [{
-          eventId: expect.stringMatching(/^runtime-prewarm:[0-9a-f]{32}$/u),
-          kind: "runtime_prewarm_requested",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-          source: "linq.imessage.typing",
-        }],
-        workflowId: "hosted-user-runtime:member_123",
-      }),
-    );
   });
 
   it("persists browser-vault refresh as durable control mailbox work before signaling", async () => {
@@ -517,7 +490,6 @@ describe("hosted runtime Temporal signaling", () => {
         args: [{
           options: {
             ensureRuntimeProcessingStartToCloseTimeoutMs: 17_000,
-            prewarmTaskQueue: "explicit-testkit-task-queue-prewarm",
             readRuntimeReconciliationFactsStartToCloseTimeoutMs: 10_000,
           },
           userId: "member_123",
