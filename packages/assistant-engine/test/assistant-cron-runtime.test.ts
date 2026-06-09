@@ -37,7 +37,6 @@ type MockAutomationRecord = {
 const cronMocks = vi.hoisted(() => ({
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   automationsByVault: new Map<string, MockAutomationRecord[]>(),
-  deleteAutomation: vi.fn(),
   executeScheduledLogOccurrence: vi.fn(),
   getAssistantChannelAdapter: vi.fn(),
   listCanonicalScheduledLogs: vi.fn(),
@@ -57,7 +56,6 @@ const cronMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@murphai/core', () => ({
-  deleteAutomation: cronMocks.deleteAutomation,
   executeScheduledLogOccurrence: cronMocks.executeScheduledLogOccurrence,
   loadVault: cronMocks.loadVault,
   setScheduledLogStatus: cronMocks.setScheduledLogStatus,
@@ -314,34 +312,6 @@ beforeEach(() => {
         ) ?? null
       )
     })
-  cronMocks.deleteAutomation.mockReset().mockImplementation(
-    async (input: {
-      automationId?: string
-      slug?: string
-      vaultRoot: string
-    }) => {
-      const records = getVaultAutomationStore(input.vaultRoot)
-      const lookup = input.automationId ?? input.slug
-      if (!lookup) {
-        throw new Error('Automation lookup is required.')
-      }
-      const index = records.findIndex(
-        (record) => record.automationId === lookup || record.slug === lookup,
-      )
-      if (index === -1) {
-        throw new Error('Automation was not found.')
-      }
-      const [record] = records.splice(index, 1)
-      if (!record) {
-        throw new Error('Automation was not found.')
-      }
-      return {
-        automationId: record.automationId,
-        deleted: true,
-        relativePath: `bank/automations/${record.slug}.md`,
-      }
-    },
-  )
   cronMocks.upsertAutomation.mockReset().mockImplementation(
     async (input: {
       automationId?: string
@@ -811,11 +781,11 @@ describe('assistant cron runtime orchestration', () => {
       writeSpy.mockRestore()
     }
 
-    expect(cronMocks.deleteAutomation).toHaveBeenCalledWith({
-      automationId: 'automation-1',
-      vaultRoot,
+    // The automation outlives the runtime-state write failure; readers
+    // synthesize initial runtime state and re-seeding remains idempotent.
+    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')).toMatchObject({
+      status: 'active',
     })
-    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')).toBeUndefined()
 
     const recovered = await upsertAssistantCronAutomation({
       firstOccurrencePolicy: 'after-current-local-day',
@@ -856,214 +826,6 @@ describe('assistant cron runtime orchestration', () => {
           jobId: recovered.jobId,
         }),
       ],
-    })
-  })
-
-  it('archives incomplete onboarding automation seeds when rollback delete fails', async () => {
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-upsert-automation-delete-failure-',
-    )
-    cronMocks.loadVault.mockResolvedValue({
-      metadata: {
-        timezone: 'America/New_York',
-      },
-    })
-    cronMocks.deleteAutomation.mockRejectedValueOnce(new Error('delete failed'))
-    const writeSpy = vi.spyOn(
-      assistantCronRuntimeState,
-      'writeAssistantCronCanonicalRuntimeStore',
-    )
-
-    try {
-      writeSpy.mockRejectedValueOnce(new Error('state store unavailable'))
-      await expect(
-        upsertAssistantCronAutomation({
-          firstOccurrencePolicy: 'after-current-local-day',
-          instructions: 'Check setup progress.',
-          now: new Date('2026-04-08T15:00:00.000Z'),
-          route: {
-            channel: 'telegram',
-            deliverySource: null,
-            deliveryTarget: 'room-1',
-            identityId: null,
-            participantId: null,
-            threadId: null,
-          },
-          schedule: {
-            kind: 'dailyLocal',
-            localTime: '13:30',
-          },
-          slug: 'finish-onboarding-followup',
-          summary: 'Continue setup.',
-          tags: ['assistant', 'onboarding'],
-          title: 'Finish Murph onboarding follow-up',
-          vault: vaultRoot,
-        }),
-      ).rejects.toThrow('state store unavailable')
-    } finally {
-      writeSpy.mockRestore()
-    }
-
-    expect(cronMocks.deleteAutomation).toHaveBeenCalledOnce()
-    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')).toMatchObject({
-      status: 'archived',
-      tags: ['assistant', 'onboarding'],
-    })
-  })
-
-  it('restores a previous null summary after existing automation runtime-state write failure', async () => {
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-upsert-automation-restore-null-summary-',
-    )
-    cronMocks.loadVault.mockResolvedValue({
-      metadata: {
-        timezone: 'America/New_York',
-      },
-    })
-    getVaultAutomationStore(vaultRoot).push({
-      automationId: 'automation-existing',
-      continuityPolicy: 'preserve',
-      createdAt: '2026-04-08T14:00:00.000Z',
-      instructions: 'Original setup check.',
-      route: {
-        channel: 'telegram',
-        deliverySource: null,
-        deliveryTarget: 'room-1',
-        identityId: null,
-        participantId: null,
-        threadId: null,
-      },
-      schedule: {
-        kind: 'dailyLocal',
-        localTime: '13:30',
-      },
-      slug: 'finish-onboarding-followup',
-      status: 'active',
-      summary: null,
-      tags: ['assistant', 'onboarding'],
-      title: 'Finish Murph onboarding follow-up',
-      updatedAt: '2026-04-08T14:00:00.000Z',
-    })
-    const writeSpy = vi.spyOn(
-      assistantCronRuntimeState,
-      'writeAssistantCronCanonicalRuntimeStore',
-    )
-
-    try {
-      writeSpy.mockRejectedValueOnce(new Error('state store unavailable'))
-      await expect(
-        upsertAssistantCronAutomation({
-          firstOccurrencePolicy: 'after-current-local-day',
-          instructions: 'Updated setup check.',
-          now: new Date('2026-04-08T15:00:00.000Z'),
-          route: {
-            channel: 'telegram',
-            deliverySource: null,
-            deliveryTarget: 'room-1',
-            identityId: null,
-            participantId: null,
-            threadId: null,
-          },
-          schedule: {
-            kind: 'dailyLocal',
-            localTime: '13:30',
-          },
-          slug: 'finish-onboarding-followup',
-          summary: 'Updated summary.',
-          tags: ['assistant', 'onboarding'],
-          title: 'Finish Murph onboarding follow-up',
-          vault: vaultRoot,
-        }),
-      ).rejects.toThrow('state store unavailable')
-    } finally {
-      writeSpy.mockRestore()
-    }
-
-    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')).toMatchObject({
-      instructions: 'Original setup check.',
-      summary: null,
-      updatedAt: expect.any(String),
-    })
-  })
-
-  it('does not restore stale automation state over a concurrent edit after runtime-state write failure', async () => {
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-upsert-automation-concurrent-edit-',
-    )
-    cronMocks.loadVault.mockResolvedValue({
-      metadata: {
-        timezone: 'America/New_York',
-      },
-    })
-    getVaultAutomationStore(vaultRoot).push({
-      automationId: 'automation-existing',
-      continuityPolicy: 'preserve',
-      createdAt: '2026-04-08T14:00:00.000Z',
-      instructions: 'Original setup check.',
-      route: {
-        channel: 'telegram',
-        deliverySource: null,
-        deliveryTarget: 'room-1',
-        identityId: null,
-        participantId: null,
-        threadId: null,
-      },
-      schedule: {
-        kind: 'dailyLocal',
-        localTime: '13:30',
-      },
-      slug: 'finish-onboarding-followup',
-      status: 'active',
-      summary: 'Original summary.',
-      tags: ['assistant', 'onboarding'],
-      title: 'Finish Murph onboarding follow-up',
-      updatedAt: '2026-04-08T14:00:00.000Z',
-    })
-    const writeSpy = vi.spyOn(
-      assistantCronRuntimeState,
-      'writeAssistantCronCanonicalRuntimeStore',
-    )
-
-    try {
-      writeSpy.mockImplementationOnce(async () => {
-        const automation = findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')
-        if (!automation) {
-          throw new Error('Expected automation to exist.')
-        }
-        automation.status = 'archived'
-        automation.updatedAt = '2026-04-08T15:00:01.000Z'
-        throw new Error('state store unavailable')
-      })
-
-      await expect(
-        upsertAssistantCronAutomation({
-          firstOccurrencePolicy: 'after-current-local-day',
-          instructions: 'Updated setup check.',
-          now: new Date('2026-04-08T15:00:00.000Z'),
-          route: {
-            channel: 'telegram',
-            deliverySource: null,
-            deliveryTarget: 'room-1',
-            identityId: null,
-            participantId: null,
-            threadId: null,
-          },
-          schedule: {
-            kind: 'dailyLocal',
-            localTime: '13:30',
-          },
-          slug: 'finish-onboarding-followup',
-          title: 'Finish Murph onboarding follow-up',
-          vault: vaultRoot,
-        }),
-      ).rejects.toThrow('state store unavailable')
-    } finally {
-      writeSpy.mockRestore()
-    }
-
-    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')).toMatchObject({
-      status: 'archived',
-      updatedAt: '2026-04-08T15:00:01.000Z',
     })
   })
 

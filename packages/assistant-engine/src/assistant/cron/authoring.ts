@@ -1,4 +1,4 @@
-import { deleteAutomation, upsertAutomation } from '@murphai/core'
+import { upsertAutomation } from '@murphai/core'
 import {
   formatTimeZoneDateTimeParts,
   type AutomationRoute,
@@ -277,81 +277,19 @@ export async function upsertAssistantCronAutomation(
           }
 
     upsertAssistantCronCanonicalRuntimeRecord(runtimeStore, persistedRuntimeState)
-    try {
-      await writeAssistantCronCanonicalRuntimeStore(
-        resolvedCreation.paths,
-        runtimeStore,
-      )
-    } catch (error) {
-      await restoreAssistantCronAutomationAfterRuntimeStateFailure({
-        created: source,
-        existing: existingAutomation,
-        vault: resolvedCreation.vault,
-      }).catch(() => {
-        throw new VaultCliError(
-          'ASSISTANT_CRON_AUTOMATION_ROLLBACK_FAILED',
-          'Assistant cron automation runtime-state write failed and rollback also failed. Manual automation cleanup may be required.',
-        )
-      })
-      throw error
-    }
+    // No rollback on write failure: a canonical automation without a runtime
+    // record self-heals (readers synthesize initial state) and re-seeding is
+    // idempotent, so the worst case is losing the first-occurrence deferral.
+    await writeAssistantCronCanonicalRuntimeStore(
+      resolvedCreation.paths,
+      runtimeStore,
+    )
 
     return projectCanonicalAssistantCronJob({
       source,
       runtimeState: persistedRuntimeState,
     })
   })
-}
-
-async function restoreAssistantCronAutomationAfterRuntimeStateFailure(input: {
-  created: CanonicalAutomationAssistantCronJobRecord
-  existing: NonNullable<
-    Awaited<ReturnType<typeof showCanonicalAutomation>>
-  > | null
-  vault: string
-}): Promise<void> {
-  const current = await showCanonicalAutomation(input.vault, input.created.automationId)
-  if (!current || current.updatedAt !== input.created.updatedAt) {
-    return
-  }
-
-  if (input.existing) {
-    await upsertAutomation({
-      automationId: input.existing.automationId,
-      continuityPolicy: input.existing.continuityPolicy,
-      instructions: input.existing.instructions,
-      route: input.existing.route,
-      schedule: input.existing.schedule,
-      slug: input.existing.slug,
-      status: input.existing.status,
-      summary: input.existing.summary,
-      tags: input.existing.tags,
-      title: input.existing.title,
-      vaultRoot: input.vault,
-    })
-    return
-  }
-
-  try {
-    await deleteAutomation({
-      automationId: input.created.automationId,
-      vaultRoot: input.vault,
-    })
-  } catch {
-    await upsertAutomation({
-      automationId: input.created.automationId,
-      continuityPolicy: input.created.continuityPolicy,
-      instructions: input.created.instructions,
-      route: input.created.route,
-      schedule: input.created.schedule,
-      slug: input.created.slug,
-      status: 'archived',
-      summary: input.created.summary,
-      tags: input.created.tags,
-      title: input.created.title,
-      vaultRoot: input.vault,
-    })
-  }
 }
 
 export async function resolveAssistantCronJobCreationInput(

@@ -32,7 +32,6 @@ import {
   addBodyMeasurement,
   appendJournal,
   checkpointExperiment,
-  deleteAutomation,
   createExperiment,
   addMeal,
   initializeVault,
@@ -59,7 +58,6 @@ async function makeTempDirectory(name: string): Promise<string> {
 test("public core exports include the high-level canonical mutation ports", () => {
   assert.equal(typeof appendJournal, "function");
   assert.equal(typeof checkpointExperiment, "function");
-  assert.equal(typeof deleteAutomation, "function");
   assert.equal(typeof linkJournalEventIds, "function");
   assert.equal(typeof linkJournalStreams, "function");
   assert.equal(typeof promoteInboxExperimentNote, "function");

@@ -23,7 +23,6 @@ import { VAULT_LAYOUT } from "./constants.ts";
 import { generateRecordId } from "./ids.ts";
 import { VaultError } from "./errors.ts";
 import {
-  deleteMarkdownRegistryDocument,
   loadMarkdownRegistryDocuments,
   readRegistryRecord,
   resolveMarkdownRegistryUpsertTarget,
@@ -121,14 +120,6 @@ export interface ReadAutomationInput {
   automationId?: string;
   slug?: string;
   vaultRoot: string;
-}
-
-export interface DeleteAutomationInput extends ReadAutomationInput {}
-
-export interface DeleteAutomationResult {
-  automationId: string;
-  deleted: true;
-  relativePath: string;
 }
 
 export interface ListAutomationInput {
@@ -597,33 +588,6 @@ export async function upsertAutomation(
   input: UpsertAutomationInput,
 ): Promise<UpsertAutomationResult> {
   return withAutomationRegistryLock(input.vaultRoot, () => upsertAutomationWithLatestRegistry(input));
-}
-
-export async function deleteAutomation(
-  input: DeleteAutomationInput,
-): Promise<DeleteAutomationResult> {
-  return withAutomationRegistryLock(input.vaultRoot, async () => {
-    const record = await readAutomation(input);
-
-    await deleteMarkdownRegistryDocument({
-      vaultRoot: input.vaultRoot,
-      operationType: "automation_delete",
-      summary: `Delete automation ${record.automationId}`,
-      relativePath: record.relativePath,
-      audit: {
-        action: "automation_delete",
-        commandName: "core.deleteAutomation",
-        summary: `Deleted automation ${record.automationId}.`,
-        targetIds: [record.automationId],
-      },
-    });
-
-    return {
-      automationId: record.automationId,
-      deleted: true,
-      relativePath: record.relativePath,
-    };
-  });
 }
 
 export async function patchAutomation(

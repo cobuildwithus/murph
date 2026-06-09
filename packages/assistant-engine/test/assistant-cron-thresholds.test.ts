@@ -36,7 +36,6 @@ type MockAutomationRecord = {
 const cronMocks = vi.hoisted(() => ({
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   automationsByVault: new Map<string, MockAutomationRecord[]>(),
-  deleteAutomation: vi.fn(),
   getAssistantChannelAdapter: vi.fn(),
   listCanonicalAutomations: vi.fn(),
   loadImporterRuntime: vi.fn(),
@@ -52,7 +51,6 @@ const cronMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@murphai/core', () => ({
-  deleteAutomation: cronMocks.deleteAutomation,
   loadVault: cronMocks.loadVault,
   upsertAutomation: cronMocks.upsertAutomation,
 }))

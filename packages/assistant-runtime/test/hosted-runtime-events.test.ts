@@ -2086,8 +2086,9 @@ describe("executeHostedMailboxEvent", () => {
       }),
     );
     expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
-    expect(result.redactedLogEntries).not.toContainEqual(
+    expect(result.redactedLogEntries).toContainEqual(
       expect.objectContaining({
+        level: "warn",
         message: "Hosted onboarding follow-up automation seed failed.",
       }),
     );

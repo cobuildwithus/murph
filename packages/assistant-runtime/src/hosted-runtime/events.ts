@@ -678,7 +678,9 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
       input.wake.notification.route,
     );
     if (!route) {
-      return null;
+      throw new Error(
+        "Onboarding follow-up route is not seedable: Linq participant delivery has no delivery source.",
+      );
     }
 
     const job = await upsertAssistantCronAutomation({
