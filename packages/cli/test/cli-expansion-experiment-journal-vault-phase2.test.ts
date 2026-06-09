@@ -202,6 +202,9 @@ test('experiment start schema exposes typed fields while protocol import-json ke
     experimentStartSchema.options.properties.primaryBiomarkerKey.description ?? '',
     /Required for --custom starts.*biomarker:<metric-slug>/u,
   )
+  assert.equal('setupAnswer' in experimentStartSchema.options.properties, true)
+  assert.equal('onboardingCompletedAt' in experimentStartSchema.options.properties, true)
+  assert.equal('reminderPolicy' in experimentStartSchema.options.properties, true)
   assert.equal('interventionStart' in experimentStartSchema.options.properties, true)
   assert.equal('dryRun' in experimentStartSchema.options.properties, true)
   assert.equal('input' in protocolImportJsonSchema.options.properties, true)
@@ -1228,6 +1231,19 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       '0 18 * * 2,4,6',
       '--schedule-time-zone',
       'America/Los_Angeles',
+      '--onboarding-completed-at',
+      '2026-04-30T15:00:00.000Z',
+      '--setup-answer',
+      'safety_red_flags_denied=2026-06-09',
+      '--setup-answer',
+      'first_week_support_status=existing_daily_reminder',
+      '--context-note',
+      'Existing daily reminder will handle the first week.',
+      '--reminder-policy',
+      'daily_reminder_policy',
+      '--reminder-option-id',
+      'daily_1100',
+      '--reminders-enabled',
       '--vault',
       vaultRoot,
     ])
@@ -1328,6 +1344,21 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       'biomarker:sleep-efficiency',
       'biomarker:deep-sleep-minutes',
     ])
+    const onboarding = requireRecord(experimentData.onboarding, 'onboarding')
+    assert.equal(onboarding.completedAt, '2026-04-30T15:00:00.000Z')
+    const setupAnswers = requireRecord(onboarding.setupAnswers, 'onboarding.setupAnswers')
+    assert.equal(setupAnswers.safety_red_flags_denied, '2026-06-09')
+    assert.equal(setupAnswers.first_week_support_status, 'existing_daily_reminder')
+    assert.deepEqual(onboarding.contextNotes, [
+      'Existing daily reminder will handle the first week.',
+    ])
+    const assistantSupport = requireRecord(
+      experimentData.assistantSupport,
+      'assistantSupport',
+    )
+    assert.equal(assistantSupport.reminderPolicy, 'daily_reminder_policy')
+    assert.equal(assistantSupport.reminderOptionId, 'daily_1100')
+    assert.equal(assistantSupport.remindersEnabled, true)
 
     const compressionStarted = await runSliceCli([
       'experiment',

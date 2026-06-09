@@ -1,8 +1,5 @@
 import {
   EXPERIMENT_STATUSES,
-  HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS,
-  HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES,
-  HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS,
   VAULT_LAYOUT,
   eventSourceSchema,
   experimentAnalysisPlanSchema,
@@ -12,18 +9,15 @@ import {
   experimentOutcomeSchema,
   experimentFrontmatterSchema,
   experimentOnboardingCaptureSchema,
-  experimentOnboardingSafetySchema,
   commonsProtocolRefSchema,
   experimentRunLoggingSchema,
   experimentRunPlanSchema,
   experimentRunScheduleIntentSchema,
   healthCommonsKeySchema,
-  healthCommonsStableIdSchema,
   jsonObjectSchema,
   protocolRefSchema,
   safeParseContract,
   type ExperimentRunScheduleIntent,
-  type JsonValue,
 } from '@murphai/contracts'
 import { stringifyFrontmatterDocument } from '@murphai/core'
 import { synthesizeLegacySessionAdherenceTargets } from '@murphai/query'
@@ -60,6 +54,16 @@ import {
   normalizeExperimentMeasurementAnchorFlagOption,
   normalizeExperimentPlannedMeasurementFlagOption,
 } from '../option-utils.js'
+import {
+  buildExperimentAssistantSupportFromOptions,
+  buildExperimentOnboardingCaptureFromOptions,
+  normalizeRequiredTextOption,
+  normalizeStableIdListOption,
+  normalizeStableIdOption,
+  normalizeTextListOption,
+  type ExperimentAssistantSupportOptions,
+  type ExperimentOnboardingCaptureOptions,
+} from '../experiment-onboarding-options.js'
 import { upsertEventRecord } from './provider-event.js'
 import {
   attachInterventionSessionToExperiment,
@@ -249,19 +253,11 @@ interface ExperimentJournalVaultCoreRuntime {
 const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES)
 type ExperimentStatusValue = z.infer<typeof experimentStatusSchema>
 const experimentSignalDirectionSchema = z.enum(['increase', 'decrease', 'stabilize'])
-const experimentCheckInCadenceSchema = z.enum(['none', 'daily', 'every_3_days', 'weekly'])
-const experimentNotificationStyleSchema = z.enum([
-  'skip_by_default',
-  'send_scheduled_summary',
-])
 type ExperimentFrontmatterValue = z.infer<typeof experimentFrontmatterSchema>
 type CommonsProtocolRefValue = z.infer<typeof commonsProtocolRefSchema>
 type ExperimentRunLoggingValue = z.infer<typeof experimentRunLoggingSchema>
 type ExperimentRunPlanValue = z.infer<typeof experimentRunPlanSchema>
 type ExperimentAnalysisPlanValue = z.infer<typeof experimentAnalysisPlanSchema>
-type ExperimentOnboardingSafetyValue = z.infer<typeof experimentOnboardingSafetySchema>
-type ExperimentOnboardingCaptureValue = z.infer<typeof experimentOnboardingCaptureSchema>
-type ExperimentAssistantSupportValue = z.infer<typeof experimentAssistantSupportSchema>
 const experimentSelectorPayloadSchema = z
   .object({
     lookup: z.string().min(1).optional(),
@@ -275,7 +271,10 @@ const experimentSelectorPayloadSchema = z
       typeof value.slug === 'string',
     'Expected one of lookup, experimentId, or slug.',
   )
-export interface ApplyExperimentOnboardingRecordInput {
+
+export interface ApplyExperimentOnboardingRecordInput
+  extends ExperimentOnboardingCaptureOptions,
+    ExperimentAssistantSupportOptions {
   vault: string
   lookup: string
   status?: ExperimentStatusValue
@@ -310,20 +309,6 @@ export interface ApplyExperimentOnboardingRecordInput {
   analysisAnchor?: readonly string[]
   plannedMeasurement?: readonly string[]
   analysisNote?: readonly string[]
-  onboardingCompletedAt?: string
-  setupAnswer?: readonly string[]
-  safetyCautionLevel?: (typeof HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS)[number]
-  safetyDisposition?: (typeof HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS)[number]
-  positiveQuestionId?: readonly string[]
-  safetyNote?: readonly string[]
-  contextNote?: readonly string[]
-  reminderPolicy?: string
-  reminderOptionId?: string
-  remindersEnabled?: boolean
-  checkInCadence?: z.infer<typeof experimentCheckInCadenceSchema>
-  notificationStyle?: z.infer<typeof experimentNotificationStyleSchema>
-  missedLogFollowup?: (typeof HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES)[number]
-  weeklyDigestEnabled?: boolean
 }
 
 const privateProtocolPlanInputSchema = z
@@ -851,11 +836,11 @@ export async function applyExperimentOnboardingRecord(
     input,
     frontmatter.analysisPlan,
   )
-  const onboarding = buildOnboardingCaptureForOnboardingApply(
+  const onboarding = buildExperimentOnboardingCaptureFromOptions(
     input,
     frontmatter.onboarding,
   )
-  const assistantSupport = buildAssistantSupportForOnboardingApply(
+  const assistantSupport = buildExperimentAssistantSupportFromOptions(
     input,
     frontmatter.assistantSupport,
   )
@@ -2352,138 +2337,6 @@ function buildAnalysisPlanForOnboardingApply(
   )
 }
 
-function buildOnboardingCaptureForOnboardingApply(
-  input: ApplyExperimentOnboardingRecordInput,
-  existing: ExperimentFrontmatterValue['onboarding'],
-): ExperimentOnboardingCaptureValue | undefined {
-  const patch: Partial<ExperimentOnboardingCaptureValue> = {}
-
-  if (input.onboardingCompletedAt !== undefined) {
-    patch.completedAt = input.onboardingCompletedAt
-  }
-
-  const setupAnswers = buildSetupAnswersForOnboardingApply(
-    input.setupAnswer,
-    existing?.setupAnswers,
-  )
-  if (setupAnswers !== undefined) {
-    patch.setupAnswers = setupAnswers
-  }
-
-  const safety = buildOnboardingSafetyForOnboardingApply(input, existing?.safety)
-  if (safety !== undefined) {
-    patch.safety = safety
-  }
-
-  const contextNotes = normalizeTextListOption(input.contextNote, 'context-note')
-  if (contextNotes !== undefined) {
-    patch.contextNotes = contextNotes
-  }
-
-  if (Object.keys(patch).length === 0) {
-    return undefined
-  }
-
-  return experimentOnboardingCaptureSchema.parse(
-    compactObject({
-      ...(existing ?? {}),
-      ...patch,
-    }),
-  )
-}
-
-function buildOnboardingSafetyForOnboardingApply(
-  input: ApplyExperimentOnboardingRecordInput,
-  existing: ExperimentOnboardingSafetyValue | undefined,
-): ExperimentOnboardingSafetyValue | undefined {
-  const patch: Partial<ExperimentOnboardingSafetyValue> = {}
-
-  if (input.safetyCautionLevel !== undefined) {
-    patch.cautionLevel = z
-      .enum(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS)
-      .parse(input.safetyCautionLevel)
-  }
-  if (input.safetyDisposition !== undefined) {
-    patch.disposition = z
-      .enum(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS)
-      .parse(input.safetyDisposition)
-  }
-
-  const positiveQuestionIds = normalizeStableIdListOption(
-    input.positiveQuestionId,
-    'positive-question-id',
-  )
-  if (positiveQuestionIds !== undefined) {
-    patch.positiveQuestionIds = positiveQuestionIds
-  }
-
-  const notes = normalizeTextListOption(input.safetyNote, 'safety-note')
-  if (notes !== undefined) {
-    patch.notes = notes
-  }
-
-  if (Object.keys(patch).length === 0) {
-    return undefined
-  }
-
-  return experimentOnboardingSafetySchema.parse(
-    compactObject({
-      ...(existing ?? {}),
-      ...patch,
-    }),
-  )
-}
-
-function buildAssistantSupportForOnboardingApply(
-  input: ApplyExperimentOnboardingRecordInput,
-  existing: ExperimentFrontmatterValue['assistantSupport'],
-): ExperimentAssistantSupportValue | undefined {
-  const patch: Partial<ExperimentAssistantSupportValue> = {}
-
-  if (input.reminderPolicy !== undefined) {
-    patch.reminderPolicy = normalizeStableIdOption(
-      input.reminderPolicy,
-      'reminder-policy',
-    )
-  }
-  if (input.reminderOptionId !== undefined) {
-    patch.reminderOptionId = normalizeStableIdOption(
-      input.reminderOptionId,
-      'reminder-option-id',
-    )
-  }
-  if (input.remindersEnabled !== undefined) {
-    patch.remindersEnabled = input.remindersEnabled
-  }
-  if (input.checkInCadence !== undefined) {
-    patch.checkInCadence = experimentCheckInCadenceSchema.parse(input.checkInCadence)
-  }
-  if (input.notificationStyle !== undefined) {
-    patch.notificationStyle = experimentNotificationStyleSchema.parse(
-      input.notificationStyle,
-    )
-  }
-  if (input.missedLogFollowup !== undefined) {
-    patch.missedLogFollowup = z
-      .enum(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES)
-      .parse(input.missedLogFollowup)
-  }
-  if (input.weeklyDigestEnabled !== undefined) {
-    patch.weeklyDigestEnabled = input.weeklyDigestEnabled
-  }
-
-  if (Object.keys(patch).length === 0) {
-    return undefined
-  }
-
-  return experimentAssistantSupportSchema.parse(
-    compactObject({
-      ...(existing ?? {}),
-      ...patch,
-    }),
-  )
-}
-
 function buildRunPlanDatePatch(input: ApplyExperimentOnboardingRecordInput) {
   let baselineStart = normalizeLocalDateOption(input.baselineStart, 'baseline-start')
   let baselineEnd = normalizeLocalDateOption(input.baselineEnd, 'baseline-end')
@@ -2620,134 +2473,6 @@ function addLocalDays(value: string, days: number, optionName: string) {
     String(date.getUTCMonth() + 1).padStart(2, '0'),
     String(date.getUTCDate()).padStart(2, '0'),
   ].join('-')
-}
-
-function buildSetupAnswersForOnboardingApply(
-  values: readonly string[] | undefined,
-  existing: JsonObject | undefined,
-): JsonObject | undefined {
-  if (values === undefined) {
-    return undefined
-  }
-
-  const next: JsonObject = { ...(existing ?? {}) }
-  for (const value of values) {
-    const { key, answer } = parseSetupAnswerOption(value)
-    next[key] = answer
-  }
-
-  return next
-}
-
-function parseSetupAnswerOption(value: string) {
-  const separatorIndex = value.indexOf('=')
-  if (separatorIndex <= 0) {
-    throw new VaultCliError(
-      'invalid_option',
-      '--setup-answer must use key=value with a Health Commons setup slot id.',
-    )
-  }
-
-  const key = value.slice(0, separatorIndex).trim()
-  const answerText = value.slice(separatorIndex + 1).trim()
-  return {
-    key: normalizeStableIdOption(key, 'setup-answer'),
-    answer: parseSetupAnswerValue(answerText),
-  }
-}
-
-function parseSetupAnswerValue(value: string): JsonValue {
-  if (value.length === 0) {
-    return ''
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(value)
-    if (isJsonValue(parsed)) {
-      return parsed
-    }
-  } catch {
-    // Plain string answers are expected for most setup slots.
-  }
-
-  return value
-}
-
-function isJsonValue(value: unknown): value is JsonValue {
-  if (
-    value === null ||
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return true
-  }
-
-  if (Array.isArray(value)) {
-    return value.every(isJsonValue)
-  }
-
-  if (typeof value === 'object') {
-    return Object.values(value).every(isJsonValue)
-  }
-
-  return false
-}
-
-function normalizeRequiredTextOption(value: string, optionName: string) {
-  const normalized = normalizeOptionalText(value)
-  if (!normalized) {
-    throw new VaultCliError('invalid_option', `--${optionName} must not be empty.`)
-  }
-
-  return normalized
-}
-
-function normalizeTextListOption(
-  values: readonly string[] | undefined,
-  optionName: string,
-) {
-  if (values === undefined) {
-    return undefined
-  }
-
-  const normalized = uniqueStrings(
-    values
-      .map((entry) => normalizeOptionalText(entry) ?? '')
-      .filter((entry) => entry.length > 0),
-  )
-
-  if (normalized.length === 0) {
-    throw new VaultCliError('invalid_option', `--${optionName} must not be empty.`)
-  }
-
-  return normalized
-}
-
-function normalizeStableIdOption(value: string, optionName: string) {
-  const normalized = normalizeRequiredTextOption(value, optionName)
-  const parsed = safeParseContract(healthCommonsStableIdSchema, normalized)
-
-  if (!parsed.success) {
-    throw new VaultCliError(
-      'invalid_option',
-      `--${optionName} must be a Health Commons stable id.`,
-    )
-  }
-
-  return parsed.data
-}
-
-function normalizeStableIdListOption(
-  values: readonly string[] | undefined,
-  optionName: string,
-) {
-  const normalized = normalizeTextListOption(values, optionName)
-  if (normalized === undefined) {
-    return undefined
-  }
-
-  return normalized.map((entry) => normalizeStableIdOption(entry, optionName))
 }
 
 function normalizeHealthCommonsKeyOption(value: string, optionName: string) {
