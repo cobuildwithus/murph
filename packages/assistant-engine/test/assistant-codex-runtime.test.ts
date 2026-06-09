@@ -1075,7 +1075,60 @@ describe('assistant codex runtime', () => {
     ).toHaveLength(1)
   })
 
-  it('reuses the warm Codex app-server across noisy local env changes', async () => {
+  it('reuses the warm Codex app-server when resolved local child env is unchanged', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-local-warm-stable-env-work-')
+    const codexHome = await createTempDir('assistant-codex-local-warm-stable-env-home-')
+    const spawnedChildren: MockChildProcess[] = []
+    mockHostedCodexIdentityServer(spawnedChildren)
+
+    const baseInput = {
+      approvalPolicy: 'never',
+      codexHome,
+      sandbox: 'workspace-write' as const,
+      workingDirectory,
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...baseInput,
+        env: {
+          PATH: '/custom/bin',
+          CUSTOM_TOOL_SECRET: 'custom-tool-secret-stable',
+          NODE_V8_COVERAGE: '/coverage-one',
+        },
+        prompt: 'first stable resolved child env turn',
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-identity-1-1',
+      turnId: 'turn-warm-identity-1-1',
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...baseInput,
+        env: {
+          CUSTOM_TOOL_SECRET: 'custom-tool-secret-stable',
+          NODE_V8_COVERAGE: '/coverage-two',
+          PATH: '/custom/bin',
+        },
+        prompt: 'second stable resolved child env turn',
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-identity-1-2',
+      turnId: 'turn-warm-identity-1-2',
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    const messages = readWrittenRpcMessages(
+      requireMockChildProcess(spawnedChildren[0] ?? null),
+    )
+    expect(messages.filter((message) => message.method === 'initialize'))
+      .toHaveLength(1)
+    expect(messages.filter((message) => message.method === 'turn/start'))
+      .toHaveLength(2)
+  })
+
+  it('starts a fresh warm Codex app-server when local child env changes', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-warm-noisy-work-')
     const codexHome = await createTempDir('assistant-codex-local-warm-noisy-home-')
     const spawnedChildren: MockChildProcess[] = []
@@ -1114,17 +1167,22 @@ describe('assistant codex runtime', () => {
         prompt: 'second noisy local warm turn',
       }),
     ).resolves.toMatchObject({
-      sessionId: 'thread-warm-identity-1-2',
-      turnId: 'turn-warm-identity-1-2',
+      sessionId: 'thread-warm-identity-2-1',
+      turnId: 'turn-warm-identity-2-1',
     })
 
-    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
-    const messages = readWrittenRpcMessages(requireMockChildProcess(spawnedChildren[0] ?? null))
-    expect(messages.filter((message) => message.method === 'initialize')).toHaveLength(1)
-    expect(messages.filter((message) => message.method === 'thread/start'))
-      .toHaveLength(2)
-    expect(messages.filter((message) => message.method === 'turn/start'))
-      .toHaveLength(2)
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(process.kill).toHaveBeenCalledWith(-40_000, 'SIGTERM')
+    const firstMessages = readWrittenRpcMessages(
+      requireMockChildProcess(spawnedChildren[0] ?? null),
+    )
+    const secondMessages = readWrittenRpcMessages(
+      requireMockChildProcess(spawnedChildren[1] ?? null),
+    )
+    expect(firstMessages.filter((message) => message.method === 'turn/start'))
+      .toHaveLength(1)
+    expect(secondMessages.filter((message) => message.method === 'turn/start'))
+      .toHaveLength(1)
   })
 
   it.each([
@@ -1167,8 +1225,18 @@ describe('assistant codex runtime', () => {
         CODEX_ACCESS_TOKEN: 'fixture-codex-token-two',
       },
     },
+    {
+      firstEnv: {
+        CUSTOM_TOOL_SECRET: 'custom-tool-secret-one',
+        PATH: '/custom/bin',
+      },
+      name: 'custom tool secret',
+      secondEnv: {
+        CUSTOM_TOOL_SECRET: 'custom-tool-secret-two',
+      },
+    },
   ] as const)(
-    'starts a fresh warm Codex app-server when allowlisted local env changes: $name',
+    'starts a fresh warm Codex app-server when local child env changes: $name',
     async (scenario) => {
       const workingDirectory = await createTempDir('assistant-codex-local-warm-env-work-')
       const codexHome = await createTempDir('assistant-codex-local-warm-env-home-')
@@ -1186,7 +1254,7 @@ describe('assistant codex runtime', () => {
       await expect(
         executeCodexAppServerTurn({
           ...baseInput,
-          prompt: 'first local allowlisted env turn',
+          prompt: 'first local child env turn',
         }),
       ).resolves.toMatchObject({
         sessionId: 'thread-warm-identity-1-1',
@@ -1200,7 +1268,7 @@ describe('assistant codex runtime', () => {
             ...baseInput.env,
             ...scenario.secondEnv,
           },
-          prompt: 'second local allowlisted env turn',
+          prompt: 'second local child env turn',
         }),
       ).resolves.toMatchObject({
         sessionId: 'thread-warm-identity-2-1',
@@ -3365,224 +3433,6 @@ describe('assistant codex runtime', () => {
     )
   })
 
-  it('reuses one warm Codex app-server process across noisy hosted env changes', async () => {
-    const hostedCodexHome = await createTempDir('assistant-codex-warm-home-')
-    const workingDirectory = await createTempDir('assistant-codex-warm-work-')
-    let child: MockChildProcess | null = null
-
-    codexMocks.spawn.mockImplementation((_command, _args, options) => {
-      const spawnedChild = new MockChildProcess()
-      spawnedChild.pid = 987_654_321
-      child = spawnedChild
-      expect(options.env).toMatchObject({
-        MURPH_HOSTED_CODEX_BOUND_USER_ID: 'member_one',
-        MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: 'attempt_one',
-        MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: '7',
-        MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION: '41',
-      })
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialized = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialized.id, result: {} }))
-
-          const firstThread = await waitForRpcMethodCount(spawnedChild, 'thread/start', 1)
-          spawnedChild.stdout.write(jsonLine({
-            id: firstThread.id,
-            result: {
-              thread: {
-                id: 'thread-warm-one',
-              },
-            },
-          }))
-
-          const firstTurn = await waitForRpcMethodCount(spawnedChild, 'turn/start', 1)
-          spawnedChild.stdout.write(jsonLine({
-            id: firstTurn.id,
-            result: {
-              turn: {
-                id: 'turn-warm-one',
-              },
-            },
-          }))
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-warm-one',
-                status: 'completed',
-              },
-            },
-          }))
-
-          const secondThread = await waitForRpcMethodCount(spawnedChild, 'thread/start', 2)
-          spawnedChild.stdout.write(jsonLine({
-            id: secondThread.id,
-            result: {
-              thread: {
-                id: 'thread-warm-two',
-              },
-            },
-          }))
-
-          const secondTurn = await waitForRpcMethodCount(spawnedChild, 'turn/start', 2)
-          spawnedChild.stdout.write(jsonLine({
-            id: secondTurn.id,
-            result: {
-              turn: {
-                id: 'turn-warm-two',
-              },
-            },
-          }))
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-warm-two',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
-      })
-
-      return spawnedChild
-    })
-
-    const hostedEnv = (turn: string) => ({
-      CODEX_HOME: hostedCodexHome,
-      CI: turn === 'one' ? '1' : '0',
-      COLORTERM: turn === 'one' ? 'truecolor' : '24bit',
-      FORCE_COLOR: turn === 'one' ? '1' : '0',
-      LANG: turn === 'one' ? 'en_US.UTF-8' : 'C.UTF-8',
-      LANGUAGE: turn === 'one' ? 'en_US' : 'C',
-      LC_ALL: turn === 'one' ? 'en_US.UTF-8' : 'C.UTF-8',
-      LC_CTYPE: turn === 'one' ? 'en_US.UTF-8' : 'C.UTF-8',
-      MURPH_HOSTED_CODEX_BOUND_USER_ID: `member_${turn}`,
-      MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: `attempt_${turn}`,
-      MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: turn === 'one' ? '7' : '8',
-      MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION: turn === 'one' ? '41' : '42',
-      MURPH_HOSTED_RUNTIME_PROCESS: '1',
-      NO_COLOR: turn === 'one' ? '1' : '0',
-      NODE_ENV: 'test',
-      PATH: '/usr/bin',
-      PATHEXT: turn === 'one' ? '.COM;.EXE;.BAT' : '.EXE;.CMD',
-      SystemDrive: turn === 'one' ? 'C:' : 'D:',
-      SystemRoot: turn === 'one' ? 'C:\\Windows' : 'D:\\Windows',
-    })
-
-    await expect(
-      executeCodexAppServerTurn({
-        env: hostedEnv('one'),
-        prompt: 'first warm turn',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-warm-one',
-      turnId: 'turn-warm-one',
-    })
-    const warmPid = requireMockChildProcess(child).pid
-    expect(warmPid).toBe(987_654_321)
-
-    await expect(
-      executeCodexAppServerTurn({
-        env: hostedEnv('two'),
-        prompt: 'second warm turn',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-warm-two',
-      turnId: 'turn-warm-two',
-    })
-
-    const spawnedChild = requireMockChildProcess(child)
-    expect(spawnedChild.pid).toBe(warmPid)
-    const messages = readWrittenRpcMessages(spawnedChild)
-    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
-    expect(messages.filter((message) => message.method === 'initialize')).toHaveLength(1)
-    expect(messages.filter((message) => message.method === 'thread/start').map((message) => message.id))
-      .toEqual([2, 4])
-    expect(messages.filter((message) => message.method === 'turn/start').map((message) => message.id))
-      .toEqual([3, 5])
-    expect(await snapshotExpectedCodexRootProcess()).toBeNull()
-  })
-
-  it.each([
-    {
-      name: 'attemptId',
-      secondEnv: {
-        MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: 'attempt-two',
-      },
-    },
-    {
-      name: 'leaseGeneration',
-      secondEnv: {
-        MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: '8',
-      },
-    },
-    {
-      name: 'workspaceVersion',
-      secondEnv: {
-        MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION: '42',
-      },
-    },
-  ] as const)(
-    'keeps warm Codex identity stable when $name changes',
-    async (scenario) => {
-      const hostedCodexHome = await createTempDir('assistant-codex-stable-identity-home-')
-      const workingDirectory = await createTempDir('assistant-codex-stable-identity-work-')
-      const spawnedChildren: MockChildProcess[] = []
-      mockHostedCodexIdentityServer(spawnedChildren)
-
-      const baseEnv = {
-        [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-stable',
-        [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1:9174/',
-        CODEX_HOME: hostedCodexHome,
-        HOSTED_ASSISTANT_MODEL: 'gpt-stable-identity',
-        MURPH_HOSTED_CODEX_MODEL_PROVIDER_ID: 'hosted-provider-stable',
-        MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: 'attempt-one',
-        MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: '7',
-        MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION: '41',
-        MURPH_HOSTED_RUNTIME_PROCESS: '1',
-        NODE_ENV: 'test',
-        PATH: '/usr/bin',
-      }
-
-      await expect(
-        executeCodexAppServerTurn({
-          env: baseEnv,
-          prompt: `first ${scenario.name} identity turn`,
-          workingDirectory,
-        }),
-      ).resolves.toMatchObject({
-        sessionId: 'thread-warm-identity-1-1',
-        turnId: 'turn-warm-identity-1-1',
-      })
-
-      await expect(
-        executeCodexAppServerTurn({
-          env: {
-            ...baseEnv,
-            ...scenario.secondEnv,
-          },
-          prompt: `second ${scenario.name} identity turn`,
-          workingDirectory,
-        }),
-      ).resolves.toMatchObject({
-        sessionId: 'thread-warm-identity-1-2',
-        turnId: 'turn-warm-identity-1-2',
-      })
-
-      expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
-      const messages = readWrittenRpcMessages(requireMockChildProcess(spawnedChildren[0] ?? null))
-      expect(messages.filter((message) => message.method === 'initialize')).toHaveLength(1)
-      expect(messages.filter((message) => message.method === 'thread/start'))
-        .toHaveLength(2)
-      expect(messages.filter((message) => message.method === 'turn/start'))
-        .toHaveLength(2)
-    },
-  )
-
   it('does not reuse warm Codex after a CLI bridge off-invocation stop', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-warm-cli-bridge-stop-home-')
     const workingDirectory = await createTempDir('assistant-codex-warm-cli-bridge-stop-work-')
@@ -3678,77 +3528,6 @@ describe('assistant codex runtime', () => {
 
   it.each([
     {
-      name: 'model',
-      secondEnv: {
-        HOSTED_ASSISTANT_MODEL: 'gpt-identity-two',
-      },
-    },
-    {
-      name: 'provider',
-      secondEnv: {
-        MURPH_HOSTED_CODEX_MODEL_PROVIDER_ID: 'hosted-provider-two',
-      },
-    },
-    {
-      name: 'hosted command override env',
-      secondEnv: {
-        [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: '/tmp/hosted-codex-two',
-      },
-    },
-  ] as const)(
-    'keeps warm Codex identity stable when $name changes',
-    async (scenario) => {
-      const hostedCodexHome = await createTempDir('assistant-codex-stable-identity-env-home-')
-      const workingDirectory = await createTempDir('assistant-codex-stable-identity-env-work-')
-      const spawnedChildren: MockChildProcess[] = []
-      mockHostedCodexIdentityServer(spawnedChildren)
-
-      const baseEnv = {
-        CODEX_HOME: hostedCodexHome,
-        HOSTED_ASSISTANT_MODEL: 'gpt-stable-identity',
-        MURPH_HOSTED_CODEX_MODEL_PROVIDER_ID: 'hosted-provider-stable',
-        MURPH_HOSTED_RUNTIME_PROCESS: '1',
-        NODE_ENV: 'test',
-        PATH: '/usr/bin',
-      }
-
-      await expect(
-        executeCodexAppServerTurn({
-          env: baseEnv,
-          prompt: `first ${scenario.name} identity turn`,
-          workingDirectory,
-        }),
-      ).resolves.toMatchObject({
-        sessionId: 'thread-warm-identity-1-1',
-        turnId: 'turn-warm-identity-1-1',
-      })
-
-      await expect(
-        executeCodexAppServerTurn({
-          env: {
-            ...baseEnv,
-            ...scenario.secondEnv,
-          },
-          prompt: `second ${scenario.name} identity turn`,
-          workingDirectory,
-        }),
-      ).resolves.toMatchObject({
-        sessionId: 'thread-warm-identity-1-2',
-        turnId: 'turn-warm-identity-1-2',
-      })
-
-      expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
-      const messages = readWrittenRpcMessages(requireMockChildProcess(spawnedChildren[0] ?? null))
-      expect(messages.filter((message) => message.method === 'initialize')).toHaveLength(1)
-      expect(messages.filter((message) => message.method === 'thread/start'))
-        .toHaveLength(2)
-      expect(messages.filter((message) => message.method === 'turn/start'))
-        .toHaveLength(2)
-    },
-  )
-
-  it.each([
-    {
       name: 'stable bridge token',
       secondEnv: {
         [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-two',
@@ -3777,12 +3556,19 @@ describe('assistant codex runtime', () => {
       useSecondCodexHome: false,
     },
     {
+      name: 'custom child env',
+      secondEnv: {
+        CUSTOM_TOOL_SECRET: 'custom-tool-secret-two',
+      },
+      useSecondCodexHome: false,
+    },
+    {
       name: 'Codex home',
       secondEnv: {},
       useSecondCodexHome: true,
     },
   ] as const)(
-    'starts a fresh warm Codex app-server process when launch field $name changes',
+    'starts a fresh warm Codex app-server process when child env field $name changes',
     async (scenario) => {
       const firstCodexHome = await createTempDir('assistant-codex-warm-identity-home-a-')
       const secondCodexHome = scenario.useSecondCodexHome === true
@@ -3841,6 +3627,7 @@ describe('assistant codex runtime', () => {
         [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-one',
         [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1:9174/',
         CODEX_HOME: firstCodexHome,
+        CUSTOM_TOOL_SECRET: 'custom-tool-secret-one',
         HOSTED_ASSISTANT_MODEL: 'gpt-identity-one',
         MURPH_HOSTED_CODEX_MODEL_PROVIDER_ID: 'hosted-provider-one',
         MURPH_HOSTED_RUNTIME_PROCESS: '1',
@@ -4488,10 +4275,13 @@ describe('assistant codex runtime', () => {
     expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
   })
 
-  it('keeps the warm Codex app-server process when config file content changes', async () => {
+  it('keeps the warm Codex app-server process when per-thread config file content changes', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-warm-config-home-')
     const workingDirectory = await createTempDir('assistant-codex-warm-config-work-')
-    await writeFile(path.join(hostedCodexHome, 'config.toml'), 'model = "first"\n')
+    await writeFile(
+      path.join(hostedCodexHome, 'config.toml'),
+      'model = "gpt-config-first"\nmodel_provider = "openai"\n',
+    )
     const spawnedChildren: MockChildProcess[] = []
 
     codexMocks.spawn.mockImplementation(() => {
@@ -4577,6 +4367,8 @@ describe('assistant codex runtime', () => {
     await expect(
       executeCodexAppServerTurn({
         env: hostedEnv,
+        model: 'gpt-config-first',
+        modelProvider: 'openai',
         prompt: 'first config launch',
         workingDirectory,
       }),
@@ -4585,11 +4377,16 @@ describe('assistant codex runtime', () => {
       turnId: 'turn-warm-config-1',
     })
 
-    await writeFile(path.join(hostedCodexHome, 'config.toml'), 'model = "second"\n')
+    await writeFile(
+      path.join(hostedCodexHome, 'config.toml'),
+      'model = "gpt-config-second"\nmodel_provider = "venice"\n',
+    )
 
     await expect(
       executeCodexAppServerTurn({
         env: hostedEnv,
+        model: 'gpt-config-second',
+        modelProvider: 'venice',
         prompt: 'second config launch',
         workingDirectory,
       }),
@@ -4599,8 +4396,21 @@ describe('assistant codex runtime', () => {
     })
 
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
-    expect(readWrittenRpcMessages(requireMockChildProcess(spawnedChildren[0] ?? null)).filter((message) => message.method === 'initialize'))
+    const messages = readWrittenRpcMessages(
+      requireMockChildProcess(spawnedChildren[0] ?? null),
+    )
+    const threadStarts = messages.filter((message) => message.method === 'thread/start')
+    expect(messages.filter((message) => message.method === 'initialize'))
       .toHaveLength(1)
+    expect(threadStarts).toHaveLength(2)
+    expect(asRecord(threadStarts[0]?.params)).toMatchObject({
+      model: 'gpt-config-first',
+      modelProvider: 'openai',
+    })
+    expect(asRecord(threadStarts[1]?.params)).toMatchObject({
+      model: 'gpt-config-second',
+      modelProvider: 'venice',
+    })
   })
 
   it('does not clear or replace a stale warm Codex process when stop cannot prove exit', async () => {

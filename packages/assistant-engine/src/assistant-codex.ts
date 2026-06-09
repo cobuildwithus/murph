@@ -7,9 +7,6 @@ import path from 'node:path'
 import type {
   HostedExpectedCodexRootProcess,
 } from '@murphai/hosted-execution/runtime-control'
-import {
-  ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS,
-} from '@murphai/operator-config/assistant/target-runtime'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -115,43 +112,6 @@ const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
 const CODEX_APP_SERVER_TIMING_TRACE_TYPE =
   'assistant.codex.app_server_timing'
 const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
-const CODEX_APP_SERVER_PROVIDER_LAUNCH_ENV_NAMES =
-  ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS.map((config) => config.envKey)
-
-// This is intentionally a tiny process-launch compatibility gate, not a
-// general Murph runtime identity system. If a value must be per-turn, do not put
-// it in the Codex process env; pass it through Codex RPC or an active runtime
-// bridge instead.
-const CODEX_APP_SERVER_LAUNCH_ENV_NAMES = [
-  'ALL_PROXY',
-  'CODEX_ACCESS_TOKEN',
-  'CODEX_API_KEY',
-  'CODEX_CA_CERTIFICATE',
-  'CODEX_HOME',
-  'CURL_CA_BUNDLE',
-  'HOME',
-  'HTTP_PROXY',
-  'HTTPS_PROXY',
-  'MURPH_ASSISTANT_SKILLS_ROOT',
-  'MURPH_HOSTED_CLI_BRIDGE_TOKEN',
-  'MURPH_HOSTED_CLI_BRIDGE_URL',
-  'MURPH_HOSTED_RUNTIME_PROCESS',
-  'NO_PROXY',
-  'NODE_ENV',
-  'NODE_EXTRA_CA_CERTS',
-  'OPENAI_API_KEY',
-  'PATH',
-  'REQUESTS_CA_BUNDLE',
-  'SSL_CERT_DIR',
-  'SSL_CERT_FILE',
-  'TEMP',
-  'TMP',
-  'TMPDIR',
-  'TZ',
-  'VAULT',
-  'VERCEL_AI_API_KEY',
-  ...CODEX_APP_SERVER_PROVIDER_LAUNCH_ENV_NAMES,
-] as const
 
 type CodexAppServerProcessState =
   | 'idle'
@@ -524,23 +484,17 @@ function buildCodexAppServerLaunchKey(input: {
   return hashCodexRawString(JSON.stringify({
     args: input.args,
     codexCommand: input.codexCommand,
-    codexHome: normalizeNullableString(input.env.CODEX_HOME),
-    env: projectCodexAppServerLaunchEnv(input.env),
+    env: stableCodexProcessEnv(input.env),
     workingDirectory: input.workingDirectory,
   }))
 }
 
-function projectCodexAppServerLaunchEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const projected: NodeJS.ProcessEnv = {}
-
-  for (const key of CODEX_APP_SERVER_LAUNCH_ENV_NAMES) {
-    const value = env[key]
-    if (typeof value === 'string') {
-      projected[key] = value
-    }
-  }
-
-  return projected
+function stableCodexProcessEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env)
+      .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+      .sort(([left], [right]) => left.localeCompare(right)),
+  )
 }
 
 export function buildCodexAppServerArgs(
