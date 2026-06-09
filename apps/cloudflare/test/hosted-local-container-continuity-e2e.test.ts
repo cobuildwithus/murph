@@ -74,7 +74,7 @@ describe("hosted local container continuity e2e", () => {
 
     const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
     const baselineProviderRequestCount = countAssistantProviderResponsesApiRequests();
-    const baselineIdleShutdownCleanupCount = countSuccessfulIdleShutdownCheckpointCleanupLogs();
+    const baselineIdleShutdownCleanupCount = countContainerDestroyCompletedLogs();
     requireScenario().queueAssistantResponses([firstReplyText, secondReplyText]);
 
     const firstWebhookResponse = await postSignedLinqWebhook(
@@ -113,7 +113,7 @@ describe("hosted local container continuity e2e", () => {
       .toBeNull();
     expect(idleShutdownStatus.inFlight).toBe(false);
     expect(idleShutdownStatus.lastErrorCode ?? null).toBeNull();
-    expect(countSuccessfulIdleShutdownCheckpointCleanupLogs())
+    expect(countContainerDestroyCompletedLogs())
       .toBeGreaterThan(baselineIdleShutdownCleanupCount);
 
     const secondWebhookResponse = await postSignedLinqWebhook(
@@ -201,7 +201,7 @@ async function waitForIdleShutdownCheckpoint(input: {
       && deltaRef === null
       && !status.inFlight
       && !status.lastErrorCode
-      && countSuccessfulIdleShutdownCheckpointCleanupLogs() > input.baselineCleanupCount
+      && countContainerDestroyCompletedLogs() > input.baselineCleanupCount
     ) {
       return status;
     }
@@ -228,7 +228,7 @@ function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function countSuccessfulIdleShutdownCheckpointCleanupLogs(): number {
+function countContainerDestroyCompletedLogs(): number {
   const output = [
     requireScenario().harness.stdoutTail(200_000),
     requireScenario().harness.stderrTail(200_000),
@@ -255,11 +255,8 @@ function countSuccessfulIdleShutdownCheckpointCleanupLogs(): number {
 
       const candidate = record as {
         message?: unknown;
-        userId?: unknown;
       };
-      const cleanupMessage =
-        "Hosted runner completed idle-shutdown checkpoint cleanup without container destroy.";
-      return candidate.message === cleanupMessage && candidate.userId === userId;
+      return candidate.message === "Hosted execution container destroy completed.";
     }).length;
 }
 

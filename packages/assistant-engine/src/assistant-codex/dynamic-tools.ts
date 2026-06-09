@@ -140,6 +140,10 @@ export const MURPH_DYNAMIC_TOOLS = [
   MURPH_GENERATE_IMAGE_TOOL,
 ] as const
 
+export function listMurphDynamicToolNames(): string[] {
+  return MURPH_DYNAMIC_TOOLS.map((tool) => `${tool.namespace}.${tool.name}`)
+}
+
 const CODEX_DYNAMIC_TOOL_CALL_METHOD = 'item/tool/call'
 
 const attachResponseMediaArgumentsSchema = z

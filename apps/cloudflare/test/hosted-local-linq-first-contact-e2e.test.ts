@@ -11,6 +11,9 @@ import {
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
 import {
+  listMurphDynamicToolNames,
+} from "@murphai/assistant-engine/assistant-codex";
+import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
@@ -74,7 +77,7 @@ const progressToolFinalReplyText = "I checked that and can keep helping from her
 const typingLoopReplyText = "I saw that and can help from here.";
 const productionLikeAssistantModel = "gpt-5.5";
 const localRunnerIdleTtlMs = "300000";
-const expectedDynamicTools = "murph.send_progress_update,murph.attach_response_media";
+const expectedDynamicTools = listMurphDynamicToolNames().join(",");
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const fastDeployGate = process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1";
@@ -133,6 +136,8 @@ describe("hosted local Linq first-contact e2e", () => {
   }, 300_000);
 
   it("sends the first-contact Linq welcome through the live local worker", async () => {
+    expectConfiguredDynamicTools();
+
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
       memberId: userId,
@@ -185,6 +190,8 @@ describe("hosted local Linq first-contact e2e", () => {
   }, 300_000);
 
   it("sends a Linq reply after a later inbound Linq message", async () => {
+    expectConfiguredDynamicTools();
+
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(directReplyUserId),
       memberId: directReplyUserId,
@@ -311,6 +318,8 @@ describe("hosted local Linq first-contact e2e", () => {
   }, 300_000);
 
   it("delivers a model-authored progress update through the hosted Linq bridge", async () => {
+    expectConfiguredDynamicTools();
+
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(progressToolUserId),
       memberId: progressToolUserId,
@@ -1096,6 +1105,12 @@ function requireScenario(): HostedLocalFullStackScenario {
   }
 
   return scenario;
+}
+
+function expectConfiguredDynamicTools(): void {
+  expect(
+    requireScenario().runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV],
+  ).toBe(expectedDynamicTools);
 }
 
 function countObservedLinqRequests(input: {

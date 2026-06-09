@@ -319,10 +319,14 @@ export async function startHostedLocalFullStackScenario(input: {
           method: request.method,
           url: request.url,
         }));
+        const recentLogs = status ? summarizeHostedRecentLogsForFailure(status) : [];
         return [
           ...summaryLines,
           ...(status
             ? [`hosted status: ${JSON.stringify(sanitizeHostedStatusForFailureLog(status))}`]
+            : []),
+          ...(recentLogs.length > 0
+            ? [`hosted recent logs: ${JSON.stringify(recentLogs)}`]
             : []),
           `assistant provider requests: ${JSON.stringify(assistantProviderRequestLog)}`,
           `stdout tail: ${sanitizeHostedFailureText(scenarioHarness.stdoutTail())}`,
@@ -449,6 +453,26 @@ function fingerprintProviderRequestBody(value: string, secret: string): string {
     .update(value)
     .digest("hex")
     .slice(0, 16);
+}
+
+function summarizeHostedRecentLogsForFailure(
+  status: HostedRunnerStatusResponse,
+): Array<Record<string, string>> {
+  return (status.recentLogs ?? []).slice(-12).map((entry) => {
+    const summary: Record<string, string> = {
+      at: entry.at,
+      component: entry.component,
+      eventCode: entry.eventCode,
+      level: entry.level,
+      phase: entry.phase,
+    };
+
+    if (entry.errorCode) {
+      summary.errorCode = entry.errorCode;
+    }
+
+    return summary;
+  });
 }
 
 interface HostedLocalScenarioDatabaseLease {
