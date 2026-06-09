@@ -873,7 +873,25 @@ describe('assistant notification decision guidance', () => {
     ).prompt
 
     expect(prompt).toContain(
-      'For experiment-related scheduled checks other than first-session prep or first-week habit support, call `vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --format json` first.',
+      'For experiment-related scheduled checks other than session-support, first-session prep, or first-week habit support, call `vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --format json` first.',
+    )
+    expect(prompt).toContain('Session-support automations close the loop')
+    expect(prompt).toContain('not nagging reminders')
+    expect(prompt).toContain(
+      'call `vault-cli experiment followup due <id> --kind missed-log --date <sessionDate> --format json`',
+    )
+    expect(prompt).toContain('prior local session date')
+    expect(prompt).toContain(
+      'If the automation is pre-session, give compact guidance for what to do now.',
+    )
+    expect(prompt).toContain(
+      'If it is after-session missed-log recovery, ask one neutral question',
+    )
+    expect(prompt).toContain(
+      'Do not tell the user to remember to log later',
+    )
+    expect(prompt).toContain(
+      'Retrieval budget for session-support automations',
     )
     expect(prompt).toContain(
       'First-session prep automations are one-shot pre-session support, not missed-log or weekly-digest checks.',
@@ -889,7 +907,7 @@ describe('assistant notification decision guidance', () => {
     )
     expect(prompt).toContain('Send the prep reminder when those direct checks pass.')
     expect(prompt).toContain(
-      'The sent message must include a compact first-time walkthrough: what to do first, what to keep easy, the pain or stop rule, and what to log during or after plus next morning.',
+      'The sent message must include a compact first-time walkthrough: what to do first, what to keep easy, the pain or stop rule, what Murph can capture automatically, what subjective details Murph may ask about later if needed, and the simplest way to answer.',
     )
     expect(prompt).toContain('Do not only offer to walk the user through it.')
     expect(prompt).toContain(
@@ -905,10 +923,10 @@ describe('assistant notification decision guidance', () => {
       'skip if the experiment is inactive, the user declined or cancelled reminders, the scheduled session or log is already complete, the saved plan changed, or the first-week support window has ended',
     )
     expect(prompt).toContain(
-      'Send only a short reminder for that day: the planned action or baseline log, the safety stop rule when relevant, and what to log.',
+      'Send only a short reminder for that day: the planned action or baseline log, the safety stop rule when relevant, and what Murph can capture automatically or may ask about later if needed.',
     )
     expect(prompt).toContain(
-      'Default to skip for experiment notifications other than first-session prep or first-week habit support unless the due check says `notify`',
+      'Default to skip for experiment notifications other than session-support, first-session prep, or first-week habit support unless the due check says `notify`',
     )
   })
 })

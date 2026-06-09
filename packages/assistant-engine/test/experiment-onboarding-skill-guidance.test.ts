@@ -38,6 +38,10 @@ describe('experiment onboarding skill guidance', () => {
     expect(raw).toContain(
       'Summarize only what the user needs for session one',
     )
+    expect(raw).toContain('what Murph can capture automatically')
+    expect(raw).toContain(
+      'what subjective details Murph may ask about later if needed',
+    )
     expect(raw).toContain(
       'Do not make the reminder merely say "you have a session" or "I can walk you through it."',
     )
@@ -97,6 +101,21 @@ describe('experiment onboarding skill guidance', () => {
     expect(raw).toContain(
       'read `vault-cli experiment show <id> --format json`, `vault-cli commons protocol show <key-or-route> --format json`, and `vault-cli experiment progress <id> --as-of <date> --format json` before sending',
     )
+  })
+
+  it('defines the bounded session support loop outcome', async () => {
+    const raw = await readExperimentOnboardingSkill()
+
+    expect(raw).toContain(
+      'the user should not need to remember to report later',
+    )
+    expect(raw).toContain('Pre-session guidance tells the user what to do now')
+    expect(raw).toContain('For pre-bed protocols')
+    expect(raw).toContain('usual wake window')
+    expect(raw).toContain(
+      'experiment-session-support-<experiment-slug>-<YYYY-MM-DD>',
+    )
+    expect(raw).toContain('--kind missed-log --date <sessionDate>')
   })
 
   it('requires context-backed reminder time suggestions before open-ended time questions', async () => {

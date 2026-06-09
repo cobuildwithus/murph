@@ -9,6 +9,9 @@ import {
   type HostedExecutionWake,
   type HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
+} from "@murphai/hosted-execution/cli-runtime-bridge";
 import type { AssistantExecutionContext } from "@murphai/assistant-engine";
 import type { AssistantModelTarget } from "@murphai/operator-config/assistant-backend";
 import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
@@ -409,12 +412,15 @@ export async function readHostedAssistantExecutionDefaultTarget(input: {
     resolveHostedAssistantProviderConfig(hostedAssistantConfig),
   );
 
-  return applyHostedCodexRuntimeModelProviderTarget({
-    modelProviderId: normalizeHostedContextString(
-      input.runtimeEnv?.[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]
-        ?? process.env[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
-    ),
-    target,
+  return applyHostedCodexRuntimeCommandTarget({
+    codexCommand: readHostedCodexRuntimeCommandOverride(input.runtimeEnv),
+    target: applyHostedCodexRuntimeModelProviderTarget({
+      modelProviderId: normalizeHostedContextString(
+        input.runtimeEnv?.[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]
+          ?? process.env[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+      ),
+      target,
+    }),
   });
 }
 
@@ -451,6 +457,51 @@ function normalizeHostedContextString(
 ): string | null {
   const normalized = value?.trim();
   return normalized ? normalized : null;
+}
+
+function readHostedCodexRuntimeCommandOverride(
+  runtimeEnv: Readonly<Record<string, string | undefined>> | undefined,
+): string | null {
+  const env = runtimeEnv ?? process.env;
+  const command = normalizeHostedContextString(
+    env[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV],
+  );
+  if (!command) {
+    return null;
+  }
+
+  // prepareHostedCodexRuntimeEnvironment owns validation. Keep this projection
+  // test-only so hosted production cannot grow an executable selector path here.
+  if (
+    normalizeHostedContextString(env.NODE_ENV) !== "test" ||
+    !path.isAbsolute(command)
+  ) {
+    return null;
+  }
+
+  return command;
+}
+
+function applyHostedCodexRuntimeCommandTarget(input: {
+  codexCommand: string | null;
+  target: AssistantModelTarget | null;
+}): AssistantModelTarget | null {
+  if (
+    !input.target ||
+    input.target.adapter !== "codex-cli" ||
+    !input.codexCommand
+  ) {
+    return input.target;
+  }
+
+  if (input.codexCommand === input.target.codexCommand) {
+    return input.target;
+  }
+
+  return {
+    ...input.target,
+    codexCommand: input.codexCommand,
+  };
 }
 
 function applyHostedCodexRuntimeModelProviderTarget(input: {

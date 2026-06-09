@@ -49,7 +49,7 @@ afterEach(async () => {
   )
 })
 
-test('buildCodexAppServerArgs includes sandbox, approval, config, profile, and oss flags', () => {
+test('buildCodexAppServerArgs keeps sandbox and approval out of process args', () => {
   const args = buildCodexAppServerArgs({
     approvalPolicy: 'never',
     configOverrides: ['mcp_servers.murph_memory.command="node"'],
@@ -59,10 +59,6 @@ test('buildCodexAppServerArgs includes sandbox, approval, config, profile, and o
   })
 
   assert.deepEqual(args, [
-    '-s',
-    'read-only',
-    '-a',
-    'never',
     '--config',
     'mcp_servers.murph_memory.command="node"',
     '--profile',
@@ -128,7 +124,7 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
     const child = new MockChildProcess()
     const expectedWorkingDirectory = path.resolve(workingDirectory)
 
-    assert.deepEqual(args, ['-s', 'workspace-write', '-a', 'never', 'app-server'])
+    assert.deepEqual(args, ['app-server'])
     assert.deepEqual(options, {
       cwd: expectedWorkingDirectory,
       detached: true,
