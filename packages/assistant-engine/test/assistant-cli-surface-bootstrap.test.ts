@@ -815,6 +815,50 @@ test('buildAssistantCliSurfaceContract renders array options as repeated flags w
   assert.doesNotMatch(contract, /--query=list/u)
 })
 
+test('buildAssistantCliSurfaceContract renders explicit hints without required array options', async () => {
+  const {
+    buildAssistantCliSurfaceContract,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  const contract = buildAssistantCliSurfaceContract({
+    commands: [
+      {
+        description: 'Create or update one supplement from typed command fields.',
+        hint:
+          'Repeat --ingredient with one shell-quoted JSON object per ingredient; do not pass plain ingredient text or an array.',
+        name: 'supplement save',
+        schema: {
+          args: {
+            properties: {
+              title: {
+                type: 'string',
+              },
+            },
+            required: ['title'],
+          },
+          options: {
+            properties: {
+              ingredient: {
+                items: {
+                  type: 'string',
+                },
+                type: 'array',
+              },
+            },
+          },
+        },
+      },
+    ],
+  })
+
+  assert.ok(contract)
+  assert.match(contract, /options repeat --ingredient=string/u)
+  assert.match(
+    contract,
+    /hint Repeat --ingredient with one shell-quoted JSON object per ingredient; do not pass plain ingredient text or an array/u,
+  )
+})
+
 test('buildAssistantCliSurfaceContract renders low-frequency families as bare command names', async () => {
   const {
     buildAssistantCliSurfaceContract,
@@ -839,6 +883,10 @@ test('buildAssistantCliSurfaceContract renders low-frequency families as bare co
     commands: [
       ...nameOnlyFamilies.map((family) => ({
         description: `${family} detailed route`,
+        hint:
+          family === 'scheduled-log'
+            ? 'Prefer scheduled-log save for canonical typed create/update usage.'
+            : undefined,
         name: `${family} inspect`,
         schema: {
           args: {
@@ -886,7 +934,14 @@ test('buildAssistantCliSurfaceContract renders low-frequency families as bare co
 
   assert.ok(contract)
   for (const family of nameOnlyFamilies) {
-    assert.match(contract, new RegExp(`- \`${family} inspect\`\\.`, 'u'))
+    if (family === 'scheduled-log') {
+      assert.match(
+        contract,
+        /- `scheduled-log inspect`; hint Prefer scheduled-log save for canonical typed create\/update usage\./u,
+      )
+    } else {
+      assert.match(contract, new RegExp(`- \`${family} inspect\`\\.`, 'u'))
+    }
     assert.doesNotMatch(contract, new RegExp(`${family} detailed route`, 'u'))
   }
   assert.match(
@@ -1628,7 +1683,7 @@ test('resolveAssistantCliSurfaceBootstrapContext keys the in-memory cache by man
 
 function createAssistantCliSurfaceManifestFingerprint(manifest: unknown): string {
   return createHash('sha256')
-    .update('murph.assistant-cli-surface-render-policy.v2')
+    .update('murph.assistant-cli-surface-render-policy.v3')
     .update('\0')
     .update(JSON.stringify(manifest))
     .digest('hex')

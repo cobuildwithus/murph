@@ -1,4 +1,5 @@
 import type { Cli } from 'incur'
+import { vaultCliCommandDescriptors } from './vault-cli-command-manifest.js'
 
 type CliServeOptions = Parameters<Cli.Cli['serve']>[1]
 
@@ -27,6 +28,18 @@ interface ScopedLlmsMarkdownRequest {
   commandPath: string[]
 }
 
+interface LlmsJsonManifestRequest {
+  kind: 'json-manifest'
+}
+
+interface ScopedLlmsMarkdownNormalizationRequest extends ScopedLlmsMarkdownRequest {
+  kind: 'scoped-markdown'
+}
+
+type LlmsNormalizationRequest =
+  | LlmsJsonManifestRequest
+  | ScopedLlmsMarkdownNormalizationRequest
+
 export function installVaultCliLlmsNormalizer(
   cli: Cli.Cli,
   commandName = 'vault-cli',
@@ -34,17 +47,18 @@ export function installVaultCliLlmsNormalizer(
   const serve = cli.serve.bind(cli)
 
   cli.serve = async (argv = process.argv.slice(2), options = {}) => {
-    const request = parseScopedLlmsMarkdownRequest(argv)
+    const request = parseLlmsNormalizationRequest(argv)
     if (!request) {
       await serve(argv, options)
       return
     }
 
     const result = await captureServeOutput(serve, argv, options)
-    writeStdout(
-      options,
-      normalizeScopedLlmsMarkdownOutput(result.output, commandName, request.commandPath),
-    )
+    const output =
+      request.kind === 'json-manifest'
+        ? normalizeLlmsJsonManifestOutput(result.output)
+        : normalizeScopedLlmsMarkdownOutput(result.output, commandName, request.commandPath)
+    writeStdout(options, output)
 
     if (result.exitCode !== null) {
       exitProcess(options, result.exitCode)
@@ -52,9 +66,9 @@ export function installVaultCliLlmsNormalizer(
   }
 }
 
-function parseScopedLlmsMarkdownRequest(
+function parseLlmsNormalizationRequest(
   argv: readonly string[],
-): ScopedLlmsMarkdownRequest | null {
+): LlmsNormalizationRequest | null {
   let hasLlmsFlag = false
   let explicitFormat: string | null = null
   const commandPath: string[] = []
@@ -111,15 +125,26 @@ function parseScopedLlmsMarkdownRequest(
     commandPath.push(token)
   }
 
-  if (!hasLlmsFlag || commandPath.length === 0) {
+  if (!hasLlmsFlag) {
     return null
+  }
+
+  if (commandPath.length === 0) {
+    if (explicitFormat === 'json') {
+      return { kind: 'json-manifest' }
+    }
+    return null
+  }
+
+  if (explicitFormat === 'json') {
+    return { kind: 'json-manifest' }
   }
 
   if (explicitFormat !== null && explicitFormat !== 'md') {
     return null
   }
 
-  return { commandPath }
+  return { commandPath, kind: 'scoped-markdown' }
 }
 
 async function captureServeOutput(
@@ -172,6 +197,82 @@ function normalizeScopedLlmsMarkdownOutput(
   }
 
   return normalized
+}
+
+function normalizeLlmsJsonManifestOutput(output: string): string {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(output)
+  } catch {
+    return output
+  }
+
+  if (!isRecord(parsed) || !Array.isArray(parsed.commands)) {
+    return output
+  }
+
+  const hintsByCommandName = collectVaultCliDescriptorHintsByCommandName()
+  let changed = false
+  const commands = parsed.commands.map((command) => {
+    if (!isRecord(command) || typeof command.name !== 'string') {
+      return command
+    }
+
+    const existingHint = command.hint
+    if (typeof existingHint === 'string' && existingHint.trim().length > 0) {
+      return command
+    }
+
+    const hint = hintsByCommandName.get(command.name)
+    if (!hint) {
+      return command
+    }
+
+    changed = true
+    return {
+      ...command,
+      hint,
+    }
+  })
+
+  if (!changed) {
+    return output
+  }
+
+  return `${JSON.stringify(
+    {
+      ...parsed,
+      commands,
+    },
+    null,
+    2,
+  )}\n`
+}
+
+function collectVaultCliDescriptorHintsByCommandName(): Map<string, string> {
+  const hintsByCommandName = new Map<string, string>()
+
+  for (const descriptor of vaultCliCommandDescriptors) {
+    const leafCommands =
+      'leafCommands' in descriptor ? descriptor.leafCommands : undefined
+    for (const leafCommand of leafCommands ?? []) {
+      const hint =
+        'hint' in leafCommand && typeof leafCommand.hint === 'string'
+          ? leafCommand.hint.trim()
+          : undefined
+      if (hint === undefined || hint.length === 0) {
+        continue
+      }
+
+      hintsByCommandName.set(leafCommand.path.join(' '), hint)
+    }
+  }
+
+  return hintsByCommandName
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function escapeRegExp(value: string): string {

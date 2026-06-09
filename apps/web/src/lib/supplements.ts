@@ -6,12 +6,25 @@ const { Pool } = pg;
 
 const SUPPLEMENT_DATABASE_ENV = "MURPH_SUPPLEMENT_DB_URL";
 const DEFAULT_POOL_MAX = 3;
+const SUPPLEMENT_BRAND_INDEX_TTL_MS = 10 * 60 * 1000;
+const MAX_SUPPLEMENT_BRAND_SCOPES = 12;
 
 type SupplementsQueryClient = {
   query<T>(text: string, values: unknown[]): Promise<{ rows: T[] }>;
 };
 
 let defaultPool: PgPool | null = null;
+let defaultQueriesInstance: ReturnType<typeof createSupplementsQueries> | null = null;
+
+type SupplementBrandIndexEntry = {
+  brand: string;
+  normalizedBrand: string;
+};
+
+type SupplementBrandIndexCache = {
+  expiresAt: number;
+  promise: Promise<SupplementBrandIndexEntry[]>;
+};
 
 export type SupplementSearchItem = {
   id: string;
@@ -41,6 +54,30 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
     q: string;
   }) => Promise<SupplementSearchItem[]>;
 } {
+  let brandIndexCache: SupplementBrandIndexCache | null = null;
+
+  async function getBrandIndex(): Promise<SupplementBrandIndexEntry[]> {
+    const now = Date.now();
+
+    if (!brandIndexCache || brandIndexCache.expiresAt <= now) {
+      brandIndexCache = {
+        expiresAt: now + SUPPLEMENT_BRAND_INDEX_TTL_MS,
+        promise: loadSupplementBrandIndex(client),
+      };
+    }
+
+    const promise = brandIndexCache.promise;
+
+    try {
+      return await promise;
+    } catch (error) {
+      if (brandIndexCache?.promise === promise) {
+        brandIndexCache = null;
+      }
+      throw error;
+    }
+  }
+
   return {
     async getSupplementById(input) {
       const id = input.id.trim();
@@ -116,8 +153,34 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
         return [];
       }
 
-      const { rows } = await client.query<SupplementSearchItem>(
-        `
+      const brandScopes = findSupplementBrandScopes(await getBrandIndex(), q);
+
+      if (brandScopes.length > 0) {
+        return await searchBrandScopedSupplements(client, {
+          ...input,
+          q,
+          brandScopes,
+        });
+      }
+
+      return await searchGenericSupplements(client, {
+        ...input,
+        q,
+      });
+    },
+  };
+}
+
+async function searchGenericSupplements(
+  client: SupplementsQueryClient,
+  input: {
+    includeOffMarket: boolean;
+    limit: number;
+    q: string;
+  },
+): Promise<SupplementSearchItem[]> {
+  const { rows } = await client.query<SupplementSearchItem>(
+    `
         WITH query AS (
           SELECT
             $1::text AS raw_q,
@@ -190,12 +253,228 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
           name ASC
         LIMIT $3
         `,
-        [q, input.includeOffMarket, input.limit],
-      );
+    [input.q, input.includeOffMarket, input.limit],
+  );
 
-      return rows;
-    },
-  };
+  return rows;
+}
+
+async function searchBrandScopedSupplements(
+  client: SupplementsQueryClient,
+  input: {
+    brandScopes: SupplementBrandIndexEntry[];
+    includeOffMarket: boolean;
+    limit: number;
+    q: string;
+  },
+): Promise<SupplementSearchItem[]> {
+  const { rows } = await client.query<SupplementSearchItem>(
+    `
+    WITH query AS (
+      SELECT
+        $1::text AS raw_q,
+        btrim(regexp_replace(replace(lower($1::text), '''', ''), '[^a-z0-9]+', ' ', 'g')) AS normalized_q,
+        websearch_to_tsquery('simple', $1) AS tsq
+    ),
+    brand_candidates AS MATERIALIZED (
+      SELECT
+        id,
+        canonical_key,
+        data_origin AS "dataOrigin",
+        data_origin_id AS "dataOriginId",
+        name,
+        brand,
+        upc,
+        off_market AS "offMarket",
+        label,
+        data_origin_priority,
+        search_text,
+        btrim(regexp_replace(replace(lower(name), '''', ''), '[^a-z0-9]+', ' ', 'g')) AS normalized_name,
+        btrim(regexp_replace(replace(lower(brand), '''', ''), '[^a-z0-9]+', ' ', 'g')) AS normalized_brand
+      FROM supplements
+      WHERE
+        brand = ANY($4::text[])
+        AND ($2::boolean OR off_market = false)
+    ),
+    scored AS (
+      SELECT
+        brand_candidates.*,
+        query.raw_q,
+        query.normalized_q,
+        query.tsq,
+        btrim(replace(' ' || normalized_q || ' ', ' ' || normalized_brand || ' ', ' ')) AS product_q
+      FROM brand_candidates, query
+    ),
+    product_scored AS (
+      SELECT
+        *,
+        CASE
+          WHEN product_q = '' THEN ts_rank_cd(to_tsvector('simple', search_text), tsq)
+          ELSE ts_rank_cd(to_tsvector('simple', search_text), websearch_to_tsquery('simple', product_q))
+        END AS search_rank,
+        CASE
+          WHEN product_q = '' THEN strict_word_similarity(name, raw_q)
+          ELSE strict_word_similarity(name, product_q)
+        END AS name_similarity,
+        CASE
+          WHEN strpos(' ' || product_q || ' ', ' ' || normalized_name || ' ') > 0 THEN 1
+          ELSE 0
+        END AS name_phrase_match,
+        CASE
+          WHEN strpos(' ' || product_q || ' ', ' ' || normalized_name || ' ') > 0 THEN char_length(normalized_name)
+          ELSE 0
+        END AS name_phrase_length,
+        CASE
+          WHEN product_q = '' THEN 1
+          WHEN strpos(normalized_name, product_q) > 0 THEN 1
+          WHEN strpos(product_q, normalized_name) > 0 THEN 1
+          WHEN strict_word_similarity(name, product_q) >= 0.55 THEN 1
+          WHEN similarity(name, product_q) >= 0.30 THEN 1
+          ELSE 0
+        END AS product_identity_match
+      FROM scored
+    ),
+    ranked AS (
+      SELECT
+        *,
+        row_number() OVER (
+          PARTITION BY canonical_key
+          ORDER BY
+            name_phrase_match DESC,
+            name_phrase_length DESC,
+            "offMarket" ASC,
+            data_origin_priority ASC,
+            name_similarity DESC,
+            search_rank DESC,
+            name ASC,
+            id ASC
+        ) AS dedupe_rank
+      FROM product_scored
+      WHERE product_identity_match = 1
+    )
+    SELECT
+      id,
+      "dataOrigin",
+      "dataOriginId",
+      name,
+      brand,
+      upc,
+      "offMarket",
+      label
+    FROM ranked
+    WHERE dedupe_rank = 1
+    ORDER BY
+      name_phrase_match DESC,
+      name_phrase_length DESC,
+      data_origin_priority ASC,
+      name_similarity DESC,
+      search_rank DESC,
+      name ASC
+    LIMIT $3
+    `,
+    [
+      input.q,
+      input.includeOffMarket,
+      input.limit,
+      input.brandScopes.map((scope) => scope.brand),
+    ],
+  );
+
+  return rows;
+}
+
+async function loadSupplementBrandIndex(
+  client: SupplementsQueryClient,
+): Promise<SupplementBrandIndexEntry[]> {
+  const { rows } = await client.query<{ brand: string | null }>(
+    `
+    SELECT brand
+    FROM supplements
+    WHERE brand IS NOT NULL AND brand <> ''
+    GROUP BY brand
+    `,
+    [],
+  );
+
+  return rows.flatMap((row) => {
+    const brand = row.brand ?? "";
+    const normalizedBrand = normalizeSupplementSearchPhrase(brand);
+
+    if (!normalizedBrand) {
+      return [];
+    }
+
+    return [
+      {
+        brand,
+        normalizedBrand,
+      },
+    ];
+  });
+}
+
+function findSupplementBrandScopes(
+  brandIndex: SupplementBrandIndexEntry[],
+  q: string,
+): SupplementBrandIndexEntry[] {
+  const normalizedQ = normalizeSupplementSearchPhrase(q);
+
+  if (!normalizedQ) {
+    return [];
+  }
+
+  const matches = brandIndex
+    .filter((entry) => containsNormalizedPhrase(normalizedQ, entry.normalizedBrand))
+    .sort(
+      (left, right) =>
+        right.normalizedBrand.length - left.normalizedBrand.length ||
+        left.brand.localeCompare(right.brand),
+    );
+
+  return matches
+    .filter(
+      (entry) => {
+        const isSingleWordBrand = !entry.normalizedBrand.includes(" ");
+
+        if (
+          isSingleWordBrand &&
+          (normalizedQ === entry.normalizedBrand ||
+            !containsNormalizedEdgePhrase(normalizedQ, entry.normalizedBrand))
+        ) {
+          return false;
+        }
+
+        return (
+          !isSingleWordBrand ||
+          !matches.some(
+            (other) =>
+              other !== entry &&
+              containsNormalizedPhrase(other.normalizedBrand, entry.normalizedBrand),
+          )
+        );
+      },
+    )
+    .slice(0, MAX_SUPPLEMENT_BRAND_SCOPES);
+}
+
+function containsNormalizedPhrase(haystack: string, needle: string): boolean {
+  return needle.length > 0 && ` ${haystack} `.includes(` ${needle} `);
+}
+
+function containsNormalizedEdgePhrase(haystack: string, needle: string): boolean {
+  return (
+    needle.length > 0 &&
+    (haystack.startsWith(`${needle} `) || haystack.endsWith(` ${needle}`))
+  );
+}
+
+function normalizeSupplementSearchPhrase(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/'/gu, "")
+    .replace(/[^a-z0-9]+/gu, " ")
+    .trim()
+    .replace(/\s+/gu, " ");
 }
 
 function isSupplementLookupId(id: string): boolean {
@@ -247,7 +526,9 @@ export async function getSupplementByUpc(input: {
 }
 
 function defaultQueries(): ReturnType<typeof createSupplementsQueries> {
-  return createSupplementsQueries(getDefaultPool());
+  defaultQueriesInstance ??= createSupplementsQueries(getDefaultPool());
+
+  return defaultQueriesInstance;
 }
 
 function getDefaultPool(): PgPool {

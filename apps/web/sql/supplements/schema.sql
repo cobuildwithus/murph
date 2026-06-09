@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 CREATE TABLE IF NOT EXISTS supplements (
   id TEXT PRIMARY KEY,
   canonical_key TEXT NOT NULL,
@@ -28,6 +30,14 @@ CREATE TABLE IF NOT EXISTS supplements (
 CREATE INDEX IF NOT EXISTS supplements_search_idx
   ON supplements
   USING GIN (to_tsvector('simple', search_text));
+
+CREATE INDEX IF NOT EXISTS supplements_name_trgm_idx
+  ON supplements
+  USING GIN (name gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS supplements_brand_idx
+  ON supplements (brand)
+  WHERE brand IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS supplements_upc_idx
   ON supplements (upc)

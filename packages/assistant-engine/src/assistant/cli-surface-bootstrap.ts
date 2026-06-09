@@ -18,7 +18,7 @@ const assistantCliSurfaceBootstrapSchemaVersion =
 export const assistantCliSurfacePrebuiltSchemaVersion =
   'murph.assistant-cli-surface-prebuilt.v2'
 const assistantCliSurfaceBootstrapRenderPolicyVersion =
-  'murph.assistant-cli-surface-render-policy.v2'
+  'murph.assistant-cli-surface-render-policy.v3'
 const assistantCliSurfaceBootstrapContractCharBudget = 40_000
 export const assistantCliSurfacePrebuiltArtifactFileName =
   'cli-surface-contract.generated.json'
@@ -574,10 +574,9 @@ function renderAssistantCliContractCommandLine(
 ): string {
   const normalizedDescription =
     mode === 'name-only' ? '' : truncateAssistantCliText(command.description ?? '', 220)
-  const normalizedHint =
-    mode === 'name-only' || !hasRequiredAssistantCliArrayOption(command)
-      ? ''
-      : trimAssistantCliContractHint(truncateAssistantCliText(command.hint ?? '', 180))
+  const normalizedHint = trimAssistantCliContractHint(
+    truncateAssistantCliText(command.hint ?? '', 180),
+  )
   const parts = [`- \`${command.name}\`${normalizedDescription ? `: ${normalizedDescription}` : ''}`]
   const argsSchema = command.schema?.args
   const optionsSchema = command.schema?.options
@@ -649,15 +648,6 @@ function renderAssistantCliOptionSignature(
 
   const suffix = renderAssistantCliOptionValueSuffix(schema)
   return `--${optionName}${suffix}`
-}
-
-function hasRequiredAssistantCliArrayOption(
-  command: AssistantCliLlmsManifestCommand,
-): boolean {
-  const optionsSchema = command.schema?.options
-  return readAssistantCliRequiredSchemaPropertyNames(optionsSchema)
-    .filter((name) => !assistantCliSurfaceBootstrapIgnoredOptionNames.has(name))
-    .some((name) => optionsSchema?.properties?.[name]?.type === 'array')
 }
 
 function renderAssistantCliArrayItemValueSuffix(

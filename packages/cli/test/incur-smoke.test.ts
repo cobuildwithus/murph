@@ -1829,7 +1829,11 @@ test('health command help surfaces examples and hints through Incur metadata', a
   )
   assert.match(
     supplementSaveHelp,
-    /Supplements are saved as regimen records with kind supplement\./u,
+    /Repeat --ingredient with one shell-quoted JSON object per ingredient; do not pass plain ingredient text or an array\./u,
+  )
+  assert.match(
+    supplementSaveHelp,
+    /Use unit "mcg" and put qualifiers like "DFE" in note\./u,
   )
   assert.match(
     supplementStopHelp,
@@ -1976,7 +1980,7 @@ test('compact llms json manifest remains available', async () => {
     await runSourceCliRaw(['--llms', '--format', 'json']),
   ) as {
     version: string
-    commands: Array<{ name: string }>
+    commands: Array<{ hint?: string; name: string }>
   }
 
   assert.equal(manifest.version, 'incur.v1')
@@ -2012,6 +2016,17 @@ test('compact llms json manifest remains available', async () => {
     manifest.commands.some((command) => command.name === 'query projection rebuild'),
     true,
   )
+  const supplementSaveCommand = manifest.commands.find(
+    (command) => command.name === 'supplement save',
+  )
+  assert.match(
+    String(supplementSaveCommand?.hint ?? ''),
+    /one shell-quoted JSON object per ingredient/u,
+  )
+  assert.match(
+    String(supplementSaveCommand?.hint ?? ''),
+    /do not pass plain ingredient text or an array/u,
+  )
 })
 
 test('full llms json manifest remains available for schema-rich commands', async () => {
@@ -2020,6 +2035,7 @@ test('full llms json manifest remains available for schema-rich commands', async
   ) as {
     commands: Array<{
       description?: string
+      hint?: string
       name: string
       options?: Record<string, unknown>
     }>
@@ -2089,6 +2105,17 @@ test('full llms json manifest remains available for schema-rich commands', async
   assert.match(
     String(searchQueryCommand?.description ?? ''),
     /either positionally or with `--text`/u,
+  )
+  const supplementSaveCommand = manifest.commands.find(
+    (command) => command.name === 'supplement save',
+  )
+  assert.match(
+    String(supplementSaveCommand?.hint ?? ''),
+    /one shell-quoted JSON object per ingredient/u,
+  )
+  assert.match(
+    String(supplementSaveCommand?.hint ?? ''),
+    /qualifiers like "DFE" in note/u,
   )
 })
 

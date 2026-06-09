@@ -264,7 +264,7 @@ function createHealthLeafCommands(
         },
       },
     ],
-    hint: `--input accepts @file.json or - for structured ${descriptor.noun} payload imports. Run ${descriptor.command.commandName} scaffold first if you need the current canonical field shape.`,
+    hint: `Use --input @file.json or -. Run ${descriptor.command.commandName} scaffold for canonical fields.`,
     output: createHealthJsonImportResultSchema(descriptor),
   })
 
@@ -537,7 +537,7 @@ export const vaultCliCommandDescriptors = [
         path: ['capture', 'import-json'],
         description: captureCommandDescriptions.importJson,
         hint:
-          'Explicit JSON escape hatch for batch capture metadata, media/raw refs, labels, body sites, collections, tags, and related ids.',
+          'JSON escape hatch for batch capture metadata, media/raw refs, labels, body sites, tags, and related ids.',
       },
       {
         path: ['capture', 'show'],
@@ -719,7 +719,7 @@ export const vaultCliCommandDescriptors = [
         description:
           'Estimate route distance, duration, and optional approximate elevation between two points through temporary Mapbox lookups without persisting route data in Murph state.',
         hint:
-          'Set MAPBOX_ACCESS_TOKEN in the runtime environment before using this command. Route geometry is omitted by default, elevation is approximate when enabled, and text lookups stay temporary.',
+          'Requires MAPBOX_ACCESS_TOKEN. Geometry is omitted by default; elevation is approximate; text lookups stay temporary.',
         output: mapboxRouteEstimateResultSchema,
       },
     ],
@@ -742,7 +742,7 @@ export const vaultCliCommandDescriptors = [
         description:
           'Import one meal from a structured JSON payload file or stdin, preserving nested ingredients and nutrition provenance fields.',
         hint:
-          'Use this explicit JSON escape hatch for advanced imports; typed flags may override imported scalar fields.',
+          'JSON escape hatch for advanced imports; typed flags may override imported scalar fields.',
       },
       {
         path: ['meal', 'show'],
@@ -786,7 +786,7 @@ export const vaultCliCommandDescriptors = [
         path: ['measurement', 'import-json'],
         description: measurementCommandDescriptions.importJson,
         hint:
-          'Explicit JSON escape hatch for nested links, external references, rawRefs, stored-media import metadata, and other structured measurement fields outside typed add.',
+          'JSON escape hatch for nested links, external refs, rawRefs, media metadata, and other fields outside typed add.',
       },
       {
         path: ['measurement', 'show'],
@@ -820,7 +820,7 @@ export const vaultCliCommandDescriptors = [
         description:
           'Import one workout from an advanced structured JSON payload file or stdin.',
         hint:
-          'Explicit JSON escape hatch for source fields, media/raw refs, exercises, and sets outside the typed add surface.',
+          'JSON escape hatch for source fields, media/raw refs, exercises, and sets outside typed add.',
       },
       {
         path: ['workout', 'show'],
@@ -870,7 +870,7 @@ export const vaultCliCommandDescriptors = [
         description:
           'Import one reusable workout format from a structured JSON payload file or stdin.',
         hint:
-          'Explicit JSON escape hatch for routine exercises, planned sets, grouping, tags, and persistent notes outside the typed save surface.',
+          'JSON escape hatch for routine exercises, planned sets, grouping, tags, and notes outside typed save.',
       },
       {
         path: ['workout', 'format', 'show'],
@@ -1475,6 +1475,8 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['supplement', 'save'],
         description: 'Create or update one supplement from typed command fields.',
+        hint:
+          'Repeat --ingredient with one shell-quoted JSON object per ingredient; do not pass plain ingredient text or an array. Use unit "mcg" and put qualifiers like "DFE" in note.',
       },
       {
         path: ['supplement', 'stop'],

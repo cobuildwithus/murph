@@ -134,6 +134,9 @@ async function runSmokeChecks(input: {
       workspaceRoot: input.workspaceRoot,
     });
   const pythonVersion = await runPythonToolchainSmoke();
+  const ripgrepVersion = await runRipgrepToolchainSmoke({
+    scratchRoot: path.join(input.workspaceRoot, "ripgrep-smoke"),
+  });
 
   const vaultShowOutput = await runTextCommand("vault-cli", [
     "vault",
@@ -214,6 +217,8 @@ async function runSmokeChecks(input: {
     pdfTextSha256: sha256Hex(pdfParse.text),
     pythonVersion,
     reportedVaultIdMatchesExpected: true,
+    ripgrepCommandDiscovered: true,
+    ripgrepVersion,
     schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
     vaultCliCommandDiscovered: true,
     vaultRootRebound: true,
@@ -584,6 +589,33 @@ async function runPythonToolchainSmoke(): Promise<string> {
   return pythonVersion;
 }
 
+async function runRipgrepToolchainSmoke(input: {
+  scratchRoot: string;
+}): Promise<string> {
+  await resolveCommandPath("rg");
+  const ripgrepVersion = readRipgrepVersionProbeResult(
+    await runTextCommand("rg", ["--version"]),
+  );
+
+  await ensureScratchDirectory(input.scratchRoot);
+  await writeFile(
+    path.join(input.scratchRoot, "needle.txt"),
+    "hosted runner ripgrep smoke\n",
+    { mode: 0o600 },
+  );
+
+  const searchOutput = await runTextCommand("rg", [
+    "--line-number",
+    "ripgrep smoke",
+    input.scratchRoot,
+  ]);
+  if (!searchOutput.includes("needle.txt:1:hosted runner ripgrep smoke")) {
+    throw new Error("Hosted runner smoke rg search did not find the scratch proof file.");
+  }
+
+  return ripgrepVersion;
+}
+
 async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
   expectedVaultId: string;
   vaultRoot: string;
@@ -887,6 +919,9 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
     const pythonVersion = readPythonVersionProbeResult(
       (await execCommand("python3-version", ["python3", "--version"])).stdout,
     );
+    readRipgrepVersionProbeResult(
+      (await execCommand("rg-version", ["rg", "--version"])).stdout,
+    );
     await execCommand("python-major", [
       "python",
       "-c",
@@ -946,6 +981,7 @@ const proof = {
   providerCredentialPresent: Boolean(process.env.OPENAI_API_KEY || process.env.VERCEL_AI_API_KEY),
   python3PathBytes: Buffer.byteLength(findExecutable("python3"), "utf8"),
   pythonPathBytes: Buffer.byteLength(findExecutable("python"), "utf8"),
+  rgPathBytes: Buffer.byteLength(findExecutable("rg"), "utf8"),
   vaultCliPathBytes: Buffer.byteLength(findExecutable("vault-cli"), "utf8"),
   vaultRootInherited: process.env.VAULT === expectedVaultRoot,
 };
@@ -970,6 +1006,7 @@ function parseCodexEnvironmentProbe(
   );
   readPositiveNumber(record.pythonPathBytes, "environment probe.pythonPathBytes");
   readPositiveNumber(record.python3PathBytes, "environment probe.python3PathBytes");
+  readPositiveNumber(record.rgPathBytes, "environment probe.rgPathBytes");
 
   if (vaultCliPathBytes <= 0) {
     throw new Error("Codex app-server environment probe did not resolve vault-cli.");
@@ -999,6 +1036,15 @@ function readPythonVersionProbeResult(stdout: string): string {
   }
 
   return pythonVersion;
+}
+
+function readRipgrepVersionProbeResult(stdout: string): string {
+  const firstLine = stdout.split(/\r?\n/u)[0]?.trim() ?? "";
+  if (!/^ripgrep\s+\d/u.test(firstLine)) {
+    throw new Error("Hosted runner smoke did not execute rg --version.");
+  }
+
+  return firstLine;
 }
 
 function assertRootLlmsHidesVault(stdout: string): void {

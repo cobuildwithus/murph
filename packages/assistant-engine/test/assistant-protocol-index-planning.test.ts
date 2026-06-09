@@ -156,10 +156,10 @@ describe('assistant protocol index planning', () => {
     expect(plan.systemPrompt).toContain(skillRef)
     expect(plan.turnContextPrompt).toContain('Murph onboarding:')
     expect(plan.turnContextPrompt).toContain(
-      `Use \`${skillRef}\` only when the current user message is a greeting`,
+      `Use \`${skillRef}\` when onboarding is open and you need the next unresolved onboarding step`,
     )
     expect(plan.turnContextPrompt).toContain(
-      'Do not read or follow the onboarding skill before handling concrete help',
+      'Before ending a normal reply while onboarding is open, keep onboarding moving unless a skip condition applies',
     )
     expect(plan.turnContextPrompt).not.toContain(
       'roughly 5-6 short assistant messages',
@@ -279,6 +279,45 @@ describe('assistant protocol index planning', () => {
     expect(plan.resumeCodexThreadId).toBeNull()
     expect(plan.developerInstructions).toContain('bootstrap contract')
     expect(plan.assistantContractFingerprint).toEqual(expect.any(String))
+  })
+
+  it('keeps the assistant contract fingerprint stable across repeated identical plans', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const route = createRoute()
+    const input = {
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    } satisfies Parameters<typeof resolveAssistantRouteTurnPlan>[0]
+
+    const first = await resolveAssistantRouteTurnPlan(input)
+    const second = await resolveAssistantRouteTurnPlan(input)
+
+    expect(second.assistantContractFingerprint).toBe(
+      first.assistantContractFingerprint,
+    )
+    expect(first.assistantContractFingerprint).toBe(
+      buildAssistantCodexContractFingerprint({
+        developerInstructions: first.developerInstructions,
+        dynamicTools: MURPH_DYNAMIC_TOOLS,
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+      }),
+    )
   })
 
   it('starts a fresh thread when stable developer instructions change', async () => {

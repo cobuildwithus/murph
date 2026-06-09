@@ -156,6 +156,11 @@ test('supplement save compact guidance teaches shell-safe ingredient JSON object
   const help = await runRawInProcessCli(cli, ['supplement', 'save', '--help'])
   const llms = await runRawInProcessCli(cli, ['supplement', 'save', '--llms-full'])
 
+  for (const rendered of [help, llms]) {
+    assert.match(rendered, /do not pass plain ingredient text or an array/u)
+    assert.match(rendered, /qualifiers like "DFE" in note/u)
+  }
+
   for (const rendered of [ingredientSchema.description ?? '', help, llms]) {
     assert.match(rendered, /one shell-quoted JSON object/u)
     assert.match(rendered, /compound required/u)

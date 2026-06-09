@@ -934,19 +934,34 @@ describe('assistant Murph onboarding guidance', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
     )
     expect(prompt).toContain(
-      'First-run Murph onboarding is eligible for this turn, but it is not mandatory and must not block concrete help',
+      'First-run Murph onboarding is open until its completion criteria are met',
     )
     expect(prompt).toContain(
-      'Use `$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md` only when the current user message is a greeting',
+      "The user's immediate need comes first",
     )
     expect(prompt).toContain(
-      'Do not read or follow the onboarding skill before handling concrete help',
+      'Before ending a normal reply while onboarding is open, keep onboarding moving unless a skip condition applies',
     )
     expect(prompt).toContain(
-      'When concrete help interrupts onboarding, handle the concrete task fully in this turn',
+      'User-provided context can satisfy onboarding steps',
     )
     expect(prompt).toContain(
-      'Use the current prompt\'s date, timezone, channel, delivery route, and hosted wearable connection guidance as runtime context whenever the onboarding skill is actually used',
+      'Files, images, PDFs, labs, supplement labels, wearable data, medications, meals, workouts, symptoms, and setup answers may be both',
+    )
+    expect(prompt).toContain(
+      'If the user clearly declines or skips onboarding',
+    )
+    expect(prompt).toContain(
+      'only to mark onboarding complete with the declined reason',
+    )
+    expect(prompt).toContain(
+      'Skip onboarding advancement when the user explicitly asked for no follow-up',
+    )
+    expect(prompt).toContain(
+      'Use `$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md` when onboarding is open and you need the next unresolved onboarding step or need to handle a clear onboarding decline',
+    )
+    expect(prompt).toContain(
+      'Use the current prompt\'s date, timezone, channel, delivery route, and hosted wearable connection guidance as runtime context whenever the onboarding skill is used',
     )
     expect(prompt).not.toContain(
       'Before replying, read `$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md`',
@@ -982,7 +997,7 @@ describe('assistant Murph onboarding guidance', () => {
     )
     expect(prompt).not.toContain('Murph onboarding:')
     expect(prompt).not.toContain(
-      'First-run Murph onboarding is eligible for this turn',
+      'First-run Murph onboarding is open until its completion criteria are met',
     )
   })
 })
