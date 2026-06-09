@@ -902,7 +902,7 @@ test("Junction meal ids stay stable when provider meal nutrition changes", () =>
   assert.notDeepEqual(firstMeal?.fields?.nutrition, correctedMeal?.fields?.nutrition);
 });
 
-test("Junction meal ids use provider meal id aliases for stable external refs", () => {
+test("Junction meal ids prefer Junction summary ids over provider id aliases", () => {
   const buildMeal = (input: { calories: number; junctionId: string; timestamp: string; title: string }) =>
     normalizeJunctionSnapshot({
       importedAt: "2026-04-22T12:00:00.000Z",
@@ -932,6 +932,43 @@ test("Junction meal ids use provider meal id aliases for stable external refs", 
   const correctedMeal = buildMeal({
     calories: 425,
     junctionId: "junction-row-2",
+    timestamp: "2019-08-24T18:45:00Z",
+    title: "Dinner corrected",
+  });
+
+  assert.notEqual(firstMeal?.externalRef?.resourceId, correctedMeal?.externalRef?.resourceId);
+  assert.notEqual(firstMeal?.fields?.mealId, correctedMeal?.fields?.mealId);
+  assert.notEqual(firstMeal?.occurredAt, correctedMeal?.occurredAt);
+  assert.notDeepEqual(firstMeal?.fields?.nutrition, correctedMeal?.fields?.nutrition);
+});
+
+test("Junction meal ids use provider meal id aliases only when Junction id is absent", () => {
+  const buildMeal = (input: { calories: number; timestamp: string; title: string }) =>
+    normalizeJunctionSnapshot({
+      importedAt: "2026-04-22T12:00:00.000Z",
+      summaries: {
+        meal: [{
+          calendar_date: "2019-08-24",
+          data: {
+            entree: {
+              energy: { unit: "kcal", value: input.calories },
+            },
+          },
+          name: input.title,
+          provider_id: "provider-meal-alias-1",
+          source: { provider: "cronometer", type: "app" },
+          timestamp: input.timestamp,
+        }],
+      },
+    }).events?.find((event) => event.kind === "meal");
+
+  const firstMeal = buildMeal({
+    calories: 400,
+    timestamp: "2019-08-24T18:30:00Z",
+    title: "Dinner",
+  });
+  const correctedMeal = buildMeal({
+    calories: 425,
     timestamp: "2019-08-24T18:45:00Z",
     title: "Dinner corrected",
   });
@@ -1046,39 +1083,41 @@ test("Junction meal data arrays stay meal-internal food items", () => {
   });
 });
 
-test("Junction direct meal data envelopes split into meal records", () => {
+test("Junction meal data arrays keep food items with ids and timestamps meal-internal", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     summaries: {
-      meal: {
+      meal: [{
+        calendar_date: "2019-08-24",
         data: [
           {
-            data: [{ energy: { unit: "kcal", value: 180 }, name: "Yogurt" }],
-            id: "meal-envelope-breakfast-1",
-            name: "Breakfast",
-            timestamp: "2019-08-24T08:00:00Z",
+            energy: { unit: "kcal", value: 180 },
+            id: "food-row-1",
+            name: "Yogurt",
+            timestamp: "2019-08-24T08:05:00Z",
           },
           {
-            data: [{ energy: { unit: "kcal", value: 420 }, name: "Salad" }],
-            id: "meal-envelope-lunch-1",
-            name: "Lunch",
-            timestamp: "2019-08-24T12:30:00Z",
+            energy: { unit: "kcal", value: 120 },
+            id: "food-row-2",
+            name: "Granola",
+            timestamp: "2019-08-24T08:10:00Z",
           },
         ],
+        id: "meal-with-item-row-identities-1",
+        name: "Breakfast",
         source: { provider: "cronometer", type: "app" },
-      },
+        timestamp: "2019-08-24T08:00:00Z",
+      }],
     },
   });
   const meals = payload.events?.filter((event) => event.kind === "meal") ?? [];
 
-  assert.equal(meals.length, 2);
-  assert.deepEqual(meals.map((meal) => meal.title), ["Breakfast", "Lunch"]);
-  assert.deepEqual(meals.map((meal) => meal.fields?.ingredients), [["Yogurt"], ["Salad"]]);
-  assert.deepEqual(
-    meals.map((meal) => (meal.fields?.nutrition as { totals?: Record<string, unknown> } | undefined)?.totals),
-    [{ calories: 180 }, { calories: 420 }],
-  );
-  assert.deepEqual(meals.map((meal) => meal.dataOrigin?.sourceProviderSlug), ["cronometer", "cronometer"]);
+  assert.equal(meals.length, 1);
+  assert.equal(meals[0]?.title, "Breakfast");
+  assert.deepEqual(meals[0]?.fields?.ingredients, ["Yogurt", "Granola"]);
+  assert.deepEqual((meals[0]?.fields?.nutrition as { totals?: Record<string, unknown> } | undefined)?.totals, {
+    calories: 300,
+  });
 });
 
 test("Junction meal import writes canonical nutrition into a vault", async () => {

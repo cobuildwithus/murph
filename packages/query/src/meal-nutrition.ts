@@ -79,6 +79,10 @@ function asFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
 function selectMealNutritionTotals(
   attributes: Record<string, unknown>,
 ): Record<string, unknown> | null {
@@ -145,16 +149,83 @@ function mealDate(record: CanonicalEntity): string | null {
   return null;
 }
 
+function mealRevisionKey(record: CanonicalEntity): string | null {
+  if (!isRecord(record.attributes)) {
+    return null;
+  }
+
+  const externalRef = record.attributes.externalRef;
+  if (isRecord(externalRef)) {
+    const system = readString(externalRef.system);
+    const resourceType = readString(externalRef.resourceType);
+    const resourceId = readString(externalRef.resourceId);
+    const facet = readString(externalRef.facet);
+    if (system && resourceType && resourceId) {
+      return JSON.stringify(["externalRef", system, resourceType, resourceId, facet]);
+    }
+  }
+
+  const source = readString(record.attributes.source);
+  const mealId = readString(record.attributes.mealId);
+  return source === "device" && mealId ? JSON.stringify(["deviceMeal", mealId]) : null;
+}
+
+function revisionTimestampMillis(value: unknown): number {
+  const timestamp = readString(value);
+  if (!timestamp) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const millis = Date.parse(timestamp);
+  return Number.isFinite(millis) ? millis : Number.NEGATIVE_INFINITY;
+}
+
+function isLaterMealRevision(candidate: CanonicalEntity, current: CanonicalEntity): boolean {
+  const candidateRecordedAt = revisionTimestampMillis(candidate.attributes.recordedAt);
+  const currentRecordedAt = revisionTimestampMillis(current.attributes.recordedAt);
+  if (candidateRecordedAt !== currentRecordedAt) {
+    return candidateRecordedAt > currentRecordedAt;
+  }
+
+  const candidateOccurredAt = revisionTimestampMillis(candidate.occurredAt);
+  const currentOccurredAt = revisionTimestampMillis(current.occurredAt);
+  if (candidateOccurredAt !== currentOccurredAt) {
+    return candidateOccurredAt > currentOccurredAt;
+  }
+
+  return candidate.entityId.localeCompare(current.entityId) > 0;
+}
+
+function selectLatestMealRevisions(meals: readonly CanonicalEntity[]): CanonicalEntity[] {
+  const unkeyedMeals: CanonicalEntity[] = [];
+  const latestByKey = new Map<string, CanonicalEntity>();
+
+  for (const meal of meals) {
+    const key = mealRevisionKey(meal);
+    if (!key) {
+      unkeyedMeals.push(meal);
+      continue;
+    }
+
+    const current = latestByKey.get(key);
+    if (!current || isLaterMealRevision(meal, current)) {
+      latestByKey.set(key, meal);
+    }
+  }
+
+  return [...unkeyedMeals, ...latestByKey.values()];
+}
+
 export function summarizeMealNutritionTotals(
   readModel: VaultReadModel,
   options: MealNutritionTotalsOptions = {},
 ): MealNutritionTotalsResult {
-  const meals = listEntities(readModel, {
+  const meals = selectLatestMealRevisions(listEntities(readModel, {
     families: ["event"],
     kinds: ["meal"],
     from: options.from,
     to: options.to,
-  });
+  }));
 
   const totals = createNutritionAccumulator();
   const days = new Map<

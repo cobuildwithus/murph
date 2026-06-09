@@ -302,12 +302,12 @@ const JUNCTION_MEAL_PROVIDER_ID_PATHS = [
   "provider_id",
 ] as const;
 const JUNCTION_MEAL_STABLE_ID_PATHS = [
-  ...JUNCTION_MEAL_PROVIDER_ID_PATHS,
+  "id",
   "resourceId",
   "resource_id",
   "externalId",
   "external_id",
-  "id",
+  ...JUNCTION_MEAL_PROVIDER_ID_PATHS,
 ] as const;
 const JUNCTION_MEAL_TITLE_PATHS = [
   "name",
@@ -325,18 +325,6 @@ const JUNCTION_MEAL_CALENDAR_DATE_PATHS = [
   "local_date",
   "date",
   "day",
-] as const;
-const JUNCTION_MEAL_TIMESTAMP_PATHS = [
-  "observedAtRaw",
-  "observed_at_raw",
-  "observedAt",
-  "observed_at",
-  "timestamp",
-  "time",
-  "recordedAt",
-  "recorded_at",
-  "loggedAt",
-  "logged_at",
 ] as const;
 const JUNCTION_MEAL_ITEM_CONTAINER_PATHS = [
   "data",
@@ -439,8 +427,8 @@ const JUNCTION_MEAL_FIBER_GRAM_PATHS = [
   "nutrition.totals.fiberGrams",
   "totals.fiberGrams",
 ] as const;
-const JUNCTION_NESTED_RESOURCE_ENTRY_KEYS = ["meals", "data", "results", "items", "records"] as const;
-const JUNCTION_MEAL_NESTED_RESOURCE_ENTRY_KEYS = ["meals", "results", "records"] as const;
+const JUNCTION_NESTED_RESOURCE_ENTRY_KEYS = ["data", "results", "items", "records"] as const;
+const JUNCTION_MEAL_NESTED_RESOURCE_ENTRY_KEYS = ["meal", "meals", "results", "records"] as const;
 const JUNCTION_MEAL_NUTRITION_TOTAL_KEYS = [
   "calories",
   "proteinGrams",
@@ -2546,46 +2534,11 @@ function readNestedResourceEntries(envelope: PlainObject, resource?: string): Pl
     }
   }
 
-  return resource === "meal" ? readJunctionMealDirectEnvelopeEntries(envelope) : null;
+  return null;
 }
 
 function nestedResourceEntryKeys(resource: string | undefined): readonly string[] {
   return resource === "meal" ? JUNCTION_MEAL_NESTED_RESOURCE_ENTRY_KEYS : JUNCTION_NESTED_RESOURCE_ENTRY_KEYS;
-}
-
-function readJunctionMealDirectEnvelopeEntries(envelope: PlainObject): PlainObject[] | null {
-  if (isJunctionMealSummaryRecord(envelope)) {
-    return null;
-  }
-
-  for (const key of ["data", "items"] as const) {
-    const entries = plainObjectEntries(envelope[key]);
-    if (entries.length > 0 && entries.every(isJunctionMealSummaryRecord)) {
-      return entries;
-    }
-  }
-
-  return null;
-}
-
-function plainObjectEntries(value: unknown): PlainObject[] {
-  const directEntry = asPlainObject(value);
-  if (directEntry) {
-    return [directEntry];
-  }
-
-  return asArray(value).flatMap((entry) => {
-    const normalized = asPlainObject(entry);
-    return normalized ? [normalized] : [];
-  });
-}
-
-function isJunctionMealSummaryRecord(entry: PlainObject): boolean {
-  return Boolean(
-    firstStringFromPaths(entry, JUNCTION_MEAL_STABLE_ID_PATHS)
-      || firstIsoDateFromPaths(entry, JUNCTION_MEAL_CALENDAR_DATE_PATHS)
-      || firstStringFromPaths(entry, JUNCTION_MEAL_TIMESTAMP_PATHS),
-  );
 }
 
 function mergeNestedResourceEntry(envelope: PlainObject, nestedEntry: PlainObject): PlainObject {
