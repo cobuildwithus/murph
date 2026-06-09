@@ -176,7 +176,7 @@ export default defineConfig({
     // apps/web and apps/cloudflare stay in their dedicated verify lanes so the
     // root multi-project run does not execute them twice.
     projects: [
-      ...ROOT_REPO_PROJECTS.map(({ config, include, root }, index) =>
+      ...ROOT_REPO_PROJECTS.map(({ config, include, root }) =>
         mergeConfig(
           config,
           {
@@ -186,7 +186,10 @@ export default defineConfig({
               include,
               sequence: {
                 ...rootRepoVitestConcurrency.sequence,
-                groupOrder: index,
+                // Package projects are independent of each other (no fixed
+                // ports, no shared mutable dirs), so they share one
+                // concurrent group and can fill the worker pool together.
+                groupOrder: 0,
               },
             },
           },
@@ -199,7 +202,10 @@ export default defineConfig({
             test: {
               sequence: {
                 ...project.test?.sequence,
-                groupOrder: ROOT_REPO_PROJECTS.length + index,
+                // The CLI buckets share the prepared runtime-artifact lock
+                // and persistent command harness, so they stay serialized
+                // after the package group, preserving their bucket order.
+                groupOrder: 1 + index,
               },
             },
           },
