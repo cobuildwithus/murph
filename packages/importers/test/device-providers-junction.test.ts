@@ -99,6 +99,52 @@ function assertEventRawArtifactRolesExist(payload: DeviceBatchImportPayload): vo
   }
 }
 
+function makeJunctionCronometerMealSnapshot(options: {
+  chickenCalories?: number;
+  chickenProtein?: number;
+} = {}) {
+  return {
+    accountId: "junction-account-hash-1",
+    importedAt: "2026-04-22T12:00:00.000Z",
+    windowStart: "2019-08-24T00:00:00.000Z",
+    windowEnd: "2019-08-24T23:59:59.999Z",
+    summaries: {
+      meal: [{
+        date: "2019-08-24",
+        created_at: "2023-02-27T20:31:24+00:00",
+        data: {
+          "Chicken coquet starter": {
+            energy: {
+              unit: "kcal",
+              value: options.chickenCalories ?? 400,
+            },
+            macros: {
+              carbs: 75,
+              fats: {
+                saturated: 98,
+                total: 100,
+              },
+              fiber: 3,
+              protein: options.chickenProtein ?? 10,
+              sugar: 25,
+            },
+          },
+          "Coffee, black, 1 tbsp(s)": {
+            energy: { unit: "kcal", value: 0 },
+            macros: { carbs: 0, fats: { total: 0 }, protein: 0, sugar: 0 },
+          },
+        },
+        id: "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+        name: "Dinner",
+        provider_id: "123456",
+        source: { app_id: "cronometer", provider: "cronometer", type: "app" },
+        timestamp: "2019-08-24T18:30:00Z",
+        updated_at: "2023-02-28T01:22:38+00:00",
+      }],
+    },
+  };
+}
+
 test("resolveJunctionOrigin accepts Junction attribution aliases", () => {
   const slugCases: Array<[string, Record<string, unknown>]> = [
     ["sourceProviderSlug", { sourceProviderSlug: "oura" }],
@@ -270,7 +316,7 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
   assert.equal(payload.accountId, "junction-account-hash-1");
   assert.deepEqual(payload.provenance?.summaryResources, [
     ...JUNCTION_OPT_IN_SUMMARY_RESOURCES,
-    ...JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+    ...JUNCTION_DEFAULT_SUMMARY_RESOURCES.filter((resource) => resource !== "meal"),
   ]);
   assert.deepEqual(payload.provenance?.timeseriesResources, [
     "blood_oxygen",
@@ -677,6 +723,396 @@ test("Junction summary resource id changes for same-provider explicit ids from d
   assert.match(resourceIds[0] ?? "", /^activity-[a-f0-9]{16}$/u);
   assert.match(resourceIds[1] ?? "", /^activity-[a-f0-9]{16}$/u);
   assert.notEqual(resourceIds[0], resourceIds[1]);
+});
+
+test("Junction normalizer emits Cronometer meal events with summed nutrition totals", () => {
+  const payload = normalizeJunctionSnapshot(makeJunctionCronometerMealSnapshot());
+  const meal = payload.events?.find((event) => event.kind === "meal");
+  const fields = meal?.fields as {
+    ingredients?: string[];
+    mealId?: string;
+    nutrition?: {
+      provenance?: Record<string, unknown>;
+      totals?: Record<string, unknown>;
+    };
+  } | undefined;
+
+  assert.ok(meal);
+  assert.equal(meal.title, "Dinner");
+  assert.equal(meal.occurredAt, "2019-08-24T18:30:00.000Z");
+  assert.equal(meal.dayKey, "2019-08-24");
+  assert.equal(meal.externalRef?.system, "junction");
+  assert.equal(meal.externalRef?.resourceType, "junction-cronometer-meal");
+  assert.equal(meal.externalRef?.facet, "meal");
+  assert.equal(meal.dataOrigin?.aggregatorProvider, "junction");
+  assert.equal(meal.dataOrigin?.sourceProviderSlug, "cronometer");
+  assert.match(fields?.mealId ?? "", /^meal_[0-9A-HJKMNP-TV-Z]{26}$/u);
+  assert.deepEqual(fields?.ingredients, [
+    "Chicken coquet starter",
+    "Coffee, black, 1 tbsp(s)",
+  ]);
+  assert.deepEqual(fields?.nutrition?.totals, {
+    calories: 400,
+    proteinGrams: 10,
+    carbsGrams: 75,
+    fatGrams: 100,
+    fiberGrams: 3,
+  });
+  assert.deepEqual(fields?.nutrition?.provenance, {
+    source: "database",
+    confidence: "high",
+    sourceDetail: "junction:cronometer:meal",
+  });
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-meal"));
+  assert.deepEqual(payload.provenance?.summaryResources, ["meal"]);
+  assertEventRawArtifactRolesExist(payload);
+});
+
+test("Junction normalizer emits direct meal nutrition totals when items are absent", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      meal: [{
+        date: "2019-08-24",
+        energy: {
+          unit: "kJ",
+          value: 418.4,
+        },
+        id: "direct-totals-meal-1",
+        ingredientNames: ["yogurt", "berries"],
+        name: "Breakfast",
+        nutrition: {
+          totals: {
+            carbsGrams: 20,
+            fatGrams: 4,
+            fiberGrams: 3,
+            proteinGrams: 12,
+          },
+        },
+        source: { provider: "cronometer", type: "app" },
+      }],
+    },
+  });
+  const meal = payload.events?.find((event) => event.kind === "meal");
+  const nutrition = meal?.fields?.nutrition as {
+    totals?: Record<string, unknown>;
+  } | undefined;
+
+  assert.ok(meal);
+  assert.equal(meal.title, "Breakfast");
+  assert.equal(meal.occurredAt, "2019-08-24T00:00:00.000Z");
+  assert.deepEqual(meal.fields?.ingredients, ["yogurt", "berries"]);
+  assert.deepEqual(nutrition?.totals, {
+    calories: 100,
+    proteinGrams: 12,
+    carbsGrams: 20,
+    fatGrams: 4,
+    fiberGrams: 3,
+  });
+});
+
+test("Junction normalizer preserves name-only meal item ingredients", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      meal: [{
+        calendar_date: "2019-08-24",
+        foodItems: [
+          { name: "Plain yogurt" },
+          { food_name: "Blueberries" },
+          "Granola",
+        ],
+        id: "name-only-food-items-1",
+        name: "Breakfast",
+        nutrition: {
+          totals: {
+            calories: 350,
+            carbsGrams: 48,
+            fatGrams: 8,
+            proteinGrams: 18,
+          },
+        },
+        source: { provider: "cronometer", type: "app" },
+        timestamp: "2019-08-24T08:00:00Z",
+      }],
+    },
+  });
+  const meal = payload.events?.find((event) => event.kind === "meal");
+
+  assert.equal(meal?.title, "Breakfast");
+  assert.deepEqual(meal?.fields?.ingredients, ["Plain yogurt", "Blueberries", "Granola"]);
+  assert.deepEqual((meal?.fields?.nutrition as { totals?: Record<string, unknown> } | undefined)?.totals, {
+    calories: 350,
+    proteinGrams: 18,
+    carbsGrams: 48,
+    fatGrams: 8,
+  });
+});
+
+test("Junction meal direct nutrition totals win over sparse item totals", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      meal: [{
+        calendar_date: "2019-08-24",
+        data: [{
+          energy: { unit: "kcal", value: 0 },
+          macros: {
+            fiber: 2,
+            protein: 0,
+          },
+          name: "Chicken bowl",
+        }],
+        id: "sparse-items-with-direct-total-1",
+        name: "Lunch",
+        nutrition: {
+          totals: {
+            calories: 650,
+            carbsGrams: 50,
+            fatGrams: 20,
+            proteinGrams: 42,
+          },
+        },
+        source: { provider: "cronometer", type: "app" },
+        timestamp: "2019-08-24T12:00:00Z",
+      }],
+    },
+  });
+  const meal = payload.events?.find((event) => event.kind === "meal");
+
+  assert.deepEqual((meal?.fields?.nutrition as { totals?: Record<string, unknown> } | undefined)?.totals, {
+    calories: 650,
+    proteinGrams: 42,
+    carbsGrams: 50,
+    fatGrams: 20,
+    fiberGrams: 2,
+  });
+});
+
+test("Junction meal ids stay stable when provider meal nutrition changes", () => {
+  const firstMeal = normalizeJunctionSnapshot(
+    makeJunctionCronometerMealSnapshot({ chickenCalories: 400, chickenProtein: 10 }),
+  ).events?.find((event) => event.kind === "meal");
+  const correctedMeal = normalizeJunctionSnapshot(
+    makeJunctionCronometerMealSnapshot({ chickenCalories: 425, chickenProtein: 12 }),
+  ).events?.find((event) => event.kind === "meal");
+
+  assert.equal(firstMeal?.externalRef?.resourceId, correctedMeal?.externalRef?.resourceId);
+  assert.equal(firstMeal?.fields?.mealId, correctedMeal?.fields?.mealId);
+  assert.notDeepEqual(firstMeal?.fields?.nutrition, correctedMeal?.fields?.nutrition);
+});
+
+test("Junction meal ids use provider meal id aliases for stable external refs", () => {
+  const buildMeal = (input: { calories: number; junctionId: string; timestamp: string; title: string }) =>
+    normalizeJunctionSnapshot({
+      importedAt: "2026-04-22T12:00:00.000Z",
+      summaries: {
+        meal: [{
+          calendar_date: "2019-08-24",
+          data: {
+            entree: {
+              energy: { unit: "kcal", value: input.calories },
+            },
+          },
+          id: input.junctionId,
+          name: input.title,
+          provider_id: "provider-meal-alias-1",
+          source: { provider: "cronometer", type: "app" },
+          timestamp: input.timestamp,
+        }],
+      },
+    }).events?.find((event) => event.kind === "meal");
+
+  const firstMeal = buildMeal({
+    calories: 400,
+    junctionId: "junction-row-1",
+    timestamp: "2019-08-24T18:30:00Z",
+    title: "Dinner",
+  });
+  const correctedMeal = buildMeal({
+    calories: 425,
+    junctionId: "junction-row-2",
+    timestamp: "2019-08-24T18:45:00Z",
+    title: "Dinner corrected",
+  });
+
+  assert.equal(firstMeal?.externalRef?.resourceId, correctedMeal?.externalRef?.resourceId);
+  assert.equal(firstMeal?.fields?.mealId, correctedMeal?.fields?.mealId);
+  assert.notEqual(firstMeal?.occurredAt, correctedMeal?.occurredAt);
+  assert.notDeepEqual(firstMeal?.fields?.nutrition, correctedMeal?.fields?.nutrition);
+});
+
+test("Junction no-id meal external refs include fallback title identity", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      meal: [
+        {
+          calendar_date: "2019-08-24",
+          data: { entree: { energy: { unit: "kcal", value: 100 } } },
+          name: "Breakfast",
+          source: { provider: "cronometer", type: "app" },
+          timestamp: "2019-08-24T08:00:00Z",
+        },
+        {
+          calendar_date: "2019-08-24",
+          data: { entree: { energy: { unit: "kcal", value: 200 } } },
+          name: "Lunch",
+          source: { provider: "cronometer", type: "app" },
+          timestamp: "2019-08-24T08:00:00Z",
+        },
+      ],
+    },
+  });
+  const meals = payload.events?.filter((event) => event.kind === "meal") ?? [];
+
+  assert.equal(meals.length, 2);
+  assert.notEqual(meals[0]?.externalRef?.resourceId, meals[1]?.externalRef?.resourceId);
+  assert.notEqual(meals[0]?.fields?.mealId, meals[1]?.fields?.mealId);
+});
+
+test("Junction duplicate no-id meal fallbacks get distinct identities", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      meal: [
+        {
+          data: { snack: { energy: { unit: "kcal", value: 140 } } },
+          name: "Snack",
+          source: { provider: "cronometer", type: "app" },
+          timestamp: "2019-08-24T15:00:00Z",
+        },
+        {
+          data: { snack: { energy: { unit: "kcal", value: 220 } } },
+          name: "Snack",
+          source: { provider: "cronometer", type: "app" },
+          timestamp: "2019-08-24T15:00:00Z",
+        },
+      ],
+    },
+  });
+  const meals = payload.events?.filter((event) => event.kind === "meal") ?? [];
+
+  assert.equal(meals.length, 2);
+  assert.equal(meals[0]?.title, "Snack");
+  assert.equal(meals[1]?.title, "Snack");
+  assert.notEqual(meals[0]?.externalRef?.resourceId, meals[1]?.externalRef?.resourceId);
+  assert.notEqual(meals[0]?.fields?.mealId, meals[1]?.fields?.mealId);
+});
+
+test("Junction meal data arrays stay meal-internal food items", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      meal: [{
+        calendar_date: "2019-08-24",
+        data: [
+          {
+            energy: { unit: "kcal", value: 120 },
+            name: "Eggs",
+          },
+          {
+            energy: { unit: "kcal", value: 80 },
+            name: "Toast",
+          },
+        ],
+        id: "meal-data-array-1",
+        name: "Breakfast plate",
+        nutrition: {
+          totals: {
+            carbsGrams: 15,
+            fatGrams: 9,
+            proteinGrams: 18,
+          },
+        },
+        source: { provider: "cronometer", type: "app" },
+        timestamp: "2019-08-24T08:00:00Z",
+      }],
+    },
+  });
+  const meals = payload.events?.filter((event) => event.kind === "meal") ?? [];
+  const nutrition = meals[0]?.fields?.nutrition as {
+    totals?: Record<string, unknown>;
+  } | undefined;
+
+  assert.equal(meals.length, 1);
+  assert.equal(meals[0]?.title, "Breakfast plate");
+  assert.deepEqual(meals[0]?.fields?.ingredients, ["Eggs", "Toast"]);
+  assert.deepEqual(nutrition?.totals, {
+    calories: 200,
+    proteinGrams: 18,
+    carbsGrams: 15,
+    fatGrams: 9,
+  });
+});
+
+test("Junction direct meal data envelopes split into meal records", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      meal: {
+        data: [
+          {
+            data: [{ energy: { unit: "kcal", value: 180 }, name: "Yogurt" }],
+            id: "meal-envelope-breakfast-1",
+            name: "Breakfast",
+            timestamp: "2019-08-24T08:00:00Z",
+          },
+          {
+            data: [{ energy: { unit: "kcal", value: 420 }, name: "Salad" }],
+            id: "meal-envelope-lunch-1",
+            name: "Lunch",
+            timestamp: "2019-08-24T12:30:00Z",
+          },
+        ],
+        source: { provider: "cronometer", type: "app" },
+      },
+    },
+  });
+  const meals = payload.events?.filter((event) => event.kind === "meal") ?? [];
+
+  assert.equal(meals.length, 2);
+  assert.deepEqual(meals.map((meal) => meal.title), ["Breakfast", "Lunch"]);
+  assert.deepEqual(meals.map((meal) => meal.fields?.ingredients), [["Yogurt"], ["Salad"]]);
+  assert.deepEqual(
+    meals.map((meal) => (meal.fields?.nutrition as { totals?: Record<string, unknown> } | undefined)?.totals),
+    [{ calories: 180 }, { calories: 420 }],
+  );
+  assert.deepEqual(meals.map((meal) => meal.dataOrigin?.sourceProviderSlug), ["cronometer", "cronometer"]);
+});
+
+test("Junction meal import writes canonical nutrition into a vault", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-meal-import");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+    });
+
+    const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: makeJunctionCronometerMealSnapshot(),
+      },
+      { corePort: coreRuntime },
+    );
+    const mealEvent = result.events.find((event) => event.kind === "meal");
+
+    assert.ok(mealEvent);
+    if (mealEvent.kind !== "meal") {
+      throw new Error("expected a meal event");
+    }
+    assert.match(mealEvent.mealId, /^meal_[0-9A-HJKMNP-TV-Z]{26}$/u);
+    assert.deepEqual(mealEvent.ingredients, ["Chicken coquet starter", "Coffee, black, 1 tbsp(s)"]);
+    assert.equal(mealEvent.nutrition?.totals?.calories, 400);
+    assert.equal(mealEvent.nutrition?.totals?.proteinGrams, 10);
+    assert.equal(mealEvent.nutrition?.provenance?.sourceDetail, "junction:cronometer:meal");
+    assert.ok(result.rawArtifacts.some((artifact) => artifact.relativePath.includes("junction-summary-meal")));
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("Junction summary resource id for explicit ids includes provider, source type, and source instance provenance", () => {
@@ -1541,6 +1977,44 @@ test("Junction normalizer unwraps object-valued data envelopes into usable recor
   assertNoFullJunctionTimeseriesArtifacts(payload);
 });
 
+test("Junction normalizer unwraps meals envelopes into individual records", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      meal: {
+        meals: [
+          {
+            calendar_date: "2019-08-24",
+            data: { entree: { energy: { unit: "kcal", value: 100 } } },
+            id: "meal-envelope-1",
+            name: "Breakfast",
+            source: { provider: "cronometer", type: "app" },
+            timestamp: "2019-08-24T08:00:00Z",
+          },
+          {
+            calendar_date: "2019-08-24",
+            data: { entree: { energy: { unit: "kcal", value: 200 } } },
+            id: "meal-envelope-2",
+            name: "Lunch",
+            source: { provider: "cronometer", type: "app" },
+            timestamp: "2019-08-24T12:00:00Z",
+          },
+        ],
+      },
+    },
+  });
+
+  const meals = payload.events?.filter((event) => event.kind === "meal") ?? [];
+
+  assert.deepEqual(meals.map((event) => event.title), ["Breakfast", "Lunch"]);
+  assert.deepEqual(
+    meals.map((event) => event.fields?.nutrition).map((nutrition) =>
+      (nutrition as { totals?: { calories?: number } } | undefined)?.totals?.calories
+    ),
+    [100, 200],
+  );
+});
+
 test("Junction normalizer defaults to the documented resource allowlist", () => {
   assert.deepEqual([...JUNCTION_DEFAULT_SUMMARY_RESOURCES], [
     "activity",
@@ -1548,6 +2022,7 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "sleep_cycle",
     "workouts",
     "body",
+    "meal",
   ]);
   assert.deepEqual([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES], [
     "blood_oxygen",
@@ -1555,11 +2030,10 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
   ]);
   assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], ["profile"]);
   assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], []);
-  assert.deepEqual([...JUNCTION_RAW_ONLY_SUMMARY_RESOURCES], ["meal", "menstrual_cycle"]);
+  assert.deepEqual([...JUNCTION_RAW_ONLY_SUMMARY_RESOURCES], ["menstrual_cycle"]);
   assert.deepEqual([...JUNCTION_ALLOWED_SUMMARY_RESOURCES], [
     ...JUNCTION_DEFAULT_SUMMARY_RESOURCES,
     ...JUNCTION_OPT_IN_SUMMARY_RESOURCES,
-    "meal",
     "menstrual_cycle",
   ]);
   assert.deepEqual([...JUNCTION_ALLOWED_TIMESERIES_RESOURCES], [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES]);
@@ -1621,25 +2095,6 @@ test("Junction normalizer keeps configured raw-only summaries as sanitized evide
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     summaries: {
-      meals: [{
-        id: "meal-1",
-        timestamp: "2026-04-22T18:30:00Z",
-        name: "Dinner",
-        calories: 650,
-        source: {
-          provider: "myfitnesspal",
-          type: "app",
-          app_id: "raw-meal-app",
-          appID: "raw-meal-app-acronym",
-          device_id: "raw-meal-device",
-          deviceID: "raw-meal-device-acronym",
-          displayName: "raw-meal-source-display",
-          "source-app-id": "raw-meal-source-app-dashed",
-          sourceAppID: "raw-meal-source-app-acronym",
-          sourceDeviceID: "raw-meal-source-device-acronym",
-          sourceName: "raw-meal-source-name",
-        },
-      }],
       menstrual_cycle: [{
         id: "cycle-1",
         created_at: "2026-04-01T12:00:00Z",
@@ -1665,31 +2120,19 @@ test("Junction normalizer keeps configured raw-only summaries as sanitized evide
     },
   });
 
-  const rawMealArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "junction-summary-meal");
   const rawCycleArtifact = payload.rawArtifacts?.find((artifact) =>
     artifact.role === "junction-summary-menstrual-cycle"
   );
   const rawArtifactText = JSON.stringify(payload.rawArtifacts);
 
-  assert.deepEqual(payload.provenance?.summaryResources, ["meal", "menstrual_cycle"]);
+  assert.deepEqual(payload.provenance?.summaryResources, ["menstrual_cycle"]);
   assert.deepEqual(payload.provenance?.timeseriesResources, []);
   assert.deepEqual(payload.events, []);
   assert.equal(payload.samples?.length ?? 0, 0);
-  assert.match(JSON.stringify(rawMealArtifact?.content), /Dinner/u);
-  assert.match(JSON.stringify(rawMealArtifact?.content), /650/u);
   assert.match(JSON.stringify(rawCycleArtifact?.content), /period_start/u);
   assert.match(JSON.stringify(rawCycleArtifact?.content), /menstrual_flow/u);
   assert.match(JSON.stringify(rawCycleArtifact?.content), /protection_used/u);
   assertJsonOmits(rawArtifactText, [
-    "raw-meal-app",
-    "raw-meal-app-acronym",
-    "raw-meal-device",
-    "raw-meal-device-acronym",
-    "raw-meal-source-display",
-    "raw-meal-source-app-dashed",
-    "raw-meal-source-app-acronym",
-    "raw-meal-source-device-acronym",
-    "raw-meal-source-name",
     "raw-cycle-source-app",
     "raw-cycle-source-name",
     "sinus_rhythm",
