@@ -38,7 +38,7 @@ export default function SignalsPage() {
 }
 
 function SignalsPageContent() {
-  const { client, error, refresh, status } = useBrowserVault();
+  const { client, error, refresh, refreshPending, status } = useBrowserVault();
   const signalRows = useMemo(() => client ? client.metrics.series() : [], [client]);
   const signalSummaries = useMemo(() => summarizeSignalRows(signalRows), [signalRows]);
   const assistantSummary = client?.replica.assistantSummary ?? {
@@ -51,6 +51,7 @@ function SignalsPageContent() {
   const bodyState = signalSummaries.bodyState;
   const sourceHealth = client?.replica.sourceHealthRows ?? [];
   const canRenderContent = status === "empty" || client !== null;
+  const isPreparingEmptyReplica = status === "empty" && refreshPending;
   const hasWearableData =
     sleep.length > 0 ||
     recovery.length > 0 ||
@@ -77,7 +78,9 @@ function SignalsPageContent() {
             ? `Latest data ${formatIsoDate(assistantSummary.latestDate)}`
             : client
               ? `Updated ${formatIsoDate(client.replica.generatedAt)}`
-              : "No signals available yet."}
+              : isPreparingEmptyReplica
+                ? "Preparing signals."
+                : "No signals available yet."}
         </div>
       </div>
 
@@ -107,11 +110,18 @@ function SignalsPageContent() {
       ) : null}
 
       {canRenderContent && !hasWearableData ? (
-        <Card>
+        <Card
+          aria-live={isPreparingEmptyReplica ? "polite" : undefined}
+          role={isPreparingEmptyReplica ? "status" : undefined}
+        >
           <CardHeader>
-            <CardTitle>No wearable signals yet</CardTitle>
+            <CardTitle>
+              {isPreparingEmptyReplica ? "Preparing your signals" : "No wearable signals yet"}
+            </CardTitle>
             <CardDescription>
-              Connect a source or sync more recent data to populate sleep, recovery, activity, and body metrics.
+              {isPreparingEmptyReplica
+                ? "Your latest signal data is still being prepared."
+                : "Connect a source or sync more recent data to populate sleep, recovery, activity, and body metrics."}
             </CardDescription>
           </CardHeader>
         </Card>

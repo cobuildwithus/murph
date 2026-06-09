@@ -1068,8 +1068,16 @@
                           "minLength": 1,
                           "maxLength": 4000
                         },
+                        "tag": {
+                          "description": "Optional automation tag. Repeat --tag for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
                         "tags": {
-                          "description": "Optional automation tags. Repeat --tags for multiple values. Do not comma-delimit multiple tags.",
+                          "description": "Legacy alias for --tag. Repeat --tags for multiple values. Do not comma-delimit multiple tags.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -1236,8 +1244,16 @@
                           "minLength": 1,
                           "maxLength": 4000
                         },
+                        "tag": {
+                          "description": "Optional automation tag. Repeat --tag for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
                         "tags": {
-                          "description": "Optional automation tags. Repeat --tags for multiple values. Do not comma-delimit multiple tags.",
+                          "description": "Legacy alias for --tag. Repeat --tags for multiple values. Do not comma-delimit multiple tags.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -9391,9 +9407,95 @@
                             "minLength": 1
                           }
                         },
+                        "onboardingCompletedAt": {
+                          "description": "Timestamp when the protocol onboarding capture completed.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "setupAnswer": {
+                          "description": "Setup answer as key=value. Repeat --setup-answer for multiple setup slots.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "safetyCautionLevel": {
+                          "description": "Onboarding safety caution level.",
+                          "type": "string",
+                          "enum": [
+                            "low",
+                            "moderate",
+                            "high",
+                            "unknown"
+                          ]
+                        },
+                        "safetyDisposition": {
+                          "description": "Onboarding safety disposition.",
+                          "type": "string",
+                          "enum": [
+                            "continue_with_caution",
+                            "clinician_guidance_before_unsupervised_start",
+                            "do_not_start_unsupervised",
+                            "do_not_start_unsupervised_explicit_clinician_clearance_required"
+                          ]
+                        },
+                        "positiveQuestionId": {
+                          "description": "Positive safety question ids. Repeat --positive-question-id for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "safetyNote": {
+                          "description": "Safety note. Repeat --safety-note for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "contextNote": {
+                          "description": "Context note from onboarding. Repeat --context-note for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "reminderPolicy": {
+                          "description": "Reminder policy id selected during onboarding.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "reminderOptionId": {
+                          "description": "Reminder option id selected during onboarding.",
+                          "type": "string",
+                          "minLength": 1
+                        },
                         "remindersEnabled": {
                           "description": "Whether assistant reminders are enabled for the run.",
                           "type": "boolean"
+                        },
+                        "checkInCadence": {
+                          "description": "Assistant check-in cadence for the run.",
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "daily",
+                            "every_3_days",
+                            "weekly"
+                          ]
+                        },
+                        "notificationStyle": {
+                          "description": "Assistant notification style for the run.",
+                          "type": "string",
+                          "enum": [
+                            "skip_by_default",
+                            "send_scheduled_summary"
+                          ]
                         },
                         "missedLogFollowup": {
                           "description": "Assistant follow-up policy for missed logs.",

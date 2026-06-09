@@ -20,10 +20,8 @@ export type BrowserVaultReplicaFreshnessReason =
   | "current"
   | "missing"
   | "source_mismatch"
-  | "checkpoint_newer"
   | "max_age_exceeded"
   | "invalid_generated_at"
-  | "invalid_checkpointed_at"
   | "invalid_now";
 
 export const BROWSER_VAULT_REPLICA_DEFAULT_MAX_AGE_MS = 24 * 60 * 60 * 1_000;
@@ -41,7 +39,6 @@ export interface BrowserVaultReplicaFreshnessAssessment {
 }
 
 export interface BrowserVaultReplicaFreshnessInput {
-  checkpointedAt?: string | null;
   currentSourceHash?: string | null;
   maxAgeMs?: number | null;
   now?: Date | number | string | null;
@@ -76,16 +73,6 @@ export function assessBrowserVaultReplicaFreshness(
     return stale("source_mismatch");
   }
 
-  if (input.checkpointedAt) {
-    const checkpointedAtMs = parseFreshnessTimestampMs(input.checkpointedAt);
-    if (checkpointedAtMs === null) {
-      return stale("invalid_checkpointed_at");
-    }
-    if (generatedAtMs < checkpointedAtMs) {
-      return stale("checkpoint_newer");
-    }
-  }
-
   const maxAgeMs = normalizeBrowserVaultMaxAgeMs(input.maxAgeMs);
   if (maxAgeMs !== null) {
     const nowMs = parseFreshnessNowMs(input.now);
@@ -105,7 +92,6 @@ export function assessBrowserVaultReplicaFreshness(
 }
 
 export function getBrowserVaultReplicaFreshness(input: {
-  checkpointedAt?: string | null;
   currentSourceHash?: string | null;
   maxAgeMs?: number | null;
   now?: Date | number | string | null;
@@ -115,14 +101,12 @@ export function getBrowserVaultReplicaFreshness(input: {
 }
 
 export function shouldScheduleBrowserVaultRefresh(input: {
-  checkpointedAt?: string | null;
   currentReplicaRef: HostedBrowserVaultReplicaRef | null;
   currentSourceHash?: string | null;
   maxAgeMs?: number | null;
   now?: Date | number | string | null;
 }): BrowserVaultRefreshDecision | null {
   const assessment = assessBrowserVaultReplicaFreshness({
-    checkpointedAt: input.checkpointedAt,
     currentSourceHash: input.currentSourceHash,
     maxAgeMs: input.maxAgeMs,
     now: input.now,

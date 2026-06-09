@@ -69,7 +69,6 @@ export function createBrowserVaultSessionRoute(input: {
     );
     const workspaceVersion = workspace?.version ?? null;
     const freshnessAssessment = assessBrowserVaultReplicaFreshness({
-      checkpointedAt: workspace?.checkpointedAt ?? null,
       now: new Date().toISOString(),
       replicaRef,
     });
