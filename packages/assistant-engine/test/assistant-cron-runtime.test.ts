@@ -716,6 +716,8 @@ describe('assistant cron runtime orchestration', () => {
   })
 
   it('passes hosted turn environment into scheduled notification sends', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T08:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-turn-env-',
     )
@@ -750,6 +752,8 @@ describe('assistant cron runtime orchestration', () => {
   })
 
   it('passes hosted provider trace callbacks into scheduled notification sends', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T08:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-trace-callback-',
     )
@@ -778,6 +782,8 @@ describe('assistant cron runtime orchestration', () => {
   })
 
   it('persists the private summary when a scheduled notification turn returns no response', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T08:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-private-summary-',
     )
@@ -903,6 +909,159 @@ describe('assistant cron runtime orchestration', () => {
         }),
       ]),
     )
+  })
+
+  it('skips stale recurring canonical notification cron jobs and advances the schedule', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-stale-recurring-canonical-',
+    )
+    const canonicalJob = await createCanonicalJob(vaultRoot, 'late daily reminder')
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(findCanonicalAutomation(vaultRoot, canonicalJob.jobId)?.status).toBe(
+      'active',
+    )
+
+    const updated = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
+    expect(updated.state.lastRunAt).toBe('2026-04-08T13:00:00.000Z')
+    expect(updated.state.lastSucceededAt).toBe('2026-04-08T13:00:00.000Z')
+    expect(updated.state.lastError).toBeNull()
+    expect(updated.state.consecutiveFailures).toBe(0)
+    expect(updated.state.nextRunAt).toBe('2026-04-09T10:00:00.000Z')
+    await expect(
+      listAssistantCronRuns({
+        job: canonicalJob.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      jobId: canonicalJob.jobId,
+      runs: [
+        expect.objectContaining({
+          error: expect.stringContaining(
+            'Assistant cron notification expired before delivery.',
+          ),
+          response: null,
+          status: 'skipped',
+        }),
+      ],
+    })
+  })
+
+  it('skips stale recurring canonical notification retries by original occurrence', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:45:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-stale-recurring-canonical-retry-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'late daily retry reminder',
+    )
+    await updateCanonicalRuntimeState(vaultRoot, canonicalJob.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        consecutiveFailures: 1,
+        lastError: 'temporary send failure',
+        lastFailedAt: '2026-04-08T10:30:00.000Z',
+        pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+        retryAfterAt: '2026-04-08T10:40:00.000Z',
+      },
+    }))
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(findCanonicalAutomation(vaultRoot, canonicalJob.jobId)?.status).toBe(
+      'active',
+    )
+
+    const updated = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
+    expect(updated.state.lastRunAt).toBe('2026-04-08T10:45:00.000Z')
+    expect(updated.state.lastSucceededAt).toBe('2026-04-08T10:45:00.000Z')
+    expect(updated.state.lastError).toBeNull()
+    expect(updated.state.consecutiveFailures).toBe(0)
+    expect(updated.state.nextRunAt).toBe('2026-04-09T10:00:00.000Z')
+    await expect(
+      listAssistantCronRuns({
+        job: canonicalJob.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      jobId: canonicalJob.jobId,
+      runs: [
+        expect.objectContaining({
+          error: expect.stringContaining(
+            'Scheduled occurrence was 45 minute(s) late.',
+          ),
+          response: null,
+          status: 'skipped',
+        }),
+      ],
+    })
+  })
+
+  it('skips stale recurring local cron jobs without removing them', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-stale-recurring-local-',
+    )
+    const job = await createLocalJob(vaultRoot, 'stale-local')
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    const updated = await getAssistantCronJob(vaultRoot, job.jobId)
+    expect(updated.state.lastRunAt).toBe('2026-04-08T10:10:00.000Z')
+    expect(updated.state.lastSucceededAt).toBe('2026-04-08T10:10:00.000Z')
+    expect(updated.state.lastError).toBeNull()
+    expect(updated.state.consecutiveFailures).toBe(0)
+    expect(updated.state.nextRunAt).toBe('2026-04-09T09:30:00.000Z')
+    await expect(
+      listAssistantCronRuns({
+        job: job.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      jobId: job.jobId,
+      runs: [
+        expect.objectContaining({
+          error: expect.stringContaining(
+            'Assistant cron notification expired before delivery.',
+          ),
+          status: 'skipped',
+        }),
+      ],
+    })
   })
 
   it('expires canonical one-shot notification retries by original occurrence', async () => {
@@ -1091,6 +1250,8 @@ describe('assistant cron runtime orchestration', () => {
   })
 
   it('processes due jobs across local and canonical stores and reports mixed outcomes', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T08:10:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-process-due-',
     )
@@ -1177,7 +1338,7 @@ describe('assistant cron runtime orchestration', () => {
               ...staleRecord,
               state: {
                 ...staleRecord.state,
-                pendingOccurrenceAt: '2026-04-08T12:00:00.000Z',
+                pendingOccurrenceAt: '2026-04-08T12:45:00.000Z',
                 runningAt: '2026-04-08T11:30:00.000Z',
                 runningPid: 111,
               },
@@ -1187,7 +1348,7 @@ describe('assistant cron runtime orchestration', () => {
               ...freshRecord,
               state: {
                 ...freshRecord.state,
-                pendingOccurrenceAt: '2026-04-08T12:00:00.000Z',
+                pendingOccurrenceAt: '2026-04-08T12:45:00.000Z',
                 runningAt: '2026-04-08T12:30:00.000Z',
                 runningPid: 222,
               },

@@ -62,6 +62,8 @@ const ASSISTANT_CRON_RUN_SCHEMA = 'murph.assistant-cron-run.v1'
 const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
 export const ASSISTANT_CRON_ONE_SHOT_NOTIFICATION_EXPIRES_AFTER_MS =
   30 * 60 * 1000
+const ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR =
+  'Assistant cron notification expired before delivery.'
 const ASSISTANT_CRON_ONE_SHOT_NOTIFICATION_EXPIRED_ERROR =
   'Assistant cron one-shot notification expired before delivery.'
 export interface ExpiredAssistantCronJobResult {
@@ -253,7 +255,7 @@ export async function expireNextStaleDueAssistantCronJob(input: {
     }
 
     const occurrenceAt = resolveDueAssistantCronCandidateOccurrenceAt(candidate) ?? nowIso
-    const expiryError = resolveExpiredOneShotNotificationCronError({
+    const expiryError = resolveExpiredAssistantCronNotificationError({
       job: candidate.job,
       nowIso,
       occurrenceAt,
@@ -275,7 +277,21 @@ export async function expireNextStaleDueAssistantCronJob(input: {
 
     if (candidate.localJob) {
       await appendAssistantCronRun(input.paths, run)
-      store.jobs = store.jobs.filter((job) => job.jobId !== candidate.localJob?.jobId)
+      if (candidate.localJob.schedule.kind === 'at' && !candidate.localJob.keepAfterRun) {
+        store.jobs = store.jobs.filter((job) => job.jobId !== candidate.localJob?.jobId)
+      } else {
+        store.jobs = store.jobs.map((job) =>
+          job.jobId === candidate.localJob?.jobId
+            ? finalizeAssistantCronJobAfterRun({
+                finishedAt: nowIso,
+                job,
+                pendingDeliveryIntentId: null,
+                responseSessionId: null,
+                run,
+              })
+            : job,
+        )
+      }
       await writeAssistantCronStore(input.paths, store)
       return {
         job: candidate.localJob,
@@ -290,26 +306,43 @@ export async function expireNextStaleDueAssistantCronJob(input: {
     }
 
     await appendAssistantCronRun(input.paths, run)
-    await upsertAutomation(
-      buildCanonicalAutomationUpsertInput({
-        vault: input.vault,
-        automationId: canonicalEntry.source.automationId,
-        automation: canonicalEntry.source,
-        title: canonicalEntry.source.title,
-        status: 'archived',
-        schedule: canonicalEntry.source.schedule,
-        route: canonicalEntry.source.route,
-        instructions: canonicalEntry.source.instructions,
-      }),
-    )
-    removeAssistantCronCanonicalRuntimeRecord(
-      runtimeStore,
-      resolveCanonicalAssistantCronJobId(canonicalEntry.source),
-    )
+    let returnedJob = canonicalEntry.job
+    if (canonicalEntry.source.schedule.kind === 'at') {
+      await upsertAutomation(
+        buildCanonicalAutomationUpsertInput({
+          vault: input.vault,
+          automationId: canonicalEntry.source.automationId,
+          automation: canonicalEntry.source,
+          title: canonicalEntry.source.title,
+          status: 'archived',
+          schedule: canonicalEntry.source.schedule,
+          route: canonicalEntry.source.route,
+          instructions: canonicalEntry.source.instructions,
+        }),
+      )
+      removeAssistantCronCanonicalRuntimeRecord(
+        runtimeStore,
+        resolveCanonicalAssistantCronJobId(canonicalEntry.source),
+      )
+    } else {
+      const updatedRuntimeState = finalizeCanonicalAssistantCronRuntimeAfterRun({
+        finishedAt: nowIso,
+        pendingDeliveryIntentId: null,
+        responseSessionId: null,
+        run,
+        runtimeState: canonicalEntry.runtimeState,
+        source: canonicalEntry.source,
+      })
+      upsertAssistantCronCanonicalRuntimeRecord(runtimeStore, updatedRuntimeState)
+      returnedJob = projectCanonicalAssistantCronJob({
+        source: canonicalEntry.source,
+        runtimeState: updatedRuntimeState,
+      })
+    }
     await writeAssistantCronCanonicalRuntimeStore(input.paths, runtimeStore)
 
     return {
-      job: canonicalEntry.job,
+      job: returnedJob,
       run,
       sourceKind: canonicalEntry.source.kind,
     }
@@ -616,7 +649,10 @@ function finalizeAssistantCronJobAfterRun(input: {
   const shouldAutoBindSession =
     input.responseSessionId !== null && !assistantCronJobHasStableSessionLocator(input.job)
 
-  if (input.run.status === 'succeeded') {
+  if (
+    input.run.status === 'succeeded' ||
+    (input.run.status === 'skipped' && input.pendingDeliveryIntentId === null)
+  ) {
     const nextRunAt = resolveAssistantCronNextRunAfterSuccess(
       input.job,
       new Date(input.finishedAt),
@@ -711,7 +747,10 @@ function finalizeCanonicalAssistantCronRuntimeAfterRun(input: {
     lastRunAt: input.finishedAt,
   }
 
-  if (input.run.status === 'succeeded') {
+  if (
+    input.run.status === 'succeeded' ||
+    (input.run.status === 'skipped' && input.pendingDeliveryIntentId === null)
+  ) {
     return {
       ...input.runtimeState,
       sessionId: input.responseSessionId ?? input.runtimeState.sessionId,
@@ -782,16 +821,12 @@ function truncateAssistantCronResponse(response: string | null): string | null {
   return response.slice(0, ASSISTANT_CRON_MAX_RESPONSE_LENGTH)
 }
 
-function resolveExpiredOneShotNotificationCronError(input: {
+function resolveExpiredAssistantCronNotificationError(input: {
   job: AssistantCronJob
   nowIso: string
   occurrenceAt: string
 }): string | null {
-  if (
-    input.job.schedule.kind !== 'at' ||
-    input.job.keepAfterRun ||
-    input.job.scheduledLog
-  ) {
+  if (input.job.scheduledLog) {
     return null
   }
 
@@ -807,7 +842,11 @@ function resolveExpiredOneShotNotificationCronError(input: {
   }
 
   const lateMinutes = Math.floor(ageMs / 60_000)
-  return `${ASSISTANT_CRON_ONE_SHOT_NOTIFICATION_EXPIRED_ERROR} Scheduled occurrence was ${lateMinutes} minute(s) late.`
+  const baseError =
+    input.job.schedule.kind === 'at' && !input.job.keepAfterRun
+      ? ASSISTANT_CRON_ONE_SHOT_NOTIFICATION_EXPIRED_ERROR
+      : ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR
+  return `${baseError} Scheduled occurrence was ${lateMinutes} minute(s) late.`
 }
 
 function cryptoRandomRunId(): string {
