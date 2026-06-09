@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
+  getHostedPrivySession: vi.fn(),
   getPrisma: vi.fn(),
   HostedAccountSettingsCards: vi.fn((props: {
     account: unknown;
@@ -37,6 +38,10 @@ const mocks = vi.hoisted(() => ({
   readHostedAccountSettingsSnapshot: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
+  withServerApprovedTelegramUsernameHint: vi.fn((input: {
+    serverApprovedPrivyLinkedAccounts?: unknown;
+    snapshot: unknown;
+  }) => input.snapshot),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -67,6 +72,11 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
   readHostedAccountSettingsSnapshot: mocks.readHostedAccountSettingsSnapshot,
+  withServerApprovedTelegramUsernameHint: mocks.withServerApprovedTelegramUsernameHint,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
+  getHostedPrivySession: mocks.getHostedPrivySession,
 }));
 
 vi.mock("@/src/components/hosted-onboarding/phone-country-code-provider", () => ({
@@ -97,6 +107,10 @@ vi.mock("@/src/components/settings/hosted-device-sync-settings", () => ({
   HostedDeviceSyncSettings: mocks.HostedDeviceSyncSettings,
 }));
 
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
 test("SettingsPage metadata uses the shared preview image", async () => {
   const { metadata } = await import("../app/(dashboard)/settings/page");
 
@@ -124,6 +138,18 @@ test("SettingsPage metadata uses the shared preview image", async () => {
 
 test("SettingsPage reads the app session and persisted account settings into the settings tree", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue({
+    identity: {
+      userId: "did:privy:user_123",
+    },
+    linkedAccounts: [
+      {
+        id: 456,
+        type: "telegram",
+        username: "sample_user",
+      },
+    ],
+  });
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -139,7 +165,9 @@ test("SettingsPage reads the app session and persisted account settings into the
       },
     ],
     memberLookup: null,
-    session: null,
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
   });
   mocks.readHostedMemberRoutingState.mockResolvedValue({
     linqChatId: null,
@@ -213,6 +241,17 @@ test("SettingsPage reads the app session and persisted account settings into the
   expect(mocks.readHostedAccountSettingsSnapshot).toHaveBeenCalledWith({
     memberId: "member_123",
   });
+  expect(mocks.getHostedPrivySession).toHaveBeenCalledTimes(1);
+  expect(mocks.withServerApprovedTelegramUsernameHint).toHaveBeenCalledWith({
+    snapshot: accountSnapshot,
+    serverApprovedPrivyLinkedAccounts: [
+      {
+        id: 456,
+        type: "telegram",
+        username: "sample_user",
+      },
+    ],
+  });
   expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
     account: accountSnapshot,
     murphPhoneNumber: "+15550100001",
@@ -220,4 +259,67 @@ test("SettingsPage reads the app session and persisted account settings into the
   expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
   }), undefined);
+});
+
+test("SettingsPage ignores Privy Telegram display hints from a stale Privy session identity", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue({
+    identity: {
+      userId: "did:privy:user_other",
+    },
+    linkedAccounts: [
+      {
+        id: 456,
+        type: "telegram",
+        username: "sample_user",
+      },
+    ],
+  });
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    memberLookup: null,
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mocks.readHostedMemberRoutingState.mockResolvedValue({
+    linqChatId: null,
+    linqRecipientPhone: null,
+    memberId: "member_123",
+    pendingLinqChatId: null,
+    pendingLinqRecipientPhone: null,
+    telegramThreadId: null,
+    telegramUserId: null,
+    telegramUserLookupKey: null,
+  });
+  mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
+  const accountSnapshot = {
+    email: {
+      address: null,
+      verifiedAt: null,
+    },
+    phone: {
+      number: null,
+      verifiedAt: null,
+    },
+    telegram: {
+      telegramUserId: "456",
+    },
+  };
+  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue(accountSnapshot);
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  renderToStaticMarkup(await SettingsPage());
+
+  expect(mocks.withServerApprovedTelegramUsernameHint).toHaveBeenCalledWith({
+    snapshot: accountSnapshot,
+    serverApprovedPrivyLinkedAccounts: null,
+  });
 });

@@ -45,6 +45,40 @@ describe("HostedAccountSettingsCards", () => {
     expect(markup).toContain("mailto:murph+u2-private-alias@mail.example.test");
     expect(markup).not.toContain("murph@mail.withmurph.ai");
   });
+
+  test("shows a matched Telegram username instead of the raw Telegram id", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedAccountSettingsCards, {
+        account: {
+          ...makeAccountSnapshot({ phoneNumber: null }),
+          telegram: {
+            telegramUserId: "456",
+            username: "sample_user",
+          },
+        },
+      }),
+    );
+
+    expect(markup).toContain("@sample_user");
+    expect(markup).not.toContain("Telegram user 456");
+  });
+
+  test("hides the raw Telegram id when no username hint is available", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedAccountSettingsCards, {
+        account: {
+          ...makeAccountSnapshot({ phoneNumber: null }),
+          telegram: {
+            telegramUserId: "456",
+            username: null,
+          },
+        },
+      }),
+    );
+
+    expect(markup).toContain("Connected");
+    expect(markup).not.toContain("Telegram user 456");
+  });
 });
 
 function makeAccountSnapshot(input: {

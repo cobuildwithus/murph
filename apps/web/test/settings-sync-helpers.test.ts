@@ -165,7 +165,6 @@ describe("hosted settings sync helpers", () => {
         telegramUserId: "12345",
         username: "murph_user",
       },
-      user: null,
     })).toEqual({
       currentTelegram: {
         firstName: null,
@@ -175,5 +174,42 @@ describe("hosted settings sync helpers", () => {
         username: "murph_user",
       },
     });
+  });
+
+  it("builds a server-bound Telegram account without client-only Privy enrichment", async () => {
+    const { resolveHostedTelegramSettingsDisplayState } = await import(
+      "@/src/components/settings/hosted-telegram-settings-helpers"
+    );
+
+    await expect(resolveHostedTelegramSettingsDisplayState({
+      initialTelegramAccount: {
+        telegramUserId: "12345",
+        username: null,
+      },
+    })).toEqual({
+      currentTelegram: {
+        firstName: null,
+        lastName: null,
+        photoUrl: null,
+        telegramUserId: "12345",
+        username: null,
+      },
+    });
+  });
+
+  it("formats trusted Telegram display values without exposing raw ids", async () => {
+    const { formatHostedTelegramDisplayValue } = await import(
+      "@/src/components/settings/hosted-telegram-settings-helpers"
+    );
+
+    expect(formatHostedTelegramDisplayValue({
+      telegramUserId: "12345",
+      username: "sample_user",
+    })).toBe("@sample_user");
+    expect(formatHostedTelegramDisplayValue({
+      telegramUserId: "12345",
+      username: null,
+    })).toBe("Connected");
+    expect(formatHostedTelegramDisplayValue(null)).toBeNull();
   });
 });

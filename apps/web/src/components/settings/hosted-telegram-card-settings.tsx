@@ -11,6 +11,8 @@ import {
 import type { HostedPrivyLinkedAccountContainer } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import {
+  formatHostedTelegramDisplayValue,
+  resolveHostedPrivyTelegramDisplayState,
   resolveHostedTelegramSettingsDisplayState,
   syncHostedLinkedTelegram,
   toHostedTelegramLinkErrorMessage,
@@ -29,8 +31,9 @@ export function HostedTelegramCardSettings(props: {
   autoLink?: boolean;
   initialTelegramAccount?: HostedTelegramSyncOverride | null;
   onSynced?: (payload: HostedTelegramSyncResult) => Promise<void> | void;
+  showHeading?: boolean;
 }) {
-  const { authenticated, autoLink, initialTelegramAccount, onSynced } = props;
+  const { authenticated, autoLink, initialTelegramAccount, onSynced, showHeading = true } = props;
   const { authenticated: privyAuthenticated, ready: privyReady } = usePrivy();
   const { refreshUser, user: privyUser } = useUser();
   const autoSyncedTelegramUserIdRef = useRef<string | null>(null);
@@ -46,10 +49,9 @@ export function HostedTelegramCardSettings(props: {
   const displayState = resolveHostedTelegramSettingsDisplayState({
     initialTelegramAccount: initialTelegramAccount ?? null,
     syncedTelegramOverride,
-    user: null,
   });
   const currentTelegram = displayState.currentTelegram;
-  const privyTelegram = resolveHostedTelegramSettingsDisplayState({ user: privyUser }).currentTelegram;
+  const privyTelegram = resolveHostedPrivyTelegramDisplayState(privyUser).currentTelegram;
   const currentTelegramUserId = currentTelegram?.telegramUserId ?? null;
   const privyTelegramUserId = privyTelegram?.telegramUserId ?? null;
   const isBusy = isLinkingTelegram || (isSyncingTelegram && !isQuietSyncingTelegram);
@@ -124,8 +126,8 @@ export function HostedTelegramCardSettings(props: {
     try {
       const refreshedUser = await refreshUser().catch(() => linkedUser);
       const refreshedTelegram =
-        resolveHostedTelegramSettingsDisplayState({ user: refreshedUser }).currentTelegram
-        ?? resolveHostedTelegramSettingsDisplayState({ user: linkedUser }).currentTelegram;
+        resolveHostedPrivyTelegramDisplayState(refreshedUser).currentTelegram
+        ?? resolveHostedPrivyTelegramDisplayState(linkedUser).currentTelegram;
 
       await syncLinkedTelegram("link", refreshedTelegram?.telegramUserId ?? null);
     } finally {
@@ -223,11 +225,7 @@ export function HostedTelegramCardSettings(props: {
     );
   }
 
-  const telegramValue = currentTelegram?.username
-    ? `@${currentTelegram.username}`
-    : currentTelegram
-      ? `Telegram user ${currentTelegram.telegramUserId}`
-      : null;
+  const telegramValue = formatHostedTelegramDisplayValue(currentTelegram);
 
   const statusTone = errorMessage ? "destructive" : successMessage ? "success" : "neutral";
   const statusMessage =
@@ -243,9 +241,11 @@ export function HostedTelegramCardSettings(props: {
 
   return (
     <div className="space-y-5">
-      <div className="space-y-2">
-        <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Telegram</h2>
-      </div>
+      {showHeading ? (
+        <div className="space-y-2">
+          <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Telegram</h2>
+        </div>
+      ) : null}
 
       {telegramValue ? (
         <ConnectedAccountCard

@@ -39,17 +39,37 @@ export interface HostedTelegramSyncPresentation {
 export function resolveHostedTelegramSettingsDisplayState(input: {
   initialTelegramAccount?: HostedTelegramSyncOverride | null;
   syncedTelegramOverride?: HostedTelegramSyncOverride | null;
-  user: HostedPrivyLinkedAccountContainer | null | undefined;
 }): HostedTelegramSettingsDisplayState {
   const currentTelegram = input.syncedTelegramOverride
     ? toHostedTelegramDisplayAccount(input.syncedTelegramOverride)
     : input.initialTelegramAccount
       ? toHostedTelegramDisplayAccount(input.initialTelegramAccount)
-      : extractHostedPrivyTelegramAccount(input.user);
+      : null;
 
   return {
     currentTelegram,
   };
+}
+
+export function resolveHostedPrivyTelegramDisplayState(
+  user: HostedPrivyLinkedAccountContainer | null | undefined,
+): HostedTelegramSettingsDisplayState {
+  return {
+    currentTelegram: extractHostedPrivyTelegramAccount(user),
+  };
+}
+
+export function formatHostedTelegramDisplayValue(
+  telegram: {
+    telegramUserId?: string | null;
+    username?: string | null;
+  } | null | undefined,
+): string | null {
+  if (!telegram?.telegramUserId) {
+    return null;
+  }
+
+  return telegram.username ? `@${telegram.username}` : "Connected";
 }
 
 function toHostedTelegramDisplayAccount(
