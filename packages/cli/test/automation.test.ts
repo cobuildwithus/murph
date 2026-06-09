@@ -333,6 +333,7 @@ test("automation save and edit schemas expose typed fields while automation impo
     "slug",
     "status",
     "summary",
+    "tag",
     "tags",
     "continuityPolicy",
     "instructions",
@@ -376,7 +377,8 @@ test("automation save guidance keeps examples shell-copyable", async () => {
   const help = await runRawInProcessCli(cli, ["automation", "save", "--help"]);
   const llms = await runRawInProcessCli(cli, ["automation", "save", "--llms-full"]);
 
-  assert.match(optionDescription(schema, "tags"), /Do not comma-delimit multiple tags/u);
+  assert.match(optionDescription(schema, "tag"), /Repeat --tag/u);
+  assert.match(optionDescription(schema, "tags"), /Legacy alias for --tag/u);
   for (const rendered of [help, llms]) {
     assert.match(rendered, /automation save 'Daily mobility'/u);
     assert.match(rendered, /--instructions 'Ask about mobility work and summarize the next step\.'/u);
@@ -563,7 +565,7 @@ test("automation edit patches sparse fields without implicit route rebinding", a
       "telegram",
       "--delivery-target",
       "telegram_thread_real",
-      "--tags",
+      "--tag",
       "assistant",
       "--vault",
       vaultRoot,
@@ -688,6 +690,72 @@ test("automation edit patches sparse fields without implicit route rebinding", a
     assert.equal(routeShown.envelope.data?.automation?.schedule.kind, "dailyLocal");
     assert.equal(routeShown.envelope.data?.automation?.schedule.localTime, "08:30");
     assert.deepEqual(routeShown.envelope.data?.automation?.tags, ["assistant"]);
+
+    const tagEdited = await runInProcessJsonCli<{
+      automationId: string;
+      created: boolean;
+    }>(cli, [
+      "automation",
+      "edit",
+      "preserve-route-reminder",
+      "--tag",
+      "scheduled",
+      "--tag",
+      "experiment",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(tagEdited.exitCode, null);
+    assert.equal(tagEdited.envelope.ok, true);
+    assert.equal(tagEdited.envelope.data?.automationId, saved.envelope.data?.automationId);
+    assert.equal(tagEdited.envelope.data?.created, false);
+
+    const mixedTags = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      "preserve-route-reminder",
+      "--tag",
+      "scheduled",
+      "--tags",
+      "experiment",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(mixedTags.exitCode, 1);
+    assert.equal(mixedTags.envelope.ok, false);
+    assert.match(
+      mixedTags.envelope.ok ? "" : mixedTags.envelope.error.message ?? "",
+      /Use --tag or legacy --tags, not both/u,
+    );
+
+    const tagShown = await runInProcessJsonCli<{
+      automation: {
+        instructions: string;
+        route: {
+          channel: string;
+          deliveryTarget: string | null;
+        };
+        schedule: {
+          kind: string;
+          localTime?: string;
+        };
+        tags: string[];
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "preserve-route-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(tagShown.exitCode, null);
+    assert.equal(tagShown.envelope.ok, true);
+    assert.equal(tagShown.envelope.data?.automation?.route.channel, "linq");
+    assert.equal(tagShown.envelope.data?.automation?.route.deliveryTarget, "linq_chat_explicit");
+    assert.equal(tagShown.envelope.data?.automation?.instructions, "Send the reminder.");
+    assert.equal(tagShown.envelope.data?.automation?.schedule.kind, "dailyLocal");
+    assert.equal(tagShown.envelope.data?.automation?.schedule.localTime, "08:30");
+    assert.deepEqual(tagShown.envelope.data?.automation?.tags, ["scheduled", "experiment"]);
   } finally {
     await bridge.stop();
     await rm(parentRoot, { recursive: true, force: true });

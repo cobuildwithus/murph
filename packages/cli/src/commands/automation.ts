@@ -321,6 +321,28 @@ function normalizeAutomationRouteOption(
   return normalized && normalized.length > 0 ? normalized : null;
 }
 
+function normalizeAutomationTagOptions(input: {
+  tag?: readonly string[];
+  tags?: readonly string[];
+}): string[] | undefined {
+  if (input.tag !== undefined && input.tags !== undefined) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Use --tag or legacy --tags, not both.",
+    );
+  }
+
+  const values = input.tag ?? input.tags;
+  if (values === undefined) {
+    return undefined;
+  }
+
+  return normalizeRepeatableFlagOption(
+    values,
+    input.tag === undefined ? "tags" : "tag",
+  );
+}
+
 const automationSharedOptionSchemas = {
   slug: z
     .string()
@@ -334,10 +356,14 @@ const automationSharedOptionSchemas = {
     .max(4000)
     .optional()
     .describe("Optional automation summary."),
+  tag: z
+    .array(z.string().min(1))
+    .optional()
+    .describe("Optional automation tag. Repeat --tag for multiple values."),
   tags: z
     .array(z.string().min(1))
     .optional()
-    .describe("Optional automation tags. Repeat --tags for multiple values. Do not comma-delimit multiple tags."),
+    .describe("Legacy alias for --tag. Repeat --tags for multiple values. Do not comma-delimit multiple tags."),
   continuityPolicy: z
     .enum(automationContinuityPolicyValues)
     .optional()
@@ -513,7 +539,10 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         slug: context.options.slug,
         status: context.options.status,
         summary: context.options.summary,
-        tags: normalizeRepeatableFlagOption(context.options.tags, "tags"),
+        tags: normalizeAutomationTagOptions({
+          tag: context.options.tag,
+          tags: context.options.tags,
+        }),
         title: context.args.title,
       });
       const result = await upsertAutomation({
@@ -590,9 +619,10 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         slug: context.options.slug,
         status: context.options.status,
         summary: context.options.summary,
-        tags: context.options.tags === undefined
-          ? undefined
-          : normalizeRepeatableFlagOption(context.options.tags, "tags"),
+        tags: normalizeAutomationTagOptions({
+          tag: context.options.tag,
+          tags: context.options.tags,
+        }),
         title: context.options.title,
         vaultRoot: context.options.vault,
       });
