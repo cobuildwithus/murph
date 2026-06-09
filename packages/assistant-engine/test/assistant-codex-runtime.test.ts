@@ -373,7 +373,12 @@ describe('assistant codex runtime', () => {
         codexThreadId: 'thread-1',
       }),
     ).toEqual({
+      approvalPolicy: 'never',
+      cwd: '/workspace',
       excludeTurns: true,
+      model: 'gpt-5',
+      modelProvider: 'vercel-ai-gateway',
+      sandbox: 'workspace-write',
       threadId: 'thread-1',
     })
     expect(
@@ -389,7 +394,12 @@ describe('assistant codex runtime', () => {
         codexThreadId: 'thread-1',
       }),
     ).toEqual({
+      approvalPolicy: 'never',
+      cwd: '/workspace',
       excludeTurns: true,
+      model: 'gpt-5',
+      modelProvider: 'vercel-ai-gateway',
+      sandbox: 'workspace-write',
       threadId: 'thread-1',
     })
 
@@ -423,19 +433,24 @@ describe('assistant codex runtime', () => {
       [
         '# comment',
         'model = "root-model"',
+        'model_provider = "root-provider"',
         'model_reasoning_effort = "medium"',
         'profile = "daily"',
         '[profiles.daily]',
         'model = "daily-model"',
+        'model_provider = "daily-provider"',
         'model_reasoning_effort = "high"',
         '[profiles.empty]',
         'model = ""',
+        'model_provider = ""',
       ].join('\n'),
       'utf8',
     )
 
     await expect(resolveCodexDisplayOptions({ configPath })).resolves.toEqual({
       model: 'daily-model',
+      modelProviderConfigDigest: expect.any(String),
+      modelProvider: 'daily-provider',
       reasoningEffort: 'high',
     })
 
@@ -443,10 +458,13 @@ describe('assistant codex runtime', () => {
       resolveCodexDisplayOptions({
         configPath,
         model: 'manual-model',
+        modelProvider: 'manual-provider',
         profile: 'daily',
       }),
     ).resolves.toEqual({
       model: 'manual-model',
+      modelProviderConfigDigest: expect.any(String),
+      modelProvider: 'manual-provider',
       reasoningEffort: 'high',
     })
 
@@ -456,6 +474,8 @@ describe('assistant codex runtime', () => {
       }),
     ).resolves.toEqual({
       model: null,
+      modelProviderConfigDigest: expect.any(String),
+      modelProvider: null,
       reasoningEffort: null,
     })
   })
@@ -4413,6 +4433,270 @@ describe('assistant codex runtime', () => {
     })
   })
 
+  it('resolves current config defaults before resuming on a warm Codex app-server', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-warm-config-resume-home-')
+    const workingDirectory = await createTempDir('assistant-codex-warm-config-resume-work-')
+    const configPath = path.join(hostedCodexHome, 'config.toml')
+    await writeFile(
+      configPath,
+      'model = "gpt-config-resume-first"\nmodel_provider = "openai"\n',
+    )
+    const spawnedChildren: MockChildProcess[] = []
+
+    codexMocks.spawn.mockImplementation(() => {
+      const spawnedChild = new MockChildProcess()
+      spawnedChild.pid = 30_500 + spawnedChildren.length
+      spawnedChildren.push(spawnedChild)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const threadStart = await waitForRpcMethod(spawnedChild, 'thread/start')
+          spawnedChild.stdout.write(jsonLine({
+            id: threadStart.id,
+            result: {
+              thread: {
+                id: 'thread-warm-config-resume',
+              },
+            },
+          }))
+
+          const firstTurn = await waitForRpcMethodCount(spawnedChild, 'turn/start', 1)
+          spawnedChild.stdout.write(jsonLine({
+            id: firstTurn.id,
+            result: {
+              turn: {
+                id: 'turn-warm-config-resume-1',
+              },
+            },
+          }))
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-warm-config-resume-1',
+                status: 'completed',
+              },
+            },
+          }))
+
+          const threadResume = await waitForRpcMethod(spawnedChild, 'thread/resume')
+          spawnedChild.stdout.write(jsonLine({
+            id: threadResume.id,
+            result: {
+              approvalPolicy: 'never',
+              cwd: path.resolve(workingDirectory),
+              model: 'gpt-config-resume-second',
+              modelProvider: 'venice',
+              thread: {
+                id: 'thread-warm-config-resume',
+              },
+            },
+          }))
+
+          const secondTurn = await waitForRpcMethodCount(spawnedChild, 'turn/start', 2)
+          spawnedChild.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: {
+              turn: {
+                id: 'turn-warm-config-resume-2',
+              },
+            },
+          }))
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-warm-config-resume-2',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return spawnedChild
+    })
+
+    const hostedEnv = {
+      CODEX_HOME: hostedCodexHome,
+      MURPH_HOSTED_RUNTIME_PROCESS: '1',
+      NODE_ENV: 'test',
+      PATH: '/usr/bin',
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'first config-default launch',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-config-resume',
+      turnId: 'turn-warm-config-resume-1',
+    })
+
+    await writeFile(
+      configPath,
+      'model = "gpt-config-resume-second"\nmodel_provider = "venice"\n',
+    )
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'second config-default resume',
+        resumeSessionId: 'thread-warm-config-resume',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-config-resume',
+      turnId: 'turn-warm-config-resume-2',
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    const messages = readWrittenRpcMessages(
+      requireMockChildProcess(spawnedChildren[0] ?? null),
+    )
+    expect(asRecord(messages.find((message) => message.method === 'thread/start')?.params))
+      .toMatchObject({
+        model: 'gpt-config-resume-first',
+        modelProvider: 'openai',
+      })
+    expect(asRecord(messages.find((message) => message.method === 'thread/resume')?.params))
+      .toMatchObject({
+        model: 'gpt-config-resume-second',
+        modelProvider: 'venice',
+        threadId: 'thread-warm-config-resume',
+      })
+  })
+
+  it('starts a fresh warm Codex app-server when config provider table authority changes', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-provider-table-home-')
+    const workingDirectory = await createTempDir('assistant-codex-provider-table-work-')
+    const configPath = path.join(hostedCodexHome, 'config.toml')
+    const writeProviderConfig = async (baseUrl: string) => {
+      await writeFile(
+        configPath,
+        [
+          'model = "gpt-provider-table"',
+          'model_provider = "internal"',
+          '[model_providers.internal]',
+          'name = "Internal"',
+          `base_url = "${baseUrl}"`,
+          'env_key = "INTERNAL_API_KEY"',
+          'wire_api = "responses"',
+          'requires_openai_auth = false',
+        ].join('\n'),
+      )
+    }
+    await writeProviderConfig('https://one.example.test/v1')
+
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      const processNumber = spawnedChildren.length + 1
+      let turnCount = 0
+      child.pid = 30_600 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      child.stdin.onWrite = (write) => {
+        for (const line of write.split('\n')) {
+          const trimmed = line.trim()
+          if (!trimmed) {
+            continue
+          }
+
+          const message = asRecord(JSON.parse(trimmed))
+          queueMicrotask(() => {
+            switch (message.method) {
+              case 'initialize':
+                child.stdout.write(jsonLine({ id: message.id, result: {} }))
+                break
+              case 'thread/start':
+              case 'thread/resume': {
+                const params = asRecord(message.params)
+                const responseThreadId = message.method === 'thread/resume'
+                  ? String(params.threadId)
+                  : `thread-provider-table-${processNumber}`
+                child.stdout.write(jsonLine({
+                  id: message.id,
+                  result: {
+                    approvalPolicy: params.approvalPolicy,
+                    cwd: params.cwd,
+                    model: params.model,
+                    modelProvider: params.modelProvider,
+                    thread: {
+                      id: responseThreadId,
+                    },
+                  },
+                }))
+                break
+              }
+              case 'turn/start':
+                turnCount += 1
+                child.stdout.write(jsonLine({
+                  id: message.id,
+                  result: {
+                    turn: {
+                      id: `turn-provider-table-${processNumber}-${turnCount}`,
+                    },
+                  },
+                }))
+                child.stdout.write(jsonLine({
+                  method: 'turn/completed',
+                  params: {
+                    turn: {
+                      id: `turn-provider-table-${processNumber}-${turnCount}`,
+                      status: 'completed',
+                    },
+                  },
+                }))
+                break
+            }
+          })
+        }
+      }
+
+      return child
+    })
+
+    const hostedEnv = {
+      CODEX_HOME: hostedCodexHome,
+      INTERNAL_API_KEY: 'test-key',
+      MURPH_HOSTED_RUNTIME_PROCESS: '1',
+      NODE_ENV: 'test',
+      PATH: '/usr/bin',
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'first provider table launch',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-provider-table-1',
+    })
+
+    await writeProviderConfig('https://two.example.test/v1')
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'second provider table launch',
+        resumeSessionId: 'thread-provider-table-1',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-provider-table-1',
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+  })
+
   it('does not clear or replace a stale warm Codex process when stop cannot prove exit', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-warm-stop-fail-home-')
     const workingDirectory = await createTempDir('assistant-codex-warm-stop-fail-work-')
@@ -4651,6 +4935,281 @@ describe('assistant codex runtime', () => {
     expect(process.kill).toHaveBeenCalledWith(-20_000, 'SIGTERM')
   })
 
+  it('rejects and frees the warm slot when an aborted turn never completes', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-warm-abort-timeout-home-')
+    const workingDirectory = await createTempDir('assistant-codex-warm-abort-timeout-work-')
+    const controller = new AbortController()
+    const interruptSeen = createDeferred<void>()
+    const liveTurnReady = createDeferred<CodexAppServerLiveTurn>()
+    const spawnedChildren: MockChildProcess[] = []
+
+    vi.mocked(process.kill).mockImplementation((pid, signal) => {
+      const child = spawnedChildren.find((candidate) => pid === -candidate.pid)
+      if (child && signal === 'SIGTERM') {
+        queueMicrotask(() => {
+          child.emit('exit', null, signal)
+          child.emit('close', null, signal)
+        })
+      }
+      return true
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const spawnedChild = new MockChildProcess()
+      spawnedChild.pid = 21_000 + spawnedChildren.length
+      spawnedChildren.push(spawnedChild)
+      const processNumber = spawnedChildren.length
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
+          spawnedChild.stdout.write(jsonLine({
+            id: thread.id,
+            result: {
+              thread: {
+                id: `thread-warm-abort-timeout-${processNumber}`,
+              },
+            },
+          }))
+
+          const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
+          spawnedChild.stdout.write(jsonLine({
+            id: turn.id,
+            result: {
+              turn: {
+                id: `turn-warm-abort-timeout-${processNumber}`,
+              },
+            },
+          }))
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: `turn-warm-abort-timeout-${processNumber}`,
+              },
+            },
+          }))
+
+          if (processNumber === 1) {
+            const interrupt = await waitForRpcMethod(spawnedChild, 'turn/interrupt')
+            interruptSeen.resolve()
+            spawnedChild.stdout.write(jsonLine({
+              id: interrupt.id,
+              result: {},
+            }))
+            return
+          }
+
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: `turn-warm-abort-timeout-${processNumber}`,
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return spawnedChild
+    })
+
+    const hostedEnv = {
+      CODEX_HOME: hostedCodexHome,
+      MURPH_HOSTED_RUNTIME_PROCESS: '1',
+      NODE_ENV: 'test',
+      PATH: '/usr/bin',
+    }
+
+    const abortedTurn = executeCodexAppServerTurn({
+      abortSignal: controller.signal,
+      env: hostedEnv,
+      onLiveTurn: (turn) => {
+        liveTurnReady.resolve(turn)
+      },
+      prompt: 'abort without completion',
+      workingDirectory,
+    })
+    void abortedTurn.catch(() => undefined)
+
+    await liveTurnReady.promise
+
+    try {
+      vi.useFakeTimers()
+      controller.abort()
+      await vi.advanceTimersByTimeAsync(1)
+      await interruptSeen.promise
+      expect(process.kill).toHaveBeenCalledWith(-21_000, 'SIGINT')
+
+      await vi.advanceTimersByTimeAsync(15_000)
+      await expect(abortedTurn).rejects.toMatchObject({
+        code: 'ASSISTANT_CODEX_APP_SERVER_INTERRUPT_TIMEOUT',
+        context: {
+          interruptCleanupTimeoutMs: 15_000,
+          liveInterruptRequested: false,
+          retryable: true,
+        },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'next turn after abort timeout',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-abort-timeout-2',
+      turnId: 'turn-warm-abort-timeout-2',
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(process.kill).toHaveBeenCalledWith(-21_000, 'SIGTERM')
+  })
+
+  it('rejects and frees the warm slot when a live interrupt never completes', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-warm-live-interrupt-timeout-home-')
+    const workingDirectory = await createTempDir('assistant-codex-warm-live-interrupt-timeout-work-')
+    const interruptSeen = createDeferred<void>()
+    const liveTurnReady = createDeferred<CodexAppServerLiveTurn>()
+    const spawnedChildren: MockChildProcess[] = []
+
+    vi.mocked(process.kill).mockImplementation((pid, signal) => {
+      const child = spawnedChildren.find((candidate) => pid === -candidate.pid)
+      if (child && signal === 'SIGTERM') {
+        queueMicrotask(() => {
+          child.emit('exit', null, signal)
+          child.emit('close', null, signal)
+        })
+      }
+      return true
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const spawnedChild = new MockChildProcess()
+      spawnedChild.pid = 22_000 + spawnedChildren.length
+      spawnedChildren.push(spawnedChild)
+      const processNumber = spawnedChildren.length
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
+          spawnedChild.stdout.write(jsonLine({
+            id: thread.id,
+            result: {
+              thread: {
+                id: `thread-warm-live-interrupt-timeout-${processNumber}`,
+              },
+            },
+          }))
+
+          const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
+          spawnedChild.stdout.write(jsonLine({
+            id: turn.id,
+            result: {
+              turn: {
+                id: `turn-warm-live-interrupt-timeout-${processNumber}`,
+              },
+            },
+          }))
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: `turn-warm-live-interrupt-timeout-${processNumber}`,
+              },
+            },
+          }))
+
+          if (processNumber === 1) {
+            const interrupt = await waitForRpcMethod(spawnedChild, 'turn/interrupt')
+            interruptSeen.resolve()
+            spawnedChild.stdout.write(jsonLine({
+              id: interrupt.id,
+              result: {},
+            }))
+            return
+          }
+
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: `turn-warm-live-interrupt-timeout-${processNumber}`,
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return spawnedChild
+    })
+
+    const hostedEnv = {
+      CODEX_HOME: hostedCodexHome,
+      MURPH_HOSTED_RUNTIME_PROCESS: '1',
+      NODE_ENV: 'test',
+      PATH: '/usr/bin',
+    }
+
+    const interruptedTurn = executeCodexAppServerTurn({
+      env: hostedEnv,
+      onLiveTurn: (turn) => {
+        liveTurnReady.resolve(turn)
+      },
+      prompt: 'interrupt without completion',
+      workingDirectory,
+    })
+    void interruptedTurn.catch(() => undefined)
+
+    const liveTurn = await liveTurnReady.promise
+
+    try {
+      vi.useFakeTimers()
+      const interruptPromise = liveTurn.interrupt()
+      await vi.advanceTimersByTimeAsync(1)
+      await interruptSeen.promise
+      await interruptPromise
+      expect(process.kill).not.toHaveBeenCalledWith(-22_000, 'SIGINT')
+
+      await vi.advanceTimersByTimeAsync(15_000)
+      await expect(interruptedTurn).rejects.toMatchObject({
+        code: 'ASSISTANT_CODEX_APP_SERVER_INTERRUPT_TIMEOUT',
+        context: {
+          interruptCleanupTimeoutMs: 15_000,
+          liveInterruptRequested: true,
+          retryable: true,
+        },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'next turn after live interrupt timeout',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-live-interrupt-timeout-2',
+      turnId: 'turn-warm-live-interrupt-timeout-2',
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(process.kill).toHaveBeenCalledWith(-22_000, 'SIGTERM')
+  })
+
   it('keeps one Codex app-server process open and steers late input into the active turn', async () => {
     const workingDirectory = await createTempDir('assistant-codex-live-steer-')
     const liveTurnReady = createDeferred<CodexAppServerLiveTurn>()
@@ -4868,6 +5427,8 @@ describe('assistant codex runtime', () => {
               jsonLine({
                 id: threadResume.id,
                 result: {
+                  approvalPolicy: 'never',
+                  cwd: path.resolve(workingDirectory),
                   thread: {
                     id: threadId,
                     path: threadPath,
@@ -5426,21 +5987,163 @@ describe('assistant codex runtime', () => {
     }
   })
 
+  it('fails closed when thread/resume reports stale execution context', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-stale-resume-context-')
+    const staleWorkingDirectory = await createTempDir('assistant-codex-old-resume-context-')
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 35_100 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const threadResume = await waitForRpcMethod(child, 'thread/resume')
+          child.stdout.write(
+            jsonLine({
+              id: threadResume.id,
+              result: {
+                approvalPolicy: 'never',
+                cwd: staleWorkingDirectory,
+                model: 'gpt-5',
+                modelProvider: 'vercel-ai-gateway',
+                sandbox: codexSandboxPolicyForMode('read-only'),
+                thread: {
+                  id: 'resume-thread',
+                },
+              },
+            }),
+          )
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        model: 'gpt-5.1',
+        modelProvider: 'openai',
+        prompt: 'resume with current context',
+        resumeSessionId: 'resume-thread',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_RESUME_STALE',
+      context: {
+        mismatchedFields: expect.arrayContaining([
+          'cwd',
+          'model',
+          'modelProvider',
+          'sandbox',
+        ]),
+        resumeContextMismatch: true,
+        retryable: true,
+        staleResume: true,
+      },
+    })
+
+    const child = requireMockChildProcess(spawnedChildren[0] ?? null)
+    expect(
+      readWrittenRpcMessages(child).some((message) => message.method === 'turn/start'),
+    ).toBe(false)
+    expect(process.kill).toHaveBeenCalledWith(-35_100, 'SIGTERM')
+  })
+
+  it('fails closed when thread/resume returns a different thread id', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-resume-thread-mismatch-')
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 35_200 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const threadResume = await waitForRpcMethod(child, 'thread/resume')
+          child.stdout.write(
+            jsonLine({
+              id: threadResume.id,
+              result: {
+                approvalPolicy: 'never',
+                cwd: path.resolve(workingDirectory),
+                model: 'gpt-5.1',
+                modelProvider: 'openai',
+                thread: {
+                  id: 'wrong-thread',
+                },
+              },
+            }),
+          )
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        model: 'gpt-5.1',
+        modelProvider: 'openai',
+        prompt: 'resume with wrong returned id',
+        resumeSessionId: 'requested-thread',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_RESUME_STALE',
+      context: {
+        mismatchedFields: ['threadId'],
+        resumeContextMismatch: true,
+        retryable: true,
+        staleResume: true,
+      },
+    })
+
+    const child = requireMockChildProcess(spawnedChildren[0] ?? null)
+    expect(
+      readWrittenRpcMessages(child).some((message) => message.method === 'turn/start'),
+    ).toBe(false)
+    expect(process.kill).toHaveBeenCalledWith(-35_200, 'SIGTERM')
+  })
+
   it.each([
     ['read-only', 'read-only'],
     ['workspace-write', 'workspace-write'],
     ['danger-full-access', 'danger-full-access'],
   ] as const)(
-    'uses Codex app-server SandboxMode %s on thread/start and stable params on thread/resume',
+    'uses Codex app-server SandboxMode %s on thread/start and thread/resume context',
     async (sandbox, expectedSandbox) => {
       const workingDirectory = await createTempDir('assistant-codex-thread-context-')
-      const expectedThreadContext = {
+      const freshSandbox = sandbox === 'read-only' ? 'danger-full-access' : 'read-only'
+      const expectedFreshThreadContext = {
         approvalPolicy: 'never',
         cwd: path.resolve(workingDirectory),
         developerInstructions: 'Stable Murph instructions.',
         model: 'gpt-5',
         modelProvider: 'vercel-ai-gateway',
+        sandbox: freshSandbox,
+      }
+      const expectedResumeThreadContext = {
+        approvalPolicy: 'never',
+        cwd: path.resolve(workingDirectory),
+        excludeTurns: true,
+        model: 'gpt-5.1',
+        modelProvider: 'openai',
         sandbox: expectedSandbox,
+        threadId: 'thread-resume-request',
       }
       const threadRequests: Record<string, unknown>[] = []
       const turnRequests: Record<string, unknown>[] = []
@@ -5463,6 +6166,15 @@ describe('assistant codex runtime', () => {
           jsonLine({
             id: threadRequest.id,
             result: {
+              ...(input.threadMethod === 'thread/resume'
+                ? {
+                    approvalPolicy: expectedResumeThreadContext.approvalPolicy,
+                    cwd: expectedResumeThreadContext.cwd,
+                    model: expectedResumeThreadContext.model,
+                    modelProvider: expectedResumeThreadContext.modelProvider,
+                    sandbox: codexSandboxPolicyForMode(expectedResumeThreadContext.sandbox),
+                  }
+                : {}),
               thread: {
                 id: input.responseThreadId,
               },
@@ -5524,7 +6236,7 @@ describe('assistant codex runtime', () => {
             await writeSuccessfulTurn({
               child,
               expectedPrompt: 'resume prompt',
-              responseThreadId: 'thread-resumed',
+              responseThreadId: 'thread-resume-request',
               threadRequestCount: 1,
               threadMethod: 'thread/resume',
               turnRequestCount: 2,
@@ -5543,7 +6255,7 @@ describe('assistant codex runtime', () => {
           developerInstructions: 'Stable Murph instructions.',
           prompt: 'fresh prompt',
           reasoningEffort: 'high',
-          sandbox,
+          sandbox: freshSandbox,
           workingDirectory,
         }),
       ).resolves.toMatchObject({
@@ -5553,8 +6265,8 @@ describe('assistant codex runtime', () => {
       await expect(
         executeCodexAppServerTurn({
           approvalPolicy: 'never',
-          model: 'gpt-5',
-          modelProvider: 'vercel-ai-gateway',
+          model: 'gpt-5.1',
+          modelProvider: 'openai',
           developerInstructions: 'Stable Murph instructions.',
           prompt: 'resume prompt',
           reasoningEffort: 'high',
@@ -5563,20 +6275,17 @@ describe('assistant codex runtime', () => {
           workingDirectory,
         }),
       ).resolves.toMatchObject({
-        sessionId: 'thread-resumed',
+        sessionId: 'thread-resume-request',
       })
 
       expect(asRecord(threadRequests[0]?.params)).toEqual({
-        ...expectedThreadContext,
+        ...expectedFreshThreadContext,
         dynamicTools: MURPH_DYNAMIC_TOOLS,
         serviceName: 'murph',
       })
-      expect(asRecord(threadRequests[1]?.params)).toEqual({
-        excludeTurns: true,
-        threadId: 'thread-resume-request',
-      })
+      expect(asRecord(threadRequests[1]?.params)).toEqual(expectedResumeThreadContext)
 
-      for (const [index, expectedThreadId] of ['thread-fresh', 'thread-resumed'].entries()) {
+      for (const [index, expectedThreadId] of ['thread-fresh', 'thread-resume-request'].entries()) {
         const turnParams = asRecord(turnRequests[index]?.params)
         expect(turnParams).toMatchObject({
           effort: 'high',
@@ -5586,6 +6295,7 @@ describe('assistant codex runtime', () => {
         expect(turnParams.cwd).toBeUndefined()
         expect(turnParams.model).toBeUndefined()
         expect(turnParams.modelProvider).toBeUndefined()
+        expect(turnParams.sandbox).toBeUndefined()
       }
     },
   )
@@ -6792,7 +7502,10 @@ describe('assistant codex runtime', () => {
           await waitForRpcMethod(child, 'initialize')
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadResume = await waitForRpcMethod(child, 'thread/resume')
-          expect(asRecord(threadResume.params)).toEqual({
+          const threadResumeParams = asRecord(threadResume.params)
+          expect(threadResumeParams).toMatchObject({
+            approvalPolicy: 'never',
+            cwd: path.resolve(workingDirectory),
             excludeTurns: true,
             threadId: 'existing-thread-without-progress-tool',
           })
@@ -6800,8 +7513,12 @@ describe('assistant codex runtime', () => {
             jsonLine({
               id: 2,
               result: {
+                approvalPolicy: 'never',
+                cwd: path.resolve(workingDirectory),
+                model: threadResumeParams.model,
+                modelProvider: threadResumeParams.modelProvider,
                 thread: {
-                  id: 'thread-progress-resume',
+                  id: 'existing-thread-without-progress-tool',
                 },
               },
             }),
@@ -6870,7 +7587,7 @@ describe('assistant codex runtime', () => {
         workingDirectory,
       }),
     ).resolves.toMatchObject({
-      sessionId: 'thread-progress-resume',
+      sessionId: 'existing-thread-without-progress-tool',
     })
     expect(progressDelivery.send).toHaveBeenCalledWith(
       'Checking the file now.',
@@ -8772,6 +9489,30 @@ function readTurnStartInputItems(
     throw new TypeError('Expected turn/start params.input to be an array.')
   }
   return input.map((item) => asRecord(item))
+}
+
+function codexSandboxPolicyForMode(
+  mode: 'danger-full-access' | 'read-only' | 'workspace-write',
+): Record<string, unknown> {
+  switch (mode) {
+    case 'danger-full-access':
+      return {
+        type: 'dangerFullAccess',
+      }
+    case 'read-only':
+      return {
+        networkAccess: false,
+        type: 'readOnly',
+      }
+    case 'workspace-write':
+      return {
+        excludeSlashTmp: false,
+        excludeTmpdirEnvVar: false,
+        networkAccess: false,
+        type: 'workspaceWrite',
+        writableRoots: [],
+      }
+  }
 }
 
 function readLocalImagePath(item: Record<string, unknown>): string {

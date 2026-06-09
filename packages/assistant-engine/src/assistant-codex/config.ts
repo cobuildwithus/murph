@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { constants as fsConstants } from 'node:fs'
 import { access, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -10,18 +11,23 @@ import { sanitizeChildProcessEnv } from '../child-process-env.js'
 
 interface CodexDisplayConfigProfile {
   model: string | null
+  modelProvider: string | null
   reasoningEffort: string | null
 }
 
 interface CodexDisplayConfig {
   defaultProfile: string | null
   model: string | null
+  modelProviderConfigDigest: string
+  modelProvider: string | null
   profiles: Record<string, CodexDisplayConfigProfile>
   reasoningEffort: string | null
 }
 
 export interface CodexDisplayOptions {
   model: string | null
+  modelProviderConfigDigest: string
+  modelProvider: string | null
   reasoningEffort: string | null
 }
 
@@ -45,9 +51,11 @@ export async function resolveCodexChildEnv(input: {
 export async function resolveCodexDisplayOptions(input: {
   configPath?: string
   model?: string | null
+  modelProvider?: string | null
   profile?: string | null
 }): Promise<CodexDisplayOptions> {
   const explicitModel = normalizeNullableString(input.model)
+  const explicitModelProvider = normalizeNullableString(input.modelProvider)
   const explicitProfile = normalizeNullableString(input.profile)
   const config = await readCodexDisplayConfig(input.configPath)
   const activeProfileName = explicitProfile ?? config.defaultProfile
@@ -57,6 +65,9 @@ export async function resolveCodexDisplayOptions(input: {
 
   return {
     model: explicitModel ?? activeProfile?.model ?? config.model,
+    modelProviderConfigDigest: config.modelProviderConfigDigest,
+    modelProvider:
+      explicitModelProvider ?? activeProfile?.modelProvider ?? config.modelProvider,
     reasoningEffort:
       activeProfile?.reasoningEffort ?? config.reasoningEffort,
   }
@@ -72,6 +83,8 @@ async function readCodexDisplayConfig(
     return {
       defaultProfile: null,
       model: null,
+      modelProviderConfigDigest: hashCodexDisplayConfigIdentity(''),
+      modelProvider: null,
       reasoningEffort: null,
       profiles: {},
     }
@@ -135,6 +148,10 @@ function parseCodexDisplayConfig(raw: string): CodexDisplayConfig {
   const config: CodexDisplayConfig = {
     defaultProfile: null,
     model: null,
+    modelProviderConfigDigest: hashCodexDisplayConfigIdentity(
+      collectCodexModelProviderConfigIdentity(raw),
+    ),
+    modelProvider: null,
     reasoningEffort: null,
     profiles: {},
   }
@@ -153,6 +170,7 @@ function parseCodexDisplayConfig(raw: string): CodexDisplayConfig {
       if (activeProfile && !config.profiles[activeProfile]) {
         config.profiles[activeProfile] = {
           model: null,
+          modelProvider: null,
           reasoningEffort: null,
         }
       }
@@ -181,6 +199,8 @@ function parseCodexDisplayConfig(raw: string): CodexDisplayConfig {
 
       if (key === 'model') {
         profile.model = normalizedValue
+      } else if (key === 'model_provider') {
+        profile.modelProvider = normalizedValue
       } else if (key === 'model_reasoning_effort') {
         profile.reasoningEffort = normalizedValue
       }
@@ -189,6 +209,8 @@ function parseCodexDisplayConfig(raw: string): CodexDisplayConfig {
 
     if (key === 'model') {
       config.model = normalizedValue
+    } else if (key === 'model_provider') {
+      config.modelProvider = normalizedValue
     } else if (key === 'model_reasoning_effort') {
       config.reasoningEffort = normalizedValue
     } else if (key === 'profile') {
@@ -197,4 +219,36 @@ function parseCodexDisplayConfig(raw: string): CodexDisplayConfig {
   }
 
   return config
+}
+
+function collectCodexModelProviderConfigIdentity(raw: string): string {
+  const lines: string[] = []
+  let inModelProviderSection = false
+
+  for (const rawLine of raw.split(/\r?\n/u)) {
+    const line = rawLine.trim()
+    if (line.length === 0 || line.startsWith('#')) {
+      continue
+    }
+
+    if (/^\[.*\]$/u.test(line)) {
+      inModelProviderSection = /^\[model_providers\./u.test(line)
+      if (inModelProviderSection) {
+        lines.push(line)
+      }
+      continue
+    }
+
+    if (inModelProviderSection) {
+      lines.push(line)
+    }
+  }
+
+  return lines.join('\n')
+}
+
+function hashCodexDisplayConfigIdentity(value: string): string {
+  return createHash('sha256')
+    .update(value)
+    .digest('hex')
 }
