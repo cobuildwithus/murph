@@ -1084,10 +1084,173 @@
                             "preserve"
                           ]
                         },
+                        "triggerKind": {
+                          "description": "Automation trigger discriminator.",
+                          "type": "string",
+                          "enum": [
+                            "at",
+                            "every",
+                            "cron",
+                            "dailyLocal",
+                            "deviceActivity"
+                          ]
+                        },
+                        "triggerAt": {
+                          "description": "Required timestamp when --trigger-kind=at.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "triggerEveryMs": {
+                          "description": "Required positive millisecond interval when --trigger-kind=every.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "triggerCron": {
+                          "description": "Required cron expression when --trigger-kind=cron.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "triggerLocalTime": {
+                          "description": "Required HH:MM local time when --trigger-kind=dailyLocal.",
+                          "type": "string",
+                          "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
+                        },
+                        "deviceSource": {
+                          "description": "Optional device activity source filter.",
+                          "type": "string",
+                          "enum": [
+                            "whoop",
+                            "whoop_v2"
+                          ]
+                        },
+                        "activityKind": {
+                          "description": "Optional device activity kind filter.",
+                          "type": "string",
+                          "enum": [
+                            "walk"
+                          ]
+                        },
+                        "scheduleKind": {
+                          "description": "Legacy alias for time-based --trigger-kind values.",
+                          "type": "string",
+                          "enum": [
+                            "at",
+                            "every",
+                            "cron",
+                            "dailyLocal"
+                          ]
+                        },
+                        "scheduleAt": {
+                          "description": "Required timestamp when --schedule-kind=at.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "scheduleEveryMs": {
+                          "description": "Required positive millisecond interval when --schedule-kind=every.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "scheduleCron": {
+                          "description": "Required cron expression when --schedule-kind=cron.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "scheduleLocalTime": {
+                          "description": "Required HH:MM local time when --schedule-kind=dailyLocal.",
+                          "type": "string",
+                          "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
+                        },
+                        "channel": {
+                          "description": "Optional outbound route channel.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "deliveryTarget": {
+                          "description": "Optional route delivery target.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "identityId": {
+                          "description": "Optional route identity id.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "participantId": {
+                          "description": "Optional route participant id.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "threadId": {
+                          "description": "Optional route thread id.",
+                          "type": "string",
+                          "minLength": 1
+                        },
                         "instructions": {
                           "type": "string",
                           "minLength": 1,
                           "description": "Automation instructions to run on the schedule."
+                        }
+                      }
+                    }
+                  }
+                },
+                "edit": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "title": {
+                          "description": "Optional automation title.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "slug": {
+                          "description": "Optional stable lowercase kebab-case slug.",
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                        },
+                        "status": {
+                          "description": "Optional automation status.",
+                          "type": "string",
+                          "enum": [
+                            "active",
+                            "paused",
+                            "archived"
+                          ]
+                        },
+                        "summary": {
+                          "description": "Optional automation summary.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "tags": {
+                          "description": "Optional automation tags. Repeat --tags for multiple values. Do not comma-delimit multiple tags.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "continuityPolicy": {
+                          "description": "Optional continuity policy for scheduled assistant context.",
+                          "type": "string",
+                          "enum": [
+                            "fresh",
+                            "preserve"
+                          ]
                         },
                         "triggerKind": {
                           "description": "Automation trigger discriminator.",
@@ -1189,6 +1352,11 @@
                         },
                         "threadId": {
                           "description": "Optional route thread id.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "instructions": {
+                          "description": "Optional automation instructions.",
                           "type": "string",
                           "minLength": 1
                         }
