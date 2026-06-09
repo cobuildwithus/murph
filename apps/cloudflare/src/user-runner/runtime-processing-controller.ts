@@ -44,6 +44,7 @@ import {
 } from "./runtime-processing-responses.js";
 import {
   RuntimeInvocationService,
+  type PreparedRuntimeInvocation,
   type RuntimeInvocationInput,
 } from "./runtime-invocation.js";
 import {
@@ -71,6 +72,16 @@ export type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
 export type RuntimePrewarmInput = HostedRuntimePrewarmRequest & {
   userId: string;
 };
+
+type FreshRuntimeStartPreparation =
+  | {
+      kind: "ready";
+      prepared: PreparedRuntimeInvocation;
+    }
+  | {
+      kind: "retry";
+      response: HostedRuntimeEnsureProcessingResponse;
+    };
 
 function toRuntimeInvocationInput(input: RuntimeProcessingInput): RuntimeInvocationInput {
   return {
@@ -363,73 +374,14 @@ export class RuntimeProcessingController {
 
     await this.syncRunnerAlarm(await this.input.stateStore.readState());
 
-    const executionInput = toRuntimeInvocationInput(input.input);
-    const readinessPromise = this.confirmRuntimeContainerStartup({
+    const preparation = await this.prepareFreshRuntimeStart({
       commandBudget: input.commandBudget,
       input: input.input,
       runnerContainerName,
       token,
     });
-    const readinessResultPromise = readinessPromise.then((startupConfirmed) => ({
-      kind: "startup" as const,
-      startupConfirmed,
-    }));
-    const preparationPromise = this.input.invocationService.prepareWithFence({
-      commandBudget: input.commandBudget,
-      input: executionInput,
-      token,
-    }).then(
-      (prepared) => ({ kind: "prepared" as const, prepared }),
-      (error: unknown) => ({ kind: "failed" as const, error }),
-    );
-
-    const clearPreparationFailure = async (
-      error: unknown,
-    ): Promise<HostedRuntimeEnsureProcessingResponse> => {
-      const current = await this.input.stateStore.readWriteFenceToken();
-      const stillOwnsFreshFence = current !== null
-        && current.attemptId === token.attemptId
-        && current.generation === token.generation
-        && current.kind === token.kind
-        && current.userId === token.userId;
-      if (!stillOwnsFreshFence) {
-        const startupConfirmed = await readinessPromise;
-        if (!startupConfirmed.confirmed) {
-          return startupConfirmed.response;
-        }
-      }
-
-      void readinessResultPromise.catch(() => undefined);
-      const failed = await this.clearWriteFenceAfterRuntimeStartFailure({
-        error,
-        input: input.input,
-        message: "Hosted runner runtime processing preparation failed.",
-        token,
-      });
-      return failed.response;
-    };
-
-    const firstCompleted = await Promise.race([
-      readinessResultPromise,
-      preparationPromise,
-    ]);
-    if (firstCompleted.kind === "failed") {
-      void readinessResultPromise.catch(() => undefined);
-      return await clearPreparationFailure(firstCompleted.error);
-    }
-
-    const startupConfirmed = firstCompleted.kind === "startup"
-      ? firstCompleted.startupConfirmed
-      : await readinessPromise;
-    if (!startupConfirmed.confirmed) {
-      return startupConfirmed.response;
-    }
-
-    const preparation = firstCompleted.kind === "prepared"
-      ? firstCompleted
-      : await preparationPromise;
-    if (preparation.kind === "failed") {
-      return await clearPreparationFailure(preparation.error);
+    if (preparation.kind === "retry") {
+      return preparation.response;
     }
     const prepared = preparation.prepared;
 
@@ -471,6 +423,99 @@ export class RuntimeProcessingController {
       kind: "runtime_processing_accepted",
       recommendedRecheckAt: this.computeRuntimeProcessingOwnerRecheckAt(),
       runtimeAttemptId: prepared.token.attemptId,
+    };
+  }
+
+  private async prepareFreshRuntimeStart(input: {
+    commandBudget: RuntimeProcessingCommandBudget;
+    input: RuntimeProcessingInput;
+    runnerContainerName: string;
+    token: RunnerWriteFenceToken;
+  }): Promise<FreshRuntimeStartPreparation> {
+    const executionInput = toRuntimeInvocationInput(input.input);
+    const token = input.token;
+    const readinessPromise = this.confirmRuntimeContainerStartup({
+      commandBudget: input.commandBudget,
+      input: input.input,
+      runnerContainerName: input.runnerContainerName,
+      token,
+    });
+    const readinessResultPromise = readinessPromise.then((startupConfirmed) => ({
+      kind: "startup" as const,
+      startupConfirmed,
+    }));
+    const preparationPromise = this.input.invocationService.prepareWithFence({
+      commandBudget: input.commandBudget,
+      input: executionInput,
+      token,
+    }).then(
+      (prepared) => ({ kind: "prepared" as const, prepared }),
+      (error: unknown) => ({ kind: "failed" as const, error }),
+    );
+
+    const clearPreparationFailure = async (
+      error: unknown,
+    ): Promise<FreshRuntimeStartPreparation> => {
+      // Preparation is the invocation authority. Once it fails, clear this
+      // fresh fence and return; any still-pending readiness RPC may finish as a
+      // best-effort warm shell, but it cannot commit runtime work without the fence.
+      void readinessResultPromise.catch(() => undefined);
+
+      const current = await this.input.stateStore.readWriteFenceToken();
+      const stillOwnsFreshFence = current !== null
+        && current.attemptId === token.attemptId
+        && current.generation === token.generation
+        && current.kind === token.kind
+        && current.userId === token.userId;
+      if (!stillOwnsFreshFence) {
+        const startupConfirmed = await readinessPromise;
+        if (!startupConfirmed.confirmed) {
+          return {
+            kind: "retry",
+            response: startupConfirmed.response,
+          };
+        }
+      }
+
+      const failed = await this.clearWriteFenceAfterRuntimeStartFailure({
+        error,
+        input: input.input,
+        message: "Hosted runner runtime processing preparation failed.",
+        token,
+      });
+      return {
+        kind: "retry",
+        response: failed.response,
+      };
+    };
+
+    const firstCompleted = await Promise.race([
+      readinessResultPromise,
+      preparationPromise,
+    ]);
+    if (firstCompleted.kind === "failed") {
+      return await clearPreparationFailure(firstCompleted.error);
+    }
+
+    const startupConfirmed = firstCompleted.kind === "startup"
+      ? firstCompleted.startupConfirmed
+      : await readinessPromise;
+    if (!startupConfirmed.confirmed) {
+      return {
+        kind: "retry",
+        response: startupConfirmed.response,
+      };
+    }
+
+    const preparation = firstCompleted.kind === "prepared"
+      ? firstCompleted
+      : await preparationPromise;
+    if (preparation.kind === "failed") {
+      return await clearPreparationFailure(preparation.error);
+    }
+    return {
+      kind: "ready",
+      prepared: preparation.prepared,
     };
   }
 

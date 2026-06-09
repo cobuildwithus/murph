@@ -333,7 +333,9 @@ start or fresh wake acceptance. Fresh starts begin the runtime write fence, then
 overlap container readiness with hosted workspace read, workspace-version
 binding, runtime config/secrets preparation, and container job construction
 before returning accepted; failures in that pre-handoff path clear the fresh
-fence and return `retry_later`. The Temporal
+fence and return `retry_later`. Because readiness is overlapped, a failed
+preparation may still leave a best-effort warm shell behind; write-fence
+ownership remains the only authority to invoke or commit runtime work. The Temporal
 caller sends its existing ensure-processing HTTP timeout as an internal header.
 Cloudflare treats that value as an operational hint only: the foreground
 pre-accept budget is clamped by Cloudflare's configured web-control timeout, and
