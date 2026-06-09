@@ -503,9 +503,11 @@ describe("runSmokeHostedDeploy", () => {
     expect(fetchCalls.filter((entry) =>
       entry.endsWith("/internal/deploy/container-smoke")
     )).toHaveLength(2);
-    expect(logs).toContain(
-      "Runner container smoke attempt 1/2 did not observe the expected runner bundle; retrying in 0ms.",
-    );
+    expect(logs.some((message) =>
+      message.startsWith("Runner container smoke attempt 1/2 failed (")
+      && message.includes("did not run the expected runner bundle")
+      && message.endsWith("; retrying in 0ms.")
+    )).toBe(true);
   });
 
   it("retries transient HTTP 400 runner container smoke responses", async () => {

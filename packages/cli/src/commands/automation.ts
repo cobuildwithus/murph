@@ -205,12 +205,16 @@ function hasDefinedAutomationOption(options: object): boolean {
   return Object.values(options).some((value) => value !== undefined);
 }
 
-function automationScheduleOptionsHavePatch(options: AutomationScheduleOptions): boolean {
-  return hasDefinedAutomationOption(options);
+// Only save/create may inherit the hosted assistant's current conversation as
+// the route; edit always requires a complete explicit route.
+async function buildAutomationSaveRouteFromOptions(input: AutomationRouteOptions): Promise<AutomationRoute> {
+  return buildAutomationRouteFromOptions(input, await readAutomationSaveCurrentRoute(input));
 }
 
-async function buildAutomationRouteFromOptions(input: AutomationRouteOptions): Promise<AutomationRoute> {
-  const currentRoute = await readAutomationSaveCurrentRoute(input);
+function buildAutomationRouteFromOptions(
+  input: AutomationRouteOptions,
+  currentRoute: HostedCliAssistantCurrentRoute | null,
+): AutomationRoute {
   const route = stripPrivateAssistantRoutePlaceholders(
     resolveAssistantDeliveryRouteWithCurrentRoute({
       channel: input.channel,
@@ -262,10 +266,6 @@ function automationSaveNeedsCurrentRoute(input: AutomationRouteOptions): boolean
   return !deliveryTarget
     && !normalizeAutomationRouteOption(input.participantId)
     && !normalizeAutomationRouteOption(input.threadId);
-}
-
-function automationRouteOptionsHavePatch(options: AutomationRouteOptions): boolean {
-  return hasDefinedAutomationOption(options);
 }
 
 function assertAutomationRouteCanDeliver(route: AutomationRoute): void {
@@ -489,7 +489,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         automationId: context.options.id,
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,
-        route: await buildAutomationRouteFromOptions({
+        route: await buildAutomationSaveRouteFromOptions({
           channel: context.options.channel,
           deliveryTarget: context.options.deliveryTarget,
           identityId: context.options.identityId,
@@ -578,10 +578,13 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,
         lookup: context.args.lookup,
-        route: automationRouteOptionsHavePatch(routeOptions)
-          ? await buildAutomationRouteFromOptions(routeOptions)
+        // Route flags replace the stored route wholesale: a route names one
+        // conversation, so it is never merged field-wise or inherited from the
+        // assistant's current conversation.
+        route: hasDefinedAutomationOption(routeOptions)
+          ? buildAutomationRouteFromOptions(routeOptions, null)
           : undefined,
-        schedule: automationScheduleOptionsHavePatch(scheduleOptions)
+        schedule: hasDefinedAutomationOption(scheduleOptions)
           ? buildAutomationScheduleFromOptions(scheduleOptions, { now })
           : undefined,
         slug: context.options.slug,

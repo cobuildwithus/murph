@@ -546,7 +546,14 @@ export async function showAutomation(
   input: ReadAutomationInput,
 ): Promise<AutomationRecord | null> {
   const records = await loadAutomationRecords(input.vaultRoot);
-  const existing = selectExistingRegistryRecord({
+  return selectAutomationRecord(records, input);
+}
+
+function selectAutomationRecord(
+  records: AutomationRecord[],
+  input: { automationId?: string; slug?: string },
+): AutomationRecord | null {
+  return selectExistingRegistryRecord({
     records,
     recordId: input.automationId,
     slug: input.slug,
@@ -555,8 +562,6 @@ export async function showAutomation(
     conflictCode: "VAULT_AUTOMATION_CONFLICT",
     conflictMessage: "Automation id and slug resolve to different records.",
   });
-
-  return existing;
 }
 
 export async function upsertAutomation(
@@ -571,10 +576,14 @@ export async function patchAutomation(
   assertAutomationPatchHasChanges(input);
 
   return withAutomationRegistryLock(input.vaultRoot, async () => {
-    const existingRecord = await readAutomationByLookup({
-      lookup: input.lookup,
-      vaultRoot: input.vaultRoot,
+    const records = await loadAutomationRecords(input.vaultRoot);
+    const existingRecord = selectAutomationRecord(records, {
+      automationId: input.lookup,
+      slug: input.lookup,
     });
+    if (!existingRecord) {
+      throw new VaultError("VAULT_AUTOMATION_MISSING", "Automation was not found.");
+    }
     return upsertAutomationWithLatestRegistry({
       automationId: existingRecord.automationId,
       continuityPolicy: input.continuityPolicy ?? existingRecord.continuityPolicy,
@@ -589,7 +598,7 @@ export async function patchAutomation(
       title: input.title ?? existingRecord.title,
       vaultRoot: input.vaultRoot,
       allowSlugRename: input.slug !== undefined,
-    });
+    }, records);
   });
 }
 
@@ -605,31 +614,17 @@ function assertAutomationPatchHasChanges(input: PatchAutomationInput): void {
   );
 }
 
-async function readAutomationByLookup(input: {
-  lookup: string;
-  vaultRoot: string;
-}): Promise<AutomationRecord> {
-  const record = await showAutomation({
-    automationId: input.lookup,
-    slug: input.lookup,
-    vaultRoot: input.vaultRoot,
-  });
-  if (record) return record;
-
-  throw new VaultError("VAULT_AUTOMATION_MISSING", "Automation was not found.");
-}
-
 async function upsertAutomationWithLatestRegistry(
   input: UpsertAutomationInput,
+  records?: AutomationRecord[],
 ): Promise<UpsertAutomationResult> {
   const normalizedId = normalizeId(input.automationId, "automationId", "automation");
   const title = normalizeAutomationTitle(input.title);
   const requestedSlug = normalizeSlug(input.slug, "slug", title);
-  const existingRecord = await showAutomation({
-    automationId: normalizedId,
-    slug: requestedSlug,
-    vaultRoot: input.vaultRoot,
-  });
+  const existingRecord = selectAutomationRecord(
+    records ?? await loadAutomationRecords(input.vaultRoot),
+    { automationId: normalizedId, slug: requestedSlug },
+  );
   const now = (input.now ?? new Date()).toISOString();
   const recordId = existingRecord?.automationId ?? normalizedId ?? generateRecordId("automation");
   const createdAt = existingRecord?.createdAt ?? now;
