@@ -70,7 +70,6 @@ export interface UpsertAssistantCronAutomationInput {
   route: AutomationRoute
   schedule: AssistantCronScheduleInput
   slug: string
-  status?: 'active' | 'paused'
   summary?: string | null
   tags?: string[]
   title: string
@@ -200,15 +199,11 @@ export async function upsertAssistantCronAutomation(
   return withAssistantCronWriteLock(lockPaths, async () => {
     const existingAutomation = await showCanonicalAutomation(input.vault, input.slug)
     const existingStatus = existingAutomation?.status ?? null
-    if (
-      existingStatus === 'archived' &&
-      input.status === undefined
-    ) {
+    if (existingStatus === 'archived') {
       return null
     }
 
-    const status =
-      input.status ?? (existingStatus === 'paused' ? 'paused' : 'active')
+    const status = existingStatus === 'paused' ? 'paused' : 'active'
     const resolvedCreation = await resolveAssistantCronJobCreationInput({
       enabled: status === 'active',
       name: input.title,
@@ -223,7 +218,6 @@ export async function upsertAssistantCronAutomation(
 
     if (
       existingAutomation &&
-      existingStatus !== 'archived' &&
       !assistantCronTargetAudienceEquals(existingAutomation.route, target)
     ) {
       return null
@@ -293,7 +287,12 @@ export async function upsertAssistantCronAutomation(
         created: source,
         existing: existingAutomation,
         vault: resolvedCreation.vault,
-      }).catch(() => undefined)
+      }).catch(() => {
+        throw new VaultCliError(
+          'ASSISTANT_CRON_AUTOMATION_ROLLBACK_FAILED',
+          'Assistant cron automation runtime-state write failed and rollback also failed. Manual automation cleanup may be required.',
+        )
+      })
       throw error
     }
 
@@ -311,6 +310,11 @@ async function restoreAssistantCronAutomationAfterRuntimeStateFailure(input: {
   > | null
   vault: string
 }): Promise<void> {
+  const current = await showCanonicalAutomation(input.vault, input.created.automationId)
+  if (!current || current.updatedAt !== input.created.updatedAt) {
+    return
+  }
+
   if (input.existing) {
     await upsertAutomation({
       automationId: input.existing.automationId,
@@ -328,10 +332,26 @@ async function restoreAssistantCronAutomationAfterRuntimeStateFailure(input: {
     return
   }
 
-  await deleteAutomation({
-    automationId: input.created.automationId,
-    vaultRoot: input.vault,
-  })
+  try {
+    await deleteAutomation({
+      automationId: input.created.automationId,
+      vaultRoot: input.vault,
+    })
+  } catch {
+    await upsertAutomation({
+      automationId: input.created.automationId,
+      continuityPolicy: input.created.continuityPolicy,
+      instructions: input.created.instructions,
+      route: input.created.route,
+      schedule: input.created.schedule,
+      slug: input.created.slug,
+      status: 'archived',
+      summary: input.created.summary ?? undefined,
+      tags: input.created.tags,
+      title: input.created.title,
+      vaultRoot: input.vault,
+    })
+  }
 }
 
 export async function resolveAssistantCronJobCreationInput(

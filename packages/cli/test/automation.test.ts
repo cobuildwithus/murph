@@ -884,6 +884,90 @@ test("automation commands round-trip save, import-json, show, and list through t
   }
 });
 
+test("automation import-json accepts Linq participant routes with delivery source", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-linq-participant-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+
+    const payload = {
+      ...createAutomationScaffoldPayload(),
+      title: "Linq setup continuation",
+      slug: "linq-setup-continuation",
+      instructions: "Continue setup over Linq.",
+      route: {
+        channel: "linq",
+        deliverySource: {
+          fromPhoneNumber: "+15550001111",
+          kind: "linq",
+        },
+        deliveryTarget: null,
+        identityId: "identity_linq",
+        participantId: "+15550002222",
+        threadId: null,
+      },
+    };
+    const payloadPath = path.join(parentRoot, "automation-linq-participant.json");
+    await writeFile(payloadPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+
+    const imported = await runInProcessJsonCli<{
+      automationId: string;
+      created: boolean;
+      lookupId: string;
+      path: string;
+      vault: string;
+    }>(cli, [
+      "automation",
+      "import-json",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(imported.exitCode, null);
+    assert.equal(imported.envelope.ok, true);
+    assert.equal(imported.envelope.data?.created, true);
+    assert.equal(imported.envelope.data?.lookupId, payload.slug);
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        route: {
+          deliverySource: { fromPhoneNumber: string; kind: string } | null;
+          deliveryTarget: string | null;
+          identityId: string | null;
+          participantId: string | null;
+          threadId: string | null;
+        };
+      } | null;
+      vault: string;
+    }>(cli, [
+      "automation",
+      "show",
+      payload.slug,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.deepEqual(shown.envelope.data?.automation?.route.deliverySource, {
+      fromPhoneNumber: "+15550001111",
+      kind: "linq",
+    });
+    assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, null);
+    assert.equal(shown.envelope.data?.automation?.route.identityId, "identity_linq");
+    assert.equal(shown.envelope.data?.automation?.route.participantId, "+15550002222");
+    assert.equal(shown.envelope.data?.automation?.route.threadId, null);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
 test("automation save maps trigger flags and keeps legacy schedule flags working", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-automation-schedules-",

@@ -91,7 +91,7 @@ const automationRouteDeliverySourceSchema = z.discriminatedUnion("kind", [
 export const automationRouteSchema = z
   .object({
     channel: z.string().min(1),
-    deliverySource: automationRouteDeliverySourceSchema.nullable().default(null),
+    deliverySource: automationRouteDeliverySourceSchema.nullable().optional(),
     deliveryTarget: z.string().min(1).nullable(),
     identityId: z.string().min(1).nullable(),
     participantId: z.string().min(1).nullable(),

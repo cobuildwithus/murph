@@ -3,6 +3,7 @@ import {
   type AssistantCronTarget,
   type AssistantCronTargetSnapshot,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import type { AutomationRoute } from '@murphai/contracts'
 import {
   looksLikePrivateAssistantRoutePlaceholder,
   resolveAssistantDeliveryRouteWithCurrentRoute,
@@ -145,7 +146,7 @@ export function buildAssistantCronTargetSnapshot(
 
 export function assistantCronTargetAudienceEquals(
   left: Pick<
-    AssistantCronTarget,
+    AssistantCronTarget | AutomationRoute,
     | 'channel'
     | 'deliverySource'
     | 'deliveryTarget'
@@ -154,7 +155,7 @@ export function assistantCronTargetAudienceEquals(
     | 'threadId'
   >,
   right: Pick<
-    AssistantCronTarget,
+    AssistantCronTarget | AutomationRoute,
     | 'channel'
     | 'deliverySource'
     | 'deliveryTarget'
@@ -177,13 +178,16 @@ export function assistantCronTargetAudienceEquals(
 }
 
 function assistantCronDeliverySourceEquals(
-  left: AssistantCronTarget['deliverySource'],
-  right: AssistantCronTarget['deliverySource'],
+  left: AssistantCronTarget['deliverySource'] | undefined,
+  right: AssistantCronTarget['deliverySource'] | undefined,
 ): boolean {
-  if (left === null || right === null) {
-    return left === right
+  const normalizedLeft = left ?? null
+  const normalizedRight = right ?? null
+
+  if (normalizedLeft === null || normalizedRight === null) {
+    return normalizedLeft === normalizedRight
   }
 
-  return left.kind === right.kind &&
-    left.fromPhoneNumber === right.fromPhoneNumber
+  return normalizedLeft.kind === normalizedRight.kind &&
+    normalizedLeft.fromPhoneNumber === normalizedRight.fromPhoneNumber
 }

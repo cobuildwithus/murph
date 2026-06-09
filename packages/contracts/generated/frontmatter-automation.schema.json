@@ -155,7 +155,6 @@
           "minLength": 1
         },
         "deliverySource": {
-          "default": null,
           "anyOf": [
             {
               "oneOf": [
@@ -231,7 +230,6 @@
       },
       "required": [
         "channel",
-        "deliverySource",
         "deliveryTarget",
         "identityId",
         "participantId",

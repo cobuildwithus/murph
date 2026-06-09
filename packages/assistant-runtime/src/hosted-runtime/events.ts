@@ -709,10 +709,11 @@ function didAssistantNotificationAcceptDelivery(
 function isSignupWelcomeAssistantNotification(
   wake: HostedExecutionAssistantNotificationRequestedWake,
 ): boolean {
+  const expectedToken = `signup-welcome:${wake.userId}`;
   return [
     wake.notification.deliveryDedupeToken,
     wake.notification.deliveryIdempotencyKey,
-  ].some((value) => value?.startsWith("signup-welcome:") === true);
+  ].some((value) => value === expectedToken);
 }
 
 function buildOnboardingFollowupAutomationRoute(
@@ -720,6 +721,10 @@ function buildOnboardingFollowupAutomationRoute(
 ): AutomationRoute | null {
   const delivery = route.delivery;
   if (route.channel === "linq") {
+    if (delivery.kind === "participant" && !delivery.source) {
+      return null;
+    }
+
     return {
       channel: route.channel,
       deliverySource: delivery.source ?? null,

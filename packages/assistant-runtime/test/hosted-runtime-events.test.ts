@@ -1635,6 +1635,40 @@ describe("executeHostedMailboxEvent", () => {
     );
   });
 
+  it("does not seed onboarding follow-up for non-exact signup welcome tokens", async () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_notification_welcome_prefix_only",
+      memberId: "member_123",
+      notification: {
+        deliveryIdempotencyKey: "signup-welcome:member_123:retry",
+        instructions: "Send exactly the signup welcome.",
+        route: {
+          actorId: "hid_telegram_actor_123",
+          channel: "telegram",
+          delivery: {
+            kind: "thread",
+            target: "telegram_thread_123",
+          },
+          identityId: null,
+          threadId: null,
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledOnce();
+    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+  });
+
   it("does not seed onboarding follow-up when signup welcome delivery is skipped", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_welcome_skip_result",
@@ -1997,6 +2031,56 @@ describe("executeHostedMailboxEvent", () => {
           threadId: null,
         },
         slug: "finish-onboarding-followup",
+      }),
+    );
+  });
+
+  it("skips onboarding follow-up seeding for Linq participant routes without delivery source", async () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_notification_linq_participant_no_source",
+      memberId: "member_123",
+      notification: {
+        deliveryIdempotencyKey: "signup-welcome:member_123",
+        instructions: "Send exactly the signup welcome.",
+        route: {
+          actorId: "hid_linq_actor_participant",
+          channel: "linq",
+          delivery: {
+            kind: "participant",
+            target: "+15550002222",
+          },
+          identityId: "hid_linq_identity_participant",
+          threadId: null,
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const result = await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(result).toMatchObject({
+      conversationMetrics: null,
+      mailboxLane: "assistant-notification",
+    });
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "linq",
+        deliveryKind: "participant",
+        deliverySource: null,
+        bindingDeliveryTarget: "+15550002222",
+      }),
+    );
+    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(result.redactedLogEntries).not.toContainEqual(
+      expect.objectContaining({
+        message: "Hosted onboarding follow-up automation seed failed.",
       }),
     );
   });

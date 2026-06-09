@@ -279,14 +279,19 @@ function assertAutomationRouteCanDeliver(route: AutomationRoute): void {
   }
 
   if (route.channel === "linq") {
-    if (!route.deliveryTarget) {
+    const hasParticipantSource =
+      Boolean(route.participantId) && route.deliverySource?.kind === "linq";
+    if (!route.deliveryTarget && !hasParticipantSource) {
       throw new VaultCliError(
         "invalid_option",
-        "iMessage automation routes require an explicit delivery target. Pass --delivery-target.",
+        "iMessage automation routes require an explicit delivery target or a participant route with a delivery source.",
       );
     }
 
-    if (looksLikePrivateAssistantRoutePlaceholder(route.deliveryTarget)) {
+    if (
+      route.deliveryTarget &&
+      looksLikePrivateAssistantRoutePlaceholder(route.deliveryTarget)
+    ) {
       throw new VaultCliError(
         "invalid_option",
         "iMessage automation routes cannot use redacted conversation placeholders as delivery targets.",
