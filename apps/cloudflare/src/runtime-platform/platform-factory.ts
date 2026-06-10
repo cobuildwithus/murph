@@ -9,6 +9,7 @@ import { createCloudflareArtifactStore } from "./artifact-store.ts";
 import { createCloudflareBrowserVaultReplicaPort } from "./browser-vault-replica-port.ts";
 import { createHostedWebDeviceSyncPort } from "./device-sync-port.ts";
 import { createCloudflareEffectsPort } from "./effects-port.ts";
+import { createCloudflareGeneratedImageUploader } from "./generated-image-uploader.ts";
 import { createHostedRuntimeIssueExportPort } from "./issue-export-port.ts";
 import { createHostedWebRuntimeLatencyTracePort } from "./latency-trace-port.ts";
 import { createHostedWebRuntimeLogPort } from "./log-port.ts";
@@ -84,6 +85,11 @@ export function buildHostedExecutionRuntimePlatform(input: {
       : {}),
     ...(input.workspaceCheckpointBridge
       ? {
+          generatedImageUploader: createCloudflareGeneratedImageUploader({
+            fetchImpl: trustedInternalFetchImpl,
+            timeoutMs,
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+          }),
           providerFetch: createCloudflareHostedProviderFetch(
             input.boundUserId,
             baseFetchImpl,
