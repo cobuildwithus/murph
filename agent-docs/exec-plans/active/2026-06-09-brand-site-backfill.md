@@ -144,3 +144,9 @@ Conclusion: the regenerated candidate artifact is clean for the read-only checks
 - Per product decision, removed non-supplement rows from the unstructured set: **355 foods** (protein powders, energy gels, bars, cookies — carry Nutrition Facts, not Supplement Facts) + **124 true multi-pack duplicates** (`N-Pack`/`N Bottles`/`N-ct` of products that exist separately). Deleted 479 total, scoped to brand_site + unstructured.
 - Attempted to recover 76 "misclassified single" candidates, but 33 lacked extractable facts and the 8 that extracted were re-blocked by the labels.mjs production guard as non_standalone (ProSupps 1-serve samples, piping-rock complex products) — the guard agreed with the original classification, so net ~0 forced through (safety preserved).
 - Final: total brand_site 25,730 → **25,251**; structured **23,033 / 25,251 = 91.2%** (from 27% at session start).
+
+### Wave 12 — image-selector fix (alt-text + SFP) (2026-06-10)
+
+- BREAKTHROUGH: the ~2k "image-failed" rows were largely a SELECTOR bug, not missing data. The facts-panel image is on the page but deep in the gallery and named/alt'd without "facts" in the filename. The fix: score candidate images by (a) ALT-TEXT facts language ("Serving Size", "Amount Per Serving", "Supplement Facts", "Daily Value") — strongest signal — and (b) `SFP` (Supplement Facts Panel) filename suffix. Old top-5-by-filename selector missed both.
+- Validated by reading panels directly: Force Factor D3/Maca MAX/L-Taurine/Complete Eye Health all read perfectly. Re-running image OCR with the fixed selector: yield jumped from 7-29% to **93-97%** on SFP brands (force-factor, bluebonnet), ~18-22% on the mid-pool tail.
+- Recovered ~340+ rows so far across fix1-fix5; loop continuing through the 2,198-row re-try pool. Structured **91.2% → 92.6%** and climbing. The fixed selector is in scripts/context-dev-image-fetch.py (FACTS_ALT + SFP scoring).
