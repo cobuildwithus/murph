@@ -284,6 +284,21 @@ export async function startHostedContainerEntrypoint(input: {
   // port is listening and consumed by the FIRST (cold) invocation only; a warm
   // process predates its message so its startup is not attributable to that turn.
   let pendingColdNodeStartupMs: number | null = null;
+  // Deploy rollouts SIGTERM the container with a short grace period. Surface
+  // that as a shutdown signal so an invocation waiting in the idle window runs
+  // its idle_shutdown checkpoint now instead of dying unsnapshotted.
+  const containerShutdownController = new AbortController();
+  process.once("SIGTERM", () => {
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      level: "warn",
+      message: "Hosted container entrypoint received SIGTERM; requesting immediate idle checkpoint.",
+      phase: "wake.running",
+    });
+    containerShutdownController.abort(
+      new DOMException("Hosted container received SIGTERM.", "AbortError"),
+    );
+  });
   const server = createServer(async (request, response) => {
     response.setHeader("connection", "close");
     const requestAbort = createRequestAbortController(request, response);
@@ -555,6 +570,7 @@ export async function startHostedContainerEntrypoint(input: {
         },
         ...(coldNodeStartupMs === null ? {} : { nodeStartupMs: coldNodeStartupMs }),
         runnerJobAcceptedAt,
+        shutdownSignal: containerShutdownController.signal,
         signal: requestAbort.signal,
       });
       directInvocationReturned = true;
@@ -2086,6 +2102,7 @@ async function runHostedWorkspaceInvocation(
     nodeStartupMs?: number | null;
     onRuntimeWakeReady?: (sendWake: () => boolean) => void;
     runnerJobAcceptedAt?: string | null;
+    shutdownSignal?: AbortSignal | null;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof runHostedWorkspaceInvocationDirect>>> {
@@ -2093,6 +2110,7 @@ async function runHostedWorkspaceInvocation(
     nodeStartupMs: options?.nodeStartupMs ?? null,
     onRuntimeWakeReady: options?.onRuntimeWakeReady,
     runnerJobAcceptedAt: options?.runnerJobAcceptedAt ?? null,
+    shutdownSignal: options?.shutdownSignal ?? null,
     signal: options?.signal,
     supervisorEnv: runtime.startupConfig.supervisorEnv,
   });
@@ -2106,6 +2124,7 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
     onCleanupStatus?: (status: Exclude<HostedContainerCleanupStatus, "not_run">) => void;
     onRuntimeWakeReady?: (sendWake: () => boolean) => void;
     runnerJobAcceptedAt?: string | null;
+    shutdownSignal?: AbortSignal | null;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof runHostedWorkspaceInvocationDirect>>> {

@@ -98,6 +98,8 @@ export {
   parseHostedWorkspaceSnapshotV2Ref,
 } from "./parsers/workspace-snapshot-v2.ts";
 export {
+  parseHostedMailboxConsumeRequest,
+  parseHostedMailboxConsumeResponse,
   parseHostedMailboxFetchRequest,
   parseHostedMailboxFetchResponse,
   parseHostedMailboxItem,

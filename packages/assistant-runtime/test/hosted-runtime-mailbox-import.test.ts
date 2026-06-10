@@ -78,6 +78,79 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.system, "0");
   });
 
+  test("flags items at or below the durable consumed floor as durably consumed", async () => {
+    const { mailboxPort } = createMailboxPort({
+      consumedSeqByLane: [
+        { consumedSeq: "1", lane: "conversation" },
+      ],
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_conversation_001",
+          laneSeq: "1",
+        }),
+        createMailboxItem({
+          id: "mailbox_item_conversation_002",
+          laneSeq: "2",
+        }),
+      ],
+    });
+    const durablyConsumedBySeq = new Map<string, boolean | undefined>();
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        durablyConsumedBySeq.set(input.item.laneSeq, input.durablyConsumed);
+        return { status: "imported" };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_import_consumed_floor",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.equal(result.importedCount, 2);
+    assert.deepEqual([...durablyConsumedBySeq.entries()], [
+      ["1", true],
+      ["2", false],
+    ]);
+  });
+
+  test("flags nothing as durably consumed when the fetch response omits consumedSeqByLane", async () => {
+    const { mailboxPort } = createMailboxPort({
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_conversation_001",
+          laneSeq: "1",
+        }),
+        createMailboxItem({
+          id: "mailbox_item_conversation_002",
+          laneSeq: "2",
+        }),
+      ],
+    });
+    const durablyConsumedBySeq = new Map<string, boolean | undefined>();
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        durablyConsumedBySeq.set(input.item.laneSeq, input.durablyConsumed);
+        return { status: "imported" };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_import_consumed_floor_missing",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.equal(result.importedCount, 2);
+    assert.deepEqual([...durablyConsumedBySeq.entries()], [
+      ["1", false],
+      ["2", false],
+    ]);
+  });
+
   test("returns the latest Linq delivery context imported from the mailbox prefix", async () => {
     const item = createMailboxItem({
       id: "mailbox_item_conversation_linq_context",
@@ -677,6 +750,7 @@ describe("hosted mailbox import loop", () => {
 });
 
 function createMailboxPort(input: {
+  consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"];
   items: readonly HostedMailboxItem[];
   payloadResponse?: HostedMailboxPayloadFetchResponse;
   userId?: string;
@@ -694,6 +768,9 @@ function createMailboxPort(input: {
       async fetch(request): Promise<HostedMailboxFetchResponse> {
         fetchRequests.push(request);
         return {
+          ...(input.consumedSeqByLane === undefined
+            ? {}
+            : { consumedSeqByLane: input.consumedSeqByLane }),
           fetchedAt: TEST_NOW,
           items: input.items.filter((item) =>
             request.lanes.some((lane) =>

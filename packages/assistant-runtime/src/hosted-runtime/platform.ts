@@ -3,6 +3,8 @@ import type {
   HostedAssistantDeliverySideEffect,
 } from "@murphai/hosted-execution/side-effects";
 import type {
+  HostedMailboxConsumeRequest,
+  HostedMailboxConsumeResponse,
   HostedMailboxFetchRequest,
   HostedMailboxFetchResponse,
   HostedMailboxPayloadFetchRequest,
@@ -245,6 +247,10 @@ export interface HostedRuntimeIssueExportPort {
 }
 
 export interface HostedRuntimeMailboxPort {
+  // Optional for deploy-window compatibility with older platform builds.
+  // Advances the durable per-lane consumed watermark after a clean pass;
+  // idempotent monotonic max on the web side.
+  consume?(request: HostedMailboxConsumeRequest): Promise<HostedMailboxConsumeResponse>;
   fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse>;
   fetchPayload(
     request: HostedMailboxPayloadFetchRequest,

@@ -60,6 +60,11 @@ export type HostedMailboxPostCheckpointEffect = () =>
   Promise<HostedMailboxPostCheckpointEffectResult>;
 
 export interface HostedMailboxResolvedImportItem {
+  // True when the durable consumed watermark from the mailbox fetch response
+  // already covers this item's laneSeq: the item is a replay of an
+  // already-handled message and must stay conversation context only, never a
+  // fresh reply candidate.
+  durablyConsumed?: boolean;
   item: HostedMailboxItem;
   payload: Extract<HostedMailboxPayloadResolutionResult, { status: "resolved" }>;
   route: HostedMailboxRoutePlan;
@@ -173,6 +178,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     fetched,
   });
   const itemsByLane = groupMailboxItemsByLane(fetched.items);
+  const consumedSeqByLane = readHostedMailboxFetchConsumedSeqByLane(fetched);
   let nextState = input.state;
   const assistantInputIds: string[] = [];
   let conversationImportedCount = 0;
@@ -296,6 +302,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     }
 
     const outcome = await input.importItem({
+      durablyConsumed: itemSeq <= consumedSeqByLane[lane],
       item,
       payload,
       route,
@@ -477,6 +484,27 @@ function assertHostedMailboxFetchUser(input: {
       });
     }
   }
+}
+
+function readHostedMailboxFetchConsumedSeqByLane(
+  fetched: HostedMailboxFetchResponse,
+): Record<HostedMailboxLane, bigint> {
+  // Missing/null consumedSeqByLane (older web responses) means no lane is
+  // durably consumed: treat every lane as consumed through seq 0.
+  const consumed: Record<HostedMailboxLane, bigint> = {
+    conversation: 0n,
+    system: 0n,
+  };
+  for (const entry of fetched.consumedSeqByLane ?? []) {
+    if (entry.lane !== "conversation" && entry.lane !== "system") {
+      continue;
+    }
+    const seq = parseMailboxSeqForImportOrNull(entry.consumedSeq);
+    if (seq !== null && seq > consumed[entry.lane]) {
+      consumed[entry.lane] = seq;
+    }
+  }
+  return consumed;
 }
 
 function groupMailboxItemsByLane(

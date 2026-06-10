@@ -66,6 +66,7 @@ export interface HostedWorkspaceInvocationOptions {
   nodeStartupMs?: number | null;
   onRuntimeWakeReady?: (sendWake: () => boolean) => void;
   runnerJobAcceptedAt?: string | null;
+  shutdownSignal?: AbortSignal | null;
   signal?: AbortSignal;
   supervisorEnv: Readonly<Record<string, string | undefined>>;
 }
@@ -204,6 +205,7 @@ export async function runHostedWorkspaceInvocation(
       platform,
       readCurrentLease: () => currentLease,
       runtimeWakeSignal,
+      shutdownSignal: options.shutdownSignal ?? null,
       snapshotArchiveBuilder: createCloudflareHostedWorkspaceSnapshotArchiveBuilder(),
       snapshotDiagnosticsHashSecret:
         job.diagnostics?.workspaceSnapshotPathHashSecret ?? null,

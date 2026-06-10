@@ -337,6 +337,14 @@ export interface HostedWorkspaceRuntimeJobOptions {
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   runAssistantPhase?: HostedWorkspaceRuntimeAssistantPhase;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
+  /**
+   * Fires when the container has been told to exit (for example a deploy
+   * rollout SIGTERM). The runtime treats it as the idle window elapsing now:
+   * the next dirty wait returns immediately so the normal idle_shutdown
+   * checkpoint runs inside the termination grace period instead of the state
+   * dying unsnapshotted. Active foreground work is not interrupted.
+   */
+  shutdownSignal?: AbortSignal | null;
   signal?: AbortSignal | null;
   vaultRoot: string;
 }
@@ -1195,6 +1203,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             projectedRuntimeWakeAt,
             runtimeAbortSignal: runtimeAbortController.signal,
             runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+            shutdownSignal: options.shutdownSignal ?? null,
           });
           if (
             dirtyWaitResult === "external_wake"
@@ -1850,8 +1859,12 @@ async function waitForHostedRuntimeDirtyWindow(input: {
   projectedRuntimeWakeAt: string | null;
   runtimeAbortSignal: AbortSignal;
   runtimeWakeSignal: RuntimeWakeSignal | null;
+  shutdownSignal: AbortSignal | null;
 }): Promise<HostedRuntimeDirtyWaitResult> {
   const nowMs = Date.now();
+  if (input.shutdownSignal?.aborted === true) {
+    return "idle_checkpoint";
+  }
   if (input.idleCheckpointStartByMs <= nowMs) {
     return "idle_checkpoint";
   }
@@ -1886,9 +1899,13 @@ async function waitForHostedRuntimeDirtyWindow(input: {
     const abort = () => {
       settle(() => reject(readHostedRuntimeAbortReason(input.runtimeAbortSignal)));
     };
+    const shutdown = () => {
+      settle(() => resolve("idle_checkpoint"));
+    };
     const cleanup = () => {
       clearTimeout(timer);
       input.runtimeAbortSignal.removeEventListener("abort", abort);
+      input.shutdownSignal?.removeEventListener("abort", shutdown);
       if (!wakeAbortController.signal.aborted) {
         wakeAbortController.abort(
           new DOMException("Hosted runtime idle checkpoint wait finished.", "AbortError"),
@@ -1905,6 +1922,7 @@ async function waitForHostedRuntimeDirtyWindow(input: {
     };
 
     input.runtimeAbortSignal.addEventListener("abort", abort, { once: true });
+    input.shutdownSignal?.addEventListener("abort", shutdown, { once: true });
     input.runtimeWakeSignal?.wait(wakeAbortController.signal).then(
       () => settle(() => resolve("external_wake")),
       (error) => {

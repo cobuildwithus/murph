@@ -44,6 +44,7 @@ export interface HostedWorkspaceInvocationInput {
     | null
     | Promise<HostedRuntimeBridgeCheckpointLease | null>;
   runtimeWakeSignal: RuntimeWakeSignal;
+  shutdownSignal?: AbortSignal | null;
   signal?: AbortSignal | null;
   snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder;
   snapshotDiagnosticsHashSecret?: string | null;
@@ -72,6 +73,7 @@ export async function runHostedWorkspaceInvocation(
     ...options,
     latencyMilestones: input.latencyMilestones ?? null,
     runtimeWakeSignal,
+    shutdownSignal: input.shutdownSignal ?? null,
     signal: input.signal ?? null,
   });
 }

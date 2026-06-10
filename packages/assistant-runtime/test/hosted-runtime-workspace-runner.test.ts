@@ -22,6 +22,8 @@ import {
   hasPendingAssistantAutoReplyInput,
 } from "@murphai/assistant-engine/assistant-automation";
 import type {
+  HostedMailboxConsumeRequest,
+  HostedMailboxConsumeResponse,
   HostedMailboxFetchRequest,
   HostedMailboxFetchResponse,
   HostedMailboxItem,
@@ -4445,6 +4447,8 @@ function createRunnerConversationWake(): HostedExecutionConversationMessageWake 
 }
 
 function createMailboxPort(input: {
+  consumeError?: Error;
+  consumeRequests?: HostedMailboxConsumeRequest[];
   fetchRequests?: HostedMailboxFetchRequest[];
   fetchUserId?: string;
   items: HostedMailboxItem[];
@@ -4453,9 +4457,25 @@ function createMailboxPort(input: {
   mailboxPort: HostedRuntimeMailboxPort;
 } {
   const fetchRequests = input.fetchRequests ?? [];
+  const consumeRequests = input.consumeRequests;
 
   return {
     mailboxPort: {
+      ...(consumeRequests
+        ? {
+            async consume(request): Promise<HostedMailboxConsumeResponse> {
+              consumeRequests.push(request);
+              if (input.consumeError) {
+                throw input.consumeError;
+              }
+              return {
+                acknowledgedAt: TEST_NOW,
+                consumedSeqByLane: request.lanes,
+                userId: input.fetchUserId ?? TEST_USER_ID,
+              };
+            },
+          }
+        : {}),
       async fetch(request): Promise<HostedMailboxFetchResponse> {
         fetchRequests.push(request);
         return {
@@ -4811,3 +4831,105 @@ async function waitForCondition(predicate: () => boolean, timeoutMs = 1_000): Pr
   }
   throw new Error("Timed out waiting for hosted workspace runner condition.");
 }
+
+describe("hosted conversation mailbox consume ack", () => {
+  async function runConsumeAckScenario(input: {
+    consumeError?: Error;
+    runAssistantPhase: Parameters<typeof runHostedWorkspaceUntilIdleOrBudget>[0]["runAssistantPhase"];
+  }) {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const consumeRequests: HostedMailboxConsumeRequest[] = [];
+    const { mailboxPort } = createMailboxPort({
+      ...(input.consumeError ? { consumeError: input.consumeError } : {}),
+      consumeRequests,
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_consume_ack",
+          laneSeq: "1",
+        }),
+      ],
+    });
+
+    try {
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_consume_ack",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests: [] }),
+        }),
+        requestId: "request_synthetic_runner_consume_ack",
+        runAssistantPhase: input.runAssistantPhase,
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+
+    return consumeRequests;
+  }
+
+  test("advances the conversation watermark after a clean foreground pass", async () => {
+    const consumeRequests = await runConsumeAckScenario({
+      async runAssistantPhase() {
+        return { foregroundReplyFailed: 0, progressed: false };
+      },
+    });
+
+    assert.deepEqual(
+      consumeRequests.map((request) => request.lanes),
+      [[{ consumedSeq: "1", lane: "conversation" }]],
+    );
+    assert.equal(
+      consumeRequests[0]?.requestId,
+      "request_synthetic_runner_consume_ack:mailbox-consume",
+    );
+  });
+
+  test("does not ack when a foreground reply failed", async () => {
+    const consumeRequests = await runConsumeAckScenario({
+      async runAssistantPhase() {
+        return { foregroundReplyFailed: 1, progressed: false };
+      },
+    });
+
+    assert.deepEqual(consumeRequests, []);
+  });
+
+  test("does not ack when the pass reported no foreground reply phase", async () => {
+    const consumeRequests = await runConsumeAckScenario({
+      async runAssistantPhase() {
+        return { progressed: false };
+      },
+    });
+
+    assert.deepEqual(consumeRequests, []);
+  });
+
+  test("treats a failed consume ack as best-effort and finishes the pass", async () => {
+    const consumeRequests = await runConsumeAckScenario({
+      consumeError: new Error("synthetic consume outage"),
+      async runAssistantPhase() {
+        return { foregroundReplyFailed: 0, progressed: false };
+      },
+    });
+
+    assert.equal(consumeRequests.length, 1);
+  });
+});

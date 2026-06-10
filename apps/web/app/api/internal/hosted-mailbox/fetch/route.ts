@@ -7,16 +7,14 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
-  hasHostedMemberActiveAccess,
-} from "@/src/lib/hosted-onboarding/entitlement";
-import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
-  readHostedMemberCoreState,
-} from "@/src/lib/hosted-onboarding/hosted-member-store";
+  requireHostedRuntimeMailboxActiveAccess,
+} from "@/src/lib/hosted-mailbox/runtime-access";
 import {
   fetchHostedMailboxItemsAfterLaneCursors,
+  readHostedMailboxConsumedSeqByLane,
   readHostedMailboxMaxSeqByLane,
 } from "@/src/lib/hosted-mailbox/store";
 import {
@@ -34,7 +32,7 @@ export const POST = withJsonError(async (request: Request) => {
   });
   await requireHostedRuntimeMailboxActiveAccess(userId);
   const body = parseHostedMailboxFetchRequest(await readOptionalJsonObject(request));
-  const [itemsResult, maxSeqByLane] = await Promise.all([
+  const [itemsResult, maxSeqByLane, consumedSeqByLane] = await Promise.all([
     fetchHostedMailboxItemsAfterLaneCursors({
       lanes: body.lanes.map((laneCursor) => ({
         afterSeq: laneCursor.importedSeq,
@@ -47,6 +45,10 @@ export const POST = withJsonError(async (request: Request) => {
       lanes: body.lanes.map((laneCursor) => laneCursor.lane),
       userId,
     }),
+    readHostedMailboxConsumedSeqByLane({
+      lanes: body.lanes.map((laneCursor) => laneCursor.lane),
+      userId,
+    }),
   ]);
   await requireHostedRuntimeMailboxAiUsageAccess({
     items: itemsResult.items,
@@ -54,29 +56,13 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   return jsonOk(parseHostedMailboxFetchResponse({
+    consumedSeqByLane,
     fetchedAt: new Date().toISOString(),
     items: itemsResult.items,
     maxSeqByLane,
     userId,
   }));
 });
-
-async function requireHostedRuntimeMailboxActiveAccess(userId: string): Promise<void> {
-  const member = await readHostedMemberCoreState({
-    memberId: userId,
-    prisma: getPrisma(),
-  });
-
-  if (member && hasHostedMemberActiveAccess(member)) {
-    return;
-  }
-
-  throw hostedOnboardingError({
-    code: "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE",
-    httpStatus: 403,
-    message: "Hosted runtime mailbox access is not active.",
-  });
-}
 
 async function requireHostedRuntimeMailboxAiUsageAccess(input: {
   items: readonly { kind: string; lane: string }[];
