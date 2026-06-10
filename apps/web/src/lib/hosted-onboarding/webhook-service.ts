@@ -1,17 +1,9 @@
-import { randomUUID } from "node:crypto";
 import type {
   Prisma,
   PrismaClient,
 } from "@prisma/client";
-import {
-  HOSTED_RUNTIME_LINQ_MESSAGE_PREWARM_SOURCE,
-  HOSTED_RUNTIME_PREWARM_TIMEOUT_MS,
-} from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
-import {
-  readHostedExecutionControlClientIfConfigured,
-} from "../hosted-execution/control";
 import {
   requireHostedLinqMessageReceivedEvent,
   sendHostedLinqReadReceipt,
@@ -146,16 +138,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       wakeUserPresent: Boolean(plan.wakeUserId),
     });
 
-    const messagePrewarm = maybeStartHostedLinqMessagePrewarm({
-      eventId: event.event_id,
-      mailboxItemId: plan.wakeMailboxItemId,
-      response: plan.response,
-      userId: plan.wakeUserId,
-    });
-    if (messagePrewarm && input.scheduleAfterResponse) {
-      input.scheduleAfterResponse(() => messagePrewarm);
-    }
-
     if (plan.desiredSideEffects.length > 0) {
       await drainHostedLinqSideEffectsDirect({
         prisma,
@@ -204,71 +186,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     throw error;
   }
-}
-
-function maybeStartHostedLinqMessagePrewarm(input: {
-  eventId: string;
-  mailboxItemId?: string;
-  response: HostedOnboardingLinqWebhookResponse;
-  userId?: string;
-}): Promise<void> | null {
-  if (
-    input.response.duplicate
-    || !input.response.ok
-    || !input.mailboxItemId
-    || !input.userId
-  ) {
-    return null;
-  }
-
-  const timing = startHostedOnboardingTiming(
-    "hosted-onboarding.webhook.linq.message-prewarm",
-    {
-      eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
-      mailboxItemPresent: true,
-      responseReason: input.response.reason ?? null,
-      userIdPresent: true,
-      userIdSuffix: toHostedOnboardingLogIdSuffix(input.userId),
-    },
-  );
-
-  let client: ReturnType<typeof readHostedExecutionControlClientIfConfigured>;
-  try {
-    client = readHostedExecutionControlClientIfConfigured(
-      HOSTED_RUNTIME_PREWARM_TIMEOUT_MS + 1_000,
-    );
-  } catch (error) {
-    finishHostedOnboardingTiming(timing, "failed", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-    });
-    return null;
-  }
-
-  if (!client) {
-    finishHostedOnboardingTiming(timing, "skipped-not-configured", {
-      responseReason: input.response.reason ?? null,
-    });
-    return null;
-  }
-
-  return client.prewarmRuntime({
-    prewarmAttemptId: `linq-message:${randomUUID()}`,
-    source: HOSTED_RUNTIME_LINQ_MESSAGE_PREWARM_SOURCE,
-    userId: input.userId,
-  }).then(
-    (result) => {
-      finishHostedOnboardingTiming(timing, result.kind, {
-        responseReason: input.response.reason ?? null,
-        runtimePrewarmAction: result.kind === "runtime_prewarm_accepted" ? result.action : null,
-      });
-    },
-    (error: unknown) => {
-      finishHostedOnboardingTiming(timing, "failed", {
-        errorName: deriveHostedOnboardingTimingErrorName(error),
-        responseReason: input.response.reason ?? null,
-      });
-    },
-  );
 }
 
 async function maybeSendHostedLinqIngressReadReceipt(input: {
