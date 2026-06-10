@@ -51,6 +51,21 @@ Write-pass summary:
 - Four residual rows flagged by the independent checker (one toxic-dose unit shift with no DV to cross-check, two buried concatenated/duplicate rows, one translated-name row) were excluded from the write batch; 4,813 rows were dry-run-verified (0 production-blocked, 0 duplicates, 0 oversized search text) and upserted.
 - Post-write verification: brand_site row count unchanged at 25,735 (updates only); rows with structured `ingredientRows` 7,063 → 11,259; average `search_text` length 1,541 → 1,443.
 
+### Wave 2 — serving-size parser extensions (2026-06-09)
+
+- Broadened `SERVING_AMOUNT`/`SERVING_FORM` patterns (approx/or-ranges, tea bags, shakes, droppers, sprays, ViaCaps, mini/soft/full/bi-layered qualifiers, translated suffixes). Converted 72 more rows to `automatedBackfillReady`; 68 (after independent stress test) dry-run-verified and upserted.
+
+### Wave 3 — haiku LLM extraction (2026-06-09)
+
+- Submitted 11,500 fixable-queue rows (evidence-bearing, prioritized by fewest blockers) to the Anthropic Messages Batches API on `claude-haiku-4-5`. Cost ≈ $26.90 (overran the $20 intent: 12 rows/request caused 591 of 959 requests to truncate at the 8k output cap; truncated responses still bill output tokens).
+- Salvaged 9,008 complete extractions from the truncated arrays (no re-spend); 2,493 rows lost their tail and remain in the queue for a future smaller-batch resubmit.
+- Validated every extraction independently (locale-aware evidence anchoring + DV cross-check, malformed-DV, directions-name, composite-amount, dup-amount, spoon-serving gates), stripped raw bloat fields, and ran the `labels.mjs` dry-run production guard. 6,893 clean → 6,888 after dropping missing-serving rows → upserted with 0 production-blocked.
+- Post-write: brand_site rows with structured `ingredientRows` **7,063 → 16,029** over the session (+8,966). Total repaired upserts this session: 11,769 (4,813 + 68 + 6,888). Target of 10k structured rows exceeded.
+
+### Remaining
+
+- ~2,493 truncated-tail rows + ~5k refetch/OCR rows (no evidence) + 799 non-standalone-review rows. The refetch set needs re-scraping before any extraction; the truncated tail is a cheap resubmit at 6 rows/request.
+
 Findings:
 
 - Repair preview runs without crashing on refetch/OCR provenance rows.
