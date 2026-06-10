@@ -8,20 +8,13 @@ type LoginCallbacks = {
 };
 
 const mocks = vi.hoisted(() => ({
-  completeHostedPrivyAuth: vi.fn(),
-  createWallet: vi.fn(),
   login: vi.fn(),
   loginCallbacks: null as LoginCallbacks | null,
+  onAuthenticated: vi.fn(),
   usePrivy: vi.fn(),
-  useUser: vi.fn(),
 }));
 
 vi.mock("@privy-io/react-auth", () => ({
-  useCreateWallet() {
-    return {
-      createWallet: mocks.createWallet,
-    };
-  },
   useLoginWithTelegram(callbacks?: LoginCallbacks) {
     mocks.loginCallbacks = callbacks ?? null;
 
@@ -31,11 +24,6 @@ vi.mock("@privy-io/react-auth", () => ({
     };
   },
   usePrivy: mocks.usePrivy,
-  useUser: mocks.useUser,
-}));
-
-vi.mock("@/src/components/hosted-onboarding/hosted-auth-completion", () => ({
-  completeHostedPrivyAuth: mocks.completeHostedPrivyAuth,
 }));
 
 import { HostedTelegramAuthButton } from "@/src/components/hosted-onboarding/hosted-telegram-auth-button";
@@ -48,20 +36,8 @@ beforeEach(() => {
   mocks.usePrivy.mockReturnValue({
     ready: true,
   });
-  mocks.useUser.mockReturnValue({
-    refreshUser: vi.fn(),
-    user: null,
-  });
   mocks.login.mockResolvedValue(undefined);
-  mocks.completeHostedPrivyAuth.mockResolvedValue({
-    payload: {
-      activationPending: false,
-      inviteCode: "invite-code",
-      joinUrl: "/join/invite-code",
-      stage: "active",
-    },
-    redirectUrl: "/home",
-  });
+  mocks.onAuthenticated.mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
@@ -78,12 +54,13 @@ function HomepageTelegramAuthButtonHarness() {
     <HostedTelegramAuthButton
       active={active}
       onActivate={() => setActive(true)}
+      onAuthenticated={mocks.onAuthenticated}
     />
   );
 }
 
-test("HomepageTelegramAuthButton logs in with Telegram and redirects through the shared homepage completion flow", async () => {
-  const { assign, button, cleanup } = await renderClientComponent(
+test("HomepageTelegramAuthButton logs in with Telegram and reports the authenticated session", async () => {
+  const { button, cleanup } = await renderClientComponent(
     createElement(HomepageTelegramAuthButtonHarness),
   );
   cleanupRender = cleanup;
@@ -93,16 +70,13 @@ test("HomepageTelegramAuthButton logs in with Telegram and redirects through the
   });
 
   expect(mocks.login).toHaveBeenCalledTimes(1);
-  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith({
+  expect(mocks.onAuthenticated).toHaveBeenCalledWith({
     authMethod: "telegram",
-    createWallet: mocks.createWallet,
-    refreshUser: expect.any(Function),
-    user: null,
+    completedUser: null,
   });
-  expect(assign).toHaveBeenCalledWith("/home");
 });
 
-test("HomepageTelegramAuthButton passes Privy's completed user into shared completion", async () => {
+test("HomepageTelegramAuthButton passes Privy's completed user along", async () => {
   const completedUser = {
     linkedAccounts: [
       {
@@ -127,13 +101,10 @@ test("HomepageTelegramAuthButton passes Privy's completed user into shared compl
     button.dispatchEvent(new Event("click", { bubbles: true }));
   });
 
-  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith(expect.objectContaining({
+  expect(mocks.onAuthenticated).toHaveBeenCalledWith({
     authMethod: "telegram",
     completedUser,
-    createWallet: mocks.createWallet,
-    refreshUser: expect.any(Function),
-    user: null,
-  }));
+  });
 });
 
 test("HomepageTelegramAuthButton keeps the CTA disabled until Privy is ready", async () => {
@@ -164,22 +135,5 @@ test("HomepageTelegramAuthButton surfaces Telegram login failures and clears the
   expect(container.textContent).toContain("Telegram popup closed");
   expect(container.querySelector('[role="alert"]')?.className).toContain("sm:col-span-2");
   expect(button.disabled).toBe(false);
-});
-
-test("HomepageTelegramAuthButton surfaces shared completion failures instead of redirecting", async () => {
-  mocks.completeHostedPrivyAuth.mockRejectedValueOnce(
-    new Error("Checkout did not return a redirect URL."),
-  );
-
-  const { assign, button, cleanup, container } = await renderClientComponent(
-    createElement(HomepageTelegramAuthButtonHarness),
-  );
-  cleanupRender = cleanup;
-
-  await act(async () => {
-    button.dispatchEvent(new Event("click", { bubbles: true }));
-  });
-
-  expect(assign).not.toHaveBeenCalled();
-  expect(container.textContent).toContain("Checkout did not return a redirect URL.");
+  expect(mocks.onAuthenticated).not.toHaveBeenCalled();
 });

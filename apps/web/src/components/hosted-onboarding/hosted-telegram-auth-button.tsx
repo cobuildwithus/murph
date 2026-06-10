@@ -1,38 +1,27 @@
 "use client";
 
-import {
-  useCreateWallet,
-  useLoginWithTelegram,
-  usePrivy,
-  useUser,
-} from "@privy-io/react-auth";
+import { useLoginWithTelegram, usePrivy } from "@privy-io/react-auth";
 import { useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
 
-import {
-  completeHostedPrivyAuth,
-  type HostedAuthCompletionResult,
-  type HostedAuthCompletionUser,
-  type HostedPrivyClientSessionInput,
-} from "./hosted-auth-completion";
-import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
+import type { HostedAuthCompletionUser } from "./hosted-auth-completion";
 import { toErrorMessage } from "./hosted-auth-shared";
 import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
+import type { HostedPrivyAuthenticatedInput } from "./use-hosted-auth-completion";
 
 export function HostedTelegramAuthButton({
   active = false,
   disableSignup = false,
   onActivate,
-  onCompleted,
+  onAuthenticated,
 }: {
   active?: boolean;
   disableSignup?: boolean;
   onActivate: () => void;
-  onCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
+  onAuthenticated: (input: HostedPrivyAuthenticatedInput) => Promise<void> | void;
 }) {
-  const { createWallet } = useCreateWallet();
   const completedUserRef = useRef<HostedAuthCompletionUser | null>(null);
   const { login, state } = useLoginWithTelegram({
     onComplete: (params) => {
@@ -40,35 +29,16 @@ export function HostedTelegramAuthButton({
     },
   });
   const { ready } = usePrivy();
-  const { refreshUser, user } = useUser();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [redirectPending, setRedirectPending] = useState(false);
-  const authSession: HostedPrivyClientSessionInput = {
-    authMethod: "telegram",
-    createWallet,
-    refreshUser,
-    user,
-  };
 
-  const loading = state.status === "loading" || redirectPending;
+  const loading = state.status === "loading";
 
   async function handleClick() {
     onActivate();
     setErrorMessage(null);
-    setRedirectPending(true);
 
     try {
       await login(disableSignup ? { disableSignup: true } : undefined);
-      const completedUser = completedUserRef.current;
-      const result = await completeHostedPrivyAuth({
-        ...authSession,
-        ...(completedUser ? { completedUser } : {}),
-      });
-      if (onCompleted) {
-        await onCompleted(result);
-        return;
-      }
-      navigateHostedAuthRedirect(result.redirectUrl);
     } catch (error) {
       setErrorMessage(
         toErrorMessage(
@@ -76,8 +46,13 @@ export function HostedTelegramAuthButton({
           "Could not continue with Telegram right now.",
         ),
       );
-      setRedirectPending(false);
+      return;
     }
+
+    await onAuthenticated({
+      authMethod: "telegram",
+      completedUser: completedUserRef.current,
+    });
   }
 
   return (

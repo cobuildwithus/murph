@@ -29,6 +29,7 @@ import { cn } from "@/src/lib/utils";
 import { HostedLegalConsentCard } from "../legal/hosted-legal-consent-card";
 import { ConnectTelegram } from "../settings/hosted-telegram-settings";
 import { requestHostedBillingCheckout } from "./client-api";
+import { HostedAuthFinishingNotice } from "./hosted-auth-shared";
 import { HostedEmailAuthButton } from "./hosted-email-auth-button";
 import { logoutHostedAppSession } from "./hosted-app-session-client";
 import { HostedInvitePhoneAuth } from "./hosted-invite-phone-auth";
@@ -39,6 +40,7 @@ import {
   shouldRefreshJoinInviteStatusFromPayload,
   type JoinInviteStatusRefreshSnapshot,
 } from "./join-invite-state";
+import { useHostedAuthCompletion } from "./use-hosted-auth-completion";
 
 type ContactMethod = "phone" | "telegram";
 
@@ -141,19 +143,35 @@ export function JoinInvitePhoneVerificationIsland({
 }) {
   const router = useRouter();
   const { logout } = usePrivy();
+  const emailAuthCompletion = useHostedAuthCompletion({
+    inviteCode,
+    onCompleted: () => {
+      router.refresh();
+    },
+  });
+
   if (verificationMode === "invite_email") {
+    if (emailAuthCompletion.completingMethod) {
+      return <HostedAuthFinishingNotice />;
+    }
+
     return (
-      <HostedEmailAuthButton
-        active
-        inline
-        initialEmailAddress={
-          emailAuthTarget?.kind === "saved" ? emailAuthTarget.emailAddress : null
-        }
-        inviteCode={inviteCode}
-        onCompleted={async () => {
-          router.refresh();
-        }}
-      />
+      <div className="space-y-3">
+        <HostedEmailAuthButton
+          active
+          inline
+          initialEmailAddress={
+            emailAuthTarget?.kind === "saved" ? emailAuthTarget.emailAddress : null
+          }
+          onAuthenticated={emailAuthCompletion.completeAuth}
+        />
+        {emailAuthCompletion.errorMessage ? (
+          <Alert variant="destructive">
+            <AlertTitle>Unable to continue</AlertTitle>
+            <AlertDescription>{emailAuthCompletion.errorMessage}</AlertDescription>
+          </Alert>
+        ) : null}
+      </div>
     );
   }
 
