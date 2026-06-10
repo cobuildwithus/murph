@@ -366,6 +366,9 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
         ...(input.latencyMilestones?.runtimePhaseStartedAt === undefined
           ? {}
           : { runtimePhaseStartedAt: input.latencyMilestones.runtimePhaseStartedAt }),
+        ...(input.latencyMilestones?.phaseBreakdown === undefined
+          ? {}
+          : { phaseBreakdown: input.latencyMilestones.phaseBreakdown }),
         source: "linq",
         type: "assistant_input_staged",
         ...(input.latencyMilestones?.workspaceRestoreDoneAt === undefined

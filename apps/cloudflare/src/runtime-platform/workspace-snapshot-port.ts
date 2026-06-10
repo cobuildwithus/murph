@@ -9,6 +9,7 @@ import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import type {
   HostedRuntimePlatform,
   HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails,
+  HostedRuntimeWorkspaceSnapshotRestoreTimingDetails,
   HostedRuntimeWorkspaceSnapshotSessionStart,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import type { HostedExecutionStructuredLogDetails } from "@murphai/hosted-execution";
@@ -226,6 +227,16 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         scratchRootPresent: request.scratchRoot !== null && request.scratchRoot !== undefined,
         timeoutMs: input.timeoutMs,
       });
+      // Per-step timers wrap each restore step at the port level so they capture
+      // the TOTAL wall-clock for that step including any replay-safe retries — the
+      // latency a user actually waits on. This intentionally differs from the inner
+      // runHostedWorkspaceSnapshotRestoreStep log duration, which is per-attempt;
+      // do not collapse these into the helper's elapsed or retry time is lost.
+      const timing: HostedRuntimeWorkspaceSnapshotRestoreTimingDetails = {
+        encryptedBytes: request.ref.archive.encryptedByteSize,
+        plainBytes: request.ref.archive.totalPlainBytes,
+      };
+      const sizeGuardStartedAt = Date.now();
       await runHostedWorkspaceSnapshotRestoreStep({
         details: restoreLogDetails,
         run: async () => {
@@ -235,6 +246,8 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         },
         step: "size_guard",
       });
+      timing.sizeGuardMs = readHostedRuntimeStepElapsedMs(sizeGuardStartedAt);
+      const dataKeyUnwrapStartedAt = Date.now();
       const dataKey = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
         details: restoreLogDetails,
         run: async () => await unwrapWorkspaceSnapshotDataKey({
@@ -247,7 +260,9 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         }),
         step: "data_key_unwrap",
       });
+      timing.dataKeyUnwrapMs = readHostedRuntimeStepElapsedMs(dataKeyUnwrapStartedAt);
       const scratchRoot = path.resolve(request.scratchRoot ?? tmpdir());
+      const scratchPrepareStartedAt = Date.now();
       const tempDir = await runHostedWorkspaceSnapshotRestoreStep({
         details: restoreLogDetails,
         run: async () => {
@@ -256,8 +271,10 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         },
         step: "scratch_prepare",
       });
+      timing.scratchPrepareMs = readHostedRuntimeStepElapsedMs(scratchPrepareStartedAt);
       const encryptedFilePath = path.join(tempDir, "workspace.snapshot.enc");
       try {
+        const presignGetStartedAt = Date.now();
         const presignedGet = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
           details: restoreLogDetails,
           run: async () => {
@@ -280,6 +297,8 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           },
           step: "presign_get",
         });
+        timing.presignGetMs = readHostedRuntimeStepElapsedMs(presignGetStartedAt);
+        const objectFetchStartedAt = Date.now();
         await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
           details: restoreLogDetails,
           run: async () => {
@@ -296,22 +315,24 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           },
           step: "object_fetch",
         });
-        await runHostedWorkspaceSnapshotRestoreStep({
+        timing.objectFetchMs = readHostedRuntimeStepElapsedMs(objectFetchStartedAt);
+        const archiveTimings = await runHostedWorkspaceSnapshotRestoreStep({
           details: restoreLogDetails,
-          run: async () => {
-            await restoreEncryptedWorkspaceSnapshot({
-              dataKey,
-              durableRoot: request.durableRoot,
-              encryptedFilePath,
-              ref: request.ref,
-              scratchRoot: request.scratchRoot ?? null,
-            });
-          },
+          run: async () => await restoreEncryptedWorkspaceSnapshot({
+            dataKey,
+            durableRoot: request.durableRoot,
+            encryptedFilePath,
+            ref: request.ref,
+            scratchRoot: request.scratchRoot ?? null,
+          }),
           step: "archive_restore",
         });
+        timing.decryptMs = archiveTimings.decryptMs;
+        timing.extractMs = archiveTimings.extractMs;
       } finally {
         await rm(tempDir, { force: true, recursive: true });
       }
+      return timing;
     },
 
     async startSnapshotSession(request) {

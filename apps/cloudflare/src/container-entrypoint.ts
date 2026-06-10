@@ -56,6 +56,12 @@ import {
   type HostedExecutionRunnerJobInput,
 } from "./runner-job-transport.ts";
 
+// Module-evaluation timestamp approximates process start; subtracting the
+// elapsed process uptime recovers the true process-start wall clock so the
+// node-startup span includes any pre-module-evaluation runtime. Pure in-memory,
+// computed once at port-listen and only attached to the first (cold) invocation.
+const HOSTED_CONTAINER_PROCESS_START_MS = Date.now() - Math.round(process.uptime() * 1000);
+
 const HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
 const HOSTED_CONTAINER_ACTIVE_DIAGNOSTIC_INTERVAL_MS = 15_000;
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH =
@@ -274,6 +280,10 @@ export async function startHostedContainerEntrypoint(input: {
   let activeRuntimeWakeAttemptId: string | null = null;
   let activeRuntimeWakePending = false;
   let activeRuntimeWakePendingAttemptId: string | null = null;
+  // Node startup span (process start -> ready to accept). Computed once after the
+  // port is listening and consumed by the FIRST (cold) invocation only; a warm
+  // process predates its message so its startup is not attributable to that turn.
+  let pendingColdNodeStartupMs: number | null = null;
   const server = createServer(async (request, response) => {
     response.setHeader("connection", "close");
     const requestAbort = createRequestAbortController(request, response);
@@ -496,6 +506,8 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       const runnerJobAcceptedAt = new Date().toISOString();
+      const coldNodeStartupMs = pendingColdNodeStartupMs;
+      pendingColdNodeStartupMs = null;
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -541,6 +553,7 @@ export async function startHostedContainerEntrypoint(input: {
             hostedContainerPoisoned = true;
           }
         },
+        ...(coldNodeStartupMs === null ? {} : { nodeStartupMs: coldNodeStartupMs }),
         runnerJobAcceptedAt,
         signal: requestAbort.signal,
       });
@@ -648,7 +661,13 @@ export async function startHostedContainerEntrypoint(input: {
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(input.port ?? 8080, "0.0.0.0", () => resolve());
+    server.listen(input.port ?? 8080, "0.0.0.0", () => {
+      // Capture node-startup latency synchronously in the listen callback, before
+      // the event loop can dispatch the first request handler, so a request that
+      // races server startup still observes the cold nodeStartupMs.
+      pendingColdNodeStartupMs = Date.now() - HOSTED_CONTAINER_PROCESS_START_MS;
+      resolve();
+    });
   }).catch((error) => {
     emitHostedExecutionStructuredLog({
       component: "container",
@@ -2064,12 +2083,14 @@ async function runHostedWorkspaceInvocation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
+    nodeStartupMs?: number | null;
     onRuntimeWakeReady?: (sendWake: () => boolean) => void;
     runnerJobAcceptedAt?: string | null;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof runHostedWorkspaceInvocationDirect>>> {
   return await runtime.runWorkspaceInvocation(input, {
+    nodeStartupMs: options?.nodeStartupMs ?? null,
     onRuntimeWakeReady: options?.onRuntimeWakeReady,
     runnerJobAcceptedAt: options?.runnerJobAcceptedAt ?? null,
     signal: options?.signal,
@@ -2081,6 +2102,7 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
+    nodeStartupMs?: number | null;
     onCleanupStatus?: (status: Exclude<HostedContainerCleanupStatus, "not_run">) => void;
     onRuntimeWakeReady?: (sendWake: () => boolean) => void;
     runnerJobAcceptedAt?: string | null;

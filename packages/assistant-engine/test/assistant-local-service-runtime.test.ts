@@ -158,6 +158,53 @@ test('sendAssistantMessageLocal keeps manual chat on the session Codex thread', 
   )
 })
 
+test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProviderRequestStarted', async () => {
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestStarted?.({
+      providerRequestOrdinal: 0,
+      startedAt: '2026-06-09T00:00:00.000Z',
+    })
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        response: 'done',
+        session: createAssistantSession({ sessionId: 'session-split' }),
+      },
+    }
+  })
+
+  const providerRequestStarted = vi.fn()
+  await sendAssistantMessageLocal({
+    deliverResponse: false,
+    onProviderRequestStarted: providerRequestStarted,
+    prompt: 'Measure setup split',
+    vault: '/vaults/test',
+  })
+
+  expect(providerRequestStarted).toHaveBeenCalledTimes(1)
+  const event = providerRequestStarted.mock.calls[0]?.[0] as {
+    admissionMs: number
+    preProviderSetupMs: number
+    promptBuildMs: number
+    sessionResolveMs: number
+    turnLockWaitMs: number
+  }
+  expect(typeof event.turnLockWaitMs).toBe('number')
+  expect(typeof event.sessionResolveMs).toBe('number')
+  expect(typeof event.promptBuildMs).toBe('number')
+  expect(typeof event.admissionMs).toBe('number')
+  expect(typeof event.preProviderSetupMs).toBe('number')
+  // preProviderSetupMs spans from lock acquisition through pre-provider admission,
+  // so it must be at least the sum of the sub-stages measured within that window.
+  expect(event.preProviderSetupMs).toBeGreaterThanOrEqual(
+    event.sessionResolveMs + event.promptBuildMs + event.admissionMs,
+  )
+})
+
 test('sendAssistantMessageLocal keeps auto-reply turns on the session Codex thread', async () => {
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 

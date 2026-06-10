@@ -44,6 +44,7 @@ import {
   type HostedRuntimeDeviceSyncBridgeKind,
   type HostedRuntimeIssueExportRequest,
   type HostedRuntimeIssueExportResponse,
+  type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLatencyTraceAssistantInputStagedEvent,
   type HostedRuntimeLatencyTraceEvent,
   type HostedRuntimeLatencyTraceMilestone,
@@ -230,6 +231,7 @@ const HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_STAGED_KEYS = new Set([
   "assistantInputId",
   "at",
   "mailboxItemId",
+  "phaseBreakdown",
   "runnerJobAcceptedAt",
   "runtimeAttemptId",
   "runtimePhaseStartedAt",
@@ -240,10 +242,39 @@ const HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_STAGED_KEYS = new Set([
 const HOSTED_RUNTIME_LATENCY_TRACE_PROVIDER_STARTED_KEYS = new Set([
   "assistantInputIds",
   "at",
+  "phaseBreakdown",
   "providerRequestOrdinal",
   "runtimeAttemptId",
   "source",
   "type",
+]);
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS = new Set([
+  "schemaVersion",
+  "restore",
+  "boot",
+  "provider",
+]);
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_RESTORE_KEYS = new Set([
+  "sizeGuardMs",
+  "dataKeyUnwrapMs",
+  "scratchPrepareMs",
+  "presignGetMs",
+  "objectFetchMs",
+  "decryptMs",
+  "extractMs",
+  "encryptedBytes",
+  "plainBytes",
+]);
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOT_KEYS = new Set([
+  "nodeStartupMs",
+  "restoreWasCold",
+]);
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PROVIDER_KEYS = new Set([
+  "turnLockWaitMs",
+  "sessionResolveMs",
+  "promptBuildMs",
+  "admissionMs",
+  "preProviderSetupMs",
 ]);
 const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONE_KEYS = new Set([
   "at",
@@ -640,6 +671,7 @@ function parseHostedRuntimeLatencyTraceAssistantInputStagedEvent(
             "Hosted runtime latency trace runtimePhaseStartedAt",
           ),
         }),
+    ...readOptionalHostedRuntimeLatencyPhaseBreakdown(record),
     source: parseHostedIngressLatencySource(record.source),
     type: "assistant_input_staged",
     ...(record.workspaceRestoreDoneAt === undefined
@@ -651,6 +683,128 @@ function parseHostedRuntimeLatencyTraceAssistantInputStagedEvent(
           ),
         }),
   };
+}
+
+function requireOptionalNonNegativeInteger(
+  record: Record<string, unknown>,
+  key: string,
+  label: string,
+): Record<string, number> {
+  if (record[key] === undefined) {
+    return {};
+  }
+
+  return { [key]: requireNonNegativeInteger(record[key], `${label}.${key}`) };
+}
+
+function requireOptionalBoolean(
+  record: Record<string, unknown>,
+  key: string,
+  label: string,
+): Record<string, boolean> {
+  if (record[key] === undefined) {
+    return {};
+  }
+
+  return { [key]: requireBoolean(record[key], `${label}.${key}`) };
+}
+
+// phaseBreakdown is best-effort diagnostic telemetry, not a core milestone. Parse
+// it leniently: if it is malformed (unknown key, non-number/boolean leaf, or an
+// older/newer shape during web/runtime deploy skew) drop only the breakdown rather
+// than rejecting the whole latency event and losing the essential milestone
+// timestamps. Dropping invalid input is also strictly safer for secret-safety than
+// salvaging it.
+function readOptionalHostedRuntimeLatencyPhaseBreakdown(
+  record: Record<string, unknown>,
+): { phaseBreakdown?: HostedRuntimeLatencyPhaseBreakdown } {
+  if (record.phaseBreakdown === undefined || record.phaseBreakdown === null) {
+    return {};
+  }
+  try {
+    return {
+      phaseBreakdown: parseHostedRuntimeLatencyPhaseBreakdown(record.phaseBreakdown),
+    };
+  } catch {
+    return {};
+  }
+}
+
+// Secret-safety trust boundary: this parser is the only path through which a
+// phaseBreakdown reaches storage. It rejects any non-number/non-boolean leaf and
+// any unknown top-level or sub key so secrets (ids/tokens/paths/urls) cannot ride
+// this channel into the trace JSON.
+function parseHostedRuntimeLatencyPhaseBreakdown(
+  value: unknown,
+): HostedRuntimeLatencyPhaseBreakdown {
+  const label = "Hosted runtime latency phase breakdown";
+  const record = requireObject(value, label);
+  assertAllowedObjectKeys(
+    record,
+    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
+    label,
+  );
+
+  const breakdown: HostedRuntimeLatencyPhaseBreakdown = {
+    schemaVersion: requireNonNegativeInteger(
+      record.schemaVersion,
+      `${label}.schemaVersion`,
+    ),
+  };
+
+  if (record.restore !== undefined) {
+    const restoreLabel = `${label}.restore`;
+    const restore = requireObject(record.restore, restoreLabel);
+    assertAllowedObjectKeys(
+      restore,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_RESTORE_KEYS,
+      restoreLabel,
+    );
+    breakdown.restore = {
+      ...requireOptionalNonNegativeInteger(restore, "sizeGuardMs", restoreLabel),
+      ...requireOptionalNonNegativeInteger(restore, "dataKeyUnwrapMs", restoreLabel),
+      ...requireOptionalNonNegativeInteger(restore, "scratchPrepareMs", restoreLabel),
+      ...requireOptionalNonNegativeInteger(restore, "presignGetMs", restoreLabel),
+      ...requireOptionalNonNegativeInteger(restore, "objectFetchMs", restoreLabel),
+      ...requireOptionalNonNegativeInteger(restore, "decryptMs", restoreLabel),
+      ...requireOptionalNonNegativeInteger(restore, "extractMs", restoreLabel),
+      ...requireOptionalNonNegativeInteger(restore, "encryptedBytes", restoreLabel),
+      ...requireOptionalNonNegativeInteger(restore, "plainBytes", restoreLabel),
+    };
+  }
+
+  if (record.boot !== undefined) {
+    const bootLabel = `${label}.boot`;
+    const boot = requireObject(record.boot, bootLabel);
+    assertAllowedObjectKeys(
+      boot,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOT_KEYS,
+      bootLabel,
+    );
+    breakdown.boot = {
+      ...requireOptionalNonNegativeInteger(boot, "nodeStartupMs", bootLabel),
+      ...requireOptionalBoolean(boot, "restoreWasCold", bootLabel),
+    };
+  }
+
+  if (record.provider !== undefined) {
+    const providerLabel = `${label}.provider`;
+    const provider = requireObject(record.provider, providerLabel);
+    assertAllowedObjectKeys(
+      provider,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PROVIDER_KEYS,
+      providerLabel,
+    );
+    breakdown.provider = {
+      ...requireOptionalNonNegativeInteger(provider, "turnLockWaitMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "sessionResolveMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "promptBuildMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "admissionMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "preProviderSetupMs", providerLabel),
+    };
+  }
+
+  return breakdown;
 }
 
 function parseHostedRuntimeLatencyTraceProviderStartedEvent(
@@ -680,6 +834,7 @@ function parseHostedRuntimeLatencyTraceProviderStartedEvent(
   return {
     assistantInputIds,
     at: requireString(record.at, "Hosted runtime latency trace at"),
+    ...readOptionalHostedRuntimeLatencyPhaseBreakdown(record),
     providerRequestOrdinal: requireNonNegativeInteger(
       record.providerRequestOrdinal,
       "Hosted runtime latency trace providerRequestOrdinal",

@@ -5,9 +5,10 @@ import { randomUUID } from "node:crypto";
 import {
   HOSTED_INGRESS_LATENCY_SOURCES,
   type HostedIngressLatencySource,
+  type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLatencyTraceMilestone,
 } from "@murphai/hosted-execution/runtime-control";
-import { type PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
@@ -147,6 +148,7 @@ export async function recordHostedIngressAssistantInputStaged(input: {
   at?: Date | string | null;
   authenticatedUserId: string;
   mailboxItemId: string;
+  phaseBreakdown?: HostedRuntimeLatencyPhaseBreakdown | null;
   prisma?: HostedIngressLatencyPrismaClient;
   runnerJobAcceptedAt?: Date | string | null;
   runtimeAttemptId?: string | null;
@@ -220,6 +222,10 @@ export async function recordHostedIngressAssistantInputStaged(input: {
         trace.workspaceRestoreDoneAt,
         workspaceRestoreDoneAt,
       ),
+      ...readPhaseBreakdownMergeUpdate(trace.phaseBreakdownJson, input.phaseBreakdown, [
+        "restore",
+        "boot",
+      ]),
       ...(trace.runtimeAttemptId || !runtimeAttemptId ? {} : { runtimeAttemptId }),
     },
     where: {
@@ -234,6 +240,7 @@ export async function recordHostedIngressProviderStarted(input: {
   assistantInputIds: readonly string[];
   at?: Date | string | null;
   authenticatedUserId: string;
+  phaseBreakdown?: HostedRuntimeLatencyPhaseBreakdown | null;
   prisma?: HostedIngressLatencyPrismaClient;
   providerRequestOrdinal: number;
   runtimeAttemptId?: string | null;
@@ -258,6 +265,7 @@ export async function recordHostedIngressProviderStarted(input: {
     select: {
       assistantInputId: true,
       id: true,
+      phaseBreakdownJson: true,
       providerStartAt: true,
       runtimeAttemptId: true,
     },
@@ -275,8 +283,17 @@ export async function recordHostedIngressProviderStarted(input: {
   await Promise.all(matchedRows.map((row) => {
     const shouldUpdateProviderStart = !row.providerStartAt || row.providerStartAt > at;
     const shouldUpdateRuntimeAttempt = !row.runtimeAttemptId && runtimeAttemptId;
+    const phaseBreakdownUpdate = readPhaseBreakdownMergeUpdate(
+      row.phaseBreakdownJson,
+      input.phaseBreakdown,
+      ["provider"],
+    );
 
-    if (!shouldUpdateProviderStart && !shouldUpdateRuntimeAttempt) {
+    if (
+      !shouldUpdateProviderStart
+      && !shouldUpdateRuntimeAttempt
+      && Object.keys(phaseBreakdownUpdate).length === 0
+    ) {
       return Promise.resolve(null);
     }
 
@@ -289,6 +306,7 @@ export async function recordHostedIngressProviderStarted(input: {
             }
           : {}),
         ...(shouldUpdateRuntimeAttempt ? { runtimeAttemptId } : {}),
+        ...phaseBreakdownUpdate,
       },
       where: {
         id: row.id,
@@ -703,6 +721,83 @@ function readEarlierDateUpdate<Field extends string>(
   }
 
   return { [field]: next } as Partial<Record<Field, Date>>;
+}
+
+type HostedRuntimeLatencyPhaseBreakdownSubKey = "restore" | "boot" | "provider";
+
+// Shallow-merges incoming phase-breakdown sub-objects into the existing trace
+// JSON within the SAME update() (no extra request). Idempotent: an already-populated
+// sub-object is preserved (never clobbered), and schemaVersion is preserved. The
+// defense-in-depth guard rejects any non-finite-number/non-boolean leaf so even a
+// malformed in-process value cannot persist a secret-shaped payload.
+function readPhaseBreakdownMergeUpdate(
+  existingValue: unknown,
+  incoming: HostedRuntimeLatencyPhaseBreakdown | null | undefined,
+  subKeys: readonly HostedRuntimeLatencyPhaseBreakdownSubKey[],
+): { phaseBreakdownJson?: Prisma.InputJsonValue } {
+  if (!incoming) {
+    return {};
+  }
+
+  const existing = isPhaseBreakdownRecord(existingValue) ? existingValue : {};
+  const merged: Record<string, unknown> = { ...existing };
+  let changed = false;
+
+  const schemaVersion =
+    typeof existing.schemaVersion === "number"
+      ? existing.schemaVersion
+      : incoming.schemaVersion;
+  if (merged.schemaVersion !== schemaVersion) {
+    merged.schemaVersion = schemaVersion;
+    changed = true;
+  }
+
+  for (const subKey of subKeys) {
+    const incomingSub = incoming[subKey];
+    if (!incomingSub || Object.keys(incomingSub).length === 0) {
+      continue;
+    }
+    // Idempotent: do not clobber an already-populated sub-object.
+    if (isPhaseBreakdownRecord(merged[subKey]) && Object.keys(merged[subKey] as Record<string, unknown>).length > 0) {
+      continue;
+    }
+    merged[subKey] = { ...incomingSub };
+    changed = true;
+  }
+
+  if (!changed) {
+    return {};
+  }
+
+  assertPhaseBreakdownLeavesSafe(merged);
+  return { phaseBreakdownJson: merged as Prisma.InputJsonValue };
+}
+
+function isPhaseBreakdownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function assertPhaseBreakdownLeavesSafe(value: Record<string, unknown>): void {
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === "schemaVersion") {
+      if (typeof entry !== "number" || !Number.isFinite(entry)) {
+        throw new TypeError("Hosted ingress latency phaseBreakdown schemaVersion must be a finite number.");
+      }
+      continue;
+    }
+    if (!isPhaseBreakdownRecord(entry)) {
+      throw new TypeError(`Hosted ingress latency phaseBreakdown ${key} must be an object.`);
+    }
+    for (const [leafKey, leaf] of Object.entries(entry)) {
+      const finiteNumber = typeof leaf === "number" && Number.isFinite(leaf);
+      const boolean = typeof leaf === "boolean";
+      if (!finiteNumber && !boolean) {
+        throw new TypeError(
+          `Hosted ingress latency phaseBreakdown ${key}.${leafKey} must be a finite number or boolean.`,
+        );
+      }
+    }
+  }
 }
 
 function normalizeNullableLatencyIdentifier(value: string | null | undefined): string | null {

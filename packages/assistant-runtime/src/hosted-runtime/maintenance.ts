@@ -45,6 +45,9 @@ import type {
   HostedExecutionRedactedLogEntry,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
+import type {
+  HostedRuntimeLatencyPhaseBreakdown,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
@@ -546,12 +549,17 @@ export async function runHostedAssistantAutomation(
 }
 
 function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
+  admissionMs?: number;
   assistantInputIds: readonly string[];
   latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
+  preProviderSetupMs?: number;
+  promptBuildMs?: number;
   providerRequestOrdinal: number;
   runtimeAttemptId?: string | null;
+  sessionResolveMs?: number;
   source: string;
   startedAt: string;
+  turnLockWaitMs?: number;
 }): void {
   if (input.source !== "linq") {
     return;
@@ -560,10 +568,28 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
     return;
   }
 
+  // In-memory provider sub-split rides the EXISTING provider_started POST. No new
+  // request, await, or I/O: the durations were measured during turn setup and are
+  // attached to the request object already being sent best-effort.
+  const provider: NonNullable<
+    HostedRuntimeLatencyPhaseBreakdown["provider"]
+  > = {
+    ...(input.turnLockWaitMs === undefined ? {} : { turnLockWaitMs: input.turnLockWaitMs }),
+    ...(input.sessionResolveMs === undefined ? {} : { sessionResolveMs: input.sessionResolveMs }),
+    ...(input.promptBuildMs === undefined ? {} : { promptBuildMs: input.promptBuildMs }),
+    ...(input.admissionMs === undefined ? {} : { admissionMs: input.admissionMs }),
+    ...(input.preProviderSetupMs === undefined
+      ? {}
+      : { preProviderSetupMs: input.preProviderSetupMs }),
+  };
+
   void recordHostedAssistantProviderStartLatencyTraceWithRetry(input.latencyTracePort, {
     event: {
       assistantInputIds: [...input.assistantInputIds],
       at: input.startedAt,
+      ...(Object.keys(provider).length > 0
+        ? { phaseBreakdown: { schemaVersion: 1, provider } }
+        : {}),
       providerRequestOrdinal: input.providerRequestOrdinal,
       runtimeAttemptId: input.runtimeAttemptId ?? null,
       source: "linq",

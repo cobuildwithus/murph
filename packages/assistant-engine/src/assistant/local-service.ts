@@ -262,17 +262,21 @@ export async function sendAssistantMessageLocal(
         stage: 'assistant-turn-lock-acquired',
         turnLockWaitMs,
       })
+      const sessionResolveStartedAt = Date.now()
       const resolved = await resolveAssistantMessageSession({
         boundaryDefaultTarget,
         defaults,
         message: input,
       })
+      const sessionResolveMs = elapsedSince(sessionResolveStartedAt)
       await emitHostedAssistantContextSessionResolvedTrace({
         message: input,
         resolved,
         source: 'assistant-message',
       })
+      const promptBuildStartedAt = Date.now()
       const sharedPlan = await buildAssistantTurnSharedPlan(input, resolved)
+      const promptBuildMs = elapsedSince(promptBuildStartedAt)
       const route = resolveAssistantTurnRoute(input, defaults, resolved)
       const receipt = await createAssistantTurnReceipt({
         vault: input.vault,
@@ -504,6 +508,7 @@ export async function sendAssistantMessageLocal(
             previousInput,
           }
         }
+        const admissionStartedAt = Date.now()
         const preProviderInput = await turnInputController.admitAvailable({
           probeIfIdle: true,
           signal: currentInput.abortSignal,
@@ -518,10 +523,12 @@ export async function sendAssistantMessageLocal(
             sessionId: currentSession.sessionId,
           })
         }
+        const admissionMs = elapsedSince(admissionStartedAt)
+        const preProviderSetupMs = elapsedSince(lockAcquiredAt)
         emitHostedAssistantContextTimingTrace({
           message: input,
           preProviderAdmissionCount,
-          preProviderSetupMs: elapsedSince(lockAcquiredAt),
+          preProviderSetupMs,
           providerRequestOrdinal,
           stage: 'assistant-pre-provider-ready',
           turnLockWaitMs,
@@ -581,9 +588,14 @@ export async function sendAssistantMessageLocal(
             }
             return currentInput.onProviderRequestStarted({
               acceptedInputIds: providerRequestAcceptedInputIds,
+              admissionMs,
+              preProviderSetupMs,
+              promptBuildMs,
               providerRequestOrdinal:
                 event.providerRequestOrdinal ?? providerRequestOrdinal,
+              sessionResolveMs,
               startedAt: event.startedAt,
+              turnLockWaitMs,
             })
           },
           route,
