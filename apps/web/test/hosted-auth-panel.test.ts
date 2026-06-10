@@ -228,12 +228,6 @@ test("HostedAuthPanel keeps split CTA presentation out of Privy auth behavior", 
   ) as HTMLButtonElement[];
 
   await act(async () => {
-    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
-  });
-
-  expect(mocks.loginWithTelegram).toHaveBeenCalledWith(undefined);
-
-  await act(async () => {
     emailButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
@@ -254,6 +248,59 @@ test("HostedAuthPanel keeps split CTA presentation out of Privy auth behavior", 
   expect(mocks.sendCode).toHaveBeenCalledWith({
     email: "login@example.com",
   });
+
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.loginWithTelegram).toHaveBeenCalledWith(undefined);
+});
+
+test("HostedAuthPanel swaps to a finishing state while shared completion runs", async () => {
+  mocks.completeHostedPrivyAuth.mockReturnValueOnce(new Promise(() => {}));
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const telegramButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Telegram"),
+  ) as HTMLButtonElement | undefined;
+
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(container.textContent).toContain("Finishing setup...");
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeNull();
+});
+
+test("HostedAuthPanel surfaces shared completion failures and restores the auth methods", async () => {
+  mocks.completeHostedPrivyAuth.mockRejectedValueOnce(
+    new Error("Checkout did not return a redirect URL."),
+  );
+
+  const { assign, cleanup, container, window } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const telegramButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Telegram"),
+  ) as HTMLButtonElement | undefined;
+
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(assign).not.toHaveBeenCalled();
+  expect(container.textContent).toContain("Checkout did not return a redirect URL.");
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
 });
 
 test("HostedAuthPanel can require launch consent after homepage login completion", async () => {

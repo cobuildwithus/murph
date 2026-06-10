@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  useCreateWallet,
-  useLoginWithEmail,
-  usePrivy,
-  useUser,
-} from "@privy-io/react-auth";
+import { useLoginWithEmail, usePrivy } from "@privy-io/react-auth";
 import { useRef, useState, type FormEvent } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -14,39 +9,31 @@ import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
 import { EmailIcon } from "@/src/components/homepage/email-icon";
 
-import {
-  completeHostedPrivyAuth,
-  type HostedAuthCompletionResult,
-  type HostedAuthCompletionUser,
-  type HostedPrivyClientSessionInput,
-} from "./hosted-auth-completion";
+import type { HostedAuthCompletionUser } from "./hosted-auth-completion";
 import {
   isValidEmailAddress,
   normalizeEmailAddress,
   toErrorMessage,
 } from "./hosted-auth-shared";
-import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 import { HostedVerificationCodeStep } from "./hosted-verification-code-step";
+import type { HostedPrivyAuthenticatedInput } from "./use-hosted-auth-completion";
 
 export function HostedEmailAuthButton({
   active = false,
   disableSignup = false,
   inline = false,
   initialEmailAddress = null,
-  inviteCode,
   onActivate = () => undefined,
-  onCompleted,
+  onAuthenticated,
 }: {
   active?: boolean;
   disableSignup?: boolean;
   inline?: boolean;
   initialEmailAddress?: string | null;
-  inviteCode?: string | null;
   onActivate?: () => void;
-  onCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
+  onAuthenticated: (input: HostedPrivyAuthenticatedInput) => Promise<void> | void;
 }) {
-  const { createWallet } = useCreateWallet();
   const completedUserRef = useRef<HostedAuthCompletionUser | null>(null);
   const { loginWithCode, sendCode, state } = useLoginWithEmail({
     onComplete: (params) => {
@@ -54,7 +41,6 @@ export function HostedEmailAuthButton({
     },
   });
   const { ready } = usePrivy();
-  const { refreshUser, user } = useUser();
   const [code, setCode] = useState("");
   const [emailAddress, setEmailAddress] = useState(
     () => normalizeEmailAddress(initialEmailAddress) ?? "",
@@ -63,22 +49,13 @@ export function HostedEmailAuthButton({
   const [pendingEmailAddress, setPendingEmailAddress] = useState<string | null>(
     null,
   );
-  const [redirectPending, setRedirectPending] = useState(false);
   const emailInputRef = useRef<HTMLInputElement | null>(null);
   const codeInputRef = useRef<HTMLInputElement | null>(null);
 
   const loading =
-    state.status === "sending-code" ||
-    state.status === "submitting-code" ||
-    redirectPending;
+    state.status === "sending-code" || state.status === "submitting-code";
   const disabled = !ready || loading;
   const showCodeEntry = pendingEmailAddress !== null;
-  const authSession: HostedPrivyClientSessionInput = {
-    authMethod: "email",
-    createWallet,
-    refreshUser,
-    user,
-  };
 
   function handleOpen() {
     onActivate();
@@ -167,21 +144,9 @@ export function HostedEmailAuthButton({
     }
 
     setErrorMessage(null);
-    setRedirectPending(true);
 
     try {
       await loginWithCode({ code: submittedCode });
-      const completedUser = completedUserRef.current;
-      const result = await completeHostedPrivyAuth({
-        ...authSession,
-        ...(completedUser ? { completedUser } : {}),
-        inviteCode,
-      });
-      if (onCompleted) {
-        await onCompleted(result);
-        return;
-      }
-      navigateHostedAuthRedirect(result.redirectUrl);
     } catch (error) {
       setErrorMessage(
         disableSignup
@@ -191,8 +156,13 @@ export function HostedEmailAuthButton({
               "We could not verify that code.",
             ),
       );
-      setRedirectPending(false);
+      return;
     }
+
+    await onAuthenticated({
+      authMethod: "email",
+      completedUser: completedUserRef.current,
+    });
   }
 
   function handleUseAnotherEmail() {
