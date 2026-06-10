@@ -35,7 +35,10 @@ import type {
   StoredDeviceSyncAccount,
 } from "../src/types.ts";
 
-const DIRECT_WEBHOOK_JOB_MAX_BYTES_FOR_TEST = 64_000;
+// A payload comfortably larger than the old 64KB inline cap. The cap was
+// removed in P3; large inline payloads now import inline instead of dropping
+// to a REST fallback or being chunked into durable jobs.
+const DIRECT_WEBHOOK_JOB_LARGE_BYTES_FOR_TEST = 64_001;
 
 function createAccount(overrides: Partial<Omit<DeviceSyncAccount, "credential">> & {
   credential?: DeviceSyncAccount["credential"];
@@ -136,16 +139,6 @@ function executeJunctionJob(
   const executor = provider.jobExecutor;
   assert.ok(executor, "Junction provider should expose a job executor.");
   return executor.executeJob(context, job);
-}
-
-function executeJunctionJobBatch(
-  provider: ReturnType<typeof createJunctionProvider>,
-  context: ProviderJobContext,
-  jobs: readonly DeviceSyncJobRecord[],
-) {
-  const executor = provider.jobExecutor;
-  assert.ok(executor?.batch, "Junction provider should expose a batch job executor.");
-  return executor.batch.execute(context, jobs);
 }
 
 function createJunctionJobContext(overrides: Partial<ProviderJobContext> = {}): ProviderJobContext {
@@ -5188,28 +5181,15 @@ test("Junction resource jobs import direct daily data webhook payloads without J
   assert.doesNotMatch(JSON.stringify(snapshot), /junction-user-1/u);
 });
 
-test("Junction resource batches import compatible direct daily payloads without Junction HTTP requests", async () => {
+test("Junction imports multiple direct daily payloads via per-job execution without Junction HTTP requests", async () => {
+  // Batching was removed (P3); multiple direct webhook records now import as N
+  // separate resource jobs, each importing its own payload via executeJob. This
+  // guards the data-loss equivalence of that per-job fallback.
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
     requests.push(url);
-
-    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-      return createJsonResponse({
-        providers: [
-          {
-            slug: "garmin",
-            name: "Garmin",
-            status: "connected",
-            resource_availability: {
-              activity: true,
-            },
-          },
-        ],
-      });
-    }
-
     throw new Error(`Unexpected request: ${url}`);
   }, {
     summaryResources: ["activity"],
@@ -5256,109 +5236,31 @@ test("Junction resource batches import compatible direct daily payloads without 
     windowEnd: "2026-04-05T00:00:00.000Z",
   });
 
-  const executor = provider.jobExecutor;
-  assert.ok(executor?.batch, "Junction provider should expose a batch descriptor.");
-  const firstDescriptor = executor.batch.describe(firstJob);
-  const secondDescriptor = executor.batch.describe(secondJob);
-  assert.ok(firstDescriptor);
-  assert.equal(secondDescriptor?.key, firstDescriptor.key);
-
-  await executeJunctionJobBatch(provider, context, [firstJob, secondJob]);
+  await executeJunctionJob(provider, context, firstJob);
+  await executeJunctionJob(provider, context, secondJob);
 
   assert.deepEqual(requests, []);
-  assert.equal(importedSnapshots.length, 1);
-  const snapshot = importedSnapshots[0] as {
-    summaries?: Record<string, Array<Record<string, unknown>>>;
-    timeseries?: Record<string, unknown[]>;
-    windowEnd?: string;
-    windowStart?: string;
-  };
-  assert.equal(snapshot.windowStart, "2026-04-01T00:00:00.000Z");
-  assert.equal(snapshot.windowEnd, "2026-04-05T00:00:00.000Z");
-  const activity = snapshot.summaries?.activity ?? [];
-  assert.equal(activity.length, 2);
-  assert.deepEqual(activity.map((record) => record.steps), [111, 222]);
+  assert.equal(importedSnapshots.length, 2);
+  const records = importedSnapshots.flatMap((raw) => {
+    const snapshot = raw as {
+      summaries?: Record<string, Array<Record<string, unknown>>>;
+      timeseries?: Record<string, unknown[]>;
+      windowEnd?: string;
+      windowStart?: string;
+    };
+    assert.equal(snapshot.windowStart, "2026-04-01T00:00:00.000Z");
+    assert.equal(snapshot.windowEnd, "2026-04-05T00:00:00.000Z");
+    assert.deepEqual(snapshot.timeseries, {});
+    assert.doesNotMatch(JSON.stringify(snapshot), /junction-user-1/u);
+    return snapshot.summaries?.activity ?? [];
+  });
+  assert.equal(records.length, 2);
+  assert.deepEqual(records.map((record) => record.steps), [111, 222]);
   assert.deepEqual(
-    activity.map((record) => record.memo),
+    records.map((record) => record.memo),
     ["first from [redacted] payload", "second from [redacted] payload"],
   );
-  assert.deepEqual(activity.map((record) => record.sourceProviderSlug), ["garmin", "garmin"]);
-  assert.deepEqual(snapshot.timeseries, {});
-  assert.doesNotMatch(JSON.stringify(snapshot), /junction-user-1/u);
-});
-
-test("Junction resource batches do not accept direct timeseries payloads", async () => {
-  const requests: string[] = [];
-  const importedSnapshots: unknown[] = [];
-  const provider = createJunctionProvider(async (input) => {
-    const url = readUrl(input);
-    requests.push(url);
-    throw new Error(`Unexpected request: ${url}`);
-  }, {
-    summaryResources: [],
-    timeseriesResources: ["blood_oxygen"],
-  });
-  const context = createJunctionJobContext({
-    importSnapshot: async (snapshot) => {
-      importedSnapshots.push(snapshot);
-      return { imported: true };
-    },
-  });
-  const firstJob = createJob("resource", {
-    eventType: "daily.data.blood_oxygen.created",
-    objectId: "blood-oxygen-1",
-    occurredAt: "2026-04-02T14:30:00.000Z",
-    resource: "blood_oxygen",
-    resourceCategory: "timeseries",
-    sourceProviderSlug: "garmin",
-    webhookDataJson: JSON.stringify({
-      data: [
-        {
-          end: "2026-04-02T14:30:00.000Z",
-          start: "2026-04-02T14:00:00.000Z",
-          unit: "%",
-          value: 97,
-        },
-      ],
-      sourceProviderSlug: "garmin",
-    }),
-    windowStart: "2026-04-02T00:00:00.000Z",
-    windowEnd: "2026-04-03T00:00:00.000Z",
-  });
-  const secondJob = createJob("resource", {
-    eventType: "daily.data.blood_oxygen.created",
-    objectId: "blood-oxygen-2",
-    occurredAt: "2026-04-02T15:30:00.000Z",
-    resource: "blood_oxygen",
-    resourceCategory: "timeseries",
-    sourceProviderSlug: "garmin",
-    webhookDataJson: JSON.stringify({
-      data: [
-        {
-          end: "2026-04-02T15:30:00.000Z",
-          start: "2026-04-02T15:00:00.000Z",
-          unit: "%",
-          value: 98,
-        },
-      ],
-      sourceProviderSlug: "garmin",
-    }),
-    windowStart: "2026-04-02T00:00:00.000Z",
-    windowEnd: "2026-04-03T00:00:00.000Z",
-  });
-
-  const executor = provider.jobExecutor;
-  assert.ok(executor?.batch, "Junction provider should expose a batch descriptor.");
-  const firstDescriptor = executor.batch.describe(firstJob);
-  const secondDescriptor = executor.batch.describe(secondJob);
-  assert.equal(firstDescriptor, null);
-  assert.equal(secondDescriptor, null);
-  await assert.rejects(
-    () => executeJunctionJobBatch(provider, context, [firstJob, secondJob]),
-    (error) => error instanceof DeviceSyncError && error.code === "JUNCTION_RESOURCE_BATCH_UNSUPPORTED",
-  );
-  assert.deepEqual(requests, []);
-  assert.deepEqual(importedSnapshots, []);
+  assert.deepEqual(records.map((record) => record.sourceProviderSlug), ["garmin", "garmin"]);
 });
 
 test("Junction resource jobs import direct Garmin sleep webhook payloads without Junction HTTP requests", async () => {
@@ -5601,7 +5503,12 @@ test("Junction resource jobs import direct Garmin sleep-cycle stage payloads wit
   assert.deepEqual(snapshot.timeseries, {});
 });
 
-test("Junction direct Garmin sleep-cycle payloads fall back when they contain no stage intervals", async () => {
+test("Junction direct Garmin sleep-cycle payloads import inline once the usefulness gate is removed", async () => {
+  // Pre-P3 these stage-interval-free sleep_cycle payloads were dropped to a REST
+  // summary read by the usefulness gate. The gate was removed in P3: a
+  // configured summary payload with a single consistent source imports inline,
+  // and the normalizer downstream decides meaning (as it does for fetched
+  // records). No REST fallback fires.
   const cases: Array<{ directRecord: Record<string, unknown>; label: string }> = [
     {
       directRecord: {
@@ -5653,39 +5560,6 @@ test("Junction direct Garmin sleep-cycle payloads fall back when they contain no
       const url = readUrl(input);
       requests.push(url);
 
-      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-        return createJsonResponse({
-          providers: [
-            {
-              slug: "garmin",
-              name: "Garmin",
-              status: "connected",
-              resource_availability: {
-                sleep_cycle: true,
-              },
-            },
-          ],
-        });
-      }
-
-      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
-        return createJsonResponse({
-          data: [
-            {
-              id: `sleep-cycle-rest-stage-data-${testCase.label}`,
-              provider_connection_id: "provider-garmin-1",
-              stages: [
-                {
-                  endAt: "2026-04-02T05:30:00.000Z",
-                  stage: "deep",
-                  startAt: "2026-04-02T04:45:00.000Z",
-                },
-              ],
-            },
-          ],
-        });
-      }
-
       throw new Error(`Unexpected request: ${url}`);
     }, {
       summaryResources: ["sleep_cycle"],
@@ -5713,57 +5587,27 @@ test("Junction direct Garmin sleep-cycle payloads fall back when they contain no
       }),
     );
 
-    const summaryRequest = requireValue(
-      requests.find((url) => url.includes("/v2/summary/sleep_cycle/")),
-      `Junction sleep-cycle fallback should fetch REST summary data for ${testCase.label}.`,
-    );
-    assertJunctionWindowQuery(summaryRequest, "2026-04-01", "2026-04-04");
+    assert.deepEqual(requests, [], testCase.label);
     assert.equal(importedSnapshots.length, 1, testCase.label);
     const snapshot = importedSnapshots[0] as {
       summaries?: Record<string, Array<Record<string, unknown>>>;
       timeseries?: Record<string, unknown[]>;
     };
-    assert.equal(snapshot.summaries?.sleep_cycle?.[0]?.id, `sleep-cycle-rest-stage-data-${testCase.label}`);
-    assert.notEqual(snapshot.summaries?.sleep_cycle?.[0]?.id, testCase.directRecord.id, testCase.label);
+    assert.equal(snapshot.summaries?.sleep_cycle?.[0]?.id, testCase.directRecord.id, testCase.label);
+    assert.equal(snapshot.summaries?.sleep_cycle?.[0]?.sourceProviderSlug, "garmin", testCase.label);
     assert.deepEqual(snapshot.timeseries, {}, testCase.label);
   }
 });
 
-test("Junction queued oversized direct resource payloads keep REST fallback", async () => {
+test("Junction queued large direct resource payloads import inline without REST fallback", async () => {
+  // The 64KB inline-payload size cap was removed (P3). A large direct summary
+  // payload now imports inline rather than dropping to a REST summary read; the
+  // normalizer downstream decides meaning. No Junction HTTP request is made.
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
     requests.push(url);
-
-    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-      return createJsonResponse({
-        providers: [
-          {
-            slug: "garmin",
-            name: "Garmin",
-            status: "connected",
-            resource_availability: {
-              activity: true,
-            },
-          },
-        ],
-      });
-    }
-
-    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
-      return createJsonResponse({
-        data: [
-          {
-            date: "2026-04-02",
-            id: "activity-rest-queued-oversized",
-            provider_connection_id: "provider-garmin-1",
-            steps: 2468,
-          },
-        ],
-      });
-    }
-
     throw new Error(`Unexpected request: ${url}`);
   }, {
     summaryResources: ["activity"],
@@ -5787,8 +5631,8 @@ test("Junction queued oversized direct resource payloads keep REST fallback", as
       sourceProviderSlug: "garmin",
       webhookDataJson: JSON.stringify({
         date: "2026-04-02",
-        id: "activity-inline-too-large",
-        memo: "x".repeat(DIRECT_WEBHOOK_JOB_MAX_BYTES_FOR_TEST + 1),
+        id: "activity-inline-large",
+        memo: "x".repeat(DIRECT_WEBHOOK_JOB_LARGE_BYTES_FOR_TEST),
         sourceProviderSlug: "garmin",
         steps: 9999,
       }),
@@ -5797,52 +5641,27 @@ test("Junction queued oversized direct resource payloads keep REST fallback", as
     }),
   );
 
-  assert.equal(requests.some((url) => url.includes("/v2/summary/activity/")), true);
+  assert.deepEqual(requests, []);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, Array<Record<string, unknown>>>;
     timeseries?: Record<string, unknown[]>;
   };
-  assert.equal(snapshot.summaries?.activity?.[0]?.steps, 2468);
-  assert.notEqual(snapshot.summaries?.activity?.[0]?.steps, 9999);
+  assert.equal(snapshot.summaries?.activity?.[0]?.steps, 9999);
   assert.deepEqual(snapshot.timeseries, {});
 });
 
-test("Junction direct resource jobs fall back when payload source differs from the job source", async () => {
+test("Junction direct resource jobs import the payload under its own resolved source provenance", async () => {
+  // The usefulness gate (which also enforced job-tag/record-source equality)
+  // was removed in P3. A self-consistent payload imports inline under its own
+  // resolved source provenance, even when the routing job tag differs. The
+  // record's source is single and unambiguous; the merge keys on the record's
+  // own resourceId, so importing it inline is additive and overlap-free.
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
     requests.push(url);
-
-    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-      return createJsonResponse({
-        providers: [
-          {
-            slug: "garmin",
-            name: "Garmin",
-            status: "connected",
-            resource_availability: {
-              activity: true,
-            },
-          },
-        ],
-      });
-    }
-
-    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
-      return createJsonResponse({
-        data: [
-          {
-            date: "2026-04-02",
-            id: "activity-rest-source-mismatch",
-            provider_connection_id: "provider-garmin-1",
-            steps: 1357,
-          },
-        ],
-      });
-    }
-
     throw new Error(`Unexpected request: ${url}`);
   }, {
     summaryResources: ["activity"],
@@ -5875,14 +5694,14 @@ test("Junction direct resource jobs fall back when payload source differs from t
     }),
   );
 
-  assert.equal(requests.some((url) => url.includes("/v2/summary/activity/")), true);
+  assert.deepEqual(requests, []);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, Array<Record<string, unknown>>>;
     timeseries?: Record<string, unknown[]>;
   };
-  assert.equal(snapshot.summaries?.activity?.[0]?.steps, 1357);
-  assert.notEqual(snapshot.summaries?.activity?.[0]?.steps, 9999);
+  assert.equal(snapshot.summaries?.activity?.[0]?.steps, 9999);
+  assert.equal(snapshot.summaries?.activity?.[0]?.sourceProviderSlug, "fitbit");
   assert.deepEqual(snapshot.timeseries, {});
 });
 
@@ -5930,16 +5749,6 @@ test("Junction direct resource jobs fall back when payload source is missing or 
         sourceProviderSlug: "garmin",
       },
       restSteps: 4444,
-    },
-    {
-      label: "identifier-only",
-      directRecord: {
-        date: "2026-04-02",
-        id: "activity-inline-identifier-only",
-        resource: "activity",
-        sourceProviderSlug: "garmin",
-      },
-      restSteps: 5555,
     },
   ];
 
@@ -6021,41 +5830,69 @@ test("Junction direct resource jobs fall back when payload source is missing or 
   }
 });
 
-test("Junction oversized daily summary webhook payloads keep REST fallback", async () => {
+test("Junction imports a metric-free direct payload inline once the usefulness gate is removed", async () => {
+  // The usefulness gate was removed in P3: a configured summary payload with a
+  // single, consistent source provider imports inline even when it carries no
+  // recognized metric fields (e.g. an identifier-only record). The downstream
+  // normalizer decides meaning, as it already does for fetched records. No REST
+  // fallback fires.
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
     requests.push(url);
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["activity"],
+    timeseriesResources: [],
+  });
 
-    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-      return createJsonResponse({
-        providers: [
-          {
-            slug: "garmin",
-            name: "Garmin",
-            status: "connected",
-            resource_availability: {
-              activity: true,
-            },
-          },
-        ],
-      });
-    }
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", {
+      eventType: "daily.data.activity.created",
+      objectId: "activity-identifier-only",
+      occurredAt: "2026-04-02T00:00:00.000Z",
+      resource: "activity",
+      resourceCategory: "summary",
+      sourceProviderSlug: "garmin",
+      webhookDataJson: JSON.stringify({
+        date: "2026-04-02",
+        id: "activity-inline-identifier-only",
+        resource: "activity",
+        sourceProviderSlug: "garmin",
+      }),
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-05T00:00:00.000Z",
+    }),
+  );
 
-    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
-      return createJsonResponse({
-        data: [
-          {
-            date: "2026-04-02",
-            id: "activity-rest-1",
-            provider_connection_id: "provider-garmin-1",
-            steps: 1234,
-          },
-        ],
-      });
-    }
+  assert.deepEqual(requests, []);
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+    timeseries?: Record<string, unknown[]>;
+  };
+  assert.equal(snapshot.summaries?.activity?.[0]?.id, "activity-inline-identifier-only");
+  assert.equal(snapshot.summaries?.activity?.[0]?.sourceProviderSlug, "garmin");
+  assert.deepEqual(snapshot.timeseries, {});
+});
 
+test("Junction large daily summary webhook payloads import inline without REST fallback", async () => {
+  // The 64KB inline-payload size cap was removed in P3. A large daily summary
+  // webhook now attaches its inline payload to the resource job and imports it
+  // inline instead of stripping `webhookDataJson` and falling back to REST.
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
     throw new Error(`Unexpected request: ${url}`);
   }, {
     summaryResources: ["activity"],
@@ -6069,8 +5906,8 @@ test("Junction oversized daily summary webhook payloads keep REST fallback", asy
       data: {
         end_date: "2026-04-02",
         date: "2026-04-02",
-        id: "activity-inline-too-large",
-        memo: "x".repeat(DIRECT_WEBHOOK_JOB_MAX_BYTES_FOR_TEST + 1),
+        id: "activity-inline-large",
+        memo: "x".repeat(DIRECT_WEBHOOK_JOB_LARGE_BYTES_FOR_TEST),
         source: {
           provider: "garmin",
           type: "watch",
@@ -6092,7 +5929,7 @@ test("Junction oversized daily summary webhook payloads keep REST fallback", asy
   assert.equal(parsed.jobs.length, 1);
   assert.equal(parsed.acceptanceMode, "durable_webhook_work");
   assert.equal(parsed.jobs[0]?.kind, "resource");
-  assert.equal("webhookDataJson" in (parsed.jobs[0]?.payload ?? {}), false);
+  assert.equal("webhookDataJson" in (parsed.jobs[0]?.payload ?? {}), true);
   assert.equal(parsed.jobs[0]?.payload?.windowStart, "2026-04-02T00:00:00.000Z");
   assert.equal(parsed.jobs[0]?.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
 
@@ -6107,23 +5944,13 @@ test("Junction oversized daily summary webhook payloads keep REST fallback", asy
     createJob("resource", parsed.jobs[0]?.payload ?? {}),
   );
 
-  const summaryRequest = requireValue(
-    requests.find((url) => url.includes("/v2/summary/activity/")),
-    "Junction oversized summary webhook should fall back to a REST summary read.",
-  );
-  assertJunctionWindowQuery(
-    summaryRequest,
-    "2026-04-02",
-    "2026-04-02",
-  );
-  assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
+  assert.deepEqual(requests, []);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, Array<Record<string, unknown>>>;
     timeseries?: Record<string, unknown[]>;
   };
-  assert.equal(snapshot.summaries?.activity?.[0]?.steps, 1234);
-  assert.notEqual(snapshot.summaries?.activity?.[0]?.steps, 9999);
+  assert.equal(snapshot.summaries?.activity?.[0]?.steps, 9999);
   assert.deepEqual(snapshot.timeseries, {});
   assert.doesNotMatch(JSON.stringify(importedSnapshots), /junction-user-1/u);
 });
