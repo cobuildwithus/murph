@@ -351,12 +351,18 @@ describe('assistant skill assets', () => {
       'ask one short follow-up for duration or start timing after the structured save or on the next onboarding turn',
     )
     expect(raw).toContain(
-      'if they do not have results handy, they can skip this now and send PDFs or pasted results later if they want Murph to use them',
+      'if they do not have results handy, they can skip this now and send PDF lab documents later if they want Murph to use them',
     )
+    expect(raw).toContain(
+      'https://my.functionhealth.com/documents',
+    )
+    expect(raw).toContain('Lab Results of Record documents')
+    expect(raw).not.toContain('Function Health has no data export')
+    expect(raw).not.toContain('copy and paste their biomarker results page')
     expect(raw).not.toContain('downloading results can be annoying')
     expect(raw).not.toContain('downloading results is annoying')
     expect(raw).toContain(
-      'If the user sends lab PDFs, pasted lab results, or blood-test documents',
+      'If the user sends lab PDFs, Lab Results of Record documents, pasted lab results, or other blood-test documents',
     )
     expect(raw).toContain(
       'call `send_progress_update` before reading the content or using file/import tools',
@@ -612,7 +618,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('birth month plus year and gender')
     expect(raw).not.toContain('birth month plus year, gender')
     expect(raw).toContain(
-      'If they send PDFs or pasted lab results, handle them through normal attachment/message intake',
+      'If they send PDFs, Lab Results of Record documents, pasted lab results, or other lab files, handle them through normal attachment/message intake',
     )
     expect(raw).toContain(
       'Useful setup answers are persisted to their best-fit canonical surface as the user shares them',
