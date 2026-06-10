@@ -134,8 +134,6 @@ export {
 export {
   parseHostedRuntimeEnsureProcessingRequest,
   parseHostedRuntimeEnsureProcessingResponse,
-  parseHostedRuntimePrewarmRequest,
-  parseHostedRuntimePrewarmResponse,
   parseHostedRuntimeReconciliationFacts,
   parseHostedRuntimeReconciliationFactsBlocked,
   parseHostedRuntimeReconciliationFactsRequest,
