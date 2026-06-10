@@ -137,10 +137,29 @@ describe("HostedEmailSettings", () => {
       }),
     );
 
-    assert.match(markup, /href="mailto:murph\+u2-private-alias@mail\.example\.test"/);
+    assert.match(markup, /href="mailto:murph\+u2-private-alias@mail\.example\.test\?subject=Hey%20Murph"/);
     assert.match(markup, /Email Murph at murph\+u2-private-alias@mail\.example\.test/);
     assert.match(markup, /Email Murph</);
     assert.doesNotMatch(markup, /Email murph\+u2-private-alias/);
+  });
+
+  it("offers a webmail chooser for the Murph email alias when the member uses a known webmail provider", async () => {
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+
+    const markup = renderToStaticMarkup(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        initialEmail: {
+          address: "member@gmail.com",
+          verifiedAt: 1741194420,
+        },
+        murphEmailAddress: "murph+u2-private-alias@mail.example.test",
+      }),
+    );
+
+    // A webmail member gets a chooser button instead of a direct mailto link.
+    assert.match(markup, /aria-haspopup="dialog"[^>]*>Email Murph</);
+    assert.doesNotMatch(markup, /<a[^>]*href="mailto:[^"]*"[^>]*>Email Murph</);
   });
 
   it("does not use Privy client user state as the displayed email authority", async () => {

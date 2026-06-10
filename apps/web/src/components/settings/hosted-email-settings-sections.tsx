@@ -9,7 +9,8 @@ import { Label } from "@/src/components/ui/label";
 import type { HostedPrivyEmailAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 import { isHostedPrivyEmailAccountVerified } from "@/src/lib/hosted-onboarding/privy-shared";
 
-import { ConnectedAccountCard, SettingsContactLink } from "./connected-account-card";
+import { ConnectedAccountCard } from "./connected-account-card";
+import { HostedEmailMurphContactDialog } from "./hosted-email-murph-contact-dialog";
 
 export function HostedEmailSettingsContent(props: {
   changeFlow?: boolean;
@@ -138,12 +139,10 @@ export function HostedEmailSettingsContent(props: {
       )}
 
       {currentEmail && murphEmailAddress && !props.changeFlow ? (
-        <SettingsContactLink
-          href={`mailto:${murphEmailAddress}`}
-          label={`Email Murph at ${murphEmailAddress}`}
-        >
-          Email Murph
-        </SettingsContactLink>
+        <HostedEmailMurphContactDialog
+          murphEmailAddress={murphEmailAddress}
+          userEmailAddress={currentEmail.address}
+        />
       ) : null}
 
       {canSendEmailUpdateCode ? (
