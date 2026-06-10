@@ -96,9 +96,15 @@ Write-pass summary:
 - 151 had both ingredients + serving; after excluding 11 non-standalone/food (protein powders/bars/variety packs), **140 upserted clean (0 production-blocked)**, tagged `evidenceStatus: dsld_upc_hydrated` with `dsldSourceId` provenance. Zero scraping, zero model spend.
 - Also tested context.dev re-pull on the recoverable tail first: only 8% yield (tail dominated by image-based brands already OCR'd) — not worth it; DSLD was the better lever.
 
+### Wave 9 — context.dev markdown re-scrape, popular brands (2026-06-10)
+
+- IMPORTANT correction: the earlier "image-only / unrecoverable floor" was inflated by silent context.dev **rate-limit failures** during scraping (a throttled scrape logged as "no facts"). Re-scraping the "mostly-missing" popular brands with proper rate limiting (0.55s gate, ~109/min under the 120/min limit) returned facts text for **633 of 1,023** rows — country-life 239/240, lemme 72/75, jarrow 67, rainbow-light 61, kaged 60, focus-factor 31.
+- Haiku extracted from the fresh markdown, anchored against it; after excluding food/non-standalone and missing-serving rows, **284 upserted clean** (country-life 217, jarrow, kaged, lemme, transparent-labs, quest...). evidenceStatus `context_dev_markdown`.
+- Full re-sweep of ALL remaining unstructured rows with throttled context.dev markdown is in progress to find the rest the original throttled passes missed.
+
 ### Session total
 
-- Structured `brand_site` rows: **7,063 → 22,557** (+15,494, ~3.2x; 88% of all brand_site rows, up from 27%). Goal was 10k — exceeded by >2x. Total brand_site rows 25,735 → 25,730 (5 borked deleted). Unstructured floor: 3,173 (front-only-image/no-facts brands + non-standalone foods/bundles + small defect residue).
+- Structured `brand_site` rows: **7,063 → 22,841** (+15,778, ~3.2x; 89% of all brand_site rows, up from 27%). Total brand_site rows 25,730. Unstructured: 2,889 and still dropping (re-sweep in progress).
 - Anthropic Batches API spend ~$47.56 of $50 (text waves); vision-OCR ran on subscription subagents ($0 API key) + context.dev scrapes.
 
 ### Remaining (~4,284 unstructured — the floor for this data source)
