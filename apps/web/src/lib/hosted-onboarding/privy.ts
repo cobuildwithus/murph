@@ -90,6 +90,19 @@ export async function syncHostedPrivyMemberIdMetadata(input: {
   return true;
 }
 
+// Deletes the Privy user record itself (account deletion). Returns false when
+// the management client is not configured; throws when the Privy API call fails.
+export async function deleteHostedPrivyUser(privyUserId: string): Promise<boolean> {
+  const client = getHostedPrivyManagementClient();
+
+  if (!client) {
+    return false;
+  }
+
+  await client.users().delete(privyUserId);
+  return true;
+}
+
 export function hasHostedPrivyPhoneAuthConfig(source: NodeJS.ProcessEnv = process.env): boolean {
   return readHostedPrivyVerificationConfig({
     appId: source.NEXT_PUBLIC_PRIVY_APP_ID,
