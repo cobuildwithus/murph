@@ -85,9 +85,14 @@ Write-pass summary:
 - Scaled in pipelined 250-row batches (fetch+select → 50 haiku agents → anchor → dry-run → upsert). Ran the full remaining pool (25 batches + a transient-failure retry): **2,741 OCR rows written**, all anchor-verified, 0 production-blocked, 0 contamination (verified via dose-in-name vs panel match). Yield ~90-95% on proven brands, tapering to ~30-60% in the long tail.
 - Conservative deletion: re-verified all 61 scrape-error rows; only **5 were genuinely dead** (HTTP 400 / delisted pages — 3 multipacks, 1 Arbonne, 1 Target generic), deleted (scoped to brand_site + unstructured). The other 56 were transient and were re-OCR'd (28 recovered). The ~226 no-facts-image rows were left intact — valid products that simply lack a facts panel on their page, not borked.
 
+### Wave 7 — text recovery of facts-bearing unstructured rows (2026-06-10)
+
+- Found ~2,579 unstructured rows that already had real `factsText` with amount data — the OCR loop had skipped them because it targeted label IMAGES and ignored existing clean text. Parser-first per request: ran all 2,579 through `repairPreviewForRow` — only 1 became `automatedBackfillReady` (these are exactly the rows the parser's conservative completeness gates had blocked). Fell back to haiku reading the existing `factsText` (104 subagents, text not vision, $0 api key), anchoring each extraction against the row's own `factsText`.
+- 1,444 anchor-passed; after dropping missing-serving-size rows and the non-standalone/food category (kept excluded per product decision), **971 upserted clean (0 production-blocked)**. Remainder: 520 marketing-only factsText (no real panel), 473 anchor-failed (safety), 215 missing serving size, 258 non-standalone/food.
+
 ### Session total
 
-- Structured `brand_site` rows: **7,063 → 21,446** (+14,383, ~3.0x; 83% of all brand_site rows, up from 27%). Goal was 10k — exceeded by >2x. Total brand_site rows 25,735 → 25,730 (5 borked deleted).
+- Structured `brand_site` rows: **7,063 → 22,417** (+15,354, ~3.2x; 87% of all brand_site rows, up from 27%). Goal was 10k — exceeded by >2x. Total brand_site rows 25,735 → 25,730 (5 borked deleted). Unstructured floor: 3,313.
 - Anthropic Batches API spend ~$47.56 of $50 (text waves); vision-OCR ran on subscription subagents ($0 API key) + context.dev scrapes.
 
 ### Remaining (~4,284 unstructured — the floor for this data source)
