@@ -54,6 +54,11 @@ describe('cloudflare hosted e2e workflow guards', () => {
     expect(workflow).toContain('pnpm hosted-local e2e idle-checkpoint-deferred-progress')
     expect(workflow).toContain('pnpm hosted-local e2e direct-r2-presigned-put')
     expect(workflow).toContain('pnpm hosted-local e2e telegram')
+    // The linq-webhook media job gates the Workers AI transcription path and
+    // depends on the shared bundle shipping the e2e parser toolchain stub.
+    expect(workflow).toContain('pnpm hosted-local e2e linq-webhook --no-bundle')
+    expect(workflow).toContain('MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN: "1"')
+    expect(workflow).not.toContain('WHISPER_COMMAND')
     expect(workflow.match(/\.artifacts\/hosted-local\/\*\*\/state\.json/g)).toHaveLength(postgresBackedScenarioCount)
     expect(workflow).not.toContain('pnpm --dir apps/cloudflare test:e2e:linq-delivery:local')
     expect(workflow).not.toContain('pnpm --dir apps/cloudflare test:e2e:telegram:local')

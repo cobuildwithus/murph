@@ -1339,6 +1339,68 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('surfaces the typed failure code in cron.job.completed events', async () => {
+    // Provider quota exhaustion (June 2026 incident) must be queryable from
+    // the persisted runtime log via failureContext.errorCode instead of only
+    // living as free text in per-vault run records.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:05:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-error-code-',
+    )
+    await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: 'quota failing reminder',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'Evening reminder.',
+      schedule: {
+        kind: 'at',
+        at: '2026-04-08T09:00:00.000Z',
+      },
+      vault: vaultRoot,
+    })
+    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(
+      new VaultCliError(
+        'ASSISTANT_CODEX_USAGE_LIMIT',
+        'Codex app-server turn failed. status failed. You have reached your monthly cap.',
+      ),
+    )
+    const events: Array<{
+      failureContext?: Record<string, boolean | number | string | null>
+      safeDetails?: string
+      type: string
+    }> = []
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      onEvent: (event) => {
+        events.push(event)
+      },
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 1,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          failureContext: expect.objectContaining({
+            errorCode: 'ASSISTANT_CODEX_USAGE_LIMIT',
+            errorPresent: true,
+            runStatus: 'failed',
+            scheduleKind: 'at',
+            sourceKind: 'automation',
+          }),
+          type: 'cron.job.completed',
+        }),
+      ]),
+    )
+  })
+
   it('skips stale recurring canonical notification cron jobs and advances the schedule', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))

@@ -1314,6 +1314,129 @@ export function extractCodexErrorMessage(event: unknown): string | null {
   )
 }
 
+// Structured error classification from the Codex app-server protocol
+// (`TurnError.codexErrorInfo`). String variants arrive as e.g.
+// "usageLimitExceeded"; carrier variants arrive as single-key objects like
+// `{ "httpConnectionFailed": { "httpStatusCode": 502 } }`.
+export interface CodexStructuredErrorInfo {
+  httpStatusCode: number | null
+  kind: string
+}
+
+export function extractCodexErrorInfo(
+  event: unknown,
+): CodexStructuredErrorInfo | null {
+  const record = asRecord(event)
+  if (!record) {
+    return null
+  }
+
+  const eventType = normalizeIdentifier(
+    typeof record.type === 'string'
+      ? record.type
+      : typeof record.method === 'string'
+        ? record.method
+        : null,
+  )
+  // turn.completed is included because a failed turn embeds its TurnError
+  // (with codexErrorInfo) at params.turn.error; successful turns carry
+  // error: null, so the deep search finds nothing there.
+  if (
+    eventType !== 'error' &&
+    eventType !== 'turn.completed' &&
+    eventType !== 'turn.failed' &&
+    eventType !== 'turn.error'
+  ) {
+    return null
+  }
+
+  return normalizeCodexErrorInfoValue(
+    findDeepValueByKeys(record, ['codexErrorInfo', 'codex_error_info']),
+  )
+}
+
+function normalizeCodexErrorInfoValue(
+  value: unknown,
+): CodexStructuredErrorInfo | null {
+  if (typeof value === 'string') {
+    const kind = normalizeNullableString(value)
+    return kind
+      ? {
+          httpStatusCode: null,
+          kind,
+        }
+      : null
+  }
+
+  const record = asRecord(value)
+  if (!record) {
+    return null
+  }
+
+  const entries = Object.entries(record)
+  if (entries.length !== 1) {
+    return null
+  }
+
+  const [kind, payload] = entries[0] as [string, unknown]
+  const normalizedKind = normalizeNullableString(kind)
+  if (!normalizedKind) {
+    return null
+  }
+
+  const payloadRecord = asRecord(payload)
+  const httpStatusCode = payloadRecord?.httpStatusCode
+  return {
+    httpStatusCode:
+      typeof httpStatusCode === 'number' && Number.isFinite(httpStatusCode)
+        ? httpStatusCode
+        : null,
+    kind: normalizedKind,
+  }
+}
+
+function findDeepValueByKeys(
+  value: unknown,
+  keys: readonly string[],
+  visited = new Set<unknown>(),
+): unknown {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  if (visited.has(value)) {
+    return null
+  }
+  visited.add(value)
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findDeepValueByKeys(item, keys, visited)
+      if (found !== null) {
+        return found
+      }
+    }
+    return null
+  }
+
+  const record = value as Record<string, unknown>
+  for (const key of keys) {
+    const candidate = record[key]
+    if (candidate !== undefined && candidate !== null) {
+      return candidate
+    }
+  }
+
+  for (const nested of Object.values(record)) {
+    const found = findDeepValueByKeys(nested, keys, visited)
+    if (found !== null) {
+      return found
+    }
+  }
+
+  return null
+}
+
 function findDeepStringByKeys(
   value: unknown,
   keys: readonly string[],

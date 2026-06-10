@@ -61,6 +61,9 @@ jobs:
       - name: Assemble hosted-local runner bundle
         env:
           MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS: "1"
+          # The linq-webhook scenario needs the bundle-local e2e parser
+          # toolchain stub (ffmpeg); other scenarios ignore the extra files.
+          MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN: "1"
         run: pnpm --dir apps/cloudflare runner:bundle:hosted-local
 
       # The tar includes the workspace dist outputs because the Temporal
@@ -102,9 +105,17 @@ jobs:
           - name: Linq delivery + Temporal orchestration E2E
             slug: linq-delivery-temporal-orchestration
             scenarios: linq-delivery temporal-orchestration
-          - name: Telegram + idle checkpoint + device connect E2E
-            slug: telegram-idle-checkpoint-device-connect
-            scenarios: telegram idle-checkpoint-deferred-progress direct-r2-presigned-put device-connect
+          - name: Telegram + idle checkpoint E2E
+            slug: telegram-idle-checkpoint
+            scenarios: telegram idle-checkpoint-deferred-progress direct-r2-presigned-put
+          # linq-webhook gates the Worker-mediated Workers AI transcription
+          # path: audio media flows through the container parser drain, the
+          # remote-transcription provider, and the murph-transcribe.worker
+          # egress handler with a deterministic fake AI binding from the
+          # hosted-local test entrypoint.
+          - name: Linq webhook media + device connect E2E
+            slug: linq-webhook-device-connect
+            scenarios: linq-webhook device-connect
     services:
       postgres:
         image: public.ecr.aws/docker/library/postgres:17
