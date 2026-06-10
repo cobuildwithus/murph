@@ -6,6 +6,13 @@ on:
     branches:
       - main
 
+# One CI run per ref per workflow: a new push to a PR cancels the superseded
+# run immediately, freeing org-level concurrency slots. Pushes to main never
+# cancel an in-progress run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -25,6 +32,9 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
+          # Cache the pnpm store keyed on pnpm-lock.yaml; biggest win on the
+          # macOS leg where a cold install costs ~2 minutes.
+          cache: pnpm
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
