@@ -74,7 +74,6 @@ describe("hosted local container continuity e2e", () => {
 
     const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
     const baselineProviderRequestCount = countAssistantProviderResponsesApiRequests();
-    const baselineIdleShutdownCleanupCount = countContainerDestroyCompletedLogs();
     requireScenario().queueAssistantResponses([firstReplyText, secondReplyText]);
 
     const firstWebhookResponse = await postSignedLinqWebhook(
@@ -102,6 +101,9 @@ describe("hosted local container continuity e2e", () => {
     const firstCompletionStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(firstCompletionStatus.lastErrorCode ?? null).toBeNull();
     expect(firstCompletionStatus.workspace).not.toBeNull();
+    // Baseline after first completion so the activation wake's own idle
+    // destroy cannot pre-satisfy the destroy-count condition.
+    const baselineIdleShutdownCleanupCount = countActivityExpiredDestroyRequestLogs();
 
     const idleShutdownStatus = await waitForIdleShutdownCheckpoint({
       baselineCleanupCount: baselineIdleShutdownCleanupCount,
@@ -113,7 +115,7 @@ describe("hosted local container continuity e2e", () => {
       .toBeNull();
     expect(idleShutdownStatus.inFlight).toBe(false);
     expect(idleShutdownStatus.lastErrorCode ?? null).toBeNull();
-    expect(countContainerDestroyCompletedLogs())
+    expect(countActivityExpiredDestroyRequestLogs())
       .toBeGreaterThan(baselineIdleShutdownCleanupCount);
 
     const secondWebhookResponse = await postSignedLinqWebhook(
@@ -201,7 +203,7 @@ async function waitForIdleShutdownCheckpoint(input: {
       && deltaRef === null
       && !status.inFlight
       && !status.lastErrorCode
-      && countContainerDestroyCompletedLogs() > input.baselineCleanupCount
+      && countActivityExpiredDestroyRequestLogs() > input.baselineCleanupCount
     ) {
       return status;
     }
@@ -228,7 +230,7 @@ function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function countContainerDestroyCompletedLogs(): number {
+function countActivityExpiredDestroyRequestLogs(): number {
   const output = [
     requireScenario().harness.stdoutTail(200_000),
     requireScenario().harness.stderrTail(200_000),
@@ -254,9 +256,15 @@ function countContainerDestroyCompletedLogs(): number {
       }
 
       const candidate = record as {
+        details?: { destroyRequestReason?: unknown };
         message?: unknown;
       };
-      return candidate.message === "Hosted execution container destroy completed.";
+      // Only the idle-path destroy proves the checkpointed container was
+      // cleaned up; smoke/readiness/recycle destroys must not satisfy the
+      // wait. Destroy logs carry no user id because the invocation context
+      // is already cleared, so the reason filter is the narrowing.
+      return candidate.message === "Hosted execution container destroy requested."
+        && candidate.details?.destroyRequestReason === "activity-expired";
     }).length;
 }
 

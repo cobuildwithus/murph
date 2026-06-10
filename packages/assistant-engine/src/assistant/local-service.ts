@@ -643,6 +643,7 @@ export async function sendAssistantMessageLocal(
           })
           await recordAdditionalAssistantUsageEvents({
             additionalUsages: providerOutcome.additionalUsages,
+            effectiveEnv: currentInput.turnEnvironment?.env ?? process.env,
             executionContext,
             providerResult: failedProviderResult,
             turnId: currentUserTurn.turnId,
@@ -684,6 +685,7 @@ export async function sendAssistantMessageLocal(
         })
         await recordAdditionalAssistantUsageEvents({
           additionalUsages: providerResult.additionalUsages,
+          effectiveEnv: currentInput.turnEnvironment?.env ?? process.env,
           executionContext,
           providerResult,
           turnId: currentUserTurn.turnId,

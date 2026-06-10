@@ -620,6 +620,7 @@ describe("assistant usage recording seam", () => {
           },
         },
       ],
+      effectiveEnv: { OPENAI_API_KEY: "" },
       executionContext: {
         hosted: {
           memberId: "member-42",
@@ -648,6 +649,7 @@ describe("assistant usage recording seam", () => {
     ).toHaveBeenCalledWith(
       expect.objectContaining({
         apiKeyEnv: "OPENAI_API_KEY",
+        effectiveEnv: { OPENAI_API_KEY: "" },
         provider: "openai-images",
       }),
     );

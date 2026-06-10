@@ -4,6 +4,10 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export const OPENAI_IMAGE_GENERATION_MODEL = 'gpt-image-2'
 export const OPENAI_IMAGES_BASE_URL = 'https://api.openai.com/v1'
+// Image generation is slow but bounded; a hung request must become a tool
+// failure reply instead of stalling the turn. TimeoutError is deliberately
+// not an AbortError, so the tool's abort passthrough does not swallow it.
+export const OPENAI_IMAGE_GENERATION_TIMEOUT_MS = 120_000
 export const OPENAI_IMAGE_GENERATION_USAGE_EXTRACTION_VERSION =
   'openai-images-v1'
 
@@ -56,7 +60,12 @@ export async function generateOpenAiImage(input: {
       'content-type': 'application/json',
     },
     method: 'POST',
-    signal: input.abortSignal ?? undefined,
+    signal: input.abortSignal
+      ? AbortSignal.any([
+          input.abortSignal,
+          AbortSignal.timeout(OPENAI_IMAGE_GENERATION_TIMEOUT_MS),
+        ])
+      : AbortSignal.timeout(OPENAI_IMAGE_GENERATION_TIMEOUT_MS),
   })
   const providerRequestId =
     normalizeNullableString(response.headers.get('x-request-id')) ??

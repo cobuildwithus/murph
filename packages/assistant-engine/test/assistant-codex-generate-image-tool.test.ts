@@ -204,6 +204,38 @@ describe('executeGenerateImageTool', () => {
     })
   })
 
+  it('reports a deadline timeout as a tool failure instead of a turn abort', async () => {
+    // AbortSignal.timeout rejects with a TimeoutError, which must stay
+    // distinct from caller AbortError so a hung OpenAI request becomes a
+    // recoverable tool failure rather than aborting the whole turn.
+    const timeoutError = new Error('request timed out')
+    timeoutError.name = 'TimeoutError'
+    const fetchImpl = vi.fn(async (_url: unknown, init?: { signal?: AbortSignal | null }) => {
+      expect(init?.signal).toBeInstanceOf(AbortSignal)
+      throw timeoutError
+    })
+
+    const result = await executeGenerateImageTool({
+      args: {
+        alt: null,
+        outputFormat: 'png',
+        prompt: 'Render the object.',
+        quality: 'medium',
+        size: '1024x1024',
+      },
+      env: {
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+      fetchImpl,
+      providerRequestOrdinal: 1,
+    })
+
+    expect(result).toEqual({
+      rpcSuccess: false,
+      rpcText: 'image generation failed',
+    })
+  })
+
   it('rethrows provider aborts instead of reporting a tool failure', async () => {
     const abortError = new Error('aborted')
     abortError.name = 'AbortError'

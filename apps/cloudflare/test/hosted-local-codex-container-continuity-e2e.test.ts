@@ -114,7 +114,6 @@ describe("hosted local Codex container continuity e2e", () => {
 
     const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
     const baselineProviderRequestCount = countAssistantProviderResponsesApiRequests();
-    const baselineIdleShutdownCleanupCount = countContainerDestroyCompletedLogs();
     requireScenario().queueAssistantResponses([firstReplyText, secondReplyText]);
 
     const firstWebhookResponse = await postSignedLinqWebhook(
@@ -144,6 +143,9 @@ describe("hosted local Codex container continuity e2e", () => {
     const firstCompletionBaseSnapshotHash = readHostedExecutionSnapshotBaseRef(
       firstCompletionStatus.workspace?.snapshotRef ?? null,
     )?.hash ?? null;
+    // Baseline after first completion so the activation wake's own idle
+    // destroy cannot pre-satisfy the destroy-count condition.
+    const baselineIdleShutdownCleanupCount = countActivityExpiredDestroyRequestLogs();
 
     const idleShutdownStatus = await waitForIdleShutdownCheckpoint({
       baselineBaseSnapshotHash: firstCompletionBaseSnapshotHash,
@@ -309,7 +311,7 @@ async function waitForIdleShutdownCheckpoint(input: {
       && deltaRef === null
       && !status.inFlight
       && !status.lastErrorCode
-      && countContainerDestroyCompletedLogs() > input.baselineCleanupCount
+      && countActivityExpiredDestroyRequestLogs() > input.baselineCleanupCount
     ) {
       return status;
     }
@@ -332,7 +334,7 @@ async function waitForIdleShutdownCheckpoint(input: {
   ]));
 }
 
-function countContainerDestroyCompletedLogs(): number {
+function countActivityExpiredDestroyRequestLogs(): number {
   const output = [
     requireScenario().harness.stdoutTail(1_000_000),
     requireScenario().harness.stderrTail(1_000_000),
@@ -358,9 +360,15 @@ function countContainerDestroyCompletedLogs(): number {
       }
 
       const candidate = record as {
+        details?: { destroyRequestReason?: unknown };
         message?: unknown;
       };
-      return candidate.message === "Hosted execution container destroy completed.";
+      // Only the idle-path destroy proves the checkpointed container was
+      // cleaned up; smoke/readiness/recycle destroys must not satisfy the
+      // wait. Destroy logs carry no user id because the invocation context
+      // is already cleared, so the reason filter is the narrowing.
+      return candidate.message === "Hosted execution container destroy requested."
+        && candidate.details?.destroyRequestReason === "activity-expired";
     }).length;
 }
 

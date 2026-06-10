@@ -2000,7 +2000,7 @@ describe('Codex assistant registry helpers', () => {
         retryable: false,
       },
       message:
-        'Codex app-server turn failed. status failed. Authorization: Bearer <REDACTED_TOKEN> at /tmp/provider-tests',
+        'Codex app-server turn failed. status failed. Authorization: Bearer raw-token-value at /tmp/provider-tests',
     }
     const traceEvents: AssistantProviderTraceEvent[] = []
 
@@ -2069,7 +2069,7 @@ describe('Codex assistant registry helpers', () => {
       schema: 'murph.assistant-codex-resume-failure-diagnostics.v1',
       type: 'assistant.codex.resume_failure',
     })
-    expect(JSON.stringify(traceEvents)).not.toContain('<REDACTED_TOKEN>')
+    expect(JSON.stringify(traceEvents)).not.toContain('raw-token-value')
     expect(JSON.stringify(traceEvents)).not.toContain('/tmp/provider-tests')
   })
 
