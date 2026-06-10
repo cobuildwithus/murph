@@ -165,7 +165,6 @@ async function assembleRunnerBundle(): Promise<void> {
 async function writeHostedLocalE2eParserToolchain(bundleRoot: string): Promise<void> {
   const toolchainRoot = path.join(bundleRoot, "test-parser-toolchain");
   await mkdir(toolchainRoot, { recursive: true });
-  await writeFile(path.join(toolchainRoot, "ggml-test.bin"), "test whisper model\n", "utf8");
   await writeExecutable(path.join(toolchainRoot, "ffmpeg"), [
     "#!/usr/bin/env node",
     "import fs from 'node:fs';",
@@ -177,15 +176,6 @@ async function writeHostedLocalE2eParserToolchain(bundleRoot: string): Promise<v
     "if (!inputPath || !outputPath) process.exit(2);",
     "fs.mkdirSync(path.dirname(outputPath), { recursive: true });",
     "fs.copyFileSync(inputPath, outputPath);",
-  ].join("\n"));
-  await writeExecutable(path.join(toolchainRoot, "whisper-cli"), [
-    "#!/usr/bin/env node",
-    "import fs from 'node:fs';",
-    "const args = process.argv.slice(2);",
-    "const outputIndex = args.indexOf('-of');",
-    "const outputBase = outputIndex >= 0 ? args[outputIndex + 1] : null;",
-    "if (!outputBase) process.exit(2);",
-    "fs.writeFileSync(`${outputBase}.txt`, 'Remember to log the voice note\\n', 'utf8');",
   ].join("\n"));
 }
 

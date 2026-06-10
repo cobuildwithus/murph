@@ -581,8 +581,6 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
       [HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV]: "1",
       HOSTED_EMAIL_INGRESS_READY: "true",
-      WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
-      WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",
     };
 
     expect(buildHostedRunnerJobRuntimeConfig({
@@ -600,9 +598,8 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         pdftotext: {
           command: "/usr/bin/pdftotext",
         },
-        whisper: {
-          command: "/app/test-parser-toolchain/whisper-cli",
-          modelPath: "/app/test-parser-toolchain/ggml-test.bin",
+        transcription: {
+          endpoint: "http://murph-transcribe.worker/v1/transcribe",
         },
       },
     });
