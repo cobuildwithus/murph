@@ -67,14 +67,20 @@ Write-pass summary:
 - Resubmitted the 2,493 truncated-tail rows at 6 rows/request, max_tokens 8k (≈ $9.26; these are the largest panels — prioritization had pushed multi-blocker 30+-ingredient products to the tail, so output stayed high even at 6/request). Salvaged 2,246 complete extractions; 247 genuinely oversized rows still truncate and remain queued.
 - Same validated pipeline: 1,492 clean → 1,489 after dropping missing-serving → upserted, 0 production-blocked. Spot-checks correct (incl. `<1 g` bounds, "Approximately 1 Scoop (35.8g)").
 
+### Wave 5 — validator dup-gate fix + sonnet retry (2026-06-09)
+
+- Analysis of the ~2,457 haiku validation failures showed the largest bucket (981 dup_amount) was a false positive in the independent validator, not a model error: nutrition macros (0/1/2 g) and supplements with multiple botanicals at the same dose (e.g. 5 herbs at 100 mg) are legitimate. Fixed the gate to flag only when an amount is reused more times than it appears in evidence and the sharing rows are not macros. Recovered 920 rows for $0.
+- For the genuinely-haiku-failed rows with rich evidence (mostly proprietary blends haiku flattened, plus OCR-typo names), submitted 1,052 to `claude-sonnet-4-6` at 6 rows/request. Added a Levenshtein-1 fuzzy name-anchor (only when the amount anchors) to absorb OCR corruption like "PhosphatidyIcholine". Salvaged 945; 484 passed validation and upserted, 0 production-blocked. Sonnet kept blends as faithful single rows (constituents named, blend total, no fabricated per-constituent amounts).
+- Sonnet batch cost ~$11.40 (output tokens at sonnet rates are 3x haiku; collect_batches.py prints haiku-rate estimates — multiply output by 3 for sonnet).
+
 ### Session result
 
-- Structured `brand_site` rows (non-empty `ingredientRows`): **7,063 → 17,067** (+10,004 net). Total repaired upserts: 13,258 (4,813 + 68 + 6,888 + 1,489).
-- Anthropic Batches API spend: $36.16 of $50 (~$13.84 left).
+- Structured `brand_site` rows (non-empty `ingredientRows`): **7,063 → 18,234** (+11,171 net). Total repaired upserts: 14,662 (4,813 + 68 + 6,888 + 1,489 + 920 + 484).
+- Anthropic Batches API spend: ~$47.56 of $50 (main $26.90 + tail $9.26 + sonnet $11.40; ~$2.44 left).
 
 ### Remaining
 
-- ~247 oversized rows that still truncate (need per-row or smaller-chunk handling) + ~5k refetch/OCR rows (no evidence in `label`) + 799 non-standalone-review rows + the ~2,448 LLM rows that failed independent validation (anchor/dup/dv flags — genuinely hard, not auto-writable). No re-scrape performed this session per direction.
+- ~5k refetch/OCR rows (no evidence in `label`) + 799 non-standalone-review rows + a residue of ~1.5k rows whose extractions failed even sonnet validation on genuine evidence defects (OCR-corrupted amounts, source pages with wrong units) + ~250 oversized rows that truncate even at 6/request. The remaining failures are evidence-limited, not model-limited — further model spend has low expected yield without re-scraping. No re-scrape performed this session per direction.
 
 Findings:
 
