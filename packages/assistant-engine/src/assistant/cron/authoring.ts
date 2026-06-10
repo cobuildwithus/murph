@@ -15,7 +15,6 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { normalizeNullableString } from '../shared.js'
 import { resolveAssistantStatePaths, type AssistantStatePaths } from '../store/paths.js'
 import {
-  buildCanonicalAutomationRoute,
   buildCanonicalAutomationUpsertInput,
   projectCanonicalAssistantCronJob,
   requireCanonicalAssistantCronRecord,
@@ -43,6 +42,7 @@ import {
 } from './store.js'
 import {
   assistantCronTargetAudienceEquals,
+  buildCanonicalAutomationRoute,
   resolveAssistantCronTargetDefaults,
   validateAssistantCronDeliveryTarget,
 } from './targets.js'

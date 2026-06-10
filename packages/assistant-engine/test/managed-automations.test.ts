@@ -53,6 +53,9 @@ vi.mock('@murphai/operator-config/assistant/current-delivery-route', () => ({
 
 vi.mock('../src/assistant/channel-adapters.ts', () => ({
   getAssistantChannelAdapter: managedAutomationMocks.getAssistantChannelAdapter,
+  // The shared route rules in cron/targets.ts resolve binding deliveries
+  // through the channel adapters; managed seeds always carry explicit routes.
+  inferAssistantBindingDelivery: vi.fn(() => null),
 }))
 
 import {
@@ -261,9 +264,63 @@ describe('applyMurphManagedAutomations', () => {
     )
   })
 
+  it('validates the resolved self-delivery route through the shared rules when no defaultRoute is given', async () => {
+    managedAutomationMocks.applyAssistantSelfDeliveryTargetDefaults.mockResolvedValue({
+      channel: 'telegram',
+      deliveryTarget: 'self-delivery-thread',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    })
+
+    const result = await applyMurphManagedAutomations({
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      vaultRoot,
+    })
+
+    expect(result).toEqual({
+      created: 1,
+      skipped: 0,
+      updated: 0,
+    })
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: {
+          channel: 'telegram',
+          deliverySource: null,
+          deliveryTarget: 'self-delivery-thread',
+          identityId: null,
+          participantId: null,
+          threadId: null,
+        },
+      }),
+    )
+  })
+
   it('skips creation when no deliverable route exists', async () => {
     const result = await applyMurphManagedAutomations({
       defaultRoute: null,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      vaultRoot,
+    })
+
+    expect(result).toEqual({
+      created: 0,
+      skipped: 1,
+      updated: 0,
+    })
+    expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
+  })
+
+  it('skips creation for a participant-only route with no resolvable binding delivery', async () => {
+    const result = await applyMurphManagedAutomations({
+      defaultRoute: {
+        channel: 'telegram',
+        deliveryTarget: null,
+        identityId: null,
+        participantId: 'participant-1',
+        threadId: null,
+      },
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })

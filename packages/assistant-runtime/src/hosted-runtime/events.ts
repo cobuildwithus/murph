@@ -674,19 +674,15 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
   }
 
   try {
-    const route = buildOnboardingFollowupAutomationRoute(
-      input.wake.notification.route,
-    );
-    if (!route) {
-      throw new Error(
-        "Onboarding follow-up route is not seedable: Linq participant delivery has no delivery source.",
-      );
-    }
-
+    // Route deliverability (e.g. Linq participant routes without a Linq
+    // delivery source) is enforced by upsertAssistantCronAutomation's target
+    // validation; an undeliverable route lands in the catch below.
     const job = await upsertAssistantCronAutomation({
       firstOccurrencePolicy: "after-current-local-day",
       instructions: ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS,
-      route,
+      route: buildOnboardingFollowupAutomationRoute(
+        input.wake.notification.route,
+      ),
       schedule: {
         kind: "dailyLocal",
         localTime: "13:30",
@@ -725,13 +721,9 @@ function isSignupWelcomeAssistantNotification(
 
 function buildOnboardingFollowupAutomationRoute(
   route: HostedExecutionAssistantNotificationRoute,
-): AutomationRoute | null {
+): AutomationRoute {
   const delivery = route.delivery;
   if (route.channel === "linq") {
-    if (delivery.kind === "participant" && !delivery.source) {
-      return null;
-    }
-
     return {
       channel: route.channel,
       deliverySource: delivery.source ?? null,
