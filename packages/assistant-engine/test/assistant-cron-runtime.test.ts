@@ -90,7 +90,12 @@ vi.mock('../src/assistant/channel-adapters.ts', () => ({
   getAssistantChannelAdapter: cronMocks.getAssistantChannelAdapter,
 }))
 
-vi.mock('../src/assistant/bindings.ts', () => ({
+vi.mock('../src/assistant/bindings.ts', async (importOriginal) => ({
+  // The conversation-key predicate is pure routing logic; keep the real one
+  // so continuity gating behaves as in production.
+  resolveAssistantConversationKey: (
+    await importOriginal<typeof import('../src/assistant/bindings.ts')>()
+  ).resolveAssistantConversationKey,
   resolveAssistantBindingDelivery: cronMocks.resolveAssistantBindingDelivery,
 }))
 
@@ -2101,6 +2106,132 @@ describe('assistant cron runtime orchestration', () => {
     })
     const runtimeRecord = finalizedRuntimeStore.jobs.find((record) => record.jobId === claimed.job.jobId)
     expect(runtimeRecord?.state.runningClaimId).toBeNull()
+  })
+
+  it('ignores and clears a stale session pin when a preserve route has conversation locators', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-keyed-preserve-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-keyed-preserve',
+      continuityPolicy: 'preserve',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Remind me to stretch.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_real',
+        identityId: 'identity-1',
+        participantId: 'participant-1',
+        threadId: 'thread-1',
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '10:00',
+      },
+      slug: 'keyed-preserve-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Keyed preserve reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = {
+      ...resolveCanonicalRuntimeState(source, runtimeStore),
+      sessionId: 'session-stale-pin',
+    }
+    const projected = projectCanonicalAssistantCronJob({
+      source,
+      runtimeState,
+    })
+    expect(projected.target.sessionId).toBeNull()
+    expect(projected.target.threadId).toBe('thread-1')
+
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projected,
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: null,
+        threadId: 'thread-1',
+      }),
+    )
+    const finalizedRuntimeStore = await readAssistantCronCanonicalRuntimeStore(paths, {
+      reclaimStaleRunningClaims: false,
+    })
+    const runtimeRecord = finalizedRuntimeStore.jobs.find(
+      (record) => record.jobId === claimed.job.jobId,
+    )
+    expect(runtimeRecord?.sessionId).toBeNull()
+  })
+
+  it('keeps pinning the response session for a preserve route without conversation locators', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-keyless-preserve-',
+    )
+    await createCanonicalJob(vaultRoot, 'keyless-preserve')
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({
+          source,
+          runtimeState,
+        }),
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    const finalizedRuntimeStore = await readAssistantCronCanonicalRuntimeStore(paths, {
+      reclaimStaleRunningClaims: false,
+    })
+    const runtimeRecord = finalizedRuntimeStore.jobs.find(
+      (record) => record.jobId === claimed.job.jobId,
+    )
+    expect(runtimeRecord?.sessionId).toBe('session-default')
   })
 
   it('processes a canonical daily-local midnight job when runtime state is missing', async () => {
