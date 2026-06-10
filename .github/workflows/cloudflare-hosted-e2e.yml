@@ -7,19 +7,14 @@ on:
       - main
   workflow_dispatch:
 
-# One CI run per ref per workflow: a new push to a PR cancels the superseded
-# run immediately, freeing org-level concurrency slots. Pushes to main never
-# cancel an in-progress run.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
-permissions:
-  contents: read
-
+# One CI run per ref per workflow: a new push to a PR or main cancels the
+# superseded run immediately, freeing org-level concurrency slots.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   # The hosted local E2E harness runs `prisma db push` during setup, so these
