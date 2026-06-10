@@ -63,6 +63,7 @@ import {
 import {
   CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS,
   extractAssistantMessageFallback,
+  extractCodexErrorInfo,
   extractCodexErrorMessage,
   extractCodexProgressEventFromNormalized,
   extractCodexSessionId,
@@ -6082,6 +6083,189 @@ describe('assistant codex runtime', () => {
     })
   })
 
+  it('classifies usage-limit turn failures from structured error notifications end to end', async () => {
+    // Proves the lastEventErrorInfo threading: the structured codexErrorInfo
+    // arrives on an `error` notification, then the turn fails via a separate
+    // turn/completed event that carries no structured info of its own. The
+    // message text deliberately matches none of the historical usage-limit
+    // phrases (June 2026 quota incident regression guard).
+    const workingDirectory = await createTempDir('assistant-codex-structured-usage-limit-')
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-structured-usage',
+                },
+              },
+            }),
+          )
+          await waitForRpcMessages(child, 4)
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-structured-usage',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/started',
+              params: {
+                turn: {
+                  id: 'turn-structured-usage',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'error',
+              params: {
+                error: {
+                  codexErrorInfo: 'usageLimitExceeded',
+                  message: 'You have reached your monthly cap.',
+                },
+                threadId: 'thread-structured-usage',
+                turnId: 'turn-structured-usage',
+                willRetry: false,
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-structured-usage',
+                  status: 'failed',
+                },
+              },
+            }),
+          )
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        prompt: 'structured usage limit',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_USAGE_LIMIT',
+      context: {
+        codexErrorInfo: 'usageLimitExceeded',
+        codexErrorInfoPresent: true,
+        codexFailureStage: 'turn_failed',
+        codexThreadIdPresent: true,
+        codexTurnStatus: 'failed',
+        providerUsageLimit: true,
+        retryable: false,
+      },
+      message: expect.stringContaining('You have reached your monthly cap.'),
+    })
+  })
+
+  it('does not classify process exits as connection loss when structured info names another failure', async () => {
+    // Same connection-sounding stderr as the retryable connection-loss test
+    // above, but a structured non-connection error arrived first: the
+    // structured classification must win over text sniffing end to end.
+    const workingDirectory = await createTempDir('assistant-codex-structured-non-connection-')
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-structured-exit',
+                },
+              },
+            }),
+          )
+          await waitForRpcMessages(child, 4)
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-structured-exit',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/started',
+              params: {
+                turn: {
+                  id: 'turn-structured-exit',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'error',
+              params: {
+                error: {
+                  codexErrorInfo: 'internalServerError',
+                  message: 'provider rejected the request',
+                },
+                threadId: 'thread-structured-exit',
+                turnId: 'turn-structured-exit',
+                willRetry: false,
+              },
+            }),
+          )
+          child.stderr.write('connection closed before response.completed\n')
+          child.emit('exit', 1, null)
+          child.emit('close', 1, null)
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        prompt: 'structured non-connection exit',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_FAILED',
+      context: {
+        codexErrorInfo: 'internalServerError',
+        codexErrorInfoPresent: true,
+        codexFailureStage: 'process_exit',
+        connectionLost: false,
+        retryable: false,
+      },
+    })
+  })
+
   it('classifies stale resume failures from thread/resume RPC errors', async () => {
     const workingDirectory = await createTempDir('assistant-codex-stale-resume-')
 
@@ -9430,6 +9614,131 @@ describe('assistant codex event shaping', () => {
       extractCodexErrorMessage({
         message: 'ignored',
         type: 'item.completed',
+      }),
+    ).toBeNull()
+
+    // Wire shape from the app-server v2 ErrorNotification:
+    // { method: 'error', params: { error: TurnError, threadId, turnId, willRetry } }
+    expect(
+      extractCodexErrorInfo({
+        method: 'error',
+        params: {
+          error: {
+            codexErrorInfo: 'usageLimitExceeded',
+            message: 'You have reached your monthly cap.',
+          },
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          willRetry: false,
+        },
+      }),
+    ).toEqual({
+      httpStatusCode: null,
+      kind: 'usageLimitExceeded',
+    })
+    expect(
+      extractCodexErrorInfo({
+        method: 'error',
+        params: {
+          error: {
+            codexErrorInfo: {
+              httpConnectionFailed: {
+                httpStatusCode: 502,
+              },
+            },
+            message: 'connection failed',
+          },
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          willRetry: true,
+        },
+      }),
+    ).toEqual({
+      httpStatusCode: 502,
+      kind: 'httpConnectionFailed',
+    })
+    expect(
+      extractCodexErrorInfo({
+        method: 'error',
+        params: {
+          error: {
+            message: 'no structured info attached',
+          },
+        },
+      }),
+    ).toBeNull()
+    // Carrier variants are single-key enums: a multi-key object is not a
+    // valid CodexErrorInfo and must not be guessed at.
+    expect(
+      extractCodexErrorInfo({
+        method: 'error',
+        params: {
+          error: {
+            codexErrorInfo: {
+              httpConnectionFailed: {
+                httpStatusCode: 502,
+              },
+              serverOverloaded: {},
+            },
+            message: 'ambiguous payload',
+          },
+        },
+      }),
+    ).toBeNull()
+    expect(
+      extractCodexErrorInfo({
+        params: {
+          error: {
+            codex_error_info: 'usageLimitExceeded',
+            message: 'snake_case wire key',
+          },
+        },
+        type: 'turn.error',
+      }),
+    ).toEqual({
+      httpStatusCode: null,
+      kind: 'usageLimitExceeded',
+    })
+    expect(
+      extractCodexErrorInfo({
+        codexErrorInfo: 'usageLimitExceeded',
+        type: 'item.completed',
+      }),
+    ).toBeNull()
+    expect(extractCodexErrorInfo(null)).toBeNull()
+
+    // A failed turn embeds its TurnError directly on turn/completed
+    // (Turn.error is only populated for failed turns at codex 0.135.0), so
+    // classification works even if the standalone error notification never
+    // arrived.
+    expect(
+      extractCodexErrorInfo({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            error: {
+              codexErrorInfo: 'usageLimitExceeded',
+              message: 'You have reached your monthly cap.',
+            },
+            id: 'turn-embedded-error',
+            status: 'failed',
+          },
+        },
+      }),
+    ).toEqual({
+      httpStatusCode: null,
+      kind: 'usageLimitExceeded',
+    })
+    expect(
+      extractCodexErrorInfo({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            error: null,
+            id: 'turn-successful',
+            status: 'completed',
+          },
+        },
       }),
     ).toBeNull()
 
