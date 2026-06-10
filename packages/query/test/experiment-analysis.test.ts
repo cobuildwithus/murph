@@ -6,9 +6,15 @@ import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import { createVaultReadModel } from "../src/model.ts";
 import {
   analyzeExperimentOutcome,
+  buildExperimentProgressCard,
   decideExperimentFollowupDue,
   summarizeExperimentProgress,
 } from "../src/index.ts";
+import {
+  buildExperimentProgressCardPath,
+  decodeExperimentProgressCard,
+  EXPERIMENT_PROGRESS_CARD_MAX_WEEKS,
+} from "@murphai/contracts";
 
 function makeEntity(
   overrides: Partial<CanonicalEntity> & Pick<CanonicalEntity, "entityId" | "family" | "kind" | "recordClass">,
@@ -1529,4 +1535,111 @@ test("experiment outcome reports sparse primary data as medium-confidence incomp
   );
   assert.match(outcome.conclusion.plainLanguage, /not enough primary biomarker data/u);
   assert.equal(outcome.protocolRef, null);
+});
+
+test("buildExperimentProgressCard projects the run window onto a weekly grid", () => {
+  const vault = createExperimentVault();
+  const { card, warnings } = buildExperimentProgressCard(vault, "sauna-rhr", {
+    asOf: "2026-04-12",
+    confounders: [{ date: "2026-04-09", label: "Alcohol (~5 drinks)" }],
+  });
+
+  // The sessions strip covers the intervention window only (04-08..04-21 =
+  // 14 days = 2 weeks); the baseline period is measurement-only and excluded.
+  assert.equal(card.weeks.length, 2);
+  assert.ok(card.weeks.length <= EXPERIMENT_PROGRESS_CARD_MAX_WEEKS);
+  assert.equal(card.weeks[0].start, "2026-04-08");
+  // No baseline "B" cells, and every code is a valid intervention-window code.
+  const cells = card.weeks.map((week) => week.cells).join("");
+  assert.match(cells, /^[CPMNSO]+$/u);
+  assert.equal(cells.includes("B"), false);
+  // Phase still reflects the whole run (baseline + intervention).
+  assert.equal(card.phase.totalDays, 21);
+  assert.equal(card.phase.day, 12);
+  assert.equal(card.sessions.logged, 2);
+  assert.equal(card.sessions.target, 6);
+  // Confounder annotations pass through verbatim.
+  assert.deepEqual(card.confounders, [
+    { date: "2026-04-09", label: "Alcohol (~5 drinks)" },
+  ]);
+  assert.deepEqual(warnings, []);
+});
+
+test("buildExperimentProgressCard marks logged intervention days as completed", () => {
+  // A daily-schedule run synthesizes an adherence calendar, so logged sessions
+  // resolve to "C" cells and unlogged-but-due days to "M".
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-progress-card",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        runPlan: {
+          baselineStart: "2026-04-01",
+          baselineEnd: "2026-04-07",
+          interventionStart: "2026-04-08",
+          interventionEnd: "2026-04-14",
+          modality: "sauna",
+          targetSessions: 7,
+          schedule: {
+            kind: "dailyLocal",
+            localTime: "19:00",
+            timeZone: "America/New_York",
+          },
+        },
+      }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE201",
+        occurredAt: "2026-04-08T23:30:00.000Z",
+      }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE202",
+        occurredAt: "2026-04-09T23:30:00.000Z",
+      }),
+    ],
+  });
+
+  const { card } = buildExperimentProgressCard(vault, "sauna-rhr", {
+    asOf: "2026-04-11",
+  });
+
+  assert.equal(card.weeks[0].start, "2026-04-08");
+  // 04-08 and 04-09 logged → completed; later days stay scheduled until their
+  // grace window lapses.
+  assert.match(card.weeks[0].cells, /^CC/u);
+  assert.equal(card.weeks[0].cells.includes("B"), false);
+  assert.ok(card.sessions.logged >= 2);
+});
+
+test("buildExperimentProgressCard surfaces the resting-heart-rate mover with downward sentiment", () => {
+  const { card } = buildExperimentProgressCard(createExperimentVault(), "sauna-rhr", {
+    asOf: "2026-04-12",
+  });
+
+  assert.ok(card.movers.length >= 1);
+  const rhr = card.movers[0];
+  assert.match(rhr.label, /heart rate/iu);
+  // RHR fell from baseline, and the analysis plan wants a decrease → positive.
+  assert.equal(rhr.direction, "down");
+  assert.equal(rhr.sentiment, "positive");
+  // The headline is an unsigned percent-change magnitude; the arrow shows direction.
+  assert.match(rhr.changePct, /^\d+(?:\.\d+)?%$/u);
+  // The raw change keeps its sign (a fall reads with a minus) and carries the unit.
+  assert.match(rhr.delta, /^−.*bpm$/u);
+});
+
+test("buildExperimentProgressCard emits a card-route path that decodes back to the card", () => {
+  const { card } = buildExperimentProgressCard(createExperimentVault(), "sauna-rhr", {
+    asOf: "2026-04-12",
+  });
+  const path = buildExperimentProgressCardPath(
+    "exp_01JNV4458HYPP53JDQCBP1QJFM",
+    card,
+  );
+
+  assert.match(
+    path,
+    /^\/experiments\/exp_[0-9A-HJKMNP-TV-Z]{26}\/progress-card\/[A-Za-z0-9_-]+\.png$/u,
+  );
+  const payload = path.slice(path.lastIndexOf("/") + 1, -".png".length);
+  assert.deepEqual(decodeExperimentProgressCard(payload), card);
 });

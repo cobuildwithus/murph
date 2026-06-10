@@ -10001,6 +10001,37 @@
                     }
                   }
                 },
+                "progress-card": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "asOf": {
+                          "description": "Optional analysis date in YYYY-MM-DD form.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "confounder": {
+                          "description": "Confounder annotation in \"YYYY-MM-DD:label\" form. Repeat --confounder for up to four entries.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
                 "session": {
                   "type": "object",
                   "additionalProperties": false,

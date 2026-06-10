@@ -1245,6 +1245,11 @@ export const vaultCliCommandDescriptors = [
         description: 'Read the deterministic progress summary for one experiment.',
       },
       {
+        path: ['experiment', 'progress-card'],
+        description:
+          'Build the shareable progress-card snapshot for one experiment and emit its image URL.',
+      },
+      {
         path: ['experiment', 'session', 'log'],
         description: 'Log one structured intervention session for an experiment using typed fields.',
       },
@@ -1292,6 +1297,7 @@ export const vaultCliCommandDescriptors = [
         'showExperiment',
         'listExperiments',
         'showExperimentProgress',
+        'showExperimentProgressCard',
         'showExperimentFollowupDue',
         'analyzeExperimentOutcome',
       ],
