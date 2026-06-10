@@ -16,6 +16,7 @@ import { getExperiment, type VaultReadModel } from "./read-model.ts";
 import {
   buildExperimentAdherenceCalendar,
   synthesizeLegacySessionAdherenceTargets,
+  type ExperimentAdherenceCalendarResult,
   type ExperimentAdherenceObservation,
 } from "./experiment-adherence.ts";
 import {
@@ -539,12 +540,50 @@ function resolveExpectedDirection(
   return null;
 }
 
-function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentProgressSummary["adherence"] {
-  const targets =
+/**
+ * Build the per-day adherence calendar for one experiment, or null when the
+ * run plan declares no adherence targets. Reuses the same target synthesis and
+ * observation mapping as the progress summary so day statuses stay consistent.
+ */
+export function collectExperimentAdherenceCalendar(
+  vault: VaultReadModel,
+  slug: string,
+  options: { asOf?: string } = {},
+): ExperimentAdherenceCalendarResult | null {
+  return buildAdherenceCalendarFromContext(
+    buildExperimentSummaryContext(vault, slug, options),
+  );
+}
+
+function resolveAdherenceTargets(
+  context: ExperimentSummaryContext,
+): QueryExperimentAdherenceTarget[] {
+  return (
     context.frontmatter.runPlan?.adherenceTargets ??
     synthesizeLegacySessionAdherenceTargets({
       runPlan: context.frontmatter.runPlan,
-    });
+    })
+  );
+}
+
+function buildAdherenceCalendarFromContext(
+  context: ExperimentSummaryContext,
+): ExperimentAdherenceCalendarResult | null {
+  const targets = resolveAdherenceTargets(context);
+  if (targets.length === 0) {
+    return null;
+  }
+
+  return buildExperimentAdherenceCalendar({
+    asOf: context.asOf,
+    observations: buildAdherenceObservations(context, targets),
+    targets,
+    windows: buildWindowSummary(context.frontmatter),
+  });
+}
+
+function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentProgressSummary["adherence"] {
+  const targets = resolveAdherenceTargets(context);
   const targetSessions =
     targets[0]?.rollup?.targetCompletions ??
     context.frontmatter.runPlan?.targetSessions ??
@@ -553,14 +592,7 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
     targets[0]?.rollup?.minimumUsefulCompletions ??
     context.frontmatter.runPlan?.minimumUsefulSessions ??
     null;
-  const adherenceCalendar = targets.length > 0
-    ? buildExperimentAdherenceCalendar({
-        asOf: context.asOf,
-        observations: buildAdherenceObservations(context, targets),
-        targets,
-        windows: buildWindowSummary(context.frontmatter),
-      })
-    : null;
+  const adherenceCalendar = buildAdherenceCalendarFromContext(context);
   const completedSessions = adherenceCalendar?.summary.satisfiedCount ?? context.completedSessions;
   const expectedSessionsByNow = adherenceCalendar
     ? adherenceCalendar.cells.filter((cell) => cell.status !== "scheduled").length

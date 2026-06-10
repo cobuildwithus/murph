@@ -1443,6 +1443,34 @@ export async function showExperimentProgress(input: {
   }
 }
 
+export async function showExperimentProgressCard(input: {
+  vault: string
+  lookup: string
+  asOf?: string
+  confounders?: ReadonlyArray<{ date: string; label: string }>
+}) {
+  const { query, readModel, entity, slug } = await resolveExperimentQueryTarget({
+    invalidSlugMessage: 'Experiment progress cards require a canonical slug.',
+    lookup: input.lookup,
+    vault: input.vault,
+  })
+
+  const { card, warnings } = query.buildExperimentProgressCard(readModel, slug, {
+    asOf: input.asOf,
+    confounders: input.confounders,
+  })
+
+  return {
+    vault: input.vault,
+    experimentId: entity.entityId,
+    lookupId: entity.entityId,
+    slug,
+    asOf: card.asOf,
+    card,
+    warnings,
+  }
+}
+
 export async function showExperimentFollowupDue(input: {
   vault: string
   lookup: string
