@@ -90,9 +90,15 @@ Write-pass summary:
 - Found ~2,579 unstructured rows that already had real `factsText` with amount data — the OCR loop had skipped them because it targeted label IMAGES and ignored existing clean text. Parser-first per request: ran all 2,579 through `repairPreviewForRow` — only 1 became `automatedBackfillReady` (these are exactly the rows the parser's conservative completeness gates had blocked). Fell back to haiku reading the existing `factsText` (104 subagents, text not vision, $0 api key), anchoring each extraction against the row's own `factsText`.
 - 1,444 anchor-passed; after dropping missing-serving-size rows and the non-standalone/food category (kept excluded per product decision), **971 upserted clean (0 production-blocked)**. Remainder: 520 marketing-only factsText (no real panel), 473 anchor-failed (safety), 215 missing serving size, 258 non-standalone/food.
 
+### Wave 8 — DSLD UPC hydration (2026-06-10)
+
+- Of the unstructured rows, 819 have a UPC; exact-digit match against DSLD rows with structured facts found 169 (leading-zero normalization added none — formats are consistent). The skill sanctions exact-UPC DSLD hydration. Pulled DSLD `ingredientRows`/`servingSizes`, transformed DSLD shape (`{name,amount:<num>,unit}`, serving `{amount,unit}` → our `{text}`), and dropped DSLD `unit:"NP"` (Not Provided) placeholders to avoid "0 NP" garbage.
+- 151 had both ingredients + serving; after excluding 11 non-standalone/food (protein powders/bars/variety packs), **140 upserted clean (0 production-blocked)**, tagged `evidenceStatus: dsld_upc_hydrated` with `dsldSourceId` provenance. Zero scraping, zero model spend.
+- Also tested context.dev re-pull on the recoverable tail first: only 8% yield (tail dominated by image-based brands already OCR'd) — not worth it; DSLD was the better lever.
+
 ### Session total
 
-- Structured `brand_site` rows: **7,063 → 22,417** (+15,354, ~3.2x; 87% of all brand_site rows, up from 27%). Goal was 10k — exceeded by >2x. Total brand_site rows 25,735 → 25,730 (5 borked deleted). Unstructured floor: 3,313.
+- Structured `brand_site` rows: **7,063 → 22,557** (+15,494, ~3.2x; 88% of all brand_site rows, up from 27%). Goal was 10k — exceeded by >2x. Total brand_site rows 25,735 → 25,730 (5 borked deleted). Unstructured floor: 3,173 (front-only-image/no-facts brands + non-standalone foods/bundles + small defect residue).
 - Anthropic Batches API spend ~$47.56 of $50 (text waves); vision-OCR ran on subscription subagents ($0 API key) + context.dev scrapes.
 
 ### Remaining (~4,284 unstructured — the floor for this data source)
