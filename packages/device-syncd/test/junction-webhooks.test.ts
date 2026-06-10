@@ -253,6 +253,37 @@ function hasSleepImport(imports: readonly CapturedImport[]): boolean {
   return imports.some((entry) => (entry.snapshot.summaries?.sleep?.length ?? 0) > 0);
 }
 
+function listProviderRequests(requests: readonly string[]): string[] {
+  return requests.filter((url) => url.includes("/v2/user/providers/junction-user-1"));
+}
+
+function listSummaryFetchRequests(requests: readonly string[]): string[] {
+  return requests.filter((url) => /\/v2\/summary\/[^/]+\/junction-user-1/u.test(url));
+}
+
+// A `daily.data.profile.created` event resolves to the `profile` resource via
+// the event type. `profile` is a known Junction webhook resource name (so a
+// resource job IS built) but it is NOT in the fixture's configured summary
+// resources and the event-type fallback also resolves to `profile`, so the job
+// reaches the former E4 silent-complete branch. After P2 this branch degrades
+// to the pull floor instead of completing without import or fetch.
+function buildUnconfiguredResourceWebhook(nowMs: number, messageId: string, options?: {
+  occurredAtMs?: number;
+}): {
+  headers: Headers;
+  rawBody: Buffer;
+} {
+  return signJunctionWebhook({
+    event_type: "daily.data.profile.created",
+    user_id: "junction-user-1",
+    data: {
+      id: `profile-${messageId}`,
+      occurred_at: iso(options?.occurredAtMs ?? nowMs - 60_000),
+      source: { provider: "whoop_v2" },
+    },
+  }, messageId);
+}
+
 test("enriched activity webhooks direct-import and sleep webhooks with embedded data import sleep", async () => {
   const fixture = await createWebhookFixture();
   const { service, store, imports, requests, nowMs, account } = fixture;
@@ -468,6 +499,270 @@ test("direct-import completions do not starve the scheduled reconcile (June 2026
       rescheduledAtMs > Date.now(),
       `the reconcile completion should schedule the next reconcile in the future (${afterReconcile?.nextReconcileAt ?? "null"})`,
     );
+  } finally {
+    fixture.close();
+  }
+});
+
+// P1: min-only scheduling. The clamp is the sole writer of nextReconcileAt for
+// every non-floor (webhook/direct-import) completion, and it only ever moves
+// the schedule EARLIER. A direct-import completion occurring after an earlier
+// scheduled reconcile must leave that earlier time intact (not push it out to
+// now + interval).
+test("direct-import completion preserves an earlier scheduled reconcile (min-only clamp)", async () => {
+  const fixture = await createWebhookFixture();
+  const { service, store, requests, nowMs, account } = fixture;
+
+  try {
+    // An earlier reconcile is scheduled for 1h out, well inside the 6h interval.
+    const earlierReconcileAt = iso(nowMs + 60 * 60_000);
+    store.patchAccount(account.id, { nextReconcileAt: earlierReconcileAt });
+
+    const webhook = buildEnrichedActivityWebhook(nowMs, {
+      calories: 600,
+      endOffsetMs: 60_000,
+      messageId: "msg_minonly_activity_1",
+    });
+    const accepted = await service.handleWebhook("junction", webhook.headers, webhook.rawBody);
+    assert.equal(accepted.accepted, true);
+    await service.drainWorker(100);
+
+    assert.equal(requests.length, 0, "the activity webhook should direct-import without calling Junction");
+    const after = store.getAccountById(account.id);
+    assert.equal(
+      after?.nextReconcileAt,
+      earlierReconcileAt,
+      "a direct import must not push an earlier scheduled reconcile out to now + interval",
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
+// P1: the floor is the sole owner of source projection. While ONLY direct
+// imports occur (no reconcile), last_seen_at / source projection is NOT
+// refreshed by the import path; the import path must not call listUserProviders
+// (preserves the deliberate user/providers decoupling). When the floor
+// reconcile runs, projection IS refreshed — proving the floor owns it and an
+// unconditional floor keeps last_seen_at fresh.
+test("floor owns source projection; direct imports never call listUserProviders", async () => {
+  const fixture = await createWebhookFixture();
+  const { service, store, requests, nowMs, account } = fixture;
+
+  try {
+    // A burst of direct imports — no reconcile fires.
+    for (const index of [0, 1, 2]) {
+      const webhook = buildEnrichedActivityWebhook(nowMs, {
+        calories: 700 + index,
+        endOffsetMs: 60_000 + index * 1_000,
+        messageId: `msg_floor_projection_activity_${index + 1}`,
+      });
+      const accepted = await service.handleWebhook("junction", webhook.headers, webhook.rawBody);
+      assert.equal(accepted.accepted, true);
+      await service.drainWorker(100);
+    }
+
+    assert.equal(
+      listProviderRequests(requests).length,
+      0,
+      "direct-import completions must not call listUserProviders (user/providers decoupling)",
+    );
+    assert.equal(
+      store.listConnectionSources({ connectionId: account.id }).length,
+      0,
+      "the direct-import path must not project sources — the floor owns projection",
+    );
+
+    // Now run the unconditional floor reconcile: it fetches user/providers and
+    // projects sources with last_seen_at = now.
+    store.patchAccount(account.id, { nextReconcileAt: iso(nowMs - 60_000) });
+    await service.runSchedulerOnce();
+    await service.drainWorker(100);
+
+    assert.ok(
+      listProviderRequests(requests).length >= 1,
+      `the floor reconcile must fetch and re-project sources; requests=${JSON.stringify(requests)}`,
+    );
+    const afterReconcile = store.listConnectionSources({ connectionId: account.id });
+    const projected = afterReconcile.find((source) => source.sourceProviderSlug === "whoop_v2");
+    assert.ok(
+      projected && Number.isFinite(Date.parse(projected.lastSeenAt)),
+      `the floor reconcile must project last_seen_at for the connected source; sources=${JSON.stringify(afterReconcile)}`,
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
+// P2: no webhook execution branch may complete without import-or-fetch. Each
+// fixture below must end in an import OR a fetch / floor-reconcile — never a
+// skip-only completion. The former E4 silent-complete (unconfigured resource,
+// no event-type fallback) now degrades to a coalescible floor reconcile.
+const importOrFetchFixtures: Array<{
+  name: string;
+  build: (nowMs: number, messageId: string) => { headers: Headers; rawBody: Buffer };
+  expect: "import" | "fetch-or-floor";
+}> = [
+  {
+    name: "enriched sleep (known discriminator) direct-imports",
+    expect: "import",
+    build: (nowMs, messageId) =>
+      signJunctionWebhook({
+        event_type: "daily.data.sleep.created",
+        user_id: "junction-user-1",
+        data: { ...buildLiveWhoopSleepRecord(nowMs, `sleep-${messageId}`), resource_type: "sleep_v2" },
+      }, messageId),
+  },
+  {
+    name: "meal webhook with embedded data direct-imports",
+    expect: "import",
+    build: (nowMs, messageId) =>
+      signJunctionWebhook({
+        event_type: "daily.data.meal.created",
+        user_id: "junction-user-1",
+        data: {
+          id: `meal-${messageId}`,
+          calendar_date: iso(nowMs - 2 * 60 * 60_000).slice(0, 10),
+          consumed_at: iso(nowMs - 2 * 60 * 60_000),
+          calories: 540,
+          protein_g: 32,
+          source: { provider: "whoop_v2" },
+        },
+      }, messageId),
+  },
+  {
+    name: "sleep webhook with no payload falls back to a fetch",
+    expect: "fetch-or-floor",
+    build: (nowMs, messageId) =>
+      signJunctionWebhook({
+        event_type: "daily.data.sleep.created",
+        user_id: "junction-user-1",
+        data: { id: `sleep-empty-${messageId}`, source: { provider: "whoop_v2" } },
+      }, messageId),
+  },
+  {
+    name: "unknown discriminator on a sleep event still imports sleep",
+    expect: "import",
+    build: (nowMs, messageId) =>
+      signJunctionWebhook({
+        event_type: "daily.data.sleep.created",
+        user_id: "junction-user-1",
+        data: { ...buildLiveWhoopSleepRecord(nowMs, `sleep-unk-${messageId}`), resource_type: "totally_unknown_v9" },
+      }, messageId),
+  },
+  {
+    name: "unconfigured resource (no fallback) degrades to a floor reconcile",
+    expect: "fetch-or-floor",
+    build: (nowMs, messageId) => buildUnconfiguredResourceWebhook(nowMs, messageId),
+  },
+  {
+    // Oversized payloads are dropped to [] before a job is built (the size cap
+    // lives in buildJunctionWebhookDataJobJsons, still present until P3). With
+    // no embedded json the resource job becomes a fetch job — modeled here as a
+    // sleep event whose payload carries no importable record.
+    name: "oversized payload (modeled as no embedded json) falls back to a fetch",
+    expect: "fetch-or-floor",
+    build: (nowMs, messageId) =>
+      signJunctionWebhook({
+        event_type: "daily.data.sleep.created",
+        user_id: "junction-user-1",
+        data: { id: `sleep-oversized-${messageId}`, source: { provider: "whoop_v2" } },
+      }, messageId),
+  },
+];
+
+for (const fixtureCase of importOrFetchFixtures) {
+  test(`every webhook ends in import-or-fetch: ${fixtureCase.name}`, async () => {
+    const fixture = await createWebhookFixture();
+    const { service, store, imports, requests, nowMs, account } = fixture;
+
+    try {
+      const webhook = fixtureCase.build(nowMs, `msg_iof_${fixtureCase.name.replace(/[^a-z0-9]+/giu, "_")}`);
+      const accepted = await service.handleWebhook("junction", webhook.headers, webhook.rawBody);
+      assert.equal(accepted.accepted, true);
+
+      // Drain until the queue settles: floor-reconcile follow-ups re-enqueue, so
+      // pump the worker and scheduler a few times to let them run.
+      for (let pass = 0; pass < 4; pass += 1) {
+        await service.runSchedulerOnce();
+        await service.drainWorker(100);
+        if (store.summarize().jobsQueued === 0 && store.summarize().jobsRunning === 0) {
+          break;
+        }
+      }
+
+      const importedAnything = imports.length > 0;
+      const fetched = listSummaryFetchRequests(requests).length > 0
+        || listProviderRequests(requests).length > 0;
+
+      if (fixtureCase.expect === "import") {
+        assert.ok(
+          importedAnything,
+          `${fixtureCase.name} must import; imports=${JSON.stringify(summaryRecordCounts(imports))}, requests=${JSON.stringify(requests)}`,
+        );
+      } else {
+        assert.ok(
+          importedAnything || fetched,
+          `${fixtureCase.name} must import OR fetch/floor-reconcile, never skip-only; imports=${imports.length}, requests=${JSON.stringify(requests)}`,
+        );
+      }
+
+      // No terminal branch may leave a dead job behind (a dead job would be the
+      // silent-complete failure class this work eliminates).
+      assert.equal(store.summarize().jobsDead, 0, `${fixtureCase.name} must not dead-letter any job`);
+    } finally {
+      fixture.close();
+    }
+  });
+}
+
+// P2 storm-safety: a burst of N webhooks that all hit the former E4 branch must
+// coalesce to a SINGLE floor reconcile (one wake), not N per-webhook fetch jobs.
+// The day-floored `reconcile` follow-up shares a dedupe key across the burst.
+test("unconfigured-resource burst coalesces to a single floor reconcile (storm-safety)", async () => {
+  const fixture = await createWebhookFixture();
+  const { service, store, requests, nowMs, account } = fixture;
+
+  try {
+    // Anchor the burst mid-UTC-day so each webhook's occurred_at lands a
+    // distinct sub-day window (distinct construction-time resource jobs) while
+    // sharing the same UTC day (so the day-floored degrade-to-floor reconcile
+    // follow-ups coalesce). This isolates the follow-up coalescing under test
+    // from construction-time dedupe.
+    const midDayMs = Date.parse(`${iso(nowMs - 24 * 60 * 60_000).slice(0, 10)}T12:00:00.000Z`);
+
+    // Enqueue a burst of unconfigured-resource webhooks BEFORE draining so the
+    // worker sees them together (production wakes claim batches).
+    for (const index of [0, 1, 2, 3, 4]) {
+      const webhook = buildUnconfiguredResourceWebhook(nowMs, `msg_storm_profile_${index + 1}`, {
+        occurredAtMs: midDayMs + index * 60_000,
+      });
+      const accepted = await service.handleWebhook("junction", webhook.headers, webhook.rawBody);
+      assert.equal(accepted.accepted, true);
+    }
+
+    // Sanity: the burst enqueued five distinct unconfigured-resource jobs (each
+    // carries a distinct sub-day window, so they do NOT coalesce at
+    // construction). The coalescing under test is the degrade-to-floor
+    // reconcile follow-up emitted by each E4 completion.
+    assert.equal(
+      store.summarize().jobsQueued,
+      5,
+      "the burst should enqueue one resource job per webhook before draining",
+    );
+
+    // Drain everything: each of the 5 E4 completions enqueues a day-floored
+    // reconcile follow-up, but they share a dedupe key so only ONE reconcile is
+    // queued and runs. A coalesced burst therefore fetches the floor exactly
+    // once; without coalescing we would see one floor fetch per webhook (5).
+    await service.drainWorker(100);
+
+    assert.equal(
+      listProviderRequests(requests).length,
+      1,
+      `a burst of unconfigured-resource webhooks must coalesce to a single floor fetch; requests=${JSON.stringify(requests)}`,
+    );
+    assert.equal(store.summarize().jobsDead, 0, "the burst must not dead-letter any job");
   } finally {
     fixture.close();
   }

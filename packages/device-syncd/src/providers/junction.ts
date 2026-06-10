@@ -1150,10 +1150,26 @@ export function createJunctionDeviceSyncProvider(
             resourceCategory: inferredCategory,
             responseStatus: 0,
           });
+          // Degrade to the pull floor instead of completing silently: a webhook
+          // we cannot import or fetch (resource not enabled, no event-type
+          // fallback) must still leave the connection scheduled for a windowed
+          // reconcile so the floor recovers the data. The persisted skip log
+          // above stays the louder observability signal; this is the recovery.
+          // Emit a day-floored `reconcile` job (NOT a unique-window resource
+          // job per webhook) so a burst of such webhooks coalesces on the
+          // shared dedupe key to a single floor wake.
           return withJunctionSkippedResourceMetadata(
             context,
             {
               nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+              scheduledJobs: [
+                buildWindowJob({
+                  kind: "reconcile",
+                  now: context.now,
+                  windowStart: window.windowStart,
+                  priority: 50,
+                }),
+              ],
             },
             skippedOptionalResources,
           );
