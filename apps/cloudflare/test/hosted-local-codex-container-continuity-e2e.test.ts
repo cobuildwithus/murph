@@ -9,9 +9,6 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
-  HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV as HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
-} from "@murphai/hosted-local-harness/codex-app-server-stub";
-import {
   buildHostedExecutionMemberActivatedWake,
   type HostedExecutionBundleRefState,
 } from "@murphai/hosted-execution";
@@ -106,9 +103,6 @@ describe("hosted local Codex container continuity e2e", () => {
       OPENAI_API_KEY: "stub-local-openai-key",
     });
     expect(
-      requireScenario().runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV],
-    ).toBeUndefined();
-    expect(
       requireScenario().runtimeEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV],
     ).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/v1$/u);
 
@@ -194,8 +188,6 @@ describe("hosted local Codex container continuity e2e", () => {
     expect(secondSession.codexThreadId).toBe(idleSession.codexThreadId);
     expect(secondSession.codexRolloutRelativePath).toBe(idleSession.codexRolloutRelativePath);
     expect(secondSession.rolloutText.length).toBeGreaterThanOrEqual(idleSession.rolloutText.length);
-    await expect(readFile(secondSession.shimRolloutPath, "utf8"))
-      .rejects.toMatchObject({ code: "ENOENT" });
 
     const firstTurnProviderRequests = requireScenario().assistantProviderRequests
       .filter((request) => request.url === "/v1/responses")
@@ -221,7 +213,6 @@ async function startScenario(): Promise<void> {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "2000",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: undefined,
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -379,7 +370,6 @@ async function readCodexSessionFromStatus(
   codexRolloutRelativePath: string;
   codexThreadId: string;
   rolloutText: string;
-  shimRolloutPath: string;
 }> {
   const restored = await restoreSnapshotForStatus(status, label);
   const sessionsDirectory = resolveAssistantStatePaths(restored.vaultRoot).sessionsDirectory;
@@ -405,12 +395,6 @@ async function readCodexSessionFromStatus(
       rolloutText: await readFile(
         path.join(restored.operatorHomeRoot, ".codex-hosted", codexRolloutRelativePath),
         "utf8",
-      ),
-      shimRolloutPath: path.join(
-        restored.operatorHomeRoot,
-        ".codex-hosted",
-        "rollouts",
-        "hosted-e2e-codex-shim.jsonl",
       ),
     };
   }

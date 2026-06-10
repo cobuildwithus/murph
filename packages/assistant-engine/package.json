@@ -115,5 +115,8 @@
   },
   "engines": {
     "node": ">=24.14.1"
+  },
+  "devDependencies": {
+    "@openai/codex": "0.135.0"
   }
 }

@@ -23,6 +23,7 @@ const hostedParserToolNames = [
   "ffmpeg",
   "pdfinfo",
   "pdftotext",
+  "transcription",
   "whisper",
 ] as const satisfies readonly HostedAssistantRuntimeParserToolName[];
 
@@ -246,6 +247,9 @@ function parseHostedAssistantRuntimeParserToolConfig(
   if (record.command !== undefined) {
     config.command = parseAbsoluteToolPath(record.command, `${label}.command`);
   }
+  if (record.endpoint !== undefined) {
+    config.endpoint = parseHttpToolEndpoint(record.endpoint, `${label}.endpoint`);
+  }
   if (record.modelPath !== undefined) {
     config.modelPath = parseAbsoluteToolPath(record.modelPath, `${label}.modelPath`);
   }
@@ -260,6 +264,21 @@ function parseAbsoluteToolPath(value: unknown, label: string): string {
   }
   if (!parsed.startsWith("/")) {
     throw new TypeError(`${label} must be an absolute path.`);
+  }
+
+  return parsed;
+}
+
+function parseHttpToolEndpoint(value: unknown, label: string): string {
+  const parsed = requireString(value, label).trim();
+  let url: URL;
+  try {
+    url = new URL(parsed);
+  } catch {
+    throw new TypeError(`${label} must be an absolute http(s) URL.`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new TypeError(`${label} must be an absolute http(s) URL.`);
   }
 
   return parsed;

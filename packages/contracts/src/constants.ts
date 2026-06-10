@@ -28,6 +28,13 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
 
 export const CURRENT_VAULT_FORMAT_VERSION = 1 as const;
 
+/**
+ * Canonical production web origin for user-facing app links. Runtime env
+ * overrides (hosted public base URLs, local dev origins) take precedence;
+ * this is the fallback so production runners never emit link-less output.
+ */
+export const MURPH_PRODUCT_ORIGIN = "https://www.withmurph.ai" as const;
+
 export const CONTRACT_ID_FORMAT = "prefix_ulid" as const;
 
 export const ID_PREFIXES = Object.freeze({

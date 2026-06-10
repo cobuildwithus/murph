@@ -37,6 +37,7 @@ import {
   startAssistantProviderStubServer,
   stopHttpStubServer,
   type HostedLocalAssistantProviderMode,
+  type HostedLocalAssistantProviderScriptedResponse,
   type HostedLocalAssistantProviderStubRequest,
   type HostedLocalAssistantProviderStubState,
   type HostedLocalAssistantProviderStubUsageMode,
@@ -99,7 +100,9 @@ export interface HostedLocalFullStackScenario {
     memberId: string;
     recipientPhone: string;
   }): Promise<void>;
-  queueAssistantResponses(responseTexts: readonly string[]): void;
+  queueAssistantResponses(
+    responses: readonly HostedLocalAssistantProviderScriptedResponse[],
+  ): void;
   runWake(
     wake: HostedExecutionWake,
     userId: string,
@@ -152,7 +155,7 @@ export async function startHostedLocalFullStackScenario(input: {
   assistantProviderMode?: HostedLocalAssistantProviderMode;
   assistantProviderMaxResponsesApiRequestBodies?: number;
   assistantProviderRecorder?: boolean;
-  assistantProviderResponses?: readonly string[];
+  assistantProviderResponses?: readonly HostedLocalAssistantProviderScriptedResponse[];
   assistantProviderStubModelId?: string;
   assistantProviderStubUsageMode?: HostedLocalAssistantProviderStubUsageMode;
   localDatabaseUrl?: string;
@@ -169,7 +172,7 @@ export async function startHostedLocalFullStackScenario(input: {
   const assistantProviderRequests: HostedLocalAssistantProviderStubRequest[] = [];
   const providerRequestBodyFingerprintSecret = randomUUID();
   const assistantProviderStubState: HostedLocalAssistantProviderStubState = {
-    queuedResponseTexts: [...(input.assistantProviderResponses ?? [])],
+    queuedResponses: [...(input.assistantProviderResponses ?? [])],
   };
   const localDatabase = await resolveHostedLocalScenarioDatabase({
     databaseUrl: input.localDatabaseUrl,
@@ -334,14 +337,19 @@ export async function startHostedLocalFullStackScenario(input: {
         ].join("\n");
       },
       runtimeEnv: scenarioRuntimeEnv,
-      queueAssistantResponses: (responseTexts) => {
-        for (const responseText of responseTexts) {
-          const trimmed = responseText.trim();
+      queueAssistantResponses: (responses) => {
+        for (const response of responses) {
+          if (typeof response !== "string") {
+            assistantProviderStubState.queuedResponses.push(response);
+            continue;
+          }
+
+          const trimmed = response.trim();
           if (!trimmed) {
             throw new Error("Hosted local assistant stub responses must be non-empty.");
           }
 
-          assistantProviderStubState.queuedResponseTexts.push(trimmed);
+          assistantProviderStubState.queuedResponses.push(trimmed);
         }
       },
       runWake: async (wake, userId, runInput) =>

@@ -5,12 +5,10 @@ import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
-  listMurphDynamicToolNames,
-} from "@murphai/assistant-engine/assistant-codex";
-import {
-  HOSTED_LOCAL_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV as HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV,
-} from "@murphai/hosted-local-harness/codex-app-server-stub";
-
+  buildAssistantProviderMurphToolCall,
+  expectAdvertisedMurphDynamicTools,
+  type HostedLocalAssistantProviderScriptedResponse,
+} from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
@@ -39,31 +37,23 @@ const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
 
-const expectedDynamicTools = listMurphDynamicToolNames().join(",");
-
-function buildHostedAssistantMediaToolResponse(input: {
+function buildHostedAssistantMediaToolResponses(input: {
   mediaUrl: string;
   text: string;
-}): string {
-  return JSON.stringify({
-    __murphE2eToolCalls: [
-      {
-        arguments: {
-          media: [
-            {
-              kind: "image",
-              url: input.mediaUrl,
-              alt: "Exercise setup reference",
-              source: "hosted-local-codex-image-media",
-            },
-          ],
+}): readonly HostedLocalAssistantProviderScriptedResponse[] {
+  return [
+    buildAssistantProviderMurphToolCall("attach_response_media", {
+      media: [
+        {
+          kind: "image",
+          url: input.mediaUrl,
+          alt: "Exercise setup reference",
+          source: "hosted-local-codex-image-media",
         },
-        namespace: "murph",
-        tool: "attach_response_media",
-      },
-    ],
-    text: input.text,
-  });
+      ],
+    }),
+    input.text,
+  ];
 }
 
 afterAll(async () => {
@@ -79,8 +69,6 @@ describe("hosted local Codex image media delivery e2e", () => {
   }, 300_000);
 
   it("lets Codex attach image media that is sent with the final Linq reply", async () => {
-    expectConfiguredDynamicTools();
-
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
       memberId: userId,
@@ -100,12 +88,12 @@ describe("hosted local Codex image media delivery e2e", () => {
       `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const outboundCountBeforeReply =
       requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantMediaToolResponse({
+    requireScenario().queueAssistantResponses(
+      buildHostedAssistantMediaToolResponses({
         mediaUrl: assistantMediaUrl,
         text: assistantReplyText,
       }),
-    ]);
+    );
 
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
@@ -145,6 +133,7 @@ describe("hosted local Codex image media delivery e2e", () => {
     const finalStatus = await completionPromise;
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests);
   }, 300_000);
 });
 
@@ -170,8 +159,6 @@ async function ensureScenario(): Promise<void> {
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       OPENAI_API_KEY: "stub-local-openai-key",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV]:
-        expectedDynamicTools,
     },
     assistantProviderStubModelId: productionLikeAssistantModel,
     localDatabaseUrl,
@@ -245,8 +232,4 @@ function requireScenario(): HostedLocalFullStackScenario {
   return scenario;
 }
 
-function expectConfiguredDynamicTools(): void {
-  expect(
-    requireScenario().runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV],
-  ).toBe(expectedDynamicTools);
-}
+
