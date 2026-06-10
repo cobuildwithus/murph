@@ -1,3 +1,4 @@
+import { MURPH_PRODUCT_ORIGIN } from '@murphai/contracts'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -852,6 +853,13 @@ describe('assistant experiment onboarding guidance', () => {
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: 'https://join.example.test',
       HOSTED_WEB_BASE_URL: 'https://web.example.test',
     })).toBe('https://join.example.test')
+  })
+
+  it('falls back to the canonical production origin when no public env is configured', () => {
+    expect(resolveAssistantMurphProductBaseUrl({})).toBe(MURPH_PRODUCT_ORIGIN)
+    expect(resolveAssistantMurphProductBaseUrl({
+      HOSTED_WEB_BASE_URL: 'not a url',
+    })).toBe(MURPH_PRODUCT_ORIGIN)
   })
 
 })
