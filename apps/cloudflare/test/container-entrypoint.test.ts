@@ -1422,6 +1422,80 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
+  it("parses x-dispatch-* headers into options.dispatch and drops invalid values", async () => {
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(
+      buildWorkspaceRunnerResult(),
+    );
+
+    try {
+      const server = await startHostedContainerEntrypoint({
+        port: 0,
+      });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const sendInvocation = async (eventId: string, dispatchHeaders: Record<string, string>) =>
+        await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+          body: JSON.stringify(buildJobBody({
+            wake: {
+              event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+              eventId,
+              occurredAt: "2026-03-26T12:00:00.000Z",
+            },
+          })),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            ...dispatchHeaders,
+          },
+          method: "POST",
+        });
+
+      // Both stamps valid: parsed into options.dispatch as epoch-ms integers.
+      const both = await sendInvocation("evt_dispatch_headers_valid", {
+        "x-dispatch-container-start-requested-at-ms": "1777000000050",
+        "x-dispatch-invoke-received-at-ms": "1777000000000",
+      });
+      expect(both.status).toBe(200);
+
+      // Invalid stamps are diagnostics-only and must be dropped per value: the
+      // non-numeric stamp disappears while the valid one survives, and the job
+      // itself is never failed by a bad header.
+      const partial = await sendInvocation("evt_dispatch_headers_partial", {
+        "x-dispatch-container-start-requested-at-ms": "1777000000050",
+        "x-dispatch-invoke-received-at-ms": "not-a-number",
+      });
+      expect(partial.status).toBe(200);
+
+      // All invalid (non-numeric, negative): no dispatch object at all.
+      const invalid = await sendInvocation("evt_dispatch_headers_invalid", {
+        "x-dispatch-container-start-requested-at-ms": "-5",
+        "x-dispatch-invoke-received-at-ms": "soon",
+      });
+      expect(invalid.status).toBe(200);
+
+      // Absent headers: no dispatch object either.
+      const absent = await sendInvocation("evt_dispatch_headers_absent", {});
+      expect(absent.status).toBe(200);
+
+      expect(runnerSpy).toHaveBeenCalledTimes(4);
+      expect(runnerSpy.mock.calls[0]?.[1]?.dispatch).toEqual({
+        containerStartRequestedAtEpochMs: 1_777_000_000_050,
+        invokeReceivedAtEpochMs: 1_777_000_000_000,
+      });
+      expect(runnerSpy.mock.calls[1]?.[1]?.dispatch).toEqual({
+        containerStartRequestedAtEpochMs: 1_777_000_000_050,
+      });
+      expect(runnerSpy.mock.calls[2]?.[1]?.dispatch ?? null).toBeNull();
+      expect(runnerSpy.mock.calls[3]?.[1]?.dispatch ?? null).toBeNull();
+    } finally {
+      runnerSpy.mockRestore();
+    }
+  });
+
   it("returns a stable invalid request error when the run body is not an object", async () => {
     const server = await startHostedContainerEntrypoint({
       port: 0,

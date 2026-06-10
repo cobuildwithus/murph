@@ -339,6 +339,83 @@ describe("runHostedWorkspaceInvocation", () => {
     expect(mocks.runPackageHostedWorkspaceInvocation).not.toHaveBeenCalled();
   });
 
+  it("threads dispatch stamps into latencyMilestones.phaseBreakdown alongside or without boot", async () => {
+    const capturedInvocationInputs: Record<string, unknown>[] = [];
+    mocks.runPackageHostedWorkspaceInvocation.mockImplementation(async (input: Record<string, unknown>) => {
+      capturedInvocationInputs.push(input);
+      return {
+        nextWakeAt: null,
+        redactedStatus: {
+          importedCount: 0,
+        },
+        status: "idle" as const,
+      };
+    });
+    const supervisorEnv = {
+      HOSTED_ASSISTANT_MODEL: "gpt-supervisor",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      NODE_ENV: "production",
+    };
+    const createJob = (attemptId: string) => createWorkspaceJob({
+      forwardedEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-job",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        NODE_ENV: "production",
+      },
+    }, { attemptId });
+
+    // Dispatch + cold node startup: both land in the same schemaVersion 1 breakdown.
+    await runHostedWorkspaceInvocation(createJob("attempt_dispatch_with_boot"), {
+      dispatch: {
+        containerStartRequestedAtEpochMs: 1_777_000_000_050,
+        invokeReceivedAtEpochMs: 1_777_000_000_000,
+      },
+      nodeStartupMs: 4200,
+      runnerJobAcceptedAt: "2026-04-26T00:00:01.000Z",
+      supervisorEnv,
+    });
+    expect(capturedInvocationInputs[0]?.latencyMilestones).toEqual({
+      phaseBreakdown: {
+        schemaVersion: 1,
+        dispatch: {
+          containerStartRequestedAtEpochMs: 1_777_000_000_050,
+          invokeReceivedAtEpochMs: 1_777_000_000_000,
+        },
+        boot: { nodeStartupMs: 4200 },
+      },
+      runnerJobAcceptedAt: "2026-04-26T00:00:01.000Z",
+    });
+
+    // Dispatch without nodeStartupMs (warm container): the breakdown is still
+    // attached, carrying dispatch only, with no boot sub-object.
+    await runHostedWorkspaceInvocation(createJob("attempt_dispatch_without_boot"), {
+      dispatch: {
+        invokeReceivedAtEpochMs: 1_777_000_000_000,
+      },
+      nodeStartupMs: null,
+      supervisorEnv,
+    });
+    expect(capturedInvocationInputs[1]?.latencyMilestones).toEqual({
+      phaseBreakdown: {
+        schemaVersion: 1,
+        dispatch: { invokeReceivedAtEpochMs: 1_777_000_000_000 },
+      },
+    });
+
+    // Neither dispatch nor nodeStartupMs (and an empty dispatch object counts as
+    // absent): no phaseBreakdown — the empty milestones object is omitted entirely.
+    await runHostedWorkspaceInvocation(createJob("attempt_no_breakdown"), {
+      dispatch: {},
+      nodeStartupMs: null,
+      supervisorEnv,
+    });
+    const bareInput = capturedInvocationInputs[2];
+    if (!bareInput) {
+      throw new Error("Expected the third direct invocation to call the package invocation.");
+    }
+    expect("latencyMilestones" in bareInput).toBe(false);
+  });
+
   it("preserves former launcher compatibility roots for direct in-process invocations", async () => {
     const capturedInvocationInputs: Record<string, unknown>[] = [];
     mocks.runPackageHostedWorkspaceInvocation.mockImplementation(async (input: Record<string, unknown>) => {

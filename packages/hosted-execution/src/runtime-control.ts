@@ -626,6 +626,14 @@ export type HostedRuntimeLatencyTraceMilestone =
 
 export interface HostedRuntimeLatencyPhaseBreakdown {
   schemaVersion: number;
+  // Durable Object dispatch stamps (DO-side Date.now() epoch ms). Together with
+  // temporal_signal_accepted_at and runner_job_accepted_at they decompose the
+  // dispatch gap into Temporal->DO, DO work, and Cloudflare container
+  // scheduling segments.
+  dispatch?: {
+    invokeReceivedAtEpochMs?: number;
+    containerStartRequestedAtEpochMs?: number;
+  };
   restore?: {
     sizeGuardMs?: number;
     dataKeyUnwrapMs?: number;

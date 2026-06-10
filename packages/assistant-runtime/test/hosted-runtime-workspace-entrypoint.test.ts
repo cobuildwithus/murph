@@ -1426,6 +1426,7 @@ describe("hosted workspace runtime entrypoint", () => {
     });
     const mailboxPort = createMailboxPort({ events, items });
     const imported: Array<{ id: string; route: string }> = [];
+    const importContextMilestones: unknown[] = [];
 
     try {
       const ensureHostedInboxSidecarReadyImpl =
@@ -1466,13 +1467,31 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             };
           },
-          async importItem(item) {
+          async importItem(item, context) {
             imported.push({
               id: item.item.id,
               route: item.route.action,
             });
             events.push(`import:${item.item.id}`);
+            // Snapshot at call time: the milestone object is shared and mutated
+            // by the runtime across the post-restore phase-breakdown rebuild.
+            importContextMilestones.push(structuredClone(context?.latencyMilestones ?? null));
             return { status: "imported" };
+          },
+          // Incoming container-side milestones: the post-restore rebuild must
+          // PRESERVE the dispatch sub-object alongside the rebuilt restore/boot
+          // (a dropped dispatch here previously killed the instrumentation
+          // end-to-end despite valid headers and a valid parser).
+          latencyMilestones: {
+            phaseBreakdown: {
+              schemaVersion: 1,
+              dispatch: {
+                invokeReceivedAtEpochMs: 1_777_000_000_000,
+                containerStartRequestedAtEpochMs: 1_777_000_000_050,
+              },
+              boot: { nodeStartupMs: 4321 },
+            },
+            runnerJobAcceptedAt: "2026-04-27T00:00:00.100Z",
           },
           platform: createPlatform({
             mailboxPort,
@@ -1493,6 +1512,24 @@ describe("hosted workspace runtime entrypoint", () => {
           id: "mailbox_item_entrypoint_001",
           route: "import-conversation-message",
         },
+      ]);
+      expect(importContextMilestones).toEqual([
+        expect.objectContaining({
+          phaseBreakdown: expect.objectContaining({
+            schemaVersion: 1,
+            dispatch: {
+              invokeReceivedAtEpochMs: 1_777_000_000_000,
+              containerStartRequestedAtEpochMs: 1_777_000_000_050,
+            },
+            boot: expect.objectContaining({
+              nodeStartupMs: 4321,
+              restoreWasCold: expect.any(Boolean),
+            }),
+          }),
+          runnerJobAcceptedAt: "2026-04-27T00:00:00.100Z",
+          runtimePhaseStartedAt: expect.any(String),
+          workspaceRestoreDoneAt: expect.any(String),
+        }),
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "idle_shutdown",

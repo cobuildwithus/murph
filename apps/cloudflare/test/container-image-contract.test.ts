@@ -487,6 +487,14 @@ describe("hosted runner container image contract", () => {
     );
     expect(finalDockerfile).toContain("RUN chmod -R a-w /app");
     expect(finalDockerfile).toContain("  && chmod -R a+rX /app");
+    // Compile-cache warm: env is set and the cache is warmed after the bundle
+    // copy but before the read-only chmod, so cold boots read baked bytecode.
+    expect(finalDockerfile).toContain("ENV NODE_COMPILE_CACHE=/app/.node-compile-cache");
+    const finalCompileCacheWarmIndex = finalDockerfile.indexOf(
+      "RUN cd /app && node --input-type=module -e \"await import('/app/dist/container-entrypoint.js');\"",
+    );
+    expect(finalCompileCacheWarmIndex).toBeGreaterThan(finalRunnerBundleCopyIndex);
+    expect(finalCompileCacheWarmIndex).toBeLessThan(finalChmodIndex);
     expect(readLastDockerUser(baseDockerfile)).toBe("runner");
     expect(readDockerUsers(finalDockerfile)).toEqual(["root", "runner"]);
     expect(finalDockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "-s", "--"]');

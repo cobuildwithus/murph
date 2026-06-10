@@ -253,9 +253,14 @@ const HOSTED_RUNTIME_LATENCY_TRACE_PROVIDER_STARTED_KEYS = new Set([
 ]);
 const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS = new Set([
   "schemaVersion",
+  "dispatch",
   "restore",
   "boot",
   "provider",
+]);
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_DISPATCH_KEYS = new Set([
+  "invokeReceivedAtEpochMs",
+  "containerStartRequestedAtEpochMs",
 ]);
 const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_RESTORE_KEYS = new Set([
   "sizeGuardMs",
@@ -797,6 +802,20 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       `${label}.schemaVersion`,
     ),
   };
+
+  if (record.dispatch !== undefined) {
+    const dispatchLabel = `${label}.dispatch`;
+    const dispatch = requireObject(record.dispatch, dispatchLabel);
+    assertAllowedObjectKeys(
+      dispatch,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_DISPATCH_KEYS,
+      dispatchLabel,
+    );
+    breakdown.dispatch = {
+      ...requireOptionalNonNegativeInteger(dispatch, "invokeReceivedAtEpochMs", dispatchLabel),
+      ...requireOptionalNonNegativeInteger(dispatch, "containerStartRequestedAtEpochMs", dispatchLabel),
+    };
+  }
 
   if (record.restore !== undefined) {
     const restoreLabel = `${label}.restore`;

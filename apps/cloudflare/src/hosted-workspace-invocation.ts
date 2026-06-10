@@ -63,6 +63,10 @@ const HOSTED_RUNNER_WARM_LAUNCHER_DIRECTORY_NAMES = [
 ] as const;
 
 export interface HostedWorkspaceInvocationOptions {
+  dispatch?: {
+    invokeReceivedAtEpochMs?: number;
+    containerStartRequestedAtEpochMs?: number;
+  } | null;
   nodeStartupMs?: number | null;
   onRuntimeWakeReady?: (sendWake: () => boolean) => void;
   runnerJobAcceptedAt?: string | null;
@@ -185,18 +189,23 @@ export async function runHostedWorkspaceInvocation(
       timeoutMs: readHostedRunnerCommitTimeoutMs(job.runtime?.commitTimeoutMs ?? null),
     });
 
+    const hasNodeStartup = options.nodeStartupMs !== null && options.nodeStartupMs !== undefined;
+    const hasDispatch = options.dispatch !== null
+      && options.dispatch !== undefined
+      && Object.keys(options.dispatch).length > 0;
     const latencyMilestones: HostedRuntimeLatencyTraceStagedMilestones = {
       ...(options.runnerJobAcceptedAt
         ? { runnerJobAcceptedAt: options.runnerJobAcceptedAt }
         : {}),
-      ...(options.nodeStartupMs === null || options.nodeStartupMs === undefined
-        ? {}
-        : {
+      ...(hasNodeStartup || hasDispatch
+        ? {
             phaseBreakdown: {
               schemaVersion: 1,
-              boot: { nodeStartupMs: options.nodeStartupMs },
+              ...(hasDispatch ? { dispatch: { ...options.dispatch } } : {}),
+              ...(hasNodeStartup ? { boot: { nodeStartupMs: options.nodeStartupMs as number } } : {}),
             },
-          }),
+          }
+        : {}),
     };
     const result = await runPackageHostedWorkspaceInvocation({
       job,

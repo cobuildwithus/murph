@@ -1564,9 +1564,13 @@ describe("RunnerContainer", () => {
       );
       expect(executeCalls[0]?.[1]?.headers).toEqual({
         "content-type": "application/json; charset=utf-8",
+        "x-dispatch-container-start-requested-at-ms": expect.stringMatching(/^\d+$/),
+        "x-dispatch-invoke-received-at-ms": expect.stringMatching(/^\d+$/),
       });
       expect(executeCalls[1]?.[1]?.headers).toEqual({
         "content-type": "application/json; charset=utf-8",
+        "x-dispatch-container-start-requested-at-ms": expect.stringMatching(/^\d+$/),
+        "x-dispatch-invoke-received-at-ms": expect.stringMatching(/^\d+$/),
       });
     } finally {
       vi.useRealTimers();
@@ -1677,9 +1681,13 @@ describe("RunnerContainer", () => {
       );
       expect(executeCalls[0]?.[1]?.headers).toEqual({
         "content-type": "application/json; charset=utf-8",
+        "x-dispatch-container-start-requested-at-ms": expect.stringMatching(/^\d+$/),
+        "x-dispatch-invoke-received-at-ms": expect.stringMatching(/^\d+$/),
       });
       expect(executeCalls[1]?.[1]?.headers).toEqual({
         "content-type": "application/json; charset=utf-8",
+        "x-dispatch-container-start-requested-at-ms": expect.stringMatching(/^\d+$/),
+        "x-dispatch-invoke-received-at-ms": expect.stringMatching(/^\d+$/),
       });
     } finally {
       vi.useRealTimers();
