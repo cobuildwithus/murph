@@ -6,6 +6,7 @@ import {
 } from "@murphai/device-syncd/hosted-runtime";
 import {
   HOSTED_RUNTIME_LOG_PATH,
+  HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_ISSUE_RECORD_PATH,
@@ -43,6 +44,7 @@ export type HostedRunnerWebControlOperation =
   | "runtime_latency_trace"
   | "runtime_log_write"
   | "usage_recording"
+  | "vault_share_deliver"
   | "workspace_checkpoint"
   | "workspace_read"
   | "web_control_blocked";
@@ -65,6 +67,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH, "workspace_checkpoint"],
   [HOSTED_RUNTIME_ISSUE_RECORD_PATH, "assistant_runtime_issue_export"],
   [HOSTED_RUNTIME_USAGE_RECORD_PATH, "usage_recording"],
+  [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH, "vault_share_deliver"],
 ]);
 
 export function isAllowedHostedRunnerWebControlPath(path: string): boolean {

@@ -196,6 +196,13 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes the member's current consent grants before the member row; export includes scope/status/version metadata.",
   },
   {
+    slug: "prisma.hosted_vault_share",
+    label: "Hosted vault share grants",
+    deletion: "live-delete",
+    export: "decoded-redacted-data",
+    note: "Deleted in the same transaction by the hosted_member FK cascade when either the grantor or destination member row is removed; export includes share rows where the member is grantor or destination.",
+  },
+  {
     slug: "prisma.device_connection",
     label: "Device provider connections and tokens",
     deletion: "live-delete",
@@ -492,6 +499,7 @@ export async function buildHostedDataExport(input: {
     invites,
     consentEvents,
     consentGrants,
+    vaultShares,
     aiUsage,
     aiUsagePeriods,
     linqDailyStates,
@@ -684,6 +692,22 @@ export async function buildHostedDataExport(input: {
       take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { memberId },
     }),
+    prisma.hostedVaultShare.findMany({
+      orderBy: { createdAt: "desc" },
+      select: {
+        createdAt: true,
+        destinationMemberId: true,
+        grantedAt: true,
+        grantorMemberId: true,
+        projectionKind: true,
+        revokedAt: true,
+        source: true,
+        status: true,
+        updatedAt: true,
+      },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
+      where: { OR: [{ grantorMemberId: memberId }, { destinationMemberId: memberId }] },
+    }),
     prisma.hostedAiUsage.findMany({
       orderBy: { occurredAt: "desc" },
       select: {
@@ -778,6 +802,7 @@ export async function buildHostedDataExport(input: {
   const limitedInvites = limitRowsForExport(invites);
   const limitedConsentEvents = limitRowsForExport(consentEvents);
   const limitedConsentGrants = limitRowsForExport(consentGrants);
+  const limitedVaultShares = limitRowsForExport(vaultShares);
   const limitedAiUsage = limitRowsForExport(aiUsage);
   const limitedAiUsagePeriods = limitRowsForExport(aiUsagePeriods);
   const limitedLinqDailyStates = limitRowsForExport(linqDailyStates);
@@ -808,6 +833,7 @@ export async function buildHostedDataExport(input: {
         mailboxLaneCounters: limitedMailboxLaneCounters.meta,
         aiUsage: limitedAiUsage.meta,
         aiUsagePeriods: limitedAiUsagePeriods.meta,
+        vaultShares: limitedVaultShares.meta,
       },
     },
     security: {
@@ -875,6 +901,18 @@ export async function buildHostedDataExport(input: {
       mailboxLaneCounters: limitedMailboxLaneCounters.rows,
     },
     vault: {
+      shares: limitedVaultShares.rows.map((share) => ({
+        createdAt: share.createdAt,
+        destinationMemberId: share.destinationMemberId,
+        grantedAt: share.grantedAt,
+        grantorMemberId: share.grantorMemberId,
+        idPresent: true,
+        projectionKind: share.projectionKind,
+        revokedAt: share.revokedAt,
+        source: share.source,
+        status: share.status,
+        updatedAt: share.updatedAt,
+      })),
       workspace: projectHostedWorkspaceForExport(workspace),
     },
     wearables: {
@@ -1484,6 +1522,7 @@ async function countHostedAccountData(input: {
     hostedInvite,
     hostedConsentEvent,
     hostedConsentGrant,
+    hostedVaultShare,
     hostedAiUsage,
     hostedAiUsagePeriod,
     hostedLinqDailyState,
@@ -1514,6 +1553,9 @@ async function countHostedAccountData(input: {
     input.prisma.hostedInvite.count({ where: { memberId } }),
     input.prisma.hostedConsentEvent.count({ where: { memberId } }),
     input.prisma.hostedConsentGrant.count({ where: { memberId } }),
+    input.prisma.hostedVaultShare.count({
+      where: { OR: [{ grantorMemberId: memberId }, { destinationMemberId: memberId }] },
+    }),
     input.prisma.hostedAiUsage.count({ where: { memberId } }),
     input.prisma.hostedAiUsagePeriod.count({ where: { memberId } }),
     input.prisma.hostedLinqDailyState.count({ where: { memberId } }),
@@ -1557,6 +1599,7 @@ async function countHostedAccountData(input: {
     "prisma.hosted_member_routing": hostedMemberRouting,
     "prisma.hosted_user_crypto_audit": hostedUserCryptoAudit,
     "prisma.hosted_user_crypto_envelope": hostedUserCryptoEnvelope,
+    "prisma.hosted_vault_share": hostedVaultShare,
     "prisma.hosted_web_internal_request_nonce": hostedWebInternalRequestNonce,
     "prisma.hosted_workspace": hostedWorkspace,
   };

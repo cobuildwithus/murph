@@ -317,6 +317,8 @@ model HostedMember {
   hostedAiUsagePeriods           HostedAiUsagePeriod[]
   consentEvents                  HostedConsentEvent[]
   consentGrants                  HostedConsentGrant[]
+  vaultSharesGranted             HostedVaultShare[]              @relation("VaultShareGrantor")
+  vaultSharesReceived            HostedVaultShare[]              @relation("VaultShareDestination")
   hostedCryptoEnvelopes          HostedUserCryptoEnvelope[]
   hostedCryptoAudits             HostedUserCryptoAudit[]
   webSessions                    HostedWebSession[]
@@ -678,6 +680,24 @@ model HostedConsentGrant {
   @@index([memberId, status])
   @@index([scope, status])
   @@map("hosted_consent_grant")
+}
+
+model HostedVaultShare {
+  id                  String       @id
+  grantorMemberId     String       @map("grantor_member_id")
+  projectionKind      String       @map("projection_kind")
+  destinationMemberId String       @map("destination_member_id")
+  status              String       @default("granted")
+  source              String
+  grantedAt           DateTime     @map("granted_at")
+  revokedAt           DateTime?    @map("revoked_at")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+  grantor             HostedMember @relation("VaultShareGrantor", fields: [grantorMemberId], references: [id], onDelete: Cascade)
+  destination         HostedMember @relation("VaultShareDestination", fields: [destinationMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([grantorMemberId, projectionKind, destinationMemberId])
+  @@map("hosted_vault_share")
 }
 
 model HostedAiUsage {
