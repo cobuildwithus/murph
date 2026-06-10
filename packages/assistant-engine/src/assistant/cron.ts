@@ -102,6 +102,7 @@ export interface AssistantCronRunExecutionResult {
   job: AssistantCronJob
   removedAfterRun: boolean
   run: AssistantCronRunRecord
+  runErrorCode: string | null
 }
 
 export interface AssistantCronTargetMutationResult {
@@ -566,6 +567,7 @@ export async function processDueAssistantCronJobsLocal(
       summary.failed += 1
     }
     emitAssistantCronJobCompletedEvent({
+      errorCode: result.runErrorCode,
       errorPresent: result.run.error !== null,
       job: result.job,
       onEvent: input.onEvent,
@@ -661,6 +663,7 @@ async function emitAssistantCronScanEvents(input: {
 }
 
 function emitAssistantCronJobCompletedEvent(input: {
+  errorCode: string | null
   errorPresent: boolean
   job: AssistantCronJob
   onEvent?: (event: AssistantRunEvent) => void
@@ -677,6 +680,10 @@ function emitAssistantCronJobCompletedEvent(input: {
     details: 'scheduled job run completed',
     safeDetails,
     failureContext: {
+      // Typed VaultCliError code (e.g. ASSISTANT_CODEX_USAGE_LIMIT) so
+      // provider-level outages are queryable in the persisted hosted runtime
+      // log; the June 2026 quota incident was invisible there.
+      errorCode: input.errorCode,
       errorPresent: input.errorPresent,
       routeConfigured: assistantCronJobHasDeliveryRoute(input.job),
       runStatus: input.runStatus,

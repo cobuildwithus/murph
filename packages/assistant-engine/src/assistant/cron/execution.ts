@@ -239,6 +239,7 @@ export async function executeClaimedAssistantCronJob(input: {
   job: AssistantCronJob
   removedAfterRun: boolean
   run: AssistantCronRunRecord
+  runErrorCode: string | null
 }> {
   const claimedJob = input.job.job
   const startedAt = new Date().toISOString()
@@ -246,6 +247,7 @@ export async function executeClaimedAssistantCronJob(input: {
   let sessionId: string | null = null
   let response: string | null = null
   let errorText: string | null = null
+  let errorCode: string | null = null
   let status: AssistantCronRunRecord['status'] = 'failed'
   let pendingDeliveryIntentId: string | null = null
   const occurrenceAt =
@@ -348,6 +350,7 @@ export async function executeClaimedAssistantCronJob(input: {
     }
   } catch (error) {
     errorText = errorMessage(error)
+    errorCode = error instanceof VaultCliError ? error.code : null
     status = 'failed'
   } finally {
     finishedAt = new Date().toISOString()
@@ -512,6 +515,9 @@ export async function executeClaimedAssistantCronJob(input: {
     job: finalized.job,
     removedAfterRun: finalized.removedAfterRun,
     run,
+    // Typed failure class (e.g. ASSISTANT_CODEX_USAGE_LIMIT) for runtime-log
+    // observability; the persisted run record keeps only the error text.
+    runErrorCode: errorCode,
   }
 }
 
