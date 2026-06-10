@@ -7,6 +7,7 @@ import {
 
 import {
   addMeal as addMealInternal,
+  dedupeDeviceEventsByExternalRef as dedupeDeviceEventsByExternalRefInternal,
   importDeviceBatch as importDeviceBatchInternal,
   importDocument as importDocumentInternal,
   importSamples as importSamplesInternal,
@@ -589,6 +590,12 @@ export async function importDeviceBatch(
   input: Parameters<typeof importDeviceBatchInternal>[0],
 ): ReturnType<typeof importDeviceBatchInternal> {
   return withCanonicalInputWriteLock(input, importDeviceBatchInternal);
+}
+
+export async function dedupeDeviceEventsByExternalRef(
+  input: Parameters<typeof dedupeDeviceEventsByExternalRefInternal>[0],
+): ReturnType<typeof dedupeDeviceEventsByExternalRefInternal> {
+  return withCanonicalInputWriteLock(input, dedupeDeviceEventsByExternalRefInternal);
 }
 
 export async function importAssessmentResponse(

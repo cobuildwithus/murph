@@ -7,6 +7,7 @@ import { test } from "vitest";
 import type { AuditRecord, EventRecord, SampleRecord } from "@murphai/contracts";
 
 import {
+  dedupeDeviceEventsByExternalRef,
   deleteEvent,
   findEventByExternalRef,
   importDeviceBatch,
@@ -2210,4 +2211,377 @@ test("importDeviceBatch supersedes an in-batch fresh record when a later entry c
   assert.equal(result.events.length, 2);
   assert.equal(result.events[0]?.id, result.events[1]?.id);
   assert.equal(result.events[1]?.lifecycle?.revision, 2);
+});
+
+test("dedupeDeviceEventsByExternalRef tombstones legacy duplicates and keeps the latest copy", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-dedupe-cleanup");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_a",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [buildJunctionStyleWorkoutEvent()],
+  });
+  const keptId = first.events[0]?.id as string;
+  const shardPath = first.eventShardPaths[0] as string;
+
+  // Simulate the pre-fix on-disk state: the same provider record exists as
+  // two more live events under different ids (accountId churn duplicates).
+  const stored = (await readJsonlRecords({ vaultRoot, relativePath: shardPath }))[0] as EventRecord;
+  for (const [duplicateId, recordedAt] of [
+    ["evt_0000000000000000000000DP21", "2026-06-02T07:00:00.000Z"],
+    ["evt_0000000000000000000000DP22", "2026-06-01T07:00:00.000Z"],
+  ] as const) {
+    await fs.appendFile(
+      path.join(vaultRoot, shardPath),
+      `${JSON.stringify({ ...stored, id: duplicateId, recordedAt })}\n`,
+    );
+  }
+
+  const dryRun = await dedupeDeviceEventsByExternalRef({ vaultRoot });
+
+  assert.equal(dryRun.applied, false);
+  assert.equal(dryRun.duplicateGroupCount, 1);
+  assert.equal(dryRun.tombstonedEventCount, 2);
+  assert.deepEqual(dryRun.tombstonedByKind, { activity_session: 2 });
+  assert.equal(
+    (await readJsonlRecords({ vaultRoot, relativePath: shardPath })).length,
+    3,
+    "dry run must not write",
+  );
+
+  const applied = await dedupeDeviceEventsByExternalRef({ vaultRoot, apply: true });
+
+  assert.equal(applied.applied, true);
+  assert.equal(applied.duplicateGroupCount, 1);
+  assert.equal(applied.tombstonedEventCount, 2);
+  assert.ok(applied.auditPath);
+
+  const records = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
+  const deletedIds = new Set(
+    records.filter((record) => record.lifecycle?.state === "deleted").map((record) => record.id),
+  );
+  const liveIds = new Set(records.map((record) => record.id).filter((id) => !deletedIds.has(id)));
+
+  assert.equal(records.length, 5, "expected 3 originals + 2 tombstones");
+  assert.deepEqual([...liveIds], [keptId]);
+
+  // Idempotent: a second pass finds nothing.
+  const second = await dedupeDeviceEventsByExternalRef({ vaultRoot, apply: true });
+  assert.equal(second.tombstonedEventCount, 0);
+  assert.equal(second.duplicateGroupCount, 0);
+  assert.equal(second.applied, false);
+
+  // And the importer keeps deduping against the surviving copy afterwards.
+  const replay = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_b",
+    importedAt: "2026-06-04T21:00:00.000Z",
+    events: [buildJunctionStyleWorkoutEvent()],
+  });
+  assert.equal(replay.events[0]?.id, keptId);
+  assert.equal(
+    (await readJsonlRecords({ vaultRoot, relativePath: shardPath })).length,
+    5,
+    "replay after cleanup must not append",
+  );
+});
+
+test("dedupeDeviceEventsByExternalRef leaves distinct records and non-device events alone", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-dedupe-noop");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_a",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent(),
+      buildJunctionStyleWorkoutEvent({ resourceId: "workouts-other" }),
+      {
+        kind: "note",
+        occurredAt: "2026-06-03T19:55:00.000Z",
+        recordedAt: "2026-06-03T20:30:00.000Z",
+        note: "no external ref",
+      },
+    ],
+  });
+
+  const result = await dedupeDeviceEventsByExternalRef({ vaultRoot, apply: true });
+
+  assert.equal(result.duplicateGroupCount, 0);
+  assert.equal(result.tombstonedEventCount, 0);
+  assert.equal(result.scannedLiveDeviceEventCount, 2);
+});
+
+test("dedupeDeviceEventsByExternalRef keeps the highest-revision duplicate and skips already-tombstoned copies", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-dedupe-revision-winner");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_a",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [buildJunctionStyleWorkoutEvent()],
+  });
+  const loserId = first.events[0]?.id as string;
+  const shardPath = first.eventShardPaths[0] as string;
+  const stored = (await readJsonlRecords({ vaultRoot, relativePath: shardPath }))[0] as EventRecord;
+
+  // A churn duplicate that was later superseded in place (revision 2). Its
+  // recordedAt is older than the rev-1 copy's, so revision priority — not
+  // recordedAt — must decide the surviving copy.
+  const supersededId = "evt_0000000000000000000000DP31";
+  await fs.appendFile(
+    path.join(vaultRoot, shardPath),
+    `${JSON.stringify({ ...stored, id: supersededId, recordedAt: "2026-06-01T07:00:00.000Z" })}\n`
+      + `${JSON.stringify({ ...stored, id: supersededId, recordedAt: "2026-06-01T08:00:00.000Z", lifecycle: { revision: 2 } })}\n`,
+  );
+
+  // A third duplicate already tombstoned by a partial prior cleanup: it must
+  // stay deleted and stay out of the live grouping.
+  const priorTombstonedId = "evt_0000000000000000000000DP32";
+  await fs.appendFile(
+    path.join(vaultRoot, shardPath),
+    `${JSON.stringify({ ...stored, id: priorTombstonedId, recordedAt: "2026-06-01T09:00:00.000Z" })}\n`
+      + `${JSON.stringify({ ...stored, id: priorTombstonedId, recordedAt: "2026-06-02T09:00:00.000Z", lifecycle: { revision: 2, state: "deleted" } })}\n`,
+  );
+
+  const applied = await dedupeDeviceEventsByExternalRef({ vaultRoot, apply: true });
+
+  assert.equal(
+    applied.scannedLiveDeviceEventCount,
+    2,
+    "already-tombstoned duplicate must not count as live",
+  );
+  assert.equal(applied.duplicateGroupCount, 1);
+  assert.equal(applied.tombstonedEventCount, 1);
+
+  const records = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
+  const deletedIds = new Set(
+    records.filter((record) => record.lifecycle?.state === "deleted").map((record) => record.id),
+  );
+  const liveIds = new Set(records.map((record) => record.id).filter((id) => !deletedIds.has(id)));
+
+  assert.deepEqual([...liveIds], [supersededId], "the revision-2 copy must survive");
+  assert.ok(deletedIds.has(loserId), "the rev-1 copy with the latest recordedAt must be tombstoned");
+  const loserTombstone = records.find(
+    (record) => record.id === loserId && record.lifecycle?.state === "deleted",
+  );
+  assert.equal(loserTombstone?.lifecycle?.revision, 2);
+  assert.equal(
+    records.filter((record) => record.id === priorTombstonedId).length,
+    2,
+    "already-tombstoned duplicate must not be tombstoned again",
+  );
+});
+
+test("dedupeDeviceEventsByExternalRef does not cross-tombstone distinct facets sharing one resourceId", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-dedupe-facets");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const buildFacetObservation = (facet: string, value: number) => ({
+    kind: "observation" as const,
+    occurredAt: "2026-06-03T07:30:00.000Z",
+    recordedAt: "2026-06-03T07:30:00.000Z",
+    title: `Junction ${facet}`,
+    externalRef: {
+      system: "junction",
+      resourceType: "junction-whoop-v2-recovery",
+      resourceId: "recovery-1",
+      facet,
+    },
+    fields: {
+      metric: facet,
+      value,
+      unit: "%",
+    },
+  });
+
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_a",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildFacetObservation("recovery-score", 67),
+      buildFacetObservation("skin-temp-deviation", 3),
+    ],
+  });
+  const shardPath = first.eventShardPaths[0] as string;
+
+  // Only the recovery-score facet has a legacy churn duplicate; the
+  // skin-temp-deviation facet shares the resourceId and must stay untouched.
+  const stored = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
+  const recoveryScore = stored.find(
+    (record) => record.externalRef?.facet === "recovery-score",
+  ) as EventRecord;
+  const duplicateId = "evt_0000000000000000000000DP33";
+  await fs.appendFile(
+    path.join(vaultRoot, shardPath),
+    `${JSON.stringify({ ...recoveryScore, id: duplicateId, recordedAt: "2026-06-01T07:00:00.000Z" })}\n`,
+  );
+
+  const applied = await dedupeDeviceEventsByExternalRef({ vaultRoot, apply: true });
+
+  assert.equal(applied.scannedLiveDeviceEventCount, 3);
+  assert.equal(applied.duplicateGroupCount, 1);
+  assert.equal(applied.tombstonedEventCount, 1);
+
+  const records = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
+  const deletedIds = new Set(
+    records.filter((record) => record.lifecycle?.state === "deleted").map((record) => record.id),
+  );
+  const liveFacets = records
+    .filter((record) => !deletedIds.has(record.id))
+    .map((record) => record.externalRef?.facet)
+    .sort();
+
+  assert.deepEqual(deletedIds, new Set([duplicateId]));
+  assert.deepEqual(liveFacets, ["recovery-score", "skin-temp-deviation"]);
+});
+
+test("dedupeDeviceEventsByExternalRef cleans duplicates across monthly shards in one apply", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-dedupe-multishard");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const june = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_a",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [buildJunctionStyleWorkoutEvent()],
+  });
+  const july = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_a",
+    importedAt: "2026-07-03T21:00:00.000Z",
+    events: [
+      {
+        ...buildJunctionStyleWorkoutEvent({
+          recordedAt: "2026-07-03T20:30:00.000Z",
+          resourceId: "workouts-july-7a51",
+        }),
+        occurredAt: "2026-07-03T19:55:00.000Z",
+      },
+    ],
+  });
+  const juneShard = june.eventShardPaths[0] as string;
+  const julyShard = july.eventShardPaths[0] as string;
+  assert.notEqual(juneShard, julyShard, "expected the July event to land in a second monthly shard");
+
+  const juneDuplicateId = "evt_0000000000000000000000DP41";
+  const julyDuplicateId = "evt_0000000000000000000000DP42";
+  for (const [shardPath, duplicateId] of [
+    [juneShard, juneDuplicateId],
+    [julyShard, julyDuplicateId],
+  ] as const) {
+    const stored = (await readJsonlRecords({ vaultRoot, relativePath: shardPath }))[0] as EventRecord;
+    await fs.appendFile(
+      path.join(vaultRoot, shardPath),
+      `${JSON.stringify({ ...stored, id: duplicateId, recordedAt: "2026-05-30T07:00:00.000Z" })}\n`,
+    );
+  }
+
+  const dryRun = await dedupeDeviceEventsByExternalRef({ vaultRoot });
+
+  assert.equal(dryRun.applied, false);
+  assert.equal(dryRun.duplicateGroupCount, 2);
+  assert.equal(dryRun.tombstonedEventCount, 2);
+  assert.deepEqual(dryRun.shardPaths, [juneShard, julyShard].sort());
+
+  const applied = await dedupeDeviceEventsByExternalRef({ vaultRoot, apply: true });
+
+  assert.equal(applied.applied, true);
+  assert.equal(applied.duplicateGroupCount, 2);
+  assert.equal(applied.tombstonedEventCount, 2);
+  assert.deepEqual(applied.shardPaths, [juneShard, julyShard].sort());
+  assert.ok(applied.auditPath);
+
+  // Both shards got their tombstone in the single canonical write.
+  for (const [shardPath, duplicateId, keptId] of [
+    [juneShard, juneDuplicateId, june.events[0]?.id as string],
+    [julyShard, julyDuplicateId, july.events[0]?.id as string],
+  ] as const) {
+    const records = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
+    assert.equal(records.length, 3, `expected original + duplicate + tombstone in ${shardPath}`);
+    const deletedIds = new Set(
+      records.filter((record) => record.lifecycle?.state === "deleted").map((record) => record.id),
+    );
+    assert.deepEqual(deletedIds, new Set([duplicateId]));
+    assert.ok(records.some((record) => record.id === keptId));
+  }
+
+  // One audit record covers both shards.
+  const auditRecords = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: applied.auditPath as string,
+  })) as AuditRecord[];
+  const dedupeAudits = auditRecords.filter(
+    (record) => record.commandName === "core.dedupeDeviceEventsByExternalRef",
+  );
+  assert.equal(dedupeAudits.length, 1, "expected one audit record for the whole apply");
+  assert.equal(dedupeAudits[0]?.action, "event_delete");
+  assert.deepEqual(
+    [...(dedupeAudits[0]?.targetIds ?? [])].sort(),
+    [juneDuplicateId, julyDuplicateId].sort(),
+  );
+  const auditChangePaths = dedupeAudits[0]?.changes.map((change) => change.path) ?? [];
+  assert.ok(auditChangePaths.includes(juneShard), "audit must reference the June shard");
+  assert.ok(auditChangePaths.includes(julyShard), "audit must reference the July shard");
+
+  const second = await dedupeDeviceEventsByExternalRef({ vaultRoot, apply: true });
+  assert.equal(second.tombstonedEventCount, 0);
+  assert.equal(second.applied, false);
+});
+
+test("dedupeDeviceEventsByExternalRef leaves duplicates with invisible later revisions untouched", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-dedupe-revised-elsewhere");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_a",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [buildJunctionStyleWorkoutEvent()],
+  });
+  const shardPath = first.eventShardPaths[0] as string;
+  const stored = (await readJsonlRecords({ vaultRoot, relativePath: shardPath }))[0] as EventRecord;
+
+  // Legacy churn duplicate, then a user edit of that duplicate through the
+  // generic event spine that dropped both source and externalRef: the edit
+  // revision is invisible to the device-filtered dedupe scan.
+  const duplicateId = "evt_0000000000000000000000DP41";
+  await fs.appendFile(
+    path.join(vaultRoot, shardPath),
+    `${JSON.stringify({ ...stored, id: duplicateId, recordedAt: "2026-06-02T07:00:00.000Z" })}\n`,
+  );
+  const { externalRef: _externalRef, ...editedBase } = stored;
+  await fs.appendFile(
+    path.join(vaultRoot, shardPath),
+    `${JSON.stringify({
+      ...editedBase,
+      id: duplicateId,
+      source: "manual",
+      note: "user-curated copy",
+      lifecycle: { revision: 2 },
+    })}\n`,
+  );
+
+  const result = await dedupeDeviceEventsByExternalRef({ vaultRoot, apply: true });
+
+  assert.equal(result.tombstonedEventCount, 0);
+  assert.equal(result.skippedRevisedElsewhereCount, 1);
+  assert.equal(
+    (await readJsonlRecords({ vaultRoot, relativePath: shardPath })).length,
+    3,
+    "the edited duplicate must be left for manual review, not tombstoned",
+  );
 });

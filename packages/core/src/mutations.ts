@@ -49,7 +49,7 @@ import {
   normalizeCanonicalEventLinks,
 } from "./event-links.ts";
 import { VaultError } from "./errors.ts";
-import { pathExists, readUtf8File, writeVaultTextFile } from "./fs.ts";
+import { pathExists, readUtf8File, walkVaultFiles, writeVaultTextFile } from "./fs.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 import { deterministicContractId, generateRecordId } from "./ids.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
@@ -1637,6 +1637,186 @@ async function reconcileDeviceEventEntriesByExternalRef(
     skippedDuplicateCount,
     supersededCount,
   };
+}
+
+export interface DedupeDeviceEventsByExternalRefInput {
+  vaultRoot: string;
+  apply?: boolean;
+}
+
+export interface DedupeDeviceEventsByExternalRefResult {
+  applied: boolean;
+  scannedLiveDeviceEventCount: number;
+  duplicateGroupCount: number;
+  tombstonedEventCount: number;
+  tombstonedByKind: Record<string, number>;
+  skippedRevisedElsewhereCount: number;
+  shardPaths: string[];
+  auditPath: string | null;
+}
+
+const DEDUPE_AUDIT_TARGET_ID_LIMIT = 50;
+
+// One-time/maintenance cleanup for vaults that accumulated duplicate device
+// events before importDeviceBatch merged idempotently on externalRef: group
+// live device events by the same externalRef identity the importer uses, keep
+// the spine-latest copy per group, and tombstone the rest (append-only spine
+// deletes, same shape as deleteEvent). Dry-run by default.
+export async function dedupeDeviceEventsByExternalRef({
+  vaultRoot,
+  apply = false,
+}: DedupeDeviceEventsByExternalRefInput): Promise<DedupeDeviceEventsByExternalRefResult> {
+  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+    extension: ".jsonl",
+  });
+  const deletedAt = new Date().toISOString();
+  const groupedByShard = new Map<string, Map<string, EventSpineEntry<EventRecord>[]>>();
+  // Highest revision per event id across ALL parsed rows in ALL shards,
+  // including revisions without a device source or externalRef (e.g. a user
+  // edit through upsertEvent that did not echo them). The device-filtered
+  // grouping below cannot see those revisions, so any id with a higher
+  // revision elsewhere is left untouched instead of risking a tombstone that
+  // collides with or shadows the invisible revision.
+  const maxRevisionById = new Map<string, number>();
+
+  for (const relativePath of shardPaths) {
+    const grouped = new Map<string, EventSpineEntry<EventRecord>[]>();
+
+    for (const raw of await readJsonlRecords({ vaultRoot, relativePath })) {
+      const parsed = safeParseContract(eventRecordSchema, raw);
+
+      if (!parsed.success) {
+        continue;
+      }
+
+      maxRevisionById.set(
+        parsed.data.id,
+        Math.max(maxRevisionById.get(parsed.data.id) ?? 0, eventSpineRevision(parsed.data)),
+      );
+
+      if (parsed.data.source !== "device" || !parsed.data.externalRef) {
+        continue;
+      }
+
+      const refKey = deviceEventExternalRefKey(parsed.data.externalRef);
+      const group = grouped.get(refKey) ?? [];
+      group.push({ relativePath, record: parsed.data });
+      grouped.set(refKey, group);
+    }
+
+    if (grouped.size > 0) {
+      groupedByShard.set(relativePath, grouped);
+    }
+  }
+
+  const tombstonePayloadByShard = new Map<string, string>();
+  const tombstonedEventIds: string[] = [];
+  const tombstonedByKind: Record<string, number> = {};
+  let scannedLiveDeviceEventCount = 0;
+  let duplicateGroupCount = 0;
+  let skippedRevisedElsewhereCount = 0;
+
+  for (const grouped of groupedByShard.values()) {
+    for (const group of grouped.values()) {
+      const livePerId = collapseEventSpineEntries(group);
+      scannedLiveDeviceEventCount += livePerId.length;
+
+      if (livePerId.length <= 1) {
+        continue;
+      }
+
+      const winner = selectLatestEventSpineEntry(livePerId);
+      duplicateGroupCount += 1;
+
+      for (const entry of livePerId) {
+        if (entry.record.id === winner?.record.id) {
+          continue;
+        }
+
+        if ((maxRevisionById.get(entry.record.id) ?? 0) > eventSpineRevision(entry.record)) {
+          skippedRevisedElsewhereCount += 1;
+          continue;
+        }
+
+        const tombstone = {
+          ...entry.record,
+          recordedAt: deletedAt,
+          lifecycle: buildEventSpineLifecycle(eventSpineRevision(entry.record) + 1, "deleted"),
+        };
+        assertContractShape(
+          eventRecordSchema,
+          tombstone,
+          "EVENT_CONTRACT_INVALID",
+          "Deduped device event tombstone is invalid.",
+        );
+        tombstonePayloadByShard.set(
+          entry.relativePath,
+          `${tombstonePayloadByShard.get(entry.relativePath) ?? ""}${JSON.stringify(tombstone)}\n`,
+        );
+        tombstonedEventIds.push(entry.record.id);
+        tombstonedByKind[entry.record.kind] = (tombstonedByKind[entry.record.kind] ?? 0) + 1;
+      }
+    }
+  }
+
+  const touchedShardPaths = [...tombstonePayloadByShard.keys()].sort();
+  const truncationNote = tombstonedEventIds.length > DEDUPE_AUDIT_TARGET_ID_LIMIT
+    ? ` (first ${DEDUPE_AUDIT_TARGET_ID_LIMIT} target ids listed)`
+    : "";
+  const summary =
+    `Deduped device events by externalRef: tombstoned ${tombstonedEventIds.length} duplicate event(s) `
+    + `across ${duplicateGroupCount} group(s), keeping the latest copy per group${truncationNote}.`;
+
+  if (!apply || tombstonedEventIds.length === 0) {
+    return {
+      applied: false,
+      scannedLiveDeviceEventCount,
+      duplicateGroupCount,
+      tombstonedEventCount: tombstonedEventIds.length,
+      tombstonedByKind,
+      skippedRevisedElsewhereCount,
+      shardPaths: touchedShardPaths,
+      auditPath: null,
+    };
+  }
+
+  return runCanonicalWrite({
+    vaultRoot,
+    operationType: "device_event_dedupe",
+    summary,
+    occurredAt: deletedAt,
+    mutate: async ({ batch }) => {
+      for (const relativePath of touchedShardPaths) {
+        const payload = tombstonePayloadByShard.get(relativePath);
+
+        if (payload) {
+          await batch.stageJsonlAppend(relativePath, payload);
+        }
+      }
+
+      const audit = await emitAuditRecord({
+        vaultRoot,
+        batch,
+        action: "event_delete",
+        commandName: "core.dedupeDeviceEventsByExternalRef",
+        summary,
+        occurredAt: deletedAt,
+        files: touchedShardPaths,
+        targetIds: tombstonedEventIds.slice(0, DEDUPE_AUDIT_TARGET_ID_LIMIT),
+      });
+
+      return {
+        applied: true,
+        scannedLiveDeviceEventCount,
+        duplicateGroupCount,
+        tombstonedEventCount: tombstonedEventIds.length,
+        tombstonedByKind,
+        skippedRevisedElsewhereCount,
+        shardPaths: touchedShardPaths,
+        auditPath: audit.relativePath,
+      };
+    },
+  });
 }
 
 function buildDeviceBatchAuditSummary(input: {
