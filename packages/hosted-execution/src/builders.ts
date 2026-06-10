@@ -17,11 +17,16 @@ import type {
   HostedExecutionRuntimeControlWake,
   HostedExecutionRuntimeControlWakeKind,
   HostedExecutionTelegramMessage,
+  HostedExecutionVaultShareDeliveryWake,
   HostedExecutionTelegramConversationMessagePayload,
   HostedExecutionWhatsAppMessage,
   HostedExecutionWhatsAppConversationMessagePayload,
   HostedRuntimeTimerTriggerKind,
 } from "./contracts.ts";
+import {
+  parseHostedVaultShareDeliveryPayload,
+  type HostedVaultShareDeliveryPayload,
+} from "./vault-share.ts";
 
 function cloneLinqMessagePart(
   value: HostedExecutionLinqConversationMessagePart,
@@ -95,7 +100,8 @@ function cloneConversationMessagePayload(
 type HostedExecutionMemberOwnedWake =
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionMemberActivatedWake
-  | HostedExecutionMemberChannelsUpdatedWake;
+  | HostedExecutionMemberChannelsUpdatedWake
+  | HostedExecutionVaultShareDeliveryWake;
 
 function buildHostedExecutionMemberOwnedWakeBase<
   TKind extends HostedExecutionMemberOwnedWake["kind"],
@@ -315,6 +321,23 @@ export function buildHostedExecutionAssistantNotificationRequestedWake(input: {
       occurredAt: input.occurredAt,
     }),
     notification: cloneAssistantNotificationPayload(input.notification),
+  };
+}
+
+export function buildHostedExecutionVaultShareDeliveryWake(input: {
+  delivery: HostedVaultShareDeliveryPayload;
+  eventId: string;
+  memberId: string;
+  occurredAt: string;
+}): HostedExecutionVaultShareDeliveryWake {
+  return {
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "vault-share.delivery",
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+    }),
+    delivery: parseHostedVaultShareDeliveryPayload(input.delivery),
   };
 }
 

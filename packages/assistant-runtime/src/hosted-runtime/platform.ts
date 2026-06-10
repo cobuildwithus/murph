@@ -33,6 +33,10 @@ import type {
   HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
 import type {
+  HostedVaultShareDeliverRequest,
+  HostedVaultShareDeliverResponse,
+} from "@murphai/hosted-execution/vault-share";
+import type {
   HostedWorkspaceSnapshotV2Aad,
   HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
@@ -342,6 +346,12 @@ export interface HostedRuntimeLatencyTracePort {
   record(request: HostedRuntimeLatencyTraceRequest): Promise<HostedRuntimeLatencyTraceResponse>;
 }
 
+export interface HostedRuntimeVaultSharePort {
+  deliver(
+    request: HostedVaultShareDeliverRequest,
+  ): Promise<HostedVaultShareDeliverResponse>;
+}
+
 export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
@@ -358,6 +368,7 @@ export interface HostedRuntimePlatform {
   runtimeLivenessPort?: RuntimeLivenessPort | null;
   runtimeLivenessRequired?: boolean | null;
   usageRecordPort?: HostedRuntimeUsageRecordPort | null;
+  vaultSharePort?: HostedRuntimeVaultSharePort | null;
   workspacePort?: HostedRuntimeWorkspacePort | null;
   workspaceSnapshotPort?: HostedRuntimeWorkspaceSnapshotPort | null;
 }

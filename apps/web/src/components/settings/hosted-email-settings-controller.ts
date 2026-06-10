@@ -1,4 +1,4 @@
-import { useLinkAccount, useUpdateEmail, useUser } from "@privy-io/react-auth";
+import { useLinkAccount, usePrivy, useUpdateEmail, useUser } from "@privy-io/react-auth";
 import { useRef, useState } from "react";
 
 import type {
@@ -28,9 +28,12 @@ export interface HostedEmailSettingsInitialEmail {
 export function useHostedEmailSettingsController(input: {
   authenticated: boolean;
   initialEmail: HostedEmailSettingsInitialEmail | null;
+  /** Called when the member dismisses Privy's link modal without linking. */
+  onPrivyLinkAborted?: () => void;
   onSynced?: (payload: HostedEmailSyncResult) => Promise<void> | void;
 }) {
-  const { refreshUser } = useUser();
+  const { refreshUser, user: privyUser } = useUser();
+  const { ready: privyReady } = usePrivy();
   const linkedAccounts = toInitialEmailLinkedAccounts(input.initialEmail);
   const baseDisplayState = resolveHostedEmailSettingsDisplayState({
     linkedAccounts,
@@ -43,16 +46,29 @@ export function useHostedEmailSettingsController(input: {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [verifiedEmailOverride, setVerifiedEmailOverride] = useState<HostedPrivyEmailAccount | null>(null);
   const updateEmailErrorRef = useRef(false);
+  const updateEmailErrorCodeRef = useRef<string | null>(null);
   const { sendCode, state, verifyCode } = useUpdateEmail({
-    onError: () => {
+    onError: (error) => {
       updateEmailErrorRef.current = true;
+      updateEmailErrorCodeRef.current = typeof error === "string" ? error : null;
+      console.error("[hosted-email-settings] Privy update email error:", error);
     },
   });
+  const [isPrivyLinkModalActive, setIsPrivyLinkModalActive] = useState(false);
   const { linkEmail } = useLinkAccount({
-    onError: () => {
+    onError: (error) => {
+      setIsPrivyLinkModalActive(false);
+
+      // Closing the Privy modal is a cancel, not a failure.
+      if (error === "exited_link_flow") {
+        input.onPrivyLinkAborted?.();
+        return;
+      }
+
       setErrorMessage("We could not link that email address.");
     },
     onSuccess: (params) => {
+      setIsPrivyLinkModalActive(false);
       if (params.linkMethod === "email") {
         void handleLinkedEmailAccount({
           linkedUser: params.user,
@@ -71,9 +87,13 @@ export function useHostedEmailSettingsController(input: {
   const normalizedCurrentEmail = overrideDisplayState.normalizedCurrentEmail;
   const canManageEmail = input.authenticated;
   const canSendEmailUpdateCode = Boolean(effectiveCurrentEmail?.address);
+  // Privy's headless update-email flow refuses to send a code unless the
+  // Privy user already has an email linked; otherwise we must link instead,
+  // which Privy only supports through its own modal.
+  const canUpdatePrivyEmail = Boolean(privyUser?.email?.address);
   const isSendingCode = state.status === "sending-code";
   const isSubmittingCode = state.status === "submitting-code";
-  const isBusy = isSendingCode || isSubmittingCode || isSyncingEmailRoute;
+  const isBusy = !privyReady || isSendingCode || isSubmittingCode || isSyncingEmailRoute;
 
   async function requestCodeForEmail(nextEmailAddress: string) {
     setErrorMessage(null);
@@ -99,10 +119,14 @@ export function useHostedEmailSettingsController(input: {
 
     try {
       updateEmailErrorRef.current = false;
+      updateEmailErrorCodeRef.current = null;
       await sendCode({ newEmailAddress: nextEmailAddress });
 
       if (updateEmailErrorRef.current) {
-        throw new Error("We could not send a verification code to that email address.");
+        throw new Error(formatUpdateEmailErrorMessage(
+          "We could not send a verification code to that email address.",
+          updateEmailErrorCodeRef.current,
+        ));
       }
 
       setPendingEmailAddress(nextEmailAddress);
@@ -113,7 +137,7 @@ export function useHostedEmailSettingsController(input: {
   }
 
   async function handleSendCode(rawEmailAddress?: string) {
-    if (!canSendEmailUpdateCode) {
+    if (!canSendEmailUpdateCode || !canUpdatePrivyEmail) {
       handleLinkEmail();
       return;
     }
@@ -216,6 +240,7 @@ export function useHostedEmailSettingsController(input: {
       return;
     }
 
+    setIsPrivyLinkModalActive(true);
     linkEmail();
   }
 
@@ -293,6 +318,7 @@ export function useHostedEmailSettingsController(input: {
     emailAddress,
     errorMessage,
     isBusy,
+    isPrivyLinkModalActive,
     isSendingCode,
     isSubmittingCode,
     isSyncingEmailRoute,
@@ -301,6 +327,7 @@ export function useHostedEmailSettingsController(input: {
     successMessage,
     setCode,
     setEmailAddress,
+    handleLinkEmail,
     handleResendCode,
     handleSendCode,
     handleSyncVerifiedEmail,
@@ -310,6 +337,10 @@ export function useHostedEmailSettingsController(input: {
 }
 
 type HostedEmailPrivyUser = { linkedAccounts?: unknown } | null | undefined;
+
+function formatUpdateEmailErrorMessage(baseMessage: string, errorCode: string | null): string {
+  return errorCode ? `${baseMessage} (${errorCode})` : baseMessage;
+}
 
 function resolveHostedEmailSettingsDisplayStateFromUsers(input: {
   fallbackUser: HostedEmailPrivyUser;

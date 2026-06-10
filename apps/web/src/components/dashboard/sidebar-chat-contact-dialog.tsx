@@ -1,6 +1,14 @@
 "use client";
 
-import { Check, Copy, ExternalLink, Mail, MessageCircle, Send } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  Copy,
+  ExternalLink,
+  Mail,
+  MessageCircle,
+  Send,
+} from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -84,7 +92,7 @@ export function SidebarChatWithMurphContactDialog({
               return (
                 <div
                   key={option.kind}
-                  className="rounded-lg border border-border bg-card transition-colors hover:bg-accent"
+                  className="relative rounded-lg border border-border bg-card transition-colors hover:bg-accent"
                 >
                   <div className="flex items-center">
                     <a
@@ -94,14 +102,17 @@ export function SidebarChatWithMurphContactDialog({
                       aria-label={`Chat with Murph in ${option.label}${
                         opensInNewTab ? " (opens in a new tab)" : ""
                       }`}
-                      className="flex flex-1 items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium text-foreground outline-none after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring"
                       onClick={() => setOpen(false)}
                     >
-                      <Icon className="size-4 text-muted-foreground" aria-hidden="true" />
-                      <span className="flex flex-col">
+                      <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      <span className="flex min-w-0 flex-col">
                         <span>{option.label}</span>
                         {option.copyValue ? (
-                          <span className="text-xs font-normal text-muted-foreground">
+                          <span
+                            className="truncate text-xs font-normal text-muted-foreground"
+                            title={option.copyValue}
+                          >
                             {option.copyValue}
                           </span>
                         ) : null}
@@ -110,26 +121,30 @@ export function SidebarChatWithMurphContactDialog({
                     {option.copyValue ? (
                       <button
                         type="button"
-                        className="mr-2 rounded-md p-2 text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                        className="relative z-10 shrink-0 rounded-md p-2 text-muted-foreground/70 transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                         aria-label={
                           copied ? "Copied" : `Copy ${option.label} contact info`
                         }
                         onClick={() => void copyOptionValue(option)}
                       >
                         {copied ? (
-                          <Check className="size-4" aria-hidden="true" />
+                          <Check className="size-3.5" aria-hidden="true" />
                         ) : (
-                          <Copy className="size-4" aria-hidden="true" />
+                          <Copy className="size-3.5" aria-hidden="true" />
                         )}
                       </button>
                     ) : null}
+                    <ChevronRight
+                      className="mr-3 size-4 shrink-0 text-muted-foreground"
+                      aria-hidden="true"
+                    />
                   </div>
                   {option.webmail ? (
                     <a
                       href={option.webmail.href}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 px-4 pb-3 pl-11 text-xs font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                      className="relative z-10 flex items-center gap-1.5 px-4 pb-3 pl-11 text-xs font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                       onClick={() => setOpen(false)}
                     >
                       Open in {option.webmail.label}

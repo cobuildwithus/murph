@@ -13,6 +13,7 @@ import { createCloudflareGeneratedImageUploader } from "./generated-image-upload
 import { createHostedRuntimeIssueExportPort } from "./issue-export-port.ts";
 import { createHostedWebRuntimeLatencyTracePort } from "./latency-trace-port.ts";
 import { createHostedWebRuntimeLogPort } from "./log-port.ts";
+import { createHostedWebVaultSharePort } from "./vault-share-port.ts";
 import { createHostedWebMailboxPort } from "./mailbox-port.ts";
 import {
   createCloudflareHostedInternalFetch,
@@ -120,6 +121,12 @@ export function buildHostedExecutionRuntimePlatform(input: {
             workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
           }),
           mailboxPort: createHostedWebMailboxPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport,
+          }),
+          vaultSharePort: createHostedWebVaultSharePort({
             boundUserId: input.boundUserId,
             fetchImpl,
             timeoutMs,

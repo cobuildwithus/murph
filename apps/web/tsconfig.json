@@ -94,6 +94,9 @@
       "@murphai/hosted-execution/temporal-env": [
         "packages/hosted-execution/src/temporal-env.ts"
       ],
+      "@murphai/hosted-execution/vault-share": [
+        "packages/hosted-execution/src/vault-share.ts"
+      ],
       "@murphai/messaging-ingress/linq-webhook": [
         "packages/messaging-ingress/src/linq-webhook.ts"
       ],

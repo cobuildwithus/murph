@@ -1,4 +1,7 @@
 import {
+  importHostedVaultShareDeliveryWake,
+} from "./vault-share-import.ts";
+import {
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
   type HostedExecutionConversationMessageWake,
@@ -180,6 +183,27 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   const wake = decoded.wake;
 
   if (!decodedSystemWakeMatchesMailboxItem(wake, input.item)) {
+    return {
+      reasonCode: "payload.decode_mismatch",
+      retryable: false,
+      status: "blocked",
+    };
+  }
+
+  if (
+    input.item.route.action === "import-vault-share-delivery"
+    && wake.kind === "vault-share.delivery"
+  ) {
+    return await importHostedVaultShareDeliveryWake({
+      vaultRoot: input.vaultRoot,
+      wake,
+    });
+  }
+
+  if (
+    input.item.route.action === "import-vault-share-delivery"
+    || wake.kind === "vault-share.delivery"
+  ) {
     return {
       reasonCode: "payload.decode_mismatch",
       retryable: false,
