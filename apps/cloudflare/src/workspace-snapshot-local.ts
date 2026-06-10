@@ -323,13 +323,18 @@ async function realpathIfExists(inputPath: string): Promise<string> {
   }
 }
 
+export interface RestoreEncryptedWorkspaceSnapshotTimings {
+  decryptMs: number;
+  extractMs: number;
+}
+
 export async function restoreEncryptedWorkspaceSnapshot(input: {
   dataKey: string;
   durableRoot: string;
   encryptedFilePath: string;
   ref: HostedWorkspaceSnapshotV2Ref;
   scratchRoot?: string | null;
-}): Promise<void> {
+}): Promise<RestoreEncryptedWorkspaceSnapshotTimings> {
   if (input.ref.archive.compression !== HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION) {
     throw new Error("Hosted workspace snapshot restore only supports zstd archives.");
   }
@@ -369,8 +374,11 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
   const restoreRoot = path.join(restoreTempDir, "durable-root");
   const backupRoot = path.join(restoreTempDir, "previous-durable-root");
   let dataKey: Uint8Array | null = null;
+  let decryptMs = 0;
+  let extractMs = 0;
 
   try {
+    const decryptStartedAt = Date.now();
     await mkdir(restoreRoot, { mode: 0o700, recursive: true });
     const authTag = await readHostedWorkspaceSnapshotAuthTag(
       encryptedFilePath,
@@ -405,7 +413,9 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
       maxFileCount: input.ref.archive.fileCount,
       maxTotalPlainBytes: input.ref.archive.totalPlainBytes,
     });
+    decryptMs = Date.now() - decryptStartedAt;
 
+    const extractStartedAt = Date.now();
     const zstd = spawn("zstd", [
       "-d",
       "--stdout",
@@ -463,6 +473,7 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
       durableRoot,
       restoreRoot,
     });
+    extractMs = Date.now() - extractStartedAt;
   } finally {
     dataKey?.fill(0);
     if (scratchTempDir !== restoreTempDir) {
@@ -470,6 +481,8 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     }
     await rm(restoreTempDir, { force: true, recursive: true });
   }
+
+  return { decryptMs, extractMs };
 }
 
 export async function preflightHostedWorkspaceSnapshotDurableRoot(

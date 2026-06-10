@@ -247,6 +247,148 @@ describe("hosted runtime latency dashboard store", () => {
     expect(trace?.mailboxImportDoneAt?.toISOString()).toBe("2026-06-02T20:00:06.000Z");
     expect(trace?.runtimeAttemptId).toBe("attempt_latency_1");
   });
+
+  it("merges restore+boot on staged and provider on provider_started without clobbering, idempotently", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-09T10:00:00.000Z")),
+    });
+
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_phase_1",
+      at: instant("2026-06-09T10:00:01.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      phaseBreakdown: {
+        schemaVersion: 1,
+        restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
+        boot: { nodeStartupMs: 4200, restoreWasCold: true },
+      },
+      prisma,
+      runtimeAttemptId: "attempt_latency_1",
+      source: "linq",
+    });
+
+    let trace = prisma.readTrace();
+    expect(trace?.phaseBreakdownJson).toEqual({
+      schemaVersion: 1,
+      restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
+      boot: { nodeStartupMs: 4200, restoreWasCold: true },
+    });
+
+    // Idempotent re-send must not clobber the already-populated restore/boot.
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_phase_1",
+      at: instant("2026-06-09T10:00:01.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      phaseBreakdown: {
+        schemaVersion: 1,
+        restore: { sizeGuardMs: 999 },
+        boot: { nodeStartupMs: 999 },
+      },
+      prisma,
+      runtimeAttemptId: "attempt_latency_1",
+      source: "linq",
+    });
+    trace = prisma.readTrace();
+    expect(trace?.phaseBreakdownJson).toEqual({
+      schemaVersion: 1,
+      restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
+      boot: { nodeStartupMs: 4200, restoreWasCold: true },
+    });
+
+    // Provider sub-object merges in alongside the preserved restore/boot.
+    await recordHostedIngressProviderStarted({
+      assistantInputIds: ["input_phase_1"],
+      at: instant("2026-06-09T10:00:03.000Z"),
+      authenticatedUserId: "member_latency_1",
+      phaseBreakdown: {
+        schemaVersion: 1,
+        provider: { sessionResolveMs: 11, promptBuildMs: 22, admissionMs: 33 },
+      },
+      prisma,
+      providerRequestOrdinal: 0,
+      runtimeAttemptId: "attempt_latency_1",
+      source: "linq",
+    });
+    trace = prisma.readTrace();
+    expect(trace?.phaseBreakdownJson).toEqual({
+      schemaVersion: 1,
+      restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
+      boot: { nodeStartupMs: 4200, restoreWasCold: true },
+      provider: { sessionResolveMs: 11, promptBuildMs: 22, admissionMs: 33 },
+    });
+
+    // Idempotent provider re-send preserves the populated provider sub-object.
+    await recordHostedIngressProviderStarted({
+      assistantInputIds: ["input_phase_1"],
+      at: instant("2026-06-09T10:00:03.000Z"),
+      authenticatedUserId: "member_latency_1",
+      phaseBreakdown: {
+        schemaVersion: 1,
+        provider: { sessionResolveMs: 999 },
+      },
+      prisma,
+      providerRequestOrdinal: 0,
+      runtimeAttemptId: "attempt_latency_1",
+      source: "linq",
+    });
+    trace = prisma.readTrace();
+    expect((trace?.phaseBreakdownJson as { provider: { sessionResolveMs: number } }).provider.sessionResolveMs)
+      .toBe(11);
+    expect((trace?.phaseBreakdownJson as { schemaVersion: number }).schemaVersion).toBe(1);
+  });
+
+  it("rejects a merge over an existing-but-malformed stored phaseBreakdown via the defense-in-depth guard", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-09T10:00:00.000Z")),
+    });
+
+    // Establish the trace with a valid populated boot sub-object first.
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_phase_guard",
+      at: instant("2026-06-09T10:00:01.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      phaseBreakdown: {
+        schemaVersion: 1,
+        boot: { nodeStartupMs: 4200, restoreWasCold: true },
+      },
+      prisma,
+      runtimeAttemptId: "attempt_latency_1",
+      source: "linq",
+    });
+
+    // Simulate a corrupted/secret-shaped value that somehow reached storage out of
+    // band (e.g. a prior bad write): a populated sub-object carrying an unsafe
+    // (string) leaf. A subsequent merge spreads the existing sub-objects, so the
+    // in-store defense-in-depth guard must refuse to persist the merged result
+    // rather than let the malformed payload ride a new update.
+    const stored = prisma.readTrace();
+    expect(stored).not.toBeNull();
+    (stored as { phaseBreakdownJson: unknown }).phaseBreakdownJson = {
+      schemaVersion: 1,
+      boot: { nodeStartupMs: "leak", restoreWasCold: true },
+    };
+
+    await expect(
+      recordHostedIngressAssistantInputStaged({
+        assistantInputId: "input_phase_guard",
+        at: instant("2026-06-09T10:00:02.000Z"),
+        authenticatedUserId: "member_latency_1",
+        mailboxItemId: "mailbox_latency_1",
+        // Incoming restore forces a merge (changed=true) that spreads the
+        // existing malformed boot into the candidate persisted object.
+        phaseBreakdown: {
+          schemaVersion: 1,
+          restore: { sizeGuardMs: 1 },
+        },
+        prisma,
+        runtimeAttemptId: "attempt_latency_1",
+        source: "linq",
+      }),
+    ).rejects.toThrow(/phaseBreakdown boot\.nodeStartupMs must be a finite number or boolean/u);
+  });
 });
 
 function createLatencyDashboardPrisma(rows: LatencyDashboardRow[]): LatencyPrisma {
@@ -292,6 +434,7 @@ function createLatencyWritePrisma(input: {
         assistantInputStagedAt: null,
         createdAt: instant("2026-06-02T12:00:00.000Z"),
         mailboxImportDoneAt: null,
+        phaseBreakdownJson: null,
         providerRequestOrdinal: null,
         providerStartAt: null,
         runnerJobAcceptedAt: null,
@@ -360,6 +503,7 @@ type MutableLatencyTrace = LatencyTraceCreateInput & {
   assistantInputStagedAt: Date | null;
   createdAt: Date;
   mailboxImportDoneAt: Date | null;
+  phaseBreakdownJson: unknown;
   providerRequestOrdinal: number | null;
   providerStartAt: Date | null;
   runnerJobAcceptedAt: Date | null;

@@ -1368,6 +1368,60 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
+  it("attaches a numeric nodeStartupMs to the first (cold) invocation only and null thereafter", async () => {
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(
+      buildWorkspaceRunnerResult(),
+    );
+
+    try {
+      const server = await startHostedContainerEntrypoint({
+        port: 0,
+      });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const sendInvocation = async (eventId: string) =>
+        await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+          body: JSON.stringify(buildJobBody({
+            wake: {
+              event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+              eventId,
+              occurredAt: "2026-03-26T12:00:00.000Z",
+            },
+          })),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        });
+
+      const first = await sendInvocation("evt_cold_node_startup_1");
+      expect(first.status).toBe(200);
+      const second = await sendInvocation("evt_warm_node_startup_2");
+      expect(second.status).toBe(200);
+
+      expect(runnerSpy).toHaveBeenCalledTimes(2);
+
+      // The first (cold) invocation observes the node-startup span captured in the
+      // server.listen callback: a non-negative finite number.
+      const coldOptions = runnerSpy.mock.calls[0]?.[1];
+      expect(typeof coldOptions?.nodeStartupMs).toBe("number");
+      expect(Number.isFinite(coldOptions?.nodeStartupMs as number)).toBe(true);
+      expect(coldOptions?.nodeStartupMs as number).toBeGreaterThanOrEqual(0);
+
+      // A warm process predates its message, so its startup is not attributable to
+      // that turn: the pending cold value is consumed once and reset to null.
+      const warmOptions = runnerSpy.mock.calls[1]?.[1];
+      expect(warmOptions?.nodeStartupMs ?? null).toBeNull();
+    } finally {
+      runnerSpy.mockRestore();
+    }
+  });
+
   it("returns a stable invalid request error when the run body is not an object", async () => {
     const server = await startHostedContainerEntrypoint({
       port: 0,

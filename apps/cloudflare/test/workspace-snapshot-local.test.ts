@@ -120,13 +120,20 @@ describe("workspace snapshot local restore", () => {
         userId,
       };
 
-      await restoreEncryptedWorkspaceSnapshot({
+      const restoreTimings = await restoreEncryptedWorkspaceSnapshot({
         dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
         durableRoot: restoredDurableRoot,
         encryptedFilePath: encrypted.encryptedFilePath,
         ref,
         scratchRoot: path.join(tempRoot, "restore-scratch"),
       });
+
+      expect(typeof restoreTimings.decryptMs).toBe("number");
+      expect(typeof restoreTimings.extractMs).toBe("number");
+      expect(Number.isFinite(restoreTimings.decryptMs)).toBe(true);
+      expect(Number.isFinite(restoreTimings.extractMs)).toBe(true);
+      expect(restoreTimings.decryptMs).toBeGreaterThanOrEqual(0);
+      expect(restoreTimings.extractMs).toBeGreaterThanOrEqual(0);
 
       const restoredVaultRoot = path.join(restoredDurableRoot, "vault");
       const restoredOperatorHomeRoot = path.join(restoredDurableRoot, "home");
