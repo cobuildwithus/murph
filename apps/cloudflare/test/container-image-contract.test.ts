@@ -221,6 +221,32 @@ describe("hosted runner container image contract", () => {
     ).rejects.toThrow();
   });
 
+  it("ships the hosted-local e2e ffmpeg stub behind the bundle test flag without whisper stubs", async () => {
+    const bundleAssemblyScript = await readFile(
+      new URL("../scripts/assemble-runner-bundle.ts", import.meta.url),
+      "utf8",
+    );
+
+    // The shared CI bundle job sets MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN=1
+    // so the linq-webhook media E2E can drain fixture audio through the ffmpeg
+    // stub; the whisper-cli/ggml stub lane is deleted (Worker-mediated
+    // Workers AI transcription replaces it).
+    expect(bundleAssemblyScript).toContain(
+      'if (process.env.MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN === "1") {',
+    );
+    expect(bundleAssemblyScript).toContain(
+      "await writeHostedLocalE2eParserToolchain(runnerBundleDeployRoot);",
+    );
+    expect(bundleAssemblyScript).toContain(
+      'path.join(bundleRoot, "test-parser-toolchain")',
+    );
+    expect(bundleAssemblyScript).toContain(
+      'await writeExecutable(path.join(toolchainRoot, "ffmpeg"), [',
+    );
+    expect(bundleAssemblyScript.toLowerCase()).not.toContain("whisper");
+    expect(bundleAssemblyScript).not.toContain("ggml");
+  });
+
   it("excludes build-only workspace packages from the runtime package manifest", async () => {
     const packageJson = await readRunnerPackageManifest();
     const runtimeDependencyNames = Object.keys(packageJson.dependencies ?? {});

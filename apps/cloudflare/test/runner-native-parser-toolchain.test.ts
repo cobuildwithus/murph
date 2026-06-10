@@ -46,8 +46,6 @@ describe("createHostedRunnerNativeParserToolchain", () => {
   it("uses explicit local e2e parser tools only when the local marker is set", () => {
     vi.stubEnv(HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV, "1");
     vi.stubEnv("FFMPEG_COMMAND", "/app/test-parser-toolchain/ffmpeg");
-    vi.stubEnv("WHISPER_COMMAND", "/app/test-parser-toolchain/whisper-cli");
-    vi.stubEnv("WHISPER_MODEL_PATH", "/app/test-parser-toolchain/ggml-test.bin");
 
     expect(createHostedRunnerNativeParserToolchain()).toEqual({
       tools: {
@@ -60,9 +58,8 @@ describe("createHostedRunnerNativeParserToolchain", () => {
         pdftotext: {
           command: "/usr/bin/pdftotext",
         },
-        whisper: {
-          command: "/app/test-parser-toolchain/whisper-cli",
-          modelPath: "/app/test-parser-toolchain/ggml-test.bin",
+        transcription: {
+          endpoint: CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT,
         },
       },
     });
@@ -71,8 +68,6 @@ describe("createHostedRunnerNativeParserToolchain", () => {
   it("requires exact local e2e parser fixture paths behind the marker", () => {
     vi.stubEnv(HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV, "1");
     vi.stubEnv("FFMPEG_COMMAND", "/app/test-parser-toolchain/../other-bin/ffmpeg");
-    vi.stubEnv("WHISPER_COMMAND", "/app/test-parser-toolchain/whisper-cli");
-    vi.stubEnv("WHISPER_MODEL_PATH", "/app/test-parser-toolchain/ggml-test.bin");
 
     expect(() => createHostedRunnerNativeParserToolchain()).toThrow(
       "HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN=1 requires FFMPEG_COMMAND=/app/test-parser-toolchain/ffmpeg.",
@@ -91,9 +86,8 @@ describe("createHostedRunnerNativeParserToolchain", () => {
         pdftotext: {
           command: "/usr/bin/pdftotext",
         },
-        whisper: {
-          command: "/app/test-parser-toolchain/whisper-cli",
-          modelPath: "/app/test-parser-toolchain/ggml-test.bin",
+        transcription: {
+          endpoint: CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT,
         },
       },
     })).toBe(true);
@@ -108,9 +102,8 @@ describe("createHostedRunnerNativeParserToolchain", () => {
         pdftotext: {
           command: "/usr/bin/pdftotext",
         },
-        whisper: {
-          command: "/app/test-parser-toolchain/whisper-cli",
-          modelPath: "/app/test-parser-toolchain/ggml-test.bin",
+        transcription: {
+          endpoint: CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT,
         },
       },
     })).toBe(false);
@@ -125,9 +118,27 @@ describe("createHostedRunnerNativeParserToolchain", () => {
         pdftotext: {
           command: "/usr/bin/pdftotext",
         },
+        transcription: {
+          endpoint: CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT,
+        },
+      },
+    })).toBe(false);
+    expect(isHostedRunnerLocalE2eParserToolchain({
+      tools: {
+        ffmpeg: {
+          command: "/app/test-parser-toolchain/ffmpeg",
+        },
+        pdfinfo: {
+          command: "/usr/bin/pdfinfo",
+        },
+        pdftotext: {
+          command: "/usr/bin/pdftotext",
+        },
+        transcription: {
+          endpoint: CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT,
+        },
         whisper: {
           command: "/app/test-parser-toolchain/whisper-cli",
-          modelPath: "/app/test-parser-toolchain/ggml-test.bin",
         },
       },
     })).toBe(false);

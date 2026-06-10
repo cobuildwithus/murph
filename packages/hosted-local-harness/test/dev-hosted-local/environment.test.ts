@@ -1117,6 +1117,8 @@ describe("buildWranglerVarArgs", () => {
       buildWranglerVarArgs({
         FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
         HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
+        // Whisper selectors left the allowlist with the Workers AI
+        // transcription hard-cut; they must no longer reach the worker.
         WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
         WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",
       }),
@@ -1125,10 +1127,6 @@ describe("buildWranglerVarArgs", () => {
       "HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN:1",
       "--var",
       "FFMPEG_COMMAND:/app/test-parser-toolchain/ffmpeg",
-      "--var",
-      "WHISPER_COMMAND:/app/test-parser-toolchain/whisper-cli",
-      "--var",
-      "WHISPER_MODEL_PATH:/app/test-parser-toolchain/ggml-test.bin",
     ]);
   });
 });
@@ -1394,15 +1392,11 @@ describe("buildWranglerLocalDevConfig", () => {
     const config = buildWranglerLocalDevConfig({
       FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
       HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
-      WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
-      WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",
     });
 
     expect(config.vars).toMatchObject({
       FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
       HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
-      WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
-      WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",
     });
   });
 
