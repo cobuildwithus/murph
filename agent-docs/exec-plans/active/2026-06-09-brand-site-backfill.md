@@ -82,15 +82,19 @@ Write-pass summary:
 
 - The ~6.5k unstructured-with-url rows are image-based-facts brands (bluebonnet, carlson, codeage...) where the facts panel is a label IMAGE, not text. Pipeline: context.dev scrape (includeImages=true) → download candidate facts images locally → haiku vision SUBAGENTS (workflows, on subscription, $0 api key) read the label image natively and extract structured rows (ZERO OCR garbage — the win over the original macos-vision-OCR data) → anchor each row vs the model's own factsText readout → labels.mjs dry-run guard → upsert.
 - Image SELECTION is the bottleneck, not vision. v1 (top-3 keyword) 29%; v2 (name-token match to isolate the product's own images from cross-sell + facts-filename patterns _SF/supp_facts/_back + top-5 window) ~62%, and ~95% on proven brands (carlson/codeage/doctors-best/double-wood). Sonnet vision recovered only 1/38 haiku failures → the misses are missing-data (no facts image on the page), not model-limited. Dead brands (jarrow, thorne, baidyanath, raw-nutrition, natures-plus) have front-only images → skipped.
-- Scaled in pipelined 250-row batches (fetch+select → 50 haiku agents → anchor → dry-run → upsert). Through batch 10: ~1,380 OCR rows written, all anchor-verified, 0 production-blocked, 0 contamination (verified via dose-in-name vs panel match). Structured brand_site rows **18,801 → 20,084** during this wave.
+- Scaled in pipelined 250-row batches (fetch+select → 50 haiku agents → anchor → dry-run → upsert). Ran the full remaining pool (25 batches + a transient-failure retry): **2,741 OCR rows written**, all anchor-verified, 0 production-blocked, 0 contamination (verified via dose-in-name vs panel match). Yield ~90-95% on proven brands, tapering to ~30-60% in the long tail.
+- Conservative deletion: re-verified all 61 scrape-error rows; only **5 were genuinely dead** (HTTP 400 / delisted pages — 3 multipacks, 1 Arbonne, 1 Target generic), deleted (scoped to brand_site + unstructured). The other 56 were transient and were re-OCR'd (28 recovered). The ~226 no-facts-image rows were left intact — valid products that simply lack a facts panel on their page, not borked.
 
-### Session total (running)
+### Session total
 
-- Structured `brand_site` rows: **7,063 → 20,084** (+13,021, ~2.85x). Goal was 10k.
+- Structured `brand_site` rows: **7,063 → 21,446** (+14,383, ~3.0x; 83% of all brand_site rows, up from 27%). Goal was 10k — exceeded by >2x. Total brand_site rows 25,735 → 25,730 (5 borked deleted).
+- Anthropic Batches API spend ~$47.56 of $50 (text waves); vision-OCR ran on subscription subagents ($0 API key) + context.dev scrapes.
 
-### Remaining
+### Remaining (~4,284 unstructured — the floor for this data source)
 
-- The OCR loop continues through the remaining pool (~5,576 rows minus dead brands); yield tapering into the long tail. Plus 799 non-standalone (excluded by product decision) + a residue of rows with genuine evidence defects. Front-only-image brands are unrecoverable without a different data source.
+- **Front-only-image / no-facts-on-page brands** (incl. dead brands jarrow/thorne/baidyanath/natures-plus, skipped): valid products whose facts are genuinely not present on the official page as text or image. Not recoverable without a different data source (e.g. DSLD UPC match, or label PDFs).
+- **799 non-standalone** (foods/bundles/variety packs): kept excluded by product decision.
+- A small residue of rows with genuine evidence defects or no URL.
 
 Findings:
 
