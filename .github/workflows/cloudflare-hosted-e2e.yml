@@ -17,6 +17,10 @@ concurrency:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   # The hosted local E2E harness runs `prisma db push` during setup, so these
   # jobs need a real loopback Postgres target rather than the unreachable

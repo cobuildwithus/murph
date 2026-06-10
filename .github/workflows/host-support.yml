@@ -16,6 +16,10 @@ concurrency:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   # CI must still run apps/web verify, but this workflow does not have the hosted
   # onboarding or hosted device-sync secrets that production deploy surfaces carry.
