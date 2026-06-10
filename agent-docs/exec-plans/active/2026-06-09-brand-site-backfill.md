@@ -112,7 +112,13 @@ Write-pass summary:
 
 ### Wave 10 — image-OCR on untried label-image brands (2026-06-10)
 
-- The improved image-pull/vision-OCR pass (force-factor, raw-nutrition, first-phorm, thorne, etc. — brands skipped or failed in the original OCR loop) recovers ~29% (force-factor 22/103, batch img1 35/120). Headwinds: context.dev rate-limits hard right after the big sweep (~35-50% scrape_error per batch, retryable) and session usage limit (resets ~3:30pm ET). Continuing in batches as limits allow; +35 landed (img1).
+- The improved image-pull/vision-OCR pass (force-factor, raw-nutrition, first-phorm, thorne, etc. — brands skipped or failed in the original OCR loop) recovers ~29% (force-factor 22/103, batch img1 35/120). Headwinds: context.dev rate-limits hard right after the big sweep (~35-50% scrape_error per batch, retryable) and session usage limit (resets ~3:30pm ET). img1 yielded 29% (force-factor-heavy), img2 collapsed to 7% (long-tail brands) — image lever exhausted; +46 landed total.
+
+### Final session result (2026-06-10)
+
+- Structured `brand_site` rows: **7,063 → 23,033** (+15,970, **~3.26x; 90%** of all 25,730 brand_site rows, up from 27%).
+- Remaining 2,697 unstructured = **555 non-standalone** (foods/bundles, excluded by product decision) + **2,142 standalone residue** (genuinely image-only/absent facts panels, foreign-language brands, and rows that failed multiple extraction attempts). This is the true floor for the available sources (official pages + DSLD); further recovery needs a different structured source.
+- KEY LESSON: the mid-session "3,173 floor" was inflated by silent context.dev rate-limit failures — re-scraping with a proper 0.55s gate (~109/min under the 120/min cap) recovered ~430 rows wrongly written off (country-life, lemme, kaged, jarrow, rainbow-light, focus-factor). Always rate-limit context.dev and treat scrape errors as retryable, not as "no data".
 - Anthropic Batches API spend ~$47.56 of $50 (text waves); vision-OCR ran on subscription subagents ($0 API key) + context.dev scrapes.
 
 ### Remaining (~4,284 unstructured — the floor for this data source)
