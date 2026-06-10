@@ -4,13 +4,11 @@ export type HostedEmailSendTargetKind = (typeof hostedEmailSendTargetKindValues)
 
 export interface HostedEmailSendRequest {
   idempotencyKey?: string | null;
-  identityId: string | null;
   message: string;
   replyToMessageId?: string | null;
   subject?: string | null;
   target: string;
   targetKind: HostedEmailSendTargetKind;
-  timeoutMs?: number | null;
 }
 
 export function parseHostedEmailSendRequest(value: unknown): HostedEmailSendRequest {
@@ -20,10 +18,6 @@ export function parseHostedEmailSendRequest(value: unknown): HostedEmailSendRequ
     idempotencyKey: readOptionalHostedEmailSendRequestString(
       record.idempotencyKey ?? null,
       "Hosted email send request idempotencyKey",
-    ),
-    identityId: readOptionalHostedEmailSendRequestString(
-      record.identityId ?? null,
-      "Hosted email send request identityId",
     ),
     message: requireHostedEmailSendRequestString(
       record.message,

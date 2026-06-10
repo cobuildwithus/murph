@@ -1793,7 +1793,9 @@ describe("hosted runtime callbacks", () => {
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendEmail({
         idempotencyKey: "assistant-outbox:intent_123",
-        identityId: "assistant@example.com",
+        // Regression: hosted bindings carry a privacy-blinded identity. The
+        // hosted dispatch boundary must not forward it to the email transport.
+        identityId: "hid_0123456789abcdef0123456789abcdef",
         message: "hello from hosted",
         replyToMessageId: "<message_parent_123@example.test>",
         subject: "Hosted subject",
@@ -1817,7 +1819,6 @@ describe("hosted runtime callbacks", () => {
 
     expect(sendEmail).toHaveBeenCalledWith({
       idempotencyKey: "assistant-outbox:intent_123",
-      identityId: "assistant@example.com",
       message: "hello from hosted",
       replyToMessageId: "<message_parent_123@example.test>",
       subject: "Hosted subject",

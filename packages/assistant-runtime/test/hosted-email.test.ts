@@ -13,7 +13,6 @@ test("hosted email send parsing accepts only hosted-supported target kinds", () 
   for (const targetKind of hostedEmailSendTargetKindValues) {
     assert.equal(
       parseHostedEmailSendRequest({
-        identityId: null,
         message: "hello",
         target: "user@example.com",
         targetKind,
@@ -23,17 +22,21 @@ test("hosted email send parsing accepts only hosted-supported target kinds", () 
   }
 });
 
-test("hosted email send parsing trims blank optional identity ids to null", () => {
+test("hosted email send parsing ignores the legacy identityId and timeoutMs fields", () => {
+  // Regression: older runners sent the session binding's privacy-blinded
+  // identity (hid_<hex>) as identityId, plus a dead timeoutMs field. The
+  // hosted sender is config-owned, so both fields were removed; legacy
+  // payloads still parse and send.
   assert.deepEqual(
     parseHostedEmailSendRequest({
-      identityId: "   ",
+      identityId: "hid_0123456789abcdef0123456789abcdef",
       message: "hello",
       target: "user@example.com",
       targetKind: "explicit",
+      timeoutMs: 45_000,
     }),
     {
       idempotencyKey: null,
-      identityId: null,
       message: "hello",
       replyToMessageId: null,
       subject: null,
@@ -41,24 +44,16 @@ test("hosted email send parsing trims blank optional identity ids to null", () =
       targetKind: "explicit",
     },
   );
-});
 
-test("hosted email send parsing treats an omitted identity id as null", () => {
-  assert.deepEqual(
+  // Ignored regardless of type: a malformed legacy identityId no longer 400s.
+  assert.equal(
     parseHostedEmailSendRequest({
+      identityId: 123,
       message: "hello",
       target: "user@example.com",
       targetKind: "explicit",
-    }),
-    {
-      idempotencyKey: null,
-      identityId: null,
-      message: "hello",
-      replyToMessageId: null,
-      subject: null,
-      target: "user@example.com",
-      targetKind: "explicit",
-    },
+    }).message,
+    "hello",
   );
 });
 
@@ -66,7 +61,6 @@ test("hosted email send parsing preserves idempotency and reply target fields", 
   assert.deepEqual(
     parseHostedEmailSendRequest({
       idempotencyKey: " email-send-123 ",
-      identityId: "assistant@example.com",
       message: "hello",
       replyToMessageId: " message-parent-123 ",
       target: "thread_123",
@@ -74,7 +68,6 @@ test("hosted email send parsing preserves idempotency and reply target fields", 
     }),
     {
       idempotencyKey: "email-send-123",
-      identityId: "assistant@example.com",
       message: "hello",
       replyToMessageId: "message-parent-123",
       subject: null,
@@ -98,16 +91,6 @@ test("hosted email send parsing rejects non-object payloads", () => {
 test("hosted email send parsing rejects non-string field values", () => {
   assert.throws(
     () => parseHostedEmailSendRequest({
-      identityId: 123,
-      message: "hello",
-      target: "user@example.com",
-      targetKind: "explicit",
-    }),
-    /identityId must be a string/u,
-  );
-  assert.throws(
-    () => parseHostedEmailSendRequest({
-      identityId: null,
       message: 123,
       target: "user@example.com",
       targetKind: "explicit",
@@ -116,7 +99,6 @@ test("hosted email send parsing rejects non-string field values", () => {
   );
   assert.throws(
     () => parseHostedEmailSendRequest({
-      identityId: null,
       message: "hello",
       target: 123,
       targetKind: "explicit",
@@ -128,7 +110,6 @@ test("hosted email send parsing rejects non-string field values", () => {
 test("hosted email send parsing rejects unsupported target kinds", () => {
   assert.throws(
     () => parseHostedEmailSendRequest({
-      identityId: null,
       message: "hello",
       target: "user@example.com",
       targetKind: "broadcast",
@@ -137,7 +118,6 @@ test("hosted email send parsing rejects unsupported target kinds", () => {
   );
   assert.throws(
     () => parseHostedEmailSendRequest({
-      identityId: null,
       message: "hello",
       target: "user@example.com",
       targetKind: "participant",

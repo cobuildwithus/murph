@@ -1811,14 +1811,16 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("authorizes email sends after live lease validation", async () => {
+  it("authorizes email sends after live lease validation and ignores legacy identityId payloads", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
-    const emailSendMock = vi.fn(async () => undefined);
+    const emailSendMock = vi.fn(async (_message: unknown) => undefined);
 
     const response = await handleRunnerOutboundRequest(
       new Request("http://results.worker/send", {
         body: JSON.stringify({
-          identityId: "assistant@mail.example.test",
+          // Regression: older runners forwarded the privacy-blinded binding
+          // identity. It must be ignored, not rejected as a sender override.
+          identityId: "hid_0123456789abcdef0123456789abcdef",
           message: "hello",
           target: "assistant@example.com",
           targetKind: "explicit",
@@ -1848,6 +1850,69 @@ describe("handleRunnerOutboundRequest", () => {
       userId: "member_123",
     });
     expect(emailSendMock).toHaveBeenCalledOnce();
+    expect(emailSendMock.mock.calls[0]?.[0]).toMatchObject({
+      from: "assistant@mail.example.test",
+    });
+  });
+
+  it("authorizes thread reply email sends that carry legacy identityId and timeoutMs fields", async () => {
+    // Incident regression: hosted email replies (targetKind "thread") from
+    // older runner bundles carried the privacy-blinded binding identity as
+    // identityId (plus a dead timeoutMs field) and failed HTTP 400. Legacy
+    // reply payloads must still send from the config-owned sender.
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const emailSendMock = vi.fn(async (_message: unknown) => undefined);
+    const env = createRunnerOutboundEnv({
+      HOSTED_EMAIL: {
+        send: emailSendMock,
+      },
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+      HOSTED_EMAIL_SIGNING_SECRET: "fixture-signing-key",
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+
+    const firstResponse = await handleRunnerOutboundRequest(
+      new Request("http://results.worker/send", {
+        body: JSON.stringify({
+          message: "hello",
+          target: "owner@example.com",
+          targetKind: "explicit",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      env,
+      "member_123",
+    );
+    expect(firstResponse.status).toBe(200);
+    const firstPayload = await firstResponse.json() as { target: string };
+    expect(firstPayload.target.length).toBeGreaterThan(0);
+
+    const replyResponse = await handleRunnerOutboundRequest(
+      new Request("http://results.worker/send", {
+        body: JSON.stringify({
+          identityId: "hid_0123456789abcdef0123456789abcdef",
+          message: "reply from murph",
+          target: firstPayload.target,
+          targetKind: "thread",
+          timeoutMs: 45_000,
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(replyResponse.status).toBe(200);
+    expect(emailSendMock).toHaveBeenCalledTimes(2);
+    expect(emailSendMock.mock.calls[1]?.[0]).toMatchObject({
+      from: "assistant@mail.example.test",
+      to: "owner@example.com",
+    });
   });
 
   it("authorizes email sends when the workspace version header is stale", async () => {
@@ -1857,7 +1922,6 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request("http://results.worker/send", {
         body: JSON.stringify({
-          identityId: "assistant@mail.example.test",
           message: "hello",
           target: "assistant@example.com",
           targetKind: "explicit",
@@ -1982,7 +2046,6 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request("http://results.worker/send", {
         body: JSON.stringify({
-          identityId: "assistant@mail.example.test",
           message: "hello",
           target: "assistant@example.com",
           targetKind: "explicit",

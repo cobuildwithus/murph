@@ -53,7 +53,7 @@ export async function sendHostedEmailMessage(input: {
     throw new Error("Hosted email sending is not configured.");
   }
 
-  const preflight = assertSupportedHostedEmailSendRequest(input.request, input.config);
+  const preflight = assertSupportedHostedEmailSendRequest(input.request);
 
   const replyAddress = await createHostedEmailUserAddress({
     config: input.config,
@@ -89,19 +89,9 @@ export async function sendHostedEmailMessage(input: {
 
 function assertSupportedHostedEmailSendRequest(
   request: HostedEmailSendRequest,
-  config: HostedEmailConfig,
 ): {
   existingThreadTarget: HostedEmailThreadTarget | null;
 } {
-  const configuredSender = normalizeHostedEmailAddress(config.fromAddress);
-  const requestedSender = normalizeHostedEmailAddress(request.identityId);
-
-  if (requestedSender && configuredSender && requestedSender !== configuredSender) {
-    throw new HostedEmailSendValidationError(
-      `Hosted email sender identity is config-owned and must remain ${configuredSender}.`,
-    );
-  }
-
   if (request.targetKind !== "explicit" && request.targetKind !== "thread") {
     throw new HostedEmailSendValidationError(
       "Hosted email delivery requires an explicit recipient or a serialized thread target.",
