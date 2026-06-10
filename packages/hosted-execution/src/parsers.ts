@@ -1,4 +1,10 @@
 import {
+  parseHostedVaultShareDeliveryPayload,
+} from "./vault-share.ts";
+import {
+  buildHostedExecutionVaultShareDeliveryWake,
+} from "./builders.ts";
+import {
   normalizeIanaTimeZone,
 } from "@murphai/contracts";
 
@@ -169,6 +175,13 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
           record.timeZone,
           "Hosted execution wake member.activated timeZone",
         ),
+      });
+    case "vault-share.delivery":
+      return buildHostedExecutionVaultShareDeliveryWake({
+        delivery: parseHostedVaultShareDeliveryPayload(record.delivery),
+        eventId,
+        memberId: wireUserId,
+        occurredAt,
       });
     case "member.channels.updated":
       return buildHostedExecutionMemberChannelsUpdatedWake({

@@ -38,11 +38,16 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
+  "vault-share.delivery",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
 export type HostedExecutionEventKind =
   (typeof HOSTED_EXECUTION_EVENT_KINDS)[number];
+
+import type {
+  HostedVaultShareDeliveryPayload,
+} from "./vault-share.ts";
 
 export const HOSTED_EXECUTION_WAKE_KINDS = [
   "conversation.message",
@@ -50,6 +55,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
+  "vault-share.delivery",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
@@ -357,6 +363,11 @@ export interface HostedExecutionMemberChannelsUpdatedWake extends HostedExecutio
   memberChannels: HostedExecutionMemberChannels;
 }
 
+export interface HostedExecutionVaultShareDeliveryWake extends HostedExecutionBaseWake {
+  delivery: HostedVaultShareDeliveryPayload;
+  kind: "vault-share.delivery";
+}
+
 export interface HostedExecutionDeviceSyncWake extends HostedExecutionBaseWake {
   connectionId?: string | null;
   hint?: HostedExecutionDeviceSyncWakeHint | null;
@@ -380,6 +391,7 @@ export type HostedExecutionWake =
   | HostedExecutionMemberChannelsUpdatedWake
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionDeviceSyncWake
+  | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionRuntimeControlWake;
 
 export type HostedRuntimeEvent =

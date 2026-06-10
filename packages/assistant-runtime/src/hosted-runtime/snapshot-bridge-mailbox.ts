@@ -1,4 +1,7 @@
 import {
+  importHostedVaultShareDeliveryWake,
+} from "./vault-share-import.ts";
+import {
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
   type HostedExecutionConversationMessageWake,
@@ -185,6 +188,13 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
       retryable: false,
       status: "blocked",
     };
+  }
+
+  if (wake.kind === "vault-share.delivery") {
+    return await importHostedVaultShareDeliveryWake({
+      vaultRoot: input.vaultRoot,
+      wake,
+    });
   }
 
   return await enqueueHostedSystemMailboxItem({

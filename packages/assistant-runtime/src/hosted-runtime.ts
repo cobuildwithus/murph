@@ -56,6 +56,9 @@ import type {
   HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,
 } from "./hosted-runtime/mailbox-import.ts";
+import {
+  offerHostedVaultShareProjectionBestEffort,
+} from "./hosted-runtime/vault-share-projection.ts";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimePlatform,
@@ -1127,6 +1130,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       if (result.runtimeStateDirty) {
         markIdleCheckpointTimerAfterDirtyWork();
       }
+      // Best-effort consented vault-share offer: runs once per wake after the foreground
+      // pass so it never delays user-facing work, holds no share state (web is the
+      // authority), and never throws.
+      await offerHostedVaultShareProjectionBestEffort({
+        vaultRoot: restored.vaultRoot,
+        vaultSharePort: guardedRuntime.platform.vaultSharePort ?? null,
+      });
       let accumulatedProjection = buildHostedWorkspaceInvocationProjection({
         mailboxBudgetExhausted: mailboxBudgetExhausted(),
         result,

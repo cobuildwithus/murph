@@ -559,6 +559,13 @@ async function executeHostedSystemWake(input: {
         conversationMetrics: null,
         mailboxLane: "runtime-control",
       });
+    case "vault-share.delivery":
+      // Vault-share deliveries are landed deterministically at mailbox import
+      // (vault-share-import.ts) and never enter the system wake execution path.
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "vault-share",
+      });
   }
 
   const exhaustiveWake: never = input.wake;
