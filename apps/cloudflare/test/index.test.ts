@@ -1885,6 +1885,34 @@ describe("cloudflare worker routes", () => {
       expect(serializedWarnLogs).not.toContain("/internal/users/test-user/runtime/ensure-processing");
     });
 
+    it("keeps the removed runtime prewarm-hint route hidden from OIDC callers", async () => {
+      const stub = createUserRunnerStub();
+      const env = createWorkerEnv(stub);
+
+      const response = await worker.fetch(
+        await signControlRequest(
+          new Request("https://runner.example.test/internal/users/test-user/runtime/prewarm-hint", {
+            body: JSON.stringify({
+              prewarmAttemptId: "linq-message:00000000-0000-4000-8000-000000000000",
+              source: "linq.message.ingress",
+            }),
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
+          }),
+        ),
+        env,
+      );
+
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({
+        error: "Not found",
+      });
+      expect(stub.bindUser).not.toHaveBeenCalled();
+      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
+    });
+
     it("starts runtime processing without an active fence", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
