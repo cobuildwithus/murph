@@ -444,9 +444,11 @@ async function deliverHostedPreparedAssistantDelivery(input: {
 
           await assertHostedDeliveryLiveNow(input);
           providerDispatchEntered = true;
+          // The binding identityId is a privacy-blinded conversation identifier,
+          // never a sender address. Hosted email always sends from the
+          // config-owned sender, so it is intentionally not forwarded.
           const result = await input.effectsPort.sendEmail({
             idempotencyKey: request.idempotencyKey ?? null,
-            identityId: request.identityId ?? null,
             message: request.message,
             replyToMessageId: request.replyToMessageId ?? null,
             subject: request.subject ?? null,

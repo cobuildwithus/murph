@@ -5076,7 +5076,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     const readResult = await effectsPort.readRawEmailMessage("raw_123");
     const sendResult = await effectsPort.sendEmail({
-      identityId: "identity_123",
       message: "hello",
       subject: "subject",
       target: "assistant@example.com",

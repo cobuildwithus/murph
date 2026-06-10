@@ -440,7 +440,6 @@ describe("hosted email routing and transport", () => {
       config: TEST_CONFIG,
       emailBinding,
       request: {
-        identityId: null,
         message: "hello from murph",
         target: "owner@example.com",
         targetKind: "explicit",
@@ -479,7 +478,6 @@ describe("hosted email routing and transport", () => {
         send: vi.fn(async (_message: unknown) => undefined),
       },
       request: {
-        identityId: null,
         message: "hello from murph",
         subject: "Should be rejected",
         target: threadTarget,
@@ -509,7 +507,6 @@ describe("hosted email routing and transport", () => {
       config: TEST_CONFIG,
       emailBinding,
       request: {
-        identityId: null,
         message: "first note",
         target: "owner@example.com",
         targetKind: "explicit",
@@ -533,7 +530,6 @@ describe("hosted email routing and transport", () => {
       config: TEST_CONFIG,
       emailBinding,
       request: {
-        identityId: null,
         message: "follow up",
         target: threadedTarget,
         targetKind: "thread",
@@ -584,7 +580,6 @@ describe("hosted email routing and transport", () => {
       config: TEST_CONFIG,
       emailBinding,
       request: {
-        identityId: null,
         idempotencyKey: "assistant-outbox:intent_email_123",
         message: "follow up",
         replyToMessageId: "<explicit-parent@example.test>",
@@ -599,7 +594,6 @@ describe("hosted email routing and transport", () => {
       config: TEST_CONFIG,
       emailBinding,
       request: {
-        identityId: null,
         idempotencyKey: "assistant-outbox:intent_email_123",
         message: "follow up",
         replyToMessageId: "<explicit-parent@example.test>",
@@ -626,24 +620,6 @@ describe("hosted email routing and transport", () => {
     );
   });
 
-  it("rejects sender overrides when the caller tries to bypass the configured sender identity", async () => {
-    await expect(sendHostedEmailMessage({
-      config: TEST_CONFIG,
-      emailBinding: {
-        send: vi.fn(async (_message: unknown) => undefined),
-      },
-      request: {
-        identityId: "other-sender@example.com",
-        message: "hello from murph",
-        target: "owner@example.com",
-        targetKind: "explicit",
-      },
-      userId: "user_123",
-      webCallbackSigning: TEST_CALLBACK_SIGNING,
-      webControlBaseUrl: "https://web.example.test",
-    })).rejects.toThrow(/sender identity is config-owned/u);
-  });
-
   it("redacts the primary recipient when the native binding send fails", async () => {
     const primaryRecipient = ["owner", "example.com"].join("@");
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
@@ -664,7 +640,6 @@ describe("hosted email routing and transport", () => {
         }),
       },
       request: {
-        identityId: null,
         message: "hello from murph",
         target: primaryRecipient,
         targetKind: "explicit",
@@ -721,7 +696,6 @@ describe("hosted email routing and transport", () => {
         }),
       },
       request: {
-        identityId: null,
         message: "follow up",
         target: serializeHostedEmailThreadTarget(initialThreadTarget),
         targetKind: "thread",
