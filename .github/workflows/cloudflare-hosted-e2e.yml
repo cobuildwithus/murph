@@ -56,8 +56,11 @@ jobs:
           MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS: "1"
         run: pnpm --dir apps/cloudflare runner:bundle:hosted-local
 
+      # The tar includes the workspace dist outputs because the Temporal
+      # worker's workflow webpack bundle resolves @murphai/* package exports
+      # to dist/, unlike vitest and tsx which alias workspace sources.
       - name: Pack runner bundle artifact
-        run: tar --zstd -cf runner-bundle.tar.zst -C apps/cloudflare/.deploy runner-bundle
+        run: tar --zstd -cf runner-bundle.tar.zst apps/cloudflare/.deploy/runner-bundle packages/*/dist apps/cloudflare/dist
 
       - name: Upload runner bundle artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -116,8 +119,7 @@ jobs:
 
       - name: Unpack runner bundle
         run: |
-          mkdir -p apps/cloudflare/.deploy
-          tar --zstd -xf runner-bundle.tar.zst -C apps/cloudflare/.deploy
+          tar --zstd -xf runner-bundle.tar.zst
           rm runner-bundle.tar.zst
 
       - name: Run device connect hosted E2E
@@ -186,8 +188,7 @@ jobs:
 
       - name: Unpack runner bundle
         run: |
-          mkdir -p apps/cloudflare/.deploy
-          tar --zstd -xf runner-bundle.tar.zst -C apps/cloudflare/.deploy
+          tar --zstd -xf runner-bundle.tar.zst
           rm runner-bundle.tar.zst
 
       - name: Run Linq delivery hosted E2E
@@ -256,8 +257,7 @@ jobs:
 
       - name: Unpack runner bundle
         run: |
-          mkdir -p apps/cloudflare/.deploy
-          tar --zstd -xf runner-bundle.tar.zst -C apps/cloudflare/.deploy
+          tar --zstd -xf runner-bundle.tar.zst
           rm runner-bundle.tar.zst
 
       - name: Run Codex image media delivery hosted E2E
@@ -326,8 +326,7 @@ jobs:
 
       - name: Unpack runner bundle
         run: |
-          mkdir -p apps/cloudflare/.deploy
-          tar --zstd -xf runner-bundle.tar.zst -C apps/cloudflare/.deploy
+          tar --zstd -xf runner-bundle.tar.zst
           rm runner-bundle.tar.zst
 
       - name: Run Linq scheduled reminder hosted E2E
@@ -396,8 +395,7 @@ jobs:
 
       - name: Unpack runner bundle
         run: |
-          mkdir -p apps/cloudflare/.deploy
-          tar --zstd -xf runner-bundle.tar.zst -C apps/cloudflare/.deploy
+          tar --zstd -xf runner-bundle.tar.zst
           rm runner-bundle.tar.zst
 
       - name: Run idle checkpoint deferred progress hosted E2E
@@ -475,8 +473,7 @@ jobs:
 
       - name: Unpack runner bundle
         run: |
-          mkdir -p apps/cloudflare/.deploy
-          tar --zstd -xf runner-bundle.tar.zst -C apps/cloudflare/.deploy
+          tar --zstd -xf runner-bundle.tar.zst
           rm runner-bundle.tar.zst
 
       - name: Run Temporal orchestration hosted E2E
@@ -545,8 +542,7 @@ jobs:
 
       - name: Unpack runner bundle
         run: |
-          mkdir -p apps/cloudflare/.deploy
-          tar --zstd -xf runner-bundle.tar.zst -C apps/cloudflare/.deploy
+          tar --zstd -xf runner-bundle.tar.zst
           rm runner-bundle.tar.zst
 
       - name: Run Telegram delivery hosted E2E
