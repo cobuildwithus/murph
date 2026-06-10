@@ -56,7 +56,6 @@ import type {
   ProviderBeginConnectionResult,
   ProviderCompleteConnectionContext,
   ProviderConnectionResult,
-  ProviderJobBatchDescriptor,
   ProviderJobContext,
   ProviderJobResult,
   ProviderScheduleResult,
@@ -109,17 +108,12 @@ interface JunctionTimeseriesImportResult {
 type JunctionResourceCategory = "summary" | "timeseries";
 
 interface JunctionDirectResourceJobInput {
-  estimatedBytes: number;
   record: Record<string, unknown>;
   resource: string;
   resourceCategory: "summary";
   sourceProviderSlug: string;
   windowEnd: string;
   windowStart: string;
-}
-
-interface JunctionDirectResourceJobBatchInput extends JunctionDirectResourceJobInput {
-  key: string;
 }
 
 interface JunctionWindowFetchOptions {
@@ -382,9 +376,6 @@ const TIMESERIES_CHUNK_MS = 24 * 60 * 60_000;
 const JUNCTION_MAX_DIAGNOSTIC_TIMESERIES_PROBE_DAYS = 14;
 const JUNCTION_DIAGNOSTIC_SHAPE_KEY_LIMIT = 24;
 const JUNCTION_DIAGNOSTIC_RESOURCE_NAME_LIMIT = 64;
-const JUNCTION_WEBHOOK_DATA_JOB_JSON_MAX_BYTES = 64_000;
-const JUNCTION_DIRECT_RESOURCE_JOB_BATCH_MAX_JOBS = 50;
-const JUNCTION_DIRECT_RESOURCE_JOB_BATCH_MAX_BYTES = 2 * 1024 * 1024;
 const EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS = Object.freeze([
   15 * 60_000,
   60 * 60_000,
@@ -676,70 +667,6 @@ export function createJunctionDeviceSyncProvider(
     );
   }
 
-  function describeJobBatch(job: DeviceSyncJobRecord): ProviderJobBatchDescriptor | null {
-    const batchInput = readJunctionDirectResourceJobBatchInput(job);
-    return batchInput
-      ? {
-          key: batchInput.key,
-          estimatedBytes: batchInput.estimatedBytes,
-        }
-      : null;
-  }
-
-  async function executeJobBatch(
-    context: ProviderJobContext,
-    jobs: readonly DeviceSyncJobRecord[],
-  ): Promise<ProviderJobResult> {
-    const batchInputs: JunctionDirectResourceJobBatchInput[] = [];
-    for (const job of jobs) {
-      const batchInput = readJunctionDirectResourceJobBatchInput(job);
-      if (!batchInput) {
-        throw deviceSyncError({
-          code: "JUNCTION_RESOURCE_BATCH_UNSUPPORTED",
-          message: "Junction direct resource batch contains an unsupported job.",
-          httpStatus: 400,
-          retryable: false,
-        });
-      }
-      batchInputs.push(batchInput);
-    }
-
-    const [first] = batchInputs;
-    if (!first || batchInputs.some((entry) => entry.key !== first.key)) {
-      throw deviceSyncError({
-        code: "JUNCTION_RESOURCE_BATCH_UNSUPPORTED",
-        message: "Junction direct resource batch contains incompatible jobs.",
-        httpStatus: 400,
-        retryable: false,
-      });
-    }
-
-    await importJunctionDirectResourceSnapshot(
-      context,
-      [],
-      first.windowStart,
-      first.windowEnd,
-      first.resource,
-      batchInputs.map((entry) => entry.record),
-    );
-    return {
-      nextReconcileAt: clampWebhookJobNextReconcileAt(context),
-    };
-  }
-
-  function readJunctionDirectResourceJobBatchInput(
-    job: DeviceSyncJobRecord,
-  ): JunctionDirectResourceJobBatchInput | null {
-    const window = readExplicitJunctionResourceJobWindow(job);
-    const input = window ? readJunctionDirectResourceJobInput(job, window) : null;
-    return input
-      ? {
-          ...input,
-          key: buildJunctionDirectResourceJobBatchKey(input),
-        }
-      : null;
-  }
-
   function readJunctionDirectResourceJobInput(
     job: DeviceSyncJobRecord,
     window: { windowEnd: string; windowStart: string },
@@ -774,21 +701,16 @@ export function createJunctionDeviceSyncProvider(
       return null;
     }
 
+    // Provenance check only: a configured summary resource with a parseable
+    // inline payload and a single, consistent source provider imports inline.
+    // The downstream normalizer decides meaning (as it already does for
+    // fetched records); there is no usefulness gate here.
     const sourceProviderSlug = resolveJunctionWebhookDataRecordSourceProviderSlug(record);
-    if (
-      !sourceProviderSlug
-      || !canImportJunctionWebhookDataJobRecord({
-        record,
-        resource,
-        resourceCategory,
-        sourceProviderSlug: normalizeProviderSlug(job.payload.sourceProviderSlug),
-      })
-    ) {
+    if (!sourceProviderSlug) {
       return null;
     }
 
     return {
-      estimatedBytes: Buffer.byteLength(webhookDataJson, "utf8"),
       record,
       resource,
       resourceCategory,
@@ -796,40 +718,6 @@ export function createJunctionDeviceSyncProvider(
       windowEnd: window.windowEnd,
       windowStart: window.windowStart,
     };
-  }
-
-  function readExplicitJunctionResourceJobWindow(
-    job: DeviceSyncJobRecord,
-  ): { windowEnd: string; windowStart: string } | null {
-    const explicitWindowEnd = normalizeString(job.payload.windowEnd);
-    const explicitWindowStart = normalizeString(job.payload.windowStart);
-    if (!explicitWindowStart || !explicitWindowEnd) {
-      return null;
-    }
-
-    const windowEndMs = Date.parse(explicitWindowEnd);
-    const windowStartMs = Date.parse(explicitWindowStart);
-    if (!Number.isFinite(windowEndMs) || !Number.isFinite(windowStartMs)) {
-      return null;
-    }
-
-    const windowEnd = new Date(windowEndMs).toISOString();
-    const windowStart = new Date(windowStartMs).toISOString();
-    return {
-      windowEnd,
-      windowStart: windowStartMs > windowEndMs ? windowEnd : windowStart,
-    };
-  }
-
-  function buildJunctionDirectResourceJobBatchKey(input: JunctionDirectResourceJobInput): string {
-    return [
-      "junction:direct-resource",
-      input.resourceCategory,
-      input.resource,
-      input.sourceProviderSlug,
-      input.windowStart,
-      input.windowEnd,
-    ].join(":");
   }
 
   async function diagnoseBackfill(
@@ -1800,12 +1688,6 @@ export function createJunctionDeviceSyncProvider(
     jobExecutor: {
       createScheduledJobs,
       executeJob,
-      batch: {
-        describe: describeJobBatch,
-        execute: executeJobBatch,
-        maxEstimatedBytes: JUNCTION_DIRECT_RESOURCE_JOB_BATCH_MAX_BYTES,
-        maxJobs: JUNCTION_DIRECT_RESOURCE_JOB_BATCH_MAX_JOBS,
-      },
     },
   };
 }
@@ -4355,27 +4237,16 @@ function buildJunctionWebhookDataJobJsons(input: {
     sourceProviderSlug:
       normalizeProviderSlug(record.sourceProviderSlug) ?? input.sourceProviderSlug ?? undefined,
   });
-  const directJson = serializeJunctionWebhookDataJobRecord(withSource);
-  if (directJson) {
-    return [directJson];
-  }
-
-  return [];
+  return [serializeJunctionWebhookDataJobRecord(withSource)];
 }
 
-function serializeJunctionWebhookDataJobRecord(record: Record<string, unknown>): string | null {
-  const json = JSON.stringify(record);
-  return Buffer.byteLength(json, "utf8") <= JUNCTION_WEBHOOK_DATA_JOB_JSON_MAX_BYTES
-    ? json
-    : null;
+function serializeJunctionWebhookDataJobRecord(record: Record<string, unknown>): string {
+  return JSON.stringify(record);
 }
 
 function parseJunctionWebhookDataJobRecord(value: unknown): Record<string, unknown> | null {
   const json = normalizeString(value);
   if (!json) {
-    return null;
-  }
-  if (Buffer.byteLength(json, "utf8") > JUNCTION_WEBHOOK_DATA_JOB_JSON_MAX_BYTES) {
     return null;
   }
 
@@ -4384,28 +4255,6 @@ function parseJunctionWebhookDataJobRecord(value: unknown): Record<string, unkno
   } catch {
     return null;
   }
-}
-
-function canImportJunctionWebhookDataJobRecord(input: {
-  record: Record<string, unknown>;
-  resource: string;
-  resourceCategory: "summary" | "timeseries";
-  sourceProviderSlug: string | null;
-}): boolean {
-  const recordSourceProviderSlug = resolveJunctionWebhookDataRecordSourceProviderSlug(input.record);
-  if (!recordSourceProviderSlug) {
-    return false;
-  }
-  if (input.sourceProviderSlug && input.sourceProviderSlug !== recordSourceProviderSlug) {
-    return false;
-  }
-
-  return hasJunctionWebhookDataJobRecords({
-    record: input.record,
-    resource: input.resource,
-    resourceCategory: input.resourceCategory,
-    sourceProviderSlug: recordSourceProviderSlug,
-  });
 }
 
 function resolveJunctionWebhookDataRecordSourceProviderSlug(
@@ -4448,51 +4297,6 @@ function resolveJunctionWebhookDataRecordSourceProviderSlug(
   return slugs.size === 1 ? [...slugs][0] ?? null : null;
 }
 
-function hasJunctionWebhookDataJobRecords(input: {
-  record: Record<string, unknown>;
-  resource: string;
-  resourceCategory: "summary" | "timeseries";
-  sourceProviderSlug: string;
-}): boolean {
-  if (input.resourceCategory === "summary") {
-    return isJunctionHistoricalBackfillCompletionSummaryResource(input.resource)
-      && hasUsefulJunctionWebhookSummaryDataRecord({
-        record: input.record,
-        resource: input.resource,
-        sourceProviderSlug: input.sourceProviderSlug,
-      });
-  }
-
-  if (readJunctionWebhookNestedRecordEntries(input.record).length > 0) {
-    return true;
-  }
-
-  if (readJunctionWebhookGroupedRecordEntries(input.record).length > 0) {
-    return true;
-  }
-
-  return hasFiniteNumberFromJunctionRecordPaths(input.record, [
-    "value",
-    "steps",
-    "heartRate",
-    "heart_rate",
-    "hrv",
-    "bodyWeight",
-    "body_weight",
-    "weight",
-    "calories",
-    "calories_active",
-    "activeCalories",
-    "active_calories",
-    "distance",
-    "distanceMeters",
-    "distance_meters",
-    "respiratoryRate",
-    "respiratory_rate",
-    "spo2",
-  ]);
-}
-
 function expandJunctionWebhookTimeseriesDataRecords(
   record: Record<string, unknown>,
 ): Record<string, unknown>[] {
@@ -4519,61 +4323,6 @@ function expandJunctionWebhookTimeseriesDataRecords(
   return entries;
 }
 
-function hasUsefulJunctionWebhookSummaryDataRecord(input: {
-  record: Record<string, unknown>;
-  resource: JunctionHistoricalBackfillCompletionSummaryResource;
-  sourceProviderSlug: string;
-}): boolean {
-  return expandJunctionWebhookSummaryDataRecords(input.record).some(({ entry, originFallback }) =>
-    hasUsefulJunctionHistoricalBackfillSummaryRecord(
-      input.resource,
-      entry,
-      resolveJunctionWebhookSummarySourceProviderSlug(entry, originFallback, input.sourceProviderSlug),
-      { acceptSleepCycleStageCount: false },
-    )
-  );
-}
-
-function expandJunctionWebhookSummaryDataRecords(
-  record: Record<string, unknown>,
-): Array<{ entry: Record<string, unknown>; originFallback?: Record<string, unknown> }> {
-  const records = [...expandJunctionHistoricalBackfillSummaryRecord(record)];
-  const groups = readPlainObject(record.groups);
-  if (!groups) {
-    return records;
-  }
-
-  for (const [groupedSourceSlug, rawGroups] of Object.entries(groups)) {
-    for (const rawGroup of readJunctionRecordArray(rawGroups)) {
-      const group = readPlainObject(rawGroup);
-      if (!group) {
-        continue;
-      }
-
-      for (const { entry, originFallback } of expandJunctionHistoricalBackfillSummaryRecord(group)) {
-        records.push({
-          entry,
-          originFallback: {
-            ...(originFallback ?? group),
-            groupedSourceSlug,
-          },
-        });
-      }
-    }
-  }
-
-  return records;
-}
-
-function resolveJunctionWebhookSummarySourceProviderSlug(
-  entry: Record<string, unknown>,
-  originFallback: Record<string, unknown> | undefined,
-  webhookSourceProviderSlug: string,
-): string | null {
-  return normalizeProviderSlug(resolveJunctionOrigin(entry, originFallback).sourceProviderSlug)
-    ?? webhookSourceProviderSlug;
-}
-
 function readJunctionWebhookNestedRecordEntries(
   record: Record<string, unknown>,
 ): Record<string, unknown>[] {
@@ -4588,29 +4337,6 @@ function readJunctionWebhookNestedRecordEntries(
       return entryRecord ? [entryRecord] : [];
     });
   });
-}
-
-function readJunctionWebhookGroupedRecordEntries(
-  record: Record<string, unknown>,
-): Record<string, unknown>[] {
-  const groups = readPlainObject(record.groups);
-  if (!groups) {
-    return [];
-  }
-
-  const entries: Record<string, unknown>[] = [];
-  for (const rawGroups of Object.values(groups)) {
-    for (const rawGroup of readJunctionRecordArray(rawGroups)) {
-      const group = readPlainObject(rawGroup);
-      if (!group) {
-        continue;
-      }
-
-      entries.push(...readJunctionWebhookNestedRecordEntries(group));
-    }
-  }
-
-  return entries;
 }
 
 function inferJunctionResourceCategory(
