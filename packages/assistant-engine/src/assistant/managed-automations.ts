@@ -9,16 +9,13 @@ import type {
   AutomationSchedule,
 } from '@murphai/contracts'
 import {
-  looksLikePrivateAssistantRoutePlaceholder,
   resolveAssistantDeliveryRouteWithCurrentRoute,
-  stripPrivateAssistantRoutePlaceholders,
-  type AssistantDeliveryRouteFields,
 } from '@murphai/operator-config/assistant/current-delivery-route'
 import {
   applyAssistantSelfDeliveryTargetDefaults,
 } from '@murphai/operator-config/operator-config'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from './automation-tags.js'
-import { getAssistantChannelAdapter } from './channel-adapters.js'
+import { resolveDeliverableAutomationRoute } from './cron/targets.js'
 
 export type MurphManagedAutomationSchedule = Exclude<
   AutomationSchedule,
@@ -208,7 +205,9 @@ async function resolveMurphManagedAutomationCreateRoute(
   input: ApplyMurphManagedAutomationsInput,
 ): Promise<AutomationRoute | null> {
   if (input.defaultRoute !== undefined) {
-    return normalizeMurphManagedAutomationRoute(input.defaultRoute)
+    return input.defaultRoute
+      ? resolveDeliverableAutomationRoute(input.defaultRoute)
+      : null
   }
 
   const resolvedTarget = await applyAssistantSelfDeliveryTargetDefaults(
@@ -225,51 +224,9 @@ async function resolveMurphManagedAutomationCreateRoute(
     input.operatorHomeRoot ?? undefined,
   )
 
-  const route = stripPrivateAssistantRoutePlaceholders(
+  return resolveDeliverableAutomationRoute(
     resolveAssistantDeliveryRouteWithCurrentRoute(resolvedTarget, null),
   )
-
-  return normalizeMurphManagedAutomationRoute(route)
-}
-
-function normalizeMurphManagedAutomationRoute(
-  route: AssistantDeliveryRouteFields | null | undefined,
-): AutomationRoute | null {
-  if (!route) {
-    return null
-  }
-
-  const channel = normalizeMurphManagedAutomationText(route.channel)
-  if (!channel) {
-    return null
-  }
-
-  const normalized: AutomationRoute = {
-    channel,
-    deliveryTarget: normalizeMurphManagedAutomationText(route.deliveryTarget),
-    identityId: normalizeMurphManagedAutomationText(route.identityId),
-    participantId: normalizeMurphManagedAutomationText(route.participantId),
-    threadId: normalizeMurphManagedAutomationText(route.threadId),
-  }
-
-  return isDeliverableMurphManagedAutomationRoute(normalized) ? normalized : null
-}
-
-function isDeliverableMurphManagedAutomationRoute(route: AutomationRoute): boolean {
-  if (!getAssistantChannelAdapter(route.channel)) {
-    return false
-  }
-
-  if (route.channel === 'linq') {
-    return Boolean(route.deliveryTarget) &&
-      !looksLikePrivateAssistantRoutePlaceholder(route.deliveryTarget)
-  }
-
-  if (route.channel === 'email' && !route.identityId) {
-    return false
-  }
-
-  return Boolean(route.deliveryTarget || route.participantId || route.threadId)
 }
 
 function murphManagedAutomationSeedChanged(

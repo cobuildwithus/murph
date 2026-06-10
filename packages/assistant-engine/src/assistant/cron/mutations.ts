@@ -8,7 +8,6 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantStatePaths } from '../store/paths.js'
 import {
-  buildCanonicalAutomationRoute,
   buildCanonicalAutomationUpsertInput,
   buildVisibleLocalAssistantCronStore,
   findCanonicalAssistantCronRecordInList,
@@ -42,6 +41,7 @@ import {
 import {
   assistantCronTargetAudienceEquals,
   buildAssistantCronTargetSnapshot,
+  buildCanonicalAutomationRoute,
 } from './targets.js'
 
 export type ResolvedAssistantCronJobMutation =
