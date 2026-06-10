@@ -51,6 +51,9 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
+          # Cache the pnpm store keyed on pnpm-lock.yaml; biggest win on the
+          # macOS leg where a cold install costs ~2 minutes.
+          cache: pnpm
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
@@ -84,6 +87,9 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
+          # Cache the pnpm store keyed on pnpm-lock.yaml; biggest win on the
+          # macOS leg where a cold install costs ~2 minutes.
+          cache: pnpm
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
@@ -159,6 +165,9 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
+          # Cache the pnpm store keyed on pnpm-lock.yaml; biggest win on the
+          # macOS leg where a cold install costs ~2 minutes.
+          cache: pnpm
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
@@ -202,6 +211,9 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
+          # Cache the pnpm store keyed on pnpm-lock.yaml; biggest win on the
+          # macOS leg where a cold install costs ~2 minutes.
+          cache: pnpm
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
@@ -224,6 +236,9 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
+          # Cache the pnpm store keyed on pnpm-lock.yaml; biggest win on the
+          # macOS leg where a cold install costs ~2 minutes.
+          cache: pnpm
 
       - name: Install deps
         run: pnpm install --frozen-lockfile

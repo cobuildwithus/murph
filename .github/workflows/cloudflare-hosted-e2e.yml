@@ -48,6 +48,9 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
+          # Cache the pnpm store keyed on pnpm-lock.yaml; biggest win on the
+          # macOS leg where a cold install costs ~2 minutes.
+          cache: pnpm
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
@@ -75,11 +78,33 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
-  device-connect:
-    name: Device connect E2E
+  # Scenario legs are grouped so each leg's E2E run time lands near the
+  # slowest single scenario (~4 minutes). Fewer legs cut the ~2 minutes of
+  # fixed container/checkout/install/bundle-download overhead every job pays
+  # and reduce org-level concurrency slot usage, which is the real CI
+  # bottleneck. Scenarios within a leg run sequentially against the same
+  # Postgres service; the harness resets state per scenario.
+  hosted-scenarios:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     needs: runner-bundle
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Codex image media delivery E2E
+            slug: codex-image-media-delivery
+            scenarios: codex-image-media-delivery
+          - name: Linq scheduled reminder E2E
+            slug: linq-scheduled-reminder
+            scenarios: linq-scheduled-reminder
+          - name: Linq delivery + Temporal orchestration E2E
+            slug: linq-delivery-temporal-orchestration
+            scenarios: linq-delivery temporal-orchestration
+          - name: Telegram + idle checkpoint + device connect E2E
+            slug: telegram-idle-checkpoint-device-connect
+            scenarios: telegram idle-checkpoint-deferred-progress direct-r2-presigned-put device-connect
     services:
       postgres:
         image: public.ecr.aws/docker/library/postgres:17
@@ -106,6 +131,9 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
+          # Cache the pnpm store keyed on pnpm-lock.yaml; biggest win on the
+          # macOS leg where a cold install costs ~2 minutes.
+          cache: pnpm
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
@@ -123,425 +151,22 @@ jobs:
           tar --zstd -xf runner-bundle.tar.zst
           rm runner-bundle.tar.zst
 
-      - name: Run device connect hosted E2E
+      - name: Run hosted E2E scenarios
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .artifacts/cloudflare-hosted-e2e
-          pnpm hosted-local e2e device-connect --no-bundle 2>&1 \
-            | tee .artifacts/cloudflare-hosted-e2e/device-connect.log
+          for scenario in ${{ matrix.scenarios }}; do
+            pnpm hosted-local e2e "$scenario" --no-bundle 2>&1 \
+              | tee ".artifacts/cloudflare-hosted-e2e/$scenario.log"
+          done
 
-      - name: Upload device connect E2E logs
+      - name: Upload hosted E2E logs
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: cloudflare-hosted-e2e-device-connect-logs
+          name: cloudflare-hosted-e2e-${{ matrix.slug }}-logs
           path: |
-            .artifacts/cloudflare-hosted-e2e/device-connect.log
-            .artifacts/hosted-local/**/state.json
-          if-no-files-found: warn
-
-  linq-delivery:
-    name: Linq delivery E2E
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    needs: runner-bundle
-    services:
-      postgres:
-        image: public.ecr.aws/docker/library/postgres:17
-        env:
-          POSTGRES_DB: murph_test
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-        options: >-
-          --health-cmd "pg_isready -U postgres -d murph_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5432:5432
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
-
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version-file: .nvmrc
-
-      - name: Install deps
-        run: pnpm install --frozen-lockfile
-
-      - name: Install/check Temporal CLI
-        run: pnpm temporal:cli:setup
-
-      - name: Download runner bundle
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: hosted-local-runner-bundle
-
-      - name: Unpack runner bundle
-        run: |
-          tar --zstd -xf runner-bundle.tar.zst
-          rm runner-bundle.tar.zst
-
-      - name: Run Linq delivery hosted E2E
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .artifacts/cloudflare-hosted-e2e
-          pnpm hosted-local e2e linq-delivery --no-bundle 2>&1 \
-            | tee .artifacts/cloudflare-hosted-e2e/linq-delivery.log
-
-      - name: Upload Linq delivery E2E logs
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: cloudflare-hosted-e2e-linq-delivery-logs
-          path: |
-            .artifacts/cloudflare-hosted-e2e/linq-delivery.log
-            .artifacts/hosted-local/**/state.json
-          if-no-files-found: warn
-
-  codex-image-media-delivery:
-    name: Codex image media delivery E2E
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    needs: runner-bundle
-    services:
-      postgres:
-        image: public.ecr.aws/docker/library/postgres:17
-        env:
-          POSTGRES_DB: murph_test
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-        options: >-
-          --health-cmd "pg_isready -U postgres -d murph_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5432:5432
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
-
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version-file: .nvmrc
-
-      - name: Install deps
-        run: pnpm install --frozen-lockfile
-
-      - name: Install/check Temporal CLI
-        run: pnpm temporal:cli:setup
-
-      - name: Download runner bundle
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: hosted-local-runner-bundle
-
-      - name: Unpack runner bundle
-        run: |
-          tar --zstd -xf runner-bundle.tar.zst
-          rm runner-bundle.tar.zst
-
-      - name: Run Codex image media delivery hosted E2E
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .artifacts/cloudflare-hosted-e2e
-          pnpm hosted-local e2e codex-image-media-delivery --no-bundle 2>&1 \
-            | tee .artifacts/cloudflare-hosted-e2e/codex-image-media-delivery.log
-
-      - name: Upload Codex image media delivery E2E logs
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: cloudflare-hosted-e2e-codex-image-media-delivery-logs
-          path: |
-            .artifacts/cloudflare-hosted-e2e/codex-image-media-delivery.log
-            .artifacts/hosted-local/**/state.json
-          if-no-files-found: warn
-
-  linq-scheduled-reminder:
-    name: Linq scheduled reminder E2E
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    needs: runner-bundle
-    services:
-      postgres:
-        image: public.ecr.aws/docker/library/postgres:17
-        env:
-          POSTGRES_DB: murph_test
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-        options: >-
-          --health-cmd "pg_isready -U postgres -d murph_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5432:5432
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
-
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version-file: .nvmrc
-
-      - name: Install deps
-        run: pnpm install --frozen-lockfile
-
-      - name: Install/check Temporal CLI
-        run: pnpm temporal:cli:setup
-
-      - name: Download runner bundle
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: hosted-local-runner-bundle
-
-      - name: Unpack runner bundle
-        run: |
-          tar --zstd -xf runner-bundle.tar.zst
-          rm runner-bundle.tar.zst
-
-      - name: Run Linq scheduled reminder hosted E2E
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .artifacts/cloudflare-hosted-e2e
-          pnpm hosted-local e2e linq-scheduled-reminder --no-bundle 2>&1 \
-            | tee .artifacts/cloudflare-hosted-e2e/linq-scheduled-reminder.log
-
-      - name: Upload Linq scheduled reminder E2E logs
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: cloudflare-hosted-e2e-linq-scheduled-reminder-logs
-          path: |
-            .artifacts/cloudflare-hosted-e2e/linq-scheduled-reminder.log
-            .artifacts/hosted-local/**/state.json
-          if-no-files-found: warn
-
-  idle-checkpoint-deferred-progress:
-    name: Idle checkpoint deferred progress E2E
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    needs: runner-bundle
-    services:
-      postgres:
-        image: public.ecr.aws/docker/library/postgres:17
-        env:
-          POSTGRES_DB: murph_test
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-        options: >-
-          --health-cmd "pg_isready -U postgres -d murph_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5432:5432
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
-
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version-file: .nvmrc
-
-      - name: Install deps
-        run: pnpm install --frozen-lockfile
-
-      - name: Install/check Temporal CLI
-        run: pnpm temporal:cli:setup
-
-      - name: Download runner bundle
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: hosted-local-runner-bundle
-
-      - name: Unpack runner bundle
-        run: |
-          tar --zstd -xf runner-bundle.tar.zst
-          rm runner-bundle.tar.zst
-
-      - name: Run idle checkpoint deferred progress hosted E2E
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .artifacts/cloudflare-hosted-e2e
-          pnpm hosted-local e2e idle-checkpoint-deferred-progress --no-bundle 2>&1 \
-            | tee .artifacts/cloudflare-hosted-e2e/idle-checkpoint-deferred-progress.log
-
-      - name: Run direct R2 presigned PUT hosted E2E
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .artifacts/cloudflare-hosted-e2e
-          pnpm hosted-local e2e direct-r2-presigned-put --no-bundle 2>&1 \
-            | tee .artifacts/cloudflare-hosted-e2e/direct-r2-presigned-put.log
-
-      - name: Upload idle checkpoint deferred progress E2E logs
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: cloudflare-hosted-e2e-idle-checkpoint-deferred-progress-logs
-          path: |
-            .artifacts/cloudflare-hosted-e2e/idle-checkpoint-deferred-progress.log
-            .artifacts/cloudflare-hosted-e2e/direct-r2-presigned-put.log
-            .artifacts/hosted-local/**/state.json
-          if-no-files-found: warn
-
-  temporal-orchestration:
-    name: Temporal orchestration E2E
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    needs: runner-bundle
-    services:
-      postgres:
-        image: public.ecr.aws/docker/library/postgres:17
-        env:
-          POSTGRES_DB: murph_test
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-        options: >-
-          --health-cmd "pg_isready -U postgres -d murph_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5432:5432
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
-
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version-file: .nvmrc
-
-      - name: Install deps
-        run: pnpm install --frozen-lockfile
-
-      - name: Install/check Temporal CLI
-        run: pnpm temporal:cli:setup
-
-      - name: Download runner bundle
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: hosted-local-runner-bundle
-
-      - name: Unpack runner bundle
-        run: |
-          tar --zstd -xf runner-bundle.tar.zst
-          rm runner-bundle.tar.zst
-
-      - name: Run Temporal orchestration hosted E2E
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .artifacts/cloudflare-hosted-e2e
-          pnpm hosted-local e2e temporal-orchestration --no-bundle 2>&1 \
-            | tee .artifacts/cloudflare-hosted-e2e/temporal-orchestration.log
-
-      - name: Upload Temporal orchestration E2E logs
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: cloudflare-hosted-e2e-temporal-orchestration-logs
-          path: |
-            .artifacts/cloudflare-hosted-e2e/temporal-orchestration.log
-            .artifacts/hosted-local/**/state.json
-          if-no-files-found: warn
-
-  telegram-delivery:
-    name: Telegram delivery E2E
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    needs: runner-bundle
-    services:
-      postgres:
-        image: public.ecr.aws/docker/library/postgres:17
-        env:
-          POSTGRES_DB: murph_test
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-        options: >-
-          --health-cmd "pg_isready -U postgres -d murph_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5432:5432
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
-
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version-file: .nvmrc
-
-      - name: Install deps
-        run: pnpm install --frozen-lockfile
-
-      - name: Install/check Temporal CLI
-        run: pnpm temporal:cli:setup
-
-      - name: Download runner bundle
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: hosted-local-runner-bundle
-
-      - name: Unpack runner bundle
-        run: |
-          tar --zstd -xf runner-bundle.tar.zst
-          rm runner-bundle.tar.zst
-
-      - name: Run Telegram delivery hosted E2E
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .artifacts/cloudflare-hosted-e2e
-          pnpm hosted-local e2e telegram --no-bundle 2>&1 \
-            | tee .artifacts/cloudflare-hosted-e2e/telegram-delivery.log
-
-      - name: Upload Telegram delivery E2E logs
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: cloudflare-hosted-e2e-telegram-delivery-logs
-          path: |
-            .artifacts/cloudflare-hosted-e2e/telegram-delivery.log
+            .artifacts/cloudflare-hosted-e2e/*.log
             .artifacts/hosted-local/**/state.json
           if-no-files-found: warn
