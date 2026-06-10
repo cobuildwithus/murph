@@ -108,7 +108,11 @@ Write-pass summary:
 
 ### Session total
 
-- Structured `brand_site` rows: **7,063 → 22,987** (+15,924, ~3.25x; 89% of all brand_site rows, up from 27%). Total brand_site rows 25,730. Unstructured: 2,743 (most are genuinely image-only facts panels; improved image pulling is the next lever).
+- Structured `brand_site` rows: **7,063 → 22,987** (+15,924, ~3.25x; 89% of all brand_site rows, up from 27%). Total brand_site rows 25,730. Unstructured: ~2,700. Remaining mapped: 555 text-residue, 1,466 image-based, 722 unscraped.
+
+### Wave 10 — image-OCR on untried label-image brands (2026-06-10)
+
+- The improved image-pull/vision-OCR pass (force-factor, raw-nutrition, first-phorm, thorne, etc. — brands skipped or failed in the original OCR loop) recovers ~29% (force-factor 22/103, batch img1 35/120). Headwinds: context.dev rate-limits hard right after the big sweep (~35-50% scrape_error per batch, retryable) and session usage limit (resets ~3:30pm ET). Continuing in batches as limits allow; +35 landed (img1).
 - Anthropic Batches API spend ~$47.56 of $50 (text waves); vision-OCR ran on subscription subagents ($0 API key) + context.dev scrapes.
 
 ### Remaining (~4,284 unstructured — the floor for this data source)
