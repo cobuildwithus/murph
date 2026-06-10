@@ -413,7 +413,7 @@ describe('applyMurphManagedAutomations', () => {
 
     await expect(applyMurphManagedAutomations({
       defaultRoute,
-      now: new Date('2026-06-09T14:31:00.000Z'),
+      now: new Date('2026-06-09T15:01:00.000Z'),
       seeds: [featureDropSeed],
       vaultRoot,
     })).resolves.toEqual({

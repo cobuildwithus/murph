@@ -60,7 +60,7 @@ import {
 
 const ASSISTANT_CRON_RUN_SCHEMA = 'murph.assistant-cron-run.v1'
 const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
-const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 30 * 60 * 1000
+const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR =
   'Assistant cron notification expired before delivery.'
 
