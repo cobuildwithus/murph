@@ -1641,6 +1641,7 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     totalTokens: 15,
     triggerKind: "conversation.message",
     turnId: "turn_usage",
+    turnProfileJson: null,
     usageId: "turn_usage.attempt-1",
     usageExtractionSourcePath: null,
     usageExtractionVersion: "legacy",

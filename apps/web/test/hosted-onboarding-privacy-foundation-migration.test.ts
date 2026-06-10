@@ -308,6 +308,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026060900_hosted_latency_phase_breakdown",
       "2026061000_hosted_mailbox_consumed_seq",
       "2026061000_hosted_vault_share",
+      "2026061001_hosted_ai_usage_turn_profile",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');

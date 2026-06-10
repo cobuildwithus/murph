@@ -25,6 +25,10 @@ vi.mock('../src/assistant/turns.ts', () => ({
   appendAssistantTurnReceiptEvent: turnsMocks.appendAssistantTurnReceiptEvent,
 }))
 
+import {
+  ASSISTANT_USAGE_SCHEMA,
+  parseAssistantUsageRecord,
+} from '@murphai/hosted-execution/assistant-usage'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -39,6 +43,7 @@ import {
   createCatalogModel,
 } from '../src/assistant/providers/catalog.ts'
 import {
+  buildAssistantCodexTurnProfileJson,
   extractCodexAssistantProviderUsage,
   resolveAssistantProviderPrompt,
 } from '../src/assistant/providers/helpers.ts'
@@ -171,6 +176,243 @@ describe('Codex assistant registry helpers', () => {
       servedModel: 'codex-mini',
       totalTokens: null,
     })
+  })
+
+  it('builds a per-turn profile from token usage and tool item events', () => {
+    const usage = extractCodexAssistantProviderUsage({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        model: 'gpt-5.5',
+        oss: false,
+      }),
+      rawEvents: [
+        {
+          method: 'turn/started',
+          params: { turn: { id: 'turn_profile' } },
+        },
+        {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            turnId: 'turn_profile',
+            tokenUsage: {
+              last: { inputTokens: 32000, cachedInputTokens: 0, outputTokens: 50 },
+              total: { inputTokens: 32000, cachedInputTokens: 0, outputTokens: 50 },
+              modelContextWindow: 258400,
+            },
+          },
+        },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              id: 'item_1',
+              command: "bash -lc vault-cli samples query --metric 'sleep score'",
+              aggregatedOutput: 'x'.repeat(2048),
+              durationMs: 420,
+            },
+          },
+        },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'mcpToolCall',
+              id: 'item_2',
+              server: 'images',
+              tool: 'generate',
+              result: { url: 'https://example.test/generated' },
+              durationMs: 900,
+            },
+          },
+        },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              id: 'item_3',
+              // Positional arguments can be member health content; only the
+              // binary name may reach the persisted label.
+              command: 'grep glucose journal.md',
+              aggregatedOutput: 'x'.repeat(512),
+              durationMs: 35,
+            },
+          },
+        },
+        {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            turnId: 'turn_profile',
+            tokenUsage: {
+              last: { inputTokens: 34100, cachedInputTokens: 33920, outputTokens: 80 },
+              total: { inputTokens: 66100, cachedInputTokens: 33920, outputTokens: 130 },
+              modelContextWindow: 258400,
+            },
+          },
+        },
+        {
+          method: 'turn/completed',
+          params: { turn: { id: 'turn_profile' } },
+        },
+      ],
+    })
+
+    expect(usage.turnProfileJson).toEqual({
+      modelContextWindow: 258400,
+      requestCount: 2,
+      requests: [
+        { cachedInput: 0, input: 32000, output: 50 },
+        { cachedInput: 33920, input: 34100, output: 80 },
+      ],
+      requestsTruncated: false,
+      schema: 'murph.assistant-turn-profile.v1',
+      tools: [
+        { calls: 1, durationMs: 420, label: 'vault-cli samples query', outputChars: 2048 },
+        { calls: 1, durationMs: 35, label: 'grep', outputChars: 512 },
+        { calls: 1, durationMs: 900, label: 'images.generate', outputChars: 40 },
+      ],
+      toolsTruncated: false,
+    })
+
+    // Producer→contract round-trip: label-charset drift between this builder
+    // and the hosted-execution allowlist would silently null every profile in
+    // prod (the parser drops invalid profiles by design), so pin it here.
+    const parsed = parseAssistantUsageRecord({
+      attemptCount: 1,
+      credentialSource: 'platform',
+      inputTokens: 66100,
+      occurredAt: '2026-06-10T12:00:00.000Z',
+      outputTokens: 130,
+      provider: 'codex-cli',
+      schema: ASSISTANT_USAGE_SCHEMA,
+      sessionId: 'asst_profile',
+      turnId: 'turn_profile',
+      turnProfileJson: usage.turnProfileJson,
+      usageId: 'turn_profile.attempt-1',
+    })
+    expect(parsed.turnProfileJson).toEqual(usage.turnProfileJson)
+  })
+
+  it('caps the per-turn profile request series and tool list under the callback payload limit', () => {
+    const rawEvents: unknown[] = [
+      // Replayed pre-turn tool output must never count toward this turn even
+      // when it would otherwise dominate the top-by-outputChars ranking.
+      {
+        method: 'item/completed',
+        params: {
+          item: {
+            type: 'commandExecution',
+            id: 'item_replay',
+            command: 'replayed-binary',
+            aggregatedOutput: 'x'.repeat(100000),
+            durationMs: 1,
+          },
+        },
+      },
+      { method: 'turn/started', params: { turn: { id: 'turn_caps' } } },
+    ]
+    for (let request = 1; request <= 34; request += 1) {
+      rawEvents.push({
+        method: 'thread/tokenUsage/updated',
+        params: {
+          turnId: 'turn_caps',
+          tokenUsage: {
+            last: { inputTokens: request, cachedInputTokens: 0, outputTokens: 1 },
+            total: { inputTokens: request, cachedInputTokens: 0, outputTokens: request },
+          },
+        },
+      })
+    }
+    for (let tool = 1; tool <= 18; tool += 1) {
+      rawEvents.push({
+        method: 'item/completed',
+        params: {
+          item: {
+            type: 'commandExecution',
+            id: `item_${tool}`,
+            command: `tool-${tool}`,
+            aggregatedOutput: 'x'.repeat(tool),
+            durationMs: tool,
+          },
+        },
+      })
+    }
+
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents,
+      turnId: 'turn_caps',
+    })
+
+    expect(profile).toMatchObject({
+      // No event carried a context window: stays null instead of 0/undefined.
+      modelContextWindow: null,
+      requestCount: 34,
+      requestsTruncated: true,
+      toolsTruncated: true,
+    })
+    const requests = profile?.requests as Array<Record<string, number>>
+    expect(requests).toHaveLength(32)
+    // The last 32 requests are kept so the expensive tail of a long turn
+    // stays visible after truncation.
+    expect(requests[0]).toEqual({ cachedInput: 0, input: 3, output: 1 })
+    expect(requests[31]).toEqual({ cachedInput: 0, input: 34, output: 1 })
+    const tools = profile?.tools as Array<{ label: string }>
+    expect(tools).toHaveLength(16)
+    expect(tools[0]).toMatchObject({ label: 'tool-18', outputChars: 18 })
+    expect(tools[15]).toMatchObject({ label: 'tool-3', outputChars: 3 })
+    const labels = tools.map((tool) => tool.label)
+    expect(labels).not.toContain('replayed-binary')
+    expect(labels).not.toContain('tool-1')
+    expect(labels).not.toContain('tool-2')
+  })
+
+  it('keeps per-turn profile command labels member-content safe at the edges', () => {
+    const commandEvent = (id: string, command: string, outputChars: number) => ({
+      method: 'item/completed',
+      params: {
+        item: {
+          type: 'commandExecution',
+          id,
+          command,
+          aggregatedOutput: 'x'.repeat(outputChars),
+          durationMs: 10,
+        },
+      },
+    })
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_labels' } } },
+        // Uppercase positional token fails the subcommand shape even after an
+        // allowlisted head binary: 'Samples' could be a member-named vault dir.
+        commandEvent('item_1', 'vault-cli Samples', 40),
+        // 'murph' is the second allowlisted head binary; labels stop at three
+        // tokens so trailing args never persist.
+        commandEvent('item_2', 'murph reminders list --all glucose', 30),
+        // Quoted shell wrapping leaves no safe head token: fail closed to the
+        // generic 'command' label instead of persisting quoted content.
+        commandEvent('item_3', 'bash -lc "vault-cli samples query"', 20),
+        // Repeated labels aggregate into one entry instead of multiplying.
+        commandEvent('item_4', 'murph reminders list', 25),
+        // Overlong safe binary names truncate to the persisted label cap.
+        commandEvent('item_5', 'a'.repeat(70), 10),
+      ],
+      turnId: 'turn_labels',
+    })
+
+    expect(profile).toMatchObject({
+      modelContextWindow: null,
+      requestCount: 0,
+      requests: [],
+      requestsTruncated: false,
+      toolsTruncated: false,
+    })
+    expect(profile?.tools).toEqual([
+      { calls: 2, durationMs: 20, label: 'murph reminders list', outputChars: 55 },
+      { calls: 1, durationMs: 10, label: 'vault-cli', outputChars: 40 },
+      { calls: 1, durationMs: 10, label: 'command', outputChars: 20 },
+      { calls: 1, durationMs: 10, label: 'a'.repeat(64), outputChars: 10 },
+    ])
   })
 
   it('records privacy-safe provider-attempt-started diagnostics', async () => {
@@ -1432,6 +1674,7 @@ describe('Codex assistant registry helpers', () => {
         requestedModel: null,
         servedModel: null,
         totalTokens: null,
+        turnProfileJson: null,
         usageExtractionSourcePath: null,
         usageExtractionVersion: 'codex-usage-v1',
       },

@@ -720,6 +720,7 @@ model HostedAiUsage {
   providerRequestId          String?      @map("provider_request_id")
   rawUsageJson               Json?        @map("raw_usage_json")
   rawUsageJsonHash           String?      @map("raw_usage_json_hash")
+  turnProfileJson            Json?        @map("turn_profile_json")
   usageExtractionVersion     String       @default("legacy") @map("usage_extraction_version")
   usageExtractionSourcePath  String?      @map("usage_extraction_source_path")
   baseUrl                    String?      @map("base_url")

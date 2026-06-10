@@ -179,6 +179,7 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     totalTokens: 3,
     triggerKind: null,
     turnId: "turn_usage",
+    turnProfileJson: null,
     usageExtractionSourcePath: null,
     usageExtractionVersion: "test",
     usageId: "turn_usage.attempt-1",

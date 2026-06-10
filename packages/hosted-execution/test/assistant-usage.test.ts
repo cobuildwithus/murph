@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  ASSISTANT_TURN_PROFILE_MAX_REQUESTS,
+  ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH,
+  ASSISTANT_TURN_PROFILE_MAX_TOOLS,
   ASSISTANT_USAGE_SCHEMA,
   createAssistantUsageId,
   createAssistantUsageReportingUserId,
@@ -118,11 +121,142 @@ test("assistant usage parsing preserves a missing totalTokens value", () => {
       totalTokens: null,
       triggerKind: null,
       turnId: "turn_123",
+      turnProfileJson: null,
       usageId: "turn_123.attempt-1",
       usageExtractionSourcePath: null,
       usageExtractionVersion: "legacy",
     },
   );
+});
+
+test("assistant usage parsing validates the turn profile allowlist", () => {
+  const profile = {
+    modelContextWindow: 258400,
+    requestCount: 2,
+    requests: [
+      { cachedInput: 0, input: 32000, output: 120 },
+      { cachedInput: 31872, input: 33000, output: 80 },
+    ],
+    requestsTruncated: false,
+    schema: "murph.assistant-turn-profile.v1",
+    tools: [
+      { calls: 2, durationMs: 1200, label: "vault-cli samples query", outputChars: 20480 },
+    ],
+    toolsTruncated: false,
+  };
+  const baseRecord = {
+    attemptCount: 1,
+    credentialSource: "platform",
+    inputTokens: 10,
+    occurredAt: "2026-03-29T12:00:00.000Z",
+    outputTokens: 5,
+    provider: "codex-cli",
+    schema: ASSISTANT_USAGE_SCHEMA,
+    sessionId: "asst_123",
+    turnId: "turn_123",
+    usageId: "turn_123.attempt-1",
+  };
+
+  assert.deepEqual(
+    parseAssistantUsageRecord({
+      ...baseRecord,
+      turnProfileJson: profile,
+    }).turnProfileJson,
+    profile,
+  );
+
+  // Invalid profiles are droppable telemetry: the usage record (and its token
+  // accounting) must survive with turnProfileJson nulled, never be rejected.
+  const dropped = parseAssistantUsageRecord({
+    ...baseRecord,
+    turnProfileJson: {
+      ...profile,
+      tools: [{ calls: 1, durationMs: 0, label: "rm -rf 'member secret'", outputChars: 1 }],
+    },
+  });
+  assert.equal(dropped.turnProfileJson, null);
+  assert.equal(dropped.inputTokens, 10);
+});
+
+test("assistant usage parsing drops out-of-contract turn profiles without failing the record", () => {
+  const validProfile = {
+    // A null context window is part of the contract (older runtimes omit it).
+    modelContextWindow: null,
+    requestCount: 1,
+    requests: [{ cachedInput: 0, input: 10, output: 5 }],
+    requestsTruncated: false,
+    schema: "murph.assistant-turn-profile.v1",
+    tools: [],
+    toolsTruncated: false,
+  };
+  const baseRecord = {
+    attemptCount: 1,
+    credentialSource: "platform",
+    inputTokens: 10,
+    occurredAt: "2026-03-29T12:00:00.000Z",
+    outputTokens: 5,
+    provider: "codex-cli",
+    schema: ASSISTANT_USAGE_SCHEMA,
+    sessionId: "asst_123",
+    turnId: "turn_123",
+    usageId: "turn_123.attempt-1",
+  };
+
+  assert.deepEqual(
+    parseAssistantUsageRecord({
+      ...baseRecord,
+      turnProfileJson: validProfile,
+    }).turnProfileJson,
+    validProfile,
+  );
+
+  const invalidProfiles: Array<Record<string, unknown>> = [
+    // Unknown schema versions never persist under the v1 contract.
+    { ...validProfile, schema: "murph.assistant-turn-profile.v0" },
+    // Non-integer and non-safe-integer counters are out of contract.
+    { ...validProfile, requests: [{ cachedInput: 0, input: 10.5, output: 5 }] },
+    { ...validProfile, requests: [{ cachedInput: 0, input: 2 ** 53, output: 5 }] },
+    { ...validProfile, modelContextWindow: -1 },
+    // Series longer than the producer-side caps mean an untrusted producer.
+    {
+      ...validProfile,
+      requestCount: ASSISTANT_TURN_PROFILE_MAX_REQUESTS + 1,
+      requests: Array.from(
+        { length: ASSISTANT_TURN_PROFILE_MAX_REQUESTS + 1 },
+        () => ({ cachedInput: 0, input: 1, output: 1 }),
+      ),
+      requestsTruncated: true,
+    },
+    {
+      ...validProfile,
+      tools: Array.from(
+        { length: ASSISTANT_TURN_PROFILE_MAX_TOOLS + 1 },
+        (_, index) => ({ calls: 1, durationMs: 0, label: `tool-${index}`, outputChars: 1 }),
+      ),
+      toolsTruncated: true,
+    },
+    // Overlong labels exceed what the producer is allowed to emit.
+    {
+      ...validProfile,
+      tools: [{
+        calls: 1,
+        durationMs: 0,
+        label: "a".repeat(ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH + 1),
+        outputChars: 1,
+      }],
+    },
+  ];
+
+  for (const profile of invalidProfiles) {
+    const parsed = parseAssistantUsageRecord({
+      ...baseRecord,
+      turnProfileJson: profile,
+    });
+    // Telemetry drops; token accounting must survive untouched.
+    assert.equal(parsed.turnProfileJson, null);
+    assert.equal(parsed.inputTokens, 10);
+    assert.equal(parsed.outputTokens, 5);
+  }
 });
 
 test("assistant usage parsing allows only token-count raw usage metadata", () => {

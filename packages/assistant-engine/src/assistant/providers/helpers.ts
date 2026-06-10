@@ -13,6 +13,12 @@ import {
   resolveAssistantCodexModelProviderConfig,
 } from '@murphai/operator-config/assistant/target-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  ASSISTANT_TURN_PROFILE_MAX_REQUESTS,
+  ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH,
+  ASSISTANT_TURN_PROFILE_MAX_TOOLS,
+  ASSISTANT_TURN_PROFILE_SCHEMA,
+} from '@murphai/hosted-execution/assistant-usage'
 import type {
   AssistantUserMessageContentPart,
 } from '../content-types.js'
@@ -301,17 +307,27 @@ export function extractCodexAssistantProviderUsage(input: {
   const completionMetrics =
     readAssistantProviderRecord(completionParams?.metrics) ??
     readAssistantProviderRecord(completionRecord?.metrics)
+  const turnId = readAssistantCodexTurnIdFromCompletion({
+    completionParams,
+    completionRecord,
+    completionTurn,
+  })
   const usageSource = resolveAssistantProviderUsageSource({
     completionMetrics,
     completionParams,
     completionRecord,
     completionTurn,
     rawEvents: input.rawEvents,
+    turnId,
   })
   const usageRecord = usageSource?.record ?? null
   const sanitizedRawUsageJson = sanitizeAssistantProviderRawUsageJson(
     usageRecord ?? completionRecord,
   )
+  const turnProfileJson = buildAssistantCodexTurnProfileJson({
+    rawEvents: input.rawEvents,
+    turnId,
+  })
   const inputTokens = readAssistantProviderInteger(
     usageRecord ?? completionRecord,
     'inputTokens',
@@ -388,6 +404,7 @@ export function extractCodexAssistantProviderUsage(input: {
         inputTokens,
         outputTokens,
       }),
+    turnProfileJson,
     usageExtractionSourcePath: usageSource?.sourcePath ?? (completionRecord ? 'completion' : null),
     usageExtractionVersion: CODEX_USAGE_EXTRACTION_VERSION,
   }
@@ -399,6 +416,7 @@ function resolveAssistantProviderUsageSource(input: {
   completionRecord: Record<string, unknown> | null
   completionTurn: Record<string, unknown> | null
   rawEvents: readonly unknown[]
+  turnId: string | null
 }): { record: Record<string, unknown>; sourcePath: string } | null {
   const candidates = [
     {
@@ -430,7 +448,7 @@ function resolveAssistantProviderUsageSource(input: {
 
   return findAssistantCodexThreadTokenUsageSource({
     rawEvents: input.rawEvents,
-    turnId: readAssistantCodexTurnIdFromCompletion(input),
+    turnId: input.turnId,
   })
 }
 
@@ -507,6 +525,7 @@ function readAssistantCodexThreadTokenUsageEvents(input: {
   turnId: string | null
 }): Array<{
   last: Record<string, unknown> | null
+  tokenUsage: Record<string, unknown> | null
   total: Record<string, unknown> | null
 }> {
   const turnStartedEventIndex = findAssistantCodexTurnStartedEventIndex(input)
@@ -542,14 +561,16 @@ function readAssistantCodexThreadTokenUsageEvents(input: {
       {
         index,
         last: readAssistantProviderRecord(tokenUsage?.last),
+        tokenUsage,
         total: readAssistantProviderRecord(tokenUsage?.total),
       },
     ]
   })
 
   if (currentTurnOutputEventIndex === null) {
-    return events.map(({ last, total }) => ({
+    return events.map(({ last, tokenUsage, total }) => ({
       last,
+      tokenUsage,
       total,
     }))
   }
@@ -559,10 +580,214 @@ function readAssistantCodexThreadTokenUsageEvents(input: {
   )
   const selectedEvents = postOutputEvents.length > 0 ? postOutputEvents : events
 
-  return selectedEvents.map(({ last, total }) => ({
+  return selectedEvents.map(({ last, tokenUsage, total }) => ({
     last,
+    tokenUsage,
     total,
   }))
+}
+
+const ASSISTANT_TURN_PROFILE_SAFE_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/u
+const ASSISTANT_TURN_PROFILE_SUBCOMMAND_TOKEN_PATTERN = /^[a-z][a-z0-9-]{0,24}$/u
+const ASSISTANT_TURN_PROFILE_SHELL_TOKEN_PATTERN = /^(?:.*\/)?(?:ba|z|da)?sh$/u
+// Only these head binaries get subcommand tokens in persisted labels. For any
+// other command the first positional token can be member content (search
+// terms, vault paths), so the label stops at the binary name.
+const ASSISTANT_TURN_PROFILE_SUBCOMMAND_HEAD_BINARIES = new Set(['vault-cli', 'murph'])
+
+interface AssistantTurnProfileToolAggregate {
+  calls: number
+  durationMs: number
+  label: string
+  outputChars: number
+}
+
+// Compact per-turn profile derived entirely from notifications Codex already
+// emits (thread/tokenUsage/updated per provider request, item/completed per
+// tool call). This is what lets prod answer "which tool calls and which
+// requests made this turn expensive" without re-deriving anything client-side.
+// The request series reuses the same filtered event reader as the billed
+// totals so the profile always reconciles with the row's token deltas.
+export function buildAssistantCodexTurnProfileJson(input: {
+  rawEvents: readonly unknown[]
+  turnId: string | null
+}): Record<string, unknown> | null {
+  const tokenUsageEvents = readAssistantCodexThreadTokenUsageEvents(input)
+  const requests: Array<Record<string, number>> = []
+  let modelContextWindow: number | null = null
+  for (const event of tokenUsageEvents) {
+    modelContextWindow =
+      readAssistantProviderInteger(
+        event.tokenUsage,
+        'modelContextWindow',
+        'model_context_window',
+      ) ?? modelContextWindow
+    if (event.last) {
+      requests.push({
+        cachedInput:
+          readAssistantProviderInteger(event.last, 'cachedInputTokens', 'cached_input_tokens')
+          ?? 0,
+        input: readAssistantProviderInteger(event.last, 'inputTokens', 'input_tokens') ?? 0,
+        output: readAssistantProviderInteger(event.last, 'outputTokens', 'output_tokens') ?? 0,
+      })
+    }
+  }
+
+  const toolsByLabel = new Map<string, AssistantTurnProfileToolAggregate>()
+  const startIndex = findAssistantCodexTurnStartedEventIndex(input) ?? 0
+  for (let index = startIndex; index < input.rawEvents.length; index += 1) {
+    const record = readAssistantProviderRecord(input.rawEvents[index])
+    const eventType = readAssistantProviderString(
+      record?.method,
+      record?.type,
+      record?.event,
+    )
+    if (eventType !== 'item/completed' && eventType !== 'item.completed') {
+      continue
+    }
+
+    // Replayed foreign-turn items must not inflate this turn's aggregates;
+    // stay lenient when the event predates turn-id stamping.
+    const itemTurnId = readAssistantCodexTurnIdFromRecord(record)
+    if (input.turnId && itemTurnId && itemTurnId !== input.turnId) {
+      continue
+    }
+
+    const params = readAssistantProviderRecord(record?.params)
+    const item = readAssistantProviderRecord(params?.item)
+    const aggregate = readAssistantTurnProfileToolAggregate(item)
+    if (!aggregate) {
+      continue
+    }
+
+    const existing = toolsByLabel.get(aggregate.label)
+    if (existing) {
+      existing.calls += aggregate.calls
+      existing.durationMs += aggregate.durationMs
+      existing.outputChars += aggregate.outputChars
+    } else {
+      toolsByLabel.set(aggregate.label, aggregate)
+    }
+  }
+
+  if (requests.length === 0 && toolsByLabel.size === 0) {
+    return null
+  }
+
+  const tools = [...toolsByLabel.values()].sort(
+    (left, right) => right.outputChars - left.outputChars,
+  )
+
+  return {
+    modelContextWindow,
+    requestCount: requests.length,
+    requests: requests.slice(-ASSISTANT_TURN_PROFILE_MAX_REQUESTS),
+    requestsTruncated: requests.length > ASSISTANT_TURN_PROFILE_MAX_REQUESTS,
+    schema: ASSISTANT_TURN_PROFILE_SCHEMA,
+    tools: tools.slice(0, ASSISTANT_TURN_PROFILE_MAX_TOOLS),
+    toolsTruncated: tools.length > ASSISTANT_TURN_PROFILE_MAX_TOOLS,
+  }
+}
+
+function readAssistantTurnProfileToolAggregate(
+  item: Record<string, unknown> | null,
+): AssistantTurnProfileToolAggregate | null {
+  const itemType = readAssistantProviderString(item?.type)
+  if (!item || !itemType) {
+    return null
+  }
+
+  if (itemType === 'commandExecution') {
+    return {
+      calls: 1,
+      durationMs: readAssistantProviderInteger(item, 'durationMs', 'duration_ms') ?? 0,
+      label: buildAssistantTurnProfileCommandLabel(
+        readAssistantProviderString(item.command),
+      ),
+      outputChars: readAssistantTurnProfileTextLength(
+        item.aggregatedOutput ?? item.aggregated_output,
+      ),
+    }
+  }
+
+  if (itemType === 'mcpToolCall' || itemType === 'dynamicToolCall') {
+    const server = readAssistantProviderString(item.server)
+    const tool = readAssistantProviderString(item.tool, item.name)
+    const label = [server, tool]
+      .filter((part): part is string =>
+        part !== null && ASSISTANT_TURN_PROFILE_SAFE_TOKEN_PATTERN.test(part),
+      )
+      .join('.')
+
+    return {
+      calls: 1,
+      durationMs: readAssistantProviderInteger(item, 'durationMs', 'duration_ms') ?? 0,
+      label: truncateAssistantTurnProfileLabel(label.length > 0 ? label : itemType),
+      outputChars: readAssistantTurnProfileTextLength(item.result),
+    }
+  }
+
+  return null
+}
+
+// Tool labels must stay secret-safe: persist only the binary name unless the
+// head binary is a known subcommand-style CLI, because the first positional
+// argument of arbitrary commands (grep patterns, file paths) can carry member
+// health content even when it matches a benign-looking token charset.
+function buildAssistantTurnProfileCommandLabel(command: string | null): string {
+  const tokens = (command ?? '').split(/\s+/u).filter((token) => token.length > 0)
+  const labelTokens: string[] = []
+
+  for (const token of tokens) {
+    if (labelTokens.length === 0) {
+      if (ASSISTANT_TURN_PROFILE_SHELL_TOKEN_PATTERN.test(token) || token.startsWith('-')) {
+        continue
+      }
+      // Path-invoked binaries (`scripts/check-x.sh`) can carry member-named
+      // files; only bare binary names may persist.
+      if (!ASSISTANT_TURN_PROFILE_SAFE_TOKEN_PATTERN.test(token) || token.includes('/')) {
+        break
+      }
+      labelTokens.push(token)
+      if (!ASSISTANT_TURN_PROFILE_SUBCOMMAND_HEAD_BINARIES.has(token)) {
+        break
+      }
+      continue
+    }
+    if (!ASSISTANT_TURN_PROFILE_SUBCOMMAND_TOKEN_PATTERN.test(token)) {
+      break
+    }
+
+    labelTokens.push(token)
+    if (labelTokens.length >= 3) {
+      break
+    }
+  }
+
+  return truncateAssistantTurnProfileLabel(
+    labelTokens.length > 0 ? labelTokens.join(' ') : 'command',
+  )
+}
+
+function truncateAssistantTurnProfileLabel(label: string): string {
+  return label.length > ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH
+    ? label.slice(0, ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH)
+    : label
+}
+
+function readAssistantTurnProfileTextLength(value: unknown): number {
+  if (typeof value === 'string') {
+    return value.length
+  }
+  if (value === null || value === undefined) {
+    return 0
+  }
+
+  try {
+    return JSON.stringify(value)?.length ?? 0
+  } catch {
+    return 0
+  }
 }
 
 function findAssistantCodexTurnStartedEventIndex(input: {
