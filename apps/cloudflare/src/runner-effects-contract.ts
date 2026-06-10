@@ -1,15 +1,21 @@
 import type {
+  AssistantResponseMedia,
   HostedRuntimeProviderFileResponse,
   HostedRuntimeTelegramCleanupMessage,
   HostedRuntimeTelegramDownloadFileRequest,
   HostedRuntimeTelegramFile,
   HostedRuntimeTelegramGetFileRequest,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
+import {
+  parseHostedRuntimeAssistantResponseMedia,
+} from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 
 export const HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH =
   "/telegram/files/get";
 export const HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH =
   "/telegram/files/download";
+export const HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH =
+  "/generated-images";
 
 const PROVIDER_EFFECT_PATHS = new Set([
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
@@ -25,6 +31,19 @@ export interface HostedRunnerProviderEffectErrorResponse {
   providerMessageId?: string | null;
   providerMessageIds?: string[];
   target?: string;
+}
+
+export interface HostedRunnerGeneratedImageUploadRequest {
+  alt: string | null;
+  bytesBase64: string;
+  contentType: "image/jpeg" | "image/png" | "image/webp";
+  filename: string;
+  metadata: Record<string, string>;
+  source: string;
+}
+
+export interface HostedRunnerGeneratedImageUploadResponse {
+  media: AssistantResponseMedia;
 }
 
 export function isHostedRunnerProviderEffectPath(pathname: string): boolean {
@@ -109,6 +128,29 @@ export function parseHostedRunnerProviderEffectErrorResponse(
   };
 }
 
+export function parseHostedRunnerGeneratedImageUploadRequest(
+  value: unknown,
+): HostedRunnerGeneratedImageUploadRequest {
+  const record = requireRecord(value, "Hosted generated image upload request");
+  return {
+    alt: readOptionalString(record.alt, "alt"),
+    bytesBase64: readRequiredString(record.bytesBase64, "bytesBase64"),
+    contentType: readGeneratedImageContentType(record.contentType),
+    filename: readRequiredString(record.filename, "filename"),
+    metadata: readRequiredStringRecord(record.metadata, "metadata"),
+    source: readRequiredString(record.source, "source"),
+  };
+}
+
+export function parseHostedRunnerGeneratedImageUploadResponse(
+  value: unknown,
+): HostedRunnerGeneratedImageUploadResponse {
+  const record = requireRecord(value, "Hosted generated image upload response");
+  return {
+    media: parseHostedRuntimeAssistantResponseMedia(record.media),
+  };
+}
+
 function parseProviderFile(value: unknown): HostedRuntimeProviderFileResponse {
   const record = requireRecord(value, "Hosted provider file response");
   return {
@@ -117,6 +159,29 @@ function parseProviderFile(value: unknown): HostedRuntimeProviderFileResponse {
     fileName: readOptionalString(record.fileName, "fileName"),
     sha256: readRequiredString(record.sha256, "sha256"),
   };
+}
+
+function readGeneratedImageContentType(
+  value: unknown,
+): HostedRunnerGeneratedImageUploadRequest["contentType"] {
+  if (value === "image/jpeg" || value === "image/png" || value === "image/webp") {
+    return value;
+  }
+
+  throw new TypeError("Hosted generated image contentType is unsupported.");
+}
+
+function readRequiredStringRecord(
+  value: unknown,
+  label: string,
+): Record<string, string> {
+  const record = requireRecord(value, `Hosted generated image ${label}`);
+  const parsed: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(record)) {
+    const normalizedKey = readRequiredString(key, `${label} key`);
+    parsed[normalizedKey] = readRequiredString(entry, `${label}.${normalizedKey}`);
+  }
+  return parsed;
 }
 
 function parseTelegramFile(value: unknown): HostedRuntimeTelegramFile {

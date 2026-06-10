@@ -1,6 +1,5 @@
 "use client";
 
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import type { HostedAuthCompletionResult } from "./hosted-auth-completion";
 
 import {
@@ -16,7 +15,6 @@ interface HostedPhoneAuthProps {
   intent?: HostedPhoneAuthIntent;
   onAuthCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
   onCodeSent?: () => void;
-  onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
   phoneFieldLabel?: string | null;
@@ -32,7 +30,6 @@ export function HostedPhoneAuth({
   intent = "auth",
   onAuthCompleted,
   onCodeSent,
-  onCompleted,
   onLinked,
   onSignOut,
   phoneFieldLabel,
@@ -47,7 +44,6 @@ export function HostedPhoneAuth({
     intent,
     onAuthCompleted,
     onCodeSent,
-    onCompleted,
     onLinked,
     onSignOut,
     suppressAuthenticatedSessionIssue,

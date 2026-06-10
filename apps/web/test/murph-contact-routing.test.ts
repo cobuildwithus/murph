@@ -6,6 +6,7 @@ import {
   MURPH_CONTACT_EMAIL,
   MURPH_TELEGRAM_URL,
   resolveMurphContactOptions,
+  resolveMurphWebmailShortcut,
 } from "@/src/lib/murph-contact-routing";
 
 test("resolveMurphContactOptions returns connected channels in priority order", () => {
@@ -44,6 +45,73 @@ test("resolveMurphContactOptions falls back to the public address without an ali
   assert.equal(
     options[0]?.href,
     `mailto:${MURPH_CONTACT_EMAIL}?subject=Hey%20Murph`,
+  );
+});
+
+test("resolveMurphContactOptions exposes copy values for email and text", () => {
+  const options = resolveMurphContactOptions({
+    contactChannels: { email: true, telegram: true, text: true },
+    murphEmailAddress: "murph+alias123@mail.withmurph.ai",
+    murphPhoneNumber: "+15550100001",
+  });
+
+  assert.equal(options[0]?.copyValue, "+15550100001");
+  assert.equal(options[1]?.copyValue, undefined);
+  assert.equal(options[2]?.copyValue, "murph+alias123@mail.withmurph.ai");
+});
+
+test("resolveMurphContactOptions adds a Gmail shortcut for gmail users", () => {
+  const options = resolveMurphContactOptions({
+    contactChannels: { email: true, telegram: false, text: false },
+    murphEmailAddress: "murph+alias123@mail.withmurph.ai",
+    userEmailAddress: "Will.Hay@Gmail.com",
+  });
+
+  const webmail = options[0]?.webmail;
+  assert.equal(webmail?.label, "Gmail");
+  assert.ok(webmail?.href.startsWith("https://mail.google.com/mail/?view=cm&fs=1"));
+  assert.ok(webmail?.href.includes("to=murph%2Balias123%40mail.withmurph.ai"));
+  assert.ok(webmail?.href.includes("su=Hey+Murph"));
+});
+
+test("resolveMurphWebmailShortcut maps outlook-family and yahoo domains", () => {
+  assert.equal(
+    resolveMurphWebmailShortcut({
+      address: MURPH_CONTACT_EMAIL,
+      userEmailAddress: "someone@hotmail.com",
+    })?.label,
+    "Outlook",
+  );
+  assert.equal(
+    resolveMurphWebmailShortcut({
+      address: MURPH_CONTACT_EMAIL,
+      userEmailAddress: "someone@yahoo.com",
+    })?.label,
+    "Yahoo Mail",
+  );
+});
+
+test("resolveMurphWebmailShortcut returns null for unknown or missing domains", () => {
+  assert.equal(
+    resolveMurphWebmailShortcut({
+      address: MURPH_CONTACT_EMAIL,
+      userEmailAddress: "someone@customdomain.com",
+    }),
+    null,
+  );
+  assert.equal(
+    resolveMurphWebmailShortcut({
+      address: MURPH_CONTACT_EMAIL,
+      userEmailAddress: null,
+    }),
+    null,
+  );
+  assert.equal(
+    resolveMurphWebmailShortcut({
+      address: MURPH_CONTACT_EMAIL,
+      userEmailAddress: "not-an-email",
+    }),
+    null,
   );
 });
 

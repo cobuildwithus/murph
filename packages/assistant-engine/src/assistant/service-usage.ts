@@ -13,7 +13,10 @@ import {
   readCodexThreadRouteFingerprint,
   type CodexThreadIdentity,
 } from './codex-thread-route.js'
-import type { AssistantProviderUsage } from './providers/types.js'
+import type {
+  AssistantProviderUsage,
+  AssistantProviderUsageDraft,
+} from './providers/types.js'
 import type { AssistantUsageAttribution } from './usage-attribution.js'
 import type { AssistantExecutionContext } from './execution-context.js'
 import { normalizeNullableString } from './shared.js'
@@ -97,6 +100,47 @@ export async function recordAssistantUsageEvent(input: {
     })
   } catch (error) {
     warnAssistantUsageRecordingFailure(error)
+  }
+}
+
+export async function recordAdditionalAssistantUsageEvents(input: {
+  additionalUsages: readonly AssistantProviderUsageDraft[] | null | undefined
+  effectiveEnv: Readonly<Record<string, string | undefined>>
+  executionContext: AssistantExecutionContext
+  providerResult: AssistantUsageProviderResult
+  turnId: string
+}): Promise<void> {
+  const baseAttribution = input.providerResult.usageAttribution ?? null
+  for (const usageDraft of input.additionalUsages ?? []) {
+    // Additional usages can run on a different credential than the primary
+    // provider turn (for example platform-owned OpenAI Images on a
+    // member-credential Codex turn), so resolve credential source per draft
+    // with the same effective-env rule the primary attribution uses: a key
+    // env that is listed but unset/empty attributes as platform, not member.
+    const usageAttribution = baseAttribution
+      ? {
+          ...baseAttribution,
+          credentialSource: resolveAssistantUsageCredentialSource({
+            apiKeyEnv: normalizeNullableString(usageDraft.usage.apiKeyEnv),
+            effectiveEnv: input.effectiveEnv,
+            headers: input.providerResult.providerOptions.headers ?? null,
+            provider: usageDraft.provider,
+            userEnvKeys: [...(input.executionContext.hosted?.userEnvKeys ?? [])],
+          }),
+        }
+      : null
+    await recordAssistantUsageEvent({
+      executionContext: input.executionContext,
+      providerRequestOrdinal: usageDraft.providerRequestOrdinal,
+      providerRequestOutcome: usageDraft.providerRequestOutcome,
+      providerResult: {
+        ...input.providerResult,
+        provider: usageDraft.provider,
+        usage: usageDraft.usage,
+        usageAttribution,
+      },
+      turnId: input.turnId,
+    })
   }
 }
 

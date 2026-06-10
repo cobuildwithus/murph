@@ -4080,6 +4080,14 @@ test("device sync service exposes safe structured diagnostics for provider failu
   assert.equal(diagnostics[0]?.accountId, connected.account.id);
   assert.equal(diagnostics[0]?.code, "WHOOP_TOKEN_REQUEST_FAILED");
   assert.equal(diagnostics[0]?.retryable, false);
+  assert.equal(diagnostics[0]?.provider, "demo");
+  assert.equal(diagnostics[0]?.jobKind, "backfill");
+  assert.equal(diagnostics[0]?.attempts, 1);
+  assert.equal(typeof diagnostics[0]?.at, "string");
+  assert.equal(
+    diagnostics[0]?.summary,
+    "WHOOP token request failed. Provider reason: Refresh token expired. Reconnect WHOOP.",
+  );
   assert.deepEqual(diagnostics[0]?.details, {
     providerHttpStatus: 400,
     providerRequestAuthKind: "oauth_client_secret_body",
@@ -4177,6 +4185,84 @@ test("device sync service exposes safe structured diagnostics for provider failu
   assert.equal(JSON.stringify(warnEvents).includes(connected.account.id), false);
 
   close();
+});
+
+test("device sync service keeps per-attempt failure diagnostics after a later job success clears account error state", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-failure-after-success");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: {
+        warn() {
+          // The failure is asserted through the diagnostics ring below.
+        },
+      },
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob(_context, job) {
+          if (job.kind === "resource") {
+            throw deviceSyncError({
+              code: "JUNCTION_API_REQUEST_FAILED",
+              message: "Junction summary request failed.",
+              retryable: true,
+              httpStatus: 503,
+            });
+          }
+          return {};
+        },
+      }),
+    ],
+  });
+
+  try {
+    const begin = await service.startConnection({
+      provider: "demo",
+    });
+    const connected = await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "failure-then-success",
+    });
+
+    store.enqueueJob({
+      accountId: connected.account.id,
+      provider: "demo",
+      kind: "resource",
+      payload: {
+        resource: "sleep",
+        resourceCategory: "summary",
+      },
+      availableAt: "2026-06-08T02:00:00.000Z",
+    });
+
+    // The webhook-style resource job fails first; the initial backfill job for
+    // the same account succeeds afterwards and clears the account-level error
+    // state, mirroring the webhook-wake drains from the June 2026 incident.
+    await service.drainWorker(10);
+
+    const account = store.getAccountById(connected.account.id);
+    assert.ok(account);
+    assert.equal(account.lastSyncErrorAt, null);
+    assert.equal(account.lastErrorCode, null);
+
+    const diagnostics = service.listJobFailureDiagnostics();
+    assert.equal(diagnostics.length, 1);
+    assert.equal(diagnostics[0]?.accountId, connected.account.id);
+    assert.equal(diagnostics[0]?.code, "JUNCTION_API_REQUEST_FAILED");
+    assert.equal(diagnostics[0]?.provider, "demo");
+    assert.equal(diagnostics[0]?.jobKind, "resource");
+    assert.equal(diagnostics[0]?.resource, "sleep");
+    assert.equal(diagnostics[0]?.attempts, 1);
+    assert.equal(diagnostics[0]?.retryable, true);
+    assert.equal(typeof diagnostics[0]?.at, "string");
+    assert.equal(diagnostics[0]?.summary, "Junction summary request failed.");
+  } finally {
+    close();
+  }
 });
 
 test("device sync service persists compact Junction optional resource diagnostics", async () => {

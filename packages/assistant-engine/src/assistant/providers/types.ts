@@ -21,6 +21,9 @@ import type { AssistantUsageAttribution } from '../usage-attribution.js'
 import type { AssistantCodexContinuation } from '../active-turn-input-journal.js'
 import type { AssistantActiveTurnLiveProviderSteering } from '../turn-input.js'
 import type { AssistantProgressDelivery } from '../turn-progress.js'
+import type {
+  AssistantHostedGeneratedImageUploader,
+} from '../execution-context.js'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
 export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
@@ -70,6 +73,7 @@ export interface AssistantProviderTurnInput {
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   developerInstructions?: string | null
   env?: NodeJS.ProcessEnv
+  generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
   model?: string | null
   modelProvider?: string | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
@@ -77,9 +81,12 @@ export interface AssistantProviderTurnInput {
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   oss?: boolean | null
   profile?: string | null
+  providerFetch?: typeof fetch | null
+  providerRequestOrdinal?: number | null
   prompt?: string | null
   provider?: AssistantChatProvider | null
   reasoningEffort?: string | null
+  requireGeneratedImageUploader?: boolean | null
   resume?: AssistantProviderCodexResume | null
   sandbox?: AssistantSandbox | null
   sessionContext?: {
@@ -120,11 +127,15 @@ export interface AssistantProviderTurnExecutionInput {
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   env?: NodeJS.ProcessEnv
   developerInstructions?: string | null
+  generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   prompt?: string | null
   providerConfig: AssistantProviderConfig
+  providerFetch?: typeof fetch | null
+  providerRequestOrdinal?: number | null
+  requireGeneratedImageUploader?: boolean | null
   resume?: AssistantProviderCodexResume | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null
@@ -159,6 +170,13 @@ export interface AssistantProviderUsage {
   usageExtractionVersion?: string | null
 }
 
+export interface AssistantProviderUsageDraft {
+  provider: string
+  providerRequestOrdinal: number
+  providerRequestOutcome?: AssistantProviderRequestOutcome
+  usage: AssistantProviderUsage
+}
+
 export type AssistantProviderRequestOutcome =
   | 'aborted'
   | 'failed'
@@ -167,6 +185,7 @@ export type AssistantProviderRequestOutcome =
 
 export interface AssistantProviderTurnExecutionResult {
   codexRolloutRelativePath?: string | null
+  additionalUsages?: readonly AssistantProviderUsageDraft[] | null
   provider: AssistantChatProvider
   codexContinuation?: AssistantCodexContinuation
   codexThreadId: string | null
@@ -192,6 +211,7 @@ export type AssistantProviderTurnAttemptResult =
       result: AssistantProviderTurnExecutionResult
     }
   | {
+      additionalUsages?: readonly AssistantProviderUsageDraft[] | null
       error: unknown
       metadata: AssistantProviderAttemptMetadata
       ok: false

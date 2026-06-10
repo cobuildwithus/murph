@@ -857,29 +857,29 @@ describe('assistant experiment onboarding guidance', () => {
 })
 
 describe('assistant notification decision guidance', () => {
-  it('does not include normal conversation write-intent guidance', () => {
+  it('grants full read and write capability without the interactive chat logging-intent block', () => {
     const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput(),
     ).prompt
 
-    expect(prompt).toContain('This turn is a scheduled notification decision')
-    expect(prompt).toContain('read-only CLI commands before deciding')
     expect(prompt).toContain(
-      'The only write exception is self-disabling the current scheduled automation',
+      'You have the same full read and write tools as an interactive Murph turn.',
     )
     expect(prompt).toContain(
       'vault-cli automation set-status <lookup> --status archived',
     )
+    // The old read-only cage and write-exception-only language are gone.
+    expect(prompt).not.toContain('read-only CLI commands')
+    expect(prompt).not.toContain('The only write exception')
+    expect(prompt).not.toContain('Retrieval budget for session-support automations')
+    // Still must not pull in the interactive-chat implicit-logging block.
     expect(prompt).not.toContain('Normal conversation logging:')
     expect(prompt).not.toContain(
       'treat raw health, meal, supplement, workout, activity, symptom, body, or physical-state data as implicit logging intent',
     )
-    expect(prompt).not.toContain(
-      'Use the matching write surface directly for straightforward captures and memory updates',
-    )
   })
 
-  it('carves onboarding support automations out of deterministic followup due checks', () => {
+  it('grounds the reminder agent in current state with a stopping rule and the core invariants', () => {
     const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput({
         assistantContextSnapshotPrompt:
@@ -887,62 +887,55 @@ describe('assistant notification decision guidance', () => {
       }),
     ).prompt
 
+    // Outcome-first framing: decide whether to send, default to silence.
     expect(prompt).toContain(
-      'For experiment-related scheduled checks other than session-support, first-session prep, or first-week habit support, call `vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --format json` first.',
+      'decide whether this reminder still earns a send',
     )
-    expect(prompt).toContain('Session-support automations close the loop')
-    expect(prompt).toContain('not nagging reminders')
+    expect(prompt).toContain('Default to staying silent.')
+
+    // Full capability + ground in what the user actually did today.
     expect(prompt).toContain(
-      'call `vault-cli experiment followup due <id> --kind missed-log --date <sessionDate> --format json`',
-    )
-    expect(prompt).toContain('prior local session date')
-    expect(prompt).toContain(
-      'If the automation is pre-session, give compact guidance for what to do now.',
+      'You have the same full read and write tools as an interactive Murph turn.',
     )
     expect(prompt).toContain(
-      'If it is after-session missed-log recovery, ask one neutral question',
+      'ground yourself in what the user has actually done today',
+    )
+
+    // Retrieval budget as a stopping rule, plus the deterministic skip signal.
+    expect(prompt).toContain('read only what could change the decision, then stop')
+    expect(prompt).toContain(
+      '`vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --date <sessionDate> --format json` is the authoritative skip signal',
+    )
+
+    // Consolidated skip / send conditions (no per-type triplication).
+    expect(prompt).toContain(
+      'Skip when the run is inactive, reminders were declined or moved, the day\'s session or log is already complete, the plan no longer matches, the support window ended, or the user already did the thing.',
     )
     expect(prompt).toContain(
-      'Do not tell the user to remember to log later',
+      'Send only when due logic says notify, missing data blocks interpretation, a review is due, or safety needs outreach.',
+    )
+
+    // Good-message guidance as outcome, not an enumerated per-type list.
+    expect(prompt).toContain(
+      'A good message reflects what the user has already done and asks only for the genuine gap.',
+    )
+    expect(prompt).toContain('A first-timer gets a compact walkthrough, said once')
+    expect(prompt).toContain('not a re-explanation of a plan they know')
+
+    // The two true invariants from the incident.
+    expect(prompt).toContain(
+      'Never send a reminder that contradicts what the user already did today',
     )
     expect(prompt).toContain(
-      'Retrieval budget for session-support automations',
+      'ask one plain question they can answer in their own words, and derive the structured values like grams or totals yourself',
     )
-    expect(prompt).toContain(
-      'First-session prep automations are one-shot pre-session support, not missed-log or weekly-digest checks.',
-    )
-    expect(prompt).toContain(
-      'For first-session prep automations, do not call `experiment followup due`',
-    )
-    expect(prompt).toContain(
-      'read `vault-cli experiment show <id> --format json`, `vault-cli commons protocol show <key-or-route> --format json`, and `vault-cli experiment progress <id> --as-of <firstSessionDate> --format json` directly',
-    )
-    expect(prompt).toContain(
-      'skip if the run is inactive, completed intervention sessions are already present, the reminder was cancelled or moved, or the saved plan no longer matches the scheduled first session',
-    )
-    expect(prompt).toContain('Send the prep reminder when those direct checks pass.')
-    expect(prompt).toContain(
-      'The sent message must include a compact first-time walkthrough: what to do first, what to keep easy, the pain or stop rule, what Murph can capture automatically, what subjective details Murph may ask about later if needed, and the simplest way to answer.',
-    )
-    expect(prompt).toContain('Do not only offer to walk the user through it.')
-    expect(prompt).toContain(
-      'First-week habit support automations are bounded early support, not missed-log or weekly-digest checks.',
-    )
-    expect(prompt).toContain(
-      'For first-week support automations, do not call `experiment followup due`',
-    )
-    expect(prompt).toContain(
-      'read `vault-cli experiment show <id> --format json`, `vault-cli commons protocol show <key-or-route> --format json`, and `vault-cli experiment progress <id> --as-of <date> --format json` directly',
-    )
-    expect(prompt).toContain(
-      'skip if the experiment is inactive, the user declined or cancelled reminders, the scheduled session or log is already complete, the saved plan changed, or the first-week support window has ended',
-    )
-    expect(prompt).toContain(
-      'Send only a short reminder for that day: the planned action or baseline log, the safety stop rule when relevant, and what Murph can capture automatically or may ask about later if needed.',
-    )
-    expect(prompt).toContain(
-      'Default to skip for experiment notifications other than session-support, first-session prep, or first-week habit support unless the due check says `notify`',
-    )
+
+    // Delivery contract preserved.
+    expect(prompt).toContain('The platform delivers your structured output.')
+
+    // The old read-surface cages are gone.
+    expect(prompt).not.toContain('do not call `experiment followup due`')
+    expect(prompt).not.toContain('Retrieval budget for session-support automations')
   })
 })
 

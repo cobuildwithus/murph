@@ -22,6 +22,14 @@ starts a fresh thread for the same user turn instead of failing to reply.
 Provider-table authority should be passed as explicit `--config` process args
 by the provider path; those args are already part of launch identity.
 
+Known upstream limitation: Codex accepts dynamic tools only on `thread/start`
+and drops them to an empty list on a cold `thread/resume` (no resume or turn
+field re-sends them, and rollouts do not persist tool specs), so natively
+resumed threads after a process restart run without `murph.*` dynamic tools
+until the contract fingerprint forces a fresh thread. Warm same-process
+rejoins keep their tools. Fix belongs upstream; do not add Murph-side
+workarounds without a concrete product failure that traces attribute to this.
+
 Turn prompts, session ids, turn ids, and delivery routes are request data, not
 child process env. If a value should not affect warm reuse, keep it out of the
 Codex process env and pass it through RPC or a runtime-owned request seam.

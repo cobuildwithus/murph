@@ -135,7 +135,10 @@ import {
   resolveAssistantTurnRoute,
   resolveAssistantTurnRouteForMessage,
 } from "../src/assistant/service-turn-routes.ts";
-import { recordAssistantUsageEvent } from "../src/assistant/service-usage.ts";
+import {
+  recordAdditionalAssistantUsageEvents,
+  recordAssistantUsageEvent,
+} from "../src/assistant/service-usage.ts";
 import { ASSISTANT_TRANSCRIPT_AUDIT_TEXT_PREFIX } from "../src/assistant/transcript-audit.ts";
 import { persistAssistantTurnAndSession } from "../src/assistant/turn-finalizer.ts";
 
@@ -585,6 +588,87 @@ describe("assistant usage recording seam", () => {
         usageExtractionSourcePath: "params.usage",
         usageExtractionVersion: "codex-usage-v1",
     });
+  });
+
+  it("records each additional usage draft with its own provider, ordinal, and credential source", async () => {
+    const recordUsage = vi.fn(async () => undefined);
+    seamMocks.resolveAssistantUsageCredentialSource
+      .mockReset()
+      .mockReturnValue("platform");
+
+    await recordAdditionalAssistantUsageEvents({
+      additionalUsages: [
+        {
+          provider: "openai-images",
+          providerRequestOrdinal: 2,
+          providerRequestOutcome: "succeeded",
+          usage: {
+            apiKeyEnv: "OPENAI_API_KEY",
+            baseUrl: "https://api.openai.com/v1",
+            cacheWriteTokens: null,
+            cachedInputTokens: null,
+            inputTokens: 7,
+            outputTokens: 11,
+            providerMetadataJson: null,
+            providerName: "OpenAI Images",
+            providerRequestId: "req_image_notification",
+            rawUsageJson: null,
+            reasoningTokens: null,
+            requestedModel: "gpt-image-2",
+            servedModel: null,
+            totalTokens: 18,
+          },
+        },
+      ],
+      effectiveEnv: { OPENAI_API_KEY: "" },
+      executionContext: {
+        hosted: {
+          memberId: "member-42",
+          usageRecorder: { recordUsage },
+          userEnvKeys: [],
+        },
+      },
+      providerResult: {
+        ...createProviderResult(),
+        usageAttribution: {
+          credentialSource: "member" as const,
+          environment: "test",
+          featureKey: "assistant-turn",
+          gatewayTags: [],
+          reportingUserId: null,
+          surface: "assistant",
+          stripeMeterSource: "murph" as const,
+          triggerKind: "user-message",
+        },
+      },
+      turnId: "turn-additional",
+    });
+
+    expect(
+      seamMocks.resolveAssistantUsageCredentialSource,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKeyEnv: "OPENAI_API_KEY",
+        effectiveEnv: { OPENAI_API_KEY: "" },
+        provider: "openai-images",
+      }),
+    );
+    expect(recordUsage).toHaveBeenCalledTimes(1);
+    expect(recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        credentialSource: "platform",
+        inputTokens: 7,
+        outputTokens: 11,
+        provider: "openai-images",
+        providerName: "OpenAI Images",
+        providerRequestId: "req_image_notification",
+        providerRequestOrdinal: 2,
+        providerRequestOutcome: "succeeded",
+        requestedModel: "gpt-image-2",
+        totalTokens: 18,
+        turnId: "turn-additional",
+      }),
+    );
   });
 
   it("uses Codex provider options without legacy credential headers for fallback hosted usage attribution", async () => {
