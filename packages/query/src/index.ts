@@ -92,9 +92,16 @@ export type {
 } from "./overview.ts";
 export {
   analyzeExperimentOutcome,
+  collectExperimentAdherenceCalendar,
   decideExperimentFollowupDue,
   summarizeExperimentProgress,
 } from "./experiments.ts";
+export { buildExperimentProgressCard } from "./experiment-progress-card.ts";
+export type {
+  BuildExperimentProgressCardOptions,
+  ExperimentProgressCardBuildResult,
+  ExperimentProgressCardConfounderInput,
+} from "./experiment-progress-card.ts";
 export {
   synthesizeLegacySessionAdherenceTargets,
 } from "./experiment-adherence.ts";
