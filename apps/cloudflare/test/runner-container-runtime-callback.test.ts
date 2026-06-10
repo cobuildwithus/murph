@@ -66,42 +66,32 @@ describe("RunnerContainer internal runtime dispatch", () => {
     expect(destroy).not.toHaveBeenCalled();
   });
 
-  it("activity expiry destroys the warm shell without dispatching a checkpoint job", async () => {
-    const storage = createContainerStorageDouble();
-    const destroy = vi.fn(async () => {});
-    const containerFetch = vi.fn(async (url: string) => {
-      if (url.endsWith("/health")) {
-        return new Response(JSON.stringify(createRunnerHealthResult()), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
-        });
-      }
-
-      return new Response(JSON.stringify(createRunnerResult({
+  it("early activity expiry renews the warm shell without dispatching a checkpoint job", async () => {
+    const renewActivityTimeout = vi.fn();
+    const { container, containerFetch, destroy } = createActivityExpiryContainerDouble({
+      renewActivityTimeout,
+      resultOverrides: {
         nextWakeAt: "2026-04-27T00:10:00.000Z",
-      })), {
-        headers: { "content-type": "application/json; charset=utf-8" },
-        status: 200,
-      });
+      },
     });
-    let status: "running" | "stopped" = "stopped";
-    const container = new RunnerContainer({
-      storage,
-    } as never, {} as never);
-    Object.assign(container, {
-      containerFetch,
-      destroy: vi.fn(async () => {
-        status = "stopped";
-        await destroy();
-      }),
-      getState: vi.fn(async () => ({
-          lastChange: Date.now(),
-          status,
-      })),
-      startAndWaitForPorts: vi.fn(async () => {
-        status = "running";
-      }),
+
+    await container.invoke({
+      job: createWorkspaceRunnerJob("member_123"),
+      timeoutMs: 5_000,
+      userId: "member_123",
     });
+    containerFetch.mockClear();
+    renewActivityTimeout.mockClear();
+
+    await expect(container.onActivityExpired()).resolves.toBeUndefined();
+
+    expect(countPostedRunnerRequests(containerFetch)).toBe(0);
+    expect(destroy).not.toHaveBeenCalled();
+    expect(renewActivityTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it("activity expiry cleans up when the platform timeout cannot be renewed", async () => {
+    const { container, containerFetch, destroy } = createActivityExpiryContainerDouble();
 
     await container.invoke({
       job: createWorkspaceRunnerJob("member_123"),
@@ -131,6 +121,54 @@ function createWorkspaceRunnerJob(userId: string): HostedExecutionWorkspaceInvoc
         HOSTED_ASSISTANT_MODEL: "gpt-test",
       },
     },
+  };
+}
+
+function createActivityExpiryContainerDouble(input: {
+  renewActivityTimeout?: ReturnType<typeof vi.fn>;
+  resultOverrides?: Record<string, unknown>;
+} = {}) {
+  const storage = createContainerStorageDouble();
+  const destroy = vi.fn(async () => {});
+  const containerFetch = vi.fn(async (url: string) => {
+    if (url.endsWith("/health")) {
+      return new Response(JSON.stringify(createRunnerHealthResult()), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    }
+
+    return new Response(JSON.stringify(createRunnerResult(input.resultOverrides)), {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 200,
+    });
+  });
+  let status: "running" | "stopped" = "stopped";
+  const container = new RunnerContainer({
+    storage,
+  } as never, {} as never);
+  Object.assign(container, {
+    containerFetch,
+    destroy: vi.fn(async () => {
+      status = "stopped";
+      await destroy();
+    }),
+    getState: vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    })),
+    ...(input.renewActivityTimeout
+      ? { renewActivityTimeout: input.renewActivityTimeout }
+      : {}),
+    startAndWaitForPorts: vi.fn(async () => {
+      status = "running";
+    }),
+  });
+
+  return {
+    container,
+    containerFetch,
+    destroy,
   };
 }
 
