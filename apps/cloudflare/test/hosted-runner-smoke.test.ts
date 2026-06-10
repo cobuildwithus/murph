@@ -82,6 +82,8 @@ describe("runHostedRunnerSmokeDetailed", () => {
       queueMicrotask(() => {
         child.stdout.end(
           JSON.stringify({
+            audioNormalizedMp3Bytes: 9216,
+            audioPreparedWavBytes: 35328,
             childCwdIsIsolated: options.cwd.includes("hosted-runner-smoke-launch-"),
             codexAppServerHelpBytes: 2048,
             codexCommandDiscovered: true,
@@ -108,9 +110,6 @@ describe("runHostedRunnerSmokeDetailed", () => {
               "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
             ],
             murphCommandDiscovered: true,
-            normalizedTranscriptMatchesExpectedSnippet: true,
-            normalizedTranscriptProviderId: "whisper.cpp",
-            normalizedTranscriptSha256: "c".repeat(64),
             operatorHomeRebound: true,
             pdfParserProviderId: "poppler.pdf",
             pdfTextSha256: "b".repeat(64),
@@ -122,9 +121,6 @@ describe("runHostedRunnerSmokeDetailed", () => {
             vaultCliCommandDiscovered: true,
             vaultRootRebound: true,
             vaultShowBytes: 128,
-            wavTranscriptMatchesExpectedSnippet: true,
-            wavTranscriptProviderId: "whisper.cpp",
-            wavTranscriptSha256: "a".repeat(64),
           }),
         );
         child.emit("close", 0);
@@ -136,7 +132,6 @@ describe("runHostedRunnerSmokeDetailed", () => {
     try {
       const result = await module.runHostedRunnerSmokeDetailed({
         bundle: "bundle-base64",
-        expectedTranscriptSnippet: "hello",
         expectedVaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
         wavRelativePath: "raw/smoke/hosted-runner.wav",
       });
@@ -162,11 +157,11 @@ describe("runHostedRunnerSmokeDetailed", () => {
       expect(result.codexVersion).toBe("codex-cli 0.125.0");
       expect(result.healthCommonsFinnishDrySaunaTitle).toBe("Finnish Dry Sauna");
       expect(result.murphCommandDiscovered).toBe(true);
-      expect(result.normalizedTranscriptSha256).toBe("c".repeat(64));
+      expect(result.audioNormalizedMp3Bytes).toBe(9216);
+      expect(result.audioPreparedWavBytes).toBe(35328);
       expect(result.pdfParserProviderId).toBe("poppler.pdf");
       expect(result.pythonVersion).toBe("Python 3.11.2");
       expect(result.ripgrepVersion).toBe("ripgrep 13.0.0");
-      expect(result.wavTranscriptProviderId).toBe("whisper.cpp");
       expect(processKillSpy).toHaveBeenCalledWith(-5252, "SIGKILL");
     } finally {
       for (const [key, value] of restoredEnv) {

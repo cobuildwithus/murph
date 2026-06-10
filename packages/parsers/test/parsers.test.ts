@@ -3458,3 +3458,207 @@ test("attachment parse worker redacts local paths from stored failure messages",
 
   pipeline.close();
 });
+
+test("configured parser registry transcribes audio through a configured remote transcription endpoint", async () => {
+  const { createServer } = await import("node:http");
+  const vaultRoot = await makeTempDirectory("murph-parser-toolchain-remote-transcription");
+  const toolsDirectory = await makeTempDirectory("murph-parser-toolchain-remote-transcription-bin");
+  const audioPath = await writeExternalFile(toolsDirectory, "voice.wav", "wav-placeholder");
+  const requests: Array<{ contentType: string | undefined; method: string | undefined }> = [];
+  const server = createServer((request, response) => {
+    let bodyBytes = 0;
+    request.on("data", (chunk: Buffer) => {
+      bodyBytes += chunk.byteLength;
+    });
+    request.on("end", () => {
+      requests.push({
+        contentType: request.headers["content-type"],
+        method: request.method,
+      });
+      assert.equal(bodyBytes > 0, true);
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({
+        durationMs: 1_200,
+        language: "en",
+        segments: [{ endMs: 1_200, startMs: 0, text: "remote transcript ok" }],
+        text: "remote transcript ok",
+      }));
+    });
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.equal(typeof address === "object" && address !== null, true);
+  const endpoint = `http://127.0.0.1:${(address as { port: number }).port}/v1/transcribe`;
+
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-13T12:00:00.000Z",
+  });
+
+  try {
+    const configured = await createConfiguredParserRegistry({
+      allowEnvToolchain: false,
+      allowSystemToolchainLookup: false,
+      readVaultToolchainConfig: false,
+      toolchain: {
+        source: "platform",
+        tools: {
+          transcription: {
+            endpoint,
+          },
+        },
+      },
+      vaultRoot,
+    });
+
+    assert.deepEqual(configured.doctor.tools.transcription, {
+      available: true,
+      command: null,
+      endpoint,
+      source: "platform",
+      reason: "Remote transcription endpoint configured.",
+    });
+    assert.equal(configured.doctor.tools.whisper.available, false);
+
+    const run = await configured.registry.run({
+      intent: "attachment_text",
+      artifact: {
+        captureId: "cap_remote_transcription_registry",
+        attachmentId: "att_remote_transcription_registry",
+        kind: "audio",
+        fileName: "voice.wav",
+        mime: "audio/wav",
+        storedPath: "raw/inbox/example/voice.wav",
+        absolutePath: audioPath,
+      },
+      inputPath: audioPath,
+      preparedKind: "audio",
+      scratchDirectory: toolsDirectory,
+    });
+
+    assert.equal(run.selection.provider.id, "remote-transcription");
+    assert.equal(run.result.text, "remote transcript ok");
+    assert.equal(run.result.metadata?.durationMs, 1_200);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]?.method, "POST");
+    assert.equal(requests[0]?.contentType, "audio/wav");
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+    await fs.rm(vaultRoot, { recursive: true, force: true });
+    await fs.rm(toolsDirectory, { recursive: true, force: true });
+  }
+});
+
+test("parser toolchain config persists, merges, and validates transcription endpoints", async () => {
+  const vaultRoot = await makeTempDirectory("murph-parser-toolchain-transcription-config");
+  const endpoint = "https://transcribe.example.test/v1/transcribe";
+  const replacementEndpoint = "http://127.0.0.1:8788/v1/transcribe";
+
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-13T12:00:00.000Z",
+  });
+
+  try {
+    const written = await writeParserToolchainConfig({
+      vaultRoot,
+      now: new Date("2026-03-13T12:34:56.000Z"),
+      tools: {
+        transcription: {
+          endpoint,
+        },
+      },
+    });
+    assert.deepEqual(written.config.tools.transcription, { endpoint });
+
+    const loaded = await readParserToolchainConfig(vaultRoot);
+    assert.ok(loaded);
+    assert.deepEqual(loaded.config.tools.transcription, { endpoint });
+
+    const doctor = await discoverParserToolchain({ vaultRoot });
+    assert.deepEqual(doctor.tools.transcription, {
+      available: true,
+      command: null,
+      endpoint,
+      source: "config",
+      reason: "Remote transcription endpoint configured.",
+    });
+
+    const replaced = await writeParserToolchainConfig({
+      vaultRoot,
+      tools: {
+        transcription: {
+          endpoint: ` ${replacementEndpoint} `,
+        },
+      },
+    });
+    assert.deepEqual(replaced.config.tools.transcription, {
+      endpoint: replacementEndpoint,
+    });
+
+    const deleted = await writeParserToolchainConfig({
+      vaultRoot,
+      tools: {
+        transcription: {
+          endpoint: null,
+        },
+      },
+    });
+    assert.equal(deleted.config.tools.transcription, undefined);
+    const reloaded = await readParserToolchainConfig(vaultRoot);
+    assert.ok(reloaded);
+    assert.equal(reloaded.config.tools.transcription, undefined);
+    const missingDoctor = await discoverParserToolchain({ vaultRoot });
+    assert.deepEqual(missingDoctor.tools.transcription, {
+      available: false,
+      command: null,
+      endpoint: null,
+      source: "missing",
+      reason: "Remote transcription endpoint is not configured.",
+    });
+
+    await writeParserToolchainConfig({
+      vaultRoot,
+      tools: {
+        transcription: {
+          endpoint,
+        },
+      },
+    });
+    const { configPath } = getParserToolchainPaths(vaultRoot);
+    const persisted = await fs.readFile(configPath, "utf8");
+    assert.equal(persisted.includes(endpoint), true);
+
+    await fs.writeFile(configPath, persisted.replaceAll(endpoint, "not-a-url"), "utf8");
+    await assert.rejects(
+      readParserToolchainConfig(vaultRoot),
+      /Parser tool "transcription" endpoint must be an absolute http\(s\) URL\./u,
+    );
+
+    await fs.writeFile(
+      configPath,
+      persisted.replaceAll(`"${endpoint}"`, `"ftp://transcribe.example.test/v1"`),
+      "utf8",
+    );
+    await assert.rejects(
+      readParserToolchainConfig(vaultRoot),
+      /Parser tool "transcription" endpoint must be an absolute http\(s\) URL\./u,
+    );
+
+    await fs.writeFile(
+      configPath,
+      persisted.replaceAll(`"${endpoint}"`, "42"),
+      "utf8",
+    );
+    await assert.rejects(
+      readParserToolchainConfig(vaultRoot),
+      /Parser tool "transcription" endpoint must be a string, null, or omitted\./u,
+    );
+  } finally {
+    await fs.rm(vaultRoot, { recursive: true, force: true });
+  }
+});

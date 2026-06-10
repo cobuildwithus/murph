@@ -165,7 +165,7 @@ Opt-in runtime integrations:
 - `JUNCTION_RECONCILE_INTERVAL_MS`
 - `JUNCTION_REQUEST_TIMEOUT_MS`
 
-Native parser binaries and the default Whisper model are owned by the runner image and passed to the hosted runtime through explicit parser toolchain config, not deploy-time env overrides.
+Native parser binaries are owned by the runner image and passed to the hosted runtime through explicit parser toolchain config, not deploy-time env overrides. Hosted audio transcription has no in-image model: the parser toolchain points at the Worker-mediated `murph-transcribe.worker` host and the Worker calls the Workers AI `AI` binding (`@cf/openai/whisper-large-v3-turbo`).
 
 Device-sync provider runtime overrides:
 
@@ -293,36 +293,17 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-codex0.135.0-base-en`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.135.0`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
-It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex`, `jq`, `ripgrep`, `ffmpeg`, `whisper.cpp`, the default Whisper model, and PDF tooling from Poppler plus `file`, `qpdf`, and MuPDF tools, but no app bundle or worker secrets.
-`runner:docker:base` first reuses a GHCR-published base image when its source-fingerprint label matches the checked-out `Dockerfile.cloudflare-hosted-runner-base`; otherwise it rebuilds locally. Pass `-- --force` to rebuild from the checked-out Dockerfile without adopting a GHCR base image; deploy-capable production paths use that forced path so GHCR stays a CI/local cache instead of production image authority. The default Whisper model comes from the pinned `ghcr.io/cobuildwithus/murph-whisper-model` image and is still verified by SHA-256 inside the base build. Forced source rebuilds still need read access to that pinned GHCR model image, so local operators should run `docker login ghcr.io` unless the package is public. Pull-request hosted-local E2E does not authenticate to GHCR before running PR-controlled code, so the GHCR runner base and Whisper model packages must be public for fast anonymous PR cache/model pulls. `Dockerfile.cloudflare-whisper-model` is the only place that fetches the upstream Hugging Face model, and the protected-main `.github/workflows/cloudflare-runner-base-image.yml` workflow publishes that mirror image plus the full base image with `GITHUB_TOKEN`.
+It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex`, `jq`, `ripgrep`, `ffmpeg`, and PDF tooling from Poppler plus `file`, `qpdf`, and MuPDF tools, but no app bundle, worker secrets, or local speech models.
+`runner:docker:base` first reuses a GHCR-published base image when its source-fingerprint label matches the checked-out `Dockerfile.cloudflare-hosted-runner-base`; otherwise it rebuilds locally. Pass `-- --force` to rebuild from the checked-out Dockerfile without adopting a GHCR base image; deploy-capable production paths use that forced path so GHCR stays a CI/local cache instead of production image authority. Pull-request hosted-local E2E does not authenticate to GHCR before running PR-controlled code, so the GHCR runner base package must be public for fast anonymous PR cache pulls. The protected-main `.github/workflows/cloudflare-runner-base-image.yml` workflow publishes the base image with `GITHUB_TOKEN`.
 The base image build runs `python3 --version`, `python --version`, `jq --version`, `rg --version`, `zstd --version`, `codex --version`, `codex app-server --help`, and `codex doctor --help` under the runner user, and the Docker smoke repeats the Python and ripgrep checks inside the final image before deploy while also proving `file`, `pdfinfo`, `pdftotext`, `pdftoppm`, `qpdf`, and `mutool` against the restored smoke PDF fixture.
 Run `pnpm --dir apps/cloudflare test:e2e:runner-python:local` when you specifically want the actual final hosted-runner app image `PATH` proof for Python. It assembles the runner bundle, builds the same `linux/amd64` app-layer Dockerfile used by the Cloudflare container, starts the image with its normal entrypoint, waits for `/health`, then checks Python as the non-root `runner` user from immutable `/app` with the baked runner env. Run `pnpm --dir apps/cloudflare runner:docker:smoke` when you want the broader final-image native smoke.
 
-For Whisper model bumps, publish the new pinned GHCR model tag before opening or
-rerunning a pull request that changes `WHISPER_MODEL_IMAGE` or
-`WHISPER_MODEL_SHA256`. From the exact branch that updates
-`Dockerfile.cloudflare-whisper-model`, an operator with GHCR package write access
-can run:
-
-```bash
-docker login ghcr.io
-docker buildx build \
-  --platform linux/amd64 \
-  --file Dockerfile.cloudflare-whisper-model \
-  --tag ghcr.io/cobuildwithus/murph-whisper-model:ggml-base-en-sha256-<sha256> \
-  --push \
-  .
-```
-
-After first publish, make the GHCR model and runner base packages public so PR
-CI can use anonymous pulls without exposing package credentials to PR-controlled
-commands. The protected-main publish workflow skips the model build when the
-pinned model image tag already exists, so ordinary base-image refreshes do not
-hit Hugging Face.
+After first publish, make the GHCR runner base package public so PR CI can use
+anonymous pulls without exposing package credentials to PR-controlled commands.
 
 When you need to backstop lifecycle rules locally or in CI:
 

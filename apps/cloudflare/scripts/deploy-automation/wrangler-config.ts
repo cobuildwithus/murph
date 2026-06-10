@@ -127,6 +127,9 @@ export function buildHostedWranglerDeployConfig(
         preview_bucket_name: environment.bundlesPreviewBucketName,
       },
     ],
+    ai: {
+      binding: "AI",
+    },
     ...(sendEmailBindings.length > 0
       ? {
           send_email: sendEmailBindings,

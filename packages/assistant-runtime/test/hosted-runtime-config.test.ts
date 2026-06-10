@@ -71,6 +71,67 @@ describe("parseHostedAssistantRuntimeConfig", () => {
       );
   });
 
+  it("parses hosted transcription endpoints and trims surrounding whitespace", () => {
+    const parsed = parseHostedAssistantRuntimeConfig({
+      parserToolchain: {
+        tools: {
+          transcription: {
+            endpoint: "  http://murph-transcribe.worker/v1/transcribe  ",
+          },
+        },
+      },
+    });
+
+    expect(parsed.parserToolchain).toEqual({
+      tools: {
+        transcription: {
+          endpoint: "http://murph-transcribe.worker/v1/transcribe",
+        },
+      },
+    });
+  });
+
+  it("rejects non-absolute and non-http(s) hosted transcription endpoints", () => {
+    expect(() =>
+      parseHostedAssistantRuntimeConfig({
+        parserToolchain: {
+          tools: {
+            transcription: {
+              endpoint: "v1/transcribe",
+            },
+          },
+        },
+      })).toThrow(
+        /parserToolchain\.tools\.transcription\.endpoint must be an absolute http\(s\) URL/u,
+      );
+
+    expect(() =>
+      parseHostedAssistantRuntimeConfig({
+        parserToolchain: {
+          tools: {
+            transcription: {
+              endpoint: "ftp://murph-transcribe.worker/v1/transcribe",
+            },
+          },
+        },
+      })).toThrow(
+        /parserToolchain\.tools\.transcription\.endpoint must be an absolute http\(s\) URL/u,
+      );
+
+    expect(() =>
+      parseHostedAssistantRuntimeConfig({
+        parserToolchain: {
+          tools: {
+            transcription: {
+              endpoint: null,
+            },
+          },
+        },
+      })).toThrow(
+        /parserToolchain\.tools\.transcription\.endpoint must be a non-empty string/u,
+      );
+  });
+
   it("rejects parserToolchain:null", () => {
     expect(() =>
       parseHostedAssistantRuntimeConfig({

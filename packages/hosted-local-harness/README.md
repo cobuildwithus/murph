@@ -49,10 +49,7 @@ cold CI hosts it first tries the GHCR-published fingerprinted base image, then
 falls back to a local build. Use
 `pnpm --dir apps/cloudflare runner:docker:base -- --force` to force a rebuild.
 Pull-request CI does not authenticate to GHCR before running PR-controlled code,
-so the GHCR runner base and Whisper model packages must be public for anonymous
-cache/model pulls there. Before a pull request changes the pinned Whisper model
-tag or SHA, prepublish that new model tag from the branch's
-`Dockerfile.cloudflare-whisper-model` as described in `apps/cloudflare/DEPLOY.md`.
+so the GHCR runner base package must be public for anonymous cache pulls there.
 
 ## State files
 

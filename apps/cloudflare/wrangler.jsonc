@@ -75,6 +75,9 @@
       "preview_bucket_name": "murph-hosted-bundles-preview"
     }
   ],
+  "ai": {
+    "binding": "AI"
+  },
   "send_email": [
     {
       "name": "HOSTED_EMAIL"
