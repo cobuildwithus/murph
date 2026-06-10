@@ -7,6 +7,13 @@ on:
       - main
   workflow_dispatch:
 
+# One CI run per ref per workflow: a new push to a PR cancels the superseded
+# run immediately, freeing org-level concurrency slots. Pushes to main never
+# cancel an in-progress run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -29,9 +36,6 @@ jobs:
     name: Build hosted runner bundle
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    concurrency:
-      group: cloudflare-hosted-e2e-runner-bundle-${{ github.event.pull_request.number || github.ref || github.run_id }}
-      cancel-in-progress: true
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -90,9 +94,6 @@ jobs:
           --health-retries 10
         ports:
           - 5432:5432
-    concurrency:
-      group: cloudflare-hosted-e2e-device-connect-${{ github.event.pull_request.number || github.ref || github.run_id }}
-      cancel-in-progress: true
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -159,9 +160,6 @@ jobs:
           --health-retries 10
         ports:
           - 5432:5432
-    concurrency:
-      group: cloudflare-hosted-e2e-linq-${{ github.event.pull_request.number || github.ref || github.run_id }}
-      cancel-in-progress: true
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -228,9 +226,6 @@ jobs:
           --health-retries 10
         ports:
           - 5432:5432
-    concurrency:
-      group: cloudflare-hosted-e2e-codex-image-media-${{ github.event.pull_request.number || github.ref || github.run_id }}
-      cancel-in-progress: true
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -297,9 +292,6 @@ jobs:
           --health-retries 10
         ports:
           - 5432:5432
-    concurrency:
-      group: cloudflare-hosted-e2e-linq-scheduled-reminder-${{ github.event.pull_request.number || github.ref || github.run_id }}
-      cancel-in-progress: true
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -366,9 +358,6 @@ jobs:
           --health-retries 10
         ports:
           - 5432:5432
-    concurrency:
-      group: cloudflare-hosted-e2e-idle-checkpoint-${{ github.event.pull_request.number || github.ref || github.run_id }}
-      cancel-in-progress: true
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -444,9 +433,6 @@ jobs:
           --health-retries 10
         ports:
           - 5432:5432
-    concurrency:
-      group: cloudflare-hosted-e2e-temporal-orchestration-${{ github.event.pull_request.number || github.ref || github.run_id }}
-      cancel-in-progress: true
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -513,9 +499,6 @@ jobs:
           --health-retries 10
         ports:
           - 5432:5432
-    concurrency:
-      group: cloudflare-hosted-e2e-telegram-${{ github.event.pull_request.number || github.ref || github.run_id }}
-      cancel-in-progress: true
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:

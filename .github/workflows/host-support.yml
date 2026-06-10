@@ -6,6 +6,13 @@ on:
     branches:
       - main
 
+# One CI run per ref per workflow: a new push to a PR cancels the superseded
+# run immediately, freeing org-level concurrency slots. Pushes to main never
+# cancel an in-progress run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -107,22 +114,39 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
+      # Three shards balanced so each job's test wall clock roughly matches the
+      # slowest single package lane (the CLI suite, ~5 minutes). Fewer, fuller
+      # shards keep per-job checkout/install overhead and org-level concurrency
+      # slot usage down; the org concurrency cap is the real CI bottleneck.
       matrix:
         include:
-          - shard: assistant-engine
-            packages: packages/assistant-engine
           - shard: cli
             packages: packages/cli
-          - shard: assistant-runtime-setup-operator
-            packages: packages/assistant-runtime packages/setup-cli packages/operator-config
-          - shard: core-query-usecases
-            packages: packages/core packages/query packages/vault-usecases
-          - shard: device-inbox-runtime
-            packages: packages/device-syncd packages/inboxd packages/importers packages/runtime-state
-          - shard: assistant-hosted
-            packages: packages/assistant-cli packages/assistantd packages/hosted-execution
-          - shard: small-packages
-            packages: packages/cloudflare-hosted-control packages/contracts packages/gateway-core packages/inbox-services packages/messaging-ingress packages/openclaw-plugin packages/parsers
+          - shard: assistant
+            packages: >-
+              packages/assistant-engine
+              packages/assistant-cli
+              packages/assistantd
+              packages/hosted-execution
+          - shard: platform
+            packages: >-
+              packages/assistant-runtime
+              packages/setup-cli
+              packages/operator-config
+              packages/core
+              packages/query
+              packages/vault-usecases
+              packages/device-syncd
+              packages/inboxd
+              packages/importers
+              packages/runtime-state
+              packages/cloudflare-hosted-control
+              packages/contracts
+              packages/gateway-core
+              packages/inbox-services
+              packages/messaging-ingress
+              packages/openclaw-plugin
+              packages/parsers
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
