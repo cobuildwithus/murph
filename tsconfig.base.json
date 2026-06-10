@@ -91,6 +91,9 @@
       "@murphai/hosted-execution/temporal-env": [
         "packages/hosted-execution/src/temporal-env.ts"
       ],
+      "@murphai/hosted-execution/vault-share": [
+        "packages/hosted-execution/src/vault-share.ts"
+      ],
       "@murphai/hosted-execution/*": [
         "packages/hosted-execution/src/*"
       ],
