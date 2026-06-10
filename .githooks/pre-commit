@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Keep generated CLI artifacts in sync with the CLI config surface.
+#
+# CI ("Release package coverage (cli)") fails when
+# packages/cli/config.schema.json or packages/cli/src/incur.generated.ts drift
+# from the generator output. When a commit touches packages/cli/, regenerate
+# those artifacts and re-stage them so a stale copy can never be committed.
+#
+# Installed by the root `prepare` script (sets core.hooksPath=.githooks).
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+
+# Fast no-op unless the staged change touches the CLI package.
+if ! git diff --cached --name-only | grep -q '^packages/cli/'; then
+  exit 0
+fi
+
+if ! pnpm --dir "$repo_root/packages/cli" gen:config-schema >/dev/null 2>&1; then
+  echo "pre-commit: CLI config-schema generation failed; commit continues, CI will verify." >&2
+  exit 0
+fi
+
+if ! git -C "$repo_root" diff --quiet -- \
+  packages/cli/config.schema.json packages/cli/src/incur.generated.ts; then
+  git -C "$repo_root" add \
+    packages/cli/config.schema.json packages/cli/src/incur.generated.ts
+  echo "pre-commit: regenerated CLI config schema and re-staged it." >&2
+fi
