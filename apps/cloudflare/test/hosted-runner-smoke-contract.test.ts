@@ -11,6 +11,8 @@ import {
 } from "../src/hosted-runner-smoke-contract.js";
 
 const validHostedRunnerSmokeResult = {
+  audioNormalizedMp3Bytes: 9216,
+  audioPreparedWavBytes: 35328,
   childCwdIsIsolated: true,
   codexAppServerHelpBytes: 2048,
   codexCommandDiscovered: true,
@@ -34,9 +36,6 @@ const validHostedRunnerSmokeResult = {
     "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
   ],
   murphCommandDiscovered: true,
-  normalizedTranscriptMatchesExpectedSnippet: true,
-  normalizedTranscriptProviderId: "whisper.cpp",
-  normalizedTranscriptSha256: "c".repeat(64),
   operatorHomeRebound: true,
   pdfParserProviderId: "poppler.pdf",
   pdfTextSha256: "b".repeat(64),
@@ -48,21 +47,16 @@ const validHostedRunnerSmokeResult = {
   vaultCliCommandDiscovered: true,
   vaultRootRebound: true,
   vaultShowBytes: 128,
-  wavTranscriptMatchesExpectedSnippet: true,
-  wavTranscriptProviderId: "whisper.cpp",
-  wavTranscriptSha256: "a".repeat(64),
 } as const;
 
 describe("parseHostedRunnerSmokeInput", () => {
   it("accepts the local smoke payload shape", () => {
     expect(parseHostedRunnerSmokeInput({
       bundle: "bundle-base64",
-      expectedTranscriptSnippet: "hello",
       expectedVaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
       wavRelativePath: "raw/smoke/hosted-runner.wav",
     })).toEqual({
       bundle: "bundle-base64",
-      expectedTranscriptSnippet: "hello",
       expectedVaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
       wavRelativePath: "raw/smoke/hosted-runner.wav",
     });
@@ -71,7 +65,6 @@ describe("parseHostedRunnerSmokeInput", () => {
   it("rejects empty required strings", () => {
     expect(() => parseHostedRunnerSmokeInput({
       bundle: "  ",
-      expectedTranscriptSnippet: null,
       expectedVaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
       wavRelativePath: "raw/smoke/hosted-runner.wav",
     })).toThrow("Hosted runner smoke input.bundle must be a non-empty string.");
@@ -81,6 +74,8 @@ describe("parseHostedRunnerSmokeInput", () => {
 describe("parseHostedRunnerSmokeResult", () => {
   it("accepts the in-image smoke result shape", () => {
     expect(parseHostedRunnerSmokeResult(validHostedRunnerSmokeResult)).toMatchObject({
+      audioNormalizedMp3Bytes: 9216,
+      audioPreparedWavBytes: 35328,
       childCwdIsIsolated: true,
       codexAppServerHelpBytes: 2048,
       codexCommandDiscovered: true,
@@ -95,7 +90,6 @@ describe("parseHostedRunnerSmokeResult", () => {
       codexHostedShellVaultCliLlmsBytes: 4096,
       codexVersion: "codex-cli 0.125.0",
       murphCommandDiscovered: true,
-      normalizedTranscriptSha256: "c".repeat(64),
       operatorHomeRebound: true,
       pdfParserProviderId: "poppler.pdf",
       pdfTextSha256: "b".repeat(64),
@@ -113,7 +107,6 @@ describe("parseHostedRunnerSmokeResult", () => {
       vaultCliCommandDiscovered: true,
       vaultRootRebound: true,
       vaultShowBytes: 128,
-      wavTranscriptProviderId: "whisper.cpp",
     });
   });
 
@@ -255,9 +248,16 @@ describe("parseHostedRunnerSmokeResult", () => {
 
     expect(() => parseHostedRunnerSmokeResult({
       ...validHostedRunnerSmokeResult,
-      wavTranscriptSha256: "raw transcript text",
+      audioNormalizedMp3Bytes: 0,
     })).toThrow(
-      "Hosted runner smoke result.wavTranscriptSha256 must be a SHA-256 hex string.",
+      "Hosted runner smoke result.audioNormalizedMp3Bytes must be a positive finite number.",
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      audioPreparedWavBytes: 0,
+    })).toThrow(
+      "Hosted runner smoke result.audioPreparedWavBytes must be a positive finite number.",
     );
 
     expect(() => parseHostedRunnerSmokeResult({
@@ -275,13 +275,11 @@ describe("parseHostedRunnerSmokeResult", () => {
       "codexHostedConfigShellEnvironmentPolicyAllowlisted",
       "codexHostedCliSchemaVaultOptionHidden",
       "murphCommandDiscovered",
-      "normalizedTranscriptMatchesExpectedSnippet",
       "operatorHomeRebound",
       "reportedVaultIdMatchesExpected",
       "ripgrepCommandDiscovered",
       "vaultCliCommandDiscovered",
       "vaultRootRebound",
-      "wavTranscriptMatchesExpectedSnippet",
     ] as const;
 
     for (const field of trueProofFields) {

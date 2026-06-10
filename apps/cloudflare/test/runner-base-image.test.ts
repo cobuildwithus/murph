@@ -21,11 +21,8 @@ vi.mock("node:fs/promises", () => ({
   readFile: vi.fn(),
 }));
 
-const whisperModelImage =
-  "ghcr.io/cobuildwithus/murph-whisper-model:ggml-base-en-sha256-a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002";
 const dockerfileText = [
   "FROM node:24.14.1",
-  `ARG WHISPER_MODEL_IMAGE=${whisperModelImage}`,
   "RUN codex app-server --help",
   "",
 ].join("\n");
@@ -75,7 +72,6 @@ describe("runner base image preparation", () => {
       { status: 0, stdout: "old-fingerprint\n" },
       { status: 1, stderr: "manifest unknown\n" },
       { status: 1, stderr: "manifest unknown\n" },
-      { status: 0 },
     ]);
 
     const result = await prepareRunnerBaseImage();
@@ -95,11 +91,6 @@ describe("runner base image preparation", () => {
         "org.opencontainers.image.source=https://github.com/cobuildwithus/murph",
       ]),
       expect.objectContaining({ stdio: "inherit" }),
-    );
-    expect(spawnSync).toHaveBeenCalledWith(
-      "docker",
-      ["pull", "--platform", "linux/amd64", whisperModelImage],
-      expect.objectContaining({ stdio: ["ignore", "ignore", "pipe"] }),
     );
   });
 
@@ -191,16 +182,11 @@ describe("runner base image preparation", () => {
   it("pushes stable and fingerprinted GHCR image tags when publishing", async () => {
     const { prepareRunnerBaseImage } = await import("../scripts/runner-base-image.ts");
     const fingerprint = expectedFingerprint();
-    mockDockerSyncResults([{ status: 0 }]);
 
     const result = await prepareRunnerBaseImage({ push: true });
 
     expect(result.status).toBe("pushed");
-    expect(spawnSync).toHaveBeenCalledWith(
-      "docker",
-      ["pull", "--platform", "linux/amd64", whisperModelImage],
-      expect.objectContaining({ stdio: ["ignore", "ignore", "pipe"] }),
-    );
+    expect(spawnSync).not.toHaveBeenCalled();
     expect(spawn).toHaveBeenCalledWith(
       "docker",
       expect.arrayContaining([
@@ -218,16 +204,11 @@ describe("runner base image preparation", () => {
 
   it("rebuilds the Docker image when forced even if the fingerprint matches", async () => {
     const { prepareRunnerBaseImage } = await import("../scripts/runner-base-image.ts");
-    mockDockerSyncResults([{ status: 0 }]);
 
     const result = await prepareRunnerBaseImage({ force: true });
 
     expect(result.status).toBe("built");
-    expect(spawnSync).toHaveBeenCalledWith(
-      "docker",
-      ["pull", "--platform", "linux/amd64", whisperModelImage],
-      expect.objectContaining({ stdio: ["ignore", "ignore", "pipe"] }),
-    );
+    expect(spawnSync).not.toHaveBeenCalled();
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 });
