@@ -150,3 +150,13 @@ Conclusion: the regenerated candidate artifact is clean for the read-only checks
 - BREAKTHROUGH: the ~2k "image-failed" rows were largely a SELECTOR bug, not missing data. The facts-panel image is on the page but deep in the gallery and named/alt'd without "facts" in the filename. The fix: score candidate images by (a) ALT-TEXT facts language ("Serving Size", "Amount Per Serving", "Supplement Facts", "Daily Value") — strongest signal — and (b) `SFP` (Supplement Facts Panel) filename suffix. Old top-5-by-filename selector missed both.
 - Validated by reading panels directly: Force Factor D3/Maca MAX/L-Taurine/Complete Eye Health all read perfectly. Re-running image OCR with the fixed selector: yield jumped from 7-29% to **93-97%** on SFP brands (force-factor, bluebonnet), ~18-22% on the mid-pool tail.
 - Recovered ~340+ rows so far across fix1-fix5; loop continuing through the 2,198-row re-try pool. Structured **91.2% → 92.6%** and climbing. The fixed selector is in scripts/context-dev-image-fetch.py (FACTS_ALT + SFP scoring).
+
+### Wave 12 result — image-selector fix recovers the false floor (2026-06-10)
+
+- The fixed selector (alt-text + SFP) re-ran across the full image pool + a retry pass (context.dev rate-limited ~50%/forward batch, so the retry rounds caught the rest). Yield: 93-97% on SFP brands (force-factor, then **bluebonnet 176/183 in the retry — the exact brand earlier wrongly called the unrecoverable floor**), ~16-30% mid-pool, ~3-9% on the sports/foreign tail (raw-nutrition/first-phorm anchor poorly).
+- Recovered ~760 image rows total this wave. Structured **91.2% → 94.2%** (23,786 / 25,251). Remaining 1,465 unstructured are genuinely image-less brands (natures-plus ~116 yielded 0 — facts not published as a readable image) + the anchor-failing sports/foreign tail.
+- LESSON: never trust a single selector's "no facts image" as proof of absence. Score candidate images by ALT-TEXT facts language and SFP filename, pull a wide window, and treat context.dev rate-limit scrape_errors as retryable (multiple passes catch different rows).
+
+### Final session result
+
+- Structured `brand_site` rows: **7,063 → 23,786** (+16,723; **27% → 94.2%**, ~3.4x). Total brand_site 25,251 (479 non-supplements removed). The selector fix alone reclaimed ~760 rows previously written off as image-only floor.
