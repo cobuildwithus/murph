@@ -892,6 +892,95 @@ test("device sync store keeps source instances distinct and lists them determini
   }
 });
 
+test("device sync store preserves omitted source error detail while errored and clears it on recovery", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-source-error-detail");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const connection = store.upsertAccount({
+      provider: "aggregator",
+      externalAccountId: "aggregator-source-error-detail",
+      displayName: "Aggregator",
+      scopes: [],
+      credential: {
+        kind: "none",
+      },
+      metadata: {},
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+
+    const errored = store.upsertConnectionSource({
+      connectionId: connection.id,
+      sourceInstanceKey: "src_whoop_hash_a",
+      sourceProviderSlug: "whoop_v2",
+      status: "error",
+      lastErrorCode: "token_refresh_failed",
+      lastErrorMessage: "WHOOP rejected the refresh token.",
+      lastSeenAt: "2026-04-07T01:00:00.000Z",
+    });
+
+    assert.equal(errored.lastErrorCode, "token_refresh_failed");
+    assert.equal(errored.lastErrorMessage, "WHOOP rejected the refresh token.");
+
+    // Still errored with the error keys omitted: existing detail is preserved.
+    const stillErrored = store.upsertConnectionSource({
+      connectionId: connection.id,
+      sourceInstanceKey: "src_whoop_hash_a",
+      sourceProviderSlug: "whoop_v2",
+      status: "error",
+      lastSeenAt: "2026-04-07T02:00:00.000Z",
+    });
+
+    assert.equal(stillErrored.lastErrorCode, "token_refresh_failed");
+    assert.equal(stillErrored.lastErrorMessage, "WHOOP rejected the refresh token.");
+
+    // Recovery with the error keys omitted: stale detail auto-clears.
+    const recovered = store.upsertConnectionSource({
+      connectionId: connection.id,
+      sourceInstanceKey: "src_whoop_hash_a",
+      sourceProviderSlug: "whoop_v2",
+      status: "connected",
+      lastSeenAt: "2026-04-07T03:00:00.000Z",
+    });
+
+    assert.equal(recovered.lastErrorCode, null);
+    assert.equal(recovered.lastErrorMessage, null);
+
+    // The store rejects over-length error fields, which is why projections
+    // must truncate to 80/240 before persisting.
+    assert.throws(
+      () =>
+        store.upsertConnectionSource({
+          connectionId: connection.id,
+          sourceInstanceKey: "src_whoop_hash_a",
+          sourceProviderSlug: "whoop_v2",
+          status: "error",
+          lastErrorCode: "x".repeat(81),
+          lastSeenAt: "2026-04-07T04:00:00.000Z",
+        }),
+      /lastErrorCode must be 80 characters or fewer\./u,
+    );
+    assert.throws(
+      () =>
+        store.upsertConnectionSource({
+          connectionId: connection.id,
+          sourceInstanceKey: "src_whoop_hash_a",
+          sourceProviderSlug: "whoop_v2",
+          status: "error",
+          lastErrorMessage: "x".repeat(241),
+          lastSeenAt: "2026-04-07T04:00:00.000Z",
+        }),
+      /lastErrorMessage must be 240 characters or fewer\./u,
+    );
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store cascades source projection rows when the parent connection is deleted", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-source-cascade");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
