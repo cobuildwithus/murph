@@ -20,6 +20,9 @@ env:
   HOSTED_MAILBOX_FINGERPRINT_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
   NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
   PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key
+  # The runner-bundle workspace build defaults to a fully serial
+  # `--workspace-concurrency=1`; CI runners have 4 vCPUs, so build in parallel.
+  MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "4"
 
 jobs:
   junction-wearable-direct-resource-replay:
