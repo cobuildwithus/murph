@@ -28,7 +28,8 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/PRODUCT_SENSE.md` | Product behavior guardrails for implementation work. | Current product behavior | High | 2026-05-13 |
 | `agent-docs/PRODUCT_CONSTITUTION.md` | Internal product constitution and tradeoff rules. | Product principles | High | 2026-04-22 |
 | `agent-docs/FRONTEND.md` | Frontend implementation guidance for `apps/web`, including design-system sources (`PRODUCT.md`, `DESIGN.md`) and UI workflow rules. | Current frontend implementation guidance | Medium | 2026-04-24 |
-| `agent-docs/product-marketing-context.md` | Product marketing context: positioning, audience, differentiation, customer language, brand voice, and the protocol outcome graph. | Product/marketing decisions | High | 2026-05-13 |
+| `agent-docs/product-marketing-context.md` | Product marketing context: positioning, audience, differentiation, customer language, brand voice, and the protocol outcome graph. Rewritten 2026-06-10 around the group-challenge wedge with fact/hypothesis/target-state labels. | Product/marketing decisions | High | 2026-06-10 |
+| `agent-docs/user-interviews.md` | User-interview kit: cardinal rules, prospective-user and existing-user scripts, question swaps, signal lists, Murph-specific probes, after-call synthesis template. Based on Gustaf Alströmer's YC talk + PG. | User research method | Medium | 2026-06-10 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
 | `agent-docs/RELIABILITY.md` | Reliability guardrails and failure-mode expectations. | Runtime reliability policy | High | 2026-06-09 |
 | `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules, including Cloudflare immediate-deploy Blacksmith secret access and Worker-owned hosted generated-image uploads. | Security policy | High | 2026-06-09 |
