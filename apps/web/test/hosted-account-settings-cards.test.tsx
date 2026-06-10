@@ -26,7 +26,7 @@ describe("HostedAccountSettingsCards", () => {
     expect(withPhone).toContain("sms:+15550100001");
   });
 
-  test("shows the private Murph email alias after the member has one", () => {
+  test("shows a private Murph email action after the member has one", () => {
     const markup = renderToStaticMarkup(
       React.createElement(HostedAccountSettingsCards, {
         account: {
@@ -41,8 +41,10 @@ describe("HostedAccountSettingsCards", () => {
     );
 
     expect(markup).toContain("member@example.com");
-    expect(markup).toContain("Email murph+u2-private-alias@mail.example.test");
+    expect(markup).toContain("Email Murph");
     expect(markup).toContain("mailto:murph+u2-private-alias@mail.example.test");
+    expect(markup).not.toContain("Email Murph at murph+u2-private-alias@mail.example.test");
+    expect(markup).not.toContain("Email murph+u2-private-alias@mail.example.test");
     expect(markup).not.toContain("murph@mail.withmurph.ai");
   });
 

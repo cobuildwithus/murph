@@ -73,9 +73,9 @@ export function HostedAccountSettingsCards({
           meta={emailAddress && murphEmailAddress ? (
             <SettingsContactLink
               href={`mailto:${murphEmailAddress}`}
-              label={`Email Murph at ${murphEmailAddress}`}
+              label="Email Murph"
             >
-              Email {murphEmailAddress}
+              Email Murph
             </SettingsContactLink>
           ) : null}
           action={
