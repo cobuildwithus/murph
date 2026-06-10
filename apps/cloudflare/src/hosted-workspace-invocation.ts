@@ -65,7 +65,7 @@ const HOSTED_RUNNER_WARM_LAUNCHER_DIRECTORY_NAMES = [
 export interface HostedWorkspaceInvocationOptions {
   dispatch?: {
     invokeReceivedAtEpochMs?: number;
-    containerStartRequestedAtEpochMs?: number;
+    containerEnsureReadyStartedAtEpochMs?: number;
   } | null;
   nodeStartupMs?: number | null;
   onRuntimeWakeReady?: (sendWake: () => boolean) => void;

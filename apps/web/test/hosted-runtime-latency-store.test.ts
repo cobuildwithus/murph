@@ -262,7 +262,7 @@ describe("hosted runtime latency dashboard store", () => {
         schemaVersion: 1,
         dispatch: {
           invokeReceivedAtEpochMs: 1_777_000_000_000,
-          containerStartRequestedAtEpochMs: 1_777_000_000_050,
+          containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
         },
         restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
         boot: { nodeStartupMs: 4200, restoreWasCold: true },
@@ -277,7 +277,7 @@ describe("hosted runtime latency dashboard store", () => {
       schemaVersion: 1,
       dispatch: {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
-        containerStartRequestedAtEpochMs: 1_777_000_000_050,
+        containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
       },
       restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
       boot: { nodeStartupMs: 4200, restoreWasCold: true },
@@ -304,7 +304,7 @@ describe("hosted runtime latency dashboard store", () => {
       schemaVersion: 1,
       dispatch: {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
-        containerStartRequestedAtEpochMs: 1_777_000_000_050,
+        containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
       },
       restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
       boot: { nodeStartupMs: 4200, restoreWasCold: true },
@@ -329,7 +329,7 @@ describe("hosted runtime latency dashboard store", () => {
       schemaVersion: 1,
       dispatch: {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
-        containerStartRequestedAtEpochMs: 1_777_000_000_050,
+        containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
       },
       restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
       boot: { nodeStartupMs: 4200, restoreWasCold: true },

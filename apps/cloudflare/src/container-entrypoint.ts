@@ -875,19 +875,19 @@ function writeJsonResponse(
 // job; these stamps are diagnostics, not authority.
 function readHostedContainerDispatchMilestones(
   request: IncomingMessage,
-): { invokeReceivedAtEpochMs?: number; containerStartRequestedAtEpochMs?: number } | null {
+): { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null {
   const invokeReceivedAtEpochMs = readDispatchEpochMs(
     request.headers["x-dispatch-invoke-received-at-ms"],
   );
-  const containerStartRequestedAtEpochMs = readDispatchEpochMs(
-    request.headers["x-dispatch-container-start-requested-at-ms"],
+  const containerEnsureReadyStartedAtEpochMs = readDispatchEpochMs(
+    request.headers["x-dispatch-container-ensure-ready-started-at-ms"],
   );
-  if (invokeReceivedAtEpochMs === null && containerStartRequestedAtEpochMs === null) {
+  if (invokeReceivedAtEpochMs === null && containerEnsureReadyStartedAtEpochMs === null) {
     return null;
   }
   return {
     ...(invokeReceivedAtEpochMs === null ? {} : { invokeReceivedAtEpochMs }),
-    ...(containerStartRequestedAtEpochMs === null ? {} : { containerStartRequestedAtEpochMs }),
+    ...(containerEnsureReadyStartedAtEpochMs === null ? {} : { containerEnsureReadyStartedAtEpochMs }),
   };
 }
 
@@ -2187,7 +2187,7 @@ async function runHostedWorkspaceInvocation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
-    dispatch?: { invokeReceivedAtEpochMs?: number; containerStartRequestedAtEpochMs?: number } | null;
+    dispatch?: { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null;
     nodeStartupMs?: number | null;
     onRuntimeWakeReady?: (sendWake: () => boolean) => void;
     runnerJobAcceptedAt?: string | null;
@@ -2210,7 +2210,7 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
-    dispatch?: { invokeReceivedAtEpochMs?: number; containerStartRequestedAtEpochMs?: number } | null;
+    dispatch?: { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null;
     nodeStartupMs?: number | null;
     onCleanupStatus?: (status: Exclude<HostedContainerCleanupStatus, "not_run">) => void;
     onRuntimeWakeReady?: (sendWake: () => boolean) => void;

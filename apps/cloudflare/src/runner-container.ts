@@ -850,7 +850,7 @@ export class RunnerContainer extends Container {
         phase: "container.starting",
         userId: routeUserId,
       });
-      const dispatchContainerStartRequestedAtEpochMs = Date.now();
+      const dispatchContainerEnsureReadyStartedAtEpochMs = Date.now();
       await this.ensureContainerReady(input, operationAbortController.signal);
       this.clearRecentReadinessProof();
       cleanupWarmContainerOnFailure = true;
@@ -877,8 +877,8 @@ export class RunnerContainer extends Container {
           headers: {
             "content-type": "application/json; charset=utf-8",
             "x-dispatch-invoke-received-at-ms": String(dispatchInvokeReceivedAtEpochMs),
-            "x-dispatch-container-start-requested-at-ms": String(
-              dispatchContainerStartRequestedAtEpochMs,
+            "x-dispatch-container-ensure-ready-started-at-ms": String(
+              dispatchContainerEnsureReadyStartedAtEpochMs,
             ),
           },
           method: "POST",

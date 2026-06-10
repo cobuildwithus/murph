@@ -260,7 +260,7 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS = new Set([
 ]);
 const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_DISPATCH_KEYS = new Set([
   "invokeReceivedAtEpochMs",
-  "containerStartRequestedAtEpochMs",
+  "containerEnsureReadyStartedAtEpochMs",
 ]);
 const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_RESTORE_KEYS = new Set([
   "sizeGuardMs",
@@ -813,7 +813,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     );
     breakdown.dispatch = {
       ...requireOptionalNonNegativeInteger(dispatch, "invokeReceivedAtEpochMs", dispatchLabel),
-      ...requireOptionalNonNegativeInteger(dispatch, "containerStartRequestedAtEpochMs", dispatchLabel),
+      ...requireOptionalNonNegativeInteger(dispatch, "containerEnsureReadyStartedAtEpochMs", dispatchLabel),
     };
   }
 

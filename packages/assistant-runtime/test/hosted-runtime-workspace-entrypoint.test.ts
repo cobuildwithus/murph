@@ -1487,7 +1487,7 @@ describe("hosted workspace runtime entrypoint", () => {
               schemaVersion: 1,
               dispatch: {
                 invokeReceivedAtEpochMs: 1_777_000_000_000,
-                containerStartRequestedAtEpochMs: 1_777_000_000_050,
+                containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
               },
               boot: { nodeStartupMs: 4321 },
             },
@@ -1519,7 +1519,7 @@ describe("hosted workspace runtime entrypoint", () => {
             schemaVersion: 1,
             dispatch: {
               invokeReceivedAtEpochMs: 1_777_000_000_000,
-              containerStartRequestedAtEpochMs: 1_777_000_000_050,
+              containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
             },
             boot: expect.objectContaining({
               nodeStartupMs: 4321,

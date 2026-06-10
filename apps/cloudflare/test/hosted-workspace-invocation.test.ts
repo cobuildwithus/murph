@@ -367,7 +367,7 @@ describe("runHostedWorkspaceInvocation", () => {
     // Dispatch + cold node startup: both land in the same schemaVersion 1 breakdown.
     await runHostedWorkspaceInvocation(createJob("attempt_dispatch_with_boot"), {
       dispatch: {
-        containerStartRequestedAtEpochMs: 1_777_000_000_050,
+        containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
         invokeReceivedAtEpochMs: 1_777_000_000_000,
       },
       nodeStartupMs: 4200,
@@ -378,7 +378,7 @@ describe("runHostedWorkspaceInvocation", () => {
       phaseBreakdown: {
         schemaVersion: 1,
         dispatch: {
-          containerStartRequestedAtEpochMs: 1_777_000_000_050,
+          containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
           invokeReceivedAtEpochMs: 1_777_000_000_000,
         },
         boot: { nodeStartupMs: 4200 },

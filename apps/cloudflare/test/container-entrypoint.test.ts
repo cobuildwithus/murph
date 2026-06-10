@@ -1456,7 +1456,7 @@ describe("startHostedContainerEntrypoint", () => {
 
       // Both stamps valid: parsed into options.dispatch as epoch-ms integers.
       const both = await sendInvocation("evt_dispatch_headers_valid", {
-        "x-dispatch-container-start-requested-at-ms": "1777000000050",
+        "x-dispatch-container-ensure-ready-started-at-ms": "1777000000050",
         "x-dispatch-invoke-received-at-ms": "1777000000000",
       });
       expect(both.status).toBe(200);
@@ -1465,14 +1465,14 @@ describe("startHostedContainerEntrypoint", () => {
       // non-numeric stamp disappears while the valid one survives, and the job
       // itself is never failed by a bad header.
       const partial = await sendInvocation("evt_dispatch_headers_partial", {
-        "x-dispatch-container-start-requested-at-ms": "1777000000050",
+        "x-dispatch-container-ensure-ready-started-at-ms": "1777000000050",
         "x-dispatch-invoke-received-at-ms": "not-a-number",
       });
       expect(partial.status).toBe(200);
 
       // All invalid (non-numeric, negative): no dispatch object at all.
       const invalid = await sendInvocation("evt_dispatch_headers_invalid", {
-        "x-dispatch-container-start-requested-at-ms": "-5",
+        "x-dispatch-container-ensure-ready-started-at-ms": "-5",
         "x-dispatch-invoke-received-at-ms": "soon",
       });
       expect(invalid.status).toBe(200);
@@ -1483,11 +1483,11 @@ describe("startHostedContainerEntrypoint", () => {
 
       expect(runnerSpy).toHaveBeenCalledTimes(4);
       expect(runnerSpy.mock.calls[0]?.[1]?.dispatch).toEqual({
-        containerStartRequestedAtEpochMs: 1_777_000_000_050,
+        containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
         invokeReceivedAtEpochMs: 1_777_000_000_000,
       });
       expect(runnerSpy.mock.calls[1]?.[1]?.dispatch).toEqual({
-        containerStartRequestedAtEpochMs: 1_777_000_000_050,
+        containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
       });
       expect(runnerSpy.mock.calls[2]?.[1]?.dispatch ?? null).toBeNull();
       expect(runnerSpy.mock.calls[3]?.[1]?.dispatch ?? null).toBeNull();

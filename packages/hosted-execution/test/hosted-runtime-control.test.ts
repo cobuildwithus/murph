@@ -720,7 +720,7 @@ describe("hosted runtime control contracts", () => {
       schemaVersion: 1,
       dispatch: {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
-        containerStartRequestedAtEpochMs: 1_777_000_000_050,
+        containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
       },
       restore: {
         sizeGuardMs: 1,
@@ -819,7 +819,7 @@ describe("hosted runtime control contracts", () => {
     for (const unsafeDispatch of [
       { invokeReceivedAtEpochMs: 1, routedThroughColo: 1 }, // unknown sub key
       { invokeReceivedAtEpochMs: 1.5 }, // non-integer leaf
-      { containerStartRequestedAtEpochMs: -1 }, // negative leaf
+      { containerEnsureReadyStartedAtEpochMs: -1 }, // negative leaf
       { invokeReceivedAtEpochMs: "1777000000000" }, // string leaf
     ]) {
       const parsed = parseHostedRuntimeLatencyTraceRequest({

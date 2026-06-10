@@ -8,14 +8,6 @@ ARG HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-bundle
 
 COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/
 
-# Warm Node's on-disk compile cache at image build so cold container boots read
-# precompiled V8 bytecode instead of re-parsing the unbundled dist/node_modules
-# tree. The guarded import evaluates the entrypoint module graph without
-# starting the server (isHostedContainerCliEntrypoint() is false for -e runs).
-# The cache becomes read-only below; runtime cache writes are best-effort no-ops.
-ENV NODE_COMPILE_CACHE=/app/.node-compile-cache
-RUN cd /app && node --input-type=module -e "await import('/app/dist/container-entrypoint.js');"
-
 RUN chmod -R a-w /app \
   && chmod -R a+rX /app
 
