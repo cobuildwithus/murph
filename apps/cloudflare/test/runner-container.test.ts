@@ -1831,52 +1831,127 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it("does not renew or keep the warm shell when activity expiry fires after work completed", async () => {
-    const renewActivityTimeout = vi.fn();
-    const { container, containerFetch, destroy, startAndWaitForPorts } = createContainerDouble();
-    Object.assign(container, {
-      renewActivityTimeout,
-    });
+  it("renews and keeps the warm shell when activity expiry fires before idle TTL", async () => {
+    vi.useFakeTimers();
 
-    await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_stale_activity_first"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    });
-    renewActivityTimeout.mockClear();
+    try {
+      const renewActivityTimeout = vi.fn();
+      const { container, containerFetch, destroy, startAndWaitForPorts } =
+        createContainerDouble();
+      Object.assign(container, {
+        renewActivityTimeout,
+      });
 
-    await container.onActivityExpired();
-    expect(destroy).toHaveBeenCalledTimes(1);
-    expect(renewActivityTimeout).not.toHaveBeenCalled();
+      vi.setSystemTime(new Date("2026-06-04T03:56:40.000Z"));
+      await container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_recent_activity_first"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+      renewActivityTimeout.mockClear();
 
-    await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_stale_activity_second"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    });
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
-    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
-      String(url).endsWith("/internal/workspace-invocation")
-    );
-    expect(executeCalls[0]?.[1]?.headers).toEqual({
-      "content-type": "application/json; charset=utf-8",
-    });
-    expect(executeCalls[1]?.[1]?.headers).toEqual({
-      "content-type": "application/json; charset=utf-8",
-    });
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "container",
-        message: "Hosted execution container activity expired; running cleanup.",
-        phase: "container.ready",
-      }),
-    );
+      vi.setSystemTime(new Date("2026-06-04T03:56:42.000Z"));
+      await container.onActivityExpired();
+      expect(destroy).not.toHaveBeenCalled();
+      expect(renewActivityTimeout).toHaveBeenCalledTimes(1);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            activeWorkspaceInvocationPresent: false,
+            idleTtlDeltaMs: -298_000,
+            lifecycleStage: "activity-expired-early-renew",
+            runnerIdleTtlMs: 300_000,
+          }),
+          message:
+            "Hosted execution container activity expiry arrived before the idle TTL elapsed; renewing.",
+          phase: "container.ready",
+        }),
+      );
+
+      await container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_recent_activity_second"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+      const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+        String(url).endsWith("/internal/workspace-invocation")
+      );
+      expect(executeCalls[0]?.[1]?.headers).toEqual({
+        "content-type": "application/json; charset=utf-8",
+      });
+      expect(executeCalls[1]?.[1]?.headers).toEqual({
+        "content-type": "application/json; charset=utf-8",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cleans up when early activity-expiry renewal throws", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const renewActivityTimeout = vi.fn();
+      const { container, destroy } = createContainerDouble();
+      Object.assign(container, {
+        renewActivityTimeout,
+      });
+
+      vi.setSystemTime(new Date("2026-06-04T03:56:40.000Z"));
+      await container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_recent_activity_before_throw"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+
+      renewActivityTimeout.mockImplementation(() => {
+        throw new Error("activity timeout renewal failed");
+      });
+      vi.clearAllMocks();
+
+      vi.setSystemTime(new Date("2026-06-04T03:56:42.000Z"));
+      await container.onActivityExpired();
+
+      expect(renewActivityTimeout).toHaveBeenCalledTimes(1);
+      expect(destroy).toHaveBeenCalledTimes(1);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            activityStage: "activity-expired-early-renew",
+          }),
+          level: "warn",
+          message: "Hosted execution container failed to renew activity timeout.",
+          phase: "container.ready",
+        }),
+      );
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            idleTtlDeltaMs: -298_000,
+            lifecycleStage: "activity-expired-cleanup",
+            runnerIdleTtlMs: 300_000,
+          }),
+          message: "Hosted execution container activity expired; running cleanup.",
+          phase: "container.ready",
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("renews the activity timeout during long runner invocations", async () => {

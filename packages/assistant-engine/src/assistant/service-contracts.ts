@@ -191,6 +191,9 @@ export type { ResolvedAssistantSession }
 export type {
   AssistantChannelTypingDependencies,
   AssistantExecutionContext,
+  AssistantGeneratedImageContentType,
+  AssistantHostedGeneratedImageUploadInput,
+  AssistantHostedGeneratedImageUploader,
   AssistantHostedExecutionContext,
   AssistantHostedProgressDeliveryDependencies,
 } from './execution-context.js'

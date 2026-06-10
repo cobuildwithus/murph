@@ -13,6 +13,7 @@ export const HOSTED_WORKER_REQUIRED_SECRET_NAMES = [
 ] as const;
 
 export const HOSTED_WORKER_OPTIONAL_SECRET_NAMES = [
+  "CLOUDFLARE_IMAGES_API_KEY",
   "DEVICE_SYNC_SECRET",
   ...deviceSyncProviderRuntimeSecretEnvKeys,
   "HOSTED_AI_USAGE_REPORTING_SECRET",

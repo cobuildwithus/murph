@@ -1055,7 +1055,7 @@ function copyAssistantProviderTokenDetails(
   }
 }
 
-function hashAssistantProviderStableJson(value: unknown): string {
+export function hashAssistantProviderStableJson(value: unknown): string {
   return `sha256:${createHash('sha256')
     .update(stableStringifyAssistantProviderJson(value))
     .digest('hex')}`
