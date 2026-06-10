@@ -47,10 +47,7 @@ describe("settings privacy delete route", () => {
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.parseHostedAccountDeletionRequest.mockReturnValue({
-      acknowledgedIrreversibleDeletion: true,
-      acknowledgedProviderAndBackupLimits: true,
-      confirmationPhrase: "DELETE MY MURPH DATA",
-      secondConfirmationAccepted: true,
+      confirmationPhrase: "DELETE MY ACCOUNT",
     });
     mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
       member: {
@@ -73,10 +70,7 @@ describe("settings privacy delete route", () => {
   it("uses member auth, not active-member auth, before deleting account data", async () => {
     const request = new Request("https://join.example.test/api/settings/privacy/delete", {
       body: JSON.stringify({
-        acknowledgedIrreversibleDeletion: true,
-        acknowledgedProviderAndBackupLimits: true,
-        confirmationPhrase: "DELETE MY MURPH DATA",
-        secondConfirmationAccepted: true,
+        confirmationPhrase: "DELETE MY ACCOUNT",
       }),
       headers: {
         "Content-Type": "application/json",
@@ -91,10 +85,7 @@ describe("settings privacy delete route", () => {
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.parseHostedAccountDeletionRequest).toHaveBeenCalledWith({
-      acknowledgedIrreversibleDeletion: true,
-      acknowledgedProviderAndBackupLimits: true,
-      confirmationPhrase: "DELETE MY MURPH DATA",
-      secondConfirmationAccepted: true,
+      confirmationPhrase: "DELETE MY ACCOUNT",
     });
     expect(mocks.deleteHostedAccountData).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -122,16 +113,13 @@ describe("settings privacy delete route", () => {
       throw hostedOnboardingError({
         code: "ACCOUNT_DELETION_CONFIRMATION_PHRASE_REQUIRED",
         httpStatus: 400,
-        message: "Type DELETE MY MURPH DATA exactly to delete your Murph data.",
+        message: "Type DELETE MY ACCOUNT exactly to delete your account.",
       });
     });
 
     const request = new Request("https://join.example.test/api/settings/privacy/delete", {
       body: JSON.stringify({
-        acknowledgedIrreversibleDeletion: true,
-        acknowledgedProviderAndBackupLimits: true,
-        confirmationPhrase: "delete my data",
-        secondConfirmationAccepted: true,
+        confirmationPhrase: "delete my account",
       }),
       headers: {
         "Content-Type": "application/json",
@@ -154,11 +142,8 @@ describe("settings privacy delete route", () => {
   it("rejects oversized request bodies before parsing or deleting account data", async () => {
     const request = new Request("https://join.example.test/api/settings/privacy/delete", {
       body: JSON.stringify({
-        acknowledgedIrreversibleDeletion: true,
-        acknowledgedProviderAndBackupLimits: true,
-        confirmationPhrase: "DELETE MY MURPH DATA",
+        confirmationPhrase: "DELETE MY ACCOUNT",
         padding: "x".repeat(5_000),
-        secondConfirmationAccepted: true,
       }),
       headers: {
         "Content-Type": "application/json",
