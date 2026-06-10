@@ -220,7 +220,7 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
-  it("keeps hosted email send readiness false without the binding even when ingress config is present", () => {
+  it("forwards hosted email send readiness alongside ingress when email config is present", () => {
     expect(buildHostedRunnerContainerEnv({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
@@ -234,7 +234,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_INGRESS_READY: "true",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
-      HOSTED_EMAIL_SEND_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "true",
       NODE_ENV: "production",
     });
   });

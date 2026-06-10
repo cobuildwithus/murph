@@ -4404,6 +4404,331 @@ test("Junction source projection uses provider-level keys for slug-only sources"
   assert.equal(sources[0]?.resourceAvailabilitySummary.sourceInstanceKeyFallback, undefined);
 });
 
+test("Junction source projection persists provider error details for errored sources", async () => {
+  const longErrorMessage = `WHOOP rejected the refresh token. ${"detail ".repeat(60)}`;
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "whoop_v2",
+            name: "WHOOP",
+            status: "error",
+            error_details: {
+              error_type: "token_refresh_failed",
+              error_message: longErrorMessage,
+              errored_at: "2026-04-02T21:28:00+00:00",
+            },
+            resource_availability: {
+              sleep: true,
+            },
+          },
+          {
+            slug: "oura",
+            name: "Oura",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({ data: [] });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+  const context = createJunctionJobContext({
+    upsertConnectionSource: (input) => {
+      upserts.push(input);
+      return {
+        id: `src-${upserts.length}`,
+        connectionId: "acct-junction-1",
+        ...input,
+        displayName: input.displayName ?? null,
+        resourceAvailabilitySummary: input.resourceAvailabilitySummary ?? {},
+        lastErrorCode: input.lastErrorCode ?? null,
+        lastErrorMessage: input.lastErrorMessage ?? null,
+        firstSeenAt: input.firstSeenAt ?? input.lastSeenAt,
+        createdAt: input.lastSeenAt,
+        updatedAt: input.lastSeenAt,
+      };
+    },
+  });
+
+  await executeJunctionJob(
+    provider,
+    context,
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const erroredUpsert = upserts.find((input) => input.sourceProviderSlug === "whoop_v2");
+  assert.ok(erroredUpsert, "Errored WHOOP source should be projected.");
+  assert.equal(erroredUpsert.status, "error");
+  assert.equal(erroredUpsert.lastErrorCode, "token_refresh_failed");
+  assert.equal(erroredUpsert.lastErrorMessage?.length, 240);
+  assert.match(erroredUpsert.lastErrorMessage ?? "", /^WHOOP rejected the refresh token\./u);
+
+  const connectedUpsert = upserts.find((input) => input.sourceProviderSlug === "oura");
+  assert.ok(connectedUpsert, "Connected Oura source should be projected.");
+  assert.equal(connectedUpsert.status, "connected");
+  // Omitted keys let the store auto-clear stale error detail on recovery.
+  assert.equal(Object.hasOwn(connectedUpsert, "lastErrorCode"), false);
+  assert.equal(Object.hasOwn(connectedUpsert, "lastErrorMessage"), false);
+});
+
+test("Junction source projection drops error details when a sibling source entry is connected", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "whoop_v2",
+            name: "WHOOP",
+            status: "error",
+            error_details: {
+              error_type: "token_refresh_failed",
+              error_message: "WHOOP rejected the refresh token.",
+            },
+            resource_availability: {
+              sleep: true,
+            },
+          },
+          {
+            slug: "whoop_v2",
+            name: "WHOOP",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({ data: [] });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+  const context = createJunctionJobContext({
+    upsertConnectionSource: (input) => {
+      upserts.push(input);
+      return {
+        id: `src-${upserts.length}`,
+        connectionId: "acct-junction-1",
+        ...input,
+        displayName: input.displayName ?? null,
+        resourceAvailabilitySummary: input.resourceAvailabilitySummary ?? {},
+        lastErrorCode: input.lastErrorCode ?? null,
+        lastErrorMessage: input.lastErrorMessage ?? null,
+        firstSeenAt: input.firstSeenAt ?? input.lastSeenAt,
+        createdAt: input.lastSeenAt,
+        updatedAt: input.lastSeenAt,
+      };
+    },
+  });
+
+  await executeJunctionJob(
+    provider,
+    context,
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(upserts.length, 1);
+  assert.equal(upserts[0]?.sourceProviderSlug, "whoop_v2");
+  assert.equal(upserts[0]?.status, "connected");
+  assert.equal(Object.hasOwn(upserts[0] ?? {}, "lastErrorCode"), false);
+  assert.equal(Object.hasOwn(upserts[0] ?? {}, "lastErrorMessage"), false);
+});
+
+test("Junction source projection tolerates malformed error details and reads camelCase fields", async () => {
+  const longErrorType = `token_refresh_failed_${"x".repeat(100)}`;
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "whoop_v2",
+            name: "WHOOP",
+            status: "error",
+            error_details: "token refresh failed",
+            resource_availability: {
+              sleep: true,
+            },
+          },
+          {
+            slug: "oura",
+            name: "Oura",
+            status: "error",
+            error_details: {
+              error_type: "   ",
+              error_message: "",
+            },
+            resource_availability: {
+              activity: true,
+            },
+          },
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "error",
+            errorDetails: {
+              errorType: longErrorType,
+              errorMessage: "Garmin revoked access.",
+            },
+            resource_availability: {
+              activity: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({ data: [] });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+  const context = createJunctionJobContext({
+    upsertConnectionSource: (input) => {
+      upserts.push(input);
+      return {
+        id: `src-${upserts.length}`,
+        connectionId: "acct-junction-1",
+        ...input,
+        displayName: input.displayName ?? null,
+        resourceAvailabilitySummary: input.resourceAvailabilitySummary ?? {},
+        lastErrorCode: input.lastErrorCode ?? null,
+        lastErrorMessage: input.lastErrorMessage ?? null,
+        firstSeenAt: input.firstSeenAt ?? input.lastSeenAt,
+        createdAt: input.lastSeenAt,
+        updatedAt: input.lastSeenAt,
+      };
+    },
+  });
+
+  await executeJunctionJob(
+    provider,
+    context,
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  // Non-object error_details: errored projection keeps the status but omits
+  // the error keys so the store can preserve any previously stored detail.
+  const malformedUpsert = upserts.find((input) => input.sourceProviderSlug === "whoop_v2");
+  assert.ok(malformedUpsert, "Errored WHOOP source should be projected.");
+  assert.equal(malformedUpsert.status, "error");
+  assert.equal(Object.hasOwn(malformedUpsert, "lastErrorCode"), false);
+  assert.equal(Object.hasOwn(malformedUpsert, "lastErrorMessage"), false);
+
+  // All-blank error detail fields collapse to null details and omit the keys.
+  const blankUpsert = upserts.find((input) => input.sourceProviderSlug === "oura");
+  assert.ok(blankUpsert, "Errored Oura source should be projected.");
+  assert.equal(blankUpsert.status, "error");
+  assert.equal(Object.hasOwn(blankUpsert, "lastErrorCode"), false);
+  assert.equal(Object.hasOwn(blankUpsert, "lastErrorMessage"), false);
+
+  // camelCase errorDetails parse, and the code truncates to the 80-char bound.
+  const camelUpsert = upserts.find((input) => input.sourceProviderSlug === "garmin");
+  assert.ok(camelUpsert, "Errored Garmin source should be projected.");
+  assert.equal(camelUpsert.status, "error");
+  assert.equal(camelUpsert.lastErrorCode?.length, 80);
+  assert.match(camelUpsert.lastErrorCode ?? "", /^token_refresh_failed_x/u);
+  assert.equal(camelUpsert.lastErrorMessage, "Garmin revoked access.");
+});
+
+test("Junction source projection fills error details from a later errored sibling entry", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "whoop_v2",
+            name: "WHOOP",
+            status: "error",
+            resource_availability: {
+              sleep: true,
+            },
+          },
+          {
+            slug: "whoop_v2",
+            name: "WHOOP",
+            status: "error",
+            error_details: {
+              error_type: "token_refresh_failed",
+              error_message: "WHOOP rejected the refresh token.",
+            },
+            resource_availability: {
+              activity: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({ data: [] });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+  const context = createJunctionJobContext({
+    upsertConnectionSource: (input) => {
+      upserts.push(input);
+      return {
+        id: `src-${upserts.length}`,
+        connectionId: "acct-junction-1",
+        ...input,
+        displayName: input.displayName ?? null,
+        resourceAvailabilitySummary: input.resourceAvailabilitySummary ?? {},
+        lastErrorCode: input.lastErrorCode ?? null,
+        lastErrorMessage: input.lastErrorMessage ?? null,
+        firstSeenAt: input.firstSeenAt ?? input.lastSeenAt,
+        createdAt: input.lastSeenAt,
+        updatedAt: input.lastSeenAt,
+      };
+    },
+  });
+
+  await executeJunctionJob(
+    provider,
+    context,
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(upserts.length, 1);
+  assert.equal(upserts[0]?.sourceProviderSlug, "whoop_v2");
+  assert.equal(upserts[0]?.status, "error");
+  assert.equal(upserts[0]?.lastErrorCode, "token_refresh_failed");
+  assert.equal(upserts[0]?.lastErrorMessage, "WHOOP rejected the refresh token.");
+});
+
 test("Junction polling skips optional unavailable resource collections", async () => {
   const warnings: Record<string, unknown>[] = [];
   const importedSnapshots: unknown[] = [];
