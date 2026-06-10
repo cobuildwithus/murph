@@ -219,12 +219,12 @@ export function readHostedEmailCapabilities(
       parseHostedEmailCapabilityFlag(readHostedEmailEnvString(source, "HOSTED_EMAIL_INGRESS_READY"))
       ?? inferredIngressReady
     );
-  const inferredSendReady = inferredIngressReady && hasHostedEmailSendBindingValue(source.HOSTED_EMAIL);
-  const sendReady = ingressReady
-    && (
-      parseHostedEmailCapabilityFlag(readHostedEmailEnvString(source, "HOSTED_EMAIL_SEND_READY"))
-      ?? inferredSendReady
-    );
+  // Send capability tracks ingress: once email is configured (domain, sender,
+  // signing secret) the statically declared HOSTED_EMAIL send binding is always
+  // present. We deliberately do not gate on the live binding object — capabilities
+  // are recomputed in the runner from a stringified env where the binding object
+  // does not survive, which would otherwise leave send permanently unavailable.
+  const sendReady = ingressReady;
 
   return {
     ingressReady,
@@ -321,15 +321,6 @@ export function parseHostedEmailRouteResolutionCallbackResponse(
       "Hosted email route resolution callback response userId",
     ),
   };
-}
-
-function hasHostedEmailSendBindingValue(value: unknown): boolean {
-  return Boolean(
-    value
-      && typeof value === "object"
-      && "send" in value
-      && typeof (value as { send?: unknown }).send === "function",
-  );
 }
 
 function normalizeHostedEmailAddress(value: string | null | undefined): string | null {

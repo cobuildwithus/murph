@@ -105,9 +105,20 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
 export interface DeviceSyncJobFailureDiagnostic {
   accountId: string;
   accountStatus: DeviceSyncAccountStatus | null;
+  /** ISO timestamp of the failed attempt, when known. */
+  at?: string;
+  /** Attempt count of the failing job at execution time, when known. */
+  attempts?: number;
   code: string;
   details: DeviceSyncJobFailureDiagnosticDetails;
+  /** Job kind of the failing job (for example `resource`, `reconcile`), when known. */
+  jobKind?: string;
+  provider?: string;
+  /** Provider resource name from the failing job payload, when known. */
+  resource?: string;
   retryable: boolean;
+  /** Sanitized failure summary already passed through the shared redaction helpers. */
+  summary?: string;
 }
 
 export interface DeviceSyncHttpConfig {
