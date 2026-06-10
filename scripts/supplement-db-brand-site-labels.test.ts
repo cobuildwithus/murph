@@ -97,6 +97,24 @@ describe("supplement brand-site DB helper", () => {
     assert.doesNotMatch(searchText, /rawPageText/u);
   });
 
+  test("extracts serving sizes for approx amounts, or-ranges, and uncommon form nouns", () => {
+    const cases: Array<[string, string]> = [
+      ["Supplement Facts Serving Size: Approx. 2 Teaspoons (4 g) Servings Per Container 113", "2 Teaspoons (4 g)"],
+      ["Supplement Facts Serving Size: 1 or 2 Gummies, Servings Per Container: 60 or 30", "1 or 2 Gummies"],
+      ["Supplement Facts Serving Size 1 Tea Bag Servings Per Container 24", "1 Tea Bag"],
+      ["Supplement Facts Serving Size 3 Mini Softgels, Servings Per Container 50", "3 Mini Softgels"],
+      ["Supplement Facts Serving Size 2 Soft Chews, Servings Per Container 30", "2 Soft Chews"],
+      ["Serving Size: 1 full dropper (1mL) Servings Per Container 60", "1 full dropper (1mL)"],
+      ["Serving size/ Dosisgröße: 10 g (1 Scoop) Servings per container 30", "10 g (1 Scoop)"],
+      ["Serving Size 4 sprays (0.5 mL). Servings Per Container 60.", "4 sprays (0.5 mL)"],
+    ];
+    for (const [factsText, expected] of cases) {
+      const servingSizes = extractServingSizes({ factsText });
+      assert.equal(servingSizes.length >= 1, true, `no serving parsed from: ${factsText}`);
+      assert.equal(servingSizes[0]?.text, expected, `parsed ${servingSizes[0]?.text} from: ${factsText}`);
+    }
+  });
+
   test("search text strips raw other-ingredients labels, embedded amounts, and placeholder variant titles", () => {
     const searchText = buildSearchText({
       source: "example-brand",

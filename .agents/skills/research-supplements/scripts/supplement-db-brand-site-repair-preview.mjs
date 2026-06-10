@@ -19,8 +19,8 @@ const AMOUNT_VALUE_PATTERN = String.raw`(?<![\d,./])(?:<\s*)?\d(?:[\d,./]*)(?:\.
 const UNIT_PATTERN = String.raw`mcg\s+RAE|mcg\s+DFE|(?:µ|μ)g\s+RAE|(?:µ|μ)g\s+DFE|mg\s+NE|billion\s+CFUs?|million\s+CFUs?|CFUs?|IU|mcgt|mgt|mlt|mca|mg|mcg|(?:µ|μ)g|gt|g(?!\.[A-Za-z])|ml|kcal|calories?`;
 const AMOUNT_WITH_UNIT_PATTERN = String.raw`${AMOUNT_VALUE_PATTERN}\s*(?:${UNIT_PATTERN})`;
 const BLEND_AMOUNT_PATTERN = String.raw`(?:${AMOUNT_WITH_UNIT_PATTERN}|\(\s*${AMOUNT_WITH_UNIT_PATTERN}\s*\))`;
-const SERVING_AMOUNT_PATTERN = String.raw`(?:about\s*)?(?:\d+(?:[.,]\d+)?(?:\s*-\s*\d+(?:[.,]\d+)?)?|\d+\s*/\s*\d+|one|two|three|four|five|six|seven|eight|nine|ten|un|una|dos|tres|quatre)`;
-const SERVING_FORM_PATTERN = String.raw`(?:(?:quick\s+release|vegetarian|vegan|veggie|vegetable|coated|chewable|rounded|level|heaping|heaped|liquid|effervescent|oil\s*-?\s*infused|biodegradable)\s+)*(?:g(?![A-Za-z])|grams?|mg|mcg|mL|ml|milliliters?|fl\.?\s*oz\.?|fluid\s+ounces?|oz|tsp|teaspoons?|tbsp|tablespoons?|scoops?|capsules?(?:\(s\))?|tabletten?|tablety|(?!tablet[tky])tablets?(?:\(s\))?|caplets?|soft\s*-?\s*gels?|softgels?|gumm(?:y|ies)(?:\(ies\))?|chews?|chewables?|wafers?|lozenges?|packets?|stick\s+packs?|sticks?|VegCaps?|servings?|drops?(?:\(s\))?|gouttes?|gotas?|pumps?|bars?|sachets?|vials?|latas?|l[aá]hev|s[aá]č(?:ek|ky|ků)?|shots?|shota|cps|tbl|porcje?|porcj[ęea]?|kapsu[lł]ki|kapsu[lł]ka|kapsle|kapsl[iíe]|kapseln?|tabletk[ęeai]?|miark[ęea]?(?:\s+proszku)?|cacitos?|comprimidos?|comprim[eé]s?|g[eé]lules?|capsulas?|c[aá]psulas?|perlas?|pipettes?|cuill[eè]res?|כמוס(?:ה|ות)|טבלי(?:ה|ות)|קפסול(?:ה|ות))`;
+const SERVING_AMOUNT_PATTERN = String.raw`(?:(?:about|approx(?:imately)?\.?)\s*)?(?:\d+(?:[.,]\d+)?(?:\s*(?:-|–|to|or)\s*\d+(?:[.,]\d+)?)?|\d+\s*/\s*\d+|one|two|three|four|five|six|seven|eight|nine|ten|un|una|dos|tres|quatre)`;
+const SERVING_FORM_PATTERN = String.raw`(?:(?:quick\s+release|vegetarian|vegan|veggie|vegetable|coated|chewable|rounded|level|heaping|heaped|liquid|effervescent|oil\s*-?\s*infused|biodegradable|mini|soft|full|extended\s+release|bi\s*-?\s*layered|animal\s*-?\s*shaped)\s+)*(?:g(?![A-Za-z])|grams?|mg|mcg|mL|ml|milliliters?|fl\.?\s*oz\.?|fluid\s+ounces?|oz|tsp|teaspoons?|tbsp|tablespoons?|scoops?|capsules?(?:\(s\))?|tabletten?|tablety|(?!tablet[tky])tablets?(?:\(s\))?|caplets?|soft\s*-?\s*gels?|softgels?|gumm(?:y|ies)(?:\(ies\))?|chews?|chewables?|wafers?|lozenges?|packets?|stick\s+packs?|sticks?|VegCaps?|Via\s*Caps?|servings?|droppers?|drops?(?:\(s\))?|gouttes?|gotas?|pumps?|bars?|sachets?|vials?|latas?|l[aá]hev|s[aá]č(?:ek|ky|ků)?|shots?|shota|cps|tbl|porcje?|porcj[ęea]?|kapsu[lł]ki|kapsu[lł]ka|kapsle|kapsl[iíe]|kapseln?|tabletk[ęeai]?|miark[ęea]?(?:\s+proszku)?|cacitos?|comprimidos?|comprim[eé]s?|g[eé]lules?|capsulas?|c[aá]psulas?|perlas?|pipettes?|cuill[eè]res?|tea\s+bags?|shakes?|sprays?|כמוס(?:ה|ות)|טבלי(?:ה|ות)|קפסול(?:ה|ות))`;
 const PROMINENT_FACTS_ROW_NAMES = [
   "Vitamin A",
   "Vitamin B-1",
@@ -1602,7 +1602,8 @@ function extractServingSizes(label, context = {}) {
     for (const match of text.matchAll(ageQualifiedServingPattern)) {
       addServingSizeCandidate(servingSizes, match[1]);
     }
-    const boundedServingPattern = new RegExp(String.raw`\bServings?\s+Size\s*:?\s*(${SERVING_AMOUNT_PATTERN}\s*${SERVING_FORM_PATTERN}(?:\s*\([^)]{1,70}\))?)`, "giu");
+    // Tolerate translated suffixes ("Serving size/ Dosisgröße:") and table pipes after the colon.
+    const boundedServingPattern = new RegExp(String.raw`\bServings?\s+Size(?:\s*/\s*[\p{L}öäüß]{2,24})?\s*:?\s*(?:\|\s*)?(${SERVING_AMOUNT_PATTERN}\s*${SERVING_FORM_PATTERN}(?:\s*\([^)]{1,70}\))?)`, "giu");
     for (const match of text.matchAll(boundedServingPattern)) {
       addServingSizeCandidate(servingSizes, match[1]);
     }
@@ -2987,6 +2988,7 @@ function cleanServingSize(value) {
   return cleanValue(value)
     .replace(/^(?:Adults|Children|Infants|Adolescents|Teenagers|Seniors)\s*;\s*(?:age\s+[^:;]+:\s*)?/iu, "")
     .replace(/^(?:serving\s+size|dosis(?:\s+diaria\s+recomendada)?|diaria\s+recomendada|dose|dávka|davka|pour|dosage\s+pour|par|per|por)\s*[:–-]?\s*/iu, "")
+    .replace(/^(?:about|approx(?:imately)?\.?)\s+/iu, "")
     .replace(/^(?:journali[eè]re|daily)\s*\(\s*/iu, "")
     .replace(/^(?:t[aä]glich|taeglich)\s+/iu, "")
     .replace(/^(\d+(?:[.,]\d+)?)\s*(g|grams?)\s*[–-]\s*(1\s+s[aá]č(?:ek|ky|ků)?).*$/iu, "$3 ($1 $2)")
