@@ -31,7 +31,7 @@ jobs:
     timeout-minutes: 35
     services:
       postgres:
-        image: postgres:17
+        image: public.ecr.aws/docker/library/postgres:17
         env:
           POSTGRES_DB: murph_test
           POSTGRES_PASSWORD: postgres
