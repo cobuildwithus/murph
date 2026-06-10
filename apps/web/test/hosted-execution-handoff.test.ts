@@ -191,7 +191,6 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       createBrowserVaultSession: vi.fn(),
       deleteUserData,
       getRunnerStatus: vi.fn(),
-      prewarmRuntime: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     await expect(deleteHostedRunnerUserDataBestEffort({

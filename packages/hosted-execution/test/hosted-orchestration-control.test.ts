@@ -17,8 +17,6 @@ import {
 import {
   parseHostedRuntimeEnsureProcessingRequest,
   parseHostedRuntimeEnsureProcessingResponse,
-  parseHostedRuntimePrewarmRequest,
-  parseHostedRuntimePrewarmResponse,
   parseHostedRuntimeReconciliationFacts,
   parseHostedRuntimeReconciliationFactsRequest,
   parseHostedRuntimeSignal,
@@ -309,67 +307,6 @@ describe("hosted orchestration control contracts", () => {
     );
   });
 
-  it("parses prewarm request and response variants without mailbox fields", () => {
-    expect(parseHostedRuntimePrewarmRequest({
-      prewarmAttemptId: "prewarm_attempt_test",
-      source: "linq.message.ingress",
-    })).toEqual({
-      prewarmAttemptId: "prewarm_attempt_test",
-      source: "linq.message.ingress",
-    });
-
-    for (const action of [
-      "started",
-      "already_warm",
-      "already_running",
-    ] as const) {
-      expect(parseHostedRuntimePrewarmResponse({
-        action,
-        kind: "runtime_prewarm_accepted",
-      })).toEqual({
-        action,
-        kind: "runtime_prewarm_accepted",
-      });
-    }
-
-    expect(parseHostedRuntimePrewarmResponse({
-      kind: "retry_later",
-      retryAt: "2026-05-20T12:04:00.000Z",
-    })).toEqual({
-      kind: "retry_later",
-      retryAt: "2026-05-20T12:04:00.000Z",
-    });
-  });
-
-  it("rejects mailbox and processing fields in prewarm contracts", () => {
-    expect(() => parseHostedRuntimePrewarmRequest({
-      prewarmAttemptId: "prewarm_attempt_test",
-      reason: "nudge",
-      source: "linq.message.ingress",
-    })).toThrow("Hosted runtime prewarm request must not include reason.");
-
-    expect(() => parseHostedRuntimePrewarmRequest({
-      prewarmAttemptId: "prewarm_attempt_test",
-      source: "linq.imessage.typing",
-    })).toThrow("Hosted runtime prewarm request source is not supported.");
-
-    expect(() => parseHostedRuntimePrewarmResponse({
-      action: "already_warm",
-      kind: "runtime_prewarm_accepted",
-      runtimeAttemptId: "runtime_attempt_test",
-    })).toThrow(
-      "Hosted runtime prewarm-accepted response must not include runtimeAttemptId.",
-    );
-
-    expect(() => parseHostedRuntimePrewarmResponse({
-      kind: "retry_later",
-      mailboxLag: [],
-      retryAt: "2026-05-20T12:04:00.000Z",
-    })).toThrow(
-      "Hosted runtime prewarm retry-later response must not include mailboxLag.",
-    );
-
-  });
 });
 
 function createMailboxLag(): HostedMailboxLaneLag[] {
