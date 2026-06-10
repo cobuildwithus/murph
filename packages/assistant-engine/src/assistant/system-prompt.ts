@@ -8,6 +8,7 @@ import {
   ASSISTANT_SKILLS,
   buildAssistantSkillFileRef,
 } from "../assistant-skill-assets.js";
+import { MURPH_PRODUCT_ORIGIN } from "@murphai/contracts";
 import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
@@ -398,11 +399,12 @@ function formatAssistantHumanReadableLocalDate(localDate: string): string {
 
 export function resolveAssistantMurphProductBaseUrl(
   source: Readonly<Record<string, string | undefined>> = process.env
-): string | null {
+): string {
   return (
     normalizeAssistantProductBaseUrl(source.HOSTED_ONBOARDING_PUBLIC_BASE_URL)
     ?? normalizeAssistantProductBaseUrl(source.HOSTED_WEB_BASE_URL)
     ?? readAssistantVercelProductionBaseUrl(source)
+    ?? MURPH_PRODUCT_ORIGIN
   );
 }
 

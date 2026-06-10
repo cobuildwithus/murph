@@ -7,9 +7,6 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
-  HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV as HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
-} from "@murphai/hosted-local-harness/codex-app-server-stub";
-import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 
@@ -72,9 +69,6 @@ describe("hosted local Codex Gateway prefix e2e", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       OPENAI_API_KEY: "stub-local-openai-key",
     });
-    expect(
-      requireScenario().runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV],
-    ).toBeUndefined();
     expect(
       requireScenario().runtimeEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV],
     ).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/v1$/u);
@@ -474,7 +468,6 @@ async function startLinqScenario(): Promise<void> {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: undefined,
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
