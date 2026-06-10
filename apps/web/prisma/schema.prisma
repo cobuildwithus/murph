@@ -519,11 +519,15 @@ model HostedIngressLatencyTrace {
 }
 
 model HostedMailboxLaneCounter {
-  userId    String       @map("user_id")
-  lane      String
-  nextSeq   BigInt       @default(1) @map("next_seq")
-  updatedAt DateTime     @updatedAt @map("updated_at")
-  member    HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String       @map("user_id")
+  lane        String
+  nextSeq     BigInt       @default(1) @map("next_seq")
+  // Highest lane seq whose handling pass completed cleanly (replied or
+  // deliberately skipped). Replay after a workspace restore re-stages items
+  // at or below this seq as context only, never as fresh reply candidates.
+  consumedSeq BigInt       @default(0) @map("consumed_seq")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  member      HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, lane])
   @@map("hosted_mailbox_lane_counter")

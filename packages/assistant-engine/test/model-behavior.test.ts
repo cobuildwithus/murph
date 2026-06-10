@@ -355,6 +355,9 @@ describe('assistant consumption lookup guidance', () => {
       'preserve the full active ingredient panel with repeated `vault-cli supplement save --ingredient` JSON-object flags',
     )
     expect(prompt).toContain(
+      "keeping each ingredient's label amount and unit, and save the label serving size with `--serving-size`",
+    )
+    expect(prompt).toContain(
       'Do not collapse multi-ingredient labels to one primary ingredient',
     )
     expect(prompt).toContain(
@@ -644,7 +647,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '759665a48561e7f02b639332b746e82ed4eb754ff16d9be65d4177d68e3f8da4',
+      'b6d5f778ca0525e286cb20951a37ac0ea9bcd7ce4ae7ab75dbcf75252a0a7794',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

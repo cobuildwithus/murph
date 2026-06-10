@@ -1887,6 +1887,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(result).toEqual({
+      foregroundReplyFailed: 0,
       progressed: false,
       redactedStatus: expect.objectContaining({
         hostedAssistantNextWakeAt: null,

@@ -8126,3 +8126,137 @@ async function waitUntil(assertion: () => void, timeoutMs = 1_000): Promise<void
 
   throw lastError instanceof Error ? lastError : new Error("Timed out waiting for assertion.");
 }
+
+describe("hosted runtime shutdown signal", () => {
+  test("an already-signalled shutdown checkpoints immediately instead of waiting out the idle window", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const shutdownController = new AbortController();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_shutdown_signal_pre",
+            // Far longer than the test timeout: only the shutdown signal can
+            // start the idle checkpoint this fast.
+            idleCheckpointDelayMs: 120_000,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/shutdown-signal-pre.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            shutdownController.abort(
+              new DOMException("Synthetic container SIGTERM.", "AbortError"),
+            );
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              progressed: true,
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(result.status, "idle");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  }, 30_000);
+
+  test("a shutdown signalled mid-wait interrupts the idle window and checkpoints", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const shutdownController = new AbortController();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_shutdown_signal_mid",
+            idleCheckpointDelayMs: 120_000,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/shutdown-signal-mid.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            setTimeout(() => {
+              shutdownController.abort(
+                new DOMException("Synthetic container SIGTERM.", "AbortError"),
+              );
+            }, 50);
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              progressed: true,
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(result.status, "idle");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  }, 30_000);
+});

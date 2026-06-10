@@ -16,9 +16,15 @@ import { createDeviceProviderRegistry } from "../src/device-providers/registry.t
 
 describe("device provider descriptors", () => {
   it("keeps the built-in adapters aligned with the shared provider descriptors", () => {
-    expect(defaultDeviceProviderAdapters.map((adapter) => adapter.provider)).toEqual(
-      defaultDeviceProviderDescriptors.map((descriptor) => descriptor.provider),
-    );
+    const descriptorProviders = defaultDeviceProviderDescriptors.map((descriptor) => descriptor.provider);
+
+    expect(defaultDeviceProviderAdapters.map((adapter) => adapter.provider)).toEqual([
+      "whoop",
+      "oura",
+      "strava",
+      "junction",
+    ]);
+    expect(descriptorProviders).toEqual(["whoop", "oura", "garmin", "strava", "junction"]);
 
     for (const adapter of defaultDeviceProviderAdapters) {
       const descriptor = resolveDeviceProviderDescriptor(adapter.provider);

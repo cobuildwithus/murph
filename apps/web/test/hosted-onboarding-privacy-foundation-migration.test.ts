@@ -306,6 +306,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026060300_hosted_latency_milestones",
       "2026060501_device_sync_source_confirmed_backfill",
       "2026060900_hosted_latency_phase_breakdown",
+      "2026061000_hosted_mailbox_consumed_seq",
       "2026061000_hosted_vault_share",
       "migration_lock.toml",
     ]);

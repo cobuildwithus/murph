@@ -887,6 +887,10 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
     : input.systemMailboxResult.progressed === true
     ? input.systemMailboxResult
     : null;
+  // The foreground reply phase only ever reports its failed-reply count on the
+  // assistant-lane result; carry it through the system-mailbox merge so the
+  // workspace runner can gate the durable conversation consumed ack.
+  const foregroundReplyFailed = input.assistantResult.foregroundReplyFailed;
   if (progressedResult) {
     return {
       ...(afterCheckpoint ? { afterCheckpoint } : {}),
@@ -894,6 +898,7 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
         ? { browserVaultReplicaRefreshRequested: true }
         : {}),
       checkpointReason: progressedResult.checkpointReason,
+      ...(foregroundReplyFailed === undefined ? {} : { foregroundReplyFailed }),
       ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
       ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
         ? { nextWakeReason: nextWake.reason }
@@ -908,6 +913,7 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
     ...(browserVaultReplicaRefreshRequested
       ? { browserVaultReplicaRefreshRequested: true }
       : {}),
+    ...(foregroundReplyFailed === undefined ? {} : { foregroundReplyFailed }),
     ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
     ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
       ? { nextWakeReason: nextWake.reason }
@@ -2066,6 +2072,7 @@ async function runForegroundAssistantReplyPhase(input: {
   systemMailboxWakeAt: string | null;
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
+  const foregroundReplyFailed = input.assistantMetrics.assistantAutomationReplyFailed ?? 0;
   const deliveryEffects = await collectForegroundDeliveryEffects({
     preferredIntentIds: input.currentTurnDeliveryIntentIds,
     vaultRoot: input.input.restored.vaultRoot,
@@ -2133,6 +2140,7 @@ async function runForegroundAssistantReplyPhase(input: {
     };
     if (!progressed) {
       return {
+        foregroundReplyFailed,
         ...(nextWakeAt ? { nextWakeAt } : {}),
         ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
           ? { nextWakeReason: postDelivery.nextWakeReason }
@@ -2143,6 +2151,7 @@ async function runForegroundAssistantReplyPhase(input: {
     }
     return {
       checkpointReason: postDelivery.checkpointReason,
+      foregroundReplyFailed,
       nextWakeAt,
       ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
         ? { nextWakeReason: postDelivery.nextWakeReason }
@@ -2205,6 +2214,7 @@ async function runForegroundAssistantReplyPhase(input: {
   });
   if (!progressed) {
     return {
+      foregroundReplyFailed,
       ...(nextWakeAt ? { nextWakeAt } : {}),
       ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
         ? { nextWakeReason: nextWake.reason }
@@ -2250,6 +2260,7 @@ async function runForegroundAssistantReplyPhase(input: {
           terminalLinqCleanupDue: false,
           wakeStateProgressed,
         }),
+    foregroundReplyFailed,
     nextWakeAt,
     ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
       ? { nextWakeReason: nextWake.reason }

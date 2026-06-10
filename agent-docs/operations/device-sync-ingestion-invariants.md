@@ -47,10 +47,12 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    harmless, since invariant 4 makes the extra fetch idempotent and Junction
    reads are unmetered.)
 
-4. **Merge is idempotent on `externalRef.resourceId`.** Core upserts on the
+4. **Merge is idempotent on `externalRef.resourceId`.** Core reconciles on the
    record's own resource id (the explicit Junction id for summaries;
-   resource/source/timestamp for timeseries). Push-then-pull writes overwrite
-   the same row, so importing a record more than once — or via a different path —
+   resource/source/timestamp for timeseries). Push-then-pull re-imports of
+   identical content are skipped, and changed content appends an event-spine
+   revision of the same event id (read-side revision collapse keeps one live
+   record), so importing a record more than once — or via a different path —
    is overlap-free. This is what makes invariants 2 and 3 safe, and it is why an
    import-vs-skip optimization is unnecessary: re-fetching is cheap and correct,
    not a correctness risk.
