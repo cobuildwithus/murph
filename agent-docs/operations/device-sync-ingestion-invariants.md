@@ -41,6 +41,11 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    fallback — marks the connection dirty for the floor (a coalescible reconcile
    over the event window). No silent-complete terminal branch exists: every
    webhook branch ends in import, fetch, or a scheduled floor reconcile.
+   The degrade reconcile coalesces on a day-floored window dedupe key, so a
+   burst of such webhooks collapses to one floor wake. (Expected edge: a burst
+   straddling 00:00 UTC can floor to two days and produce two reconciles —
+   harmless, since invariant 4 makes the extra fetch idempotent and Junction
+   reads are unmetered.)
 
 4. **Merge is idempotent on `externalRef.resourceId`.** Core upserts on the
    record's own resource id (the explicit Junction id for summaries;
