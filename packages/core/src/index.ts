@@ -88,6 +88,7 @@ export {
   checkpointExperiment,
   copyRawArtifact,
   createExperiment,
+  dedupeDeviceEventsByExternalRef,
   deleteEvent,
   deleteFood,
   deleteProvider,
