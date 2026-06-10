@@ -55,7 +55,10 @@ export const MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID =
 // lazily on background wakes, so a dormant user may first see a one-shot
 // seed long after its scheduled moment. Past this window the seed is
 // skipped rather than installed, so a stale announcement is never sent late.
-const MURPH_MANAGED_ONE_SHOT_NOTIFICATION_EXPIRES_AFTER_MS = 30 * 60 * 1000
+// Keep aligned with ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS in
+// cron/execution.ts: both express the same product window for how late a
+// one-shot notification may still go out.
+const MURPH_MANAGED_ONE_SHOT_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
 
 const MURPH_MANAGED_AUTOMATION_BASE_TAGS = [
   'assistant',

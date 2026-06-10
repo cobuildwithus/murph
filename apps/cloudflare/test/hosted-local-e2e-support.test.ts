@@ -3,11 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import {
-  HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV as HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
-} from "@murphai/hosted-local-harness/codex-app-server-stub";
 
 import {
+  buildAssistantProviderVaultCliCall,
   buildHostedLocalDeviceSyncProviderEnvClearances,
   buildHostLoopbackStubBaseUrl,
   HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS,
@@ -76,7 +74,7 @@ describe("startAssistantProviderStubServer", () => {
         requests.push(request);
       },
       responseState: {
-        queuedResponseTexts: ["streamed recorder reply"],
+        queuedResponses: ["streamed recorder reply"],
       },
     });
 
@@ -110,6 +108,59 @@ describe("startAssistantProviderStubServer", () => {
     }
   });
 
+  it("streams a scripted function_call item for tool-call turns", async () => {
+    const server = await startAssistantProviderStubServer({
+      responseState: {
+        queuedResponses: [
+          buildAssistantProviderVaultCliCall(["automation", "save", "Title with 'quote'"]),
+          "follow-up text reply",
+        ],
+      },
+    });
+
+    try {
+      const baseUrl =
+        `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`;
+      const toolCallResponse = await fetch(baseUrl, {
+        body: JSON.stringify({
+          input: [],
+          model: "gpt-5.5",
+          stream: true,
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+      const toolCallBody = await toolCallResponse.text();
+
+      expect(toolCallResponse.status).toBe(200);
+      expect(toolCallBody).toContain("response.completed");
+      expect(toolCallBody).toContain('"type":"function_call"');
+      expect(toolCallBody).toContain("exec_command");
+      expect(toolCallBody).toContain("vault-cli");
+      expect(toolCallBody).toContain("automation");
+
+      const followupResponse = await fetch(baseUrl, {
+        body: JSON.stringify({
+          input: [],
+          model: "gpt-5.5",
+          stream: true,
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+      const followupBody = await followupResponse.text();
+
+      expect(followupResponse.status).toBe(200);
+      expect(followupBody).toContain("follow-up text reply");
+    } finally {
+      await stopHttpStubServer(server);
+    }
+  });
+
   it("caps recorded Responses API request bodies in diagnostic recorder mode", async () => {
     const requests: Array<{ body: string; method: string; url: string }> = [];
     const server = await startAssistantProviderStubServer({
@@ -118,7 +169,7 @@ describe("startAssistantProviderStubServer", () => {
         requests.push(request);
       },
       responseState: {
-        queuedResponseTexts: ["first reply", "second reply"],
+        queuedResponses: ["first reply", "second reply"],
       },
     });
 
@@ -170,7 +221,7 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:1234/v1",
+      [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: "http://127.0.0.1:1234/v1",
       NODE_ENV: "test",
       OPENAI_API_KEY: "stub-local-openai-key",
     });

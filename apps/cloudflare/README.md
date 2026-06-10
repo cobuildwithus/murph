@@ -134,7 +134,7 @@ Optional execution vars and secrets:
   secret. It must not be forwarded into the hosted runtime env; usage
   attribution is added at the Worker/web-control boundary when configured.
 - `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_LOCAL_PART`, optional `HOSTED_EMAIL_FROM_ADDRESS`, `HOSTED_EMAIL_DEFAULT_SUBJECT`, and `HOSTED_EMAIL_SIGNING_SECRET` for hosted email routing
-- opt-in runtime integrations such as `LINQ_*`, `TELEGRAM_*`, `WHATSAPP_*`, and `MAPBOX_ACCESS_TOKEN`; provider credentials for intercepted integrations stay Worker-owned and are represented in the hosted runtime by sentinel placeholders, while native parser binaries and the Whisper model are image-owned by the runner container and rebound from the image instead of being serialized through Worker runtime envelopes
+- opt-in runtime integrations such as `LINQ_*`, `TELEGRAM_*`, `WHATSAPP_*`, and `MAPBOX_ACCESS_TOKEN`; provider credentials for intercepted integrations stay Worker-owned and are represented in the hosted runtime by sentinel placeholders, while native parser binaries are image-owned by the runner container and rebound from the image instead of being serialized through Worker runtime envelopes; hosted audio transcription has no in-image model and runs through the Worker-owned `AI` binding behind the fixed `murph-transcribe.worker` egress host
 
 When hosted email sender identity is configured, deploy automation renders an environment-specific native `HOSTED_EMAIL` send binding and constrains it with `allowed_sender_addresses` so outbound sender selection remains config-owned.
 

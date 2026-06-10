@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT } from "../src/internal-hosts.ts";
 import {
   HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV,
-  HOSTED_RUNNER_WHISPER_MODEL_PATH,
   createHostedRunnerNativeParserToolchain,
   isHostedRunnerLocalE2eParserToolchain,
 } from "../src/runner-native-parser-toolchain.ts";
@@ -30,12 +30,17 @@ describe("createHostedRunnerNativeParserToolchain", () => {
         pdftotext: {
           command: "/usr/bin/pdftotext",
         },
-        whisper: {
-          command: "/usr/local/bin/whisper-cli",
-          modelPath: HOSTED_RUNNER_WHISPER_MODEL_PATH,
+        transcription: {
+          endpoint: CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT,
         },
       },
     });
+  });
+
+  it("routes hosted transcription through the worker transcribe host", () => {
+    expect(CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT).toBe(
+      "http://murph-transcribe.worker/v1/transcribe",
+    );
   });
 
   it("uses explicit local e2e parser tools only when the local marker is set", () => {

@@ -64,6 +64,8 @@ export type { FfmpegToolOptions } from "./adapters/ffmpeg.js";
 export { prepareAudioInput, resolveFfmpegCommand } from "./adapters/ffmpeg.js";
 export type { PopplerPdfProviderOptions } from "./adapters/poppler-pdf.js";
 export { createPopplerPdfProvider } from "./adapters/poppler-pdf.js";
+export type { RemoteTranscriptionProviderOptions } from "./adapters/remote-transcription.js";
+export { createRemoteTranscriptionProvider } from "./adapters/remote-transcription.js";
 export type { WhisperCppProviderOptions } from "./adapters/whisper-cpp.js";
 export { createWhisperCppProvider } from "./adapters/whisper-cpp.js";
 export type {

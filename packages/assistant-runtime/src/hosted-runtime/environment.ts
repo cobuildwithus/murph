@@ -216,6 +216,7 @@ const hostedParserToolNames = [
   "ffmpeg",
   "pdfinfo",
   "pdftotext",
+  "transcription",
   "whisper",
 ] as const satisfies readonly HostedAssistantRuntimeParserToolName[];
 
@@ -458,6 +459,13 @@ function cloneHostedAssistantRuntimeParserToolConfig(
             "command",
           ),
         }),
+    ...(input.endpoint === undefined
+      ? {}
+      : {
+          endpoint: normalizeHostedAssistantRuntimeParserToolEndpoint(
+            input.endpoint,
+          ),
+        }),
     ...(input.modelPath === undefined
       ? {}
       : {
@@ -467,6 +475,33 @@ function cloneHostedAssistantRuntimeParserToolConfig(
           ),
         }),
   };
+}
+
+function normalizeHostedAssistantRuntimeParserToolEndpoint(
+  value: string | null | undefined,
+): string {
+  const normalized = normalizeHostedRuntimeString(value);
+  if (!normalized) {
+    throw new TypeError(
+      "Hosted runtime parser toolchain endpoint must be a non-empty http(s) URL.",
+    );
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new TypeError(
+      "Hosted runtime parser toolchain endpoint must be an absolute http(s) URL.",
+    );
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new TypeError(
+      "Hosted runtime parser toolchain endpoint must be an absolute http(s) URL.",
+    );
+  }
+
+  return normalized;
 }
 
 function normalizeHostedAssistantRuntimeParserToolPath(

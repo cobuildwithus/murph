@@ -26,7 +26,6 @@ import type {
   HostedLocalDevConfig,
 } from "../../src/dev-hosted-local/types.ts";
 import {
-  HOSTED_LOCAL_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "../../src/dev-hosted-local/constants.ts";
 
@@ -689,35 +688,6 @@ describe("mergeCloudflareLocalEnv", () => {
     ).toThrow("MURPH_DEV_CODEX_APP_SERVER_PROXY_URL");
   });
 
-  it("drops stale test-only Codex app-server stub values unless supplied by this run", () => {
-    const merged = mergeCloudflareLocalEnv({
-      config: localConfig,
-      existing: {
-        MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
-      },
-      oidcIdentity,
-    });
-
-    expect(merged.MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL).toBeUndefined();
-  });
-
-  it("preserves a current test-only Codex app-server stub override", () => {
-    const merged = mergeCloudflareLocalEnv({
-      config: localConfig,
-      existing: {
-        MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
-      },
-      oidcIdentity,
-      overrides: {
-        MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:5222/v1",
-      },
-    });
-
-    expect(merged.MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL).toBe(
-      "http://127.0.0.1:5222/v1",
-    );
-  });
-
   it("drops stale test-only Codex model provider base URL overrides unless supplied by this run", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
@@ -1113,12 +1083,6 @@ describe("buildWranglerVarArgs", () => {
         LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
         [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
           "http://127.0.0.1:4222/v1",
-        MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
-        MURPH_E2E_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS:
-          "murph.send_progress_update",
-        MURPH_E2E_CODEX_APP_SERVER_STUB_TURN_DELAY_MS: "37",
-        [HOSTED_LOCAL_CODEX_APP_SERVER_COMMAND_ENV]:
-          "/app/.murph-hosted-local/codex-app-server-stub/codex",
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
         NODE_ENV: "test",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
@@ -1131,8 +1095,6 @@ describe("buildWranglerVarArgs", () => {
       "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID:callback:v1",
       "--var",
       "LINQ_ATTACHMENT_CDN_BASE_URL:http://127.0.0.1:4011/attachment-downloads",
-      "--var",
-      "MURPH_HOSTED_CODEX_APP_SERVER_COMMAND:/app/.murph-hosted-local/codex-app-server-stub/codex",
       "--var",
       "HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL:http://127.0.0.1:4222/v1",
       "--var",

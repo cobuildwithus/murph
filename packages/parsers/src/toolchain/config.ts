@@ -11,10 +11,11 @@ import {
 export const PARSER_TOOLCHAIN_SCHEMA = "murph.parser-toolchain-config.v1" as const;
 export const PARSER_TOOLCHAIN_SCHEMA_VERSION = 1 as const;
 
-export type ParserToolName = "ffmpeg" | "pdfinfo" | "pdftotext" | "whisper";
+export type ParserToolName = "ffmpeg" | "pdfinfo" | "pdftotext" | "transcription" | "whisper";
 
 export interface ParserToolchainToolConfig {
   command?: string | null;
+  endpoint?: string | null;
   modelPath?: string | null;
 }
 
@@ -202,6 +203,13 @@ function parseToolConfig(value: unknown, toolName: ParserToolName): ParserToolch
   if ("command" in value) {
     config.command = normalizeConfigString(value.command, `Parser tool "${toolName}" command must be a string, null, or omitted.`);
   }
+  if ("endpoint" in value) {
+    const endpoint = normalizeConfigString(value.endpoint, `Parser tool "${toolName}" endpoint must be a string, null, or omitted.`);
+    if (endpoint !== null) {
+      assertParserToolHttpEndpoint(endpoint, toolName);
+    }
+    config.endpoint = endpoint;
+  }
   if ("modelPath" in value) {
     config.modelPath = normalizeConfigString(value.modelPath, `Parser tool "${toolName}" modelPath must be a string, null, or omitted.`);
   }
@@ -216,7 +224,7 @@ function mergeToolConfigs(
   const merged: ParserToolchainTools = {};
 
   for (const toolName of parserToolNames) {
-    const nextTool = mergeToolConfig(current[toolName], updates[toolName]);
+    const nextTool = mergeToolConfig(toolName, current[toolName], updates[toolName]);
     if (nextTool) {
       merged[toolName] = nextTool;
     }
@@ -226,6 +234,7 @@ function mergeToolConfigs(
 }
 
 function mergeToolConfig(
+  toolName: ParserToolName,
   current: ParserToolchainToolConfig | undefined,
   update: ParserToolchainToolConfig | undefined,
 ): ParserToolchainToolConfig | null {
@@ -236,6 +245,9 @@ function mergeToolConfig(
   const next: ParserToolchainToolConfig = {};
   if (current?.command !== undefined) {
     next.command = current.command;
+  }
+  if (current?.endpoint !== undefined) {
+    next.endpoint = current.endpoint;
   }
   if (current?.modelPath !== undefined) {
     next.modelPath = current.modelPath;
@@ -251,6 +263,16 @@ function mergeToolConfig(
       }
     }
 
+    if (Object.prototype.hasOwnProperty.call(update, "endpoint")) {
+      const normalized = normalizeNullableString(update.endpoint);
+      if (normalized === null) {
+        delete next.endpoint;
+      } else {
+        assertParserToolHttpEndpoint(normalized, toolName);
+        next.endpoint = normalized;
+      }
+    }
+
     if (Object.prototype.hasOwnProperty.call(update, "modelPath")) {
       const normalized = normalizeNullableString(update.modelPath);
       if (normalized === null) {
@@ -262,6 +284,19 @@ function mergeToolConfig(
   }
 
   return Object.keys(next).length > 0 ? next : null;
+}
+
+function assertParserToolHttpEndpoint(endpoint: string, toolName: ParserToolName): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(endpoint);
+  } catch {
+    throw new TypeError(`Parser tool "${toolName}" endpoint must be an absolute http(s) URL.`);
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new TypeError(`Parser tool "${toolName}" endpoint must be an absolute http(s) URL.`);
+  }
 }
 
 function normalizeConfigString(value: unknown, errorMessage: string): string | null {
@@ -301,5 +336,6 @@ const parserToolNames = [
   "ffmpeg",
   "pdfinfo",
   "pdftotext",
+  "transcription",
   "whisper",
 ] as const satisfies readonly ParserToolName[];

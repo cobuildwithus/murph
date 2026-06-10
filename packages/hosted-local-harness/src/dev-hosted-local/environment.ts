@@ -14,7 +14,6 @@ import {
   HOSTED_LOCAL_R2_PRESIGN_ACCOUNT_ID,
   HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME,
   HOSTED_LOCAL_R2_PRESIGN_SECRET_ACCESS_KEY,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
@@ -195,10 +194,6 @@ export function mergeCloudflareLocalEnv(input: {
   assertNoDeprecatedHostedLocalCodexBridgeEnv(input.existing);
   assertNoDeprecatedHostedLocalCodexBridgeEnv(normalizedOverrides);
   stripStaleHostedLocalOidcJwksOverride({
-    env: resolvedExisting,
-    overrides: normalizedOverrides,
-  });
-  stripStaleHostedLocalCodexAppServerStubEnv({
     env: resolvedExisting,
     overrides: normalizedOverrides,
   });
@@ -594,17 +589,6 @@ function stripLegacyHostedCryptoAuthorityEnv(
       delete env[key];
     }
   }
-}
-
-function stripStaleHostedLocalCodexAppServerStubEnv(input: {
-  env: Record<string, string | undefined>;
-  overrides: Record<string, string | undefined>;
-}): void {
-  if (input.overrides[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]?.trim()) {
-    return;
-  }
-
-  delete input.env[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV];
 }
 
 function stripStaleHostedLocalCodexModelProviderBaseUrlEnv(input: {
