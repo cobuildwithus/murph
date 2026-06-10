@@ -62,9 +62,19 @@ Write-pass summary:
 - Validated every extraction independently (locale-aware evidence anchoring + DV cross-check, malformed-DV, directions-name, composite-amount, dup-amount, spoon-serving gates), stripped raw bloat fields, and ran the `labels.mjs` dry-run production guard. 6,893 clean → 6,888 after dropping missing-serving rows → upserted with 0 production-blocked.
 - Post-write: brand_site rows with structured `ingredientRows` **7,063 → 16,029** over the session (+8,966). Total repaired upserts this session: 11,769 (4,813 + 68 + 6,888). Target of 10k structured rows exceeded.
 
+### Wave 4 — truncated-tail resubmit (2026-06-09)
+
+- Resubmitted the 2,493 truncated-tail rows at 6 rows/request, max_tokens 8k (≈ $9.26; these are the largest panels — prioritization had pushed multi-blocker 30+-ingredient products to the tail, so output stayed high even at 6/request). Salvaged 2,246 complete extractions; 247 genuinely oversized rows still truncate and remain queued.
+- Same validated pipeline: 1,492 clean → 1,489 after dropping missing-serving → upserted, 0 production-blocked. Spot-checks correct (incl. `<1 g` bounds, "Approximately 1 Scoop (35.8g)").
+
+### Session result
+
+- Structured `brand_site` rows (non-empty `ingredientRows`): **7,063 → 17,067** (+10,004 net). Total repaired upserts: 13,258 (4,813 + 68 + 6,888 + 1,489).
+- Anthropic Batches API spend: $36.16 of $50 (~$13.84 left).
+
 ### Remaining
 
-- ~2,493 truncated-tail rows + ~5k refetch/OCR rows (no evidence) + 799 non-standalone-review rows. The refetch set needs re-scraping before any extraction; the truncated tail is a cheap resubmit at 6 rows/request.
+- ~247 oversized rows that still truncate (need per-row or smaller-chunk handling) + ~5k refetch/OCR rows (no evidence in `label`) + 799 non-standalone-review rows + the ~2,448 LLM rows that failed independent validation (anchor/dup/dv flags — genuinely hard, not auto-writable). No re-scrape performed this session per direction.
 
 Findings:
 
