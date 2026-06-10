@@ -6702,3 +6702,38 @@ test("Junction resource job with an unresolvable resource records an observable 
   assert.equal(metadataPatch.junctionSkippedResourceLast, "summary.mystery_records.0.unsupported");
   assert.equal(metadataPatch.junctionSkippedResourceJobCount, 1);
 });
+
+test("Junction import accountId is stable across local account row re-registration", async () => {
+  const importedAccountIds: string[] = [];
+  const provider = createEmptyJunctionBackfillProvider();
+
+  const runReconcileWithAccountRowId = async (rowId: string) => {
+    await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({ id: rowId }),
+        importSnapshot: async (snapshot) => {
+          const accountId = (snapshot as { accountId?: string }).accountId;
+          if (accountId) {
+            importedAccountIds.push(accountId);
+          }
+          return { imported: true };
+        },
+      }),
+      createJob("reconcile", {
+        windowStart: "2026-04-02T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    );
+  };
+
+  // Hosted cold starts recreate the machine-local device-sync store, so the
+  // same Junction user is re-registered under a fresh local row id. Import
+  // identity must follow the stable Junction user, not the local row.
+  await runReconcileWithAccountRowId("dsa_cold_start_row_a");
+  await runReconcileWithAccountRowId("dsa_cold_start_row_b");
+
+  assert.ok(importedAccountIds.length >= 2, "expected reconcile runs to import snapshots");
+  assert.match(importedAccountIds[0] ?? "", /^jxn_acct_[a-f0-9]{32}$/u);
+  assert.equal(new Set(importedAccountIds).size, 1);
+});

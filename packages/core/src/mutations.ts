@@ -53,7 +53,13 @@ import { pathExists, readUtf8File, writeVaultTextFile } from "./fs.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 import { deterministicContractId, generateRecordId } from "./ids.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
-import { buildEventSpineLifecycle, eventSpineRevision } from "./history/event-spine.ts";
+import {
+  buildEventSpineLifecycle,
+  collapseEventSpineEntries,
+  eventSpineRevision,
+  selectLatestEventSpineEntry,
+  type EventSpineEntry,
+} from "./history/event-spine.ts";
 import { loadEventLedgerShardsById, selectLatestMatchedEvent } from "./domains/events/ledger.ts";
 import {
   normalizeMealNutrition,
@@ -1069,6 +1075,7 @@ async function buildJsonlAppendPlan<RecordType extends { id: string }>(
   entries: readonly PreparedJsonlEntry<RecordType>[],
   options: {
     dedupeWithinPlan?: boolean;
+    forceAppendIds?: ReadonlySet<string>;
   } = {},
 ): Promise<JsonlAppendPlan> {
   assertCanonicalWriteLockScope(vaultRoot);
@@ -1084,7 +1091,7 @@ async function buildJsonlAppendPlan<RecordType extends { id: string }>(
 
     existingIdsByShard.set(entry.relativePath, existingIds);
 
-    if (existingIds.has(entry.record.id)) {
+    if (existingIds.has(entry.record.id) && !options.forceAppendIds?.has(entry.record.id)) {
       continue;
     }
 
@@ -1457,6 +1464,201 @@ function isImplicitDeviceRawRefFallbackRole(role: string): boolean {
   return !role.startsWith("wearable-raw-receipt:")
     && !role.startsWith("wearable-raw-envelope:")
     && !role.startsWith("wearable-canonical-records:");
+}
+
+interface DeviceEventExternalRefReconciliation {
+  appendEntries: PreparedJsonlEntry<EventRecord>[];
+  records: EventRecord[];
+  forceAppendIds: ReadonlySet<string>;
+  skippedDuplicateCount: number;
+  supersededCount: number;
+}
+
+// externalRef.version is intentionally NOT part of the reconcile identity:
+// direct providers (WHOOP, Oura, Strava) stamp it from the record's mutable
+// updated_at, so a provider-side rescore would change the key and mint a new
+// event instead of superseding the existing one. Version still participates in
+// content equality, so a version bump with changed data becomes a spine
+// revision of the same event.
+function deviceEventExternalRefKey(externalRef: ExternalRef): string {
+  return stableStringify({
+    system: externalRef.system,
+    resourceType: externalRef.resourceType,
+    resourceId: externalRef.resourceId,
+    facet: externalRef.facet ?? null,
+  });
+}
+
+function deviceEventContentKey(record: EventRecord): string {
+  const {
+    id: _id,
+    rawRefs: _rawRefs,
+    lifecycle: _lifecycle,
+    recordedAt: _recordedAt,
+    ...content
+  } = record;
+  return stableStringify(content);
+}
+
+interface DeviceEventShardIndex {
+  latestByRefKey: Map<string, EventRecord>;
+  maxRevisionById: Map<string, number>;
+}
+
+async function indexLatestDeviceEventsByExternalRef(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<DeviceEventShardIndex> {
+  const latestByRefKey = new Map<string, EventRecord>();
+  const maxRevisionById = new Map<string, number>();
+  const resolved = resolveVaultPath(vaultRoot, relativePath);
+
+  if (!(await pathExists(resolved.absolutePath))) {
+    return { latestByRefKey, maxRevisionById };
+  }
+
+  const grouped = new Map<string, EventSpineEntry<EventRecord>[]>();
+
+  for (const raw of await readJsonlRecords({ vaultRoot, relativePath })) {
+    const parsed = safeParseContract(eventRecordSchema, raw);
+
+    if (!parsed.success) {
+      continue;
+    }
+
+    // Track the highest revision per event id across ALL rows, including
+    // revisions without an externalRef (e.g. a user edit through upsertEvent
+    // that did not echo the ref), so a supersede never reuses a taken
+    // revision number.
+    maxRevisionById.set(
+      parsed.data.id,
+      Math.max(maxRevisionById.get(parsed.data.id) ?? 0, eventSpineRevision(parsed.data)),
+    );
+
+    if (!parsed.data.externalRef) {
+      continue;
+    }
+
+    const refKey = deviceEventExternalRefKey(parsed.data.externalRef);
+    const group = grouped.get(refKey) ?? [];
+    group.push({ relativePath, record: parsed.data });
+    grouped.set(refKey, group);
+  }
+
+  for (const [refKey, group] of grouped) {
+    // Collapse spine revisions per event id first; raw revision counts are not
+    // comparable across different event ids (a deleted duplicate's tombstone
+    // must not outrank a surviving live copy of the same provider record).
+    // The collapse drops ids whose latest revision is deleted, so a fully
+    // tombstoned ref yields no match and re-imports append a fresh event,
+    // bounded by the deterministic-id skip for identical content.
+    const latest = selectLatestEventSpineEntry(collapseEventSpineEntries(group));
+
+    if (latest) {
+      latestByRefKey.set(refKey, latest.record);
+    }
+  }
+
+  return { latestByRefKey, maxRevisionById };
+}
+
+// Device-sync ingestion invariant 4: merge is idempotent on the record's own
+// externalRef, so overlapping push/pull re-imports of the same provider record
+// must not mint new events. Re-imports with identical content (ignoring
+// per-import identity such as id, rawRefs, lifecycle, and recordedAt) are
+// skipped; changed content appends an event-spine revision onto the existing
+// event id instead of a new event.
+async function reconcileDeviceEventEntriesByExternalRef(
+  vaultRoot: string,
+  entries: readonly PreparedJsonlEntry<EventRecord>[],
+): Promise<DeviceEventExternalRefReconciliation> {
+  assertCanonicalWriteLockScope(vaultRoot);
+
+  const indexByShard = new Map<string, DeviceEventShardIndex>();
+  const appendEntries: PreparedJsonlEntry<EventRecord>[] = [];
+  const records: EventRecord[] = [];
+  const forceAppendIds = new Set<string>();
+  let skippedDuplicateCount = 0;
+  let supersededCount = 0;
+
+  for (const entry of entries) {
+    const externalRef = entry.record.externalRef;
+
+    if (!externalRef) {
+      appendEntries.push(entry);
+      records.push(entry.record);
+      continue;
+    }
+
+    const shardIndex =
+      indexByShard.get(entry.relativePath) ??
+      (await indexLatestDeviceEventsByExternalRef(vaultRoot, entry.relativePath));
+
+    indexByShard.set(entry.relativePath, shardIndex);
+
+    const refKey = deviceEventExternalRefKey(externalRef);
+    const latest = shardIndex.latestByRefKey.get(refKey);
+
+    if (!latest) {
+      shardIndex.latestByRefKey.set(refKey, entry.record);
+      appendEntries.push(entry);
+      records.push(entry.record);
+      continue;
+    }
+
+    if (deviceEventContentKey(latest) === deviceEventContentKey(entry.record)) {
+      skippedDuplicateCount += 1;
+      records.push(latest);
+      continue;
+    }
+
+    const revision = Math.max(
+      eventSpineRevision(latest),
+      shardIndex.maxRevisionById.get(latest.id) ?? 0,
+    ) + 1;
+    const superseding: EventRecord = {
+      ...entry.record,
+      id: latest.id,
+      lifecycle: buildEventSpineLifecycle(revision),
+    };
+
+    forceAppendIds.add(latest.id);
+    shardIndex.latestByRefKey.set(refKey, superseding);
+    shardIndex.maxRevisionById.set(latest.id, revision);
+    appendEntries.push({ relativePath: entry.relativePath, record: superseding });
+    records.push(superseding);
+    supersededCount += 1;
+  }
+
+  return {
+    appendEntries,
+    records,
+    forceAppendIds,
+    skippedDuplicateCount,
+    supersededCount,
+  };
+}
+
+function buildDeviceBatchAuditSummary(input: {
+  provider: string;
+  eventCount: number;
+  sampleCount: number;
+  skippedDuplicateCount: number;
+  supersededCount: number;
+}): string {
+  const dedupeNotes: string[] = [];
+
+  if (input.skippedDuplicateCount > 0) {
+    dedupeNotes.push(`${input.skippedDuplicateCount} duplicate event(s) skipped by externalRef`);
+  }
+
+  if (input.supersededCount > 0) {
+    dedupeNotes.push(`${input.supersededCount} event(s) updated in place by externalRef`);
+  }
+
+  const dedupeSuffix = dedupeNotes.length > 0 ? ` (${dedupeNotes.join(", ")})` : "";
+
+  return `Imported ${input.provider} device batch with ${input.eventCount} event(s) and ${input.sampleCount} sample(s)${dedupeSuffix}.`;
 }
 
 function prepareDeviceSampleEntries(
@@ -2046,13 +2248,21 @@ export async function importDeviceBatch({
     rawArtifacts,
     provenance,
   });
-  const eventAppendPlan = await buildJsonlAppendPlan(vaultRoot, deviceBatchPlan.preparedEvents, {
+  const eventReconciliation = await reconcileDeviceEventEntriesByExternalRef(
+    vaultRoot,
+    deviceBatchPlan.preparedEvents,
+  );
+  const eventAppendPlan = await buildJsonlAppendPlan(vaultRoot, eventReconciliation.appendEntries, {
     dedupeWithinPlan: true,
+    forceAppendIds: eventReconciliation.forceAppendIds,
   });
   const sampleAppendPlan = await buildJsonlAppendPlan(vaultRoot, deviceBatchPlan.preparedSamples, {
     dedupeWithinPlan: true,
   });
-  const eventRecords = deviceBatchPlan.preparedEvents.map((entry) => entry.record);
+  const eventRecords = eventReconciliation.records;
+  const eventTargetShardPaths = [
+    ...new Set(deviceBatchPlan.preparedEvents.map((entry) => entry.relativePath)),
+  ].sort();
   const sampleRecords = deviceBatchPlan.preparedSamples.map((entry) => entry.record);
 
   return runCanonicalWrite({
@@ -2119,7 +2329,13 @@ export async function importDeviceBatch({
         batch,
         action: "device_import",
         commandName: "core.importDeviceBatch",
-        summary: `Imported ${deviceBatchPlan.provider} device batch with ${eventRecords.length} event(s) and ${sampleRecords.length} sample(s).`,
+        summary: buildDeviceBatchAuditSummary({
+          provider: deviceBatchPlan.provider,
+          eventCount: eventRecords.length,
+          sampleCount: sampleRecords.length,
+          skippedDuplicateCount: eventReconciliation.skippedDuplicateCount,
+          supersededCount: eventReconciliation.supersededCount,
+        }),
         occurredAt: deviceBatchPlan.importedAt,
         files: touchedPaths,
         targetIds: [deviceBatchPlan.importId],
@@ -2132,7 +2348,7 @@ export async function importDeviceBatch({
         importedAt: deviceBatchPlan.importedAt,
         events: eventRecords,
         samples: sampleRecords,
-        eventShardPaths: eventAppendPlan.targetShardPaths,
+        eventShardPaths: eventTargetShardPaths,
         sampleShardPaths: sampleAppendPlan.targetShardPaths,
         rawArtifacts: deviceBatchPlan.preparedRawArtifacts.map((artifact) => artifact.raw),
         auditPath: audit.relativePath,
