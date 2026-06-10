@@ -2212,6 +2212,7 @@ describe('Codex assistant registry helpers', () => {
     })
 
     expect(attempt).toEqual({
+      additionalUsages: [],
       error: expectedError,
       metadata: {
         activityLabels: ['Refresh Session'],

@@ -189,6 +189,75 @@ describe("hosted workspace restore Codex continuity", () => {
     }
   });
 
+  test("cold v2 restore returns restoreTiming + cold boot flag; warm leaves it null", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-v2-timing-"));
+
+    try {
+      const restoredVaultRoot = path.join(workspaceRoot, "restored-vault");
+      const snapshotRef = createWorkspaceSnapshotV2Ref();
+
+      const coldRestored = await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createRestorePlatform({
+          artifactBytesByHash: new Map(),
+          workspaceSnapshotPort: {
+            async abortSnapshotSession() {
+              throw new Error("abortSnapshotSession is not used during v2 restore.");
+            },
+            async completeSnapshotSession() {
+              throw new Error("completeSnapshotSession is not used during v2 restore.");
+            },
+            async putSnapshotObjectDirect() {
+              throw new Error("putSnapshotObjectDirect is not used during v2 restore.");
+            },
+            async restoreWorkspaceSnapshot(request) {
+              await mkdir(request.durableRoot, { recursive: true });
+              await writeFile(path.join(request.durableRoot, "note.md"), "restored\n", "utf8");
+              return {
+                sizeGuardMs: 1,
+                dataKeyUnwrapMs: 2,
+                scratchPrepareMs: 3,
+                presignGetMs: 4,
+                objectFetchMs: 5,
+                decryptMs: 6,
+                extractMs: 7,
+                encryptedBytes: 8,
+                plainBytes: 9,
+              };
+            },
+            async startSnapshotSession() {
+              throw new Error("startSnapshotSession is not used during v2 restore.");
+            },
+          },
+        }),
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({ snapshotRef }),
+      });
+
+      assert.equal(coldRestored.restoreWasCold, true);
+      assert.deepEqual(coldRestored.restoreTiming, {
+        sizeGuardMs: 1,
+        dataKeyUnwrapMs: 2,
+        scratchPrepareMs: 3,
+        presignGetMs: 4,
+        objectFetchMs: 5,
+        decryptMs: 6,
+        extractMs: 7,
+        encryptedBytes: 8,
+        plainBytes: 9,
+      });
+
+      // Null-bootstrap (no snapshot ref) is a warm/empty path: restoreTiming stays null.
+      const warmRestored = await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createRestorePlatform({ artifactBytesByHash: new Map() }),
+        vaultRoot: path.join(workspaceRoot, "null-bootstrap-vault"),
+        workspace: createWorkspaceState({ snapshotRef: null }),
+      });
+      assert.equal(warmRestored.restoreTiming, null);
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
   test("reuses a matching warm-clean v2 workspace marker once", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-v2-warm-"));
 
@@ -239,6 +308,7 @@ describe("hosted workspace restore Codex continuity", () => {
 
       assert.equal(restored.mode, "snapshot");
       assert.equal(restored.restoreWasCold, false);
+      assert.equal(restored.restoreTiming, null);
       assert.equal(restored.inboxSidecarNeedsRebuild, true);
       assert.equal(restoreCallCount, 0);
       assert.equal(

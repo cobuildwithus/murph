@@ -502,6 +502,7 @@ model HostedIngressLatencyTrace {
   assistantInputStagedAt   DateTime?         @map("assistant_input_staged_at")
   providerStartAt          DateTime?         @map("provider_start_at")
   providerRequestOrdinal   Int?              @map("provider_request_ordinal")
+  phaseBreakdownJson       Json?             @map("phase_breakdown_json")
   createdAt                DateTime          @default(now()) @map("created_at")
   updatedAt                DateTime          @updatedAt @map("updated_at")
   mailboxItem              HostedMailboxItem @relation(fields: [userId, mailboxItemId], references: [userId, id], onDelete: Cascade)

@@ -2,24 +2,20 @@ import { createHmac } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-} from "@murphai/contracts";
-import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
+import {
+  listMurphDynamicToolNames,
+} from "@murphai/assistant-engine/assistant-codex";
 import {
   HOSTED_LOCAL_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV as HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV,
 } from "@murphai/hosted-local-harness/codex-app-server-stub";
 
 import {
-  buildHostedAssistantNotificationDecisionResponse,
-} from "./helpers/hosted-local-e2e-support.js";
-import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
-  buildHostedLinqSignupWelcomeWake,
   buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
@@ -43,7 +39,7 @@ const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
 
-const expectedDynamicTools = "murph.send_progress_update,murph.attach_response_media";
+const expectedDynamicTools = listMurphDynamicToolNames().join(",");
 
 function buildHostedAssistantMediaToolResponse(input: {
   mediaUrl: string;
@@ -83,6 +79,8 @@ describe("hosted local Codex image media delivery e2e", () => {
   }, 300_000);
 
   it("lets Codex attach image media that is sent with the final Linq reply", async () => {
+    expectConfiguredDynamicTools();
+
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
       memberId: userId,
@@ -90,29 +88,14 @@ describe("hosted local Codex image media delivery e2e", () => {
     });
     await requireScenario().runWake(buildActivationWake(userId), userId);
     await requireScenario().waitForHostedCompletion(userId);
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver signup welcome",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-      }),
-    ]);
-    await requireScenario().runWake(
-      buildHostedLinqSignupWelcomeWake({
-        eventId: `assistant.notification.requested:local:${userId}:evt_linq_codex_media`,
-        userId,
-      }),
-      userId,
-    );
-    const welcomeSendPromise = requireLinqStub().waitForSend({
-      expectedPath: requireLinqStub().createChatPath,
-      matchRequest: requireLinqStub().createCreateChatRequestMatcher(userId),
-      scenario: requireScenario(),
-      userId,
-    });
-    await requireScenario().waitForHostedCompletion(userId);
-    await welcomeSendPromise;
 
-    const materializedChatId = requireLinqStub().requireObservedChatId(userId);
+    const materializedChatId = `chat_local_codex_media_${userId}`;
+    await requireScenario().bindActiveHostedLinqHomeChat({
+      chatId: materializedChatId,
+      memberId: userId,
+      recipientPhone: buildLinqRecipientPhoneNumber(userId),
+    });
+
     const expectedDirectReplyChatPath =
       `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const outboundCountBeforeReply =
@@ -162,9 +145,6 @@ describe("hosted local Codex image media delivery e2e", () => {
     const finalStatus = await completionPromise;
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(
-      requireScenario().runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV],
-    ).toBe(expectedDynamicTools);
   }, 300_000);
 });
 
@@ -263,4 +243,10 @@ function requireScenario(): HostedLocalFullStackScenario {
   }
 
   return scenario;
+}
+
+function expectConfiguredDynamicTools(): void {
+  expect(
+    requireScenario().runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV],
+  ).toBe(expectedDynamicTools);
 }

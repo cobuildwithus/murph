@@ -1,19 +1,23 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import {
   EVENT_SOURCES,
+  EXPERIMENT_PROGRESS_CARD_MAX_CONFOUNDERS,
   EXPERIMENT_STATUSES,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS,
+  buildExperimentProgressCardPath,
   commonsProtocolRefSchema,
   effectiveProtocolSnapshotSchema,
   experimentAnalysisPlanSchema,
   experimentAssistantSupportSchema,
   experimentFrontmatterSchema,
   experimentOutcomeSchema,
+  experimentProgressCardSchema,
   experimentProgressSnapshotSchema,
   experimentRunPlanSchema,
   experimentRunScheduleIntentSchema,
+  isStrictIsoDate,
   jsonObjectSchema,
   type ExperimentRunScheduleIntent,
   type HealthCommonsExpectedSignalDescription,
@@ -1119,6 +1123,75 @@ const experimentProgressResultSchema = z.object({
   progress: experimentProgressSnapshotSchema,
 })
 
+const experimentProgressCardResultSchema = z.object({
+  experimentId: z.string().min(1),
+  slug: slugSchema,
+  card: experimentProgressCardSchema,
+  path: z.string().min(1),
+  url: z.string().url().nullable(),
+  warnings: z.array(z.string().min(1)),
+})
+
+function parseExperimentProgressCardConfounderOptions(
+  values: readonly string[] | undefined,
+): Array<{ date: string; label: string }> {
+  const entries = normalizeRepeatableTextFlagOption(values) ?? []
+  if (entries.length > EXPERIMENT_PROGRESS_CARD_MAX_CONFOUNDERS) {
+    throw new VaultCliError(
+      'invalid_payload',
+      `--confounder accepts at most ${EXPERIMENT_PROGRESS_CARD_MAX_CONFOUNDERS} entries.`,
+    )
+  }
+
+  return entries.map((entry) => {
+    const separatorIndex = entry.indexOf(':')
+    const date = separatorIndex > 0 ? entry.slice(0, separatorIndex) : ''
+    const label = separatorIndex > 0 ? entry.slice(separatorIndex + 1).trim() : ''
+    if (!isStrictIsoDate(date) || label.length === 0 || label.length > 60) {
+      throw new VaultCliError(
+        'invalid_payload',
+        `Invalid --confounder value "${entry}". Expected "YYYY-MM-DD:label" with a strict date and a 1-60 character label.`,
+      )
+    }
+
+    return { date, label }
+  })
+}
+
+/**
+ * Resolve the public product base URL for progress-card links. Mirrors the
+ * assistant-engine product base URL resolution (HOSTED_ONBOARDING_PUBLIC_BASE_URL,
+ * then HOSTED_WEB_BASE_URL, then VERCEL_PROJECT_PRODUCTION_URL with an implied
+ * https scheme) without importing assistant-engine from the CLI.
+ */
+function resolveExperimentProgressCardBaseUrl(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string | null {
+  const candidates = [
+    env.HOSTED_ONBOARDING_PUBLIC_BASE_URL,
+    env.HOSTED_WEB_BASE_URL,
+    env.VERCEL_PROJECT_PRODUCTION_URL,
+  ]
+
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim()
+    if (!trimmed) {
+      continue
+    }
+
+    const withScheme = /^[a-z][a-z\d+.-]*:\/\//iu.test(trimmed)
+      ? trimmed
+      : `https://${trimmed}`
+    try {
+      return new URL(withScheme).origin
+    } catch {
+      continue
+    }
+  }
+
+  return null
+}
+
 const experimentFollowupDueDecisionSchema = z.object({
   schema: z.literal('murph.experiment-followup-due.v1'),
   kind: experimentFollowupKindSchema,
@@ -1879,6 +1952,49 @@ export function registerExperimentCommands(
         lookup: args.id,
         asOf: options.asOf,
       })
+    },
+  })
+
+  experiment.command('progress-card', {
+    description:
+      'Build the shareable progress-card snapshot for one experiment and emit its image URL.',
+    args: experimentLookupArgSchema,
+    options: withBaseOptions({
+      asOf: localDateSchema.optional().describe('Optional analysis date in YYYY-MM-DD form.'),
+      confounder: z
+        .array(z.string().min(1))
+        .optional()
+        .describe(
+          'Confounder annotation in "YYYY-MM-DD:label" form. Repeat --confounder for up to four entries.',
+        ),
+    }),
+    output: experimentProgressCardResultSchema,
+    async run({ args, options }) {
+      const confounders = parseExperimentProgressCardConfounderOptions(options.confounder)
+      const result = await services.query.showExperimentProgressCard({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+        lookup: args.id,
+        asOf: options.asOf,
+        confounders,
+      })
+      const cardPath = buildExperimentProgressCardPath(result.experimentId, result.card)
+      const warnings = [...result.warnings]
+      const baseUrl = resolveExperimentProgressCardBaseUrl()
+      if (!baseUrl) {
+        warnings.push(
+          'No product base URL is configured (HOSTED_ONBOARDING_PUBLIC_BASE_URL, HOSTED_WEB_BASE_URL, or VERCEL_PROJECT_PRODUCTION_URL); url is null.',
+        )
+      }
+
+      return {
+        experimentId: result.experimentId,
+        slug: result.slug,
+        card: result.card,
+        path: cardPath,
+        url: baseUrl ? `${baseUrl}${cardPath}` : null,
+        warnings,
+      }
     },
   })
 

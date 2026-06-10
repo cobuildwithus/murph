@@ -762,216 +762,6 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
   });
 
-  it("preempts container prewarm when a workspace invocation arrives", async () => {
-    const firstStartEntered = createDeferred<void>();
-    const startAndWaitForPorts = vi.fn(async (input: {
-      cancellationOptions: { abort: AbortSignal };
-    }) => {
-      if (startAndWaitForPorts.mock.calls.length === 1) {
-        firstStartEntered.resolve();
-        await new Promise<void>((_resolve, reject) => {
-          const signal = input.cancellationOptions.abort;
-          if (signal.aborted) {
-            reject(signal.reason);
-            return;
-          }
-          signal.addEventListener("abort", () => reject(signal.reason), {
-            once: true,
-          });
-        });
-        return;
-      }
-    });
-    const { container, containerFetch, destroy } = createContainerDouble({
-      startAndWaitForPorts,
-    });
-
-    const prewarm = container.prewarmForProcessing({
-      timeoutMs: 60_000,
-      userId: "member_123",
-    });
-    await firstStartEntered.promise;
-
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_after_prewarm"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-    await expect(prewarm).resolves.toEqual({ kind: "busy" });
-
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
-    expect(destroy).not.toHaveBeenCalled();
-    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
-      String(url).endsWith("/internal/workspace-invocation")
-    );
-    expect(executeCalls).toHaveLength(1);
-  });
-
-  it("does not wait on slow cleanup after a timed-out prewarm start", async () => {
-    vi.useFakeTimers();
-
-    try {
-      let status: "running" | "stopped" = "stopped";
-      const prewarmStarted = createDeferred<void>();
-      const destroy = vi.fn(async () => {
-        await new Promise<void>(() => undefined);
-      });
-      const startAndWaitForPorts = vi.fn(async (input: {
-        cancellationOptions: { abort: AbortSignal };
-      }) => {
-        status = "running";
-        prewarmStarted.resolve();
-        await new Promise<void>((_resolve, reject) => {
-          input.cancellationOptions.abort.addEventListener(
-            "abort",
-            () => reject(input.cancellationOptions.abort.reason),
-            { once: true },
-          );
-        });
-      });
-      const getState = vi.fn(async () => ({
-        lastChange: Date.now(),
-        status,
-      }));
-      const { container } = createContainerDouble({
-        destroy,
-        getState,
-        startAndWaitForPorts,
-      });
-
-      const prewarmOutcome = container.prewarmForProcessing({
-        timeoutMs: 5_000,
-        userId: "member_123",
-      }).then(
-        () => "resolved" as const,
-        () => "rejected" as const,
-      );
-
-      await prewarmStarted.promise;
-      await vi.advanceTimersByTimeAsync(5_000);
-
-      await expect(prewarmOutcome).resolves.toBe("rejected");
-      expect(destroy).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("returns busy instead of queueing prewarm behind active runtime work", async () => {
-    const firstRequestStarted = createDeferred<void>();
-    const firstRequestRelease = createDeferred<void>();
-    let workspaceRequestCount = 0;
-    const containerFetch = vi.fn(async (url: string) => {
-      if (url.endsWith("/health")) {
-        return new Response(JSON.stringify(createRunnerHealthResult()), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-
-      workspaceRequestCount += 1;
-      firstRequestStarted.resolve();
-      await firstRequestRelease.promise;
-
-      return new Response(JSON.stringify(createRunnerResult()), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      });
-    });
-    const { container, startAndWaitForPorts } = createContainerDouble({
-      containerFetch,
-    });
-
-    const invocation = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_lock_holder"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    });
-    await firstRequestStarted.promise;
-
-    await expect(container.prewarmForProcessing({
-      timeoutMs: 5_000,
-      userId: "member_123",
-    })).resolves.toEqual({ kind: "busy" });
-
-    firstRequestRelease.resolve();
-    await expect(invocation).resolves.toEqual(createRunnerResult());
-    expect(workspaceRequestCount).toBe(1);
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not restart a warm shell when prewarm is preempted by workspace invocation", async () => {
-    const healthEntered = createDeferred<void>();
-    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith("/health") && containerFetch.mock.calls.length === 1) {
-        healthEntered.resolve();
-        await new Promise<never>((_resolve, reject) => {
-          const signal = init?.signal;
-          if (signal?.aborted) {
-            reject(signal.reason);
-            return;
-          }
-          signal?.addEventListener("abort", () => reject(signal.reason), {
-            once: true,
-          });
-        });
-      }
-
-      if (url.endsWith("/health")) {
-        return new Response(JSON.stringify(createRunnerHealthResult()), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-
-      return new Response(JSON.stringify(createRunnerResult()), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      });
-    });
-    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
-      containerFetch,
-      initialStatus: "running",
-    });
-
-    const prewarm = container.prewarmForProcessing({
-      timeoutMs: 60_000,
-      userId: "member_123",
-    });
-    await healthEntered.promise;
-
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_after_warm_prewarm"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-    await expect(prewarm).resolves.toEqual({ kind: "busy" });
-
-    expect(destroy).not.toHaveBeenCalled();
-    expect(startAndWaitForPorts).not.toHaveBeenCalled();
-    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
-      String(url).endsWith("/internal/workspace-invocation")
-    );
-    expect(executeCalls).toHaveLength(1);
-  });
-
   it("ensureProcessing rejects mismatched user identities before waking or starting work", async () => {
     const { container, containerFetch } = createContainerDouble();
 
@@ -1831,52 +1621,127 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it("does not renew or keep the warm shell when activity expiry fires after work completed", async () => {
-    const renewActivityTimeout = vi.fn();
-    const { container, containerFetch, destroy, startAndWaitForPorts } = createContainerDouble();
-    Object.assign(container, {
-      renewActivityTimeout,
-    });
+  it("renews and keeps the warm shell when activity expiry fires before idle TTL", async () => {
+    vi.useFakeTimers();
 
-    await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_stale_activity_first"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    });
-    renewActivityTimeout.mockClear();
+    try {
+      const renewActivityTimeout = vi.fn();
+      const { container, containerFetch, destroy, startAndWaitForPorts } =
+        createContainerDouble();
+      Object.assign(container, {
+        renewActivityTimeout,
+      });
 
-    await container.onActivityExpired();
-    expect(destroy).toHaveBeenCalledTimes(1);
-    expect(renewActivityTimeout).not.toHaveBeenCalled();
+      vi.setSystemTime(new Date("2026-06-04T03:56:40.000Z"));
+      await container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_recent_activity_first"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+      renewActivityTimeout.mockClear();
 
-    await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_stale_activity_second"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    });
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
-    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
-      String(url).endsWith("/internal/workspace-invocation")
-    );
-    expect(executeCalls[0]?.[1]?.headers).toEqual({
-      "content-type": "application/json; charset=utf-8",
-    });
-    expect(executeCalls[1]?.[1]?.headers).toEqual({
-      "content-type": "application/json; charset=utf-8",
-    });
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "container",
-        message: "Hosted execution container activity expired; running cleanup.",
-        phase: "container.ready",
-      }),
-    );
+      vi.setSystemTime(new Date("2026-06-04T03:56:42.000Z"));
+      await container.onActivityExpired();
+      expect(destroy).not.toHaveBeenCalled();
+      expect(renewActivityTimeout).toHaveBeenCalledTimes(1);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            activeWorkspaceInvocationPresent: false,
+            idleTtlDeltaMs: -298_000,
+            lifecycleStage: "activity-expired-early-renew",
+            runnerIdleTtlMs: 300_000,
+          }),
+          message:
+            "Hosted execution container activity expiry arrived before the idle TTL elapsed; renewing.",
+          phase: "container.ready",
+        }),
+      );
+
+      await container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_recent_activity_second"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+      const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+        String(url).endsWith("/internal/workspace-invocation")
+      );
+      expect(executeCalls[0]?.[1]?.headers).toEqual({
+        "content-type": "application/json; charset=utf-8",
+      });
+      expect(executeCalls[1]?.[1]?.headers).toEqual({
+        "content-type": "application/json; charset=utf-8",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cleans up when early activity-expiry renewal throws", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const renewActivityTimeout = vi.fn();
+      const { container, destroy } = createContainerDouble();
+      Object.assign(container, {
+        renewActivityTimeout,
+      });
+
+      vi.setSystemTime(new Date("2026-06-04T03:56:40.000Z"));
+      await container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_recent_activity_before_throw"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+
+      renewActivityTimeout.mockImplementation(() => {
+        throw new Error("activity timeout renewal failed");
+      });
+      vi.clearAllMocks();
+
+      vi.setSystemTime(new Date("2026-06-04T03:56:42.000Z"));
+      await container.onActivityExpired();
+
+      expect(renewActivityTimeout).toHaveBeenCalledTimes(1);
+      expect(destroy).toHaveBeenCalledTimes(1);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            activityStage: "activity-expired-early-renew",
+          }),
+          level: "warn",
+          message: "Hosted execution container failed to renew activity timeout.",
+          phase: "container.ready",
+        }),
+      );
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            idleTtlDeltaMs: -298_000,
+            lifecycleStage: "activity-expired-cleanup",
+            runnerIdleTtlMs: 300_000,
+          }),
+          message: "Hosted execution container activity expired; running cleanup.",
+          phase: "container.ready",
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("renews the activity timeout during long runner invocations", async () => {

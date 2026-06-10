@@ -2,6 +2,7 @@ export * from "./bank-entities.ts";
 export * from "./constants.ts";
 export * from "./event-lifecycle.ts";
 export * from "./examples.ts";
+export * from "./experiment-progress-card.ts";
 export * from "./frontmatter.ts";
 export * from "./health-entities.ts";
 export * from "./health-commons.ts";

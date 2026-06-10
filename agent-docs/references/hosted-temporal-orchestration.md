@@ -190,9 +190,7 @@ and worker connection code must support the same API key, TLS enablement,
 client certificate/key, server root CA, and server-name override settings so
 `signalWithStart` and worker polling use the same trust model.
 
-Mailbox signals must stay source-less. Temporal no longer carries prewarm
-signals; message-ingress prewarm is a direct web-to-Cloudflare best-effort hint
-after mailbox append.
+Mailbox signals must stay source-less.
 
 ## Global Device-Sync Scheduled Wake Reconciler
 
@@ -312,7 +310,7 @@ POST /internal/users/:userId/runtime/ensure-processing
 Temporal signs this request with the hosted internal callback key and includes
 the bound hosted user header in the signature input. Cloudflare accepts only
 that signed form for the runtime processing adapter; Vercel OIDC remains for
-browser-vault, status, deletion, and best-effort prewarm-hint control clients.
+browser-vault, status, and deletion control clients.
 Do not introduce a static shared bearer token for this adapter.
 
 Request summary:

@@ -557,7 +557,8 @@ class DeviceSyncServiceController {
       retryAt: string | null,
       retryable: boolean,
     ): boolean => {
-      const failed = this.store.failJobIfOwned(job.id, this.workerId, currentNow(), code, message, retryAt, retryable);
+      const failedAt = currentNow();
+      const failed = this.store.failJobIfOwned(job.id, this.workerId, failedAt, code, message, retryAt, retryable);
 
       if (!failed) {
         this.logger.debug?.("Device sync job side effects skipped because execution was cancelled.", {
@@ -565,8 +566,24 @@ class DeviceSyncServiceController {
           accountId: job.accountId,
           jobId: job.id,
         });
+        return failed;
       }
 
+      // No summary here: these repo-authored messages can embed the local
+      // account id, and the failure code already names the cause.
+      const failedJobResource = readSafeDiagnosticToken(job.payload.resource);
+      this.recordJobFailureDiagnostic({
+        accountId: job.accountId,
+        accountStatus: null,
+        at: failedAt,
+        attempts: job.attempts,
+        code,
+        details: {},
+        jobKind: job.kind,
+        provider: job.provider,
+        ...(failedJobResource ? { resource: failedJobResource } : {}),
+        retryable,
+      });
       return failed;
     };
 
@@ -897,12 +914,19 @@ class DeviceSyncServiceController {
         return finishPass();
       }
 
+      const failedJobResource = readSafeDiagnosticToken(job.payload.resource);
       this.recordJobFailureDiagnostic({
         accountId: storedAccount.id,
         accountStatus: failure.accountStatus ?? null,
+        at: failureNow,
+        attempts: job.attempts,
         code: failure.code,
         details: failure.details,
+        jobKind: job.kind,
+        provider: provider.provider,
+        ...(failedJobResource ? { resource: failedJobResource } : {}),
         retryable: failure.retryable,
+        summary: failure.message,
       });
       const failureMetadataPatch = readDeviceSyncFailureMetadataPatch(error);
       const failureOptions = {

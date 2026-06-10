@@ -21,16 +21,6 @@ export const HOSTED_RUNTIME_SIGNAL_KINDS = [
 
 export type HostedRuntimeSignalKind = (typeof HOSTED_RUNTIME_SIGNAL_KINDS)[number];
 
-export const HOSTED_RUNTIME_LINQ_MESSAGE_PREWARM_SOURCE =
-  "linq.message.ingress" as const;
-
-export const HOSTED_RUNTIME_PREWARM_SOURCES = [
-  HOSTED_RUNTIME_LINQ_MESSAGE_PREWARM_SOURCE,
-] as const;
-
-export type HostedRuntimePrewarmSource =
-  (typeof HOSTED_RUNTIME_PREWARM_SOURCES)[number];
-
 export type HostedRuntimeSignal =
   | {
       kind: "mailbox_appended";
@@ -107,38 +97,6 @@ export type HostedRuntimeEnsureProcessingResponse =
       kind: "runtime_processing_accepted";
       recommendedRecheckAt: string;
       runtimeAttemptId: string;
-    }
-  | {
-      kind: "retry_later";
-      retryAt: string;
-    };
-
-export interface HostedRuntimePrewarmRequest {
-  prewarmAttemptId: string;
-  source: HostedRuntimePrewarmSource;
-}
-
-export const HOSTED_RUNTIME_PREWARM_RESPONSE_KINDS = [
-  "runtime_prewarm_accepted",
-  "retry_later",
-] as const;
-
-export type HostedRuntimePrewarmResponseKind =
-  (typeof HOSTED_RUNTIME_PREWARM_RESPONSE_KINDS)[number];
-
-export const HOSTED_RUNTIME_PREWARM_ACCEPTED_ACTIONS = [
-  "started",
-  "already_warm",
-  "already_running",
-] as const;
-
-export type HostedRuntimePrewarmAcceptedAction =
-  (typeof HOSTED_RUNTIME_PREWARM_ACCEPTED_ACTIONS)[number];
-
-export type HostedRuntimePrewarmResponse =
-  | {
-      action: HostedRuntimePrewarmAcceptedAction;
-      kind: "runtime_prewarm_accepted";
     }
   | {
       kind: "retry_later";

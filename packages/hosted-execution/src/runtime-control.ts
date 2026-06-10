@@ -604,10 +604,37 @@ export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
 export type HostedRuntimeLatencyTraceMilestone =
   (typeof HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES)[number];
 
+export interface HostedRuntimeLatencyPhaseBreakdown {
+  schemaVersion: number;
+  restore?: {
+    sizeGuardMs?: number;
+    dataKeyUnwrapMs?: number;
+    scratchPrepareMs?: number;
+    presignGetMs?: number;
+    objectFetchMs?: number;
+    decryptMs?: number;
+    extractMs?: number;
+    encryptedBytes?: number;
+    plainBytes?: number;
+  };
+  boot?: {
+    nodeStartupMs?: number;
+    restoreWasCold?: boolean;
+  };
+  provider?: {
+    turnLockWaitMs?: number;
+    sessionResolveMs?: number;
+    promptBuildMs?: number;
+    admissionMs?: number;
+    preProviderSetupMs?: number;
+  };
+}
+
 export interface HostedRuntimeLatencyTraceStagedMilestones {
   runnerJobAcceptedAt?: string | null;
   runtimePhaseStartedAt?: string | null;
   workspaceRestoreDoneAt?: string | null;
+  phaseBreakdown?: HostedRuntimeLatencyPhaseBreakdown | null;
 }
 
 export interface HostedRuntimeLatencyTraceAssistantInputStagedEvent
@@ -623,6 +650,7 @@ export interface HostedRuntimeLatencyTraceAssistantInputStagedEvent
 export interface HostedRuntimeLatencyTraceProviderStartedEvent {
   assistantInputIds: string[];
   at: string;
+  phaseBreakdown?: HostedRuntimeLatencyPhaseBreakdown | null;
   providerRequestOrdinal: number;
   runtimeAttemptId?: string | null;
   source: HostedIngressLatencySource;

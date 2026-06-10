@@ -15,6 +15,10 @@ import {
   readHostedMemberSnapshot,
   type HostedMemberSnapshot,
 } from "../hosted-onboarding/hosted-member-store";
+import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-member-billing-store";
+import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
+import { deleteHostedPrivyUser } from "../hosted-onboarding/privy";
+import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import {
   deleteHostedRunnerUserDataBestEffort,
@@ -91,7 +95,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Local Stripe billing references",
     deletion: "local-reference-delete",
     export: "decoded-redacted-data",
-    note: "Confirmed export includes local Stripe customer/subscription references. Stripe records remain governed by Stripe/legal retention.",
+    note: "Confirmed export includes local Stripe customer/subscription references. The Stripe subscription and customer themselves are canceled/deleted by the vendor-account deletion step.",
   },
   {
     slug: "prisma.hosted_mailbox_item",
@@ -305,10 +309,10 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
   },
   {
     slug: "providers.stripe_privy",
-    label: "Stripe and Privy vendor records",
-    deletion: "documented-retention",
+    label: "Stripe and Privy vendor accounts",
+    deletion: "best-effort-delete",
     export: "documented-only",
-    note: "Deletes local references only. Vendor records are retained or erased through Stripe/Privy/legal workflows outside this MVP endpoint.",
+    note: "Cancels the Stripe subscription before local deletion (fail-closed), then deletes the Stripe customer and Privy user after local rows are removed; results are reported in the deletion result.",
   },
   {
     slug: "backups",
@@ -322,10 +326,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
 export type HostedAccountDataStoreSlug = typeof HOSTED_ACCOUNT_DATA_STORE_COVERAGE[number]["slug"];
 
 export interface HostedAccountDeletionRequest {
-  acknowledgedIrreversibleDeletion: true;
-  acknowledgedProviderAndBackupLimits: true;
   confirmationPhrase: typeof HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE;
-  secondConfirmationAccepted: true;
 }
 
 export interface HostedAccountDataCounts {
@@ -347,6 +348,23 @@ export interface HostedAccountProviderRevocationResult {
   warningCode: string | null;
 }
 
+export type HostedAccountVendorDeletionStatus =
+  | "completed"
+  | "failed"
+  | "skipped_no_record"
+  | "skipped_not_configured";
+
+export interface HostedAccountVendorDeletionResult {
+  errorCode: string | null;
+  status: HostedAccountVendorDeletionStatus;
+}
+
+export interface HostedAccountVendorAccountDeletions {
+  privyUser: HostedAccountVendorDeletionResult;
+  stripeCustomer: HostedAccountVendorDeletionResult;
+  stripeSubscription: HostedAccountVendorDeletionResult;
+}
+
 export interface HostedAccountDeletionResult {
   cloudflare: HostedRunnerUserDataDeletionBestEffortResult;
   deletedAt: string;
@@ -355,6 +373,7 @@ export interface HostedAccountDeletionResult {
   providerRevocations: HostedAccountProviderRevocationResult[];
   retentionNotes: readonly string[];
   schema: typeof HOSTED_ACCOUNT_DATA_DELETION_SCHEMA;
+  vendorAccounts: HostedAccountVendorAccountDeletions;
 }
 
 export type HostedDataExportJsonValue =
@@ -403,10 +422,9 @@ const HOSTED_DATA_EXPORT_OMITTED_INTERNAL_TABLES = [
 const HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE = 250;
 
 const HOSTED_ACCOUNT_RETENTION_NOTES = [
-  "Live Prisma, hosted mailbox, device, runtime, and workspace rows are deleted immediately by this workflow.",
-  "Cloudflare Durable Object/R2 cleanup is best effort and reported in the deletion result when hosted execution control is configured.",
-  "Provider-side data deletion is limited to revocation hooks and external provider retention controls; Junction-routed sources are deregistered through Junction when configured.",
-  "Stripe, Privy, carrier/email/Telegram/Linq provider records, and infrastructure backups follow their documented retention/legal processes.",
+  "Messages already delivered to external carrier, Telegram, email, or Linq systems are not recalled from those services.",
+  "Stripe retains records it is legally required to keep, such as invoices, under its documented processes.",
+  "Infrastructure backups age out automatically under documented retention and are never restored into live systems.",
 ] as const;
 
 export function parseHostedAccountDeletionRequest(
@@ -416,39 +434,12 @@ export function parseHostedAccountDeletionRequest(
     throw hostedOnboardingError({
       code: "ACCOUNT_DELETION_CONFIRMATION_PHRASE_REQUIRED",
       httpStatus: 400,
-      message: `Type ${HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE} exactly to delete your Murph data.`,
-    });
-  }
-
-  if (body.secondConfirmationAccepted !== true) {
-    throw hostedOnboardingError({
-      code: "ACCOUNT_DELETION_SECOND_CONFIRMATION_REQUIRED",
-      httpStatus: 400,
-      message: "Confirm the second deletion step before deleting your Murph data.",
-    });
-  }
-
-  if (body.acknowledgedIrreversibleDeletion !== true) {
-    throw hostedOnboardingError({
-      code: "ACCOUNT_DELETION_IRREVERSIBLE_ACK_REQUIRED",
-      httpStatus: 400,
-      message: "Acknowledge that live Murph data deletion is irreversible before continuing.",
-    });
-  }
-
-  if (body.acknowledgedProviderAndBackupLimits !== true) {
-    throw hostedOnboardingError({
-      code: "ACCOUNT_DELETION_PROVIDER_BACKUP_ACK_REQUIRED",
-      httpStatus: 400,
-      message: "Acknowledge provider and backup retention limits before deleting your Murph data.",
+      message: `Type ${HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE} exactly to delete your account.`,
     });
   }
 
   return {
-    acknowledgedIrreversibleDeletion: true,
-    acknowledgedProviderAndBackupLimits: true,
     confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
-    secondConfirmationAccepted: true,
   };
 }
 
@@ -1275,6 +1266,19 @@ export async function deleteHostedAccountData(input: {
     });
   }
 
+  // Decrypt vendor account ids before their rows are deleted below.
+  const billingRef = await readHostedMemberStripeBillingRef({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const identity = await readHostedMemberIdentity({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const stripeCustomerId = billingRef?.stripeCustomerId ?? null;
+  const stripeSubscriptionId = billingRef?.stripeSubscriptionId ?? null;
+  const privyUserId = identity?.privyUserId ?? null;
+
   await terminateHostedUserRuntimeWorkflowBestEffort({
     reason: "account-deleted",
     userId: input.memberId,
@@ -1289,6 +1293,12 @@ export async function deleteHostedAccountData(input: {
     request: input.request,
   });
   assertProviderRevocationsAllowDeletion(providerRevocations);
+  // Cancel the subscription before local rows are deleted and fail closed:
+  // a deleted account must never keep an active Stripe subscription billing it.
+  const stripeSubscription = await cancelHostedStripeSubscriptionForAccountDeletion({
+    memberId: input.memberId,
+    stripeSubscriptionId,
+  });
   const deletedCounts = await input.prisma.$transaction(async (tx) => {
     await lockHostedMemberForAccountDeletionTx({
       memberId: input.memberId,
@@ -1316,6 +1326,16 @@ export async function deleteHostedAccountData(input: {
     reason: "account-deleted",
     userId: input.memberId,
   });
+  // Local rows are gone and the subscription is already canceled, so vendor
+  // account deletion is best effort and reported instead of fail-closed.
+  const stripeCustomer = await deleteHostedStripeCustomerBestEffort({
+    memberId: input.memberId,
+    stripeCustomerId,
+  });
+  const privyUser = await deleteHostedPrivyUserBestEffort({
+    memberId: input.memberId,
+    privyUserId,
+  });
 
   return {
     cloudflare,
@@ -1325,7 +1345,121 @@ export async function deleteHostedAccountData(input: {
     providerRevocations,
     retentionNotes: HOSTED_ACCOUNT_RETENTION_NOTES,
     schema: HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
+    vendorAccounts: {
+      privyUser,
+      stripeCustomer,
+      stripeSubscription,
+    },
   };
+}
+
+async function cancelHostedStripeSubscriptionForAccountDeletion(input: {
+  memberId: string;
+  stripeSubscriptionId: string | null;
+}): Promise<HostedAccountVendorDeletionResult> {
+  if (!input.stripeSubscriptionId) {
+    return { errorCode: null, status: "skipped_no_record" };
+  }
+
+  const stripe = getHostedOnboardingStripe();
+  if (!stripe) {
+    // Fail closed: a subscription reference exists, so proceeding without a
+    // Stripe client could leave a deleted account with an active subscription.
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED",
+      httpStatus: 500,
+      message: "Billing is not configured, so your subscription could not be canceled. Contact support to delete your account.",
+    });
+  }
+
+  try {
+    const subscription = await stripe.subscriptions.retrieve(input.stripeSubscriptionId);
+    // canceled and incomplete_expired are terminal states Stripe refuses to cancel again.
+    if (subscription.status !== "canceled" && subscription.status !== "incomplete_expired") {
+      await stripe.subscriptions.cancel(input.stripeSubscriptionId);
+    }
+    return { errorCode: null, status: "completed" };
+  } catch (error) {
+    if (isStripeResourceMissingError(error)) {
+      return { errorCode: null, status: "skipped_no_record" };
+    }
+
+    const cancelErrorCode = safeErrorCode(error);
+    const memberId = input.memberId;
+    console.error(
+      `[hosted-privacy] Stripe subscription cancel failed during account deletion (memberId=${memberId}, errorCode=${cancelErrorCode}).`,
+    );
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_SUBSCRIPTION_CANCEL_FAILED",
+      httpStatus: 502,
+      message: "We could not cancel your subscription. Retry account deletion, or contact support if it keeps failing.",
+      retryable: true,
+    });
+  }
+}
+
+async function deleteHostedStripeCustomerBestEffort(input: {
+  memberId: string;
+  stripeCustomerId: string | null;
+}): Promise<HostedAccountVendorDeletionResult> {
+  if (!input.stripeCustomerId) {
+    return { errorCode: null, status: "skipped_no_record" };
+  }
+
+  const stripe = getHostedOnboardingStripe();
+  if (!stripe) {
+    return { errorCode: null, status: "skipped_not_configured" };
+  }
+
+  try {
+    await stripe.customers.del(input.stripeCustomerId);
+    return { errorCode: null, status: "completed" };
+  } catch (error) {
+    if (isStripeResourceMissingError(error)) {
+      return { errorCode: null, status: "skipped_no_record" };
+    }
+
+    const stripeErrorCode = safeErrorCode(error);
+    const memberId = input.memberId;
+    console.error(
+      `[hosted-privacy] Stripe customer deletion failed after account deletion (memberId=${memberId}, errorCode=${stripeErrorCode}).`,
+    );
+    return { errorCode: stripeErrorCode, status: "failed" };
+  }
+}
+
+async function deleteHostedPrivyUserBestEffort(input: {
+  memberId: string;
+  privyUserId: string | null;
+}): Promise<HostedAccountVendorDeletionResult> {
+  if (!input.privyUserId) {
+    return { errorCode: null, status: "skipped_no_record" };
+  }
+
+  try {
+    const deleted = await deleteHostedPrivyUser(input.privyUserId);
+    return deleted
+      ? { errorCode: null, status: "completed" }
+      : { errorCode: null, status: "skipped_not_configured" };
+  } catch (error) {
+    const privyErrorCode = safeErrorCode(error);
+    const memberId = input.memberId;
+    console.error(
+      `[hosted-privacy] Privy user deletion failed after account deletion (memberId=${memberId}, errorCode=${privyErrorCode}).`,
+    );
+    return { errorCode: privyErrorCode, status: "failed" };
+  }
+}
+
+function isStripeResourceMissingError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+
+  const type = Reflect.get(error, "type");
+  return Reflect.get(error, "code") === "resource_missing"
+    && typeof type === "string"
+    && type.startsWith("Stripe");
 }
 
 async function countHostedAccountData(input: {

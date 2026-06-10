@@ -21,6 +21,9 @@ import type {
 import type {
   AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
+import {
+  assistantResponseMediaSchema,
+} from "@murphai/operator-config/assistant-cli-contracts";
 import type {
   AssistantResponseMedia,
 } from "@murphai/operator-config/assistant-cli-contracts";
@@ -44,6 +47,9 @@ import type {
 import type {
   HostedEmailSendRequest,
 } from "../hosted-email.ts";
+import type {
+  AssistantHostedGeneratedImageUploader,
+} from "@murphai/assistant-engine";
 import type {
   RuntimeLivenessPort,
 } from "./liveness.ts";
@@ -124,6 +130,16 @@ export interface HostedRuntimeProviderFileResponse {
   contentType: string | null;
   fileName: string | null;
   sha256: string;
+}
+
+export type {
+  AssistantResponseMedia,
+};
+
+export function parseHostedRuntimeAssistantResponseMedia(
+  value: unknown,
+): AssistantResponseMedia {
+  return assistantResponseMediaSchema.parse(value);
 }
 
 export interface HostedRuntimeLinqSendRequest {
@@ -271,6 +287,18 @@ export interface HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails {
   snapshotDirectR2PutElapsedMs?: number;
 }
 
+export interface HostedRuntimeWorkspaceSnapshotRestoreTimingDetails {
+  sizeGuardMs?: number;
+  dataKeyUnwrapMs?: number;
+  scratchPrepareMs?: number;
+  presignGetMs?: number;
+  objectFetchMs?: number;
+  decryptMs?: number;
+  extractMs?: number;
+  encryptedBytes?: number;
+  plainBytes?: number;
+}
+
 export interface HostedRuntimeWorkspaceSnapshotPort {
   abortSnapshotSession(input: {
     objectKey: string;
@@ -291,7 +319,7 @@ export interface HostedRuntimeWorkspaceSnapshotPort {
     durableRoot: string;
     ref: HostedWorkspaceSnapshotV2Ref;
     scratchRoot?: string | null;
-  }): Promise<void>;
+  }): Promise<HostedRuntimeWorkspaceSnapshotRestoreTimingDetails | void>;
   startSnapshotSession(input: {
     expectedWorkspaceVersion: string;
     nextWakeAt?: string | null;
@@ -313,6 +341,7 @@ export interface HostedRuntimePlatform {
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;
+  generatedImageUploader?: AssistantHostedGeneratedImageUploader | null;
   providerFetch?: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
   issueExportPort?: HostedRuntimeIssueExportPort | null;

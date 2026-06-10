@@ -2,6 +2,9 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
 } from "../internal-hosts.ts";
 import {
+  HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
+} from "../runner-effects-contract.ts";
+import {
   readHostedRunnerWebControlOperation,
 } from "./shared-web-control-policy.ts";
 
@@ -95,6 +98,12 @@ export function readHostedRunnerInternalOperation(input: {
     return "runner_control";
   }
   if (input.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
+    if (
+      input.method === "POST" &&
+      input.pathname === HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH
+    ) {
+      return "generated_image_upload";
+    }
     return "effects_port";
   }
 

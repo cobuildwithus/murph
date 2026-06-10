@@ -112,6 +112,7 @@ const queryServiceMethodNames = [
   "showExperiment",
   "listExperiments",
   "showExperimentProgress",
+  "showExperimentProgressCard",
   "showExperimentFollowupDue",
   "analyzeExperimentOutcome",
   "showJournal",

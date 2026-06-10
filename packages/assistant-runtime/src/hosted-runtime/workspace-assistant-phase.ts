@@ -353,7 +353,10 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(input.materializeWorkspaceArtifacts
           ? { materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts }
           : {}),
+        generatedImageUploader: input.runtime.platform.generatedImageUploader ?? null,
+        generatedImageUploaderRequired: true,
         memberId: input.request.userId,
+        providerFetch: input.runtime.platform.providerFetch ?? null,
         ...(input.runtime.platform.usageRecordPort
           ? {
               usageRecorder: {
@@ -1188,6 +1191,30 @@ function createHostedDeviceActivityAutomationWakeCandidate(
   );
 }
 
+// System-mailbox and device-sync-only invocations skip the assistant lane, so
+// their wake candidates alone would replace an armed assistant cron wake in
+// the persisted workspace next_wake_at and the runtime would sleep through
+// scheduled reminders (2026-06-10 missed-reminder incident). Merge the cron
+// schedule back into every such candidate selection, best-effort: a failed
+// vault read must not break the device-sync lane, and the next full assistant
+// pass re-arms the wake from the same source either way.
+async function resolveHostedAssistantCronWakeCandidateBestEffort(
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput,
+): Promise<HostedRuntimeWakeCandidate | null> {
+  try {
+    const cronStatus = await getAssistantCronStatus(phaseInput.restored.vaultRoot);
+    return createHostedRuntimeWakeCandidate(
+      resolveHostedAssistantAutomationNextWakeAt({
+        input: phaseInput,
+        nextWakeAt: cronStatus.nextRunAt,
+      }),
+      HOSTED_ASSISTANT_WAKE_REASON,
+    );
+  } catch {
+    return null;
+  }
+}
+
 function systemMailboxPreparationRanDeviceSync(
   systemMailboxPreparation: HostedSystemMailboxPreparation,
 ): boolean {
@@ -1417,6 +1444,7 @@ async function writeHostedDeviceActivityAutomationScheduleFailureRuntimeLog(inpu
 }
 
 function buildIdleDeviceSyncOnlyAssistantPhaseResult(input: {
+  assistantCronWake: HostedRuntimeWakeCandidate | null;
   deviceActivityAutomation: HostedDeviceActivityAutomationScheduleResult | null;
   dirtyDeviceSyncMetrics: HostedDeviceSyncWakeMetrics;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
@@ -1431,6 +1459,7 @@ function buildIdleDeviceSyncOnlyAssistantPhaseResult(input: {
       HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
     ),
     createHostedDeviceActivityAutomationWakeCandidate(input.deviceActivityAutomation),
+    input.assistantCronWake,
   ]);
   const nextWakeAt = dirtyDeviceSyncWake.at;
   const dirtyPostCheckpoint = input.dirtyDeviceSyncMetrics.postCheckpointRecord
@@ -1547,6 +1576,8 @@ async function runSystemMailboxMaintenancePhase(input: {
         deviceSyncMaintenanceRan: true,
         initialProviderCleanupCheckpoint,
         result: buildIdleDeviceSyncOnlyAssistantPhaseResult({
+          assistantCronWake:
+            await resolveHostedAssistantCronWakeCandidateBestEffort(phaseInput),
           deviceActivityAutomation: dirtyDeviceActivityAutomation,
           dirtyDeviceSyncMetrics,
           input: phaseInput,
@@ -1625,10 +1656,13 @@ async function runSystemMailboxMaintenancePhase(input: {
       ])
     : null;
   const dirtyDeviceSyncWakeAt = dirtyDeviceSyncWake?.at ?? null;
+  const assistantCronWake =
+    await resolveHostedAssistantCronWakeCandidateBestEffort(phaseInput);
   const nextWake = selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(systemMailboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(systemMailboxMetricsWakeAt, systemMailboxMetricsWakeReason),
     dirtyDeviceSyncWake,
+    assistantCronWake,
     createHostedRuntimeWakeCandidate(outboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(
       initialProviderCleanupDue ? null : initialProviderCleanupCheckpoint?.nextWakeAt ?? null,
@@ -1821,6 +1855,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
         input.systemMailboxMetricsWakeReason,
       ),
       createHostedDeviceActivityAutomationWakeCandidate(input.dirtyDeviceActivityAutomation),
+      await resolveHostedAssistantCronWakeCandidateBestEffort(input.input),
     ]);
     const statusNextWakeAt = statusNextWake.at;
     const statusNextWakeReason = statusNextWake.reason;
@@ -1921,6 +1956,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       dirtyPostCheckpoint.nextWakeAt,
       HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
     ),
+    await resolveHostedAssistantCronWakeCandidateBestEffort(input.input),
   ]);
   const dirtyNextWakeAt = dirtyNextWake.at;
   return {

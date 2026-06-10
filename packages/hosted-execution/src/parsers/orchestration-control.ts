@@ -3,17 +3,11 @@ import {
 } from "../runtime-control.ts";
 import {
   HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
-  HOSTED_RUNTIME_PREWARM_ACCEPTED_ACTIONS,
-  HOSTED_RUNTIME_PREWARM_RESPONSE_KINDS,
-  HOSTED_RUNTIME_PREWARM_SOURCES,
   HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
   HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
   HOSTED_RUNTIME_SIGNAL_KINDS,
   type HostedRuntimeEnsureProcessingRequest,
   type HostedRuntimeEnsureProcessingResponse,
-  type HostedRuntimePrewarmRequest,
-  type HostedRuntimePrewarmResponse,
-  type HostedRuntimePrewarmSource,
   type HostedRuntimeReconciliationFacts,
   type HostedRuntimeReconciliationFactsBlocked,
   type HostedRuntimeReconciliationFactsRequest,
@@ -239,76 +233,6 @@ export function parseHostedRuntimeEnsureProcessingResponse(
   }
 }
 
-export function parseHostedRuntimePrewarmRequest(
-  value: unknown,
-): HostedRuntimePrewarmRequest {
-  const record = requireObject(value, "Hosted runtime prewarm request");
-  assertExactKeys(record, "Hosted runtime prewarm request", [
-    "prewarmAttemptId",
-    "source",
-  ]);
-
-  return {
-    prewarmAttemptId: requireOpaqueIdentifier(
-      record.prewarmAttemptId,
-      "Hosted runtime prewarm request prewarmAttemptId",
-    ),
-    source: parseHostedRuntimePrewarmSource(
-      record.source,
-      "Hosted runtime prewarm request source",
-    ),
-  };
-}
-
-export function parseHostedRuntimePrewarmResponse(
-  value: unknown,
-): HostedRuntimePrewarmResponse {
-  const record = requireObject(value, "Hosted runtime prewarm response");
-  const kind = parseAllowedString(
-    record.kind,
-    "Hosted runtime prewarm response kind",
-    HOSTED_RUNTIME_PREWARM_RESPONSE_KINDS,
-  );
-
-  switch (kind) {
-    case "runtime_prewarm_accepted": {
-      assertExactKeys(record, "Hosted runtime prewarm-accepted response", [
-        "action",
-        "kind",
-      ]);
-
-      return {
-        action: parseAllowedString(
-          record.action,
-          "Hosted runtime prewarm-accepted response action",
-          HOSTED_RUNTIME_PREWARM_ACCEPTED_ACTIONS,
-        ),
-        kind,
-      };
-    }
-    case "retry_later": {
-      assertExactKeys(record, "Hosted runtime prewarm retry-later response", [
-        "kind",
-        "retryAt",
-      ]);
-
-      return {
-        kind,
-        retryAt: readRequiredIsoTimestamp(
-          record.retryAt,
-          "Hosted runtime prewarm retry-later response retryAt",
-        ),
-      };
-    }
-    default: {
-      const exhaustive: never = kind;
-      throw new TypeError(
-        `Unsupported hosted runtime prewarm response kind: ${String(exhaustive)}.`,
-      );
-    }
-  }
-}
-
 function parseHostedRuntimeMailboxLaneLagArray(
   value: unknown,
   label: string,
@@ -341,13 +265,6 @@ function parseHostedRuntimeMailboxLaneLag(
           maxUpdatedAt: readNullableIsoTimestamp(record.maxUpdatedAt, `${label}.maxUpdatedAt`),
         }),
   };
-}
-
-function parseHostedRuntimePrewarmSource(
-  value: unknown,
-  label: string,
-): HostedRuntimePrewarmSource {
-  return parseAllowedString(value, label, HOSTED_RUNTIME_PREWARM_SOURCES);
 }
 
 function requireOpaqueIdentifier(value: unknown, label: string): string {

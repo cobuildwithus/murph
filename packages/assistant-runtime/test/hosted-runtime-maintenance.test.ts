@@ -1162,6 +1162,7 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
 
@@ -1237,6 +1238,7 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
 
@@ -1324,6 +1326,7 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
     mocks.syncHostedDeviceSyncControlPlaneState.mockRejectedValue(
@@ -1361,6 +1364,7 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
     mocks.reconcileHostedDeviceSyncControlPlaneState.mockRejectedValue(
@@ -1397,6 +1401,7 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
 
@@ -1437,6 +1442,7 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
     mocks.pruneWearableDenseRawTimeseries.mockResolvedValueOnce({
@@ -1527,6 +1533,7 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
     mocks.pruneWearableDenseRawTimeseries.mockResolvedValueOnce({
@@ -1578,6 +1585,7 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
 
@@ -1617,6 +1625,7 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
     mocks.pruneWearableDenseRawTimeseries.mockRejectedValueOnce(
@@ -1681,6 +1690,7 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
     mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
@@ -1767,6 +1777,7 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
 
@@ -1813,6 +1824,7 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
     mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
@@ -1884,6 +1896,7 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
     mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
@@ -1957,6 +1970,7 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
 
@@ -2004,6 +2018,7 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
       runSchedulerOnce,
     });
 
@@ -2217,6 +2232,7 @@ describe("runHostedDeviceSyncPass", () => {
     assert.equal(entry.phase, "invoke");
     assert.deepEqual(entry.redactedJson, {
       failureCode: "SYNC_JOB_FAILED",
+      failureDisposition: "retry",
       failureSummary:
         "Importer failed reading <redacted-path> for <redacted-email> with <redacted-secret>",
       failureCauseCode: "UND_ERR_CONNECT_TIMEOUT",
@@ -2265,6 +2281,145 @@ describe("runHostedDeviceSyncPass", () => {
     expect(serialized).not.toContain("file://");
     expect(serialized).not.toContain("owner@example.test");
     expect(serialized).not.toContain("<fixture-secret>");
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs webhook-triggered job failures even when a later success cleared account error state", async () => {
+    const close = vi.fn();
+    const drainWorker = vi.fn(async () => 2);
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const logRequests: HostedRuntimeLogRequest[] = [];
+
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextWakeAt: () => "2026-06-08T03:00:00.000Z",
+      listJobFailureDiagnostics: vi.fn(() => [
+        {
+          accountId: "local_account_sleep_sensitive",
+          accountStatus: null,
+          at: "2026-06-08T02:00:02.000Z",
+          attempts: 3,
+          code: "JUNCTION_API_REQUEST_FAILED",
+          details: {
+            providerHttpStatus: 503,
+            providerRequestEndpointKind: "junction_summary",
+            providerRequestMethod: "GET",
+          },
+          jobKind: "resource",
+          provider: "junction",
+          resource: "sleep",
+          retryable: true,
+          summary: "Junction summary request failed with an ambiguous provider error.",
+        },
+      ]),
+      listAccounts: vi.fn(() => [
+        {
+          id: "local_account_sleep_sensitive",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSyncCompletedAt: "2026-06-08T02:00:03.000Z",
+          lastSyncErrorAt: null,
+          lastSyncStartedAt: "2026-06-08T02:00:01.000Z",
+          nextReconcileAt: "2026-06-08T03:00:00.000Z",
+          provider: "junction",
+          setupPhase: null,
+          status: "active",
+        },
+      ]),
+      runSchedulerOnce,
+    });
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValue({
+      hostedToLocalAccountIds: new Map([
+        ["hosted_connection_sleep_sensitive", "local_account_sleep_sensitive"],
+      ]),
+      localToHostedAccountIds: new Map([
+        ["local_account_sleep_sensitive", "hosted_connection_sleep_sensitive"],
+      ]),
+      observedTokenVersions: new Map(),
+      pendingDirtyAcks: [],
+      snapshot: {
+        connections: [
+          {
+            connection: {
+              id: "hosted_connection_sleep_sensitive",
+            },
+            localState: {
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSyncCompletedAt: "2026-06-07T02:00:00.000Z",
+              lastSyncErrorAt: null,
+              lastSyncStartedAt: null,
+            },
+          },
+        ],
+      },
+    });
+
+    await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_device_sync_webhook_failure_log",
+        hint: null,
+        kind: "device-sync.wake",
+        occurredAt: "2026-06-08T02:00:00.000Z",
+        reason: "webhook_hint",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      {
+        runtimeLogPlatform: {
+          logPort: {
+            async write(request) {
+              logRequests.push(request);
+              return {
+                loggedCount: request.entries.length,
+              };
+            },
+          },
+        },
+      },
+    );
+
+    assert.equal(logRequests.length, 1);
+    const entry = logRequests[0]?.entries[0];
+    assert.ok(entry);
+    assert.equal(entry.at, "2026-06-08T02:00:02.000Z");
+    assert.equal(entry.component, "device-sync");
+    assert.equal(entry.errorCode, "JUNCTION_API_REQUEST_FAILED");
+    assert.equal(entry.eventCode, "device-sync.job_failed");
+    assert.equal(entry.level, "warn");
+    assert.equal(entry.phase, "invoke");
+    assert.deepEqual(entry.redactedJson, {
+      failureCode: "JUNCTION_API_REQUEST_FAILED",
+      failureDisposition: "retry",
+      failureJobAttempts: 3,
+      failureJobKind: "resource",
+      failureResource: "sleep",
+      failureSummary: "Junction summary request failed with an ambiguous provider error.",
+      failureRetryable: true,
+      hadPriorFailure: false,
+      hadPriorSuccess: true,
+      hostedConnectionKnown: true,
+      nextReconcileAt: "2026-06-08T03:00:00.000Z",
+      processedJobs: 2,
+      provider: "junction",
+      providerHttpStatus: 503,
+      providerRequestEndpointKind: "junction_summary",
+      providerRequestMethod: "GET",
+      setupPhase: null,
+      status: "active",
+      syncCompletedAt: "2026-06-08T02:00:03.000Z",
+      syncFailedAt: null,
+      syncStartedAt: "2026-06-08T02:00:01.000Z",
+      wakeKind: "device-sync.wake",
+      wakeReason: "webhook_hint",
+    });
+    const serializedWebhookFailureLogs = JSON.stringify(logRequests);
+    expect(serializedWebhookFailureLogs).not.toContain("local_account_sleep_sensitive");
+    expect(serializedWebhookFailureLogs).not.toContain("hosted_connection_sleep_sensitive");
     expect(close).toHaveBeenCalledTimes(1);
   });
 

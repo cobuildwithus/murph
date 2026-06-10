@@ -574,6 +574,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     );
     const workspaceRestoreDoneAt = new Date().toISOString();
     initialAssistantInputLatencyMilestones.workspaceRestoreDoneAt = workspaceRestoreDoneAt;
+    // Attach the in-memory cold-start phase breakdown to the SAME staged-milestone
+    // object already passed to the assistant_input_staged event. No new request,
+    // await, or I/O: restore timings were returned in-memory by the restore call,
+    // and the boot.nodeStartupMs (if any) rode in via options.latencyMilestones.
+    const incomingBoot = initialAssistantInputLatencyMilestones.phaseBreakdown?.boot;
+    initialAssistantInputLatencyMilestones.phaseBreakdown = {
+      schemaVersion: 1,
+      ...(restored.restoreTiming ? { restore: restored.restoreTiming } : {}),
+      boot: {
+        ...(incomingBoot ?? {}),
+        restoreWasCold: restored.restoreWasCold,
+      },
+    };
     emitPhaseLog({
       details: {
         materializedArtifactPathCount: restored.materializedArtifactPaths.size,
@@ -2125,6 +2138,14 @@ function createAbortGuardedHostedRuntimePlatform(
       ? {
           providerFetch: (async (request, init) =>
             guard(() => platform.providerFetch!(request, init))) as typeof fetch,
+        }
+      : {}),
+    ...(platform.generatedImageUploader
+      ? {
+          generatedImageUploader: {
+            uploadGeneratedImage: (request) =>
+              guard(() => platform.generatedImageUploader!.uploadGeneratedImage(request)),
+          },
         }
       : {}),
     ...(platform.usageRecordPort

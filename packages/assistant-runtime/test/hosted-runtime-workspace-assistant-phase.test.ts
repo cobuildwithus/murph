@@ -136,6 +136,7 @@ vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
 
 import {
   initializeVault,
+  upsertAutomation,
 } from "@murphai/core";
 import {
   markAssistantContextSnapshotDirty,
@@ -3180,6 +3181,243 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         hostedSystemMailboxRecorded: 1,
       }),
     }));
+  });
+
+  it("keeps an armed assistant cron wake when a device-sync mailbox wake is processed", async () => {
+    // Prod regression (2026-06-10): an `at` reminder automation armed next_wake_at=02:45,
+    // then WHOOP device-sync wakes at 01:59/02:03 early-returned a device-sync-only result
+    // whose nextWakeAt replaced the armed cron wake, so the runtime slept through 02:45.
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-cron-wake-clobber-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+
+    try {
+      await initializeVault({
+        createdAt: "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      });
+      await upsertAutomation({
+        continuityPolicy: "fresh",
+        instructions: "Remind me to start red light therapy.",
+        now: new Date("2026-04-27T00:00:00.000Z"),
+        status: "active",
+        route: {
+          channel: "linq",
+          deliverySource: {
+            fromPhoneNumber: "+15555550199",
+            kind: "linq",
+          },
+          deliveryTarget: "+15555550100",
+          identityId: null,
+          participantId: null,
+          threadId: null,
+        },
+        schedule: {
+          at: "2026-04-27T02:45:00.000Z",
+          kind: "at",
+        },
+        title: "Red light therapy reminder",
+        vaultRoot,
+      });
+      const actualEngine = await vi.importActual<
+        typeof import("@murphai/assistant-engine")
+      >("@murphai/assistant-engine");
+      mocks.getAssistantCronStatus.mockImplementation(
+        actualEngine.getAssistantCronStatus,
+      );
+
+      const deviceSyncItem = {
+        ...createSystemMailboxItem(),
+        routeAction: "run-device-sync-wake" as const,
+        wake: {
+          eventId: "evt_synthetic_device_sync_wake_clobber",
+          kind: "device-sync.wake" as const,
+          occurredAt: "2026-04-27T00:00:00.000Z",
+          reason: "connected" as const,
+          userId: "member_synthetic_phase",
+        },
+      };
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+        item: deviceSyncItem,
+        itemId: "system_mailbox_item_device_sync_clobber",
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "device-sync",
+          nextWakeAt: "2026-04-27T08:03:00.000Z",
+          postCheckpointRecord: null,
+          redactedLogEntries: [],
+        },
+        status: "processed",
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      }));
+      const postCheckpoint = await result.afterCheckpoint?.();
+
+      // The device-sync-only pass must not narrow the alarm past the armed
+      // cron occurrence at 02:45; the 08:03 device reconcile loses. The
+      // recorded-receipt post-checkpoint recomputes its own wake, so assert
+      // it directly instead of falling back to the pre-checkpoint result.
+      expect(result.nextWakeAt).toBe("2026-04-27T02:45:00.000Z");
+      expect(postCheckpoint?.nextWakeAt).toBe("2026-04-27T02:45:00.000Z");
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("keeps an armed assistant cron wake when idle dirty device-sync work runs", async () => {
+    // Same clobber as the mailbox-item route, but through the idle dirty
+    // device-sync-only result (no system-mailbox item): the device reconcile
+    // follow-up at 08:03 must not replace the earlier 02:45 cron occurrence.
+    mocks.getAssistantCronStatus.mockResolvedValue({
+      dueJobs: 0,
+      enabledJobs: 1,
+      nextRunAt: "2026-04-27T02:45:00.000Z",
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+    mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 1,
+      deviceSyncSkipped: false,
+      nextWakeAt: "2026-04-27T08:03:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "device-sync.reconcile",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T02:45:00.000Z",
+      nextWakeReason: "assistant",
+      progressed: true,
+    }));
+  });
+
+  it("keeps the earlier device-sync wake when the assistant cron occurrence is later", async () => {
+    // The injected cron candidate stays earliest-wins: it must never delay an
+    // earlier device-sync reconcile wake.
+    mocks.getAssistantCronStatus.mockResolvedValue({
+      dueJobs: 0,
+      enabledJobs: 1,
+      nextRunAt: "2026-04-27T09:00:00.000Z",
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+    mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 1,
+      deviceSyncSkipped: false,
+      nextWakeAt: "2026-04-27T00:01:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "device-sync.reconcile",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:01:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      progressed: true,
+    }));
+  });
+
+  it("still schedules the device-sync wake when the assistant cron status read fails", async () => {
+    // Best-effort invariant: a failed cron-status vault read must not break
+    // the device-sync lane or its wake selection, before or after checkpoint.
+    mocks.getAssistantCronStatus.mockRejectedValue(
+      new Error("synthetic cron status read failure"),
+    );
+    const deviceSyncItem = {
+      ...createSystemMailboxItem(),
+      routeAction: "run-device-sync-wake" as const,
+      wake: {
+        eventId: "evt_synthetic_device_sync_wake_cron_read_failure",
+        kind: "device-sync.wake" as const,
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        reason: "connected" as const,
+        userId: "member_synthetic_phase",
+      },
+    };
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: deviceSyncItem,
+      itemId: "system_mailbox_item_device_sync_cron_read_failure",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "device-sync",
+        nextWakeAt: "2026-04-27T08:03:00.000Z",
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T08:03:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      progressed: true,
+    }));
+    expect(postCheckpoint?.nextWakeAt).toBe("2026-04-27T08:03:00.000Z");
   });
 
   it("preserves device-sync ownership returned by mailbox post-checkpoint recording", async () => {

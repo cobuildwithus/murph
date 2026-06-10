@@ -94,6 +94,10 @@ const OPENAI_EGRESS_POLICY = [
     pathname: "/v1/responses/compact",
   },
   {
+    method: "POST",
+    pathname: "/v1/images/generations",
+  },
+  {
     method: "GET",
     pathname: "/v1/models",
   },

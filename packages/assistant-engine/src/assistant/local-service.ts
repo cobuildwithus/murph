@@ -69,7 +69,10 @@ import {
 } from './service-result.js'
 import { persistFailedAssistantPromptAttempt } from './prompt-attempts.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
-import { recordAssistantUsageEvent } from './service-usage.js'
+import {
+  recordAdditionalAssistantUsageEvents,
+  recordAssistantUsageEvent,
+} from './service-usage.js'
 import {
   type AssistantActiveTurnInputAdmissionResult,
 } from './turn-input.js'
@@ -259,17 +262,21 @@ export async function sendAssistantMessageLocal(
         stage: 'assistant-turn-lock-acquired',
         turnLockWaitMs,
       })
+      const sessionResolveStartedAt = Date.now()
       const resolved = await resolveAssistantMessageSession({
         boundaryDefaultTarget,
         defaults,
         message: input,
       })
+      const sessionResolveMs = elapsedSince(sessionResolveStartedAt)
       await emitHostedAssistantContextSessionResolvedTrace({
         message: input,
         resolved,
         source: 'assistant-message',
       })
+      const promptBuildStartedAt = Date.now()
       const sharedPlan = await buildAssistantTurnSharedPlan(input, resolved)
+      const promptBuildMs = elapsedSince(promptBuildStartedAt)
       const route = resolveAssistantTurnRoute(input, defaults, resolved)
       const receipt = await createAssistantTurnReceipt({
         vault: input.vault,
@@ -501,6 +508,7 @@ export async function sendAssistantMessageLocal(
             previousInput,
           }
         }
+        const admissionStartedAt = Date.now()
         const preProviderInput = await turnInputController.admitAvailable({
           probeIfIdle: true,
           signal: currentInput.abortSignal,
@@ -515,10 +523,12 @@ export async function sendAssistantMessageLocal(
             sessionId: currentSession.sessionId,
           })
         }
+        const admissionMs = elapsedSince(admissionStartedAt)
+        const preProviderSetupMs = elapsedSince(lockAcquiredAt)
         emitHostedAssistantContextTimingTrace({
           message: input,
           preProviderAdmissionCount,
-          preProviderSetupMs: elapsedSince(lockAcquiredAt),
+          preProviderSetupMs,
           providerRequestOrdinal,
           stage: 'assistant-pre-provider-ready',
           turnLockWaitMs,
@@ -578,9 +588,14 @@ export async function sendAssistantMessageLocal(
             }
             return currentInput.onProviderRequestStarted({
               acceptedInputIds: providerRequestAcceptedInputIds,
+              admissionMs,
+              preProviderSetupMs,
+              promptBuildMs,
               providerRequestOrdinal:
                 event.providerRequestOrdinal ?? providerRequestOrdinal,
+              sessionResolveMs,
               startedAt: event.startedAt,
+              turnLockWaitMs,
             })
           },
           route,
@@ -622,19 +637,27 @@ export async function sendAssistantMessageLocal(
             continuation: providerOutcome.codexContinuation,
             sessionId: providerOutcome.session.sessionId,
           })
+          const failedProviderResult = {
+            attemptCount: providerOutcome.attemptCount,
+            provider: providerOutcome.route.provider,
+            providerOptions: providerOutcome.route.providerOptions,
+            route: providerOutcome.route,
+            session: providerOutcome.session,
+            usage: providerOutcome.usage,
+            usageAttribution: providerOutcome.usageAttribution,
+          }
           await recordAssistantUsageEvent({
             executionContext,
             providerRequestOrdinal,
             providerRequestOutcome: providerOutcome.providerRequestOutcome,
-            providerResult: {
-              attemptCount: providerOutcome.attemptCount,
-              provider: providerOutcome.route.provider,
-              providerOptions: providerOutcome.route.providerOptions,
-              route: providerOutcome.route,
-              session: providerOutcome.session,
-              usage: providerOutcome.usage,
-              usageAttribution: providerOutcome.usageAttribution,
-            },
+            providerResult: failedProviderResult,
+            turnId: currentUserTurn.turnId,
+          })
+          await recordAdditionalAssistantUsageEvents({
+            additionalUsages: providerOutcome.additionalUsages,
+            effectiveEnv: currentInput.turnEnvironment?.env ?? process.env,
+            executionContext,
+            providerResult: failedProviderResult,
             turnId: currentUserTurn.turnId,
           })
           throw providerOutcome.error
@@ -669,6 +692,13 @@ export async function sendAssistantMessageLocal(
         await recordAssistantUsageEvent({
           executionContext,
           providerRequestOrdinal,
+          providerResult,
+          turnId: currentUserTurn.turnId,
+        })
+        await recordAdditionalAssistantUsageEvents({
+          additionalUsages: providerResult.additionalUsages,
+          effectiveEnv: currentInput.turnEnvironment?.env ?? process.env,
+          executionContext,
           providerResult,
           turnId: currentUserTurn.turnId,
         })
