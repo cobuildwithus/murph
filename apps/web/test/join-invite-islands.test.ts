@@ -34,8 +34,15 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@privy-io/react-auth", () => ({
+  useCreateWallet: () => ({
+    createWallet: vi.fn(),
+  }),
   usePrivy: () => ({
     logout: vi.fn(),
+  }),
+  useUser: () => ({
+    refreshUser: vi.fn(),
+    user: null,
   }),
 }));
 
@@ -412,7 +419,7 @@ test("JoinInvitePhoneVerificationIsland uses email auth for invite email verific
     active: true,
     initialEmailAddress: "buddy@example.com",
     inline: true,
-    inviteCode: "invite-code",
+    onAuthenticated: expect.any(Function),
   });
   expect(mocks.hostedPhoneAuthProps).toBeNull();
   await cleanup();

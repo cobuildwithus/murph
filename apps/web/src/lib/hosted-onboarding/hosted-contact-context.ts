@@ -15,6 +15,7 @@ export interface HostedMurphContactContext {
   initialContactChannels: MurphContactChannels;
   murphEmailAddress: string | null;
   murphPhoneNumber: string | null;
+  userEmailAddress: string | null;
 }
 
 export async function readHostedMurphContactContext():
@@ -42,6 +43,7 @@ export async function readHostedMurphContactContext():
       : DEFAULT_MURPH_CONTACT_CHANNELS,
     murphEmailAddress: account?.email?.murphEmailAddress ?? null,
     murphPhoneNumber: routing?.linqRecipientPhone ?? null,
+    userEmailAddress: account?.email?.address ?? null,
   };
 }
 
