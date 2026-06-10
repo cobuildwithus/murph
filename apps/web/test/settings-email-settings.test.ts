@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderClientComponent } from "./render-client-component";
 
 type LinkAccountCallbacks = {
-  onError?: () => void;
+  onError?: (error?: string) => void;
   onSuccess?: (params: {
     linkedAccount: unknown;
     linkMethod: string;
@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   sendCode: vi.fn(),
   updateEmailCallbacks: null as UpdateEmailCallbacks | null,
   useLinkAccount: vi.fn(),
+  usePrivy: vi.fn(),
   useUpdateEmail: vi.fn(),
   useUser: vi.fn(),
   verifyCode: vi.fn(),
@@ -33,6 +34,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@privy-io/react-auth", () => ({
   useLinkAccount: mocks.useLinkAccount,
+  usePrivy: mocks.usePrivy,
   useUpdateEmail: mocks.useUpdateEmail,
   useUser: mocks.useUser,
 }));
@@ -65,9 +67,17 @@ describe("HostedEmailSettings", () => {
         verifyCode: mocks.verifyCode,
       };
     });
+    mocks.usePrivy.mockReturnValue({
+      ready: true,
+    });
+    // Privy's headless update-email flow requires an email on the Privy user;
+    // the default mock mirrors that so the inline send-code path is exercised.
     mocks.useUser.mockReturnValue({
       refreshUser: mocks.refreshUser,
-      user: null,
+      user: {
+        email: { address: "old@example.com" },
+        linkedAccounts: [],
+      },
     });
     mocks.verifyCode.mockResolvedValue({
       user: {
@@ -187,6 +197,86 @@ describe("HostedEmailSettings", () => {
     expect(mocks.sendCode).not.toHaveBeenCalled();
     expect(container.querySelector("input[data-input-otp]")).toBeNull();
     expect(container.textContent).not.toContain("We sent a code to");
+  });
+
+  describe("HostedEmailPrivyLinkHandOff", () => {
+    it("opens Privy's link modal once the client is ready without rendering Murph chrome", async () => {
+      mocks.useUser.mockReturnValue({
+        refreshUser: mocks.refreshUser,
+        user: {
+          linkedAccounts: [],
+        },
+      });
+      const onAborted = vi.fn();
+      const { HostedEmailPrivyLinkHandOff } = await import(
+        "@/src/components/settings/hosted-email-privy-link-hand-off"
+      );
+
+      const { cleanup, container } = await renderClientComponent(
+        createElement(HostedEmailPrivyLinkHandOff, {
+          onAborted,
+        }),
+        { requireButton: false },
+      );
+      cleanupRender = cleanup;
+
+      expect(mocks.linkEmail).toHaveBeenCalledTimes(1);
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+      // Privy's modal is the only visible surface while it is open.
+      expect(container.textContent).toBe("");
+      expect(onAborted).not.toHaveBeenCalled();
+    });
+
+    it("shows a spinner instead of opening the modal while the Privy client boots", async () => {
+      mocks.usePrivy.mockReturnValue({
+        ready: false,
+      });
+      mocks.useUser.mockReturnValue({
+        refreshUser: mocks.refreshUser,
+        user: null,
+      });
+      const { HostedEmailPrivyLinkHandOff } = await import(
+        "@/src/components/settings/hosted-email-privy-link-hand-off"
+      );
+
+      const { cleanup, container } = await renderClientComponent(
+        createElement(HostedEmailPrivyLinkHandOff, {
+          onAborted: vi.fn(),
+        }),
+        { requireButton: false },
+      );
+      cleanupRender = cleanup;
+
+      expect(mocks.linkEmail).not.toHaveBeenCalled();
+      expect(container.textContent).toContain("Opening secure window");
+    });
+
+    it("closes the flow when the member dismisses Privy's modal", async () => {
+      mocks.useUser.mockReturnValue({
+        refreshUser: mocks.refreshUser,
+        user: {
+          linkedAccounts: [],
+        },
+      });
+      const onAborted = vi.fn();
+      const { HostedEmailPrivyLinkHandOff } = await import(
+        "@/src/components/settings/hosted-email-privy-link-hand-off"
+      );
+
+      const { cleanup } = await renderClientComponent(
+        createElement(HostedEmailPrivyLinkHandOff, {
+          onAborted,
+        }),
+        { requireButton: false },
+      );
+      cleanupRender = cleanup;
+
+      await act(async () => {
+        mocks.linkAccountCallbacks?.onError?.("exited_link_flow");
+      });
+
+      expect(onAborted).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("prefills an unverified server-provided email and lets the member send a verification code", async () => {

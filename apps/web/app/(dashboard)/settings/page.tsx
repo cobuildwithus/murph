@@ -8,7 +8,7 @@ import Link from "next/link";
 import { PageHeader } from "@/src/components/ui/page-header";
 import {
   readHostedAccountSettingsSnapshot,
-  withServerApprovedTelegramUsernameHint,
+  withServerApprovedPrivyAccountHints,
 } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 import {
   canStartHostedPulseTrialPaidPlan,
@@ -57,7 +57,7 @@ export default async function SettingsPage() {
     ? freshPrivySession.linkedAccounts
     : null;
   const accountWithPrivyDisplay = account
-    ? withServerApprovedTelegramUsernameHint({
+    ? withServerApprovedPrivyAccountHints({
         snapshot: account,
         serverApprovedPrivyLinkedAccounts,
       })

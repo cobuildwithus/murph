@@ -25,7 +25,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
 
 import {
   readHostedAccountSettingsSnapshot,
-  withServerApprovedTelegramUsernameHint,
+  withServerApprovedPrivyAccountHints,
   type HostedAccountSettingsSnapshot,
 } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 
@@ -115,7 +115,7 @@ describe("hosted account settings snapshot", () => {
   });
 
   it("adds a server-approved Privy Telegram username only when it matches the stored Telegram id", () => {
-    expect(withServerApprovedTelegramUsernameHint({
+    expect(withServerApprovedPrivyAccountHints({
       snapshot: makeAccountSettingsSnapshot({ telegramUserId: "456" }),
       serverApprovedPrivyLinkedAccounts: [
         {
@@ -133,7 +133,7 @@ describe("hosted account settings snapshot", () => {
   });
 
   it("does not add a server-approved Privy Telegram username from a different Telegram id", () => {
-    expect(withServerApprovedTelegramUsernameHint({
+    expect(withServerApprovedPrivyAccountHints({
       snapshot: makeAccountSettingsSnapshot({ telegramUserId: "456" }),
       serverApprovedPrivyLinkedAccounts: [
         {
@@ -146,6 +146,40 @@ describe("hosted account settings snapshot", () => {
       telegram: {
         telegramUserId: "456",
         username: null,
+      },
+    });
+  });
+
+  it("marks whether the server-approved Privy session has an email linked", () => {
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot: makeAccountSettingsSnapshot({ telegramUserId: null }),
+      serverApprovedPrivyLinkedAccounts: [
+        {
+          address: "member@example.com",
+          type: "email",
+        },
+      ],
+    })).toMatchObject({
+      email: {
+        privyEmailLinked: true,
+      },
+    });
+
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot: makeAccountSettingsSnapshot({ telegramUserId: null }),
+      serverApprovedPrivyLinkedAccounts: [],
+    })).toMatchObject({
+      email: {
+        privyEmailLinked: false,
+      },
+    });
+
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot: makeAccountSettingsSnapshot({ telegramUserId: null }),
+      serverApprovedPrivyLinkedAccounts: null,
+    })).toMatchObject({
+      email: {
+        privyEmailLinked: null,
       },
     });
   });
