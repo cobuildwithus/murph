@@ -20,6 +20,7 @@ import {
   type AssistantCronCanonicalRuntimeState,
   type AssistantCronCanonicalRuntimeStore,
 } from './runtime-state.js'
+import { resolveAssistantConversationKey } from '../bindings.js'
 import { computeAssistantCronNextRunAt } from './schedule.js'
 import {
   normalizeCanonicalScheduledLogCronRecord,
@@ -139,20 +140,39 @@ export function resolveCanonicalRuntimeState(
   )
 }
 
+// A route whose fields form a conversation key continues that conversation's
+// live chat session at fire time, with the conversation-key path's fingerprint
+// and expiry checks. Pinning a previous run's session would bypass those
+// checks and go stale, so the pin is reserved for keyless routes (e.g. a bare
+// delivery target), where it is the only continuity available.
+export function automationContinuityUsesSessionPin(
+  source: CanonicalAssistantCronJobRecord,
+): boolean {
+  return (
+    source.kind === 'automation' &&
+    source.continuityPolicy === 'preserve' &&
+    resolveAssistantConversationKey({
+      channel: source.route.channel,
+      identityId: source.route.identityId,
+      actorId: source.route.participantId,
+      threadId: source.route.threadId,
+    }) === null
+  )
+}
+
 export function projectCanonicalAssistantCronJob(input: {
   source: CanonicalAssistantCronJobRecord
   runtimeState: AssistantCronCanonicalRuntimeRecord
 }): AssistantCronJob {
-  const continuitySessionId =
+  const preservesContinuity =
     input.source.kind === 'automation' &&
     input.source.continuityPolicy === 'preserve'
-      ? input.runtimeState.sessionId
-      : null
-  const continuityAlias =
-    input.source.kind === 'automation' &&
-    input.source.continuityPolicy === 'preserve'
-      ? input.runtimeState.alias
-      : null
+  const continuitySessionId = automationContinuityUsesSessionPin(input.source)
+    ? input.runtimeState.sessionId
+    : null
+  // Aliases only enter runtime state as explicit creation-time bindings, so
+  // they stay honored even when the automatic session pin is gated off.
+  const continuityAlias = preservesContinuity ? input.runtimeState.alias : null
   const targetRoute =
     input.source.kind === 'automation'
       ? input.source.route

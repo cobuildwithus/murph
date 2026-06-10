@@ -100,8 +100,6 @@ describe("runHostedWorkspaceInvocation", () => {
         OPENAI_API_KEY: "fixture-openai-key",
         TELEGRAM_API_BASE_URL: "https://telegram.example.test",
         TELEGRAM_BOT_TOKEN: "fixture-telegram-token",
-        WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
-        WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",
         WHATSAPP_ACCESS_TOKEN: "fixture-whatsapp-token",
         WHATSAPP_PHONE_NUMBER_ID: "fixture-whatsapp-phone-number-id",
       },
@@ -126,8 +124,8 @@ describe("runHostedWorkspaceInvocation", () => {
     expect(runtime.parserToolchain?.tools.ffmpeg?.command).toBe(
       "/app/test-parser-toolchain/ffmpeg",
     );
-    expect(runtime.parserToolchain?.tools.whisper?.command).toBe(
-      "/app/test-parser-toolchain/whisper-cli",
+    expect(runtime.parserToolchain?.tools.transcription?.endpoint).toBe(
+      "http://murph-transcribe.worker/v1/transcribe",
     );
   });
 

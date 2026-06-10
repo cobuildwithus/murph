@@ -57,6 +57,79 @@ describe('assistant current delivery route', () => {
     })
   })
 
+  it('fills missing locators when the explicit target names the current conversation', () => {
+    expect(
+      resolveAssistantDeliveryRouteWithCurrentRoute(
+        {
+          channel: 'linq',
+          deliveryTarget: 'linq_chat_real',
+        },
+        {
+          channel: 'linq',
+          deliveryTarget: 'linq_chat_real',
+          identityId: LINQ_IDENTITY_ID,
+          participantId: LINQ_PARTICIPANT_ID,
+          threadId: LINQ_THREAD_ID,
+        },
+      ),
+    ).toEqual({
+      channel: 'linq',
+      deliveryTarget: 'linq_chat_real',
+      identityId: LINQ_IDENTITY_ID,
+      participantId: LINQ_PARTICIPANT_ID,
+      threadId: LINQ_THREAD_ID,
+    })
+  })
+
+  it('keeps explicit locators over current-route locators for the same conversation', () => {
+    expect(
+      resolveAssistantDeliveryRouteWithCurrentRoute(
+        {
+          channel: 'linq',
+          deliveryTarget: 'linq_chat_real',
+          threadId: 'explicit_thread',
+        },
+        {
+          channel: 'linq',
+          deliveryTarget: 'linq_chat_real',
+          identityId: LINQ_IDENTITY_ID,
+          participantId: LINQ_PARTICIPANT_ID,
+          threadId: LINQ_THREAD_ID,
+        },
+      ),
+    ).toEqual({
+      channel: 'linq',
+      deliveryTarget: 'linq_chat_real',
+      identityId: LINQ_IDENTITY_ID,
+      participantId: LINQ_PARTICIPANT_ID,
+      threadId: 'explicit_thread',
+    })
+  })
+
+  it('does not enrich an explicit target on a different channel', () => {
+    expect(
+      resolveAssistantDeliveryRouteWithCurrentRoute(
+        {
+          channel: 'telegram',
+          deliveryTarget: 'linq_chat_real',
+        },
+        {
+          channel: 'linq',
+          deliveryTarget: 'linq_chat_real',
+          identityId: LINQ_IDENTITY_ID,
+          participantId: LINQ_PARTICIPANT_ID,
+          threadId: LINQ_THREAD_ID,
+        },
+      ),
+    ).toEqual({
+      channel: 'telegram',
+      deliveryTarget: 'linq_chat_real',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    })
+  })
+
   it('keeps private lookup identifiers separate from redacted placeholders', () => {
     expect(looksLikePrivateAssistantRoutePlaceholder(LINQ_THREAD_ID)).toBe(true)
     expect(

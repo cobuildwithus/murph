@@ -29,10 +29,12 @@ export type HostedAssistantRuntimeParserToolName =
   | "ffmpeg"
   | "pdfinfo"
   | "pdftotext"
+  | "transcription"
   | "whisper";
 
 export interface HostedAssistantRuntimeParserToolConfig {
   command?: string;
+  endpoint?: string;
   modelPath?: string;
 }
 

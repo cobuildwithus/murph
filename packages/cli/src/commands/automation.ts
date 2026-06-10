@@ -215,16 +215,20 @@ function buildAutomationRouteFromOptions(
   input: AutomationRouteOptions,
   currentRoute: HostedCliAssistantCurrentRoute | null,
 ): AutomationRoute {
-  const route = stripPrivateAssistantRoutePlaceholders(
-    resolveAssistantDeliveryRouteWithCurrentRoute({
-      channel: input.channel,
-      deliveryTarget: input.deliveryTarget,
-      identityId: input.identityId,
-      participantId: input.participantId,
-      threadId: input.threadId,
-    }, currentRoute),
+  // Strip redacted placeholders from the model-typed flags before merging:
+  // the current route comes from the hosted bridge, not model text, and its
+  // locators are trusted as-is (hosted linq locators are hid_-blinded by
+  // design, the same values session bindings persist).
+  const explicit = stripPrivateAssistantRoutePlaceholders({
+    channel: normalizeAutomationRouteOption(input.channel),
+    deliveryTarget: normalizeAutomationRouteOption(input.deliveryTarget),
+    identityId: normalizeAutomationRouteOption(input.identityId),
+    participantId: normalizeAutomationRouteOption(input.participantId),
+    threadId: normalizeAutomationRouteOption(input.threadId),
+  });
+  const parsed = automationRouteSchema.parse(
+    resolveAssistantDeliveryRouteWithCurrentRoute(explicit, currentRoute),
   );
-  const parsed = normalizeAutomationRouteFieldsForSave(route);
 
   assertAutomationRouteCanDeliver(parsed);
   return parsed;
@@ -254,18 +258,14 @@ async function readAutomationSaveCurrentRoute(input: AutomationRouteOptions): Pr
   return null;
 }
 
+// The current route both fills a fully omitted route and enriches an explicit
+// same-conversation target with its missing conversation locators, so it is
+// needed whenever any of those fields is still unset.
 function automationSaveNeedsCurrentRoute(input: AutomationRouteOptions): boolean {
-  const channel = normalizeAutomationRouteOption(input.channel);
-  const deliveryTarget = normalizeAutomationRouteOption(input.deliveryTarget);
-  if (!channel) {
-    return true;
-  }
-  if (channel === "linq") {
-    return !deliveryTarget;
-  }
-  return !deliveryTarget
-    && !normalizeAutomationRouteOption(input.participantId)
-    && !normalizeAutomationRouteOption(input.threadId);
+  return !normalizeAutomationRouteOption(input.channel)
+    || !normalizeAutomationRouteOption(input.identityId)
+    || !normalizeAutomationRouteOption(input.participantId)
+    || !normalizeAutomationRouteOption(input.threadId);
 }
 
 function assertAutomationRouteCanDeliver(route: AutomationRoute): void {

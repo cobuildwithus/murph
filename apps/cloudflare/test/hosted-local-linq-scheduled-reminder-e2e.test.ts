@@ -9,7 +9,9 @@ import {
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
+  buildAssistantProviderVaultCliCall,
   buildHostedAssistantNotificationDecisionResponse,
+  type HostedLocalAssistantProviderScriptedResponse,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
@@ -98,13 +100,13 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     const reminderPath = `/chats/${encodeURIComponent(scheduledChatId)}/messages`;
     const setupReplyBaselineCount = requireLinqStub().countObservedSends(reminderPath);
     const scheduledReminderTimes = resolveScheduledReminderTimes();
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantAutomationSaveDirectiveResponse({
+    requireScenario().queueAssistantResponses(
+      buildHostedAssistantAutomationSaveResponses({
         dueAtIso: scheduledReminderTimes.dueAtIso,
         deliveryTarget: scheduledChatId,
         text: setupReplyText,
       }),
-    ]);
+    );
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
       scheduledChatId,
@@ -181,43 +183,39 @@ async function startScenario(): Promise<void> {
   });
 }
 
-function buildHostedAssistantAutomationSaveDirectiveResponse(input: {
+function buildHostedAssistantAutomationSaveResponses(input: {
   deliveryTarget: string;
   dueAtIso: string;
   text: string;
-}): string {
-  return JSON.stringify({
-    __murphE2eVaultCliCommands: [
-      {
-        args: [
-          "automation",
-          "save",
-          "Sleep reminder",
-          "--request-id",
-          `hosted-local-reminder-${userId}`,
-          "--instructions",
-          "Send the user a short reminder to go to sleep.",
-          "--summary",
-          "One-shot sleep reminder.",
-          "--tags",
-          "assistant",
-          "--tags",
-          "scheduled",
-          "--continuity-policy",
-          "preserve",
-          "--channel",
-          "linq",
-          "--delivery-target",
-          input.deliveryTarget,
-          "--schedule-kind",
-          "at",
-          "--schedule-at",
-          input.dueAtIso,
-        ],
-      },
-    ],
-    text: input.text,
-  });
+}): readonly HostedLocalAssistantProviderScriptedResponse[] {
+  return [
+    buildAssistantProviderVaultCliCall([
+      "automation",
+      "save",
+      "Sleep reminder",
+      "--request-id",
+      `hosted-local-reminder-${userId}`,
+      "--instructions",
+      "Send the user a short reminder to go to sleep.",
+      "--summary",
+      "One-shot sleep reminder.",
+      "--tags",
+      "assistant",
+      "--tags",
+      "scheduled",
+      "--continuity-policy",
+      "preserve",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      input.deliveryTarget,
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      input.dueAtIso,
+    ]),
+    input.text,
+  ];
 }
 
 function buildActivationWake(memberId: string) {

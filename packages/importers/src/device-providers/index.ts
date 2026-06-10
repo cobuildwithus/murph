@@ -11,17 +11,11 @@ export {
 export {
   defaultDeviceProviderAdapters,
   defaultDeviceProviderDescriptors,
-  GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
   STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
   WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
 } from "./defaults.ts";
-export {
-  normalizeGarminSnapshot,
-  garminProviderAdapter,
-  type GarminSnapshotInput,
-} from "./garmin.ts";
 export {
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES,

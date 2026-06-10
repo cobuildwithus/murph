@@ -204,6 +204,9 @@ describe("hosted deploy automation helpers", () => {
       TELEGRAM_BOT_USERNAME: "hosted_bot",
     });
     const config = buildHostedWranglerDeployConfig(environment) as {
+      ai?: {
+        binding: string;
+      };
       containers: Array<{
         class_name: string;
         image: string;
@@ -352,6 +355,7 @@ describe("hosted deploy automation helpers", () => {
         name: "HOSTED_EMAIL",
       },
     ]);
+    expect(config.ai).toEqual({ binding: "AI" });
     expect(config.vars.HOSTED_WEB_BASE_URL).toBe("https://web.example.test");
     expect(config.vars.AGENTMAIL_BASE_URL).toBeUndefined();
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
@@ -571,7 +575,7 @@ describe("hosted deploy automation helpers", () => {
       "run: pnpm --dir apps/cloudflare runner:docker:base -- --force",
       "name: Save immediate build artifacts",
       "tar --hard-dereference -czf .artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz \\",
-      "docker save murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-codex0.135.0-base-en \\",
+      "docker save murph-cloudflare-runner-base:node24.14.1-codex0.135.0 \\",
       "name: Upload immediate build handoff",
       "cloudflare-hosted-immediate-build-${{ github.sha }}",
       "name: Download immediate build handoff",

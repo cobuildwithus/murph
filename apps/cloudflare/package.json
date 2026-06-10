@@ -57,8 +57,6 @@
     "runner:docker:smoke:image": "docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner --build-arg HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-smoke-bundle -t murph-cloudflare-runner .",
     "runner:docker:smoke:prepared-base": "pnpm runner:docker:smoke:prepare && pnpm runner:docker:smoke:image && pnpm runner:docker:smoke:built",
     "runner:docker:smoke": "pnpm runner:bundle && pnpm runner:docker:base && pnpm runner:docker:smoke:prepare && pnpm runner:docker:smoke:image && pnpm runner:docker:smoke:built",
-    "runner:docker:audio-benchmark:built": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/runner-audio-benchmark.ts",
-    "runner:docker:audio-benchmark": "pnpm runner:bundle && pnpm runner:docker:base && pnpm runner:docker:smoke:prepare && pnpm runner:docker:smoke:image && pnpm runner:docker:audio-benchmark:built",
     "worker:dev:prepared": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/dev-worker.ts",
     "worker:deploy:apply": "pnpm deploy:worker:apply",
     "worker:deploy": "pnpm deploy:worker",

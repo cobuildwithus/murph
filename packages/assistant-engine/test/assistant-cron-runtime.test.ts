@@ -90,7 +90,12 @@ vi.mock('../src/assistant/channel-adapters.ts', () => ({
   getAssistantChannelAdapter: cronMocks.getAssistantChannelAdapter,
 }))
 
-vi.mock('../src/assistant/bindings.ts', () => ({
+vi.mock('../src/assistant/bindings.ts', async (importOriginal) => ({
+  // The conversation-key predicate is pure routing logic; keep the real one
+  // so continuity gating behaves as in production.
+  resolveAssistantConversationKey: (
+    await importOriginal<typeof import('../src/assistant/bindings.ts')>()
+  ).resolveAssistantConversationKey,
   resolveAssistantBindingDelivery: cronMocks.resolveAssistantBindingDelivery,
 }))
 
@@ -1334,6 +1339,68 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('surfaces the typed failure code in cron.job.completed events', async () => {
+    // Provider quota exhaustion (June 2026 incident) must be queryable from
+    // the persisted runtime log via failureContext.errorCode instead of only
+    // living as free text in per-vault run records.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:05:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-error-code-',
+    )
+    await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: 'quota failing reminder',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'Evening reminder.',
+      schedule: {
+        kind: 'at',
+        at: '2026-04-08T09:00:00.000Z',
+      },
+      vault: vaultRoot,
+    })
+    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(
+      new VaultCliError(
+        'ASSISTANT_CODEX_USAGE_LIMIT',
+        'Codex app-server turn failed. status failed. You have reached your monthly cap.',
+      ),
+    )
+    const events: Array<{
+      failureContext?: Record<string, boolean | number | string | null>
+      safeDetails?: string
+      type: string
+    }> = []
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      onEvent: (event) => {
+        events.push(event)
+      },
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 1,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          failureContext: expect.objectContaining({
+            errorCode: 'ASSISTANT_CODEX_USAGE_LIMIT',
+            errorPresent: true,
+            runStatus: 'failed',
+            scheduleKind: 'at',
+            sourceKind: 'automation',
+          }),
+          type: 'cron.job.completed',
+        }),
+      ]),
+    )
+  })
+
   it('skips stale recurring canonical notification cron jobs and advances the schedule', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
@@ -1384,7 +1451,7 @@ describe('assistant cron runtime orchestration', () => {
 
   it('skips stale recurring canonical notification retries by original occurrence', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T10:45:00.000Z'))
+    vi.setSystemTime(new Date('2026-04-08T11:15:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-stale-recurring-canonical-retry-',
     )
@@ -1420,8 +1487,8 @@ describe('assistant cron runtime orchestration', () => {
     )
 
     const updated = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
-    expect(updated.state.lastRunAt).toBe('2026-04-08T10:45:00.000Z')
-    expect(updated.state.lastSucceededAt).toBe('2026-04-08T10:45:00.000Z')
+    expect(updated.state.lastRunAt).toBe('2026-04-08T11:15:00.000Z')
+    expect(updated.state.lastSucceededAt).toBe('2026-04-08T11:15:00.000Z')
     expect(updated.state.lastError).toBeNull()
     expect(updated.state.consecutiveFailures).toBe(0)
     expect(updated.state.nextRunAt).toBe('2026-04-09T10:00:00.000Z')
@@ -1435,7 +1502,7 @@ describe('assistant cron runtime orchestration', () => {
       runs: [
         expect.objectContaining({
           error: expect.stringContaining(
-            'Scheduled occurrence was 45 minute(s) late.',
+            'Scheduled occurrence was 75 minute(s) late.',
           ),
           response: null,
           status: 'skipped',
@@ -1446,7 +1513,7 @@ describe('assistant cron runtime orchestration', () => {
 
   it('skips stale recurring local cron jobs without removing them', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T10:10:00.000Z'))
+    vi.setSystemTime(new Date('2026-04-08T10:35:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-stale-recurring-local-',
     )
@@ -1464,8 +1531,8 @@ describe('assistant cron runtime orchestration', () => {
     })
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
     const updated = await getAssistantCronJob(vaultRoot, job.jobId)
-    expect(updated.state.lastRunAt).toBe('2026-04-08T10:10:00.000Z')
-    expect(updated.state.lastSucceededAt).toBe('2026-04-08T10:10:00.000Z')
+    expect(updated.state.lastRunAt).toBe('2026-04-08T10:35:00.000Z')
+    expect(updated.state.lastSucceededAt).toBe('2026-04-08T10:35:00.000Z')
     expect(updated.state.lastError).toBeNull()
     expect(updated.state.consecutiveFailures).toBe(0)
     expect(updated.state.nextRunAt).toBe('2026-04-09T09:30:00.000Z')
@@ -1489,7 +1556,7 @@ describe('assistant cron runtime orchestration', () => {
 
   it('skips stale kept one-shot local cron jobs and disables them', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T10:10:00.000Z'))
+    vi.setSystemTime(new Date('2026-04-08T10:35:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-stale-kept-one-shot-',
     )
@@ -1533,7 +1600,7 @@ describe('assistant cron runtime orchestration', () => {
 
   it('expires canonical one-shot notification retries by original occurrence', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T09:45:00.000Z'))
+    vi.setSystemTime(new Date('2026-04-08T10:05:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-expired-one-shot-retry-',
     )
@@ -1581,7 +1648,7 @@ describe('assistant cron runtime orchestration', () => {
     ).resolves.toMatchObject({
       runs: [
         expect.objectContaining({
-          error: expect.stringContaining('Scheduled occurrence was 45 minute(s) late.'),
+          error: expect.stringContaining('Scheduled occurrence was 65 minute(s) late.'),
           status: 'skipped',
         }),
       ],
@@ -1590,7 +1657,9 @@ describe('assistant cron runtime orchestration', () => {
 
   it('runs canonical one-shot notification cron jobs within the expiry window', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T09:20:00.000Z'))
+    // 55 minutes late: stale under the previous 30-minute window, deliverable
+    // under the 60-minute window.
+    vi.setSystemTime(new Date('2026-04-08T09:55:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-fresh-one-shot-',
     )
@@ -1637,6 +1706,110 @@ describe('assistant cron runtime orchestration', () => {
         expect.objectContaining({
           error: null,
           status: 'succeeded',
+        }),
+      ],
+    })
+  })
+
+  it('delivers canonical one-shot notifications exactly at the 60-minute expiry boundary', async () => {
+    vi.useFakeTimers()
+    // Exactly 60 minutes late: the expiry window is inclusive, so this must
+    // still deliver.
+    vi.setSystemTime(new Date('2026-04-08T10:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-boundary-one-shot-',
+    )
+    const canonicalJob = await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: 'boundary one-shot reminder',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'First-session prep reminder.',
+      schedule: {
+        kind: 'at',
+        at: '2026-04-08T09:00:00.000Z',
+      },
+      vault: vaultRoot,
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryDedupeToken: expect.stringContaining(
+          `assistant-cron|${canonicalJob.jobId}|2026-04-08T09:00:00.000Z`,
+        ),
+        instructions: 'First-session prep reminder.',
+        turnTrigger: 'automation-cron',
+      }),
+    )
+    await expect(
+      listAssistantCronRuns({
+        job: canonicalJob.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      jobId: canonicalJob.jobId,
+      runs: [
+        expect.objectContaining({
+          error: null,
+          status: 'succeeded',
+        }),
+      ],
+    })
+  })
+
+  it('skips canonical one-shot notifications just past the 60-minute expiry boundary', async () => {
+    vi.useFakeTimers()
+    // One millisecond past the inclusive 60-minute window: must skip and
+    // archive instead of delivering.
+    vi.setSystemTime(new Date('2026-04-08T10:00:00.001Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-past-boundary-one-shot-',
+    )
+    const canonicalJob = await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: 'past-boundary one-shot reminder',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'First-session prep reminder.',
+      schedule: {
+        kind: 'at',
+        at: '2026-04-08T09:00:00.000Z',
+      },
+      vault: vaultRoot,
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    await expect(listAssistantCronJobs(vaultRoot)).resolves.toEqual([])
+    await expect(
+      listAssistantCronRuns({
+        job: canonicalJob.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      runs: [
+        expect.objectContaining({
+          error: expect.stringContaining('Scheduled occurrence was 60 minute(s) late.'),
+          status: 'skipped',
         }),
       ],
     })
@@ -1995,6 +2168,132 @@ describe('assistant cron runtime orchestration', () => {
     })
     const runtimeRecord = finalizedRuntimeStore.jobs.find((record) => record.jobId === claimed.job.jobId)
     expect(runtimeRecord?.state.runningClaimId).toBeNull()
+  })
+
+  it('ignores and clears a stale session pin when a preserve route has conversation locators', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-keyed-preserve-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-keyed-preserve',
+      continuityPolicy: 'preserve',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Remind me to stretch.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_real',
+        identityId: 'identity-1',
+        participantId: 'participant-1',
+        threadId: 'thread-1',
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '10:00',
+      },
+      slug: 'keyed-preserve-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Keyed preserve reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = {
+      ...resolveCanonicalRuntimeState(source, runtimeStore),
+      sessionId: 'session-stale-pin',
+    }
+    const projected = projectCanonicalAssistantCronJob({
+      source,
+      runtimeState,
+    })
+    expect(projected.target.sessionId).toBeNull()
+    expect(projected.target.threadId).toBe('thread-1')
+
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projected,
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: null,
+        threadId: 'thread-1',
+      }),
+    )
+    const finalizedRuntimeStore = await readAssistantCronCanonicalRuntimeStore(paths, {
+      reclaimStaleRunningClaims: false,
+    })
+    const runtimeRecord = finalizedRuntimeStore.jobs.find(
+      (record) => record.jobId === claimed.job.jobId,
+    )
+    expect(runtimeRecord?.sessionId).toBeNull()
+  })
+
+  it('keeps pinning the response session for a preserve route without conversation locators', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-keyless-preserve-',
+    )
+    await createCanonicalJob(vaultRoot, 'keyless-preserve')
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({
+          source,
+          runtimeState,
+        }),
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    const finalizedRuntimeStore = await readAssistantCronCanonicalRuntimeStore(paths, {
+      reclaimStaleRunningClaims: false,
+    })
+    const runtimeRecord = finalizedRuntimeStore.jobs.find(
+      (record) => record.jobId === claimed.job.jobId,
+    )
+    expect(runtimeRecord?.sessionId).toBe('session-default')
   })
 
   it('processes a canonical daily-local midnight job when runtime state is missing', async () => {

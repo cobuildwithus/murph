@@ -340,6 +340,64 @@ describe("runHostedAssistantAutomation", () => {
     );
   });
 
+  it("persists the typed cron failure code from cron.job.completed events", async () => {
+    // June 2026 quota incident: provider quota failures on scheduled
+    // reminders must land queryable in hosted_runtime_log.
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      input.onEvent?.({
+        failureContext: {
+          errorCode: "ASSISTANT_CODEX_USAGE_LIMIT",
+          errorPresent: true,
+          routeConfigured: true,
+          runStatus: "failed",
+          scheduleKind: "at",
+          sourceKind: "automation",
+        },
+        safeDetails: "cron_job_enqueue_failed",
+        type: "cron.job.completed",
+      });
+      return {
+        nextWakeAt: null,
+        progressed: true,
+      };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_cron_error_code",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_cron_error_code",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    );
+
+    expect(result.redactedLogEntries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "Hosted assistant automation event: cron.job.completed.",
+          redacted: expect.objectContaining({
+            failureErrorCode: "ASSISTANT_CODEX_USAGE_LIMIT",
+            failureErrorPresent: true,
+            failureRunStatus: "failed",
+            failureScheduleKind: "at",
+            safeDetails: "cron_job_enqueue_failed",
+            type: "cron.job.completed",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("reports active-turn ingestion when automation reads staged conversation input", async () => {
     const listNewConversationInputs = vi.fn(async (query) => ({
       inputs: [

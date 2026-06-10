@@ -20,8 +20,10 @@ import type {
 } from './assistant-codex-events.js'
 import {
   extractAssistantMessageFallback,
+  extractCodexErrorInfo,
   extractCodexErrorMessage,
   extractCodexProgressEventFromNormalized,
+  type CodexStructuredErrorInfo,
   extractCodexSessionId,
   extractCodexStatusEventFromStderrLine,
   extractCodexTraceUpdatesFromNormalized,
@@ -861,6 +863,7 @@ class CodexAppServerProcess {
         abortRequested: false,
         code: this.child.exitCode,
         diagnostics: this.buildStartupProcessDiagnostics(),
+        errorInfo: null,
         fallback: buildCodexStdinFailureFallback({
           error,
           lastEventError: null,
@@ -971,6 +974,7 @@ class CodexAppServerProcess {
       abortRequested: false,
       code,
       diagnostics: this.buildStartupProcessDiagnostics(),
+      errorInfo: null,
       fallback: null,
       providerActionCount: 0,
       codexThreadId: null,
@@ -1015,6 +1019,7 @@ class CodexAppServerProcess {
         abortRequested: false,
         code: this.child.exitCode,
         diagnostics: this.buildStartupProcessDiagnostics(),
+        errorInfo: null,
         fallback: null,
         providerActionCount: 0,
         codexThreadId: null,
@@ -1238,6 +1243,7 @@ async function runCodexAppServerTurnOnProcess(
   let expectedTurnId: string | null = null
   let lastAgentMessage: string | null = null
   let lastEventError: string | null = null
+  let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
@@ -1439,6 +1445,7 @@ async function runCodexAppServerTurnOnProcess(
         abortRequested,
         code: codexProcess.child.exitCode,
         diagnostics: buildProcessExitDiagnostics(),
+        errorInfo: lastEventErrorInfo,
         fallback: buildCodexStdinFailureFallback({
           error,
           lastEventError,
@@ -1818,6 +1825,7 @@ async function runCodexAppServerTurnOnProcess(
     acceptJsonEvent(message)
     codexThreadId = codexThreadId ?? extractCodexSessionId(message)
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
+    lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
     if (isCodexTurnStartedMethod(method)) {
       turnId = extractCodexTurnIdFromMessage(message) ?? turnId
     }
@@ -1881,6 +1889,7 @@ async function runCodexAppServerTurnOnProcess(
       turnTerminal = true
       failTurn?.(
         buildCodexTurnFailedError({
+          errorInfo: extractCodexErrorInfo(message) ?? lastEventErrorInfo,
           fallback: lastEventError ?? extractCodexTurnErrorMessage(message),
           providerActionCount,
           codexThreadId,
@@ -2114,6 +2123,7 @@ async function runCodexAppServerTurnOnProcess(
           abortRequested,
           code,
           diagnostics: buildProcessExitDiagnostics(),
+          errorInfo: lastEventErrorInfo,
           fallback: lastEventError,
           providerActionCount,
           codexThreadId,

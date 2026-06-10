@@ -17,7 +17,6 @@ const repoRoot = path.resolve(appDir, "..", "..");
 const runnerBaseDockerfile = path.join(repoRoot, "Dockerfile.cloudflare-hosted-runner-base");
 const forceRebuildEnv = "MURPH_RUNNER_DOCKER_BASE_REBUILD";
 const runnerBaseImagePlatform = "linux/amd64";
-const whisperModelImageArgName = "WHISPER_MODEL_IMAGE";
 
 export interface RunnerBaseImagePreparationResult {
   fingerprint: string;
@@ -72,7 +71,6 @@ export async function prepareRunnerBaseImage(input: {
   const force = input.force === true || env[forceRebuildEnv] === "1";
 
   if (input.push === true) {
-    await assertWhisperModelImagePullable(env);
     await buildRunnerBaseImage({ env, fingerprint, imageTag, push: true });
     return { fingerprint, imageTag, status: "pushed" };
   }
@@ -87,33 +85,8 @@ export async function prepareRunnerBaseImage(input: {
     return { fingerprint, imageTag, status: "pulled" };
   }
 
-  await assertWhisperModelImagePullable(env);
   await buildRunnerBaseImage({ env, fingerprint, imageTag, push: false });
   return { fingerprint, imageTag, status: "built" };
-}
-
-async function readWhisperModelImage(): Promise<string> {
-  const dockerfile = await readFile(runnerBaseDockerfile, "utf8");
-  const match = dockerfile.match(new RegExp(`^ARG ${whisperModelImageArgName}=(.+)$`, "mu"));
-  const image = match?.[1]?.trim();
-  if (!image) {
-    throw new Error(`Missing ${whisperModelImageArgName} in ${runnerBaseDockerfile}.`);
-  }
-  return image;
-}
-
-async function assertWhisperModelImagePullable(env: NodeJS.ProcessEnv): Promise<void> {
-  const image = await readWhisperModelImage();
-  if (
-    runDockerSync(["pull", "--platform", runnerBaseImagePlatform, image], env).ok
-  ) {
-    return;
-  }
-
-  throw new Error(
-    `Runner Whisper model image is not pullable: ${image}. ` +
-    "Run `docker login ghcr.io` or publish the protected GHCR model image before building the runner base image.",
-  );
 }
 
 async function buildRunnerBaseImage(input: {
