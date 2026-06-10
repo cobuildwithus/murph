@@ -58,7 +58,14 @@ export async function runHostedWorkspaceInvocation(
   const runtimeWakeSignal = requireHostedInvocationRuntimeWakeSignal(input.runtimeWakeSignal);
   const runtime: HostedAssistantRuntimeConfig = input.job.runtime ?? {};
   const options = createHostedWorkspaceRuntimeBridgeJobOptions({
-    consumePendingRuntimeWake: () => runtimeWakeSignal.consumePending(),
+    // Once shutdown began, a late wake must not interrupt the immediate
+    // idle_shutdown checkpoint (the interrupt discards the snapshot after the
+    // R2 upload and starts a doomed turn). The unconsumed wake stays durable in
+    // the mailbox; reconciliation re-derives it for the replacement container.
+    consumePendingRuntimeWake: () =>
+      input.shutdownSignal?.aborted === true
+        ? false
+        : runtimeWakeSignal.consumePending(),
     decodeMailboxPayload: input.mailboxPayloadDecoder,
     platform: input.platform,
     readCurrentLease,
