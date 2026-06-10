@@ -500,14 +500,26 @@ describe("hosted email helpers", () => {
     })).toBe("assistant@example.com");
   });
 
-  it("derives capabilities from env defaults and explicit flags", () => {
+  it("derives capabilities from env defaults and the ingress flag", () => {
+    // Fully configured ingress (domain + sender + signing secret) implies send
+    // readiness without needing the live HOSTED_EMAIL binding object.
     expect(readHostedEmailCapabilities({
-      HOSTED_EMAIL: {
-        send: async (_message: unknown) => undefined,
-      },
       HOSTED_EMAIL_DOMAIN: "example.com",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SIGNING_SECRET: "secret_123",
+    })).toEqual({
+      ingressReady: true,
+      sendReady: true,
+      senderIdentity: "assistant@example.com",
+    });
+
+    // Runner-shaped env: only the forwarded sender + ingress flag are present
+    // (no signing secret, no binding object). Send must still be ready so the
+    // assistant can reply by email.
+    expect(readHostedEmailCapabilities({
+      HOSTED_EMAIL_DOMAIN: "example.com",
+      HOSTED_EMAIL_FROM_ADDRESS: "assistant@example.com",
+      HOSTED_EMAIL_INGRESS_READY: "true",
     })).toEqual({
       ingressReady: true,
       sendReady: true,
@@ -518,7 +530,6 @@ describe("hosted email helpers", () => {
       HOSTED_EMAIL_DOMAIN: "example.com",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@example.com",
       HOSTED_EMAIL_INGRESS_READY: "false",
-      HOSTED_EMAIL_SEND_READY: "1",
     })).toEqual({
       ingressReady: false,
       sendReady: false,
