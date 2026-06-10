@@ -7,7 +7,6 @@ import {
   buildHostedVaultShareDeliveryDedupeKey,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
   isHostedVaultShareProjectionKind,
-  type HostedVaultShareDeliveryPayload,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
@@ -61,18 +60,18 @@ export async function findActiveHostedVaultShares(input: {
 }
 
 export interface DeliverHostedVaultShareRecordsResult {
-  appendedRecordKeys: string[];
-  duplicateRecordKeys: string[];
   lastAppendedMailboxItemId: string | null;
 }
 
 /**
  * Appends one typed `vault-share.delivery` wake envelope per shared record into the
- * destination mailbox. The envelope eventId doubles as the mailbox dedupe key — derived
- * from (shareId, recordKey) — and occurredAt comes from the record itself, so the
- * envelope is fully deterministic for a given (share, record) and re-offering an
- * already-delivered record is a byte-identical no-op rather than a dedupe conflict.
- * Payloads ride the standard encrypted mailbox path; nothing lands in plaintext.
+ * destination mailbox, all in a single transaction per share. The envelope eventId doubles
+ * as the mailbox dedupe key — derived from (shareId, recordKey) — and occurredAt comes from
+ * the record itself (parser-pinned to the night date for sleep-times), so the envelope is
+ * fully deterministic for a given (share, record) and re-offering an already-delivered
+ * record is a byte-identical no-op rather than a dedupe conflict. Payload data rides the
+ * standard encrypted mailbox path; only the dedupe key and night-date occurredAt are
+ * plaintext mailbox metadata.
  */
 export async function deliverHostedVaultShareRecords(input: {
   prisma?: PrismaClient;
@@ -80,45 +79,35 @@ export async function deliverHostedVaultShareRecords(input: {
   share: ActiveHostedVaultShare;
 }): Promise<DeliverHostedVaultShareRecordsResult> {
   const prisma = input.prisma ?? getPrisma();
-  const appendedRecordKeys: string[] = [];
-  const duplicateRecordKeys: string[] = [];
-  let lastAppendedMailboxItemId: string | null = null;
 
-  for (const record of input.records) {
-    const delivery: HostedVaultShareDeliveryPayload = {
-      grantorMemberId: input.share.grantorMemberId,
-      projectionKind: input.share.projectionKind,
-      record,
-      schema: HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
-      shareId: input.share.id,
-    };
-    const envelope = buildHostedExecutionVaultShareDeliveryWake({
-      delivery,
-      eventId: buildHostedVaultShareDeliveryDedupeKey({
-        recordKey: record.recordKey,
-        shareId: input.share.id,
-      }),
-      memberId: input.share.destinationMemberId,
-      occurredAt: record.occurredAt,
-    });
-    const result = await prisma.$transaction((tx) =>
-      appendHostedMailboxEnvelopeTx({
+  return prisma.$transaction(async (tx) => {
+    let lastAppendedMailboxItemId: string | null = null;
+
+    for (const record of input.records) {
+      const envelope = buildHostedExecutionVaultShareDeliveryWake({
+        delivery: {
+          grantorMemberId: input.share.grantorMemberId,
+          projectionKind: input.share.projectionKind,
+          record,
+          schema: HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
+          shareId: input.share.id,
+        },
+        eventId: buildHostedVaultShareDeliveryDedupeKey({
+          recordKey: record.recordKey,
+          shareId: input.share.id,
+        }),
+        memberId: input.share.destinationMemberId,
+      });
+      const result = await appendHostedMailboxEnvelopeTx({
         envelope,
         tx,
-      }),
-    );
+      });
 
-    if (result.inserted) {
-      appendedRecordKeys.push(record.recordKey);
-      lastAppendedMailboxItemId = result.item.id;
-    } else {
-      duplicateRecordKeys.push(record.recordKey);
+      if (result.inserted) {
+        lastAppendedMailboxItemId = result.item.id;
+      }
     }
-  }
 
-  return {
-    appendedRecordKeys,
-    duplicateRecordKeys,
-    lastAppendedMailboxItemId,
-  };
+    return { lastAppendedMailboxItemId };
+  });
 }

@@ -78,7 +78,10 @@ export async function readProjectableSleepNights(
  * Pure selection step: keep the most recent fully-timed nights, capped at the projection
  * window, and drop nights older than the recency cutoff so members with only stale sleep
  * data never offer undeliverable records. Each night maps to one delivery record whose
- * recordKey is the night date and whose occurredAt is the night's sleepEndAt.
+ * recordKey is the night date and whose occurredAt is the night date at UTC midnight —
+ * occurredAt becomes plaintext mailbox metadata on the destination side, so it must
+ * disclose nothing beyond the night date the dedupe key already carries; the exact
+ * sleep timestamps stay inside the encrypted payload.
  */
 export function selectProjectableSleepNights(
   summaries: readonly Pick<ProjectedWearableSleepSummary, "date" | "sleepEndAt" | "sleepStartAt">[],
@@ -104,7 +107,7 @@ export function selectProjectableSleepNights(
         sleepEndAt: summary.sleepEndAt,
         sleepStartAt: summary.sleepStartAt,
       },
-      occurredAt: summary.sleepEndAt,
+      occurredAt: `${summary.date}T00:00:00.000Z`,
       recordKey: summary.date,
     });
 

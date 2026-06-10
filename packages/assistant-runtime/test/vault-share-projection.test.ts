@@ -2,6 +2,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { parseHostedVaultShareDeliverRequest } from "@murphai/hosted-execution/vault-share";
 import { describe, expect, it, vi } from "vitest";
 
 import { importHostedVaultShareDeliveryWake } from "../src/hosted-runtime/vault-share-import.ts";
@@ -19,7 +20,7 @@ const NIGHT = {
 
 const RECORD = {
   data: NIGHT,
-  occurredAt: NIGHT.sleepEndAt,
+  occurredAt: `${NIGHT.date}T00:00:00.000Z`,
   recordKey: NIGHT.date,
 };
 
@@ -34,11 +35,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
   });
 
   it("offers projectable records and reports delivery", async () => {
-    const deliver = vi.fn().mockResolvedValue({
-      appendedCount: 1,
-      duplicateCount: 0,
-      status: "delivered",
-    });
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
     const result = await offerHostedVaultShareProjectionBestEffort({
       readRecords: async () => [RECORD],
       vaultRoot: "/unused",
@@ -93,11 +90,27 @@ describe("selectProjectableSleepNights", () => {
 
     const selected = selectProjectableSleepNights(summaries, nowMs);
 
-    // recordKey is the night date and occurredAt is the night's sleepEndAt, so the dedupe
-    // key and the destination vault path stay byte-identical to the night itself.
+    // recordKey is the night date and occurredAt is the night date at UTC midnight, so the
+    // dedupe key, vault path, and plaintext mailbox metadata all reduce to the night itself
+    // — the exact sleep timestamps travel only inside the encrypted payload.
     expect(selected).toEqual([RECORD]);
     expect(selected[0]?.recordKey).toBe(NIGHT.date);
-    expect(selected[0]?.occurredAt).toBe(NIGHT.sleepEndAt);
+    expect(selected[0]?.occurredAt).toBe(`${NIGHT.date}T00:00:00.000Z`);
+  });
+
+  it("emits records the hosted-execution deliver-request parser accepts unchanged", () => {
+    // Cross-package drift guard: the deliver parser pins occurredAt to the night-date
+    // midnight and bounds the sleep window, so a projector that drifts from that contract
+    // would make web reject every offer. Pipe real projector output through the real parser.
+    const selected = selectProjectableSleepNights([NIGHT], nowMs);
+
+    expect(selected).toHaveLength(1);
+    expect(
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "sleep-times.v0",
+        records: selected,
+      }).records,
+    ).toEqual(selected);
   });
 
   it("drops nights older than the recency cutoff exactly", () => {

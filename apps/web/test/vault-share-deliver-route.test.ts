@@ -54,7 +54,9 @@ function recentRecord(daysAgo: number): {
       sleepEndAt: end.toISOString(),
       sleepStartAt: start.toISOString(),
     },
-    occurredAt: end.toISOString(),
+    // occurredAt is parser-pinned to the night-date midnight: it becomes plaintext mailbox
+    // metadata, so it must disclose nothing beyond the night date.
+    occurredAt: `${date}T00:00:00.000Z`,
     recordKey: date,
   };
 }
@@ -65,7 +67,7 @@ const STALE_RECORD = {
     sleepEndAt: "1999-01-01T06:31:00.000Z",
     sleepStartAt: "1998-12-31T22:04:00.000Z",
   },
-  occurredAt: "1999-01-01T06:31:00.000Z",
+  occurredAt: "1999-01-01T00:00:00.000Z",
   recordKey: "1999-01-01",
 };
 
@@ -78,6 +80,13 @@ const ACTIVE_SHARE = {
   destinationMemberId: "member_referee",
   grantorMemberId: "member_grantor",
   id: "share_1",
+  projectionKind: "sleep-times.v0",
+};
+
+const SECOND_SHARE = {
+  destinationMemberId: "member_other_referee",
+  grantorMemberId: "member_grantor",
+  id: "share_2",
   projectionKind: "sleep-times.v0",
 };
 
@@ -103,8 +112,6 @@ describe("vault-share deliver route", () => {
     mocks.readHostedMemberCoreState.mockResolvedValue({ id: "member_referee" });
     mocks.hasHostedMemberActiveAccess.mockReturnValue(true);
     mocks.deliverHostedVaultShareRecords.mockResolvedValue({
-      appendedRecordKeys: ["2026-06-09"],
-      duplicateRecordKeys: [],
       lastAppendedMailboxItemId: "mailbox_item_1",
     });
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({ signaled: true });
@@ -114,11 +121,7 @@ describe("vault-share deliver route", () => {
     const response = await deliverRoute.POST(buildRequest(VALID_BODY));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      appendedCount: 1,
-      duplicateCount: 0,
-      status: "delivered",
-    });
+    expect(await response.json()).toEqual({ status: "delivered" });
     expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
       grantorMemberId: "member_grantor",
       projectionKind: "sleep-times.v0",
@@ -139,11 +142,7 @@ describe("vault-share deliver route", () => {
     const response = await deliverRoute.POST(buildRequest(VALID_BODY));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      appendedCount: 0,
-      duplicateCount: 0,
-      status: "no-active-share",
-    });
+    expect(await response.json()).toEqual({ status: "no-active-share" });
     expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
@@ -154,11 +153,7 @@ describe("vault-share deliver route", () => {
     const response = await deliverRoute.POST(buildRequest(VALID_BODY));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      appendedCount: 0,
-      duplicateCount: 0,
-      status: "no-active-share",
-    });
+    expect(await response.json()).toEqual({ status: "no-active-share" });
     expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
   });
 
@@ -171,13 +166,26 @@ describe("vault-share deliver route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      appendedCount: 0,
-      duplicateCount: 0,
-      status: "delivered",
-    });
+    expect(await response.json()).toEqual({ status: "delivered" });
     expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("keeps an all-stale offer indistinguishable when the destination is inactive", async () => {
+    // The status must be a function of share configuration alone: a grantor probing with
+    // stale records learns nothing finer than the normal active/no-active-share split.
+    mocks.hasHostedMemberActiveAccess.mockReturnValue(false);
+
+    const response = await deliverRoute.POST(
+      buildRequest({
+        projectionKind: "sleep-times.v0",
+        records: [STALE_RECORD],
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "no-active-share" });
+    expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
   });
 
   it("delivers only the in-window records when an offer mixes stale and fresh records", async () => {
@@ -190,16 +198,61 @@ describe("vault-share deliver route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      appendedCount: 1,
-      duplicateCount: 0,
-      status: "delivered",
-    });
+    expect(await response.json()).toEqual({ status: "delivered" });
     expect(mocks.deliverHostedVaultShareRecords).toHaveBeenCalledTimes(1);
     expect(mocks.deliverHostedVaultShareRecords).toHaveBeenCalledWith({
       records: [freshRecord],
       share: ACTIVE_SHARE,
     });
+  });
+
+  it("keeps delivering to later shares when an earlier share's delivery fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE, SECOND_SHARE]);
+      mocks.readHostedMemberCoreState
+        .mockResolvedValueOnce({ id: "member_referee" })
+        .mockResolvedValueOnce({ id: "member_other_referee" });
+      mocks.deliverHostedVaultShareRecords
+        .mockRejectedValueOnce(new Error("destination mailbox down"))
+        .mockResolvedValueOnce({ lastAppendedMailboxItemId: "mailbox_item_2" });
+
+      const response = await deliverRoute.POST(buildRequest(VALID_BODY));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ status: "delivered" });
+      expect(mocks.deliverHostedVaultShareRecords).toHaveBeenCalledTimes(2);
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+        expectedUserId: "member_other_referee",
+        mailboxItemId: "mailbox_item_2",
+      });
+      // The operator log carries ids only — never payload fields, timestamps, or the
+      // raw error message, which could echo destination state back into shared logs.
+      expect(consoleError).toHaveBeenCalledTimes(1);
+      expect(consoleError).toHaveBeenCalledWith(
+        "Hosted vault-share delivery to a destination share failed.",
+        { errorName: "Error", shareId: "share_1" },
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("skips the wake signal when every offered record is a dedupe duplicate", async () => {
+    // Re-offering already-delivered nights appends nothing; waking the destination for a
+    // no-op import would be pure noise, and the response still reveals only "delivered".
+    mocks.deliverHostedVaultShareRecords.mockResolvedValue({
+      lastAppendedMailboxItemId: null,
+    });
+
+    const response = await deliverRoute.POST(buildRequest(VALID_BODY));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "delivered" });
+    expect(mocks.deliverHostedVaultShareRecords).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("rejects payloads that do not match the closed schema", async () => {
@@ -229,23 +282,24 @@ describe("vault-share deliver route", () => {
       grantorMemberId: "member_other",
       projectionKind: "sleep-times.v0",
     });
-    expect(await response.json()).toEqual({
-      appendedCount: 0,
-      duplicateCount: 0,
-      status: "no-active-share",
-    });
+    expect(await response.json()).toEqual({ status: "no-active-share" });
   });
 
   it("still reports delivered when the wake signal fails after a durable append", async () => {
-    mocks.signalHostedMailboxAppendRuntime.mockRejectedValue(new Error("temporal down"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    const response = await deliverRoute.POST(buildRequest(VALID_BODY));
+    try {
+      mocks.signalHostedMailboxAppendRuntime.mockRejectedValue(new Error("temporal down"));
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      appendedCount: 1,
-      duplicateCount: 0,
-      status: "delivered",
-    });
+      const response = await deliverRoute.POST(buildRequest(VALID_BODY));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ status: "delivered" });
+      // The append is durable and the destination imports on its next wake: a signal
+      // failure is not a delivery failure and must not be logged as one.
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });

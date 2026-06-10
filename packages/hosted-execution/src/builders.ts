@@ -328,16 +328,20 @@ export function buildHostedExecutionVaultShareDeliveryWake(input: {
   delivery: HostedVaultShareDeliveryPayload;
   eventId: string;
   memberId: string;
-  occurredAt: string;
 }): HostedExecutionVaultShareDeliveryWake {
+  const delivery = parseHostedVaultShareDeliveryPayload(input.delivery);
+
   return {
     ...buildHostedExecutionMemberOwnedWakeBase({
       eventId: input.eventId,
       kind: "vault-share.delivery",
       memberId: input.memberId,
-      occurredAt: input.occurredAt,
+      // The envelope occurredAt becomes the plaintext occurred_at mailbox column. Deriving
+      // it from the parsed record (parser-pinned to the night date for sleep-times) makes
+      // the pin authoritative for every caller instead of trusting a separate input.
+      occurredAt: delivery.record.occurredAt,
     }),
-    delivery: parseHostedVaultShareDeliveryPayload(input.delivery),
+    delivery,
   };
 }
 
