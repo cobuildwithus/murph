@@ -770,7 +770,7 @@ When creating automations, choose continuity deliberately. Use ${code(
     "--continuity-policy preserve"
   )} for simple reminders, check-ins, and lightweight support where recent prior automation context can help. Use ${code(
     "--continuity-policy fresh"
-  )} for larger automations such as research, audits, roundups, content inspection, or any recurring task likely to need multiple tool calls, so each run starts from current vault/tool evidence instead of prior run transcript context.
+  )} for larger automations such as research, audits, roundups, content inspection, or any recurring task likely to need multiple tool calls, so each run starts from current vault/tool evidence instead of prior run transcript context. For an automation meant for the current conversation, route flags may name this conversation or be omitted entirely; the route then inherits this conversation, and a preserve automation continues it instead of starting a separate thread.
 
 Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.`;
 }

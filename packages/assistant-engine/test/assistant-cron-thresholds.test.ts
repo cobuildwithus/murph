@@ -82,7 +82,12 @@ vi.mock('../src/assistant/channel-adapters.ts', () => ({
   getAssistantChannelAdapter: cronMocks.getAssistantChannelAdapter,
 }))
 
-vi.mock('../src/assistant/bindings.ts', () => ({
+vi.mock('../src/assistant/bindings.ts', async (importOriginal) => ({
+  // The conversation-key predicate is pure routing logic; keep the real one
+  // so continuity gating behaves as in production.
+  resolveAssistantConversationKey: (
+    await importOriginal<typeof import('../src/assistant/bindings.ts')>()
+  ).resolveAssistantConversationKey,
   resolveAssistantBindingDelivery: cronMocks.resolveAssistantBindingDelivery,
 }))
 

@@ -36,18 +36,37 @@ export function resolveAssistantDeliveryRouteWithCurrentRoute(
     participantId: normalizeAssistantRouteString(input.participantId),
     threadId: normalizeAssistantRouteString(input.threadId),
   }
+  if (
+    normalizedCurrentRoute === null ||
+    explicit.channel === null ||
+    normalizedCurrentRoute.channel !== explicit.channel
+  ) {
+    return explicit
+  }
   // The target and locator fields together describe one conversation, so the
   // current route is inherited atomically: mixing explicit and inherited
   // fields would fabricate a route that never existed.
-  const useCurrentRoute =
+  if (
     explicit.deliveryTarget === null &&
     explicit.identityId === null &&
     explicit.participantId === null &&
-    explicit.threadId === null &&
-    explicit.channel !== null &&
-    normalizedCurrentRoute?.channel === explicit.channel
-
-  return useCurrentRoute ? normalizedCurrentRoute : explicit
+    explicit.threadId === null
+  ) {
+    return normalizedCurrentRoute
+  }
+  // An explicit delivery target naming the current conversation (channel +
+  // delivery target identify one conversation) inherits its missing locators,
+  // so the saved route can resolve that conversation's session later.
+  if (explicit.deliveryTarget !== normalizedCurrentRoute.deliveryTarget) {
+    return explicit
+  }
+  return {
+    channel: explicit.channel,
+    deliveryTarget: explicit.deliveryTarget,
+    identityId: explicit.identityId ?? normalizedCurrentRoute.identityId,
+    participantId: explicit.participantId ?? normalizedCurrentRoute.participantId,
+    threadId: explicit.threadId ?? normalizedCurrentRoute.threadId,
+  }
 }
 
 function normalizeAssistantCurrentDeliveryRoute(

@@ -37,6 +37,7 @@ import {
   buildCanonicalAutomationUpsertInput,
   buildVisibleLocalAssistantCronStore,
   isCanonicalAssistantCronSourceEnabled,
+  automationContinuityUsesSessionPin,
   listCanonicalAssistantCronRecords,
   projectCanonicalAssistantCronJob,
   type CanonicalAssistantCronJobRecord,
@@ -428,6 +429,7 @@ export async function executeClaimedAssistantCronJob(input: {
     }
     await appendAssistantCronRun(input.paths, run)
 
+    const usesSessionPin = automationContinuityUsesSessionPin(input.job.source)
     const updatedRuntimeState = finalizeCanonicalAssistantCronRuntimeAfterRun({
       finishedAt,
       run: {
@@ -435,26 +437,20 @@ export async function executeClaimedAssistantCronJob(input: {
         status,
       },
       runtimeState: currentRuntimeState,
-      responseSessionId:
-        input.job.source.kind === 'automation' &&
-        input.job.source.continuityPolicy === 'preserve'
-          ? sessionId
-          : null,
+      responseSessionId: usesSessionPin ? sessionId : null,
       pendingDeliveryIntentId,
       source: input.job.source,
     })
     const persistedRuntimeState: AssistantCronCanonicalRuntimeRecord = {
       ...currentRuntimeState,
+      // Aliases are explicit creation-time bindings and survive preserve runs;
+      // only the automatic session pin is gated by the conversation key.
       alias:
         input.job.source.kind === 'automation' &&
         input.job.source.continuityPolicy === 'preserve'
           ? updatedRuntimeState.alias
           : null,
-      sessionId:
-        input.job.source.kind === 'automation' &&
-        input.job.source.continuityPolicy === 'preserve'
-          ? updatedRuntimeState.sessionId
-          : null,
+      sessionId: usesSessionPin ? updatedRuntimeState.sessionId : null,
       updatedAt: finishedAt,
       state: updatedRuntimeState.state,
     }
