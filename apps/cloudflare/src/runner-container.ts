@@ -756,6 +756,29 @@ export class RunnerContainer extends Container {
         return;
       }
 
+      const lastActivityObservedAtMs = this.lastActivityObservedAtMs;
+      if (
+        lastActivityObservedAtMs !== null
+        && Date.now() - lastActivityObservedAtMs
+          < readRunnerContainerIdleTtlMs(this.environment)
+      ) {
+        this.lastActivityExpiryAtMs = Date.now();
+        if (this.renewPlatformActivityTimeout()) {
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            details: {
+              ...this.buildLifecycleDiagnosticDetails(),
+              lifecycleStage: "activity-expired-early-renew",
+            },
+            message:
+              "Hosted execution container activity expiry arrived before the idle TTL elapsed; renewing.",
+            phase: "container.ready",
+            userId: this.currentLogContext?.userId,
+          });
+          return;
+        }
+      }
+
       this.lastActivityExpiryAtMs = Date.now();
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -1546,6 +1569,15 @@ export class RunnerContainer extends Container {
   }
 
   protected noteRunnerActivity(stage: string): boolean {
+    if (!this.renewPlatformActivityTimeout(stage)) {
+      return false;
+    }
+
+    this.recordContainerActivityObserved(stage);
+    return true;
+  }
+
+  private renewPlatformActivityTimeout(stage = "activity-expired-early-renew"): boolean {
     const renewActivityTimeout =
       (this as RunnerContainer & Partial<RunnerActivityTimeoutRenewable>).renewActivityTimeout;
 
@@ -1555,7 +1587,6 @@ export class RunnerContainer extends Container {
 
     try {
       renewActivityTimeout.call(this);
-      this.recordContainerActivityObserved(stage);
       return true;
     } catch (error) {
       emitHostedExecutionStructuredLog({

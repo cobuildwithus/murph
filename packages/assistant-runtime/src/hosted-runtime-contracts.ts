@@ -12,6 +12,7 @@ export type {
   HostedAssistantRuntimeResolvedConfig,
 } from "./hosted-runtime/models.ts";
 export type {
+  AssistantResponseMedia,
   HostedRuntimeArtifactReader,
   HostedRuntimeArtifactStore,
   HostedRuntimeArtifactWriter,
@@ -58,6 +59,7 @@ export {
   type RuntimeLivenessPort,
 } from "./hosted-runtime/liveness.ts";
 export {
+  parseHostedRuntimeAssistantResponseMedia,
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeLatencyTraceResponse,
   parseHostedRuntimeUsageRecordResponse,

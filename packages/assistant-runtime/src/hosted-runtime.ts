@@ -2127,6 +2127,14 @@ function createAbortGuardedHostedRuntimePlatform(
             guard(() => platform.providerFetch!(request, init))) as typeof fetch,
         }
       : {}),
+    ...(platform.generatedImageUploader
+      ? {
+          generatedImageUploader: {
+            uploadGeneratedImage: (request) =>
+              guard(() => platform.generatedImageUploader!.uploadGeneratedImage(request)),
+          },
+        }
+      : {}),
     ...(platform.usageRecordPort
       ? {
           usageRecordPort: {

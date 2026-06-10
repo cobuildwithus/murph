@@ -11,6 +11,7 @@ export type {
   HostedAssistantWorkspaceRuntimeJobResult,
 } from "./hosted-runtime/models.ts";
 export type {
+  AssistantResponseMedia,
   HostedRuntimeArtifactStore,
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
@@ -48,6 +49,7 @@ export {
   parseHostedAssistantWorkspaceRuntimeJobRequest,
 } from "./hosted-runtime/parsers.ts";
 export {
+  parseHostedRuntimeAssistantResponseMedia,
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeLatencyTraceResponse,
   parseHostedRuntimeUsageRecordResponse,
