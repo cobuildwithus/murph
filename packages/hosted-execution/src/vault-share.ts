@@ -16,8 +16,10 @@ import {
  * exists and is the only writer into the destination mailbox.
  *
  * Projection kinds are a closed registry on purpose: each kind is a deterministic,
- * fixed-schema projection. Adding a kind means adding a schema and a projector, never
- * widening an existing payload.
+ * fixed-schema projection. The wire envelope is kind-generic — every record carries a
+ * path-safe `recordKey` (its identity within the share) and an `occurredAt` timestamp,
+ * with the kind-specific shape isolated under `data`. Adding a kind means adding a data
+ * schema and a projector, never widening the envelope.
  */
 export const HOSTED_VAULT_SHARE_PROJECTION_KINDS = [
   "sleep-times.v0",
@@ -29,17 +31,28 @@ export type HostedVaultShareProjectionKind =
 export const HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA =
   "murph.vault-share.delivery.v1";
 
-export const HOSTED_VAULT_SHARE_DELIVER_MAX_NIGHTS = 7;
+export const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS = 7;
 
-export interface HostedVaultShareSleepNight {
+const HOSTED_VAULT_SHARE_RECORD_KEY_MAX_LENGTH = 128;
+const HOSTED_VAULT_SHARE_RECORD_KEY_PATTERN = /^[A-Za-z0-9._-]+$/u;
+
+export interface HostedVaultShareSleepTimesData {
   date: string;
   sleepEndAt: string;
   sleepStartAt: string;
 }
 
+export type HostedVaultShareDeliveryRecordData = HostedVaultShareSleepTimesData;
+
+export interface HostedVaultShareDeliveryRecord {
+  data: HostedVaultShareDeliveryRecordData;
+  occurredAt: string;
+  recordKey: string;
+}
+
 export interface HostedVaultShareDeliverRequest {
-  nights: HostedVaultShareSleepNight[];
   projectionKind: HostedVaultShareProjectionKind;
+  records: HostedVaultShareDeliveryRecord[];
 }
 
 export interface HostedVaultShareDeliverResponse {
@@ -50,8 +63,8 @@ export interface HostedVaultShareDeliverResponse {
 
 export interface HostedVaultShareDeliveryPayload {
   grantorMemberId: string;
-  night: HostedVaultShareSleepNight;
   projectionKind: HostedVaultShareProjectionKind;
+  record: HostedVaultShareDeliveryRecord;
   schema: typeof HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA;
   shareId: string;
 }
@@ -76,33 +89,78 @@ function parseHostedVaultShareProjectionKind(
 }
 
 export function buildHostedVaultShareDeliveryDedupeKey(input: {
-  date: string;
+  recordKey: string;
   shareId: string;
 }): string {
-  return `vault-share:${input.shareId}:${input.date}`;
+  return `vault-share:${input.shareId}:${input.recordKey}`;
 }
 
-function parseHostedVaultShareSleepNight(
+export function parseHostedVaultShareDeliveryRecord(
   value: unknown,
-): HostedVaultShareSleepNight {
-  const record = requireObject(value, "Vault share sleep night");
-  const date = requireString(record.date, "Vault share sleep night date");
+  projectionKind: HostedVaultShareProjectionKind,
+): HostedVaultShareDeliveryRecord {
+  const record = requireObject(value, "Vault share delivery record");
+  const recordKey = requireRecordKey(
+    record.recordKey,
+    "Vault share delivery record recordKey",
+  );
+
+  return {
+    data: parseHostedVaultShareDeliveryRecordData(record.data, {
+      projectionKind,
+      recordKey,
+    }),
+    occurredAt: requireIsoTimestamp(
+      record.occurredAt,
+      "Vault share delivery record occurredAt",
+    ),
+    recordKey,
+  };
+}
+
+function parseHostedVaultShareDeliveryRecordData(
+  value: unknown,
+  context: {
+    projectionKind: HostedVaultShareProjectionKind;
+    recordKey: string;
+  },
+): HostedVaultShareDeliveryRecordData {
+  switch (context.projectionKind) {
+    case "sleep-times.v0":
+      return parseHostedVaultShareSleepTimesData(value, context.recordKey);
+  }
+}
+
+function parseHostedVaultShareSleepTimesData(
+  value: unknown,
+  recordKey: string,
+): HostedVaultShareSleepTimesData {
+  const data = requireObject(value, "Vault share sleep-times data");
+  const date = requireString(data.date, "Vault share sleep-times data date");
 
   if (!isStrictIsoDate(date)) {
     throw new TypeError(
-      "Vault share sleep night date must be a real calendar day formatted YYYY-MM-DD.",
+      "Vault share sleep-times data date must be a real calendar day formatted YYYY-MM-DD.",
+    );
+  }
+
+  // The record's identity is its night date; rejecting any drift keeps the dedupe key and
+  // the destination vault path derived from recordKey byte-identical to the night itself.
+  if (recordKey !== date) {
+    throw new TypeError(
+      "Vault share sleep-times recordKey must equal the data date.",
     );
   }
 
   return {
     date,
     sleepEndAt: requireIsoTimestamp(
-      record.sleepEndAt,
-      "Vault share sleep night sleepEndAt",
+      data.sleepEndAt,
+      "Vault share sleep-times data sleepEndAt",
     ),
     sleepStartAt: requireIsoTimestamp(
-      record.sleepStartAt,
-      "Vault share sleep night sleepStartAt",
+      data.sleepStartAt,
+      "Vault share sleep-times data sleepStartAt",
     ),
   };
 }
@@ -110,24 +168,27 @@ function parseHostedVaultShareSleepNight(
 export function parseHostedVaultShareDeliverRequest(
   value: unknown,
 ): HostedVaultShareDeliverRequest {
-  const record = requireObject(value, "Vault share deliver request");
-  const nights = requireArray(record.nights, "Vault share deliver request nights");
+  const request = requireObject(value, "Vault share deliver request");
+  const projectionKind = parseHostedVaultShareProjectionKind(
+    request.projectionKind,
+    "Vault share deliver request projectionKind",
+  );
+  const records = requireArray(request.records, "Vault share deliver request records");
 
-  if (nights.length === 0) {
-    throw new TypeError("Vault share deliver request nights must not be empty.");
+  if (records.length === 0) {
+    throw new TypeError("Vault share deliver request records must not be empty.");
   }
 
-  if (nights.length > HOSTED_VAULT_SHARE_DELIVER_MAX_NIGHTS) {
+  if (records.length > HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS) {
     throw new TypeError(
-      `Vault share deliver request nights must contain at most ${HOSTED_VAULT_SHARE_DELIVER_MAX_NIGHTS} nights.`,
+      `Vault share deliver request records must contain at most ${HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS} records.`,
     );
   }
 
   return {
-    nights: nights.map((night) => parseHostedVaultShareSleepNight(night)),
-    projectionKind: parseHostedVaultShareProjectionKind(
-      record.projectionKind,
-      "Vault share deliver request projectionKind",
+    projectionKind,
+    records: records.map((record) =>
+      parseHostedVaultShareDeliveryRecord(record, projectionKind),
     ),
   };
 }
@@ -160,8 +221,8 @@ export function parseHostedVaultShareDeliverResponse(
 export function parseHostedVaultShareDeliveryPayload(
   value: unknown,
 ): HostedVaultShareDeliveryPayload {
-  const record = requireObject(value, "Vault share delivery payload");
-  const schema = requireString(record.schema, "Vault share delivery payload schema");
+  const payload = requireObject(value, "Vault share delivery payload");
+  const schema = requireString(payload.schema, "Vault share delivery payload schema");
 
   if (schema !== HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA) {
     throw new TypeError(
@@ -169,19 +230,37 @@ export function parseHostedVaultShareDeliveryPayload(
     );
   }
 
+  const projectionKind = parseHostedVaultShareProjectionKind(
+    payload.projectionKind,
+    "Vault share delivery payload projectionKind",
+  );
+
   return {
     grantorMemberId: requireString(
-      record.grantorMemberId,
+      payload.grantorMemberId,
       "Vault share delivery payload grantorMemberId",
     ),
-    night: parseHostedVaultShareSleepNight(record.night),
-    projectionKind: parseHostedVaultShareProjectionKind(
-      record.projectionKind,
-      "Vault share delivery payload projectionKind",
-    ),
+    projectionKind,
+    record: parseHostedVaultShareDeliveryRecord(payload.record, projectionKind),
     schema: HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
-    shareId: requireString(record.shareId, "Vault share delivery payload shareId"),
+    shareId: requireString(payload.shareId, "Vault share delivery payload shareId"),
   };
+}
+
+function requireRecordKey(value: unknown, label: string): string {
+  const text = requireString(value, label);
+
+  if (
+    text.length > HOSTED_VAULT_SHARE_RECORD_KEY_MAX_LENGTH
+    || text.includes("..")
+    || !HOSTED_VAULT_SHARE_RECORD_KEY_PATTERN.test(text)
+  ) {
+    throw new TypeError(
+      `${label} must be at most ${HOSTED_VAULT_SHARE_RECORD_KEY_MAX_LENGTH} path-safe characters (A-Z, a-z, 0-9, '.', '_', '-') without '..'.`,
+    );
+  }
+
+  return text;
 }
 
 function requireIsoTimestamp(value: unknown, label: string): string {

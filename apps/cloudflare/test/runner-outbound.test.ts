@@ -638,14 +638,18 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH}`, {
         body: JSON.stringify({
-          nights: [
+          projectionKind: "sleep-times.v0",
+          records: [
             {
-              date: "2026-06-09",
-              sleepEndAt: "2026-06-10T06:31:00.000Z",
-              sleepStartAt: "2026-06-09T22:04:00.000Z",
+              data: {
+                date: "2026-06-09",
+                sleepEndAt: "2026-06-10T06:31:00.000Z",
+                sleepStartAt: "2026-06-09T22:04:00.000Z",
+              },
+              occurredAt: "2026-06-10T06:31:00.000Z",
+              recordKey: "2026-06-09",
             },
           ],
-          projectionKind: "sleep-times.v0",
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
@@ -691,14 +695,18 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH}`, {
         body: JSON.stringify({
-          nights: [
+          projectionKind: "sleep-times.v0",
+          records: [
             {
-              date: "2026-06-09",
-              sleepEndAt: "2026-06-10T06:31:00.000Z",
-              sleepStartAt: "2026-06-09T22:04:00.000Z",
+              data: {
+                date: "2026-06-09",
+                sleepEndAt: "2026-06-10T06:31:00.000Z",
+                sleepStartAt: "2026-06-09T22:04:00.000Z",
+              },
+              occurredAt: "2026-06-10T06:31:00.000Z",
+              recordKey: "2026-06-09",
             },
           ],
-          projectionKind: "sleep-times.v0",
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
@@ -743,14 +751,18 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH}`, {
         body: JSON.stringify({
-          nights: [
+          projectionKind: "sleep-times.v0",
+          records: [
             {
-              date: "2026-06-09",
-              sleepEndAt: "2026-06-10T06:31:00.000Z",
-              sleepStartAt: "2026-06-09T22:04:00.000Z",
+              data: {
+                date: "2026-06-09",
+                sleepEndAt: "2026-06-10T06:31:00.000Z",
+                sleepStartAt: "2026-06-09T22:04:00.000Z",
+              },
+              occurredAt: "2026-06-10T06:31:00.000Z",
+              recordKey: "2026-06-09",
             },
           ],
-          projectionKind: "sleep-times.v0",
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",

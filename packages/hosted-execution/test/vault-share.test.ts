@@ -4,22 +4,26 @@ import { parseHostedExecutionWake } from "../src/parsers.ts";
 import { HOSTED_MAILBOX_KINDS } from "../src/runtime-control.ts";
 import {
   buildHostedVaultShareDeliveryDedupeKey,
-  HOSTED_VAULT_SHARE_DELIVER_MAX_NIGHTS,
+  HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
   parseHostedVaultShareDeliverRequest,
   parseHostedVaultShareDeliverResponse,
 } from "../src/vault-share.ts";
 
-const VALID_NIGHT = {
-  date: "2026-06-09",
-  sleepEndAt: "2026-06-10T06:31:00.000Z",
-  sleepStartAt: "2026-06-09T22:04:00.000Z",
+const VALID_RECORD = {
+  data: {
+    date: "2026-06-09",
+    sleepEndAt: "2026-06-10T06:31:00.000Z",
+    sleepStartAt: "2026-06-09T22:04:00.000Z",
+  },
+  occurredAt: "2026-06-10T06:31:00.000Z",
+  recordKey: "2026-06-09",
 };
 
 const VALID_DELIVERY = {
   grantorMemberId: "member_grantor",
-  night: VALID_NIGHT,
   projectionKind: "sleep-times.v0",
+  record: VALID_RECORD,
   schema: HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
   shareId: "share_1",
 };
@@ -29,74 +33,119 @@ describe("vault-share contracts", () => {
     expect(HOSTED_MAILBOX_KINDS).toContain("vault-share.delivery");
   });
 
-  it("derives the dedupe key from share id and night date", () => {
+  it("derives the dedupe key from share id and record key", () => {
     expect(
-      buildHostedVaultShareDeliveryDedupeKey({ date: "2026-06-09", shareId: "share_1" }),
+      buildHostedVaultShareDeliveryDedupeKey({ recordKey: "2026-06-09", shareId: "share_1" }),
     ).toBe("vault-share:share_1:2026-06-09");
   });
 
   it("parses a valid deliver request", () => {
     const parsed = parseHostedVaultShareDeliverRequest({
-      nights: [VALID_NIGHT],
       projectionKind: "sleep-times.v0",
+      records: [VALID_RECORD],
     });
 
-    expect(parsed.nights).toEqual([VALID_NIGHT]);
+    expect(parsed.records).toEqual([VALID_RECORD]);
     expect(parsed.projectionKind).toBe("sleep-times.v0");
   });
 
-  it("rejects an empty nights array", () => {
+  it("rejects an empty records array", () => {
     expect(() =>
-      parseHostedVaultShareDeliverRequest({ nights: [], projectionKind: "sleep-times.v0" }),
+      parseHostedVaultShareDeliverRequest({ projectionKind: "sleep-times.v0", records: [] }),
     ).toThrow(/must not be empty/u);
   });
 
-  it("rejects more nights than the cap", () => {
-    const nights = Array.from(
-      { length: HOSTED_VAULT_SHARE_DELIVER_MAX_NIGHTS + 1 },
-      (_, index) => ({
-        ...VALID_NIGHT,
-        date: `2026-06-${String(index + 1).padStart(2, "0")}`,
-      }),
+  it("rejects more records than the cap", () => {
+    const records = Array.from(
+      { length: HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS + 1 },
+      (_, index) => {
+        const date = `2026-06-${String(index + 1).padStart(2, "0")}`;
+
+        return {
+          ...VALID_RECORD,
+          data: { ...VALID_RECORD.data, date },
+          recordKey: date,
+        };
+      },
     );
 
     expect(() =>
-      parseHostedVaultShareDeliverRequest({ nights, projectionKind: "sleep-times.v0" }),
+      parseHostedVaultShareDeliverRequest({ projectionKind: "sleep-times.v0", records }),
     ).toThrow(/at most/u);
   });
 
   it("rejects an unknown projection kind", () => {
     expect(() =>
       parseHostedVaultShareDeliverRequest({
-        nights: [VALID_NIGHT],
         projectionKind: "biometrics.everything",
+        records: [VALID_RECORD],
       }),
     ).toThrow(/known vault-share projection kind/u);
+  });
+
+  it("rejects record keys that are not path-safe", () => {
+    for (const recordKey of ["../x", "a/b", "a..b", "x".repeat(129)]) {
+      expect(() =>
+        parseHostedVaultShareDeliverRequest({
+          projectionKind: "sleep-times.v0",
+          records: [{ ...VALID_RECORD, recordKey }],
+        }),
+      ).toThrow(/path-safe/u);
+    }
+  });
+
+  it("rejects a sleep record whose recordKey drifts from the data date", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "sleep-times.v0",
+        records: [{ ...VALID_RECORD, recordKey: "2026-06-08" }],
+      }),
+    ).toThrow(/recordKey must equal the data date/u);
   });
 
   it("rejects malformed dates and timestamps", () => {
     expect(() =>
       parseHostedVaultShareDeliverRequest({
-        nights: [{ ...VALID_NIGHT, date: "June 9th" }],
         projectionKind: "sleep-times.v0",
+        records: [{
+          ...VALID_RECORD,
+          data: { ...VALID_RECORD.data, date: "June 9th" },
+          recordKey: "June9th",
+        }],
       }),
     ).toThrow(/YYYY-MM-DD/u);
     expect(() =>
       parseHostedVaultShareDeliverRequest({
-        nights: [{ ...VALID_NIGHT, date: "2026-02-31" }],
         projectionKind: "sleep-times.v0",
+        records: [{
+          ...VALID_RECORD,
+          data: { ...VALID_RECORD.data, date: "2026-02-31" },
+          recordKey: "2026-02-31",
+        }],
       }),
     ).toThrow(/YYYY-MM-DD/u);
     expect(() =>
       parseHostedVaultShareDeliverRequest({
-        nights: [{ ...VALID_NIGHT, sleepStartAt: "late" }],
         projectionKind: "sleep-times.v0",
+        records: [{ ...VALID_RECORD, occurredAt: "later" }],
       }),
     ).toThrow(/ISO-8601/u);
     expect(() =>
       parseHostedVaultShareDeliverRequest({
-        nights: [{ ...VALID_NIGHT, sleepEndAt: "2026-02-31T00:00:00.000Z" }],
         projectionKind: "sleep-times.v0",
+        records: [{
+          ...VALID_RECORD,
+          data: { ...VALID_RECORD.data, sleepStartAt: "late" },
+        }],
+      }),
+    ).toThrow(/ISO-8601/u);
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "sleep-times.v0",
+        records: [{
+          ...VALID_RECORD,
+          data: { ...VALID_RECORD.data, sleepEndAt: "2026-02-31T00:00:00.000Z" },
+        }],
       }),
     ).toThrow(/ISO-8601/u);
   });

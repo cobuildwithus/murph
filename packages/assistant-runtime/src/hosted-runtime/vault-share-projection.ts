@@ -1,6 +1,6 @@
 import {
-  HOSTED_VAULT_SHARE_DELIVER_MAX_NIGHTS,
-  type HostedVaultShareSleepNight,
+  HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  type HostedVaultShareDeliveryRecord,
 } from "@murphai/hosted-execution/vault-share";
 import {
   type ProjectedWearableSleepSummary,
@@ -19,20 +19,21 @@ export interface HostedVaultShareProjectionOfferResult {
     | "error"
     | "no-active-share"
     | "no-port"
-    | "no-projectable-nights";
+    | "no-projectable-records";
 }
 
 /**
  * Deterministic, best-effort projection offer: read the latest fully-timed sleep nights
- * from the member's own vault and offer them through the vault-share port. The web control
- * plane is the sole authority on whether shares exist; this step holds no share state.
+ * from the member's own vault and offer them as delivery records through the vault-share
+ * port. The web control plane is the sole authority on whether shares exist; this step
+ * holds no share state.
  *
  * Never throws — a projection failure must never affect the runtime's primary work — and
  * sends nothing when the vault has no fully-timed nights, so members without sleep data
  * (or without wearables) make no delivery calls at all.
  */
 export async function offerHostedVaultShareProjectionBestEffort(input: {
-  readNights?: (vaultRoot: string) => Promise<HostedVaultShareSleepNight[]>;
+  readRecords?: (vaultRoot: string) => Promise<HostedVaultShareDeliveryRecord[]>;
   vaultRoot: string;
   vaultSharePort: HostedRuntimeVaultSharePort | null | undefined;
 }): Promise<HostedVaultShareProjectionOfferResult> {
@@ -42,18 +43,18 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
     return { outcome: "no-port" };
   }
 
-  const readNights = input.readNights ?? readProjectableSleepNights;
+  const readRecords = input.readRecords ?? readProjectableSleepNights;
 
   try {
-    const nights = await readNights(input.vaultRoot);
+    const records = await readRecords(input.vaultRoot);
 
-    if (nights.length === 0) {
-      return { outcome: "no-projectable-nights" };
+    if (records.length === 0) {
+      return { outcome: "no-projectable-records" };
     }
 
     const response = await port.deliver({
-      nights,
       projectionKind: "sleep-times.v0",
+      records,
     });
 
     return {
@@ -66,9 +67,9 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
 
 export async function readProjectableSleepNights(
   vaultRoot: string,
-): Promise<HostedVaultShareSleepNight[]> {
+): Promise<HostedVaultShareDeliveryRecord[]> {
   const summaries = await summarizeWearableSleepRuntime(vaultRoot, {
-    limit: HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW + HOSTED_VAULT_SHARE_DELIVER_MAX_NIGHTS,
+    limit: HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW + HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   });
   return selectProjectableSleepNights(summaries, Date.now());
 }
@@ -76,15 +77,16 @@ export async function readProjectableSleepNights(
 /**
  * Pure selection step: keep the most recent fully-timed nights, capped at the projection
  * window, and drop nights older than the recency cutoff so members with only stale sleep
- * data never offer undeliverable nights.
+ * data never offer undeliverable records. Each night maps to one delivery record whose
+ * recordKey is the night date and whose occurredAt is the night's sleepEndAt.
  */
 export function selectProjectableSleepNights(
   summaries: readonly Pick<ProjectedWearableSleepSummary, "date" | "sleepEndAt" | "sleepStartAt">[],
   nowMs: number,
-): HostedVaultShareSleepNight[] {
+): HostedVaultShareDeliveryRecord[] {
   const cutoffMs =
     nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS * 24 * 60 * 60 * 1000;
-  const nights: HostedVaultShareSleepNight[] = [];
+  const records: HostedVaultShareDeliveryRecord[] = [];
 
   for (const summary of summaries) {
     if (typeof summary.sleepStartAt !== "string" || typeof summary.sleepEndAt !== "string") {
@@ -96,16 +98,20 @@ export function selectProjectableSleepNights(
       continue;
     }
 
-    nights.push({
-      date: summary.date,
-      sleepEndAt: summary.sleepEndAt,
-      sleepStartAt: summary.sleepStartAt,
+    records.push({
+      data: {
+        date: summary.date,
+        sleepEndAt: summary.sleepEndAt,
+        sleepStartAt: summary.sleepStartAt,
+      },
+      occurredAt: summary.sleepEndAt,
+      recordKey: summary.date,
     });
 
-    if (nights.length >= HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW) {
+    if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW) {
       break;
     }
   }
 
-  return nights;
+  return records;
 }

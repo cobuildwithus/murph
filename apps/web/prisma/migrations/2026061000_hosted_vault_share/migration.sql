@@ -23,3 +23,6 @@ ALTER TABLE "hosted_vault_share" ADD CONSTRAINT "hosted_vault_share_grantor_memb
 
 -- AddForeignKey
 ALTER TABLE "hosted_vault_share" ADD CONSTRAINT "hosted_vault_share_destination_member_id_fkey" FOREIGN KEY ("destination_member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddCheckConstraint (v0 share rows are written by raw operator SQL, so the database is the validation layer)
+ALTER TABLE "hosted_vault_share" ADD CONSTRAINT "hosted_vault_share_status_check" CHECK ("status" IN ('granted','revoked'));

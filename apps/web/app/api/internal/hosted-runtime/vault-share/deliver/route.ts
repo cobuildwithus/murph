@@ -1,7 +1,7 @@
 import {
   parseHostedVaultShareDeliverRequest,
   type HostedVaultShareDeliverResponse,
-  type HostedVaultShareSleepNight,
+  type HostedVaultShareDeliveryRecord,
 } from "@murphai/hosted-execution/vault-share";
 
 import {
@@ -14,7 +14,7 @@ import {
   readHostedMemberCoreState,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
-  deliverHostedVaultShareNights,
+  deliverHostedVaultShareRecords,
   findActiveHostedVaultShares,
 } from "@/src/lib/hosted-mailbox/vault-share-store";
 import {
@@ -25,8 +25,8 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES = 16 * 1024;
-const HOSTED_VAULT_SHARE_DELIVER_MAX_NIGHT_AGE_DAYS = 60;
-const HOSTED_VAULT_SHARE_DELIVER_MAX_NIGHT_FUTURE_DAYS = 2;
+const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_AGE_DAYS = 60;
+const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_FUTURE_DAYS = 2;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const NO_ACTIVE_SHARE_RESPONSE: HostedVaultShareDeliverResponse = {
@@ -37,7 +37,7 @@ const NO_ACTIVE_SHARE_RESPONSE: HostedVaultShareDeliverResponse = {
 
 /**
  * The single cross-member write seam. The grantor identity comes exclusively from the
- * signed Cloudflare callback; the grantor's runtime offers projected nights without
+ * signed Cloudflare callback; the grantor's runtime offers projected records without
  * knowing whether shares exist. Web is the sole authority: it fans the offer out to every
  * active HostedVaultShare for (grantor, projectionKind), skipping inactive destinations.
  * No grants — or only inactive destinations — resolves to `no-active-share` with nothing
@@ -48,7 +48,7 @@ export const POST = withJsonError(async (request: Request) => {
     maxBodyBytes: HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
   });
   const body = parseHostedVaultShareDeliverRequest(await readOptionalJsonObject(request));
-  const nights = filterDeliverableNights(body.nights);
+  const records = filterDeliverableRecords(body.records);
 
   const shares = await findActiveHostedVaultShares({
     grantorMemberId,
@@ -63,8 +63,8 @@ export const POST = withJsonError(async (request: Request) => {
   let duplicateCount = 0;
 
   // An all-stale offer skips delivery entirely but still resolves as delivered with zero
-  // counts: stale nights must never produce a permanent error loop for the grantor runtime.
-  if (nights.length > 0) {
+  // counts: stale records must never produce a permanent error loop for the grantor runtime.
+  if (records.length > 0) {
     let delivered = false;
 
     for (const share of shares) {
@@ -77,14 +77,14 @@ export const POST = withJsonError(async (request: Request) => {
         continue;
       }
 
-      const delivery = await deliverHostedVaultShareNights({
-        nights,
+      const delivery = await deliverHostedVaultShareRecords({
+        records,
         share,
       });
 
       delivered = true;
-      appendedCount += delivery.appendedDates.length;
-      duplicateCount += delivery.duplicateDates.length;
+      appendedCount += delivery.appendedRecordKeys.length;
+      duplicateCount += delivery.duplicateRecordKeys.length;
 
       if (delivery.lastAppendedMailboxItemId !== null) {
         try {
@@ -112,21 +112,21 @@ export const POST = withJsonError(async (request: Request) => {
 });
 
 /**
- * Bounds the mailbox dedupe-key space a grantor runtime can mint: only nights inside a
- * sane recency window are delivered. Out-of-window nights are silently dropped rather than
- * rejected so one stale night never poisons delivery of the fresh ones. Honest runtimes
- * only ever offer the latest few nights.
+ * Bounds the mailbox dedupe-key space a grantor runtime can mint: only records inside a
+ * sane recency window are delivered. Out-of-window records are silently dropped rather than
+ * rejected so one stale record never poisons delivery of the fresh ones. Honest runtimes
+ * only ever offer the latest few records.
  */
-function filterDeliverableNights(
-  nights: readonly HostedVaultShareSleepNight[],
-): HostedVaultShareSleepNight[] {
+function filterDeliverableRecords(
+  records: readonly HostedVaultShareDeliveryRecord[],
+): HostedVaultShareDeliveryRecord[] {
   const nowMs = Date.now();
 
-  return nights.filter((night) => {
-    const dateMs = Date.parse(`${night.date}T00:00:00.000Z`);
+  return records.filter((record) => {
+    const occurredAtMs = Date.parse(record.occurredAt);
 
-    return !Number.isNaN(dateMs)
-      && dateMs <= nowMs + HOSTED_VAULT_SHARE_DELIVER_MAX_NIGHT_FUTURE_DAYS * DAY_MS
-      && dateMs >= nowMs - HOSTED_VAULT_SHARE_DELIVER_MAX_NIGHT_AGE_DAYS * DAY_MS;
+    return !Number.isNaN(occurredAtMs)
+      && occurredAtMs <= nowMs + HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_FUTURE_DAYS * DAY_MS
+      && occurredAtMs >= nowMs - HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_AGE_DAYS * DAY_MS;
   });
 }

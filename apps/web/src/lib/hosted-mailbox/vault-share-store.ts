@@ -8,8 +8,8 @@ import {
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
   isHostedVaultShareProjectionKind,
   type HostedVaultShareDeliveryPayload,
+  type HostedVaultShareDeliveryRecord,
   type HostedVaultShareProjectionKind,
-  type HostedVaultShareSleepNight,
 } from "@murphai/hosted-execution/vault-share";
 import type { PrismaClient } from "@prisma/client";
 
@@ -60,46 +60,46 @@ export async function findActiveHostedVaultShares(input: {
   });
 }
 
-export interface DeliverHostedVaultShareNightsResult {
-  appendedDates: string[];
-  duplicateDates: string[];
+export interface DeliverHostedVaultShareRecordsResult {
+  appendedRecordKeys: string[];
+  duplicateRecordKeys: string[];
   lastAppendedMailboxItemId: string | null;
 }
 
 /**
- * Appends one typed `vault-share.delivery` wake envelope per shared night into the
+ * Appends one typed `vault-share.delivery` wake envelope per shared record into the
  * destination mailbox. The envelope eventId doubles as the mailbox dedupe key — derived
- * from (shareId, night date) — and occurredAt comes from the night itself, so the
- * envelope is fully deterministic for a given (share, night) and re-offering an
- * already-delivered night is a byte-identical no-op rather than a dedupe conflict.
+ * from (shareId, recordKey) — and occurredAt comes from the record itself, so the
+ * envelope is fully deterministic for a given (share, record) and re-offering an
+ * already-delivered record is a byte-identical no-op rather than a dedupe conflict.
  * Payloads ride the standard encrypted mailbox path; nothing lands in plaintext.
  */
-export async function deliverHostedVaultShareNights(input: {
-  nights: readonly HostedVaultShareSleepNight[];
+export async function deliverHostedVaultShareRecords(input: {
   prisma?: PrismaClient;
+  records: readonly HostedVaultShareDeliveryRecord[];
   share: ActiveHostedVaultShare;
-}): Promise<DeliverHostedVaultShareNightsResult> {
+}): Promise<DeliverHostedVaultShareRecordsResult> {
   const prisma = input.prisma ?? getPrisma();
-  const appendedDates: string[] = [];
-  const duplicateDates: string[] = [];
+  const appendedRecordKeys: string[] = [];
+  const duplicateRecordKeys: string[] = [];
   let lastAppendedMailboxItemId: string | null = null;
 
-  for (const night of input.nights) {
+  for (const record of input.records) {
     const delivery: HostedVaultShareDeliveryPayload = {
       grantorMemberId: input.share.grantorMemberId,
-      night,
       projectionKind: input.share.projectionKind,
+      record,
       schema: HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
       shareId: input.share.id,
     };
     const envelope = buildHostedExecutionVaultShareDeliveryWake({
       delivery,
       eventId: buildHostedVaultShareDeliveryDedupeKey({
-        date: night.date,
+        recordKey: record.recordKey,
         shareId: input.share.id,
       }),
       memberId: input.share.destinationMemberId,
-      occurredAt: night.sleepEndAt,
+      occurredAt: record.occurredAt,
     });
     const result = await prisma.$transaction((tx) =>
       appendHostedMailboxEnvelopeTx({
@@ -109,16 +109,16 @@ export async function deliverHostedVaultShareNights(input: {
     );
 
     if (result.inserted) {
-      appendedDates.push(night.date);
+      appendedRecordKeys.push(record.recordKey);
       lastAppendedMailboxItemId = result.item.id;
     } else {
-      duplicateDates.push(night.date);
+      duplicateRecordKeys.push(record.recordKey);
     }
   }
 
   return {
-    appendedDates,
-    duplicateDates,
+    appendedRecordKeys,
+    duplicateRecordKeys,
     lastAppendedMailboxItemId,
   };
 }

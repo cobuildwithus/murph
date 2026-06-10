@@ -17,6 +17,12 @@ const NIGHT = {
   sleepStartAt: "2026-06-09T22:04:00.000Z",
 };
 
+const RECORD = {
+  data: NIGHT,
+  occurredAt: NIGHT.sleepEndAt,
+  recordKey: NIGHT.date,
+};
+
 describe("offerHostedVaultShareProjectionBestEffort", () => {
   it("is a no-op without a vault-share port", async () => {
     const result = await offerHostedVaultShareProjectionBestEffort({
@@ -27,41 +33,41 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
     expect(result.outcome).toBe("no-port");
   });
 
-  it("offers projectable nights and reports delivery", async () => {
+  it("offers projectable records and reports delivery", async () => {
     const deliver = vi.fn().mockResolvedValue({
       appendedCount: 1,
       duplicateCount: 0,
       status: "delivered",
     });
     const result = await offerHostedVaultShareProjectionBestEffort({
-      readNights: async () => [NIGHT],
+      readRecords: async () => [RECORD],
       vaultRoot: "/unused",
       vaultSharePort: { deliver },
     });
 
     expect(result.outcome).toBe("delivered");
     expect(deliver).toHaveBeenCalledWith({
-      nights: [NIGHT],
       projectionKind: "sleep-times.v0",
+      records: [RECORD],
     });
   });
 
   it("sends nothing when the vault has no fully timed nights", async () => {
     const deliver = vi.fn();
     const result = await offerHostedVaultShareProjectionBestEffort({
-      readNights: async () => [],
+      readRecords: async () => [],
       vaultRoot: "/unused",
       vaultSharePort: { deliver },
     });
 
-    expect(result.outcome).toBe("no-projectable-nights");
+    expect(result.outcome).toBe("no-projectable-records");
     expect(deliver).not.toHaveBeenCalled();
   });
 
   it("never throws when the port fails", async () => {
     const deliver = vi.fn().mockRejectedValue(new Error("network down"));
     const result = await offerHostedVaultShareProjectionBestEffort({
-      readNights: async () => [NIGHT],
+      readRecords: async () => [RECORD],
       vaultRoot: "/unused",
       vaultSharePort: { deliver },
     });
@@ -73,7 +79,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
 describe("selectProjectableSleepNights", () => {
   const nowMs = Date.parse("2026-06-10T00:00:00.000Z");
 
-  it("keeps recent fully-timed nights and drops stale or partial ones", () => {
+  it("maps recent fully-timed nights to records keyed by night date and drops stale or partial ones", () => {
     const staleDate = "2026-05-01";
     const summaries = [
       { date: NIGHT.date, sleepEndAt: NIGHT.sleepEndAt, sleepStartAt: NIGHT.sleepStartAt },
@@ -85,7 +91,13 @@ describe("selectProjectableSleepNights", () => {
       },
     ];
 
-    expect(selectProjectableSleepNights(summaries, nowMs)).toEqual([NIGHT]);
+    const selected = selectProjectableSleepNights(summaries, nowMs);
+
+    // recordKey is the night date and occurredAt is the night's sleepEndAt, so the dedupe
+    // key and the destination vault path stay byte-identical to the night itself.
+    expect(selected).toEqual([RECORD]);
+    expect(selected[0]?.recordKey).toBe(NIGHT.date);
+    expect(selected[0]?.occurredAt).toBe(NIGHT.sleepEndAt);
   });
 
   it("drops nights older than the recency cutoff exactly", () => {
@@ -101,7 +113,7 @@ describe("selectProjectableSleepNights", () => {
 
     const selected = selectProjectableSleepNights(summaries, nowMs);
 
-    expect(selected.map((night) => night.date)).toEqual([justInsideDate]);
+    expect(selected.map((record) => record.recordKey)).toEqual([justInsideDate]);
   });
 });
 
@@ -109,8 +121,8 @@ describe("importHostedVaultShareDeliveryWake", () => {
   const wake = {
     delivery: {
       grantorMemberId: "member_grantor",
-      night: NIGHT,
       projectionKind: "sleep-times.v0" as const,
+      record: RECORD,
       schema: "murph.vault-share.delivery.v1" as const,
       shareId: "share_1",
     },
@@ -120,7 +132,7 @@ describe("importHostedVaultShareDeliveryWake", () => {
     userId: "member_referee",
   };
 
-  it("lands the shared night as durable vault content, idempotently", async () => {
+  it("lands the shared record as durable vault content, idempotently", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
 
     const first = await importHostedVaultShareDeliveryWake({ vaultRoot, wake });
@@ -129,13 +141,14 @@ describe("importHostedVaultShareDeliveryWake", () => {
     expect(first).toEqual({ status: "imported" });
     expect(second).toEqual({ status: "imported" });
 
+    // The recordKey-based path is byte-identical to the previous night-date-based one.
     const stored = JSON.parse(
       await readFile(
         join(vaultRoot, "raw", "shared", "sleep-times.v0", "member_grantor", "2026-06-09.json"),
         "utf8",
       ),
     );
-    expect(stored.night).toEqual(NIGHT);
+    expect(stored.record).toEqual(RECORD);
     expect(stored.shareId).toBe("share_1");
     expect(stored.receivedEventId).toBe(wake.eventId);
   });

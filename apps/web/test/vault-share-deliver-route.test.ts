@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  deliverHostedVaultShareNights: vi.fn(),
+  deliverHostedVaultShareRecords: vi.fn(),
   findActiveHostedVaultShares: vi.fn(),
   hasHostedMemberActiveAccess: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
@@ -14,7 +14,7 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/vault-share-store", () => ({
-  deliverHostedVaultShareNights: mocks.deliverHostedVaultShareNights,
+  deliverHostedVaultShareRecords: mocks.deliverHostedVaultShareRecords,
   findActiveHostedVaultShares: mocks.findActiveHostedVaultShares,
 }));
 
@@ -39,24 +39,39 @@ type DeliverRouteModule =
 
 let deliverRoute: DeliverRouteModule;
 
-function recentNight(daysAgo: number): {
-  date: string;
-  sleepEndAt: string;
-  sleepStartAt: string;
+function recentRecord(daysAgo: number): {
+  data: { date: string; sleepEndAt: string; sleepStartAt: string };
+  occurredAt: string;
+  recordKey: string;
 } {
   const end = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
   const start = new Date(end.getTime() - 8 * 60 * 60 * 1000);
+  const date = end.toISOString().slice(0, 10);
 
   return {
-    date: end.toISOString().slice(0, 10),
-    sleepEndAt: end.toISOString(),
-    sleepStartAt: start.toISOString(),
+    data: {
+      date,
+      sleepEndAt: end.toISOString(),
+      sleepStartAt: start.toISOString(),
+    },
+    occurredAt: end.toISOString(),
+    recordKey: date,
   };
 }
 
+const STALE_RECORD = {
+  data: {
+    date: "1999-01-01",
+    sleepEndAt: "1999-01-01T06:31:00.000Z",
+    sleepStartAt: "1998-12-31T22:04:00.000Z",
+  },
+  occurredAt: "1999-01-01T06:31:00.000Z",
+  recordKey: "1999-01-01",
+};
+
 const VALID_BODY = {
-  nights: [recentNight(1)],
   projectionKind: "sleep-times.v0",
+  records: [recentRecord(1)],
 };
 
 const ACTIVE_SHARE = {
@@ -87,15 +102,15 @@ describe("vault-share deliver route", () => {
     mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE]);
     mocks.readHostedMemberCoreState.mockResolvedValue({ id: "member_referee" });
     mocks.hasHostedMemberActiveAccess.mockReturnValue(true);
-    mocks.deliverHostedVaultShareNights.mockResolvedValue({
-      appendedDates: ["2026-06-09"],
-      duplicateDates: [],
+    mocks.deliverHostedVaultShareRecords.mockResolvedValue({
+      appendedRecordKeys: ["2026-06-09"],
+      duplicateRecordKeys: [],
       lastAppendedMailboxItemId: "mailbox_item_1",
     });
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({ signaled: true });
   });
 
-  it("delivers offered nights to every active share and signals the destination", async () => {
+  it("delivers offered records to every active share and signals the destination", async () => {
     const response = await deliverRoute.POST(buildRequest(VALID_BODY));
 
     expect(response.status).toBe(200);
@@ -108,8 +123,8 @@ describe("vault-share deliver route", () => {
       grantorMemberId: "member_grantor",
       projectionKind: "sleep-times.v0",
     });
-    expect(mocks.deliverHostedVaultShareNights).toHaveBeenCalledWith({
-      nights: VALID_BODY.nights,
+    expect(mocks.deliverHostedVaultShareRecords).toHaveBeenCalledWith({
+      records: VALID_BODY.records,
       share: ACTIVE_SHARE,
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
@@ -129,7 +144,7 @@ describe("vault-share deliver route", () => {
       duplicateCount: 0,
       status: "no-active-share",
     });
-    expect(mocks.deliverHostedVaultShareNights).not.toHaveBeenCalled();
+    expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
@@ -144,20 +159,14 @@ describe("vault-share deliver route", () => {
       duplicateCount: 0,
       status: "no-active-share",
     });
-    expect(mocks.deliverHostedVaultShareNights).not.toHaveBeenCalled();
+    expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
   });
 
   it("silently drops an all-stale offer instead of erroring", async () => {
     const response = await deliverRoute.POST(
       buildRequest({
-        nights: [
-          {
-            date: "1999-01-01",
-            sleepEndAt: "1999-01-01T06:31:00.000Z",
-            sleepStartAt: "1998-12-31T22:04:00.000Z",
-          },
-        ],
         projectionKind: "sleep-times.v0",
+        records: [STALE_RECORD],
       }),
     );
 
@@ -167,23 +176,16 @@ describe("vault-share deliver route", () => {
       duplicateCount: 0,
       status: "delivered",
     });
-    expect(mocks.deliverHostedVaultShareNights).not.toHaveBeenCalled();
+    expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
-  it("delivers only the in-window nights when an offer mixes stale and fresh nights", async () => {
-    const freshNight = recentNight(1);
+  it("delivers only the in-window records when an offer mixes stale and fresh records", async () => {
+    const freshRecord = recentRecord(1);
     const response = await deliverRoute.POST(
       buildRequest({
-        nights: [
-          {
-            date: "1999-01-01",
-            sleepEndAt: "1999-01-01T06:31:00.000Z",
-            sleepStartAt: "1998-12-31T22:04:00.000Z",
-          },
-          freshNight,
-        ],
         projectionKind: "sleep-times.v0",
+        records: [STALE_RECORD, freshRecord],
       }),
     );
 
@@ -193,9 +195,9 @@ describe("vault-share deliver route", () => {
       duplicateCount: 0,
       status: "delivered",
     });
-    expect(mocks.deliverHostedVaultShareNights).toHaveBeenCalledTimes(1);
-    expect(mocks.deliverHostedVaultShareNights).toHaveBeenCalledWith({
-      nights: [freshNight],
+    expect(mocks.deliverHostedVaultShareRecords).toHaveBeenCalledTimes(1);
+    expect(mocks.deliverHostedVaultShareRecords).toHaveBeenCalledWith({
+      records: [freshRecord],
       share: ACTIVE_SHARE,
     });
   });
@@ -203,14 +205,18 @@ describe("vault-share deliver route", () => {
   it("rejects payloads that do not match the closed schema", async () => {
     const response = await deliverRoute.POST(
       buildRequest({
-        nights: [{ date: "whenever", sleepEndAt: "x", sleepStartAt: "y" }],
         projectionKind: "sleep-times.v0",
+        records: [{
+          data: { date: "whenever", sleepEndAt: "x", sleepStartAt: "y" },
+          occurredAt: "z",
+          recordKey: "whenever",
+        }],
       }),
     );
 
     expect(response.status).toBeGreaterThanOrEqual(400);
     expect(mocks.findActiveHostedVaultShares).not.toHaveBeenCalled();
-    expect(mocks.deliverHostedVaultShareNights).not.toHaveBeenCalled();
+    expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
   });
 
   it("does not let a grantor deliver as someone else: identity comes from callback auth only", async () => {
