@@ -38,15 +38,8 @@ import {
   stopWarmCodexAppServer,
 } from "@murphai/assistant-engine/codex-lifecycle";
 import {
-  readHostedAssistantCliSurfaceBootstrapContext,
-} from "@murphai/assistant-runtime/hosted-assistant-bootstrap";
-import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "./hosted-runtime-architecture.ts";
-import {
-  HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
-  countAssistantCliSurfaceHotPathProofs,
-} from "./hosted-runner-smoke-contract.ts";
 import {
   runHostedWorkspaceInvocation as runHostedWorkspaceInvocationDirect,
 } from "./hosted-workspace-invocation.ts";
@@ -530,6 +523,7 @@ export async function startHostedContainerEntrypoint(input: {
       const runnerJobAcceptedAt = new Date().toISOString();
       const coldNodeStartupMs = pendingColdNodeStartupMs;
       pendingColdNodeStartupMs = null;
+      const dispatchMilestones = readHostedContainerDispatchMilestones(request);
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -576,6 +570,7 @@ export async function startHostedContainerEntrypoint(input: {
           }
         },
         ...(coldNodeStartupMs === null ? {} : { nodeStartupMs: coldNodeStartupMs }),
+        ...(dispatchMilestones ? { dispatch: dispatchMilestones } : {}),
         runnerJobAcceptedAt,
         shutdownSignal: containerShutdownController.signal,
         signal: invocationAbort.signal,
@@ -873,6 +868,35 @@ function writeJsonResponse(
   response.statusCode = statusCode;
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.end(JSON.stringify(payload));
+}
+
+// Best-effort dispatch telemetry stamped by the Durable Object onto the runner
+// POST headers. Invalid or absent values are dropped rather than failing the
+// job; these stamps are diagnostics, not authority.
+function readHostedContainerDispatchMilestones(
+  request: IncomingMessage,
+): { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null {
+  const invokeReceivedAtEpochMs = readDispatchEpochMs(
+    request.headers["x-dispatch-invoke-received-at-ms"],
+  );
+  const containerEnsureReadyStartedAtEpochMs = readDispatchEpochMs(
+    request.headers["x-dispatch-container-ensure-ready-started-at-ms"],
+  );
+  if (invokeReceivedAtEpochMs === null && containerEnsureReadyStartedAtEpochMs === null) {
+    return null;
+  }
+  return {
+    ...(invokeReceivedAtEpochMs === null ? {} : { invokeReceivedAtEpochMs }),
+    ...(containerEnsureReadyStartedAtEpochMs === null ? {} : { containerEnsureReadyStartedAtEpochMs }),
+  };
+}
+
+function readDispatchEpochMs(raw: string | string[] | undefined): number | null {
+  if (typeof raw !== "string" || !/^\d+$/u.test(raw)) {
+    return null;
+  }
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : null;
 }
 
 function discardUnreadRequestBody(request: IncomingMessage): void {
@@ -1449,6 +1473,18 @@ async function runHostedContainerCliSurfaceContractSmoke(smokeVaultRoot: string)
   contractBytes: number;
   hotPathProofCount: number;
 }> {
+  // Deploy-smoke-only modules: loaded lazily so the cold-boot job path never
+  // pays their module-evaluation cost.
+  const [
+    { readHostedAssistantCliSurfaceBootstrapContext },
+    {
+      HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
+      countAssistantCliSurfaceHotPathProofs,
+    },
+  ] = await Promise.all([
+    import("@murphai/assistant-runtime/hosted-assistant-bootstrap"),
+    import("./hosted-runner-smoke-contract.ts"),
+  ]);
   const contract = await readHostedAssistantCliSurfaceBootstrapContext({
     sessionId: "hosted-container-deploy-smoke",
     vault: smokeVaultRoot,
@@ -2151,6 +2187,7 @@ async function runHostedWorkspaceInvocation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
+    dispatch?: { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null;
     nodeStartupMs?: number | null;
     onRuntimeWakeReady?: (sendWake: () => boolean) => void;
     runnerJobAcceptedAt?: string | null;
@@ -2159,6 +2196,7 @@ async function runHostedWorkspaceInvocation(
   },
 ): Promise<Awaited<ReturnType<typeof runHostedWorkspaceInvocationDirect>>> {
   return await runtime.runWorkspaceInvocation(input, {
+    dispatch: options?.dispatch ?? null,
     nodeStartupMs: options?.nodeStartupMs ?? null,
     onRuntimeWakeReady: options?.onRuntimeWakeReady,
     runnerJobAcceptedAt: options?.runnerJobAcceptedAt ?? null,
@@ -2172,6 +2210,7 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
+    dispatch?: { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null;
     nodeStartupMs?: number | null;
     onCleanupStatus?: (status: Exclude<HostedContainerCleanupStatus, "not_run">) => void;
     onRuntimeWakeReady?: (sendWake: () => boolean) => void;
