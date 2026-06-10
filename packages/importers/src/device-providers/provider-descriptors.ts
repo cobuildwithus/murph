@@ -226,42 +226,6 @@ function normalizeDeviceProviderMetricKey(metric: string | null | undefined): st
   return normalized.length > 0 ? normalized : null;
 }
 
-const GARMIN_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
-  activeCalories: 100,
-  activityScore: 90,
-  averageHeartRate: 80,
-  awakeMinutes: 80,
-  bmi: 100,
-  bodyBattery: 100,
-  bodyFatPercentage: 100,
-  dayStrain: 90,
-  deepMinutes: 80,
-  distanceKm: 100,
-  hrv: 80,
-  lightMinutes: 80,
-  lowestHeartRate: 90,
-  readinessScore: 80,
-  recoveryScore: 80,
-  remMinutes: 80,
-  respiratoryRate: 80,
-  restingHeartRate: 90,
-  sessionCount: 100,
-  sessionMinutes: 90,
-  sleepConsistency: 80,
-  sleepEfficiency: 80,
-  sleepPerformance: 80,
-  sleepScore: 90,
-  spo2: 80,
-  steps: 100,
-  stressLevel: 100,
-  temperature: 90,
-  temperatureDeviation: 80,
-  timeInBedMinutes: 90,
-  totalCalories: 100,
-  totalSleepMinutes: 80,
-  weightKg: 100,
-} as const satisfies Record<string, number>);
-
 const OURA_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
   activeCalories: 90,
   activityScore: 100,
@@ -370,38 +334,6 @@ const JUNCTION_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
   totalSleepMinutes: 55,
   weightKg: 55,
 } as const satisfies Record<string, number>);
-
-export const GARMIN_DEVICE_PROVIDER_DESCRIPTOR = {
-  provider: "garmin",
-  displayName: "Garmin",
-  transportModes: ["async_export"],
-  connection: {
-    kind: "none",
-  },
-  normalization: {
-    metricFamilies: [
-      "activity",
-      "sleep",
-      "cardio",
-      "respiration",
-      "temperature",
-      "women_health",
-    ],
-    snapshotParser: "schema",
-  },
-  sourcePriorityHints: {
-    defaultPriority: 70,
-    metricFamilies: {
-      activity: 100,
-      cardio: 80,
-      sleep: 65,
-      respiration: 65,
-      temperature: 60,
-      women_health: 100,
-    },
-    metrics: GARMIN_DEVICE_PROVIDER_METRIC_PRIORITIES,
-  },
-} as const satisfies DeviceProviderDescriptor;
 
 export const OURA_DEVICE_PROVIDER_DESCRIPTOR = {
   provider: "oura",
@@ -609,7 +541,6 @@ export const JUNCTION_DEVICE_PROVIDER_DESCRIPTOR = {
 export const defaultDeviceProviderDescriptors = Object.freeze([
   WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
-  GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
   STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
 ] as const);

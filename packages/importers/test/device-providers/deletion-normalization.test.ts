@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeGarminSnapshot } from "../../src/device-providers/garmin.ts";
 import { buildSyntheticDeletionResourceId } from "../../src/device-providers/shared-normalization.ts";
 import { normalizeOuraSnapshot } from "../../src/device-providers/oura.ts";
 import { normalizeWhoopSnapshot } from "../../src/device-providers/whoop.ts";
@@ -494,33 +493,6 @@ describe("normalizeOuraSnapshot", () => {
       resourceId: "sleep_123",
       resourceType: "sleep",
     });
-  });
-});
-
-describe("normalizeGarminSnapshot", () => {
-  it("generates deterministic synthetic deletion ids when stable ids are missing", () => {
-    const normalized = normalizeGarminSnapshot({
-      accountId: "acct_2",
-      importedAt: "2026-04-10T00:00:00.000Z",
-      deletions: [
-        {
-          resourceType: "sleep",
-          occurredAt: "2026-04-09T09:30:00.000Z",
-          eventType: "sleep.deleted",
-          payload: {
-            profile: "sensitive",
-          },
-        },
-      ],
-    });
-
-    expectSyntheticDeletionArtifact(
-      normalized,
-      "garmin",
-      "sleep",
-      "2026-04-09T09:30:00.000Z",
-      "sleep.deleted",
-    );
   });
 });
 
