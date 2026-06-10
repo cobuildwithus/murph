@@ -9,7 +9,7 @@ This package consumes attachment-level parse jobs from the inbox runtime, select
 - text-like documents: built-in Node text reader
 - born-digital PDFs: Poppler `pdfinfo` + `pdftotext`
 - image QR/barcode scanning: `zxing-wasm`
-- audio and extracted video audio: `whisper.cpp`
+- audio and extracted video audio: `whisper.cpp` when installed locally, or the `remote-transcription` HTTP provider when a `transcription.endpoint` is configured in the parser toolchain (hosted execution points it at the Worker-mediated Workers AI transcribe host)
 - media normalization: `ffmpeg`
 
 ## Design rules

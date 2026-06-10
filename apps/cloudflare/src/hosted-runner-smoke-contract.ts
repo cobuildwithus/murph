@@ -5,12 +5,13 @@ export const HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT = 2;
 
 export interface HostedRunnerSmokeInput {
   bundle: string;
-  expectedTranscriptSnippet: string | null;
   expectedVaultId: string;
   wavRelativePath: string;
 }
 
 export interface HostedRunnerSmokeResult {
+  audioNormalizedMp3Bytes: number;
+  audioPreparedWavBytes: number;
   childCwdIsIsolated: boolean;
   codexAppServerHelpBytes: number;
   codexCommandDiscovered: boolean;
@@ -30,9 +31,6 @@ export interface HostedRunnerSmokeResult {
   healthCommonsRuntimeProtocolHitKeys: readonly string[];
   healthCommonsRuntimeSearchHitKeys: readonly string[];
   murphCommandDiscovered: boolean;
-  normalizedTranscriptMatchesExpectedSnippet: boolean;
-  normalizedTranscriptProviderId: string;
-  normalizedTranscriptSha256: string;
   operatorHomeRebound: boolean;
   pdfParserProviderId: string;
   pdfTextSha256: string;
@@ -44,12 +42,11 @@ export interface HostedRunnerSmokeResult {
   vaultCliCommandDiscovered: boolean;
   vaultRootRebound: boolean;
   vaultShowBytes: number;
-  wavTranscriptMatchesExpectedSnippet: boolean;
-  wavTranscriptProviderId: string;
-  wavTranscriptSha256: string;
 }
 
 const HOSTED_RUNNER_SMOKE_RESULT_KEYS = new Set([
+  "audioNormalizedMp3Bytes",
+  "audioPreparedWavBytes",
   "childCwdIsIsolated",
   "codexAppServerHelpBytes",
   "codexCommandDiscovered",
@@ -69,9 +66,6 @@ const HOSTED_RUNNER_SMOKE_RESULT_KEYS = new Set([
   "healthCommonsRuntimeProtocolHitKeys",
   "healthCommonsRuntimeSearchHitKeys",
   "murphCommandDiscovered",
-  "normalizedTranscriptMatchesExpectedSnippet",
-  "normalizedTranscriptProviderId",
-  "normalizedTranscriptSha256",
   "operatorHomeRebound",
   "pdfParserProviderId",
   "pdfTextSha256",
@@ -83,9 +77,6 @@ const HOSTED_RUNNER_SMOKE_RESULT_KEYS = new Set([
   "vaultCliCommandDiscovered",
   "vaultRootRebound",
   "vaultShowBytes",
-  "wavTranscriptMatchesExpectedSnippet",
-  "wavTranscriptProviderId",
-  "wavTranscriptSha256",
 ]);
 
 export function parseHostedRunnerSmokeInput(value: unknown): HostedRunnerSmokeInput {
@@ -93,10 +84,6 @@ export function parseHostedRunnerSmokeInput(value: unknown): HostedRunnerSmokeIn
 
   return {
     bundle: readNonEmptyString(record.bundle, "Hosted runner smoke input.bundle"),
-    expectedTranscriptSnippet: readNullableString(
-      record.expectedTranscriptSnippet,
-      "Hosted runner smoke input.expectedTranscriptSnippet",
-    ),
     expectedVaultId: readNonEmptyString(
       record.expectedVaultId,
       "Hosted runner smoke input.expectedVaultId",
@@ -119,6 +106,14 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
   }
 
   return {
+    audioNormalizedMp3Bytes: readPositiveFiniteNumber(
+      record.audioNormalizedMp3Bytes,
+      "Hosted runner smoke result.audioNormalizedMp3Bytes",
+    ),
+    audioPreparedWavBytes: readPositiveFiniteNumber(
+      record.audioPreparedWavBytes,
+      "Hosted runner smoke result.audioPreparedWavBytes",
+    ),
     childCwdIsIsolated: readTrue(
       record.childCwdIsIsolated,
       "Hosted runner smoke result.childCwdIsIsolated",
@@ -198,18 +193,6 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.murphCommandDiscovered,
       "Hosted runner smoke result.murphCommandDiscovered",
     ),
-    normalizedTranscriptMatchesExpectedSnippet: readTrue(
-      record.normalizedTranscriptMatchesExpectedSnippet,
-      "Hosted runner smoke result.normalizedTranscriptMatchesExpectedSnippet",
-    ),
-    normalizedTranscriptProviderId: readNonEmptyString(
-      record.normalizedTranscriptProviderId,
-      "Hosted runner smoke result.normalizedTranscriptProviderId",
-    ),
-    normalizedTranscriptSha256: readSha256HexString(
-      record.normalizedTranscriptSha256,
-      "Hosted runner smoke result.normalizedTranscriptSha256",
-    ),
     operatorHomeRebound: readTrue(
       record.operatorHomeRebound,
       "Hosted runner smoke result.operatorHomeRebound",
@@ -250,18 +233,6 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
     vaultShowBytes: readFiniteNumber(
       record.vaultShowBytes,
       "Hosted runner smoke result.vaultShowBytes",
-    ),
-    wavTranscriptMatchesExpectedSnippet: readTrue(
-      record.wavTranscriptMatchesExpectedSnippet,
-      "Hosted runner smoke result.wavTranscriptMatchesExpectedSnippet",
-    ),
-    wavTranscriptProviderId: readNonEmptyString(
-      record.wavTranscriptProviderId,
-      "Hosted runner smoke result.wavTranscriptProviderId",
-    ),
-    wavTranscriptSha256: readSha256HexString(
-      record.wavTranscriptSha256,
-      "Hosted runner smoke result.wavTranscriptSha256",
     ),
   };
 }
@@ -429,10 +400,3 @@ function readSha256HexString(value: unknown, label: string): string {
   return normalized;
 }
 
-function readNullableString(value: unknown, label: string): string | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  return readNonEmptyString(value, label);
-}

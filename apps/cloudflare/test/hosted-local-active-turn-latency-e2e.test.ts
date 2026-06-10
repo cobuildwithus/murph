@@ -34,6 +34,9 @@ import {
 } from "@murphai/vault-usecases/vault-services";
 
 import {
+  buildAssistantProviderShellCommandCall,
+} from "./helpers/hosted-local-e2e-support.js";
+import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
@@ -175,7 +178,15 @@ async function runActiveTurnLatencyProbe(input: {
 
     const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
     const baselineProviderRequestCount = requireScenario().assistantProviderRequests.length;
-    requireScenario().queueAssistantResponses([replyText, "Late reply."]);
+    // Keep the first turn busy with a real sandboxed sleep so the late input
+    // below arrives while the Codex turn is still active.
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderShellCommandCall(
+        `sleep ${Math.ceil(codexTurnDelayMs / 1000)}`,
+      ),
+      replyText,
+      "Late reply.",
+    ]);
 
     const startedAt = performance.now();
     const firstResponse = await postSignedLinqWebhook(
@@ -360,7 +371,6 @@ async function startProbeScenario(input: {
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-      MURPH_E2E_CODEX_APP_SERVER_STUB_TURN_DELAY_MS: String(codexTurnDelayMs),
     },
     assistantProviderStubModelId: productionLikeAssistantModel,
     localDatabaseUrl: input.localDatabaseUrl,

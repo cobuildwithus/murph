@@ -55,12 +55,6 @@ const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
 const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
-const HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV =
-  "MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL";
-const HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV =
-  "MURPH_E2E_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS";
-const HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV =
-  "MURPH_E2E_CODEX_APP_SERVER_STUB_TURN_DELAY_MS";
 
 afterEach(async () => {
   await Promise.all(
@@ -328,27 +322,6 @@ test("hosted Codex runtime config accepts a Linux Docker bridge model provider o
   const config = await readFile(result.codexConfigPath, "utf8");
   assert.match(config, /model_provider = "openai-local-test"/u);
   assert.match(config, /base_url = "http:\/\/172\.17\.0\.1:4567\/v1"/u);
-});
-
-test("hosted Codex runtime config does not install the legacy E2E app-server stub", async () => {
-  const operatorHomeRoot = await createTemporaryDirectory();
-
-  const result = await prepareHostedCodexRuntimeEnvironment({
-    operatorHomeRoot,
-    runtimeEnv: {
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
-        "http://127.0.0.1:4111/v1",
-      NODE_ENV: "test",
-      OPENAI_API_KEY: "secret-openai-key",
-    },
-  });
-
-  await assert.rejects(
-    () => stat(path.join(result.codexHome, "bin", "codex")),
-    (error) => isRecord(error) && error.code === "ENOENT",
-  );
-  assert.equal(result.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV], undefined);
 });
 
 test("hosted Codex runtime config rejects command override outside test mode", async () => {
@@ -719,27 +692,6 @@ test("hosted Codex runtime config rejects https model provider base URL override
   );
 });
 
-test("hosted Codex runtime config requires model credentials even when legacy E2E stub env is present", async () => {
-  const operatorHomeRoot = await createTemporaryDirectory();
-
-  await assert.rejects(
-    () =>
-      prepareHostedCodexRuntimeEnvironment({
-        operatorHomeRoot,
-        runtimeEnv: {
-          HOSTED_ASSISTANT_PROVIDER: "openai",
-          [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
-            "http://127.0.0.1:4123/v1",
-          NODE_ENV: "test",
-        },
-      }),
-    (error) =>
-      error instanceof HostedAssistantConfigurationError
-      && error.code === "HOSTED_ASSISTANT_CONFIG_REQUIRED"
-      && error.message.includes("OPENAI_API_KEY"),
-  );
-});
-
 test("hosted Codex runtime config rejects removed local dev app-server proxy env", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
 
@@ -873,61 +825,6 @@ test("hosted runtime launch env policy forwards the neutral hosted Codex command
       OPENAI_API_KEY: "openai-key",
     })[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV],
     "/tmp/hosted-local-codex",
-  );
-});
-
-test("hosted runtime launch env policy does not forward E2E Codex app-server stub controls", () => {
-  assert.equal(
-    (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
-      HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
-    ),
-    false,
-  );
-  assert.equal(
-    (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
-      HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV,
-    ),
-    false,
-  );
-  assert.equal(
-    (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
-      HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV,
-    ),
-    false,
-  );
-  assert.deepEqual(
-    Object.fromEntries(
-      Object.entries(buildHostedRuntimeForwardedEnv({
-        HOSTED_ASSISTANT_PROVIDER: "openai",
-        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
-          "http://127.0.0.1:4111/v1",
-        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV]: "6000",
-        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV]:
-          "murph.send_progress_update",
-        NODE_ENV: "test",
-        OPENAI_API_KEY: "openai-key",
-      })).filter(([key]) => key.startsWith("MURPH_E2E_CODEX_APP_SERVER_STUB_")),
-    ),
-    {},
-  );
-  assert.deepEqual(
-    buildHostedRuntimeForwardedEnv({
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
-        "http://127.0.0.1:4111/v1",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV]: "6000",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV]:
-        "murph.send_progress_update",
-      NODE_ENV: "test",
-      OPENAI_API_KEY: "openai-key",
-    }),
-    {
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EMAIL_INGRESS_READY: "false",
-      HOSTED_EMAIL_SEND_READY: "false",
-      NODE_ENV: "test",
-      OPENAI_API_KEY: "openai-key",
-    },
   );
 });
 

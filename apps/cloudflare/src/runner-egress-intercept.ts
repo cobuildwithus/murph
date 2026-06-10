@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+
 import {
   buildHostedExecutionSafeErrorDetails,
   deriveHostedExecutionErrorCode,
@@ -13,6 +15,8 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
+  CLOUDFLARE_HOSTED_TRANSCRIBE_HOST,
+  CLOUDFLARE_HOSTED_TRANSCRIBE_PATH,
 } from "./internal-hosts.ts";
 import {
   handleRunnerOutboundRequest,
@@ -68,6 +72,13 @@ const HOSTED_DATA_API_SUPPLEMENTS_PATH = "/api/supplements";
 const HOSTED_DATA_API_RUNTIME_HOST =
   new URL(HOSTED_DATA_API_RUNTIME_BASE_URL).hostname;
 const HOSTED_DATA_API_MAX_POST_BODY_BYTES = 8 * 1024;
+// 16 kHz mono PCM WAV is ~1.9 MiB/min; this covers ~8 minutes of prepared
+// audio while keeping body + base64 + inference payload well inside the
+// Worker isolate memory limit. Keep in sync with the parsers
+// remote-transcription provider input cap.
+const HOSTED_TRANSCRIBE_MAX_BODY_BYTES = 16 * 1024 * 1024;
+const HOSTED_TRANSCRIBE_WORKERS_AI_MODEL = "@cf/openai/whisper-large-v3-turbo";
+const HOSTED_TRANSCRIBE_MAX_SEGMENTS = 10_000;
 
 export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   artifactStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore,
@@ -79,6 +90,7 @@ export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   openAi: "api.openai.com",
   runnerControl: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl,
   telegram: "api.telegram.org",
+  transcribe: CLOUDFLARE_HOSTED_TRANSCRIBE_HOST,
   webControlPlane: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
   workspaceSnapshotStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore,
   whatsApp: "graph.facebook.com",
@@ -318,6 +330,7 @@ export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutbound
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi]: handleHostedRunnerOpenAiOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.runnerControl]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.telegram]: handleHostedRunnerTelegramOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.transcribe]: handleHostedRunnerOpenInternetOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.workspaceSnapshotStore]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.whatsApp]: handleHostedRunnerWhatsAppOutbound,
@@ -340,6 +353,7 @@ export async function handleHostedRunnerOpenInternetOutbound(
 
   const handled =
     await maybeHandleHostedDataApiRequest({ ctx, env, request, url, userId })
+    ?? await maybeHandleHostedTranscribeRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleOpenAiRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleMapboxRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleLinqRequest({ ctx, env, request, url, userId })
@@ -615,6 +629,160 @@ async function maybeHandleHostedDataApiRequest(input: {
     ),
     url: input.url,
   });
+}
+
+async function maybeHandleHostedTranscribeRequest(input: {
+  ctx?: HostedRunnerOutboundContext;
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  url: URL;
+  userId: string | null;
+}): Promise<Response | null> {
+  if (normalizeProviderHostname(input.url.hostname) !== CLOUDFLARE_HOSTED_TRANSCRIBE_HOST) {
+    return null;
+  }
+  if (input.url.pathname !== CLOUDFLARE_HOSTED_TRANSCRIBE_PATH) {
+    return disallowedProviderEgress();
+  }
+  if (input.request.method.toUpperCase() !== "POST") {
+    return disallowedProviderEgress();
+  }
+
+  const startedAt = Date.now();
+  const authorization = await authorizeHostedProviderEgress({
+    ...input,
+    allowActiveUserFenceWithoutToken: true,
+    providerKind: "workers_ai_transcribe",
+  });
+  if (!authorization.authorized) {
+    return unauthorizedProviderEgress({
+      authorization,
+      providerKind: "workers_ai_transcribe",
+      request: input.request,
+      startedAt,
+      url: input.url,
+    });
+  }
+
+  const ai = input.env.AI;
+  if (!ai || typeof ai.run !== "function") {
+    return new Response("Hosted transcription Workers AI binding is not configured.", {
+      status: 500,
+    });
+  }
+
+  const audio = await readBoundedRequestBody(input.request, HOSTED_TRANSCRIBE_MAX_BODY_BYTES);
+  if (audio === null) {
+    return new Response("Payload Too Large", { status: 413 });
+  }
+  if (audio.byteLength === 0) {
+    return new Response("Hosted transcription request body must include audio bytes.", {
+      status: 400,
+    });
+  }
+
+  const upstreamStartedAt = Date.now();
+  try {
+    const output = await ai.run(HOSTED_TRANSCRIBE_WORKERS_AI_MODEL, {
+      audio: Buffer.from(audio).toString("base64"),
+    });
+    const response = Response.json(readHostedTranscribeResponsePayload(output));
+    emitHostedProviderEgressDiagnostic({
+      authorization,
+      providerKind: "workers_ai_transcribe",
+      request: input.request,
+      response,
+      startedAt,
+      upstreamDurationMs: Date.now() - upstreamStartedAt,
+      url: input.url,
+    });
+    return response;
+  } catch (error) {
+    emitHostedProviderEgressDiagnostic({
+      authorization,
+      error,
+      providerKind: "workers_ai_transcribe",
+      request: input.request,
+      startedAt,
+      upstreamDurationMs: Date.now() - upstreamStartedAt,
+      url: input.url,
+    });
+    return new Response("Hosted transcription failed.", { status: 502 });
+  }
+}
+
+interface HostedTranscribeResponsePayload {
+  durationMs: number | null;
+  language: string | null;
+  segments: Array<{
+    endMs: number | null;
+    startMs: number | null;
+    text: string;
+  }>;
+  text: string;
+}
+
+function readHostedTranscribeResponsePayload(
+  output: unknown,
+): HostedTranscribeResponsePayload {
+  if (!output || typeof output !== "object" || Array.isArray(output)) {
+    throw new TypeError("Workers AI transcription output must be an object.");
+  }
+
+  const record = output as Record<string, unknown>;
+  const text = typeof record.text === "string" ? record.text.trim() : "";
+  if (!text) {
+    throw new TypeError("Workers AI transcription output did not include transcript text.");
+  }
+
+  const transcriptionInfo =
+    record.transcription_info && typeof record.transcription_info === "object"
+      && !Array.isArray(record.transcription_info)
+      ? record.transcription_info as Record<string, unknown>
+      : null;
+  const durationSeconds = readHostedTranscribeNonNegativeNumber(
+    transcriptionInfo?.duration,
+  );
+  const language = typeof transcriptionInfo?.language === "string"
+      && transcriptionInfo.language.trim().length > 0
+    ? transcriptionInfo.language.trim()
+    : null;
+  const segments = Array.isArray(record.segments)
+    ? record.segments
+      .slice(0, HOSTED_TRANSCRIBE_MAX_SEGMENTS)
+      .flatMap((segment) => {
+        if (!segment || typeof segment !== "object" || Array.isArray(segment)) {
+          return [];
+        }
+        const segmentRecord = segment as Record<string, unknown>;
+        const segmentText = typeof segmentRecord.text === "string"
+          ? segmentRecord.text.trim()
+          : "";
+        if (!segmentText) {
+          return [];
+        }
+        const startSeconds = readHostedTranscribeNonNegativeNumber(segmentRecord.start);
+        const endSeconds = readHostedTranscribeNonNegativeNumber(segmentRecord.end);
+        return [{
+          endMs: endSeconds === null ? null : Math.round(endSeconds * 1_000),
+          startMs: startSeconds === null ? null : Math.round(startSeconds * 1_000),
+          text: segmentText,
+        }];
+      })
+    : [];
+
+  return {
+    durationMs: durationSeconds === null ? null : Math.round(durationSeconds * 1_000),
+    language,
+    segments,
+    text,
+  };
+}
+
+function readHostedTranscribeNonNegativeNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
 }
 
 async function maybeHandleOpenAiRequest(input: {

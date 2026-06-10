@@ -9,6 +9,10 @@ export interface WorkerSendEmailBindingLike {
   send(message: unknown): Promise<unknown>;
 }
 
+export interface WorkerAiBindingLike {
+  run(model: string, input: Record<string, unknown>): Promise<unknown>;
+}
+
 export type WorkerActiveRuntimeWriteFenceValidationRejectReason =
   | "missing_runner_state"
   | "missing_write_fence"
@@ -114,6 +118,7 @@ export interface WorkerUserRunnerNamespaceLike<
 export interface WorkerEnvironmentContract<
   TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
 > extends Readonly<Record<string, unknown>> {
+  AI?: WorkerAiBindingLike;
   BUNDLES: R2BucketLike;
   CF_VERSION_METADATA?: {
     id?: string;

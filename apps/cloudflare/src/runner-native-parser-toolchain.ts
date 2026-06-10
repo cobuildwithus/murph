@@ -3,8 +3,8 @@ import type {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { posix as pathPosix } from "node:path";
 
-export const HOSTED_RUNNER_WHISPER_MODEL_PATH =
-  "/home/runner/.murph/models/whisper/model.bin";
+import { CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT } from "./internal-hosts.ts";
+
 export const HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV =
   "HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN";
 const HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ROOT = "/app/test-parser-toolchain";
@@ -14,7 +14,6 @@ const HOSTED_LOCAL_E2E_WHISPER_MODEL_PATH = `${HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN
 const HOSTED_RUNNER_DEFAULT_FFMPEG_COMMAND = "/usr/bin/ffmpeg";
 const HOSTED_RUNNER_DEFAULT_PDFINFO_COMMAND = "/usr/bin/pdfinfo";
 const HOSTED_RUNNER_DEFAULT_PDFTOTEXT_COMMAND = "/usr/bin/pdftotext";
-const HOSTED_RUNNER_DEFAULT_WHISPER_COMMAND = "/usr/local/bin/whisper-cli";
 
 export function createHostedRunnerNativeParserToolchain(
   source: Readonly<Record<string, string | undefined>> = process.env,
@@ -36,9 +35,8 @@ export function createHostedRunnerNativeParserToolchain(
       pdftotext: {
         command: HOSTED_RUNNER_DEFAULT_PDFTOTEXT_COMMAND,
       },
-      whisper: {
-        command: HOSTED_RUNNER_DEFAULT_WHISPER_COMMAND,
-        modelPath: HOSTED_RUNNER_WHISPER_MODEL_PATH,
+      transcription: {
+        endpoint: CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT,
       },
     },
   };

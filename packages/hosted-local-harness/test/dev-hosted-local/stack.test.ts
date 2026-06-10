@@ -1330,61 +1330,6 @@ describe("hosted local dev stack", () => {
     );
   });
 
-  it("preserves test NODE_ENV for the local E2E Codex app-server stub", async () => {
-    spawnChildProcess
-      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 105 }))
-      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 106 }));
-
-    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
-    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
-
-    const stack = await startHostedLocalDevStack({
-      env: {
-        ...process.env,
-        MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
-        MURPH_E2E_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS:
-          "murph.send_progress_update",
-        MURPH_E2E_CODEX_APP_SERVER_STUB_TURN_DELAY_MS: "37",
-        NODE_ENV: "test",
-      },
-    });
-    await stack.ready;
-    await stack.stop();
-
-    const resolveInput = vi.mocked(environmentModule.resolveCloudflareLocalEnv).mock.calls.at(-1)?.[0];
-    expect(resolveInput?.overrides).toMatchObject({
-      MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
-      MURPH_E2E_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS:
-        "murph.send_progress_update",
-      MURPH_E2E_CODEX_APP_SERVER_STUB_TURN_DELAY_MS: "37",
-      NODE_ENV: "test",
-    });
-
-    const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
-    const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
-    expect(cloudflareEnv.NODE_ENV).toBe("test");
-    expect(cloudflareEnv.MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL).toBeUndefined();
-    expect(cloudflareEnv.MURPH_E2E_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS)
-      .toBeUndefined();
-    expect(cloudflareEnv.MURPH_E2E_CODEX_APP_SERVER_STUB_TURN_DELAY_MS)
-      .toBeUndefined();
-    expect(cloudflareEnv.MURPH_HOSTED_CODEX_APP_SERVER_COMMAND).toBe(
-      "/app/.murph-hosted-local/codex-app-server-stub/codex",
-    );
-    expect(vi.mocked(writeFile)).toHaveBeenCalledWith(
-      expect.stringContaining(".murph-hosted-local/codex-app-server-stub/codex"),
-      expect.stringContaining("hosted-e2e-codex-shim"),
-      expect.objectContaining({
-        mode: 0o700,
-      }),
-    );
-    const stubWrite = vi.mocked(writeFile).mock.calls.find(([target]) =>
-      String(target).includes(".murph-hosted-local/codex-app-server-stub/codex")
-    );
-    expect(String(stubWrite?.[1])).toContain("murph.send_progress_update");
-    expect(String(stubWrite?.[1])).toContain("const turnDelayMs = 37;");
-  });
-
   it("preserves test NODE_ENV for the local E2E Codex model provider base URL override", async () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 107 }))
