@@ -14,7 +14,7 @@ export async function resolveHostedMurphContactOptions({
 }: {
   message?: MurphContactMessage | null;
 } = {}): Promise<MurphContactOption[]> {
-  const { initialContactChannels, murphEmailAddress, murphPhoneNumber } =
+  const { initialContactChannels, murphEmailAddress, murphPhoneNumber, userEmailAddress } =
     await getHostedMurphContactContext();
 
   return resolveMurphContactOptions({
@@ -22,6 +22,7 @@ export async function resolveHostedMurphContactOptions({
     message,
     murphEmailAddress,
     murphPhoneNumber,
+    userEmailAddress,
   });
 }
 

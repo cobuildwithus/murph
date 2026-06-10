@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { PhoneIcon } from "lucide-react";
 
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
@@ -10,6 +11,7 @@ import type { HostedAuthCompletionResult } from "./hosted-auth-completion";
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 
 import {
+  HostedAuthFinishingNotice,
   HostedAuthLegalNotice,
 } from "./hosted-auth-shared";
 
@@ -18,6 +20,7 @@ import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 import { HostedPhoneAuth } from "./hosted-phone-auth";
 import { HostedPrivyCaptcha } from "./hosted-privy-captcha";
 import { HostedTelegramAuthButton } from "./hosted-telegram-auth-button";
+import { useHostedAuthCompletion } from "./use-hosted-auth-completion";
 
 type HostedAuthMethod = "phone" | "telegram" | "email";
 type HostedPrimaryMethod = "phone" | "email";
@@ -43,6 +46,7 @@ export function HostedAuthPanel({
   const [pendingAuthCompletion, setPendingAuthCompletion] =
     useState<HostedAuthCompletionResult | null>(null);
   const pendingAuthCompletionRef = useRef<HostedAuthCompletionResult | null>(null);
+  const completion = useHostedAuthCompletion({ onCompleted: handleAuthCompleted });
   const includesPhone = methods.includes("phone");
   const includesTelegram = methods.includes("telegram");
   const includesEmail = methods.includes("email");
@@ -100,6 +104,10 @@ export function HostedAuthPanel({
     );
   }
 
+  if (completion.completingMethod) {
+    return <HostedAuthFinishingNotice />;
+  }
+
   return (
     <div className="space-y-4">
       <HostedPrivyCaptcha />
@@ -108,7 +116,6 @@ export function HostedAuthPanel({
         <HostedPhoneAuth
           onAuthCompleted={handleAuthCompleted}
           onCodeSent={() => setCodeSent(true)}
-          onCompleted={onCompleted}
           onSignOut={onSignOut}
           phoneInputAutoFocus
           renderCaptcha={false}
@@ -120,7 +127,7 @@ export function HostedAuthPanel({
       {primaryMethod === "email" && includesEmail ? (
         <HostedEmailAuthButton
           active
-          onCompleted={handleAuthCompleted}
+          onAuthenticated={completion.completeAuth}
           onActivate={() => {}}
           inline
         />
@@ -137,7 +144,7 @@ export function HostedAuthPanel({
             {includesTelegram ? (
               <HostedTelegramAuthButton
                 active={telegramActive}
-                onCompleted={handleAuthCompleted}
+                onAuthenticated={completion.completeAuth}
                 onActivate={() => {
                   setPrimaryMethod("phone");
                   setTelegramActive(true);
@@ -148,7 +155,7 @@ export function HostedAuthPanel({
               primaryMethod === "phone" ? (
                 <HostedEmailAuthButton
                   active={false}
-                  onCompleted={handleAuthCompleted}
+                  onAuthenticated={completion.completeAuth}
                   onActivate={() => {
                     setPrimaryMethod("email");
                     setTelegramActive(false);
@@ -170,6 +177,13 @@ export function HostedAuthPanel({
             ) : null}
           </div>
         </>
+      ) : null}
+
+      {completion.errorMessage ? (
+        <Alert variant="destructive">
+          <AlertTitle>Unable to continue</AlertTitle>
+          <AlertDescription>{completion.errorMessage}</AlertDescription>
+        </Alert>
       ) : null}
 
       {shouldShowPassiveLegalNotice ? <HostedAuthLegalNotice /> : null}
