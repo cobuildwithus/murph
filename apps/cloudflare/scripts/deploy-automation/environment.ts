@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 
 import {
+  HOSTED_WORKER_OPTIONAL_VAR_DEFAULTS,
   HOSTED_WORKER_OPTIONAL_VAR_NAMES,
   HOSTED_WORKER_REQUIRED_VAR_NAMES,
 } from "./worker-optional-vars.ts";
@@ -13,10 +14,6 @@ import {
 } from "./shared.ts";
 const DEFAULT_LOG_HEAD_SAMPLING_RATE = 1;
 const DEFAULT_TRACE_HEAD_SAMPLING_RATE = 1;
-// Device-sync stays worker-only and is serialized into resolvedConfig instead of
-// forwarding raw provider env into the hosted child runtime.
-const DEFAULT_HOSTED_EXECUTION_RUNNER_ENV_PROFILES =
-  "hosted-email,linq,mapbox,telegram,whatsapp";
 const NAMED_CONTAINER_INSTANCE_TYPES = [
   "basic",
   "dev",
@@ -354,17 +351,9 @@ function resolveHostedWorkerVar(
   source: EnvSource,
   key: typeof HOSTED_WORKER_OPTIONAL_VAR_NAMES[number],
 ): string | null {
-  const value = normalizeOptionalString(source[key]);
-
-  if (value) {
-    return value;
-  }
-
-  if (key === "HOSTED_EXECUTION_RUNNER_ENV_PROFILES") {
-    return DEFAULT_HOSTED_EXECUTION_RUNNER_ENV_PROFILES;
-  }
-
-  return null;
+  return normalizeOptionalString(source[key])
+    ?? HOSTED_WORKER_OPTIONAL_VAR_DEFAULTS[key]
+    ?? null;
 }
 
 function requirePositiveNumber(value: unknown, label: string): number {
