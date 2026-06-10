@@ -104,7 +104,11 @@ Write-pass summary:
 
 ### Session total
 
-- Structured `brand_site` rows: **7,063 → 22,841** (+15,778, ~3.2x; 89% of all brand_site rows, up from 27%). Total brand_site rows 25,730. Unstructured: 2,889 and still dropping (re-sweep in progress).
+- Full re-sweep of all remaining unstructured rows (throttled context.dev markdown, 6 errors vs 784 before) found 962 facts-bearing rows; haiku extracted, +108 upserted, plus +38 via a deterministic serving-size recovery (parser `extractServingSizes` on the stored markdown filled servings haiku had missed).
+
+### Session total
+
+- Structured `brand_site` rows: **7,063 → 22,987** (+15,924, ~3.25x; 89% of all brand_site rows, up from 27%). Total brand_site rows 25,730. Unstructured: 2,743 (most are genuinely image-only facts panels; improved image pulling is the next lever).
 - Anthropic Batches API spend ~$47.56 of $50 (text waves); vision-OCR ran on subscription subagents ($0 API key) + context.dev scrapes.
 
 ### Remaining (~4,284 unstructured — the floor for this data source)
