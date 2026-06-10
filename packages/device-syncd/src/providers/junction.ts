@@ -5180,26 +5180,31 @@ async function projectJunctionSources(
       displayName: null,
       status: source.status,
       resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+      // Only assert error fields when this projection saw an errored entry;
+      // omitting the keys lets the store preserve existing detail while the
+      // status stays "error" and auto-clear it once the status recovers.
+      ...(source.lastErrorCode !== null || source.lastErrorMessage !== null
+        ? { lastErrorCode: source.lastErrorCode, lastErrorMessage: source.lastErrorMessage }
+        : {}),
       lastSeenAt: context.now,
     });
   }
 }
 
-function projectJunctionSourcesByProviderSlug(
-  connectionId: string,
-  providers: readonly JunctionProviderConnection[],
-): Array<{
+interface ProjectedJunctionSource {
   sourceInstanceKey: string;
   sourceProviderSlug: string;
   status: DeviceConnectionSourceStatus;
   resourceAvailabilitySummary: Record<string, string | number | boolean | null>;
-}> {
-  const projected = new Map<string, {
-    sourceInstanceKey: string;
-    sourceProviderSlug: string;
-    status: DeviceConnectionSourceStatus;
-    resourceAvailabilitySummary: Record<string, string | number | boolean | null>;
-  }>();
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+}
+
+function projectJunctionSourcesByProviderSlug(
+  connectionId: string,
+  providers: readonly JunctionProviderConnection[],
+): ProjectedJunctionSource[] {
+  const projected = new Map<string, ProjectedJunctionSource>();
 
   for (const provider of providers) {
     const origin = resolveJunctionOrigin(
@@ -5232,28 +5237,57 @@ function projectJunctionSourcesByProviderSlug(
     }
 
     const resourceAvailabilitySummary = sanitizeJunctionResourceAvailabilitySummary(provider.resourceAvailability);
+    const status = mapJunctionSourceStatus(provider.status);
+    const lastErrorCode = status === "error"
+      ? truncateJunctionSourceErrorText(provider.errorDetails?.errorType, JUNCTION_SOURCE_ERROR_CODE_MAX_LENGTH)
+      : null;
+    const lastErrorMessage = status === "error"
+      ? truncateJunctionSourceErrorText(provider.errorDetails?.errorMessage, JUNCTION_SOURCE_ERROR_MESSAGE_MAX_LENGTH)
+      : null;
     const existing = projected.get(sourceProviderSlug);
     if (existing) {
       mergeJunctionResourceAvailabilitySummary(
         existing.resourceAvailabilitySummary,
         resourceAvailabilitySummary,
       );
-      existing.status = mergeJunctionSourceStatus(
-        existing.status,
-        mapJunctionSourceStatus(provider.status),
-      );
+      existing.status = mergeJunctionSourceStatus(existing.status, status);
+      if (existing.status !== "error") {
+        existing.lastErrorCode = null;
+        existing.lastErrorMessage = null;
+      } else if (existing.lastErrorCode === null && existing.lastErrorMessage === null) {
+        existing.lastErrorCode = lastErrorCode;
+        existing.lastErrorMessage = lastErrorMessage;
+      }
       continue;
     }
 
     projected.set(sourceProviderSlug, {
       sourceInstanceKey,
       sourceProviderSlug,
-      status: mapJunctionSourceStatus(provider.status),
+      status,
       resourceAvailabilitySummary,
+      lastErrorCode,
+      lastErrorMessage,
     });
   }
 
   return [...projected.values()];
+}
+
+// device_connection_source bounds (the store rejects longer values).
+const JUNCTION_SOURCE_ERROR_CODE_MAX_LENGTH = 80;
+const JUNCTION_SOURCE_ERROR_MESSAGE_MAX_LENGTH = 240;
+
+function truncateJunctionSourceErrorText(
+  value: string | null | undefined,
+  maxLength: number,
+): string | null {
+  const normalized = value?.trim() ?? "";
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized.length > maxLength ? normalized.slice(0, maxLength) : normalized;
 }
 
 function mergeJunctionResourceAvailabilitySummary(
