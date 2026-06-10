@@ -138,3 +138,9 @@ Findings:
 - `pnpm typecheck` currently fails outside this supplement work in `apps/web/test/hosted-execution-handoff.test.ts` because a hosted-control mock lacks `prewarmRuntime`.
 
 Conclusion: the regenerated candidate artifact is clean for the read-only checks performed here. No supplement DB writes were run; the actual backfill remains deferred until explicit approval.
+
+### Wave 11 — food/bundle cleanup (2026-06-10)
+
+- Per product decision, removed non-supplement rows from the unstructured set: **355 foods** (protein powders, energy gels, bars, cookies — carry Nutrition Facts, not Supplement Facts) + **124 true multi-pack duplicates** (`N-Pack`/`N Bottles`/`N-ct` of products that exist separately). Deleted 479 total, scoped to brand_site + unstructured.
+- Attempted to recover 76 "misclassified single" candidates, but 33 lacked extractable facts and the 8 that extracted were re-blocked by the labels.mjs production guard as non_standalone (ProSupps 1-serve samples, piping-rock complex products) — the guard agreed with the original classification, so net ~0 forced through (safety preserved).
+- Final: total brand_site 25,730 → **25,251**; structured **23,033 / 25,251 = 91.2%** (from 27% at session start).
