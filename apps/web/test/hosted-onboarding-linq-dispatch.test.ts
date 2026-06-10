@@ -3315,6 +3315,98 @@ https://join.example.test/join/code_first_text`);
     expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
   });
 
+  it("refuses to rebind a member's home chat to a new chat id when the payload does not attest the chat is direct", async () => {
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          routing: {
+            linqChatIdEncrypted: await encryptHostedWebNullableString({
+              field: "hosted-member-routing.home-linq-chat-id",
+              memberId: "member_123",
+              value: "chat_home",
+            }),
+            linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+              field: "hosted-member-routing.home-linq-recipient-phone",
+              memberId: "member_123",
+              value: "+15550100001",
+            }),
+            memberId: "member_123",
+            pendingLinqChatIdEncrypted: null,
+            pendingLinqRecipientPhoneEncrypted: null,
+            telegramUserIdEncrypted: null,
+            telegramUserLookupKey: null,
+          },
+        }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          linqChatIdEncrypted: await encryptHostedWebNullableString({
+            field: "hosted-member-routing.home-linq-chat-id",
+            memberId: "member_123",
+            value: "chat_home",
+          }),
+          linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+            field: "hosted-member-routing.home-linq-recipient-phone",
+            memberId: "member_123",
+            value: "+15550100001",
+          }),
+          memberId: "member_123",
+        }),
+        upsert: vi.fn(),
+      },
+    });
+
+    // Same recipient line as the bound home, NEW chat id, and no is_group flag at all —
+    // exactly what a group message would look like if the provider's flag went missing.
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_possible_group",
+            owner_handle: {
+              handle: "+15550100001",
+              id: "handle_owner_123",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+        },
+        eventId: "evt_unattested_rebind",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "unattested-direct-chat",
+    });
+    expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
   it("suppresses repeat signup links after the first send that day", async () => {
     mocks.readHostedLinqDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
       inboundCount: 1,

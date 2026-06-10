@@ -94,6 +94,8 @@ describe("resolveHostedLinqActiveRouteDecision", () => {
         homeChatId: "chat_home",
         homeRecipientPhone: "+15550100001",
         incomingChatId: "chat_home",
+        // Known chat ids bind without consulting the attestation flag.
+        incomingDirectAttested: false,
         incomingRecipientPhone: "+15550100002",
       }),
     ).toEqual({
@@ -107,6 +109,7 @@ describe("resolveHostedLinqActiveRouteDecision", () => {
         homeChatId: "chat_home",
         homeRecipientPhone: "+15550100001",
         incomingChatId: "chat_other",
+        incomingDirectAttested: false,
         incomingRecipientPhone: "+15550100002",
       }),
     ).toEqual({
@@ -121,6 +124,7 @@ describe("resolveHostedLinqActiveRouteDecision", () => {
         homeChatId: "chat_home",
         homeRecipientPhone: null,
         incomingChatId: "chat_other",
+        incomingDirectAttested: true,
         incomingRecipientPhone: "+15550100002",
       }),
     ).toEqual({
@@ -134,10 +138,69 @@ describe("resolveHostedLinqActiveRouteDecision", () => {
         homeChatId: "chat_home",
         homeRecipientPhone: "+15550100001",
         incomingChatId: "chat_other",
+        incomingDirectAttested: true,
         incomingRecipientPhone: null,
       }),
     ).toEqual({
       kind: "ignore_unknown_home",
+    });
+  });
+
+  it("still binds a FIRST home chat without attestation (signup compatibility)", () => {
+    // Linq 1:1 payloads are not confirmed to always carry is_group; failing closed on the
+    // first bind would break signup. Only rebinds demand the explicit attestation.
+    expect(
+      resolveHostedLinqActiveRouteDecision({
+        homeChatId: null,
+        homeRecipientPhone: null,
+        incomingChatId: "chat_new",
+        incomingDirectAttested: false,
+        incomingRecipientPhone: "+15550100001",
+      }),
+    ).toEqual({
+      kind: "bind_home",
+    });
+  });
+
+  it("binds a first home chat when the payload attests the chat is direct", () => {
+    expect(
+      resolveHostedLinqActiveRouteDecision({
+        homeChatId: null,
+        homeRecipientPhone: null,
+        incomingChatId: "chat_new",
+        incomingDirectAttested: true,
+        incomingRecipientPhone: "+15550100001",
+      }),
+    ).toEqual({
+      kind: "bind_home",
+    });
+  });
+
+  it("refuses to rebind the home chat to a new chat id without an explicit direct attestation", () => {
+    expect(
+      resolveHostedLinqActiveRouteDecision({
+        homeChatId: "chat_home",
+        homeRecipientPhone: "+15550100001",
+        incomingChatId: "chat_other",
+        incomingDirectAttested: false,
+        incomingRecipientPhone: "+15550100001",
+      }),
+    ).toEqual({
+      kind: "ignore_unattested_direct",
+    });
+  });
+
+  it("rebinds to a new chat id when the payload attests the chat is direct", () => {
+    expect(
+      resolveHostedLinqActiveRouteDecision({
+        homeChatId: "chat_home",
+        homeRecipientPhone: "+15550100001",
+        incomingChatId: "chat_other",
+        incomingDirectAttested: true,
+        incomingRecipientPhone: "+15550100001",
+      }),
+    ).toEqual({
+      kind: "bind_home",
     });
   });
 });
