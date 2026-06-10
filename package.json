@@ -9,6 +9,7 @@
     "pnpm": "10.33.0"
   },
   "scripts": {
+    "prepare": "git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
     "hosted-local": "pnpm exec tsx --tsconfig tsconfig.base.json scripts/hosted-local.ts",
     "dev": "pnpm hosted-local up",
     "dev:reset": "MURPH_DEV_FORCE_RESET_LOCAL_DB=1 MURPH_DEV_FORCE_RESET_TEMPORAL=1 MURPH_DEV_TEMPORAL=managed pnpm hosted-local up",
