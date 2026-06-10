@@ -697,8 +697,6 @@ model HostedVaultShare {
   destination         HostedMember @relation("VaultShareDestination", fields: [destinationMemberId], references: [id], onDelete: Cascade)
 
   @@unique([grantorMemberId, projectionKind, destinationMemberId])
-  @@index([grantorMemberId, status])
-  @@index([destinationMemberId, status])
   @@map("hosted_vault_share")
 }
 

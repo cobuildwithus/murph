@@ -17,11 +17,6 @@ CREATE TABLE "hosted_vault_share" (
 -- CreateIndex
 CREATE UNIQUE INDEX "hosted_vault_share_grantor_member_id_projection_kind_desti_key" ON "hosted_vault_share"("grantor_member_id", "projection_kind", "destination_member_id");
 
--- CreateIndex
-CREATE INDEX "hosted_vault_share_grantor_member_id_status_idx" ON "hosted_vault_share"("grantor_member_id", "status");
-
--- CreateIndex
-CREATE INDEX "hosted_vault_share_destination_member_id_status_idx" ON "hosted_vault_share"("destination_member_id", "status");
 
 -- AddForeignKey
 ALTER TABLE "hosted_vault_share" ADD CONSTRAINT "hosted_vault_share_grantor_member_id_fkey" FOREIGN KEY ("grantor_member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;

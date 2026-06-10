@@ -83,7 +83,19 @@ describe("vault-share contracts", () => {
     ).toThrow(/YYYY-MM-DD/u);
     expect(() =>
       parseHostedVaultShareDeliverRequest({
+        nights: [{ ...VALID_NIGHT, date: "2026-02-31" }],
+        projectionKind: "sleep-times.v0",
+      }),
+    ).toThrow(/YYYY-MM-DD/u);
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
         nights: [{ ...VALID_NIGHT, sleepStartAt: "late" }],
+        projectionKind: "sleep-times.v0",
+      }),
+    ).toThrow(/ISO-8601/u);
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        nights: [{ ...VALID_NIGHT, sleepEndAt: "2026-02-31T00:00:00.000Z" }],
         projectionKind: "sleep-times.v0",
       }),
     ).toThrow(/ISO-8601/u);

@@ -190,11 +190,25 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
     };
   }
 
-  if (wake.kind === "vault-share.delivery") {
+  if (
+    input.item.route.action === "import-vault-share-delivery"
+    && wake.kind === "vault-share.delivery"
+  ) {
     return await importHostedVaultShareDeliveryWake({
       vaultRoot: input.vaultRoot,
       wake,
     });
+  }
+
+  if (
+    input.item.route.action === "import-vault-share-delivery"
+    || wake.kind === "vault-share.delivery"
+  ) {
+    return {
+      reasonCode: "payload.decode_mismatch",
+      retryable: false,
+      status: "blocked",
+    };
   }
 
   return await enqueueHostedSystemMailboxItem({

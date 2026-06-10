@@ -393,7 +393,6 @@ describe("hosted execution coverage gaps", () => {
       "member.channels.updated",
       "assistant.notification.requested",
       "device-sync.wake",
-      "vault-share.delivery",
       "runtime.manual-requested",
       "runtime.browser-vault-refresh-requested",
       "runtime.device-sync-recovery-requested",

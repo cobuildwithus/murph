@@ -1133,10 +1133,23 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       // Best-effort consented vault-share offer: runs once per wake after the foreground
       // pass so it never delays user-facing work, holds no share state (web is the
       // authority), and never throws.
-      await offerHostedVaultShareProjectionBestEffort({
+      const vaultShareOffer = await offerHostedVaultShareProjectionBestEffort({
         vaultRoot: restored.vaultRoot,
         vaultSharePort: guardedRuntime.platform.vaultSharePort ?? null,
       });
+      if (vaultShareOffer.outcome === "error") {
+        emitHostedExecutionStructuredLog({
+          component: "runtime",
+          details: {
+            requestId,
+            vaultShareOfferOutcome: vaultShareOffer.outcome,
+          },
+          level: "warn",
+          message: "Hosted vault-share projection offer failed; continuing wake.",
+          phase: "wake.running",
+          userId: null,
+        });
+      }
       let accumulatedProjection = buildHostedWorkspaceInvocationProjection({
         mailboxBudgetExhausted: mailboxBudgetExhausted(),
         result,
@@ -2162,6 +2175,14 @@ function createAbortGuardedHostedRuntimePlatform(
       ? {
           usageRecordPort: {
             recordUsage: (usage) => guard(() => platform.usageRecordPort!.recordUsage(usage)),
+          },
+        }
+      : {}),
+    ...(platform.vaultSharePort
+      ? {
+          vaultSharePort: {
+            deliver: (deliverInput) =>
+              guard(() => platform.vaultSharePort!.deliver(deliverInput)),
           },
         }
       : {}),

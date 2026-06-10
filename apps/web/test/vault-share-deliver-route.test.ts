@@ -147,7 +147,7 @@ describe("vault-share deliver route", () => {
     expect(mocks.deliverHostedVaultShareNights).not.toHaveBeenCalled();
   });
 
-  it("rejects nights outside the recent delivery window", async () => {
+  it("silently drops an all-stale offer instead of erroring", async () => {
     const response = await deliverRoute.POST(
       buildRequest({
         nights: [
@@ -161,8 +161,43 @@ describe("vault-share deliver route", () => {
       }),
     );
 
-    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      appendedCount: 0,
+      duplicateCount: 0,
+      status: "delivered",
+    });
     expect(mocks.deliverHostedVaultShareNights).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("delivers only the in-window nights when an offer mixes stale and fresh nights", async () => {
+    const freshNight = recentNight(1);
+    const response = await deliverRoute.POST(
+      buildRequest({
+        nights: [
+          {
+            date: "1999-01-01",
+            sleepEndAt: "1999-01-01T06:31:00.000Z",
+            sleepStartAt: "1998-12-31T22:04:00.000Z",
+          },
+          freshNight,
+        ],
+        projectionKind: "sleep-times.v0",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      appendedCount: 1,
+      duplicateCount: 0,
+      status: "delivered",
+    });
+    expect(mocks.deliverHostedVaultShareNights).toHaveBeenCalledTimes(1);
+    expect(mocks.deliverHostedVaultShareNights).toHaveBeenCalledWith({
+      nights: [freshNight],
+      share: ACTIVE_SHARE,
+    });
   });
 
   it("rejects payloads that do not match the closed schema", async () => {

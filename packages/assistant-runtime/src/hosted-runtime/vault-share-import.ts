@@ -1,9 +1,10 @@
-import { mkdir, rename, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
+import { normalizeOpaquePathSegment } from "@murphai/core";
 import type {
   HostedExecutionVaultShareDeliveryWake,
 } from "@murphai/hosted-execution/contracts";
+import { writeJsonFileAtomic } from "@murphai/runtime-state/node";
 
 import type { HostedMailboxItemImportOutcome } from "./mailbox-import.ts";
 
@@ -23,11 +24,23 @@ export async function importHostedVaultShareDeliveryWake(input: {
 
   // Defense in depth: every path segment below is parser-constrained upstream, but this
   // handler is the one that touches the filesystem, so it re-asserts segment safety.
-  if (
-    !isSafeVaultPathSegment(delivery.grantorMemberId)
-    || !isSafeVaultPathSegment(delivery.projectionKind)
-    || !isSafeVaultPathSegment(delivery.night.date)
-  ) {
+  let projectionKindSegment: string;
+  let grantorMemberIdSegment: string;
+  let nightDateSegment: string;
+  try {
+    projectionKindSegment = normalizeOpaquePathSegment(
+      delivery.projectionKind,
+      "Vault-share projection kind",
+    );
+    grantorMemberIdSegment = normalizeOpaquePathSegment(
+      delivery.grantorMemberId,
+      "Vault-share grantor member id",
+    );
+    nightDateSegment = normalizeOpaquePathSegment(
+      delivery.night.date,
+      "Vault-share night date",
+    );
+  } catch {
     return {
       reasonCode: "vault_share.unsafe_path_segment",
       retryable: false,
@@ -39,39 +52,30 @@ export async function importHostedVaultShareDeliveryWake(input: {
     input.vaultRoot,
     "raw",
     "shared",
-    delivery.projectionKind,
-    delivery.grantorMemberId,
-    `${delivery.night.date}.json`,
+    projectionKindSegment,
+    grantorMemberIdSegment,
+    `${nightDateSegment}.json`,
   );
 
   try {
-    await mkdir(dirname(targetPath), { recursive: true });
-    const serialized = `${JSON.stringify(
-      {
-        grantorMemberId: delivery.grantorMemberId,
-        night: delivery.night,
-        projectionKind: delivery.projectionKind,
-        receivedEventId: input.wake.eventId,
-        schema: delivery.schema,
-        shareId: delivery.shareId,
-      },
-      null,
-      2,
-    )}\n`;
-    const stagingPath = `${targetPath}.tmp-${input.wake.eventId.replaceAll("/", "_")}`;
-    await writeFile(stagingPath, serialized, "utf8");
-    await rename(stagingPath, targetPath);
+    await writeJsonFileAtomic(targetPath, {
+      grantorMemberId: delivery.grantorMemberId,
+      night: delivery.night,
+      projectionKind: delivery.projectionKind,
+      receivedEventId: input.wake.eventId,
+      schema: delivery.schema,
+      shareId: delivery.shareId,
+    });
   } catch {
+    // Quarantine instead of retrying: a persistent fs failure must not head-of-line
+    // block the destination's system lane forever, and nights are re-offered on
+    // later wakes anyway.
     return {
       reasonCode: "vault_share.write_failed",
-      retryable: true,
+      retryable: false,
       status: "blocked",
     };
   }
 
   return { status: "imported" };
-}
-
-function isSafeVaultPathSegment(value: string): boolean {
-  return /^[A-Za-z0-9._-]+$/u.test(value) && !value.includes("..");
 }

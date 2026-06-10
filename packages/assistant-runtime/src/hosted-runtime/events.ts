@@ -562,10 +562,9 @@ async function executeHostedSystemWake(input: {
     case "vault-share.delivery":
       // Vault-share deliveries are landed deterministically at mailbox import
       // (vault-share-import.ts) and never enter the system wake execution path.
-      return createNoopMailboxEffect({
-        conversationMetrics: null,
-        mailboxLane: "vault-share",
-      });
+      throw new TypeError(
+        'Hosted vault-share delivery wakes are landed at mailbox import and must never reach system wake execution.',
+      );
   }
 
   const exhaustiveWake: never = input.wake;

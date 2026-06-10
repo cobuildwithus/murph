@@ -6,7 +6,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { importHostedVaultShareDeliveryWake } from "../src/hosted-runtime/vault-share-import.ts";
 import {
+  HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
   offerHostedVaultShareProjectionBestEffort,
+  selectProjectableSleepNights,
 } from "../src/hosted-runtime/vault-share-projection.ts";
 
 const NIGHT = {
@@ -68,6 +70,41 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
   });
 });
 
+describe("selectProjectableSleepNights", () => {
+  const nowMs = Date.parse("2026-06-10T00:00:00.000Z");
+
+  it("keeps recent fully-timed nights and drops stale or partial ones", () => {
+    const staleDate = "2026-05-01";
+    const summaries = [
+      { date: NIGHT.date, sleepEndAt: NIGHT.sleepEndAt, sleepStartAt: NIGHT.sleepStartAt },
+      { date: "2026-06-08", sleepEndAt: null, sleepStartAt: "2026-06-08T22:00:00.000Z" },
+      {
+        date: staleDate,
+        sleepEndAt: "2026-05-02T06:00:00.000Z",
+        sleepStartAt: "2026-05-01T22:00:00.000Z",
+      },
+    ];
+
+    expect(selectProjectableSleepNights(summaries, nowMs)).toEqual([NIGHT]);
+  });
+
+  it("drops nights older than the recency cutoff exactly", () => {
+    const dayMs = 24 * 60 * 60 * 1000;
+    const justInsideMs = nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS * dayMs;
+    const justInsideDate = new Date(justInsideMs).toISOString().slice(0, 10);
+    const justOutsideDate = new Date(justInsideMs - dayMs).toISOString().slice(0, 10);
+    const summaries = [justInsideDate, justOutsideDate].map((date) => ({
+      date,
+      sleepEndAt: `${date}T06:00:00.000Z`,
+      sleepStartAt: `${date}T22:00:00.000Z`,
+    }));
+
+    const selected = selectProjectableSleepNights(summaries, nowMs);
+
+    expect(selected.map((night) => night.date)).toEqual([justInsideDate]);
+  });
+});
+
 describe("importHostedVaultShareDeliveryWake", () => {
   const wake = {
     delivery: {
@@ -103,7 +140,7 @@ describe("importHostedVaultShareDeliveryWake", () => {
     expect(stored.receivedEventId).toBe(wake.eventId);
   });
 
-  it("fails open as a retryable block when the vault path is unwritable", async () => {
+  it("quarantines as a non-retryable block when the vault path is unwritable", async () => {
     const result = await importHostedVaultShareDeliveryWake({
       vaultRoot: "/dev/null/not-a-dir",
       wake,
@@ -111,7 +148,23 @@ describe("importHostedVaultShareDeliveryWake", () => {
 
     expect(result).toEqual({
       reasonCode: "vault_share.write_failed",
-      retryable: true,
+      retryable: false,
+      status: "blocked",
+    });
+  });
+
+  it("blocks unsafe path segments without touching the filesystem", async () => {
+    const result = await importHostedVaultShareDeliveryWake({
+      vaultRoot: "/unused",
+      wake: {
+        ...wake,
+        delivery: { ...wake.delivery, grantorMemberId: "../escape" },
+      },
+    });
+
+    expect(result).toEqual({
+      reasonCode: "vault_share.unsafe_path_segment",
+      retryable: false,
       status: "blocked",
     });
   });

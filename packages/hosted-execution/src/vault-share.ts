@@ -1,4 +1,9 @@
 import {
+  isStrictIsoDate,
+  isStrictIsoDateTime,
+} from "@murphai/contracts";
+
+import {
   requireArray,
   requireObject,
   requireString,
@@ -21,14 +26,10 @@ export const HOSTED_VAULT_SHARE_PROJECTION_KINDS = [
 export type HostedVaultShareProjectionKind =
   (typeof HOSTED_VAULT_SHARE_PROJECTION_KINDS)[number];
 
-export const HOSTED_VAULT_SHARE_DELIVERY_MAILBOX_KIND = "vault-share.delivery";
-
 export const HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA =
   "murph.vault-share.delivery.v1";
 
 export const HOSTED_VAULT_SHARE_DELIVER_MAX_NIGHTS = 7;
-
-const HOSTED_VAULT_SHARE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
 
 export interface HostedVaultShareSleepNight {
   date: string;
@@ -63,7 +64,7 @@ export function isHostedVaultShareProjectionKind(
   );
 }
 
-export function parseHostedVaultShareProjectionKind(
+function parseHostedVaultShareProjectionKind(
   value: unknown,
   label: string,
 ): HostedVaultShareProjectionKind {
@@ -81,14 +82,16 @@ export function buildHostedVaultShareDeliveryDedupeKey(input: {
   return `vault-share:${input.shareId}:${input.date}`;
 }
 
-export function parseHostedVaultShareSleepNight(
+function parseHostedVaultShareSleepNight(
   value: unknown,
 ): HostedVaultShareSleepNight {
   const record = requireObject(value, "Vault share sleep night");
   const date = requireString(record.date, "Vault share sleep night date");
 
-  if (!HOSTED_VAULT_SHARE_DATE_PATTERN.test(date)) {
-    throw new TypeError("Vault share sleep night date must be formatted YYYY-MM-DD.");
+  if (!isStrictIsoDate(date)) {
+    throw new TypeError(
+      "Vault share sleep night date must be a real calendar day formatted YYYY-MM-DD.",
+    );
   }
 
   return {
@@ -181,16 +184,10 @@ export function parseHostedVaultShareDeliveryPayload(
   };
 }
 
-const HOSTED_VAULT_SHARE_ISO_TIMESTAMP_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/u;
-
 function requireIsoTimestamp(value: unknown, label: string): string {
   const text = requireString(value, label);
 
-  if (
-    !HOSTED_VAULT_SHARE_ISO_TIMESTAMP_PATTERN.test(text)
-    || Number.isNaN(Date.parse(text))
-  ) {
+  if (!isStrictIsoDateTime(text)) {
     throw new TypeError(`${label} must be an ISO-8601 timestamp.`);
   }
 

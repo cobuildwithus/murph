@@ -1,6 +1,7 @@
 import {
   parseHostedVaultShareDeliverRequest,
   type HostedVaultShareDeliverResponse,
+  type HostedVaultShareSleepNight,
 } from "@murphai/hosted-execution/vault-share";
 
 import {
@@ -47,51 +48,60 @@ export const POST = withJsonError(async (request: Request) => {
     maxBodyBytes: HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
   });
   const body = parseHostedVaultShareDeliverRequest(await readOptionalJsonObject(request));
-  requireDeliverableNightDates(body.nights.map((night) => night.date));
+  const nights = filterDeliverableNights(body.nights);
 
   const shares = await findActiveHostedVaultShares({
     grantorMemberId,
     projectionKind: body.projectionKind,
   });
 
-  let appendedCount = 0;
-  let duplicateCount = 0;
-  let delivered = false;
-
-  for (const share of shares) {
-    const destination = await readHostedMemberCoreState({
-      memberId: share.destinationMemberId,
-      prisma: getPrisma(),
-    });
-
-    if (!destination || !hasHostedMemberActiveAccess(destination)) {
-      continue;
-    }
-
-    const delivery = await deliverHostedVaultShareNights({
-      nights: body.nights,
-      share,
-    });
-
-    delivered = true;
-    appendedCount += delivery.appendedDates.length;
-    duplicateCount += delivery.duplicateDates.length;
-
-    if (delivery.lastAppendedMailboxItemId !== null) {
-      try {
-        await signalHostedMailboxAppendRuntime({
-          expectedUserId: share.destinationMemberId,
-          mailboxItemId: delivery.lastAppendedMailboxItemId,
-        });
-      } catch {
-        // Durable append succeeded; the destination imports on its next wake. Matches the
-        // repo invariant that Temporal signal failures after durable append are not retried.
-      }
-    }
+  if (shares.length === 0) {
+    return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
   }
 
-  if (!delivered) {
-    return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
+  let appendedCount = 0;
+  let duplicateCount = 0;
+
+  // An all-stale offer skips delivery entirely but still resolves as delivered with zero
+  // counts: stale nights must never produce a permanent error loop for the grantor runtime.
+  if (nights.length > 0) {
+    let delivered = false;
+
+    for (const share of shares) {
+      const destination = await readHostedMemberCoreState({
+        memberId: share.destinationMemberId,
+        prisma: getPrisma(),
+      });
+
+      if (!destination || !hasHostedMemberActiveAccess(destination)) {
+        continue;
+      }
+
+      const delivery = await deliverHostedVaultShareNights({
+        nights,
+        share,
+      });
+
+      delivered = true;
+      appendedCount += delivery.appendedDates.length;
+      duplicateCount += delivery.duplicateDates.length;
+
+      if (delivery.lastAppendedMailboxItemId !== null) {
+        try {
+          await signalHostedMailboxAppendRuntime({
+            expectedUserId: share.destinationMemberId,
+            mailboxItemId: delivery.lastAppendedMailboxItemId,
+          });
+        } catch {
+          // Durable append succeeded; the destination imports on its next wake. Matches the
+          // repo invariant that Temporal signal failures after durable append are not retried.
+        }
+      }
+    }
+
+    if (!delivered) {
+      return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
+    }
   }
 
   return jsonOk({
@@ -102,23 +112,21 @@ export const POST = withJsonError(async (request: Request) => {
 });
 
 /**
- * Bounds the mailbox dedupe-key space a grantor runtime can mint: offered nights must sit
- * inside a sane recency window. Honest runtimes only ever offer the latest few nights.
+ * Bounds the mailbox dedupe-key space a grantor runtime can mint: only nights inside a
+ * sane recency window are delivered. Out-of-window nights are silently dropped rather than
+ * rejected so one stale night never poisons delivery of the fresh ones. Honest runtimes
+ * only ever offer the latest few nights.
  */
-function requireDeliverableNightDates(dates: readonly string[]): void {
+function filterDeliverableNights(
+  nights: readonly HostedVaultShareSleepNight[],
+): HostedVaultShareSleepNight[] {
   const nowMs = Date.now();
 
-  for (const date of dates) {
-    const dateMs = Date.parse(`${date}T00:00:00.000Z`);
+  return nights.filter((night) => {
+    const dateMs = Date.parse(`${night.date}T00:00:00.000Z`);
 
-    if (
-      Number.isNaN(dateMs)
-      || dateMs > nowMs + HOSTED_VAULT_SHARE_DELIVER_MAX_NIGHT_FUTURE_DAYS * DAY_MS
-      || dateMs < nowMs - HOSTED_VAULT_SHARE_DELIVER_MAX_NIGHT_AGE_DAYS * DAY_MS
-    ) {
-      throw new TypeError(
-        "Vault share deliver request night dates must fall within the recent delivery window.",
-      );
-    }
-  }
+    return !Number.isNaN(dateMs)
+      && dateMs <= nowMs + HOSTED_VAULT_SHARE_DELIVER_MAX_NIGHT_FUTURE_DAYS * DAY_MS
+      && dateMs >= nowMs - HOSTED_VAULT_SHARE_DELIVER_MAX_NIGHT_AGE_DAYS * DAY_MS;
+  });
 }

@@ -69,7 +69,9 @@ export interface DeliverHostedVaultShareNightsResult {
 /**
  * Appends one typed `vault-share.delivery` wake envelope per shared night into the
  * destination mailbox. The envelope eventId doubles as the mailbox dedupe key — derived
- * from (shareId, night date) — so re-offering an already-delivered night is a no-op.
+ * from (shareId, night date) — and occurredAt comes from the night itself, so the
+ * envelope is fully deterministic for a given (share, night) and re-offering an
+ * already-delivered night is a byte-identical no-op rather than a dedupe conflict.
  * Payloads ride the standard encrypted mailbox path; nothing lands in plaintext.
  */
 export async function deliverHostedVaultShareNights(input: {
@@ -97,7 +99,7 @@ export async function deliverHostedVaultShareNights(input: {
         shareId: input.share.id,
       }),
       memberId: input.share.destinationMemberId,
-      occurredAt: new Date().toISOString(),
+      occurredAt: night.sleepEndAt,
     });
     const result = await prisma.$transaction((tx) =>
       appendHostedMailboxEnvelopeTx({

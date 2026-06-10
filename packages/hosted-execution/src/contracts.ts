@@ -38,7 +38,6 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
-  "vault-share.delivery",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
