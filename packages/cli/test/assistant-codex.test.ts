@@ -170,13 +170,18 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
         assert.equal(responseMediaTool.name, 'attach_response_media')
         assertDynamicToolDescription(responseMediaTool)
         assertDynamicToolInputSchema(responseMediaTool)
+        const generateImageTool = readDynamicTool(threadStart, 2)
+        assert.equal(generateImageTool.namespace, 'murph')
+        assert.equal(generateImageTool.name, 'generate_image')
+        assertDynamicToolDescription(generateImageTool)
+        assertDynamicToolInputSchema(generateImageTool)
         assert.deepEqual(threadStart, {
           id: 2,
           method: 'thread/start',
           params: {
             approvalPolicy: 'never',
             cwd: expectedWorkingDirectory,
-            dynamicTools: [progressTool, responseMediaTool],
+            dynamicTools: [progressTool, responseMediaTool, generateImageTool],
             model: 'gpt-5',
             sandbox: 'workspace-write',
             serviceName: 'murph',

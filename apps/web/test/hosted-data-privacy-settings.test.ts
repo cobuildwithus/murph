@@ -64,6 +64,10 @@ vi.mock("../src/components/settings/hosted-settings-session-state", () => ({
   HostedSettingsSessionState: mocks.HostedSettingsSessionState,
 }));
 
+vi.mock("@/src/components/hosted-onboarding/hosted-privy-logout", () => ({
+  HostedPrivyLogout: () => null,
+}));
+
 vi.mock("@/src/components/ui/alert", () => ({
   Alert: createPassthrough("div"),
   AlertDescription: createPassthrough("div"),
@@ -117,20 +121,15 @@ beforeEach(() => {
     ok: true,
     result: {
       cloudflare: {
-        alarmCleared: true,
         configured: true,
         deleted: true,
-        errorCode: null,
-        r2DeletedObjectCount: 1,
-        r2SkippedUserScopedPrefixes: false,
-        r2Supported: true,
-        r2UserScopedSkipReason: null,
-        runnerStateDeleted: true,
       },
       deletedAt: "2026-04-29T01:02:03.000Z",
-      deletedCounts: {},
-      providerRevocations: [],
-      retentionNotes: [],
+      vendorAccounts: {
+        privyUser: { errorCode: null, status: "completed" },
+        stripeCustomer: { errorCode: null, status: "completed" },
+        stripeSubscription: { errorCode: null, status: "completed" },
+      },
     },
   });
 });
@@ -263,21 +262,80 @@ describe("HostedDataPrivacySettings", () => {
       root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
     });
 
-    await clickButton(container, "Delete my data", window);
+    await clickButton(container, "Delete account", window);
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
       payload: {
-        acknowledgedIrreversibleDeletion: true,
-        acknowledgedProviderAndBackupLimits: true,
-        confirmationPhrase: "DELETE MY MURPH DATA",
-        secondConfirmationAccepted: true,
+        confirmationPhrase: "DELETE MY ACCOUNT",
       },
       url: "/api/settings/privacy/delete",
     });
   });
+
+  test("does not submit deletion until the exact confirmation phrase is typed", async () => {
+    mockHostedDataPrivacyDeleteFlowState({
+      confirmationPhrase: "delete my account",
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    const button = findButton(container, "Delete account");
+    assert.equal(button.disabled, true);
+
+    await act(async () => {
+      button.dispatchEvent(new window.Event("click", { bubbles: true }));
+    });
+
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  });
+
+  test("shows the account-deleted confirmation once deletion has completed", async () => {
+    mockHostedDataPrivacyDeletedState();
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    assert.ok(container.textContent?.includes("Your account and all your data have been deleted"));
+    assert.equal([...container.querySelectorAll("button")].length, 0);
+  });
 });
 
+// Values follow the component's useState declaration order:
+// exportPending, exportDialogOpen, acknowledgedSensitiveDownload, exportDialogError,
+// exportSuccess, deletePending, dialogOpen, confirmationPhrase, dialogError, deleted,
+// cleanupPending, privyLogoutDone.
 function mockHostedVaultExportFlowState(input: {
   acknowledgedSensitiveDownload?: boolean;
 } = {}) {
@@ -286,33 +344,50 @@ function mockHostedVaultExportFlowState(input: {
     true,
     input.acknowledgedSensitiveDownload ?? true,
     null,
+    null,
     false,
     false,
-    "review",
     "",
+    null,
     false,
     false,
-    null,
-    null,
-    null,
+    false,
   ];
 }
 
-function mockHostedDataPrivacyDeleteFlowState() {
+function mockHostedDataPrivacyDeleteFlowState(input: {
+  confirmationPhrase?: string;
+} = {}) {
   mocks.useStateValues = [
     false,
     false,
     false,
     null,
+    null,
     false,
     true,
-    "confirm",
-    "DELETE MY MURPH DATA",
+    input.confirmationPhrase ?? "DELETE MY ACCOUNT",
+    null,
+    false,
+    false,
+    false,
+  ];
+}
+
+function mockHostedDataPrivacyDeletedState() {
+  mocks.useStateValues = [
+    false,
+    false,
+    false,
+    null,
+    null,
+    false,
+    false,
+    "",
+    null,
     true,
-    true,
-    null,
-    null,
-    null,
+    false,
+    false,
   ];
 }
 

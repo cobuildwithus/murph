@@ -172,6 +172,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
       persistedBeforeOutbound.push('persist')
       return savedSession
     }),
+    recordAdditionalAssistantUsageEvents: vi.fn(async () => undefined),
     recordAssistantUsageEvent: vi.fn(async () => undefined),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
@@ -211,6 +212,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
+    recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
@@ -418,6 +420,7 @@ test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery 
         : (input.defaults ?? null),
     ),
     persistAssistantTurnAndSession: vi.fn(async () => linqSession),
+    recordAdditionalAssistantUsageEvents: vi.fn(async () => undefined),
     recordAssistantUsageEvent: vi.fn(async () => undefined),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
@@ -457,6 +460,7 @@ test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery 
     executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
+    recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
@@ -578,6 +582,7 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
         : (input.defaults ?? null),
     ),
     persistAssistantTurnAndSession: vi.fn(async () => providerSession),
+    recordAdditionalAssistantUsageEvents: vi.fn(async () => undefined),
     recordAssistantUsageEvent: vi.fn(async () => undefined),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
@@ -616,6 +621,7 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
     executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
+    recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
@@ -667,10 +673,34 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
     },
   })
   const sharedPlan = createSharedPlan()
-  const providerResult = createProviderResult({
-    response: '```json\n{"kind":"skip","privateSummary":"No notification required."}\n```',
-    session: providerSession,
-  })
+  const imageUsageDraft = {
+    provider: 'openai-images',
+    providerRequestOrdinal: 1,
+    providerRequestOutcome: 'succeeded' as const,
+    usage: {
+      apiKeyEnv: 'OPENAI_API_KEY',
+      baseUrl: 'https://api.openai.com/v1',
+      cacheWriteTokens: null,
+      cachedInputTokens: null,
+      inputTokens: 7,
+      outputTokens: 11,
+      providerMetadataJson: null,
+      providerName: 'OpenAI Images',
+      providerRequestId: 'req_image_notification',
+      rawUsageJson: null,
+      reasoningTokens: null,
+      requestedModel: 'gpt-image-2',
+      servedModel: null,
+      totalTokens: 18,
+    },
+  }
+  const providerResult = {
+    ...createProviderResult({
+      response: '```json\n{"kind":"skip","privateSummary":"No notification required."}\n```',
+      session: providerSession,
+    }),
+    additionalUsages: [imageUsageDraft],
+  }
   const deliverMessage = vi.fn()
   const mocks = {
     createAssistantRuntimeStateService: vi.fn(() => ({
@@ -710,6 +740,7 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
         : (input.defaults ?? null),
     ),
     persistAssistantTurnAndSession: vi.fn(async () => providerSession),
+    recordAdditionalAssistantUsageEvents: vi.fn(async () => undefined),
     recordAssistantUsageEvent: vi.fn(async () => undefined),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
@@ -748,6 +779,7 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
     executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
+    recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
@@ -784,6 +816,12 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
     session: providerSession,
   })
   expect(mocks.recordAssistantUsageEvent).toHaveBeenCalledTimes(1)
+  expect(mocks.recordAdditionalAssistantUsageEvents).toHaveBeenCalledWith(
+    expect.objectContaining({
+      additionalUsages: [imageUsageDraft],
+      turnId: 'turn-notification-skip',
+    }),
+  )
   expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
     expect.objectContaining({
       assistantTranscriptText: null,
@@ -815,7 +853,8 @@ test('sendAssistantNotificationLocal lets hosted shared planning stabilize provi
           providerTurn: providerResult,
         }
       }),
-      recordAssistantUsageEvent: vi.fn(async () => undefined),
+      recordAdditionalAssistantUsageEvents: vi.fn(async () => undefined),
+    recordAssistantUsageEvent: vi.fn(async () => undefined),
       resolveAssistantOperatorDefaults: vi.fn(async () => ({
         timezone: 'Australia/Sydney',
       })),
@@ -864,6 +903,7 @@ test('sendAssistantNotificationLocal lets hosted shared planning stabilize provi
       executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
     }))
     vi.doMock('../src/assistant/service-usage.js', () => ({
+      recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
       recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
     }))
     vi.doMock('../src/assistant/service-turn-routes.js', () => ({
@@ -961,6 +1001,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
         : (input.defaults ?? null),
     ),
     persistAssistantTurnAndSession: vi.fn(async () => providerSession),
+    recordAdditionalAssistantUsageEvents: vi.fn(async () => undefined),
     recordAssistantUsageEvent: vi.fn(async () => undefined),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
@@ -999,6 +1040,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
+    recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
@@ -1126,6 +1168,7 @@ test('sendAssistantNotificationLocal forwards provider response media to deliver
         : (input.defaults ?? null),
     ),
     persistAssistantTurnAndSession: vi.fn(async () => providerSession),
+    recordAdditionalAssistantUsageEvents: vi.fn(async () => undefined),
     recordAssistantUsageEvent: vi.fn(async () => undefined),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
@@ -1166,6 +1209,7 @@ test('sendAssistantNotificationLocal forwards provider response media to deliver
     executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
+    recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
@@ -1370,6 +1414,7 @@ test('sendAssistantNotificationLocal rejects email thread subject overrides befo
         : (input.defaults ?? null),
     ),
     persistAssistantTurnAndSession: vi.fn(async () => providerSession),
+    recordAdditionalAssistantUsageEvents: vi.fn(async () => undefined),
     recordAssistantUsageEvent: vi.fn(async () => undefined),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
@@ -1408,6 +1453,7 @@ test('sendAssistantNotificationLocal rejects email thread subject overrides befo
     executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
+    recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({

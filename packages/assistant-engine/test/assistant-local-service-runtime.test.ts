@@ -5162,6 +5162,9 @@ async function loadLocalServiceModule(input?: {
         >[0],
       ) => undefined,
     ),
+    recordAdditionalAssistantUsageEvents: vi.fn(
+      async (_input: { providerRequestOrdinal?: number }) => undefined,
+    ),
     recordAssistantUsageEvent: vi.fn(
       async (_input: { providerRequestOrdinal?: number }) => undefined,
     ),
@@ -5420,6 +5423,7 @@ async function loadLocalServiceModule(input?: {
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
+    recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   if (!useRealAcceptedInputPersistence) {

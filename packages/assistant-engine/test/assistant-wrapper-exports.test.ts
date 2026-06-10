@@ -34,6 +34,7 @@ const wrapperCases = [
     [
       'buildCodexAppServerArgs',
       'executeCodexAppServerTurn',
+      'listMurphDynamicToolNames',
       'resolveCodexDisplayOptions',
     ],
   ],
