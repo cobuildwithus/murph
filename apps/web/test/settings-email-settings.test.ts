@@ -138,7 +138,9 @@ describe("HostedEmailSettings", () => {
     );
 
     assert.match(markup, /href="mailto:murph\+u2-private-alias@mail\.example\.test"/);
-    assert.match(markup, /Email murph\+u2-private-alias@mail\.example\.test/);
+    assert.match(markup, /Email Murph at murph\+u2-private-alias@mail\.example\.test/);
+    assert.match(markup, /Email Murph</);
+    assert.doesNotMatch(markup, /Email murph\+u2-private-alias/);
   });
 
   it("does not use Privy client user state as the displayed email authority", async () => {

@@ -142,7 +142,7 @@ export function HostedEmailSettingsContent(props: {
           href={`mailto:${murphEmailAddress}`}
           label={`Email Murph at ${murphEmailAddress}`}
         >
-          Email {murphEmailAddress}
+          Email Murph
         </SettingsContactLink>
       ) : null}
 
