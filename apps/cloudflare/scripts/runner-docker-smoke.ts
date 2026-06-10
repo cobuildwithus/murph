@@ -22,7 +22,6 @@ const repoRoot = path.resolve(appDir, "../..");
 const FIXTURE_VAULT_ROOT = path.join(repoRoot, "fixtures", "demo-web-vault");
 const EXPECTED_VAULT_ID = "vault_01JNV40W8VFYQ2H7CMJY5A9R4K";
 const WAV_RELATIVE_PATH = "raw/smoke/hosted-runner.wav";
-const EXPECTED_TRANSCRIPT_SNIPPET = "hello";
 const IMAGE_TAG = "murph-cloudflare-runner";
 const SMOKE_BUNDLE_DIR = path.join(appDir, ".deploy", "runner-smoke-bundle");
 
@@ -51,7 +50,6 @@ async function main(): Promise<void> {
       "dist/hosted-runner-smoke.js",
     ], JSON.stringify({
       bundle,
-      expectedTranscriptSnippet: EXPECTED_TRANSCRIPT_SNIPPET,
       expectedVaultId: EXPECTED_VAULT_ID,
       wavRelativePath: WAV_RELATIVE_PATH,
     }));
@@ -83,12 +81,8 @@ async function main(): Promise<void> {
     console.log(`healthCommonsCliProtocolListBytes=${result.healthCommonsCliProtocolListBytes}`);
     console.log(`healthCommonsRuntimeSearchHitKeys=${result.healthCommonsRuntimeSearchHitKeys.join(",")}`);
     console.log(`healthCommonsRuntimeProtocolHitKeys=${result.healthCommonsRuntimeProtocolHitKeys.join(",")}`);
-    console.log(`wavTranscriptProviderId=${result.wavTranscriptProviderId}`);
-    console.log(`wavTranscriptSha256=${result.wavTranscriptSha256}`);
-    console.log(`wavTranscriptMatchesExpectedSnippet=${result.wavTranscriptMatchesExpectedSnippet}`);
-    console.log(`normalizedTranscriptProviderId=${result.normalizedTranscriptProviderId}`);
-    console.log(`normalizedTranscriptSha256=${result.normalizedTranscriptSha256}`);
-    console.log(`normalizedTranscriptMatchesExpectedSnippet=${result.normalizedTranscriptMatchesExpectedSnippet}`);
+    console.log(`audioNormalizedMp3Bytes=${result.audioNormalizedMp3Bytes}`);
+    console.log(`audioPreparedWavBytes=${result.audioPreparedWavBytes}`);
     console.log(`pythonVersion=${result.pythonVersion}`);
     console.log(`ripgrepCommandDiscovered=${result.ripgrepCommandDiscovered}`);
     console.log(`ripgrepVersion=${result.ripgrepVersion}`);

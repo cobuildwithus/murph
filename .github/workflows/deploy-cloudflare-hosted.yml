@@ -439,7 +439,7 @@ jobs:
           tar --hard-dereference -czf .artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz \
             -C apps/cloudflare/.deploy \
             runner-bundle
-          docker save murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-codex0.135.0-base-en \
+          docker save murph-cloudflare-runner-base:node24.14.1-codex0.135.0 \
             | gzip -1 > .artifacts/cloudflare-hosted-deploy/runner-base-image.tar.gz
 
       - name: Upload immediate build handoff
@@ -620,8 +620,6 @@ jobs:
       TELEGRAM_FILE_BASE_URL: ${{ vars.TELEGRAM_FILE_BASE_URL }}
       WHATSAPP_API_BASE_URL: ${{ vars.WHATSAPP_API_BASE_URL }}
       WHATSAPP_GRAPH_VERSION: ${{ vars.WHATSAPP_GRAPH_VERSION }}
-      WHISPER_MODEL_PATH: ${{ vars.WHISPER_MODEL_PATH }}
-      WHISPER_COMMAND: ${{ vars.WHISPER_COMMAND }}
       FFMPEG_COMMAND: ${{ vars.FFMPEG_COMMAND }}
       HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: ${{ vars.CF_PUBLIC_BASE_URL }}
       HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT: ${{ inputs.container_rollout == 'immediate' && 'true' || 'false' }}

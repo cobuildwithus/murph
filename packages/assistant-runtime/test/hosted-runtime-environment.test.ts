@@ -140,6 +140,113 @@ test("hosted runtime config rejects null or empty parser tool paths", () => {
   );
 });
 
+test("hosted runtime config validates transcription endpoints", () => {
+  const platform = createHostedRuntimePlatformStub();
+
+  const normalized = normalizeHostedAssistantRuntimeConfig(
+    {
+      parserToolchain: {
+        tools: {
+          transcription: {
+            endpoint: "  http://murph-transcribe.worker/v1/transcribe  ",
+          },
+        },
+      },
+    },
+    platform,
+  );
+  assert.deepEqual(normalized.parserToolchain, {
+    tools: {
+      transcription: {
+        endpoint: "http://murph-transcribe.worker/v1/transcribe",
+      },
+    },
+  });
+
+  assert.throws(
+    () =>
+      normalizeHostedAssistantRuntimeConfig(
+        {
+          parserToolchain: {
+            tools: {
+              transcription: {
+                endpoint: "   ",
+              },
+            },
+          },
+        },
+        platform,
+      ),
+    /Hosted runtime parser toolchain endpoint must be a non-empty http\(s\) URL/u,
+  );
+
+  assert.throws(
+    () =>
+      normalizeHostedAssistantRuntimeConfig(
+        {
+          parserToolchain: {
+            tools: {
+              transcription: {
+                endpoint: "v1/transcribe",
+              },
+            },
+          },
+        },
+        platform,
+      ),
+    /Hosted runtime parser toolchain endpoint must be an absolute http\(s\) URL/u,
+  );
+
+  assert.throws(
+    () =>
+      normalizeHostedAssistantRuntimeConfig(
+        {
+          parserToolchain: {
+            tools: {
+              transcription: {
+                endpoint: "ftp://murph-transcribe.worker/v1/transcribe",
+              },
+            },
+          },
+        },
+        platform,
+      ),
+    /Hosted runtime parser toolchain endpoint must be an absolute http\(s\) URL/u,
+  );
+});
+
+test("hosted runtime launch spec preserves transcription endpoints", () => {
+  // The hosted runner job runtime is built worker-side via
+  // buildHostedRuntimeLaunchSpec (apps/cloudflare/src/runner-env.ts), so the
+  // transcription endpoint must survive this boundary for the container-side
+  // parser registry to activate the remote-transcription provider.
+  assert.deepEqual(
+    buildHostedRuntimeLaunchSpec({
+      forwardedEnv: {},
+      parserToolchain: {
+        tools: {
+          ffmpeg: {
+            command: "/usr/bin/ffmpeg",
+          },
+          transcription: {
+            endpoint: "http://murph-transcribe.worker/v1/transcribe",
+          },
+        },
+      },
+    }).runtime.parserToolchain,
+    {
+      tools: {
+        ffmpeg: {
+          command: "/usr/bin/ffmpeg",
+        },
+        transcription: {
+          endpoint: "http://murph-transcribe.worker/v1/transcribe",
+        },
+      },
+    },
+  );
+});
+
 test("hosted runtime launch spec owns semantic env split and runtime config", () => {
   const spec = buildHostedRuntimeLaunchSpec({
     commitTimeoutMs: 45_000,

@@ -10,8 +10,6 @@
     "tsBuildInfoFile": ".deploy/smoke-dist/.tsbuildinfo"
   },
   "include": [
-    "src/hosted-runner-audio-benchmark-contract.ts",
-    "src/hosted-runner-audio-benchmark.ts",
     "src/hosted-runner-smoke-contract.ts",
     "src/hosted-runner-smoke-child.ts",
     "src/hosted-runner-smoke.ts"
