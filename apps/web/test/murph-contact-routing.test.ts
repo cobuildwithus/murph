@@ -64,12 +64,13 @@ test("resolveMurphContactOptions adds a Gmail shortcut for gmail users", () => {
   const options = resolveMurphContactOptions({
     contactChannels: { email: true, telegram: false, text: false },
     murphEmailAddress: "murph+alias123@mail.withmurph.ai",
-    userEmailAddress: "Will.Hay@Gmail.com",
+    userEmailAddress: "member@gmail.com",
   });
 
   const webmail = options[0]?.webmail;
   assert.equal(webmail?.label, "Gmail");
-  assert.ok(webmail?.href.startsWith("https://mail.google.com/mail/?view=cm&fs=1"));
+  assert.ok(webmail?.href.startsWith("https://mail.google.com/mail/?view=cm"));
+  assert.ok(!webmail?.href.includes("fs=1"));
   assert.ok(webmail?.href.includes("to=murph%2Balias123%40mail.withmurph.ai"));
   assert.ok(webmail?.href.includes("su=Hey+Murph"));
 });
