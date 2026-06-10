@@ -612,7 +612,7 @@ export function createJunctionDeviceSyncProvider(
     if (job.kind !== "backfill" || summaryHasFetchedRecords) {
       await context.importSnapshot({
         provider: "junction",
-        accountId: buildJunctionImportAccountId(context.account.id),
+        accountId: buildJunctionImportAccountId(context.account.externalAccountId),
         connectionId: context.account.id,
         importedAt: summaryWindow.windowEnd,
         windowStart: summaryWindow.windowStart,
@@ -1141,7 +1141,7 @@ export function createJunctionDeviceSyncProvider(
     const sourceProviders = await loadAndProjectSourceProviders();
     await context.importSnapshot({
       provider: "junction",
-      accountId: buildJunctionImportAccountId(context.account.id),
+      accountId: buildJunctionImportAccountId(context.account.externalAccountId),
       connectionId: context.account.id,
       importedAt: context.now,
       windowStart: window.windowStart,
@@ -1445,7 +1445,7 @@ export function createJunctionDeviceSyncProvider(
     if (executionWindowStart && executionWindowEnd && hasJunctionSnapshotRecords(dedupedTimeseries)) {
       await context.importSnapshot({
         provider: "junction",
-        accountId: buildJunctionImportAccountId(context.account.id),
+        accountId: buildJunctionImportAccountId(context.account.externalAccountId),
         connectionId: context.account.id,
         importedAt: executionWindowEnd,
         windowStart: executionWindowStart,
@@ -1491,7 +1491,7 @@ export function createJunctionDeviceSyncProvider(
 
       await context.importSnapshot({
         provider: "junction",
-        accountId: buildJunctionImportAccountId(context.account.id),
+        accountId: buildJunctionImportAccountId(context.account.externalAccountId),
         connectionId: context.account.id,
         importedAt: window.windowEnd,
         windowStart: window.windowStart,
@@ -1525,7 +1525,7 @@ export function createJunctionDeviceSyncProvider(
 
     await context.importSnapshot({
       provider: "junction",
-      accountId: buildJunctionImportAccountId(context.account.id),
+      accountId: buildJunctionImportAccountId(context.account.externalAccountId),
       connectionId: context.account.id,
       importedAt: context.now,
       windowStart,
@@ -5147,10 +5147,15 @@ function mergeJunctionSourceStatus(
   return "disconnected";
 }
 
-function buildJunctionImportAccountId(connectionId: string): string {
+// Derive import identity from the stable Junction user id, never from the
+// local device-sync account row id: row ids are re-minted whenever the
+// machine-local device-sync store is recreated (every hosted cold start), and
+// an unstable accountId changes the deterministic event identity of every
+// re-imported record.
+function buildJunctionImportAccountId(externalAccountId: string): string {
   return `jxn_acct_${
     createHash("sha256")
-      .update(JSON.stringify(["junction-import-account", connectionId]))
+      .update(JSON.stringify(["junction-import-account", externalAccountId]))
       .digest("hex")
       .slice(0, 32)
   }`;
