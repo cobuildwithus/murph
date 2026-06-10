@@ -3,8 +3,6 @@ import {
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeEnsureProcessingRequest,
-  HostedRuntimePrewarmRequest,
-  HostedRuntimePrewarmResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   assertHostedRuntimeProcessingTimeoutMs,
@@ -12,7 +10,6 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedRuntimeEnsureProcessingRequest,
-  parseHostedRuntimePrewarmRequest,
 } from "@murphai/hosted-execution/parsers";
 import {
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
@@ -63,21 +60,6 @@ const runtimeEnsureProcessingRoute = {
   wrongMethodResponse: "method-not-allowed",
 } satisfies DeclarativeRoute<WorkerRouteContext>;
 
-const runtimePrewarmHintRoute = {
-  authorizeBeforeMethod: true,
-  authorization: "vercel-oidc",
-  beforeMethod(context, params) {
-    return requireBoundInternalRouteUser(context, params, "runtime-prewarm-hint");
-  },
-  async handle(context, params) {
-    return handleRuntimePrewarmRoute(context, params.userId, "runtime-prewarm-hint");
-  },
-  match: (pathname) => matchCloudflareHostedControlUserRoutePath("runtimePrewarmHint", pathname),
-  methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.runtimePrewarmHint.method],
-  name: "runtime-prewarm-hint",
-  wrongMethodResponse: "method-not-allowed",
-} satisfies DeclarativeRoute<WorkerRouteContext>;
-
 const userStatusRoute = {
   authorizeBeforeMethod: true,
   authorization: "vercel-oidc",
@@ -95,7 +77,6 @@ const userStatusRoute = {
 
 export const runtimeProcessingRoutes = [
   runtimeEnsureProcessingRoute,
-  runtimePrewarmHintRoute,
 ] as const;
 
 export const userStatusRoutes = [
@@ -173,66 +154,6 @@ export async function handleRuntimeEnsureProcessingRoute(
     ...(commandTimeoutMs === null ? {} : { commandTimeoutMs }),
     userId,
   }));
-}
-
-export async function handleRuntimePrewarmRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-  routeName: "runtime-prewarm-hint",
-): Promise<Response> {
-  const userId = decodeRouteParam(encodedUserId);
-  let prewarmRequest: HostedRuntimePrewarmRequest;
-  try {
-    const payload = await readCachedRequestText(context, {
-      limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
-    });
-    prewarmRequest = parseHostedRuntimePrewarmRequest(
-      requireJsonObject(payload.trim() ? JSON.parse(payload) : {}),
-    );
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "worker",
-      details: buildWorkerRouteLogDetails({
-        reason: "runtime-prewarm-request-invalid",
-        routeName,
-      }, context.request, userId),
-      error,
-      level: "warn",
-      message: "Hosted worker runtime prewarm route rejected an invalid request.",
-      phase: "failed",
-      userId,
-    });
-    const classified = classifyPublicRouteError(error);
-    return json({
-      code: "invalid_request",
-      error: classified.error,
-    }, classified.status);
-  }
-
-  const stub = context.env.USER_RUNNER.getByName(userId);
-  try {
-    return json(await stub.prewarmRuntimeContainerForUser({
-      ...prewarmRequest,
-      userId,
-    }));
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "worker",
-      details: buildWorkerRouteLogDetails({
-        reason: "runtime-prewarm-rpc-failed",
-        routeName,
-      }, context.request, userId),
-      error,
-      level: "warn",
-      message: "Hosted worker runtime prewarm route failed best-effort.",
-      phase: "runtime.prewarm",
-      userId,
-    });
-    return json({
-      kind: "retry_later",
-      retryAt: new Date(Date.now() + 30_000).toISOString(),
-    } satisfies HostedRuntimePrewarmResponse);
-  }
 }
 
 export function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): number | null {

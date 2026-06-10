@@ -6,7 +6,6 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedRuntimeEnsureProcessingResponse,
-  HostedRuntimePrewarmResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   emitHostedExecutionStructuredLog,
@@ -62,7 +61,6 @@ import {
 } from "./runtime-invocation.js";
 import {
   RuntimeProcessingController,
-  type RuntimePrewarmInput,
   type RuntimeProcessingInput,
 } from "./runtime-processing-controller.js";
 
@@ -188,12 +186,6 @@ export class HostedUserRunner {
     input: RuntimeProcessingInput,
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
     return await this.runtimeProcessing.ensureForUser(input);
-  }
-
-  async prewarmRuntimeContainerForUser(
-    input: RuntimePrewarmInput,
-  ): Promise<HostedRuntimePrewarmResponse> {
-    return await this.runtimeProcessing.prewarmForUser(input);
   }
 
   async validateRuntimeWriteFence(input: {

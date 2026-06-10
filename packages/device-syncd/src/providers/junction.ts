@@ -366,6 +366,11 @@ const JUNCTION_TIMESERIES_RESOURCE_NAMES = new Set<string>([
   ...JUNCTION_KNOWN_TIMESERIES_RESOURCES,
   "glucose",
 ]);
+const JUNCTION_KNOWN_WEBHOOK_RESOURCE_NAMES = new Set<string>([
+  ...JUNCTION_ALLOWED_SUMMARY_RESOURCES,
+  ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+  ...JUNCTION_TIMESERIES_RESOURCE_NAMES,
+]);
 const DEFAULT_SUMMARY_BACKFILL_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays;
 const DEFAULT_TIMESERIES_BACKFILL_DAYS = 14;
 const DEFAULT_RECONCILE_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileDays;
@@ -718,7 +723,7 @@ export function createJunctionDeviceSyncProvider(
       batchInputs.map((entry) => entry.record),
     );
     return {
-      nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+      nextReconcileAt: clampWebhookJobNextReconcileAt(context),
     };
   }
 
@@ -1125,81 +1130,108 @@ export function createJunctionDeviceSyncProvider(
     const summaries: Record<string, unknown[]> = {};
 
     if (resource) {
-      const inferredCategory = inferJunctionResourceJobCategory(resourceCategory, resource);
+      let effectiveResource = resource;
+      let inferredCategory = inferJunctionResourceJobCategory(resourceCategory, resource);
       if (!isConfiguredJunctionResource(inferredCategory, resource)) {
-        context.logger.warn?.("Skipping Junction resource webhook job for a resource that is not enabled.", {
-          provider: "junction",
-          resource,
-          resourceCategory: inferredCategory,
-        });
-        return {
-          nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
-        };
-      } else {
-        const directInput = readJunctionDirectResourceJobInput(job, window);
-        if (directInput) {
-          await importJunctionDirectResourceSnapshot(
-            context,
-            [],
-            directInput.windowStart,
-            directInput.windowEnd,
-            directInput.resource,
-            [directInput.record],
-          );
-          return {
-            nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
-          };
-        }
-
-        if (inferredCategory === "timeseries") {
-          const sourceProviders = await loadAndProjectSourceProviders();
-          const timeseriesImport = await importTimeseriesPreciseSnapshots(
-            context,
-            sourceProviders,
-            window.windowStart,
-            window.windowEnd,
-            skippedOptionalResources,
-            [resource],
-            sourceProviderSlug,
-          );
-          if (timeseriesImport.yieldedAt) {
-            return withJunctionSkippedResourceMetadata(
-              context,
-              buildYieldedJunctionJobResult({
-                context,
-                job,
-                windowEnd: window.windowEnd,
-                windowStart: timeseriesImport.yieldedAt,
-              }),
-              skippedOptionalResources,
-            );
-          }
+        // Defense in depth for jobs enqueued by an older webhook parser: an
+        // enriched payload can hijack the resource name with a value that is
+        // not an enabled resource. Fall back to the event-type resource when
+        // it resolves to a configured one instead of dropping the job.
+        const fallback = resolveConfiguredJunctionEventTypeResource(job);
+        if (!fallback) {
+          context.logger.warn?.("Skipping Junction resource webhook job for a resource that is not enabled.", {
+            provider: "junction",
+            resource,
+            resourceCategory: inferredCategory,
+          });
+          skippedOptionalResources.push({
+            reason: "unsupported",
+            resource: resource.slice(0, JUNCTION_DIAGNOSTIC_RESOURCE_NAME_LIMIT),
+            resourceCategory: inferredCategory,
+            responseStatus: 0,
+          });
           return withJunctionSkippedResourceMetadata(
             context,
             {
-              nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+              nextReconcileAt: clampWebhookJobNextReconcileAt(context),
             },
             skippedOptionalResources,
           );
         }
-
-        const dateQueryFormat: JunctionDateQueryFormat = isFullUtcDayWindow(window) ? "date" : "datetime";
-        summaries[resource] = await fetchOptionalJunctionResourceRecords(
-          context,
-          "summary",
+        context.logger.warn?.("Junction resource webhook job fell back to the event-type resource.", {
+          provider: "junction",
           resource,
+          resourceCategory: inferredCategory,
+          fallbackResource: fallback.name,
+          fallbackResourceCategory: fallback.category,
+        });
+        effectiveResource = fallback.name;
+        inferredCategory = fallback.category;
+      }
+
+      const directInput = readJunctionDirectResourceJobInput(job, window);
+      if (directInput) {
+        await importJunctionDirectResourceSnapshot(
+          context,
+          [],
+          directInput.windowStart,
+          directInput.windowEnd,
+          directInput.resource,
+          [directInput.record],
+        );
+        return {
+          nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+        };
+      }
+
+      if (inferredCategory === "timeseries") {
+        const sourceProviders = await loadAndProjectSourceProviders();
+        const timeseriesImport = await importTimeseriesPreciseSnapshots(
+          context,
+          sourceProviders,
+          window.windowStart,
+          window.windowEnd,
           skippedOptionalResources,
-          () => client.listSummary({
-            dateQueryFormat,
-            resource,
-            signal: context.signal ?? null,
-            sourceProviderSlug,
-            userId: context.account.externalAccountId,
-            windowStart: window.windowStart,
-            windowEnd: window.windowEnd,
-          }),
+          [effectiveResource],
+          sourceProviderSlug,
+        );
+        if (timeseriesImport.yieldedAt) {
+          return withJunctionSkippedResourceMetadata(
+            context,
+            buildYieldedJunctionJobResult({
+              context,
+              job,
+              windowEnd: window.windowEnd,
+              windowStart: timeseriesImport.yieldedAt,
+            }),
+            skippedOptionalResources,
+          );
+        }
+        return withJunctionSkippedResourceMetadata(
+          context,
+          {
+            nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+          },
+          skippedOptionalResources,
         );
       }
+
+      const dateQueryFormat: JunctionDateQueryFormat = isFullUtcDayWindow(window) ? "date" : "datetime";
+      summaries[effectiveResource] = await fetchOptionalJunctionResourceRecords(
+        context,
+        "summary",
+        effectiveResource,
+        skippedOptionalResources,
+        () => client.listSummary({
+          dateQueryFormat,
+          resource: effectiveResource,
+          signal: context.signal ?? null,
+          sourceProviderSlug,
+          userId: context.account.externalAccountId,
+          windowStart: window.windowStart,
+          windowEnd: window.windowEnd,
+        }),
+      );
     }
 
     const sourceProviders = await loadAndProjectSourceProviders();
@@ -1218,7 +1250,7 @@ export function createJunctionDeviceSyncProvider(
     return withJunctionSkippedResourceMetadata(
       context,
       {
-        nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+        nextReconcileAt: clampWebhookJobNextReconcileAt(context),
       },
       skippedOptionalResources,
     );
@@ -1243,6 +1275,37 @@ export function createJunctionDeviceSyncProvider(
     }
 
     return inferJunctionResourceCategory(null, resource);
+  }
+
+  function resolveConfiguredJunctionEventTypeResource(
+    job: DeviceSyncJobRecord,
+  ): { category: "summary" | "timeseries"; name: string } | null {
+    const eventType = normalizeString(job.payload.eventType);
+    const eventResource = eventType
+      ? normalizeJunctionResourceName(readJunctionWebhookResourceFromEventType(eventType))
+      : null;
+    if (!eventResource) {
+      return null;
+    }
+
+    const category = inferJunctionResourceJobCategory(null, eventResource);
+    return isConfiguredJunctionResource(category, eventResource)
+      ? { category, name: eventResource }
+      : null;
+  }
+
+  // Webhook-driven jobs must never push the scheduled full-resource reconcile
+  // further out: with webhooks arriving more often than the reconcile
+  // interval, returning `now + interval` from every completion starves the
+  // reconcile forever. Keep the earlier of the existing schedule and
+  // `now + interval` (the latter also seeds accounts that have no schedule
+  // yet).
+  function clampWebhookJobNextReconcileAt(context: ProviderJobContext): string {
+    const scheduledAt = normalizeString(context.account.nextReconcileAt);
+    const latestAt = addMilliseconds(context.now, reconcileIntervalMs);
+    return scheduledAt && Date.parse(scheduledAt) <= Date.parse(latestAt)
+      ? scheduledAt
+      : latestAt;
   }
 
   async function verifyAndParseWebhook(
@@ -1630,7 +1693,9 @@ export function createJunctionDeviceSyncProvider(
     const followUp = buildYieldedJunctionFollowUpJob(input);
     return {
       ...(followUp ? { scheduledJobs: [followUp] } : {}),
-      nextReconcileAt: addMilliseconds(input.context.now, reconcileIntervalMs),
+      nextReconcileAt: input.job.kind === "resource"
+        ? clampWebhookJobNextReconcileAt(input.context)
+        : addMilliseconds(input.context.now, reconcileIntervalMs),
     };
   }
 
@@ -4556,7 +4621,14 @@ function inferJunctionWebhookResource(
     ?? normalizeJunctionResourceName(data?.type)
     ?? normalizeJunctionResourceName(data?.data_type);
   const eventResource = normalizeJunctionResourceName(readJunctionWebhookResourceFromEventType(eventType));
-  const resource = explicitResource ?? eventResource;
+  // Enriched payloads can carry record-level discriminators (for example
+  // `resource_type: "sleep_v2"`) that are not Junction resource names. Only
+  // let the payload value override the event-type resource when it is a known
+  // Junction resource; otherwise an enriched `daily.data.sleep.created` event
+  // would build a job for a resource that can never import.
+  const resource = explicitResource && JUNCTION_KNOWN_WEBHOOK_RESOURCE_NAMES.has(explicitResource)
+    ? explicitResource
+    : eventResource ?? explicitResource;
 
   if (!resource) {
     return null;

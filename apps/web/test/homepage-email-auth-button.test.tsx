@@ -8,21 +8,14 @@ type LoginCallbacks = {
 };
 
 const mocks = vi.hoisted(() => ({
-  completeHostedPrivyAuth: vi.fn(),
-  createWallet: vi.fn(),
   loginCallbacks: null as LoginCallbacks | null,
   loginWithCode: vi.fn(),
+  onAuthenticated: vi.fn(),
   sendCode: vi.fn(),
   usePrivy: vi.fn(),
-  useUser: vi.fn(),
 }));
 
 vi.mock("@privy-io/react-auth", () => ({
-  useCreateWallet() {
-    return {
-      createWallet: mocks.createWallet,
-    };
-  },
   useLoginWithEmail(callbacks?: LoginCallbacks) {
     mocks.loginCallbacks = callbacks ?? null;
 
@@ -33,11 +26,6 @@ vi.mock("@privy-io/react-auth", () => ({
     };
   },
   usePrivy: mocks.usePrivy,
-  useUser: mocks.useUser,
-}));
-
-vi.mock("@/src/components/hosted-onboarding/hosted-auth-completion", () => ({
-  completeHostedPrivyAuth: mocks.completeHostedPrivyAuth,
 }));
 
 import { HostedEmailAuthButton } from "@/src/components/hosted-onboarding/hosted-email-auth-button";
@@ -51,21 +39,9 @@ beforeEach(() => {
   mocks.usePrivy.mockReturnValue({
     ready: true,
   });
-  mocks.useUser.mockReturnValue({
-    refreshUser: vi.fn(),
-    user: null,
-  });
   mocks.sendCode.mockResolvedValue(undefined);
   mocks.loginWithCode.mockResolvedValue(undefined);
-  mocks.completeHostedPrivyAuth.mockResolvedValue({
-    payload: {
-      activationPending: false,
-      inviteCode: "invite-code",
-      joinUrl: "/join/invite-code",
-      stage: "active",
-    },
-    redirectUrl: "/home",
-  });
+  mocks.onAuthenticated.mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
@@ -84,6 +60,7 @@ function HomepageEmailAuthButtonHarness() {
     <HostedEmailAuthButton
       active={active}
       onActivate={() => setActive(true)}
+      onAuthenticated={mocks.onAuthenticated}
     />
   );
 }
@@ -96,6 +73,7 @@ function HomepageEmailLoginButtonHarness() {
       active={active}
       disableSignup
       onActivate={() => setActive(true)}
+      onAuthenticated={mocks.onAuthenticated}
     />
   );
 }
@@ -106,6 +84,7 @@ test("HomepageEmailAuthButton prefills an initial email address", async () => {
       active: true,
       initialEmailAddress: " buddy@example.com ",
       inline: true,
+      onAuthenticated: mocks.onAuthenticated,
     }),
     { requireButton: false },
   );
@@ -118,8 +97,8 @@ test("HomepageEmailAuthButton prefills an initial email address", async () => {
   expect(emailInput?.value).toBe("buddy@example.com");
 });
 
-test("HomepageEmailAuthButton expands, sends a code, verifies it, and redirects through the shared homepage completion flow", async () => {
-  const { assign, button, cleanup, container, window } = await renderClientComponent(
+test("HomepageEmailAuthButton expands, sends a code, verifies it, and reports the authenticated session", async () => {
+  const { button, cleanup, container, window } = await renderClientComponent(
     createElement(HomepageEmailAuthButtonHarness),
   );
   cleanupRender = cleanup;
@@ -171,16 +150,13 @@ test("HomepageEmailAuthButton expands, sends a code, verifies it, and redirects 
   expect(mocks.loginWithCode).toHaveBeenCalledWith({
     code: "654321",
   });
-  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith({
+  expect(mocks.onAuthenticated).toHaveBeenCalledWith({
     authMethod: "email",
-    createWallet: mocks.createWallet,
-    refreshUser: expect.any(Function),
-    user: null,
+    completedUser: null,
   });
-  expect(assign).toHaveBeenCalledWith("/home");
 });
 
-test("HomepageEmailAuthButton passes Privy's completed user into shared completion", async () => {
+test("HomepageEmailAuthButton passes Privy's completed user along", async () => {
   const completedUser = {
     linkedAccounts: [
       {
@@ -231,13 +207,10 @@ test("HomepageEmailAuthButton passes Privy's completed user into shared completi
     verifyButton?.dispatchEvent(new Event("click", { bubbles: true }));
   });
 
-  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith(expect.objectContaining({
+  expect(mocks.onAuthenticated).toHaveBeenCalledWith({
     authMethod: "email",
     completedUser,
-    createWallet: mocks.createWallet,
-    refreshUser: expect.any(Function),
-    user: null,
-  }));
+  });
 });
 
 test("HomepageEmailAuthButton uses no-signup mode for login code sends and resends", async () => {

@@ -142,7 +142,8 @@ describe("@murphai/openclaw-plugin", () => {
     expect(skill).toContain(
       "use repeated `vault-cli experiment edit <id> --setup-answer ...` flags for later repairs",
     );
-    expect(skill).toContain("Scheduled first-session prep and first-week support reminders should read");
+    expect(skill).toContain("When a scheduled reminder fires, ground it in current vault state — including what the user already logged today — before sending");
+    expect(skill).toContain("the scheduled assistant has full vault access, so do not bake a fixed read list into the automation");
     expect(skill).toContain("Before any other scheduled missed-log or weekly-digest decision");
   });
 });
