@@ -55,3 +55,18 @@ export const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
   "WHATSAPP_API_BASE_URL",
   "WHATSAPP_GRAPH_VERSION",
 ] as const;
+
+// Source-controlled defaults applied when the deploy environment leaves an
+// optional var unset. These are the values real deploys ship by default, so
+// they must stay aligned with the checked-in wrangler.jsonc scaffold vars
+// (enforced by deploy-automation.test.ts). Production overrides live in the
+// GitHub `production` environment variables.
+export const HOSTED_WORKER_OPTIONAL_VAR_DEFAULTS: Partial<
+  Record<(typeof HOSTED_WORKER_OPTIONAL_VAR_NAMES)[number], string>
+> = {
+  // Device-sync stays worker-only and is serialized into resolvedConfig instead
+  // of forwarding raw provider env into the hosted child runtime.
+  HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram,whatsapp",
+  HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000",
+  HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
+};
