@@ -487,6 +487,10 @@ describe("hosted runner container image contract", () => {
     );
     expect(finalDockerfile).toContain("RUN chmod -R a-w /app");
     expect(finalDockerfile).toContain("  && chmod -R a+rX /app");
+    // Measured 2026-06-10: a baked NODE_COMPILE_CACHE was a no-op for this
+    // bundle (real-bundle module eval ~0.8s even under qemu; cache hits gave
+    // no speedup), so the image intentionally ships no compile-cache warm step.
+    expect(finalDockerfile).not.toContain("NODE_COMPILE_CACHE");
     expect(readLastDockerUser(baseDockerfile)).toBe("runner");
     expect(readDockerUsers(finalDockerfile)).toEqual(["root", "runner"]);
     expect(finalDockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "-s", "--"]');

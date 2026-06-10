@@ -223,6 +223,7 @@ export async function recordHostedIngressAssistantInputStaged(input: {
         workspaceRestoreDoneAt,
       ),
       ...readPhaseBreakdownMergeUpdate(trace.phaseBreakdownJson, input.phaseBreakdown, [
+        "dispatch",
         "restore",
         "boot",
       ]),
@@ -723,7 +724,7 @@ function readEarlierDateUpdate<Field extends string>(
   return { [field]: next } as Partial<Record<Field, Date>>;
 }
 
-type HostedRuntimeLatencyPhaseBreakdownSubKey = "restore" | "boot" | "provider";
+type HostedRuntimeLatencyPhaseBreakdownSubKey = "dispatch" | "restore" | "boot" | "provider";
 
 // Shallow-merges incoming phase-breakdown sub-objects into the existing trace
 // JSON within the SAME update() (no extra request). Idempotent: an already-populated

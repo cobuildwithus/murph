@@ -590,8 +590,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     // await, or I/O: restore timings were returned in-memory by the restore call,
     // and the boot.nodeStartupMs (if any) rode in via options.latencyMilestones.
     const incomingBoot = initialAssistantInputLatencyMilestones.phaseBreakdown?.boot;
+    const incomingDispatch = initialAssistantInputLatencyMilestones.phaseBreakdown?.dispatch;
     initialAssistantInputLatencyMilestones.phaseBreakdown = {
       schemaVersion: 1,
+      ...(incomingDispatch ? { dispatch: incomingDispatch } : {}),
       ...(restored.restoreTiming ? { restore: restored.restoreTiming } : {}),
       boot: {
         ...(incomingBoot ?? {}),
