@@ -1,6 +1,6 @@
 "use client";
 
-import { Mail, MessageCircle, Send } from "lucide-react";
+import { Check, Copy, ExternalLink, Mail, MessageCircle, Send } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -14,7 +14,10 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/src/components/ui/sidebar";
-import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
+import type {
+  MurphContactKind,
+  MurphContactOption,
+} from "@/src/lib/murph-contact-routing";
 import {
   SIDEBAR_NAV_ICON_CLASS,
   SIDEBAR_NAV_ITEM_CLASS,
@@ -32,6 +35,24 @@ export function SidebarChatWithMurphContactDialog({
   options: MurphContactOption[];
 }) {
   const [open, setOpen] = useState(false);
+  const [copiedKind, setCopiedKind] = useState<MurphContactKind | null>(null);
+
+  const copyOptionValue = async (option: MurphContactOption) => {
+    if (!option.copyValue) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(option.copyValue);
+    } catch {
+      return;
+    }
+
+    setCopiedKind(option.kind);
+    setTimeout(() => {
+      setCopiedKind((kind) => (kind === option.kind ? null : kind));
+    }, 2000);
+  };
 
   return (
     <SidebarMenuItem>
@@ -58,22 +79,64 @@ export function SidebarChatWithMurphContactDialog({
             {options.map((option) => {
               const Icon = CONTACT_OPTION_ICONS[option.kind];
               const opensInNewTab = option.target === "_blank";
+              const copied = copiedKind === option.kind;
 
               return (
-                <a
+                <div
                   key={option.kind}
-                  href={option.href}
-                  target={option.target}
-                  rel={option.rel}
-                  aria-label={`Chat with Murph in ${option.label}${
-                    opensInNewTab ? " (opens in a new tab)" : ""
-                  }`}
-                  className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-sm font-medium text-foreground transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  onClick={() => setOpen(false)}
+                  className="rounded-lg border border-border bg-card transition-colors hover:bg-accent"
                 >
-                  <Icon className="size-4 text-muted-foreground" aria-hidden="true" />
-                  {option.label}
-                </a>
+                  <div className="flex items-center">
+                    <a
+                      href={option.href}
+                      target={option.target}
+                      rel={option.rel}
+                      aria-label={`Chat with Murph in ${option.label}${
+                        opensInNewTab ? " (opens in a new tab)" : ""
+                      }`}
+                      className="flex flex-1 items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      onClick={() => setOpen(false)}
+                    >
+                      <Icon className="size-4 text-muted-foreground" aria-hidden="true" />
+                      <span className="flex flex-col">
+                        <span>{option.label}</span>
+                        {option.copyValue ? (
+                          <span className="text-xs font-normal text-muted-foreground">
+                            {option.copyValue}
+                          </span>
+                        ) : null}
+                      </span>
+                    </a>
+                    {option.copyValue ? (
+                      <button
+                        type="button"
+                        className="mr-2 rounded-md p-2 text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-label={
+                          copied ? "Copied" : `Copy ${option.label} contact info`
+                        }
+                        onClick={() => void copyOptionValue(option)}
+                      >
+                        {copied ? (
+                          <Check className="size-4" aria-hidden="true" />
+                        ) : (
+                          <Copy className="size-4" aria-hidden="true" />
+                        )}
+                      </button>
+                    ) : null}
+                  </div>
+                  {option.webmail ? (
+                    <a
+                      href={option.webmail.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 px-4 pb-3 pl-11 text-xs font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => setOpen(false)}
+                    >
+                      Open in {option.webmail.label}
+                      <ExternalLink className="size-3" aria-hidden="true" />
+                    </a>
+                  ) : null}
+                </div>
               );
             })}
           </div>

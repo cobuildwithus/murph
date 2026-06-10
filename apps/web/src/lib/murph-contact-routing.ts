@@ -21,11 +21,18 @@ export interface MurphContactChannels {
 }
 
 export interface MurphContactOption {
+  copyValue?: string | null;
   href: string;
   kind: MurphContactKind;
   label: string;
   rel?: string;
   target?: string;
+  webmail?: MurphWebmailShortcut | null;
+}
+
+export interface MurphWebmailShortcut {
+  href: string;
+  label: string;
 }
 
 export interface MurphContactMessage {
@@ -44,6 +51,7 @@ export function resolveMurphContactOptions(input: {
   message?: MurphContactMessage | null;
   murphEmailAddress?: string | null;
   murphPhoneNumber?: string | null;
+  userEmailAddress?: string | null;
 }): MurphContactOption[] {
   const contactChannels = normalizeMurphContactChannels(input.contactChannels);
   const message = normalizeMurphContactMessage(input.message);
@@ -65,6 +73,7 @@ export function resolveMurphContactOptions(input: {
     options.push(buildMurphEmailContactOption({
       message,
       murphEmailAddress: input.murphEmailAddress ?? null,
+      userEmailAddress: input.userEmailAddress ?? null,
     }));
   }
 
@@ -128,6 +137,46 @@ export function buildMurphEmailHref(input: {
     : `mailto:${address}`;
 }
 
+export function resolveMurphWebmailShortcut(input: {
+  address: string;
+  body?: string | null;
+  subject?: string | null;
+  userEmailAddress?: string | null;
+}): MurphWebmailShortcut | null {
+  const domain = extractEmailDomain(input.userEmailAddress);
+
+  if (!domain) {
+    return null;
+  }
+
+  const provider = WEBMAIL_PROVIDERS.find((candidate) =>
+    candidate.domains.includes(domain),
+  );
+
+  if (!provider) {
+    return null;
+  }
+
+  const url = new URL(provider.composeUrl);
+  url.searchParams.set(provider.params.to, input.address);
+
+  const subject = normalizeOptionalString(input.subject);
+  const body = normalizeOptionalString(input.body);
+
+  if (subject) {
+    url.searchParams.set(provider.params.subject, subject);
+  }
+
+  if (body) {
+    url.searchParams.set(provider.params.body, body);
+  }
+
+  return {
+    href: url.toString(),
+    label: provider.label,
+  };
+}
+
 export function normalizeMurphContactChannels(
   channels: Partial<MurphContactChannels> | null | undefined,
 ): MurphContactChannels {
@@ -143,6 +192,7 @@ function buildMurphTextContactOption(input: {
   murphPhoneNumber: string;
 }): MurphContactOption {
   return {
+    copyValue: input.murphPhoneNumber,
     href: buildMurphSmsHref({
       body: input.message.body,
       murphPhoneNumber: input.murphPhoneNumber,
@@ -175,16 +225,64 @@ function buildMurphTelegramContactOption(input: {
 function buildMurphEmailContactOption(input: {
   message: NormalizedMurphContactMessage;
   murphEmailAddress: string | null;
+  userEmailAddress: string | null;
 }): MurphContactOption {
+  const address = normalizeOptionalString(input.murphEmailAddress) ?? MURPH_CONTACT_EMAIL;
+  const subject = input.message.subject ?? "Hey Murph";
+
   return {
+    copyValue: address,
     href: buildMurphEmailHref({
-      address: input.murphEmailAddress,
+      address,
       body: input.message.body,
-      subject: input.message.subject ?? "Hey Murph",
+      subject,
     }),
     kind: "email",
     label: "Email",
+    webmail: resolveMurphWebmailShortcut({
+      address,
+      body: input.message.body,
+      subject,
+      userEmailAddress: input.userEmailAddress,
+    }),
   };
+}
+
+const WEBMAIL_PROVIDERS: ReadonlyArray<{
+  composeUrl: string;
+  domains: readonly string[];
+  label: string;
+  params: { body: string; subject: string; to: string };
+}> = [
+  {
+    composeUrl: "https://mail.google.com/mail/?view=cm&fs=1",
+    domains: ["gmail.com", "googlemail.com"],
+    label: "Gmail",
+    params: { body: "body", subject: "su", to: "to" },
+  },
+  {
+    composeUrl: "https://outlook.live.com/mail/0/deeplink/compose",
+    domains: ["hotmail.com", "live.com", "msn.com", "outlook.com"],
+    label: "Outlook",
+    params: { body: "body", subject: "subject", to: "to" },
+  },
+  {
+    composeUrl: "https://compose.mail.yahoo.com/",
+    domains: ["yahoo.com", "ymail.com"],
+    label: "Yahoo Mail",
+    params: { body: "body", subject: "subject", to: "to" },
+  },
+];
+
+function extractEmailDomain(value: string | null | undefined): string | null {
+  const normalized = normalizeOptionalString(value)?.toLowerCase() ?? null;
+  const atIndex = normalized?.lastIndexOf("@") ?? -1;
+
+  if (!normalized || atIndex <= 0 || atIndex === normalized.length - 1) {
+    return null;
+  }
+
+  return normalized.slice(atIndex + 1);
 }
 
 interface NormalizedMurphContactMessage {
