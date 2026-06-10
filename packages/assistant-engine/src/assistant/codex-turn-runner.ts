@@ -12,6 +12,7 @@ import type {
   AssistantProviderAttemptMetadata,
   AssistantProviderRequestOutcome,
   AssistantProviderUsage,
+  AssistantProviderUsageDraft,
 } from './providers/types.js'
 import { errorMessage } from './shared.js'
 import {
@@ -96,6 +97,7 @@ type AssistantCodexAttemptOutcome =
       rawEvents: unknown[]
       session: AssistantSession
       usage: AssistantProviderUsage | null
+      additionalUsages: readonly AssistantProviderUsageDraft[]
       usageAttribution: AssistantUsageAttribution | null
     }
   | {
@@ -116,6 +118,7 @@ export type AssistantCodexTurnRecoveryOutcome =
       route: CodexThreadIdentity
       session: AssistantSession
       usage: AssistantProviderUsage | null
+      additionalUsages: readonly AssistantProviderUsageDraft[]
       usageAttribution: AssistantUsageAttribution | null
     }
   | {
@@ -181,6 +184,7 @@ export async function executeCodexTurnWithRecovery(input: {
         route: attemptPlan.route,
         session: attemptOutcome.session,
         usage: attemptOutcome.usage,
+        additionalUsages: attemptOutcome.additionalUsages,
         usageAttribution: attemptOutcome.usageAttribution,
       }
   }
@@ -344,6 +348,7 @@ async function executeAssistantCodexAttempt(input: {
   let failedAttemptProviderTurnId: string | null = null
   let failedAttemptRawEvents: unknown[] = []
   let failedAttemptUsage: AssistantProviderUsage | null = null
+  let failedAttemptAdditionalUsages: readonly AssistantProviderUsageDraft[] = []
   let failedAttemptOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'> | null =
     null
 
@@ -365,6 +370,8 @@ async function executeAssistantCodexAttempt(input: {
       activeTurnId: executionPlan.turnId,
       activeTurnSteering: executionPlan.activeTurnSteering,
       activeTurnSessionId: attemptPlan.session.sessionId,
+      generatedImageUploader:
+        executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
       onProviderRequestStarted: (event) => {
         notifyProviderRequestStartedBestEffort({
           event: {
@@ -375,6 +382,10 @@ async function executeAssistantCodexAttempt(input: {
         })
       },
       provider: attemptPlan.route.provider,
+      providerFetch: executionPlan.executionContext?.hosted?.providerFetch ?? null,
+      providerRequestOrdinal: input.providerRequestOrdinal ?? null,
+      requireGeneratedImageUploader:
+        executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
       workingDirectory: attemptPlan.routePlan.workingDirectory,
       env: attemptEnv,
       developerInstructions: attemptPlan.routePlan.developerInstructions,
@@ -422,6 +433,7 @@ async function executeAssistantCodexAttempt(input: {
       failedAttemptProviderTurnId = attemptResult.providerTurnId ?? null
       failedAttemptRawEvents = [...(attemptResult.rawEvents ?? [])]
       failedAttemptUsage = attemptResult.usage ?? null
+      failedAttemptAdditionalUsages = attemptResult.additionalUsages ?? []
       failedAttemptOutcome =
         attemptResult.providerRequestOutcome ??
         resolveFailedAssistantProviderRequestOutcome({
@@ -507,6 +519,7 @@ async function executeAssistantCodexAttempt(input: {
       rawEvents: failedAttemptRawEvents,
       session,
       usage: failedAttemptUsage,
+      additionalUsages: failedAttemptAdditionalUsages,
       usageAttribution,
     }
   }

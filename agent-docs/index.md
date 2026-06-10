@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-06-08
+Last verified: 2026-06-09
 
 ## Purpose
 
@@ -12,7 +12,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | Path | Purpose | Source of truth | Criticality | Last verified |
 | --- | --- | --- | --- | --- |
 | `README.md` | Human-facing repo overview, install path, public package posture, local/hosted runtime tiers, and verification entrypoints. | Current repository state | High | 2026-05-02 |
-| `ARCHITECTURE.md` | Top-level module map, trust boundaries, persisted-state rules, hosted mailbox/checkpoint ownership, hosted Temporal hard-cut pointer, bounded device-sync mailbox handoff ownership, active-turn targeting lifecycle, control-flow contracts, and package-boundary rules. | Current runtime architecture | High | 2026-06-08 |
+| `ARCHITECTURE.md` | Top-level module map, trust boundaries, persisted-state rules, hosted mailbox/checkpoint ownership, hosted generated-image ownership, hosted Temporal hard-cut pointer, bounded device-sync mailbox handoff ownership, active-turn targeting lifecycle, control-flow contracts, and package-boundary rules. | Current runtime architecture | High | 2026-06-09 |
 | `PRODUCT.md` | Strategic design context: register, users, brand personality, anti-references, design principles. Loaded by the impeccable skill before any UI work. | Product/brand strategic context | High | 2026-04-24 |
 | `DESIGN.md` | Visual design system in Google Stitch DESIGN.md format: color, typography, elevation, components, do's/don'ts, YAML token frontmatter. Loaded by the impeccable skill before any UI work. | Visual design system | High | 2026-04-24 |
 | `docs/architecture.md` | Concise architecture summary, repo-shape overview, package-boundary hygiene notes, and hosted ownership baseline. | Current architectural baseline | High | 2026-05-13 |
@@ -30,8 +30,8 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/FRONTEND.md` | Frontend implementation guidance for `apps/web`, including design-system sources (`PRODUCT.md`, `DESIGN.md`) and UI workflow rules. | Current frontend implementation guidance | Medium | 2026-04-24 |
 | `agent-docs/product-marketing-context.md` | Product marketing context: positioning, audience, differentiation, customer language, brand voice, and the protocol outcome graph. | Product/marketing decisions | High | 2026-05-13 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
-| `agent-docs/RELIABILITY.md` | Reliability guardrails and failure-mode expectations. | Runtime reliability policy | High | 2026-05-13 |
-| `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules, including Cloudflare immediate-deploy Blacksmith secret access. | Security policy | High | 2026-06-02 |
+| `agent-docs/RELIABILITY.md` | Reliability guardrails and failure-mode expectations. | Runtime reliability policy | High | 2026-06-09 |
+| `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules, including Cloudflare immediate-deploy Blacksmith secret access and Worker-owned hosted generated-image uploads. | Security policy | High | 2026-06-09 |
 | `agent-docs/compliance/README.md` | Compliance reference-pack overview, launch minimums, and official source links for consumer health-data obligations. | Compliance docs index | High | 2026-04-29 |
 | `agent-docs/compliance/ftc-hbnr-incident-plan.md` | Internal incident playbook for suspected FTC HBNR breaches, unauthorized disclosures, vendor incidents, and tracking disclosures involving health data. | Health-data incident response | High | 2026-04-29 |
 | `agent-docs/compliance/ftc-hbnr-notice-templates.md` | Counsel-reviewed template starting points for consumer, FTC, media, vendor, and internal incident notices. | Health-data notice workflow | High | 2026-04-29 |
@@ -67,8 +67,8 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/prompts/` | Reusable review and audit prompt templates for the completion workflow, including the prompt-primary `prompt-review` pass. | Workflow prompt library | Low | 2026-06-07 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke audit prompts for the major repo seams used in broad risk and simplification review sweeps. | Seam-audit prompt library | Low | 2026-04-23 |
 | `apps/web/README.md` | Hosted web control-plane overview, env/runtime contract, hosted AI usage allowance ownership, Temporal reconciliation-facts boundary, and app-source/testkit ownership split. | `apps/web/**` | Medium | 2026-06-03 |
-| `apps/cloudflare/README.md` | Hosted execution-plane overview and runtime contract. | `apps/cloudflare/**` | Medium | 2026-05-11 |
-| `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, including immediate Blacksmith deploy handoff validation and no signed usage-allowance start secret. | Hosted deploy flow | Medium | 2026-05-21 |
+| `apps/cloudflare/README.md` | Hosted execution-plane overview and runtime contract, including Worker-owned hosted generated-image upload config. | `apps/cloudflare/**` | Medium | 2026-06-09 |
+| `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, including immediate Blacksmith deploy handoff validation, hosted generated-image upload config, and no signed usage-allowance start secret. | Hosted deploy flow | Medium | 2026-06-09 |
 | `packages/assistantd/README.md` | Local assistant daemon boundary and control-plane contract. | `packages/assistantd/**` | Medium | 2026-03-30 |
 | `packages/assistant-runtime/README.md` | Headless hosted runtime surface consumed by Cloudflare. | `packages/assistant-runtime/**` | Medium | 2026-04-30 |
 | `packages/device-syncd/README.md` | Local wearable sync runtime boundary and env contract. | `packages/device-syncd/**` | Medium | 2026-04-02 |

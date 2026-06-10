@@ -24,8 +24,8 @@ const ASSISTANT_USAGE_RAW_TOKEN_KEYS = new Set<string>([
   "total_tokens",
 ]);
 const ASSISTANT_USAGE_RAW_DETAIL_TOKEN_KEYS = new Map<string, ReadonlySet<string>>([
-  ["input_tokens_details", new Set(["cached_tokens"])],
-  ["output_tokens_details", new Set(["reasoning_tokens"])],
+  ["input_tokens_details", new Set(["cached_tokens", "image_tokens", "text_tokens"])],
+  ["output_tokens_details", new Set(["image_tokens", "reasoning_tokens", "text_tokens"])],
   ["prompt_tokens_details", new Set(["cached_tokens"])],
 ]);
 

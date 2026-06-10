@@ -136,9 +136,13 @@ test("assistant usage parsing allows only token-count raw usage metadata", () =>
         input_tokens: 10,
         input_tokens_details: {
           cached_tokens: 2,
+          image_tokens: 5,
+          text_tokens: 8,
         },
         output_tokens_details: {
+          image_tokens: 9,
           reasoning_tokens: 3,
+          text_tokens: 1,
         },
         prompt_tokens_details: {
           cached_tokens: 4,
@@ -154,9 +158,13 @@ test("assistant usage parsing allows only token-count raw usage metadata", () =>
       input_tokens: 10,
       input_tokens_details: {
         cached_tokens: 2,
+        image_tokens: 5,
+        text_tokens: 8,
       },
       output_tokens_details: {
+        image_tokens: 9,
         reasoning_tokens: 3,
+        text_tokens: 1,
       },
       prompt_tokens_details: {
         cached_tokens: 4,
@@ -307,7 +315,7 @@ test("assistant usage credential source resolves against the hosted user env sna
     resolveAssistantUsageCredentialSource({
       apiKeyEnv: "OPENAI_API_KEY",
       effectiveEnv: {
-        OPENAI_API_KEY: "sk-user",
+        OPENAI_API_KEY: "member-api-key",
       },
       provider: "codex-cli",
       userEnvKeys: ["OPENAI_API_KEY"],

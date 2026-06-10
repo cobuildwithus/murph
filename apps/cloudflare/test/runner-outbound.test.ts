@@ -78,6 +78,7 @@ import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../src/runtime-mailbox-payload-decode-contract.ts";
 import {
+  HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
 } from "../src/runner-effects-contract.ts";
@@ -1722,6 +1723,90 @@ describe("handleRunnerOutboundRequest", () => {
       userId: "member_123",
     });
     expect(emailSendMock).toHaveBeenCalledOnce();
+  });
+
+  it("uploads generated images through the write-fenced results port", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const pngBytes = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47,
+      0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    const fetchMock = vi.fn<typeof fetch>(async (
+      request,
+      init,
+    ) => {
+      expect(String(request)).toBe(
+        "https://api.cloudflare.com/client/v4/accounts/account_123/images/v1",
+      );
+      expect(init?.method).toBe("POST");
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer images-token");
+      expect(init?.body).toBeInstanceOf(FormData);
+      const form = init?.body as FormData;
+      expect(form.get("requireSignedURLs")).toBe("false");
+      expect(form.get("metadata")).toBe(JSON.stringify({
+        model: "gpt-image-2",
+        promptHash: "hash_123",
+        schema: "murph.generated-image.v1",
+      }));
+      const file = form.get("file");
+      expect(file).toBeInstanceOf(File);
+      expect((file as File).name).toBe("generated.png");
+      expect((file as File).type).toBe("image/png");
+
+      return new Response(JSON.stringify({
+        result: {
+          variants: [
+            "https://imagedelivery.net/account_123/image_123/public",
+          ],
+        },
+        success: true,
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH}`, {
+        body: JSON.stringify({
+          alt: "Generated product image",
+          bytesBase64: Buffer.from(pngBytes).toString("base64"),
+          contentType: "image/png",
+          filename: "generated.png",
+          metadata: {
+            model: "gpt-image-2",
+            promptHash: "hash_123",
+            schema: "murph.generated-image.v1",
+          },
+          source: "gpt-image-2",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        CLOUDFLARE_IMAGES_ACCOUNT_ID: "account_123",
+        CLOUDFLARE_IMAGES_API_KEY: "images-token",
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(200);
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    await expect(response.json()).resolves.toEqual({
+      media: {
+        alt: "Generated product image",
+        kind: "image",
+        source: "gpt-image-2",
+        url: "https://imagedelivery.net/account_123/image_123/public",
+      },
+    });
   });
 
   it("rejects email sends when the live invocation lease is stale", async () => {

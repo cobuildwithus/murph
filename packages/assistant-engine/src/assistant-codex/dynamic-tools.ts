@@ -4,10 +4,23 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
+import type {
+  AssistantHostedGeneratedImageUploader,
+} from '../assistant/execution-context.js'
+import type {
+  AssistantProviderUsageDraft,
+} from '../assistant/providers/types.js'
 import { normalizeAssistantResponseMediaList } from '../assistant/response-media.js'
+import type {
+  AssistantProgressDelivery,
+} from '../assistant/turn-progress.js'
 import type {
   CodexRpcMessage,
 } from './app-server-rpc.js'
+import {
+  executeGenerateImageTool,
+  type GenerateImageToolArgs,
+} from './generate-image-tool.js'
 
 export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
@@ -80,10 +93,56 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
   },
 } as const
 
+export const MURPH_GENERATE_IMAGE_TOOL = {
+  namespace: 'murph',
+  name: 'generate_image',
+  description:
+    'Generate one image with GPT Image 2. Hosted runs attach the generated image to the final response; local runs save it under CODEX_HOME/generated_images.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      prompt: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 4000,
+      },
+      size: {
+        type: 'string',
+        enum: ['1024x1024', '1024x1536', '1536x1024'],
+        default: '1024x1024',
+      },
+      quality: {
+        type: 'string',
+        enum: ['low', 'medium', 'high'],
+        default: 'medium',
+      },
+      outputFormat: {
+        type: 'string',
+        enum: ['webp', 'png', 'jpeg'],
+        default: 'webp',
+      },
+      alt: {
+        anyOf: [
+          { type: 'string', minLength: 1, maxLength: 500 },
+          { type: 'null' },
+        ],
+        default: null,
+      },
+    },
+    required: ['prompt'],
+  },
+} as const
+
 export const MURPH_DYNAMIC_TOOLS = [
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
+  MURPH_GENERATE_IMAGE_TOOL,
 ] as const
+
+export function listMurphDynamicToolNames(): string[] {
+  return MURPH_DYNAMIC_TOOLS.map((tool) => `${tool.namespace}.${tool.name}`)
+}
 
 const CODEX_DYNAMIC_TOOL_CALL_METHOD = 'item/tool/call'
 
@@ -92,6 +151,35 @@ const attachResponseMediaArgumentsSchema = z
     media: z.array(z.unknown()).max(40),
   })
   .strict()
+
+const generateImageArgumentsSchema = z
+  .object({
+    alt: z.string().trim().min(1).max(500).nullable().default(null),
+    outputFormat: z.enum(['webp', 'png', 'jpeg']).default('webp'),
+    prompt: z.string().trim().min(1).max(4000),
+    quality: z.enum(['low', 'medium', 'high']).default('medium'),
+    size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
+  })
+  .strict()
+
+export type MurphDynamicToolResponseMediaPatch = {
+  media: AssistantResponseMedia[]
+  op: 'append' | 'replace'
+}
+
+type MurphDynamicToolRpcResult = {
+  success: boolean
+  contentItems: Array<{
+    type: 'inputText'
+    text: string
+  }>
+}
+
+export interface MurphDynamicToolExecutionResult {
+  responseMediaPatch?: MurphDynamicToolResponseMediaPatch
+  rpcResult: MurphDynamicToolRpcResult
+  usageDraft?: AssistantProviderUsageDraft | null
+}
 
 interface ParsedDynamicToolCallRequest {
   arguments: unknown
@@ -103,6 +191,13 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'attach-response-media'
       media: AssistantResponseMedia[]
+    }
+  | {
+      kind: 'generate-image'
+      args: GenerateImageToolArgs
+    }
+  | {
+      kind: 'invalid-generate-image-arguments'
     }
   | {
       kind: 'invalid-response-media-arguments'
@@ -167,12 +262,138 @@ export function readMurphDynamicToolRequest(
         media: parsed.media,
       }
     }
+    case MURPH_GENERATE_IMAGE_TOOL.name: {
+      const parsed = parseGenerateImageArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-generate-image-arguments',
+        }
+      }
+
+      return {
+        kind: 'generate-image',
+        args: parsed.args,
+      }
+    }
   }
 
   return {
     kind: 'unsupported-dynamic-tool',
     namespace: request.namespace,
     tool: request.tool,
+  }
+}
+
+export async function executeMurphDynamicToolRequest(input: {
+  abortSignal?: AbortSignal | null
+  codexHome?: string | null
+  env: NodeJS.ProcessEnv
+  fetchImpl: typeof fetch
+  hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
+  nextUsageOrdinal: () => number
+  progressDelivery: AssistantProgressDelivery | null
+  request: MurphDynamicToolRequest
+  requireHostedGeneratedImageUploader?: boolean | null
+}): Promise<MurphDynamicToolExecutionResult> {
+  switch (input.request.kind) {
+    case 'invalid-generate-image-arguments':
+      return toolTextResult(false, 'invalid image generation arguments')
+    case 'invalid-progress-arguments':
+      return toolTextResult(false, 'invalid progress update arguments')
+    case 'invalid-response-media-arguments':
+      return toolTextResult(false, 'invalid response media arguments')
+    case 'unsupported-dynamic-tool':
+      return toolTextResult(false, 'unsupported dynamic tool')
+    case 'attach-response-media':
+      return {
+        ...toolTextResult(
+          true,
+          input.request.media.length === 0
+            ? 'response media cleared'
+            : `${input.request.media.length} response image${input.request.media.length === 1 ? '' : 's'} attached`,
+        ),
+        responseMediaPatch: {
+          media: input.request.media,
+          op: 'replace',
+        },
+      }
+    case 'send-progress-update':
+      return await executeProgressUpdateTool({
+        progressDelivery: input.progressDelivery,
+        text: input.request.text,
+      })
+    case 'generate-image': {
+      const result = await executeGenerateImageTool({
+        abortSignal: input.abortSignal ?? null,
+        args: input.request.args,
+        codexHome: input.codexHome ?? null,
+        env: input.env,
+        fetchImpl: input.fetchImpl,
+        hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
+        providerRequestOrdinal: input.nextUsageOrdinal(),
+        requireHostedGeneratedImageUploader:
+          input.requireHostedGeneratedImageUploader ?? false,
+      })
+      return {
+        ...(result.responseMedia && result.responseMedia.length > 0
+          ? {
+              responseMediaPatch: {
+                media: result.responseMedia,
+                op: 'append' as const,
+              },
+            }
+          : {}),
+        rpcResult: {
+          success: result.rpcSuccess,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: result.rpcText,
+            },
+          ],
+        },
+        usageDraft: result.usageDraft ?? null,
+      }
+    }
+  }
+}
+
+async function executeProgressUpdateTool(input: {
+  progressDelivery: AssistantProgressDelivery | null
+  text: string
+}): Promise<MurphDynamicToolExecutionResult> {
+  if (!input.progressDelivery) {
+    return toolTextResult(false, 'progress updates are not available for this turn')
+  }
+  try {
+    const result = await input.progressDelivery.send(input.text, { source: 'model' })
+    if (result.kind === 'sent') {
+      return toolTextResult(true, 'progress update sent')
+    }
+    if (result.kind === 'failed') {
+      return toolTextResult(false, 'progress update failed during best-effort delivery')
+    }
+    if (result.reason === 'limit') {
+      return toolTextResult(false, 'progress update skipped: progress update limit reached')
+    }
+    if (result.reason === 'duplicate') {
+      return toolTextResult(false, 'progress update skipped: duplicate progress update')
+    }
+    return toolTextResult(false, 'progress update skipped: empty progress update')
+  } catch {
+    return toolTextResult(false, 'progress update failed during best-effort delivery')
+  }
+}
+
+function toolTextResult(
+  success: boolean,
+  text: string,
+): MurphDynamicToolExecutionResult {
+  return {
+    rpcResult: {
+      success,
+      contentItems: [{ type: 'inputText', text }],
+    },
   }
 }
 
@@ -221,6 +442,19 @@ function parseSendProgressUpdateArguments(
   return {
     ok: true,
     text,
+  }
+}
+
+function parseGenerateImageArguments(
+  value: unknown,
+): { ok: true; args: GenerateImageToolArgs } | { ok: false } {
+  const parsed = generateImageArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return { ok: false }
+  }
+  return {
+    args: parsed.data,
+    ok: true,
   }
 }
 

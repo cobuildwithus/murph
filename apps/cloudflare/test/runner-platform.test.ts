@@ -66,6 +66,9 @@ import {
 import {
   buildHostedRunnerContainerEnv,
 } from "../src/runner-env.ts";
+import {
+  HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
+} from "../src/runner-effects-contract.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
@@ -2843,6 +2846,78 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
     expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     expect(request.method).toBe("GET");
+  });
+
+  it("routes generated image uploads through the write-fenced effects port", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        media: {
+          alt: "Generated image",
+          kind: "image",
+          source: "gpt-image-2",
+          url: "https://imagedelivery.net/account/image/public",
+        },
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    });
+
+    await expect(platform.generatedImageUploader?.uploadGeneratedImage({
+      alt: "Generated image",
+      bytes: new Uint8Array([
+        0x89, 0x50, 0x4e, 0x47,
+        0x0d, 0x0a, 0x1a, 0x0a,
+      ]),
+      contentType: "image/png",
+      filename: "generated.png",
+      metadata: {
+        model: "gpt-image-2",
+        promptHash: "hash_123",
+        schema: "murph.generated-image.v1",
+      },
+      source: "gpt-image-2",
+    })).resolves.toEqual({
+      alt: "Generated image",
+      kind: "image",
+      source: "gpt-image-2",
+      url: "https://imagedelivery.net/account/image/public",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "generated image upload");
+    expect(request.url).toBe(
+      `http://results.worker${HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH}`,
+    );
+    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
+    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
+    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+    expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
+    expect(request.method).toBe("POST");
+    await expect(request.json()).resolves.toMatchObject({
+      alt: "Generated image",
+      contentType: "image/png",
+      filename: "generated.png",
+      metadata: {
+        model: "gpt-image-2",
+        promptHash: "hash_123",
+        schema: "murph.generated-image.v1",
+      },
+      source: "gpt-image-2",
+    });
   });
 
   it("attaches web-control ports and routes them through internal virtual hosts", async () => {
