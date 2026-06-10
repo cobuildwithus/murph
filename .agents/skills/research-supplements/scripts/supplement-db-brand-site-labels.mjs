@@ -383,11 +383,21 @@ function appendSearchValue(parts, value, maxLength = 240) {
   }
 }
 
+const RAW_INGREDIENT_TEXT_LABEL_PATTERN = /^\s*(?:other\s+)?ingredients?\s*:\s*/iu;
+const PARENTHETICAL_AMOUNT_PATTERN = /\s*\([^()]*\d[^()]*(?:mg|mcg|µg|ug|g|iu|ml|kcal|kj|cfu|%)[^()]*\)/giu;
+
+function cleanRawIngredientText(value) {
+  return String(value)
+    .replace(RAW_INGREDIENT_TEXT_LABEL_PATTERN, "")
+    .replace(PARENTHETICAL_AMOUNT_PATTERN, "")
+    .replace(/\.\s*$/u, "");
+}
+
 function appendIngredientNames(parts, value) {
   if (value === null || value === undefined) return;
 
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    appendSearchValue(parts, value);
+    appendSearchValue(parts, cleanRawIngredientText(value));
     return;
   }
 
@@ -411,6 +421,8 @@ function appendIngredientNames(parts, value) {
 function appendVariantSummary(parts, variant) {
   if (!variant || typeof variant !== "object" || Array.isArray(variant)) return;
   for (const key of ["title", "name", "sku", "barcode", "upc"]) {
+    // Shopify's placeholder variant title is noise, not identity.
+    if ((key === "title" || key === "name") && String(variant[key] ?? "").trim().toLowerCase() === "default title") continue;
     appendSearchValue(parts, variant[key]);
   }
 }

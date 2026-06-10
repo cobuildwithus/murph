@@ -41,7 +41,15 @@ Success criteria:
 
 ## State
 
-Read-only blocker hardening and spot checks complete; DB write deferred.
+Backfill written: 4,813 `brand_site` rows upserted with user approval on 2026-06-09.
+
+Write-pass summary:
+
+- An independent stress test of the 4,868-candidate artifact (exact-token evidence anchoring under both decimal locales, FDA daily-value cross-checks, name-contamination scans) surfaced ~30 hard defects: evidence-inherited unit shifts (e.g. Chromium 200 mg where 571% DV proves 200 mcg), daily values stored as fractions instead of percent strings, directions/FAQ text as ingredient names, one OCR-mangled fraction serving ("14 Teaspoon"), and composite slash amounts.
+- Five production gates were added to the repair preview with regression tests: `daily_value_unit_mismatch`, `malformed_daily_value`, `directions_like_ingredient_name`, `composite_amount_value`, `implausible_spoon_serving_size`.
+- Regenerated preview: 4,868 → 4,817 `automatedBackfillReady` (51 evicted by the new gates; all other parser statuses unchanged). Independent re-test of the new artifact showed zero rows in any gated defect class.
+- Four residual rows flagged by the independent checker (one toxic-dose unit shift with no DV to cross-check, two buried concatenated/duplicate rows, one translated-name row) were excluded from the write batch; 4,813 rows were dry-run-verified (0 production-blocked, 0 duplicates, 0 oversized search text) and upserted.
+- Post-write verification: brand_site row count unchanged at 25,735 (updates only); rows with structured `ingredientRows` 7,063 → 11,259; average `search_text` length 1,541 → 1,443.
 
 Findings:
 

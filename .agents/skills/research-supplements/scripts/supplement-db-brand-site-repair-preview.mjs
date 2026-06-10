@@ -354,6 +354,95 @@ function hasConflictingDuplicateIngredientRows(rows) {
   return false;
 }
 
+const DAILY_VALUE_REFERENCE_MCG = new Map([
+  ["chromium", 35],
+  ["selenium", 55],
+  ["iodine", 150],
+  ["molybdenum", 45],
+  ["vitamin b12", 2.4],
+  ["vitamin b-12", 2.4],
+  ["biotin", 30],
+  ["vitamin d", 20],
+  ["vitamin k", 120],
+  ["folate", 400],
+  ["folic acid", 400],
+  ["zinc", 11000],
+  ["copper", 900],
+  ["manganese", 2300],
+  ["vitamin c", 90000],
+  ["riboflavin", 1300],
+  ["thiamin", 1200],
+  ["niacin", 16000],
+  ["vitamin b6", 1700],
+  ["vitamin b-6", 1700],
+]);
+
+const DAILY_VALUE_UNIT_TO_MCG = new Map([
+  ["mcg", 1],
+  ["ug", 1],
+  ["µg", 1],
+  ["mcg rae", 1],
+  ["mcg dfe", 1],
+  ["mg", 1000],
+  ["g", 1000000],
+]);
+
+function parseLocaleAmountNumber(value) {
+  const text = cleanValue(value).replace(/^[<>≤≥~\s]+/u, "").replace(/\s+/gu, "");
+  const normalized = text.replace(/,(?=\d{3}(?:\D|$))/gu, "").replace(/,/gu, ".");
+  const match = normalized.match(/\d+(?:\.\d+)?/u);
+  return match ? Number.parseFloat(match[0]) : Number.NaN;
+}
+
+function hasDailyValueUnitMismatch(rows) {
+  return flattenIngredientRows(rows).some((row) => {
+    const dailyValue = cleanValue(row?.dailyValue);
+    if (!dailyValue || !dailyValue.includes("%") || !/\d/u.test(dailyValue)) return false;
+    const percent = parseLocaleAmountNumber(dailyValue);
+    const amount = parseLocaleAmountNumber(row?.amount);
+    const unitFactor = DAILY_VALUE_UNIT_TO_MCG.get(String(row?.unit ?? "").trim().toLowerCase());
+    if (!Number.isFinite(percent) || percent <= 0 || !Number.isFinite(amount) || amount <= 0 || !unitFactor) return false;
+    const name = cleanValue(row?.name).toLowerCase();
+    for (const [nutrient, referenceMcg] of DAILY_VALUE_REFERENCE_MCG) {
+      if (!name.includes(nutrient)) continue;
+      const impliedMcg = (percent / 100) * referenceMcg;
+      const statedMcg = amount * unitFactor;
+      const ratio = statedMcg / impliedMcg;
+      return ratio >= 50 || ratio <= 1 / 50;
+    }
+    return false;
+  });
+}
+
+function hasMalformedDailyValue(rows) {
+  return flattenIngredientRows(rows).some((row) => {
+    const dailyValue = cleanValue(row?.dailyValue);
+    return dailyValue.length > 0 && /\d/u.test(dailyValue) && !dailyValue.includes("%");
+  });
+}
+
+const DIRECTIONS_LIKE_NAME_PATTERN = /(?:^|\s)(?:take|consume|dissolve|swallow|do not exceed|suggested use|directions?|maintenance phase|loading phase|servings? per|how (?:much|many)|when should|store in|keep out)\b|\?/iu;
+
+function hasDirectionsLikeIngredientName(rows) {
+  return flattenIngredientRows(rows).some((row) => {
+    const name = cleanValue(row?.name);
+    return name.length > 0 && DIRECTIONS_LIKE_NAME_PATTERN.test(name);
+  });
+}
+
+function hasCompositeAmountValue(rows) {
+  return flattenIngredientRows(rows).some((row) => /\d,\d{3}\/\d/u.test(cleanValue(row?.amount)));
+}
+
+function hasImplausibleSpoonServingSize(servingSizes) {
+  if (!Array.isArray(servingSizes)) return false;
+  return servingSizes.some((servingSize) => {
+    const text = cleanValue(typeof servingSize === "string" ? servingSize : servingSize?.text);
+    const match = text.match(/^(\d{2,})\s*(?:tea|table)spoons?\b/iu);
+    return Boolean(match) && Number.parseFloat(match[1]) >= 10;
+  });
+}
+
 function hasOnlyInactiveNutritionRows(row, rows) {
   const ingredientRows = flattenIngredientRows(rows);
   if (ingredientRows.length === 0) return false;
@@ -515,6 +604,21 @@ function repairPreviewForRow(row) {
   }
   if (hasConflictingDuplicateIngredientRows(draftProductionCandidate?.label?.ingredientRows)) {
     productionReviewBlockers.push("conflicting_duplicate_ingredient_rows");
+  }
+  if (hasDailyValueUnitMismatch(draftProductionCandidate?.label?.ingredientRows)) {
+    productionReviewBlockers.push("daily_value_unit_mismatch");
+  }
+  if (hasMalformedDailyValue(draftProductionCandidate?.label?.ingredientRows)) {
+    productionReviewBlockers.push("malformed_daily_value");
+  }
+  if (hasDirectionsLikeIngredientName(draftProductionCandidate?.label?.ingredientRows)) {
+    productionReviewBlockers.push("directions_like_ingredient_name");
+  }
+  if (hasCompositeAmountValue(draftProductionCandidate?.label?.ingredientRows)) {
+    productionReviewBlockers.push("composite_amount_value");
+  }
+  if (hasImplausibleSpoonServingSize(draftProductionCandidate?.label?.servingSizes)) {
+    productionReviewBlockers.push("implausible_spoon_serving_size");
   }
   if (wouldShrinkExistingIngredientRows(label, draftProductionCandidate?.label)) {
     productionReviewBlockers.push("existing_ingredient_rows_would_decrease");

@@ -97,6 +97,31 @@ describe("supplement brand-site DB helper", () => {
     assert.doesNotMatch(searchText, /rawPageText/u);
   });
 
+  test("search text strips raw other-ingredients labels, embedded amounts, and placeholder variant titles", () => {
+    const searchText = buildSearchText({
+      source: "example-brand",
+      sourceId: "preworkout",
+      dataOrigin: "brand_site",
+      dataOriginId: "example-brand:preworkout",
+      name: "Example Pre-Workout",
+      brand: "Example Brand",
+      upc: "810030518488",
+      dataOriginUrl: "https://example.test/products/preworkout",
+      label: {
+        ingredientRows: [{ name: "Beta-Alanine", amount: "1.6", unit: "g" }],
+        otherIngredients: "Other Ingredients: Natural Flavor, Calcium Silicate (25mg), Silicon Dioxide (25mg).",
+        variant: { title: "Default Title", sku: "FGPW700130608" },
+      },
+    });
+
+    assert.match(searchText, /Natural Flavor/u);
+    assert.match(searchText, /Calcium Silicate/u);
+    assert.match(searchText, /FGPW700130608/u);
+    assert.doesNotMatch(searchText, /Other Ingredients:/u);
+    assert.doesNotMatch(searchText, /25mg/u);
+    assert.doesNotMatch(searchText, /Default Title/u);
+  });
+
   test("normalization ignores caller-provided broad searchText", () => {
     const normalized = normalizeItem({
       id: "example-brand:magnesium",
@@ -2043,6 +2068,125 @@ describe("supplement brand-site repair preview", () => {
     assert.deepEqual(preview.parserBlockers, []);
     assert.equal(preview.parsedIngredientRows, 1);
     assert.deepEqual(preview.removableFieldCandidates, ["bodyText"]);
+  });
+
+  test("repair preview blocks unit-shifted amounts that contradict the stated daily value", () => {
+    // Real defect class: brand page prints "Chromium 200 mg 571%" where 571%
+    // of the 35 mcg DV proves the amount is 200 mcg, not 200 mg.
+    const preview = repairPreviewForRow({
+      id: "example-brand:chromium-unit-shift",
+      dataOriginId: "example-brand:chromium-unit-shift",
+      dataOriginUrl: "https://example.test/products/chromium",
+      name: "Example Chromium Picolinate 200 mcg",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "chromium-unit-shift",
+        factsText: "Supplement Facts Serving Size 1 Tablet Amount Per Serving Chromium (as chromium picolinate) 200 mg 571%",
+      },
+    });
+
+    assert.equal(preview.automatedBackfillReady, false);
+    assert.ok(preview.parserBlockers.includes("daily_value_unit_mismatch"));
+  });
+
+  test("repair preview accepts consistent daily values across locale comma formats", () => {
+    // 1,385% of the riboflavin 1.3 mg DV is ~18 mg — consistent, must not block.
+    const preview = repairPreviewForRow({
+      id: "example-brand:riboflavin-consistent",
+      dataOriginId: "example-brand:riboflavin-consistent",
+      dataOriginUrl: "https://example.test/products/riboflavin",
+      name: "Example Riboflavin",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "riboflavin-consistent",
+        factsText: "Supplement Facts Serving Size 1 Capsule Amount Per Serving Riboflavin 18 mg 1,385%",
+      },
+    });
+
+    assert.ok(!preview.parserBlockers.includes("daily_value_unit_mismatch"));
+    assert.ok(!preview.parserBlockers.includes("malformed_daily_value"));
+  });
+
+  test("repair preview blocks numeric daily values that are not percent strings", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:fraction-daily-value",
+      dataOriginId: "example-brand:fraction-daily-value",
+      dataOriginUrl: "https://example.test/products/fraction-daily-value",
+      name: "Example Zinc",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "fraction-daily-value",
+        ingredientRows: [{ name: "Zinc", amount: "20", unit: "mg", dailyValue: "1.82" }],
+        servingSizes: ["1 Capsule"],
+        factsText: "Supplement Facts Serving Size 1 Capsule Amount Per Serving Zinc 20 mg",
+      },
+    });
+
+    assert.equal(preview.automatedBackfillReady, false);
+    assert.ok(preview.parserBlockers.includes("malformed_daily_value"));
+  });
+
+  test("repair preview blocks directions-like ingredient names", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:directions-name",
+      dataOriginId: "example-brand:directions-name",
+      dataOriginUrl: "https://example.test/products/directions-name",
+      name: "Example Creatine",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "directions-name",
+        ingredientRows: [
+          { name: "Creatine Monohydrate", amount: "5", unit: "g" },
+          { name: "Do not exceed", amount: "5", unit: "g" },
+        ],
+        servingSizes: ["1 Scoop"],
+        factsText: "Supplement Facts Serving Size 1 Scoop Amount Per Serving Creatine Monohydrate 5 g",
+      },
+    });
+
+    assert.equal(preview.automatedBackfillReady, false);
+    assert.ok(preview.parserBlockers.includes("directions_like_ingredient_name"));
+  });
+
+  test("repair preview blocks composite slash amounts and mangled spoon servings", () => {
+    const preview = repairPreviewForRow({
+      id: "example-brand:composite-amount",
+      dataOriginId: "example-brand:composite-amount",
+      dataOriginUrl: "https://example.test/products/composite-amount",
+      name: "Example Inositol Powder",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      searchText: "",
+      label: {
+        source: "example-brand",
+        sourceId: "composite-amount",
+        ingredientRows: [{ name: "Vitamin D (as D3 Cholecalciferol)", amount: "1,000/25", unit: "mcg" }],
+        // OCR-mangled "1/4 Teaspoon" that lost its fraction slash
+        servingSizes: ["14 Teaspoon (850 mg)"],
+        factsText: "Supplement Facts Serving Size 1/4 Teaspoon (850 mg) Amount Per Serving Vitamin D (as D3 Cholecalciferol) 1,000 IU 25 mcg",
+      },
+    });
+
+    assert.equal(preview.automatedBackfillReady, false);
+    assert.ok(preview.parserBlockers.includes("composite_amount_value"));
+    assert.ok(preview.parserBlockers.includes("implausible_spoon_serving_size"));
   });
 
   test("repair preview keeps row source identity when label source stores refetch provenance", () => {
