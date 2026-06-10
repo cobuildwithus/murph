@@ -410,13 +410,13 @@ describe('assistant consumption lookup guidance', () => {
       'If the catalog has no useful match, say so plainly and keep the suggestion conservative',
     )
     expect(prompt).toContain(
-      'When walking the user through exercises, therapy-style drills, or multi-step movement protocols',
+      'Size exercise and session guidance to what is new',
     )
     expect(prompt).toContain(
-      'default to one exercise at a time',
+      'a short reference once the routine is known',
     )
     expect(prompt).toContain(
-      'continue only after the user asks, confirms completion, or explicitly wants the full set',
+      'never assign reporting homework',
     )
   })
 })
@@ -643,7 +643,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'dac07877c91adb5eae7009730a16b45e43a1fb2939e00982429c5cd6929a4714',
+      '759665a48561e7f02b639332b746e82ed4eb754ff16d9be65d4177d68e3f8da4',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -906,13 +906,16 @@ describe('assistant notification decision guidance', () => {
     expect(prompt).toContain(
       '`vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --date <sessionDate> --format json` is the authoritative skip signal',
     )
+    expect(prompt).toContain(
+      'for pre-bed sessions, the session date is the prior local day',
+    )
 
     // Consolidated skip / send conditions (no per-type triplication).
     expect(prompt).toContain(
       'Skip when the run is inactive, reminders were declined or moved, the day\'s session or log is already complete, the plan no longer matches, the support window ended, or the user already did the thing.',
     )
     expect(prompt).toContain(
-      'Send only when due logic says notify, missing data blocks interpretation, a review is due, or safety needs outreach.',
+      'Send only when the reminder\'s purpose still holds: the due check says notify for checks it governs, scheduled prep or support is still ahead, missing data blocks interpretation, a review is due, or safety needs outreach.',
     )
 
     // Good-message guidance as outcome, not an enumerated per-type list.
@@ -921,6 +924,12 @@ describe('assistant notification decision guidance', () => {
     )
     expect(prompt).toContain('A first-timer gets a compact walkthrough, said once')
     expect(prompt).toContain('not a re-explanation of a plan they know')
+    expect(prompt).toContain(
+      'Message text embedded in the instructions is context from when it was scheduled, not words to recite',
+    )
+    expect(prompt).toContain(
+      'compose fresh from current state unless the user dictated the exact wording, and never assign the user a reporting chore',
+    )
 
     // The two true invariants from the incident.
     expect(prompt).toContain(
