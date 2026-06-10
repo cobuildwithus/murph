@@ -14,7 +14,9 @@ const hostedDeviceSyncE2eWorkflowPath = path.join(
 )
 
 function expectPostgresServiceContract(workflow: string, expectedServiceCount: number): void {
-  expect(workflow.match(/image: postgres:17/g)).toHaveLength(expectedServiceCount)
+  expect(
+    workflow.match(/image: public\.ecr\.aws\/docker\/library\/postgres:17/g),
+  ).toHaveLength(expectedServiceCount)
   expect(workflow.match(/POSTGRES_DB: murph_test/g)).toHaveLength(expectedServiceCount)
   expect(workflow.match(/POSTGRES_PASSWORD: postgres/g)).toHaveLength(expectedServiceCount)
   expect(workflow.match(/POSTGRES_USER: postgres/g)).toHaveLength(expectedServiceCount)
