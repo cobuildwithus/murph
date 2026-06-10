@@ -56,6 +56,12 @@ describe('experiment onboarding skill guidance', () => {
       'experimentOnboarding.planDefaults.firstSessionGuidance',
     )
     expect(raw).toContain('Keep it short and do not dump the full protocol.')
+    expect(raw).toContain(
+      'Automation instructions carry purpose and skip conditions, not the message',
+    )
+    expect(raw).toContain(
+      'Embed exact wording only when the user dictated it.',
+    )
   })
 
   it('requires bounded first-week habit support reminder guidance', async () => {
