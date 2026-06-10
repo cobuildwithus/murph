@@ -38,7 +38,7 @@ const mocks = vi.hoisted(() => ({
   readHostedAccountSettingsSnapshot: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
-  withServerApprovedTelegramUsernameHint: vi.fn((input: {
+  withServerApprovedPrivyAccountHints: vi.fn((input: {
     serverApprovedPrivyLinkedAccounts?: unknown;
     snapshot: unknown;
   }) => input.snapshot),
@@ -72,7 +72,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
   readHostedAccountSettingsSnapshot: mocks.readHostedAccountSettingsSnapshot,
-  withServerApprovedTelegramUsernameHint: mocks.withServerApprovedTelegramUsernameHint,
+  withServerApprovedPrivyAccountHints: mocks.withServerApprovedPrivyAccountHints,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
@@ -242,7 +242,7 @@ test("SettingsPage reads the app session and persisted account settings into the
     memberId: "member_123",
   });
   expect(mocks.getHostedPrivySession).toHaveBeenCalledTimes(1);
-  expect(mocks.withServerApprovedTelegramUsernameHint).toHaveBeenCalledWith({
+  expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
     snapshot: accountSnapshot,
     serverApprovedPrivyLinkedAccounts: [
       {
@@ -318,7 +318,7 @@ test("SettingsPage ignores Privy Telegram display hints from a stale Privy sessi
 
   renderToStaticMarkup(await SettingsPage());
 
-  expect(mocks.withServerApprovedTelegramUsernameHint).toHaveBeenCalledWith({
+  expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
     snapshot: accountSnapshot,
     serverApprovedPrivyLinkedAccounts: null,
   });

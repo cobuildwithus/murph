@@ -98,7 +98,7 @@ test("SidebarChatWithMurphContactDialog opens connected contact links", async ()
     );
     assert.equal(links[1]?.getAttribute("target"), "_blank");
     assert.equal(links[1]?.getAttribute("rel"), "noopener noreferrer");
-    assert.match(links[0]?.getAttribute("class") ?? "", /focus-visible:ring-2/);
+    assert.match(links[0]?.getAttribute("class") ?? "", /focus-visible:after:ring-2/);
   } finally {
     await cleanup();
   }
