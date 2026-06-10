@@ -467,6 +467,26 @@ function normalizeNullableString(value: unknown): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
+function normalizeLinqIsGroupFlag(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  // Provider type drift defense: a stringly-typed flag must not silently demote a group
+  // chat to "unknown" (and thereby look more direct than it is).
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") {
+      return true;
+    }
+    if (normalized === "false") {
+      return false;
+    }
+  }
+
+  return undefined;
+}
+
 function normalizeRequiredString(value: unknown, label: string): string {
   const normalized = normalizeNullableString(value);
   if (!normalized) {
@@ -715,7 +735,7 @@ function parseOptionalChatInfo(value: unknown): LinqChatInfo | null {
   const record = toLinqObjectRecord(value, "Linq message.received chat");
   return {
     id: normalizeRequiredString(record.id, "Linq message.received chat.id"),
-    is_group: typeof record.is_group === "boolean" ? record.is_group : undefined,
+    is_group: normalizeLinqIsGroupFlag(record.is_group),
     owner_handle: parseOptionalChatHandle(record.owner_handle) ?? undefined,
   };
 }

@@ -1559,3 +1559,56 @@ function buildV2026MessageReceivedWebhook(input: {
     trace_id: input.traceId ?? undefined,
   };
 }
+
+test("parseLinqMessageReceivedEvent coerces stringly-typed is_group flags", () => {
+  const buildPayload = (isGroup: unknown) => ({
+    api_version: "v3",
+    created_at: "2026-04-04T01:02:03.000Z",
+    data: {
+      chat: {
+        id: "chat_flag_drift",
+        is_group: isGroup,
+        owner_handle: {
+          handle: "+15557654321",
+          id: "handle_owner_flag_drift",
+          is_me: true,
+          service: "iMessage",
+        },
+      },
+      direction: "inbound",
+      id: "msg_flag_drift",
+      parts: [
+        {
+          type: "text",
+          value: "hello",
+        },
+      ],
+      sender_handle: {
+        handle: "+15551234567",
+        id: "handle_sender_flag_drift",
+        service: "iMessage",
+      },
+      sent_at: "2026-04-04T01:02:00.000Z",
+      service: "iMessage",
+    },
+    event_id: "evt_flag_drift",
+    event_type: "message.received",
+  });
+
+  assert.equal(
+    parseLinqMessageReceivedEvent(buildPayload("True")).data.chat?.is_group,
+    true,
+  );
+  assert.equal(
+    parseLinqMessageReceivedEvent(buildPayload("false")).data.chat?.is_group,
+    false,
+  );
+  assert.equal(
+    parseLinqMessageReceivedEvent(buildPayload(1)).data.chat?.is_group,
+    undefined,
+  );
+  assert.equal(
+    parseLinqMessageReceivedEvent(buildPayload("yes")).data.chat?.is_group,
+    undefined,
+  );
+});

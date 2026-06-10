@@ -237,6 +237,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       homeChatId: homeRoute?.linqChatId ?? null,
       homeRecipientPhone: homeRoute?.linqRecipientPhone ?? null,
       incomingChatId: summary.chatId,
+      incomingDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
       incomingRecipientPhone: recipientPhoneNumber,
     });
 
@@ -256,6 +257,19 @@ export async function planHostedOnboardingLinqWebhook(input: {
           reason: "redirect-to-home",
           routeDecision: routeDecision.kind,
           routeStage: "active-member-redirect",
+        }),
+      );
+    }
+
+    if (routeDecision.kind === "ignore_unattested_direct") {
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildIgnoredLinqWebhookPlan("unattested-direct-chat"),
+        buildHostedLinqWebhookPlannerDetails(input.event, context, {
+          existingMemberActive: true,
+          existingMemberMatch,
+          homeRoutePresent: Boolean(homeRoute?.linqChatId),
+          reason: "unattested-direct-chat",
+          routeStage: "active-member-ignored-unattested-direct",
         }),
       );
     }
@@ -556,6 +570,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       sourceEventId: input.event.event_id,
     }),
     buildHostedLinqWebhookPlannerDetails(input.event, context, {
+      chatDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
       dailyInboundCount: dailyState.inboundCount,
       existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
       existingMemberMatch,
@@ -930,6 +945,12 @@ function isLocalHostedDomainRootAuthorityMismatch(error: unknown): boolean {
 
 function isHostedLinqGroupChat(messageEvent: HostedLinqMessageReceivedEvent): boolean {
   return messageEvent.data.chat?.is_group === true;
+}
+
+function isHostedLinqDirectChatAttested(
+  messageEvent: HostedLinqMessageReceivedEvent,
+): boolean {
+  return messageEvent.data.chat?.is_group === false;
 }
 
 function normalizeHostedLinqPartText(value: unknown): string | null {
