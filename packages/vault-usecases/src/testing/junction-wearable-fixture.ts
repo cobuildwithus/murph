@@ -911,6 +911,28 @@ function selectHostedReplayRecords(
     : sorted.slice(0, Math.max(1, Math.trunc(recordLimit)));
 }
 
+// Replay records must keep 1:1 distinct ids: core merges device imports
+// idempotently on the record's own id, so a fixture whose sanitization
+// collapses every id to one shared constant folds the whole replay into a
+// single event per provider/resource.
+function assertUniqueHostedReplayRecordIds(group: HostedReplayRecordGroup): void {
+  const seen = new Set<string>();
+
+  for (const record of group.records) {
+    const id = typeof record.id === "string" ? record.id.trim() : "";
+    if (!id) {
+      continue;
+    }
+    if (seen.has(id)) {
+      throw new Error(
+        `Hosted Junction replay fixture has duplicate record id "${id}" for `
+        + `${group.provider}/${group.resource}; sanitize record ids with 1:1 pseudonyms, not a shared constant.`,
+      );
+    }
+    seen.add(id);
+  }
+}
+
 function buildHostedReplayDirtyResources(
   groups: readonly HostedReplayRecordGroup[],
   generatedAt: string,
@@ -922,6 +944,7 @@ function buildHostedReplayDirtyResources(
   const resources: JunctionWearableHostedReplayResourceSummary[] = [];
 
   for (const group of groups) {
+    assertUniqueHostedReplayRecordIds(group);
     const dates = collectIsoDates(group.records);
     const sortedDates = [...dates].sort();
     const windowStart = sortedDates[0] ? `${sortedDates[0]}T00:00:00.000Z` : generatedAt;
