@@ -1,6 +1,6 @@
 # VaultShare v0 — consented vault projections delivered to a destination member
 
-Status: active
+Status: completed
 Created: 2026-06-10
 Updated: 2026-06-10
 
@@ -134,3 +134,4 @@ Out of scope (v1+ fights this list):
    plus matching consent event.
 5. Verify after next overnight wake: referee assistant can state each grantor's bed/wake
    times; spot-check no plaintext payloads in `hosted_mailbox_item`.
+Completed: 2026-06-10
