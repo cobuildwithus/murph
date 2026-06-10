@@ -105,6 +105,7 @@ export async function recordAssistantUsageEvent(input: {
 
 export async function recordAdditionalAssistantUsageEvents(input: {
   additionalUsages: readonly AssistantProviderUsageDraft[] | null | undefined
+  effectiveEnv: Readonly<Record<string, string | undefined>>
   executionContext: AssistantExecutionContext
   providerResult: AssistantUsageProviderResult
   turnId: string
@@ -113,12 +114,15 @@ export async function recordAdditionalAssistantUsageEvents(input: {
   for (const usageDraft of input.additionalUsages ?? []) {
     // Additional usages can run on a different credential than the primary
     // provider turn (for example platform-owned OpenAI Images on a
-    // member-credential Codex turn), so resolve credential source per draft.
+    // member-credential Codex turn), so resolve credential source per draft
+    // with the same effective-env rule the primary attribution uses: a key
+    // env that is listed but unset/empty attributes as platform, not member.
     const usageAttribution = baseAttribution
       ? {
           ...baseAttribution,
           credentialSource: resolveAssistantUsageCredentialSource({
             apiKeyEnv: normalizeNullableString(usageDraft.usage.apiKeyEnv),
+            effectiveEnv: input.effectiveEnv,
             headers: input.providerResult.providerOptions.headers ?? null,
             provider: usageDraft.provider,
             userEnvKeys: [...(input.executionContext.hosted?.userEnvKeys ?? [])],
