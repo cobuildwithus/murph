@@ -78,9 +78,19 @@ Write-pass summary:
 - Structured `brand_site` rows (non-empty `ingredientRows`): **7,063 → 18,234** (+11,171 net). Total repaired upserts: 14,662 (4,813 + 68 + 6,888 + 1,489 + 920 + 484).
 - Anthropic Batches API spend: ~$47.56 of $50 (main $26.90 + tail $9.26 + sonnet $11.40; ~$2.44 left).
 
+### Wave 6 — vision-OCR re-scrape of image-based brands (2026-06-10)
+
+- The ~6.5k unstructured-with-url rows are image-based-facts brands (bluebonnet, carlson, codeage...) where the facts panel is a label IMAGE, not text. Pipeline: context.dev scrape (includeImages=true) → download candidate facts images locally → haiku vision SUBAGENTS (workflows, on subscription, $0 api key) read the label image natively and extract structured rows (ZERO OCR garbage — the win over the original macos-vision-OCR data) → anchor each row vs the model's own factsText readout → labels.mjs dry-run guard → upsert.
+- Image SELECTION is the bottleneck, not vision. v1 (top-3 keyword) 29%; v2 (name-token match to isolate the product's own images from cross-sell + facts-filename patterns _SF/supp_facts/_back + top-5 window) ~62%, and ~95% on proven brands (carlson/codeage/doctors-best/double-wood). Sonnet vision recovered only 1/38 haiku failures → the misses are missing-data (no facts image on the page), not model-limited. Dead brands (jarrow, thorne, baidyanath, raw-nutrition, natures-plus) have front-only images → skipped.
+- Scaled in pipelined 250-row batches (fetch+select → 50 haiku agents → anchor → dry-run → upsert). Through batch 10: ~1,380 OCR rows written, all anchor-verified, 0 production-blocked, 0 contamination (verified via dose-in-name vs panel match). Structured brand_site rows **18,801 → 20,084** during this wave.
+
+### Session total (running)
+
+- Structured `brand_site` rows: **7,063 → 20,084** (+13,021, ~2.85x). Goal was 10k.
+
 ### Remaining
 
-- ~5k refetch/OCR rows (no evidence in `label`) + 799 non-standalone-review rows + a residue of ~1.5k rows whose extractions failed even sonnet validation on genuine evidence defects (OCR-corrupted amounts, source pages with wrong units) + ~250 oversized rows that truncate even at 6/request. The remaining failures are evidence-limited, not model-limited — further model spend has low expected yield without re-scraping. No re-scrape performed this session per direction.
+- The OCR loop continues through the remaining pool (~5,576 rows minus dead brands); yield tapering into the long tail. Plus 799 non-standalone (excluded by product decision) + a residue of rows with genuine evidence defects. Front-only-image brands are unrecoverable without a different data source.
 
 Findings:
 
