@@ -17,9 +17,6 @@ import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
-  HOSTED_LOCAL_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV as HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV,
-} from "@murphai/hosted-local-harness/codex-app-server-stub";
-import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
   type HostedExecutionSnapshotRef,
@@ -40,8 +37,11 @@ import {
 } from "@murphai/vault-usecases/vault-services";
 
 import {
+  buildAssistantProviderMurphToolCall,
   buildHostedAssistantNotificationDecisionResponse,
   buildStableNumericSuffix,
+  readMurphDynamicToolNamesFromResponsesRequest,
+  type HostedLocalAssistantProviderScriptedResponse,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
@@ -77,7 +77,6 @@ const progressToolFinalReplyText = "I checked that and can keep helping from her
 const typingLoopReplyText = "I saw that and can help from here.";
 const productionLikeAssistantModel = "gpt-5.5";
 const localRunnerIdleTtlMs = "300000";
-const expectedDynamicTools = listMurphDynamicToolNames().join(",");
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const fastDeployGate = process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1";
@@ -93,22 +92,16 @@ let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
 const cleanupPaths: string[] = [];
 
-function buildHostedAssistantProgressDirectiveResponse(input: {
+function buildHostedAssistantProgressResponses(input: {
   progressText: string;
   text: string;
-}): string {
-  return JSON.stringify({
-    __murphE2eToolCalls: [
-      {
-        arguments: {
-          text: input.progressText,
-        },
-        namespace: "murph",
-        tool: "send_progress_update",
-      },
-    ],
-    text: input.text,
-  });
+}): readonly HostedLocalAssistantProviderScriptedResponse[] {
+  return [
+    buildAssistantProviderMurphToolCall("send_progress_update", {
+      text: input.progressText,
+    }),
+    input.text,
+  ];
 }
 
 afterAll(async () => {
@@ -136,8 +129,6 @@ describe("hosted local Linq first-contact e2e", () => {
   }, 300_000);
 
   it("sends the first-contact Linq welcome through the live local worker", async () => {
-    expectConfiguredDynamicTools();
-
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
       memberId: userId,
@@ -190,8 +181,6 @@ describe("hosted local Linq first-contact e2e", () => {
   }, 300_000);
 
   it("sends a Linq reply after a later inbound Linq message", async () => {
-    expectConfiguredDynamicTools();
-
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(directReplyUserId),
       memberId: directReplyUserId,
@@ -318,8 +307,6 @@ describe("hosted local Linq first-contact e2e", () => {
   }, 300_000);
 
   it("delivers a model-authored progress update through the hosted Linq bridge", async () => {
-    expectConfiguredDynamicTools();
-
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(progressToolUserId),
       memberId: progressToolUserId,
@@ -358,12 +345,12 @@ describe("hosted local Linq first-contact e2e", () => {
       `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const outboundCountBeforeReply =
       requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantProgressDirectiveResponse({
+    requireScenario().queueAssistantResponses(
+      buildHostedAssistantProgressResponses({
         progressText: progressToolUpdateText,
         text: progressToolFinalReplyText,
       }),
-    ]);
+    );
 
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       progressToolUserId,
@@ -740,9 +727,7 @@ describe("hosted local Linq first-contact e2e", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       OPENAI_API_KEY: "stub-local-openai-key",
     });
-    expect(
-      requireScenario().runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV],
-    ).toBe(expectedDynamicTools);
+    expectAdvertisedMurphDynamicTools();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
@@ -1109,10 +1094,20 @@ function requireScenario(): HostedLocalFullStackScenario {
   return scenario;
 }
 
-function expectConfiguredDynamicTools(): void {
+function expectAdvertisedMurphDynamicTools(): void {
+  const lastResponsesRequest = [...requireScenario().assistantProviderRequests]
+    .reverse()
+    .find((request) => request.url === "/v1/responses");
+  expect(lastResponsesRequest).toBeDefined();
   expect(
-    requireScenario().runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV],
-  ).toBe(expectedDynamicTools);
+    readMurphDynamicToolNamesFromResponsesRequest(lastResponsesRequest!.body).sort(),
+  ).toEqual(
+    // listMurphDynamicToolNames() returns namespaced ids; Codex advertises the
+    // bare tool names inside the `murph` namespace entry.
+    listMurphDynamicToolNames()
+      .map((name) => name.replace(/^murph\./u, ""))
+      .sort(),
+  );
 }
 
 function countObservedLinqRequests(input: {
@@ -1302,8 +1297,6 @@ async function startLinqScenario(
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
       LINQ_API_TOKEN: linqApiToken,
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV]:
-        expectedDynamicTools,
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: localRunnerIdleTtlMs,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",

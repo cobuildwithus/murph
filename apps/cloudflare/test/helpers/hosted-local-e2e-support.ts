@@ -4,9 +4,6 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
-  HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
-} from "@murphai/hosted-local-harness/codex-app-server-stub";
-import {
   deviceSyncProviderRuntimeSecretEnvKeys,
   deviceSyncProviderRuntimeVariableEnvKeys,
 } from "@murphai/device-syncd/config";
@@ -57,8 +54,112 @@ export const HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS = [
 
 export type HostedLocalAssistantProviderMode = "stub" | "live";
 
+/**
+ * One scripted Responses API response. A string yields an assistant message;
+ * a function call yields a `function_call` output item the real Codex
+ * app-server executes (dynamic tools via `namespace`, shell via
+ * `exec_command`). Tool-call turns consume one queued response per provider
+ * request: the tool call first, then the follow-up text.
+ */
+export type HostedLocalAssistantProviderScriptedResponse =
+  | string
+  | {
+    functionCall: {
+      arguments: Record<string, unknown>;
+      name: string;
+      namespace?: string;
+    };
+  };
+
+/**
+ * Scripts a sandboxed shell execution through the real Codex app-server.
+ * Codex 0.135.0 (CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
+ * advertises the unified `exec_command` tool on Linux; bump the tool name here
+ * if a Codex upgrade changes the advertised exec tool.
+ */
+export function buildAssistantProviderShellCommandCall(
+  command: string,
+): HostedLocalAssistantProviderScriptedResponse {
+  return {
+    functionCall: {
+      arguments: { cmd: command },
+      name: "exec_command",
+    },
+  };
+}
+
+/**
+ * Scripts a Murph dynamic tool call. The real Codex app-server relays it to
+ * the hosted runtime over `item/tool/call`, so the production dynamic-tool
+ * execution path runs for real.
+ */
+export function buildAssistantProviderMurphToolCall(
+  tool: string,
+  toolArguments: Record<string, unknown>,
+): HostedLocalAssistantProviderScriptedResponse {
+  return {
+    functionCall: {
+      arguments: toolArguments,
+      name: tool,
+      namespace: "murph",
+    },
+  };
+}
+
+/**
+ * Scripts a vault-cli invocation exactly as production models run it: a shell
+ * call executed inside the Codex sandbox with the runner PATH.
+ */
+export function buildAssistantProviderVaultCliCall(
+  args: readonly string[],
+): HostedLocalAssistantProviderScriptedResponse {
+  return buildAssistantProviderShellCommandCall(
+    ["vault-cli", ...args].map(quoteShellArgument).join(" "),
+  );
+}
+
+function quoteShellArgument(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/**
+ * Reads the Murph dynamic tool names the real Codex app-server advertised to
+ * the model in a recorded `/v1/responses` request body.
+ */
+export function readMurphDynamicToolNamesFromResponsesRequest(
+  body: string,
+): string[] {
+  const parsed: unknown = JSON.parse(body);
+  if (!parsed || typeof parsed !== "object") {
+    return [];
+  }
+
+  const tools = (parsed as { tools?: unknown }).tools;
+  if (!Array.isArray(tools)) {
+    return [];
+  }
+
+  const murphNamespace = tools.find((tool): tool is { tools?: unknown } =>
+    Boolean(
+      tool
+      && typeof tool === "object"
+      && (tool as { type?: unknown }).type === "namespace"
+      && (tool as { name?: unknown }).name === "murph",
+    )
+  );
+  if (!murphNamespace || !Array.isArray(murphNamespace.tools)) {
+    return [];
+  }
+
+  return murphNamespace.tools
+    .map((tool) =>
+      tool && typeof tool === "object" ? (tool as { name?: unknown }).name : null
+    )
+    .filter((name): name is string => typeof name === "string");
+}
+
 export interface HostedLocalAssistantProviderStubState {
-  queuedResponseTexts: string[];
+  queuedResponses: HostedLocalAssistantProviderScriptedResponse[];
 }
 
 export interface HostedLocalAssistantProviderStubRequest {
@@ -104,12 +205,12 @@ export function buildHostedAssistantNotificationDecisionResponse(input: {
   });
 }
 
-function dequeueAssistantProviderResponseText(input: {
+function dequeueAssistantProviderResponse(input: {
   fallbackResponseText?: string | null;
   responseState?: HostedLocalAssistantProviderStubState;
-}): string | null {
+}): HostedLocalAssistantProviderScriptedResponse | null {
   return (
-    input.responseState?.queuedResponseTexts.shift()
+    input.responseState?.queuedResponses.shift()
     ?? input.fallbackResponseText
     ?? null
   );
@@ -228,6 +329,73 @@ function writeAssistantProviderResponsesApiStubStream(input: {
   });
   writeAssistantProviderSseEvent(input.response, "response.output_item.done", {
     item: outputItem,
+    output_index: 0,
+    type: "response.output_item.done",
+  });
+  writeAssistantProviderSseEvent(input.response, "response.completed", {
+    response: completedResponse,
+    type: "response.completed",
+  });
+  input.response.write("data: [DONE]\n\n");
+  input.response.end();
+}
+
+function buildAssistantProviderFunctionCallItem(input: {
+  functionCall: NonNullable<
+    Exclude<HostedLocalAssistantProviderScriptedResponse, string>
+  >["functionCall"];
+  responseId: string;
+}): Record<string, unknown> {
+  return {
+    arguments: JSON.stringify(input.functionCall.arguments),
+    call_id: `call_${input.responseId}`,
+    id: `fcall_${input.responseId}`,
+    name: input.functionCall.name,
+    ...(input.functionCall.namespace
+      ? { namespace: input.functionCall.namespace }
+      : {}),
+    status: "completed",
+    type: "function_call",
+  };
+}
+
+function writeAssistantProviderFunctionCallStubStream(input: {
+  functionCallItem: Record<string, unknown>;
+  modelId: string;
+  response: ServerResponse;
+  responseId: string;
+  usage: HostedLocalAssistantProviderUsage;
+}): void {
+  const completedResponse = {
+    created_at: Math.floor(Date.now() / 1000),
+    id: input.responseId,
+    model: input.modelId,
+    output: [input.functionCallItem],
+    status: "completed",
+    usage: input.usage,
+  };
+
+  input.response.statusCode = 200;
+  input.response.setHeader("cache-control", "no-cache");
+  input.response.setHeader("content-type", "text/event-stream; charset=utf-8");
+  writeAssistantProviderSseEvent(input.response, "response.created", {
+    response: {
+      ...completedResponse,
+      output: [],
+      status: "in_progress",
+    },
+    type: "response.created",
+  });
+  writeAssistantProviderSseEvent(input.response, "response.output_item.added", {
+    item: {
+      ...input.functionCallItem,
+      status: "in_progress",
+    },
+    output_index: 0,
+    type: "response.output_item.added",
+  });
+  writeAssistantProviderSseEvent(input.response, "response.output_item.done", {
+    item: input.functionCallItem,
     output_index: 0,
     type: "response.output_item.done",
   });
@@ -409,17 +577,50 @@ export async function startAssistantProviderStubServer(input: {
         return;
       }
 
-      const responseText = dequeueAssistantProviderResponseText({
+      const scriptedResponse = dequeueAssistantProviderResponse({
         fallbackResponseText: input.fallbackResponseText,
         responseState: input.responseState,
       });
-      if (!responseText) {
+      if (!scriptedResponse) {
         writeJsonResponse(response, 500, {
           error: "Assistant provider stub received a responses request without a queued response.",
         });
         return;
       }
 
+      if (typeof scriptedResponse !== "string") {
+        const functionCallItem = buildAssistantProviderFunctionCallItem({
+          functionCall: scriptedResponse.functionCall,
+          responseId,
+        });
+        const usage = buildAssistantProviderStubUsage({
+          body,
+          responseText: JSON.stringify(functionCallItem),
+          usageMode: input.usageMode ?? "fixed",
+        });
+        if (bodyJson.stream === true) {
+          writeAssistantProviderFunctionCallStubStream({
+            functionCallItem,
+            modelId,
+            response,
+            responseId,
+            usage,
+          });
+          return;
+        }
+
+        writeJsonResponse(response, 200, {
+          created_at: Math.floor(Date.now() / 1000),
+          id: responseId,
+          model: modelId,
+          output: [functionCallItem],
+          status: "completed",
+          usage,
+        });
+        return;
+      }
+
+      const responseText = scriptedResponse;
       const usage = buildAssistantProviderStubUsage({
         body,
         responseText,
@@ -455,16 +656,23 @@ export async function startAssistantProviderStubServer(input: {
         return;
       }
 
-      const responseText = dequeueAssistantProviderResponseText({
+      const scriptedResponse = dequeueAssistantProviderResponse({
         fallbackResponseText: input.fallbackResponseText,
         responseState: input.responseState,
       });
-      if (!responseText) {
+      if (!scriptedResponse) {
         writeJsonResponse(response, 500, {
           error: "Assistant provider stub received a completion request without a queued response.",
         });
         return;
       }
+      if (typeof scriptedResponse !== "string") {
+        writeJsonResponse(response, 500, {
+          error: "Assistant provider stub only supports scripted text responses on /v1/chat/completions.",
+        });
+        return;
+      }
+      const responseText = scriptedResponse;
 
       writeJsonResponse(response, 200, {
         id: "chatcmpl_stub_hosted_local_e2e",
@@ -587,7 +795,7 @@ export function resolveHostedAssistantLocalDevEnv(
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
-      [HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+      [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
         normalizedAssistantProviderStubBaseUrl,
       NODE_ENV: "test",
       OPENAI_API_KEY: "stub-local-openai-key",
