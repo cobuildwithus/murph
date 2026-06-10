@@ -47,7 +47,7 @@ Risks/regressions:
 - Version skew (resource logic in BOTH apps/web parse + runner): new webhook jobs are a superset of old fields; old runner ignores unknown, new runner handles old jobs. Safe both orders; DEPLOY runner bundle (Cloudflare) before/with apps/web (Vercel). Add DEPLOYMENT CONCERNS to each PR.
 
 State:
-- P1 + P2 complete (this PR). P3 (deletion) and P4 (docs) follow as separate reviewed PRs. Machinery (gating/batch/chunking) intentionally retained until P3.
+- Done. P1+P2 (additive seams) and P3+P4 (deletion + docs) all complete. The gating/batch/chunking machinery is deleted; webhook construction parses payload + resolves source provenance + attaches inline json without the usefulness gate and without the size cap; oversized/empty/unknown payloads degrade to the reconcile floor. Durable ingestion-invariants doc added and indexed; compatibility matrix carries the push-only column.
 
 Done:
 - Design pass complete (current-surface map, push-only matrix, candidate comparison → Candidate B, deletion quantification, phasing).
@@ -70,3 +70,6 @@ Working set (files/ids/commands):
 - packages/device-syncd/test/junction-webhooks.test.ts, junction-provider.test.ts
 - apps/web/src/lib/device-sync/wake-service.ts (verify coalescing), packages/device-syncd/src/{store/sync-state,service}.ts (read-only verify)
 - pnpm --dir packages/device-syncd test:coverage; pnpm typecheck; hosted device-sync e2e lane
+Status: completed
+Updated: 2026-06-09
+Completed: 2026-06-09

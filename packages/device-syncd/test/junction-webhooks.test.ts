@@ -342,7 +342,13 @@ test("enriched activity webhooks direct-import and sleep webhooks with embedded 
   }
 });
 
-test("sleep webhook WITHOUT embedded data falls back to a working fetch", async () => {
+test("sleep webhook with a metric-free embedded record imports inline once the usefulness gate is removed", async () => {
+  // Pre-P3 a sleep payload carrying only an id and source (no recognized sleep
+  // metrics) was deemed "not useful" and dropped to a REST summary fetch. The
+  // usefulness gate was removed in P3: the configured summary payload with a
+  // single, consistent source now imports inline. The branch still ends in
+  // import (the P1+P2 import-or-fetch guarantee holds), only louder/earlier;
+  // the unconditional reconcile floor still recovers any fuller record later.
   const fixture = await createWebhookFixture();
   const { service, imports, requests } = fixture;
 
@@ -359,17 +365,14 @@ test("sleep webhook WITHOUT embedded data falls back to a working fetch", async 
     assert.equal(accepted.accepted, true);
     await service.drainWorker(100);
 
-    assert.ok(
-      requests.some((url) => url.includes("/v2/summary/sleep/junction-user-1")),
-      `sleep fetch fallback should query Junction's sleep summary; requests=${JSON.stringify(requests)}`,
-    );
-    assert.ok(
-      requests.some((url) => url.includes("/v2/user/providers/junction-user-1")),
-      "sleep fetch fallback should project source providers (last_seen_at advance)",
+    assert.deepEqual(
+      requests,
+      [],
+      `metric-free sleep payload should import inline without Junction HTTP; requests=${JSON.stringify(requests)}`,
     );
     assert.ok(
       hasSleepImport(imports),
-      `sleep fetch fallback should import the diagnose-confirmed records; imports=${JSON.stringify(summaryRecordCounts(imports))}`,
+      `metric-free sleep payload should import inline; imports=${JSON.stringify(summaryRecordCounts(imports))}`,
     );
   } finally {
     fixture.close();
