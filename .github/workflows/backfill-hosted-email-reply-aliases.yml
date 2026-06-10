@@ -1,0 +1,97 @@
+name: Backfill hosted email reply aliases
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Apply the backfill. Leave false for a counts-only dry-run.
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-email-reply-alias-backfill-production
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    name: Backfill production aliases
+    if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 10
+    env:
+      APPLY: ${{ inputs.apply }}
+      HOSTED_EMAIL_REPLY_ALIAS_BACKFILL_SECRET: ${{ secrets.HOSTED_EMAIL_REPLY_ALIAS_BACKFILL_SECRET }}
+      HOSTED_WEB_BASE_URL: ${{ vars.HOSTED_WEB_BASE_URL }}
+    steps:
+      - name: Validate workflow configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${HOSTED_EMAIL_REPLY_ALIAS_BACKFILL_SECRET}" ]]; then
+            printf '%s\n' 'HOSTED_EMAIL_REPLY_ALIAS_BACKFILL_SECRET is not configured.'
+            exit 1
+          fi
+          if [[ -z "${HOSTED_WEB_BASE_URL}" ]]; then
+            printf '%s\n' 'HOSTED_WEB_BASE_URL is not configured.'
+            exit 1
+          fi
+
+      - name: Run backfill
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="${HOSTED_WEB_BASE_URL%/}/api/internal/hosted-execution/email/backfill-reply-aliases"
+          response_file="$(mktemp)"
+          status="$(
+            curl --silent --show-error \
+              --output "${response_file}" \
+              --write-out '%{http_code}' \
+              --request POST \
+              --header "authorization: Bearer ${HOSTED_EMAIL_REPLY_ALIAS_BACKFILL_SECRET}" \
+              --header 'content-type: application/json' \
+              --data "{\"apply\":${APPLY}}" \
+              "${endpoint}"
+          )"
+
+          if [[ "${status}" != "200" ]]; then
+            printf 'Backfill failed with HTTP %s.\n' "${status}"
+            node -e "const fs=require('fs'); const text=fs.readFileSync(process.argv[1], 'utf8'); try { console.log(JSON.stringify(JSON.parse(text))); } catch { console.log('Non-JSON response body.'); }" "${response_file}"
+            exit 1
+          fi
+
+          node - "${response_file}" <<'NODE'
+          const fs = require("fs");
+          const body = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          if (body.ok !== true) {
+            console.log(JSON.stringify({ ok: body.ok ?? false }));
+            process.exit(1);
+          }
+
+          const summary = {
+            apply: body.apply,
+            backfilledReplyAliasCount: body.backfilledReplyAliasCount,
+            existingReplyAliasCountBefore: body.existingReplyAliasCountBefore,
+            generatedReplyAliasCount: body.generatedReplyAliasCount,
+            missingReplyAliasCountAfter: body.missingReplyAliasCountAfter,
+            missingReplyAliasCountBefore: body.missingReplyAliasCountBefore,
+            unsuspendedVerifiedEmailMemberCount: body.unsuspendedVerifiedEmailMemberCount,
+          };
+          console.log(JSON.stringify(summary));
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
+            "## Hosted email reply alias backfill",
+            "",
+            `- apply: ${summary.apply}`,
+            `- unsuspended verified email members: ${summary.unsuspendedVerifiedEmailMemberCount}`,
+            `- existing reply aliases before: ${summary.existingReplyAliasCountBefore}`,
+            `- missing reply aliases before: ${summary.missingReplyAliasCountBefore}`,
+            `- generated reply aliases: ${summary.generatedReplyAliasCount}`,
+            `- backfilled reply aliases: ${summary.backfilledReplyAliasCount}`,
+            `- missing reply aliases after: ${summary.missingReplyAliasCountAfter}`,
+            "",
+          ].join("\n"));
+          NODE
