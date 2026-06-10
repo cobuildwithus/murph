@@ -32,10 +32,12 @@ override any value explicitly.
 - `dev`: interactive hosted dev. Uses the production-shaped Cloudflare
   runner/container Codex app-server path with Vercel AI Gateway configuration.
 - `worker-only`: starts/reuses only the Cloudflare worker/container lane.
-- `e2e:stub`: deterministic hosted-local E2E defaults. It installs the
-  test-only Codex app-server stub, skips Stripe listener startup, skips Vercel
-  env pull, and forces assistant-provider stub mode. It also disables live Linq
-  webhook tunnel registration unless a caller explicitly opts back in.
+- `e2e:stub`: deterministic hosted-local E2E defaults. It runs the real Codex
+  app-server binary against a local scripted Responses API stub (test-only
+  `HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL` override with a fake provider
+  key, so zero provider spend), skips Stripe listener startup, and skips
+  Vercel env pull. It also disables live Linq webhook tunnel registration
+  unless a caller explicitly opts back in.
 - `e2e:live`: hosted-local E2E defaults for explicit live provider testing.
   Opt-in live Codex scenarios should default to the lowest-cost model that is
   already accepted by repo pricing guards. The vault persistence scenario uses
@@ -77,8 +79,12 @@ identifiers, payload-like env values, and sensitive command args are redacted.
    package `src/` paths directly.
 6. Every run writes a redacted state file under
    `.artifacts/hosted-local/<run-id>/state.json`.
-7. Test-only Codex app-server shims belong to this harness. Production runtime
-   packages should accept only a neutral command override and must not own
+7. Hosted-local E2E always runs the real Codex app-server binary; the only
+   model substitute is the local scripted Responses API stub owned by the
+   `apps/cloudflare` test helpers. Production runtime packages accept only
+   neutral, `NODE_ENV=test`-gated overrides
+   (`MURPH_HOSTED_CODEX_APP_SERVER_COMMAND`,
+   `HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL`) and must not own
    `MURPH_E2E_*` wiring or fake assistant directives.
 
 The old `scripts/dev-hosted-local.ts` and

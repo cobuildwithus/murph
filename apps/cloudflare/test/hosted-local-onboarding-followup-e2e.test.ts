@@ -11,7 +11,9 @@ import type {
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
+  buildAssistantProviderVaultCliCall,
   buildHostedAssistantNotificationDecisionResponse,
+  type HostedLocalAssistantProviderScriptedResponse,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
@@ -113,12 +115,12 @@ describe("hosted local onboarding follow-up e2e", () => {
     const followupPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const accelerationBaseline = requireLinqStub().countObservedSends(followupPath);
     const accelerationStartedAt = Date.now();
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantAccelerateFollowupDirectiveResponse({
+    requireScenario().queueAssistantResponses(
+      buildHostedAssistantAccelerateFollowupResponses({
         deliveryTarget: materializedChatId,
         text: accelerationReplyText,
       }),
-    ]);
+    );
     const accelerationWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
       materializedChatId,
@@ -179,11 +181,11 @@ describe("hosted local onboarding follow-up e2e", () => {
     assertScheduleRunway(secondDueAt);
 
     const completionBaseline = requireLinqStub().countObservedSends(followupPath);
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantCompleteOnboardingDirectiveResponse({
+    requireScenario().queueAssistantResponses(
+      buildHostedAssistantCompleteOnboardingResponses({
         text: onboardingCompleteReplyText,
       }),
-    ]);
+    );
     const completionWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
       materializedChatId,
@@ -214,9 +216,9 @@ describe("hosted local onboarding follow-up e2e", () => {
       userId,
     });
 
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantArchiveAndSkipDirectiveResponse(),
-    ]);
+    requireScenario().queueAssistantResponses(
+      buildHostedAssistantArchiveAndSkipResponses(),
+    );
     const secondSendBaseline = countOutboundLinqMessageSends();
     const secondProviderRequestBaseline = requireScenario().assistantProviderRequests.length;
     await sleepUntil(secondDueAt);
@@ -503,89 +505,77 @@ async function waitForAssistantProviderRequestCount(input: {
   ]));
 }
 
-function buildHostedAssistantAccelerateFollowupDirectiveResponse(input: {
+function buildHostedAssistantAccelerateFollowupResponses(input: {
   deliveryTarget: string;
   text: string;
-}): string {
-  return JSON.stringify({
-    __murphE2eVaultCliCommands: [
-      {
-        args: [
-          "automation",
-          "save",
-          followupTitle,
-          "--request-id",
-          `hosted-local-onboarding-followup-accelerate-${userId}`,
-          "--slug",
-          followupSlug,
-          "--status",
-          "active",
-          "--instructions",
-          [
-            "First inspect onboarding status with `vault-cli assistant onboarding status`.",
-            "If onboarding is completed or declined, run `vault-cli automation set-status finish-onboarding-followup --status archived` and return skip.",
-            "If onboarding is still open, send a short message inviting setup to continue.",
-          ].join(" "),
-          "--summary",
-          followupSummary,
-          "--tags",
-          "assistant",
-          "--tags",
-          "onboarding",
-          "--continuity-policy",
-          "preserve",
-          "--channel",
-          "linq",
-          "--delivery-target",
-          input.deliveryTarget,
-          "--schedule-kind",
-          "every",
-          "--schedule-every-ms",
-          String(acceleratedEveryMs),
-        ],
-      },
-    ],
-    text: input.text,
-  });
+}): readonly HostedLocalAssistantProviderScriptedResponse[] {
+  return [
+    buildAssistantProviderVaultCliCall([
+      "automation",
+      "save",
+      followupTitle,
+      "--request-id",
+      `hosted-local-onboarding-followup-accelerate-${userId}`,
+      "--slug",
+      followupSlug,
+      "--status",
+      "active",
+      "--instructions",
+      [
+        "First inspect onboarding status with `vault-cli assistant onboarding status`.",
+        "If onboarding is completed or declined, run `vault-cli automation set-status finish-onboarding-followup --status archived` and return skip.",
+        "If onboarding is still open, send a short message inviting setup to continue.",
+      ].join(" "),
+      "--summary",
+      followupSummary,
+      "--tags",
+      "assistant",
+      "--tags",
+      "onboarding",
+      "--continuity-policy",
+      "preserve",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      input.deliveryTarget,
+      "--schedule-kind",
+      "every",
+      "--schedule-every-ms",
+      String(acceleratedEveryMs),
+    ]),
+    input.text,
+  ];
 }
 
-function buildHostedAssistantCompleteOnboardingDirectiveResponse(input: {
+function buildHostedAssistantCompleteOnboardingResponses(input: {
   text: string;
-}): string {
-  return JSON.stringify({
-    __murphE2eVaultCliCommands: [
-      {
-        args: [
-          "assistant",
-          "onboarding",
-          "complete",
-          "--reason",
-          "manual",
-        ],
-      },
-    ],
-    text: input.text,
-  });
+}): readonly HostedLocalAssistantProviderScriptedResponse[] {
+  return [
+    buildAssistantProviderVaultCliCall([
+      "assistant",
+      "onboarding",
+      "complete",
+      "--reason",
+      "manual",
+    ]),
+    input.text,
+  ];
 }
 
-function buildHostedAssistantArchiveAndSkipDirectiveResponse(): string {
-  return JSON.stringify({
-    __murphE2eVaultCliCommands: [
-      {
-        args: [
-          "automation",
-          "set-status",
-          followupSlug,
-          "--status",
-          "archived",
-        ],
-      },
-    ],
-    text: JSON.stringify({
+function buildHostedAssistantArchiveAndSkipResponses(): readonly HostedLocalAssistantProviderScriptedResponse[] {
+  return [
+    buildAssistantProviderVaultCliCall([
+      "automation",
+      "set-status",
+      followupSlug,
+      "--status",
+      "archived",
+    ]),
+    JSON.stringify({
       kind: "skip",
       privateSummary: "Onboarding is complete; archived the follow-up automation.",
     }),
-  });
+  ];
 }
 
 async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {
