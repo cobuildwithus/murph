@@ -6472,3 +6472,81 @@ test("Junction provider rejects unsupported configured resources", () => {
     /Junction timeseries resources include unsupported resource\(s\): workout_distance\./u,
   );
 });
+
+test("Junction resource job with a hijacked resource name falls back to the event-type resource fetch", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(
+    async (input) => {
+      const url = readUrl(input);
+      requests.push(url);
+      if (url.includes("/v2/summary/sleep/junction-user-1")) {
+        return createJsonResponse({
+          data: [{ id: "sleep-1", date: "2026-04-02", source: { provider: "whoop_v2" } }],
+        });
+      }
+      if (url.includes("/v2/user/providers/junction-user-1")) {
+        return createJsonResponse({ providers: [] });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    },
+    { summaryResources: ["activity", "sleep"], timeseriesResources: [] },
+  );
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ nextReconcileAt: "2026-04-03T00:30:00.000Z" }),
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", {
+      eventType: "daily.data.sleep.created",
+      objectId: "sleep-1",
+      occurredAt: "2026-04-02T00:00:00.000Z",
+      resource: "sleep_v2",
+      resourceCategory: "summary",
+      sourceProviderSlug: "whoop_v2",
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.ok(
+    requests.some((url) => url.includes("/v2/summary/sleep/junction-user-1")),
+    `hijacked sleep job should fetch the event-type resource; requests=${JSON.stringify(requests)}`,
+  );
+  assert.equal(importedSnapshots.length, 1);
+  assert.equal(
+    result.nextReconcileAt,
+    "2026-04-03T00:30:00.000Z",
+    "webhook job completion must preserve an earlier scheduled reconcile",
+  );
+});
+
+test("Junction resource job with an unresolvable resource records an observable skip and preserves the reconcile schedule", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ nextReconcileAt: "2026-04-03T00:30:00.000Z" }),
+    }),
+    createJob("resource", {
+      eventType: "provider.connection.updated",
+      resource: "mystery_records",
+      resourceCategory: "summary",
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(result.nextReconcileAt, "2026-04-03T00:30:00.000Z");
+  const metadataPatch = result.metadataPatch ?? {};
+  assert.equal(metadataPatch.junctionSkippedResourceLast, "summary.mystery_records.0.unsupported");
+  assert.equal(metadataPatch.junctionSkippedResourceJobCount, 1);
+});
