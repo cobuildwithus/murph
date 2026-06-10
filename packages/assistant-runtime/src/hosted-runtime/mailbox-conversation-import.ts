@@ -290,17 +290,15 @@ export async function importHostedConversationMailboxItem(input: {
     input.prepareWakeContext ?? prepareHostedConversationMailboxWakeContext;
   if (!input.prepareWakeContext) {
     await requireHostedBootstrapForWake(input.vaultRoot, decoded.wake);
-    if (decoded.wake.message.channel === "linq") {
-      await prepareHostedAssistantAutoReplyForWake(
-        input.vaultRoot,
-        decoded.wake,
-        {
-          ...input.runtime.forwardedEnv,
-          ...input.runtime.userEnv,
-        },
-        input.runtime.resolvedConfig,
-      );
-    }
+    await prepareHostedAssistantAutoReplyForWake(
+      input.vaultRoot,
+      decoded.wake,
+      {
+        ...input.runtime.forwardedEnv,
+        ...input.runtime.userEnv,
+      },
+      input.runtime.resolvedConfig,
+    );
   }
 
   const stagedInput = await stageAssistantInputEvent({
