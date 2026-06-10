@@ -5,12 +5,8 @@ import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
-  listMurphDynamicToolNames,
-} from "@murphai/assistant-engine/assistant-codex";
-
-import {
   buildAssistantProviderMurphToolCall,
-  readMurphDynamicToolNamesFromResponsesRequest,
+  expectAdvertisedMurphDynamicTools,
   type HostedLocalAssistantProviderScriptedResponse,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
@@ -137,7 +133,7 @@ describe("hosted local Codex image media delivery e2e", () => {
     const finalStatus = await completionPromise;
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expectAdvertisedMurphDynamicTools();
+    expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests);
   }, 300_000);
 });
 
@@ -236,18 +232,4 @@ function requireScenario(): HostedLocalFullStackScenario {
   return scenario;
 }
 
-function expectAdvertisedMurphDynamicTools(): void {
-  const lastResponsesRequest = [...requireScenario().assistantProviderRequests]
-    .reverse()
-    .find((request) => request.url === "/v1/responses");
-  expect(lastResponsesRequest).toBeDefined();
-  expect(
-    readMurphDynamicToolNamesFromResponsesRequest(lastResponsesRequest!.body).sort(),
-  ).toEqual(
-    // listMurphDynamicToolNames() returns namespaced ids; Codex advertises the
-    // bare tool names inside the `murph` namespace entry.
-    listMurphDynamicToolNames()
-      .map((name) => name.replace(/^murph\./u, ""))
-      .sort(),
-  );
-}
+

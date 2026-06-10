@@ -11,9 +11,6 @@ import {
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
 import {
-  listMurphDynamicToolNames,
-} from "@murphai/assistant-engine/assistant-codex";
-import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
@@ -40,7 +37,7 @@ import {
   buildAssistantProviderMurphToolCall,
   buildHostedAssistantNotificationDecisionResponse,
   buildStableNumericSuffix,
-  readMurphDynamicToolNamesFromResponsesRequest,
+  expectAdvertisedMurphDynamicTools,
   type HostedLocalAssistantProviderScriptedResponse,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
@@ -727,7 +724,7 @@ describe("hosted local Linq first-contact e2e", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       OPENAI_API_KEY: "stub-local-openai-key",
     });
-    expectAdvertisedMurphDynamicTools();
+    expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests);
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
@@ -1092,22 +1089,6 @@ function requireScenario(): HostedLocalFullStackScenario {
   }
 
   return scenario;
-}
-
-function expectAdvertisedMurphDynamicTools(): void {
-  const lastResponsesRequest = [...requireScenario().assistantProviderRequests]
-    .reverse()
-    .find((request) => request.url === "/v1/responses");
-  expect(lastResponsesRequest).toBeDefined();
-  expect(
-    readMurphDynamicToolNamesFromResponsesRequest(lastResponsesRequest!.body).sort(),
-  ).toEqual(
-    // listMurphDynamicToolNames() returns namespaced ids; Codex advertises the
-    // bare tool names inside the `murph` namespace entry.
-    listMurphDynamicToolNames()
-      .map((name) => name.replace(/^murph\./u, ""))
-      .sort(),
-  );
 }
 
 function countObservedLinqRequests(input: {

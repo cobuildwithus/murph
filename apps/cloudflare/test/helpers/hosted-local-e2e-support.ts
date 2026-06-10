@@ -1,5 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createNetServer } from "node:net";
+import { expect } from "vitest";
+import {
+  listMurphDynamicToolNames,
+} from "@murphai/assistant-engine/assistant-codex";
 import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
@@ -123,18 +127,29 @@ function quoteShellArgument(value: string): string {
 }
 
 /**
- * Reads the Murph dynamic tool names the real Codex app-server advertised to
- * the model in a recorded `/v1/responses` request body.
+ * Asserts the real Codex app-server advertised exactly the Murph dynamic
+ * tools in the most recent recorded `/v1/responses` request body.
+ * `listMurphDynamicToolNames()` returns namespaced ids; Codex advertises the
+ * bare tool names inside the `murph` namespace entry.
  */
-export function readMurphDynamicToolNamesFromResponsesRequest(
-  body: string,
-): string[] {
-  const parsed: unknown = JSON.parse(body);
-  if (!parsed || typeof parsed !== "object") {
-    return [];
-  }
+export function expectAdvertisedMurphDynamicTools(
+  requests: readonly HostedLocalAssistantProviderStubRequest[],
+): void {
+  const lastResponsesRequest = [...requests]
+    .reverse()
+    .find((request) => request.url === "/v1/responses");
+  expect(lastResponsesRequest).toBeDefined();
+  expect(
+    readMurphDynamicToolNamesFromResponsesRequest(lastResponsesRequest!.body).sort(),
+  ).toEqual(
+    listMurphDynamicToolNames()
+      .map((name) => name.replace(/^murph\./u, ""))
+      .sort(),
+  );
+}
 
-  const tools = (parsed as { tools?: unknown }).tools;
+function readMurphDynamicToolNamesFromResponsesRequest(body: string): string[] {
+  const tools = parseJsonObject(body)?.tools;
   if (!Array.isArray(tools)) {
     return [];
   }
