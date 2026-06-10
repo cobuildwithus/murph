@@ -527,10 +527,29 @@ export interface HostedMailboxLaneHighWater {
   maxUpdatedAt?: string | null;
 }
 
+export interface HostedMailboxLaneConsumed {
+  consumedSeq: string;
+  lane: HostedMailboxLane;
+}
+
 export interface HostedMailboxFetchResponse {
+  // Optional for deploy-window compatibility: older web responses omit it and
+  // the runtime treats every lane as consumed through seq 0.
+  consumedSeqByLane?: HostedMailboxLaneConsumed[] | null;
   fetchedAt: string;
   items: HostedMailboxItem[];
   maxSeqByLane: HostedMailboxLaneHighWater[];
+  userId: string;
+}
+
+export interface HostedMailboxConsumeRequest {
+  lanes: HostedMailboxLaneConsumed[];
+  requestId: string;
+}
+
+export interface HostedMailboxConsumeResponse {
+  acknowledgedAt: string;
+  consumedSeqByLane: HostedMailboxLaneConsumed[];
   userId: string;
 }
 

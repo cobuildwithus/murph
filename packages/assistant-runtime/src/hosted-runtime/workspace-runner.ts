@@ -166,6 +166,11 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
 interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   afterCheckpoint?: (() => Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void>) | null;
   browserVaultReplicaRefreshRequested?: true;
+  // Failed foreground reply count for this pass. Present only when the pass
+  // ran the foreground assistant reply phase; gates the durable conversation
+  // consumed-watermark ack (only a clean pass with zero failed replies and no
+  // pending foreground assistant input may advance it).
+  foregroundReplyFailed?: number | null;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
@@ -535,6 +540,12 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         vaultRoot: input.vaultRoot,
       });
     }
+    await acknowledgeHostedConversationMailboxConsumedBestEffort({
+      assistantPhaseResult,
+      checkpointRequestSession,
+      initialMailboxImport,
+      input,
+    });
     mailboxPostCheckpointEffectsFinished = scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
@@ -855,6 +866,90 @@ async function writeHostedMailboxImportRuntimeLog(input: {
     },
     now: input.runnerInput.now,
     platform: input.runnerInput.platform,
+  });
+}
+
+async function acknowledgeHostedConversationMailboxConsumedBestEffort(context: {
+  assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
+  checkpointRequestSession: HostedWorkspaceCheckpointRequestSession;
+  initialMailboxImport: HostedMailboxImportCheckpointResult;
+  input: HostedWorkspaceRunnerInput;
+}): Promise<void> {
+  // Durable replay guard: only a foreground assistant pass that finished with
+  // zero failed replies and no pending foreground assistant input may advance
+  // the conversation consumed watermark. Anything unhandled must stay
+  // replayable as a live reply candidate. The ack is best-effort: a missed ack
+  // only widens the replay window, it must never fail the pass.
+  // Ordering invariant: this must run after checkpointHostedWorkspaceAssistantPhase —
+  // foregroundReplyFailed does not count post-checkpoint delivery-effect failures,
+  // so lost-reply safety relies on any failed intent already being in that snapshot.
+  if (context.assistantPhaseResult.foregroundReplyFailed !== 0) {
+    return;
+  }
+  const mailboxPort = context.input.platform.mailboxPort;
+  if (!mailboxPort.consume) {
+    return;
+  }
+
+  try {
+    const pendingInputWakeAt = await resolveHostedPendingAssistantInputWakeAt({
+      now: context.input.now,
+      signal: context.input.signal ?? null,
+      vaultRoot: context.input.vaultRoot,
+    });
+    if (pendingInputWakeAt) {
+      return;
+    }
+    const consumedSeq = (
+      context.checkpointRequestSession.latestMailboxImport()
+        ?? context.initialMailboxImport
+    ).state.watermarks.conversation;
+    if (consumedSeq === "0") {
+      return;
+    }
+    await mailboxPort.consume({
+      lanes: [
+        {
+          consumedSeq,
+          lane: "conversation",
+        },
+      ],
+      requestId: `${context.input.requestId}:mailbox-consume`,
+    });
+  } catch (error) {
+    await writeHostedConversationMailboxConsumeFailureRuntimeLog({
+      error,
+      input: context.input,
+    });
+  }
+}
+
+async function writeHostedConversationMailboxConsumeFailureRuntimeLog(context: {
+  error: unknown;
+  input: HostedWorkspaceRunnerInput;
+}): Promise<void> {
+  const failure = buildHostedMailboxPostCheckpointEffectFailureLog(context.error);
+  console.warn("Hosted conversation mailbox consume ack failed; replay window stays open.", {
+    errorCode: failure.errorCode,
+    errorName: failure.name ?? (context.error instanceof Error ? context.error.name : typeof context.error),
+  });
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields(context.input.runtimeLogContext),
+      component: "mailbox",
+      errorCode: "mailbox_consume_failed",
+      eventCode: "runner.error",
+      level: "warn",
+      phase: "checkpoint",
+      redactedJson: {
+        failureCodeDetails: failure.codeDetail ? [failure.codeDetail] : [],
+        failureNames: failure.name ? [failure.name] : [],
+        failureSummaries: failure.summary ? [failure.summary] : [],
+        nestedErrorCode: failure.errorCode,
+      },
+    },
+    now: context.input.now,
+    platform: context.input.platform,
   });
 }
 

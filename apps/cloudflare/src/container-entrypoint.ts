@@ -284,9 +284,31 @@ export async function startHostedContainerEntrypoint(input: {
   // port is listening and consumed by the FIRST (cold) invocation only; a warm
   // process predates its message so its startup is not attributable to that turn.
   let pendingColdNodeStartupMs: number | null = null;
+  // Deploy rollouts SIGTERM the container with a rollout grace window
+  // (wrangler `rollout_active_grace_period`, currently 300s) before SIGKILL.
+  // Shutdown contract: finish the in-flight invocation (which checkpoints
+  // immediately via the shutdown signal), then exit 0. New work arriving after
+  // exit fails over to a replacement container through the platform's normal
+  // container-stopped retry path.
+  const containerShutdownController = new AbortController();
   const server = createServer(async (request, response) => {
     response.setHeader("connection", "close");
     const requestAbort = createRequestAbortController(request, response);
+    // Once shutdown began, the runtime must finish its immediate idle
+    // checkpoint even if the DO connection drops (the same deploy restarts the
+    // DO). Snapshot durability must not depend on response deliverability, so
+    // request aborts stop propagating to the runtime after the shutdown signal.
+    const invocationAbort = new AbortController();
+    const relayInvocationAbort = () => {
+      if (!containerShutdownController.signal.aborted) {
+        invocationAbort.abort(requestAbort.signal.reason);
+      }
+    };
+    if (requestAbort.signal.aborted) {
+      relayInvocationAbort();
+    } else {
+      requestAbort.signal.addEventListener("abort", relayInvocationAbort, { once: true });
+    }
     let claimedRunnerSlot = false;
     let runtimeWakeForRequest: (() => boolean) | null = null;
     let job: HostedExecutionRunnerJobInput | null = null;
@@ -555,7 +577,8 @@ export async function startHostedContainerEntrypoint(input: {
         },
         ...(coldNodeStartupMs === null ? {} : { nodeStartupMs: coldNodeStartupMs }),
         runnerJobAcceptedAt,
-        signal: requestAbort.signal,
+        shutdownSignal: containerShutdownController.signal,
+        signal: invocationAbort.signal,
       });
       directInvocationReturned = true;
 
@@ -633,6 +656,7 @@ export async function startHostedContainerEntrypoint(input: {
         activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);
       }
       requestAbort.cleanup();
+      maybeExitAfterContainerShutdownDrain();
     }
   });
 
@@ -657,6 +681,50 @@ export async function startHostedContainerEntrypoint(input: {
         userId: null,
       });
     });
+  });
+
+  const maybeExitAfterContainerShutdownDrain = () => {
+    if (
+      !containerShutdownController.signal.aborted
+      || activeHostedRunnerJobCount > 0
+    ) {
+      return;
+    }
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      level: "warn",
+      message: "Hosted container entrypoint drained after shutdown signal; exiting cleanly.",
+      phase: "wake.running",
+    });
+    server.close(() => {
+      process.exit(0);
+    });
+    // Lingering keep-alive sockets must not hold the doomed container open.
+    setTimeout(() => {
+      process.exit(0);
+    }, 5_000).unref();
+  };
+  const handleContainerShutdownSignal = () => {
+    if (containerShutdownController.signal.aborted) {
+      return;
+    }
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      level: "warn",
+      message: "Hosted container entrypoint received SIGTERM; requesting immediate idle checkpoint.",
+      phase: "wake.running",
+    });
+    containerShutdownController.abort(
+      new DOMException("Hosted container received SIGTERM.", "AbortError"),
+    );
+    maybeExitAfterContainerShutdownDrain();
+  };
+  // process.on, not once: repeated SIGTERMs (orchestrator retries, local
+  // docker stop) must stay no-ops instead of restoring default termination
+  // mid-checkpoint.
+  process.on("SIGTERM", handleContainerShutdownSignal);
+  server.once("close", () => {
+    process.removeListener("SIGTERM", handleContainerShutdownSignal);
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -2086,6 +2154,7 @@ async function runHostedWorkspaceInvocation(
     nodeStartupMs?: number | null;
     onRuntimeWakeReady?: (sendWake: () => boolean) => void;
     runnerJobAcceptedAt?: string | null;
+    shutdownSignal?: AbortSignal | null;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof runHostedWorkspaceInvocationDirect>>> {
@@ -2093,6 +2162,7 @@ async function runHostedWorkspaceInvocation(
     nodeStartupMs: options?.nodeStartupMs ?? null,
     onRuntimeWakeReady: options?.onRuntimeWakeReady,
     runnerJobAcceptedAt: options?.runnerJobAcceptedAt ?? null,
+    shutdownSignal: options?.shutdownSignal ?? null,
     signal: options?.signal,
     supervisorEnv: runtime.startupConfig.supervisorEnv,
   });
@@ -2106,6 +2176,7 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
     onCleanupStatus?: (status: Exclude<HostedContainerCleanupStatus, "not_run">) => void;
     onRuntimeWakeReady?: (sendWake: () => boolean) => void;
     runnerJobAcceptedAt?: string | null;
+    shutdownSignal?: AbortSignal | null;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof runHostedWorkspaceInvocationDirect>>> {

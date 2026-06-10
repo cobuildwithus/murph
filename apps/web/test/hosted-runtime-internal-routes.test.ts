@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   publishLegacySourceHashBrowserVaultReplicaRef: vi.fn(),
   publishLatestBrowserVaultReplicaRef: vi.fn(),
   readAcceptedRuntimeAttemptFailureSignalOwnerLogId: vi.fn(),
+  readHostedMailboxConsumedSeqByLane: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
@@ -42,6 +43,7 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   fetchHostedMailboxItemsAfterLaneCursors: mocks.fetchHostedMailboxItemsAfterLaneCursors,
+  readHostedMailboxConsumedSeqByLane: mocks.readHostedMailboxConsumedSeqByLane,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
   fetchHostedMailboxPayload: mocks.fetchHostedMailboxPayload,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
@@ -139,6 +141,7 @@ describe("hosted runtime internal web routes", () => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue({ kind: "prisma" });
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_routes_1");
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValue([]);
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveHostedMemberRecord());
     mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(null);
