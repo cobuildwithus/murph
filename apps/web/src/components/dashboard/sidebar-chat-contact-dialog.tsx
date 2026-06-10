@@ -92,9 +92,9 @@ export function SidebarChatWithMurphContactDialog({
               return (
                 <div
                   key={option.kind}
-                  className="relative rounded-lg border border-border bg-card transition-colors hover:bg-accent"
+                  className="relative rounded-lg border border-border bg-card transition-colors hover:bg-accent/55"
                 >
-                  <div className="flex items-center">
+                  <div className="flex items-center pr-3">
                     <a
                       href={option.href}
                       target={option.target}
@@ -106,25 +106,16 @@ export function SidebarChatWithMurphContactDialog({
                       onClick={() => setOpen(false)}
                     >
                       <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                      <span className="flex min-w-0 flex-col">
-                        <span>{option.label}</span>
-                        {option.copyValue ? (
-                          <span
-                            className="truncate text-xs font-normal text-muted-foreground"
-                            title={option.copyValue}
-                          >
-                            {option.copyValue}
-                          </span>
-                        ) : null}
-                      </span>
+                      <span className="min-w-0 truncate">{option.label}</span>
                     </a>
                     {option.copyValue ? (
                       <button
                         type="button"
-                        className="relative z-10 shrink-0 rounded-md p-2 text-muted-foreground/70 transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                        className="relative z-10 mr-2 inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                         aria-label={
                           copied ? "Copied" : `Copy ${option.label} contact info`
                         }
+                        title={copied ? "Copied" : `Copy ${option.label}`}
                         onClick={() => void copyOptionValue(option)}
                       >
                         {copied ? (
@@ -135,21 +126,23 @@ export function SidebarChatWithMurphContactDialog({
                       </button>
                     ) : null}
                     <ChevronRight
-                      className="mr-3 size-4 shrink-0 text-muted-foreground"
+                      className="size-4 shrink-0 text-muted-foreground"
                       aria-hidden="true"
                     />
                   </div>
                   {option.webmail ? (
-                    <a
-                      href={option.webmail.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="relative z-10 flex items-center gap-1.5 px-4 pb-3 pl-11 text-xs font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                      onClick={() => setOpen(false)}
-                    >
-                      Open in {option.webmail.label}
-                      <ExternalLink className="size-3" aria-hidden="true" />
-                    </a>
+                    <div className="relative z-10 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 pb-3 pl-11 text-xs font-medium">
+                      <a
+                        href={option.webmail.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => setOpen(false)}
+                      >
+                        Open in {option.webmail.label}
+                        <ExternalLink className="size-3" aria-hidden="true" />
+                      </a>
+                    </div>
                   ) : null}
                 </div>
               );

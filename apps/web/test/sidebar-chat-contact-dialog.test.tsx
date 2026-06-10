@@ -59,6 +59,7 @@ test("SidebarChatWithMurphContactDialog opens connected contact links", async ()
     <SidebarChatWithMurphContactDialog
       options={[
         {
+          copyValue: "+15550100001",
           href: "sms:+15550100001",
           kind: "text",
           label: "Messages",
@@ -71,6 +72,7 @@ test("SidebarChatWithMurphContactDialog opens connected contact links", async ()
           target: "_blank",
         },
         {
+          copyValue: "murph+alias123@mail.withmurph.ai",
           href: "mailto:murph+alias123@mail.withmurph.ai?subject=Hey%20Murph",
           kind: "email",
           label: "Email",
@@ -88,6 +90,16 @@ test("SidebarChatWithMurphContactDialog opens connected contact links", async ()
 
     const links = [...container.querySelectorAll("a")];
     assert.match(container.textContent ?? "", /Pick how you want to reach Murph/);
+    assert.doesNotMatch(container.textContent ?? "", /\+15550100001/);
+    assert.doesNotMatch(container.textContent ?? "", /murph\+alias123@mail\.withmurph\.ai/);
+    assert.doesNotMatch(container.textContent ?? "", /Copy number/);
+    assert.doesNotMatch(container.textContent ?? "", /Copy address/);
+    assert.equal(
+      [...container.querySelectorAll("button")].filter((candidate) =>
+        candidate.getAttribute("aria-label")?.startsWith("Copy ")
+      ).length,
+      2,
+    );
     assert.deepEqual(
       links.map((link) => link.getAttribute("href")),
       [
@@ -101,5 +113,61 @@ test("SidebarChatWithMurphContactDialog opens connected contact links", async ()
     assert.match(links[0]?.getAttribute("class") ?? "", /focus-visible:after:ring-2/);
   } finally {
     await cleanup();
+  }
+});
+
+test("SidebarChatWithMurphContactDialog copies hidden contact values", async () => {
+  const writeText = vi.fn(() => Promise.resolve());
+  vi.useFakeTimers();
+
+  try {
+    const { SidebarChatWithMurphContactDialog } = await import(
+      "@/src/components/dashboard/sidebar-chat-contact-dialog"
+    );
+    const { button, cleanup, container, window } = await renderClientComponent(
+      <SidebarChatWithMurphContactDialog
+        options={[
+          {
+            copyValue: "murph+alias123@mail.withmurph.ai",
+            href: "mailto:murph+alias123@mail.withmurph.ai?subject=Hey%20Murph",
+            kind: "email",
+            label: "Email",
+          },
+        ]}
+      />,
+    );
+
+    vi.stubGlobal("navigator", {
+      clipboard: { writeText },
+    });
+
+    try {
+      await act(async () => {
+        button.dispatchEvent(new window.Event("click", { bubbles: true }));
+      });
+
+      const copyButton = [...container.querySelectorAll("button")].find(
+        (candidate) =>
+          candidate.getAttribute("aria-label") === "Copy Email contact info",
+      );
+      assert.ok(copyButton);
+
+      await act(async () => {
+        copyButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+      });
+
+      assert.deepEqual(writeText.mock.calls, [["murph+alias123@mail.withmurph.ai"]]);
+      assert.equal(copyButton.getAttribute("aria-label"), "Copied");
+
+      await act(async () => {
+        vi.runOnlyPendingTimers();
+      });
+
+      assert.equal(copyButton.getAttribute("aria-label"), "Copy Email contact info");
+    } finally {
+      await cleanup();
+    }
+  } finally {
+    vi.useRealTimers();
   }
 });
