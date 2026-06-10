@@ -646,7 +646,7 @@ describe("handleRunnerOutboundRequest", () => {
                 sleepEndAt: "2026-06-10T06:31:00.000Z",
                 sleepStartAt: "2026-06-09T22:04:00.000Z",
               },
-              occurredAt: "2026-06-10T06:31:00.000Z",
+              occurredAt: "2026-06-09T00:00:00.000Z",
               recordKey: "2026-06-09",
             },
           ],
@@ -680,8 +680,6 @@ describe("handleRunnerOutboundRequest", () => {
       ..._args: Parameters<typeof fetch>
     ): Promise<Response> =>
       new Response(JSON.stringify({
-        appendedCount: 1,
-        duplicateCount: 0,
         status: "delivered",
       }), {
         headers: {
@@ -703,7 +701,7 @@ describe("handleRunnerOutboundRequest", () => {
                 sleepEndAt: "2026-06-10T06:31:00.000Z",
                 sleepStartAt: "2026-06-09T22:04:00.000Z",
               },
-              occurredAt: "2026-06-10T06:31:00.000Z",
+              occurredAt: "2026-06-09T00:00:00.000Z",
               recordKey: "2026-06-09",
             },
           ],
@@ -759,7 +757,7 @@ describe("handleRunnerOutboundRequest", () => {
                 sleepEndAt: "2026-06-10T06:31:00.000Z",
                 sleepStartAt: "2026-06-09T22:04:00.000Z",
               },
-              occurredAt: "2026-06-10T06:31:00.000Z",
+              occurredAt: "2026-06-09T00:00:00.000Z",
               recordKey: "2026-06-09",
             },
           ],

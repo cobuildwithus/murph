@@ -55,9 +55,12 @@ export interface HostedVaultShareDeliverRequest {
   records: HostedVaultShareDeliveryRecord[];
 }
 
+/**
+ * The deliver response is intentionally a bare status that depends on share configuration
+ * alone: the grantor runtime may learn that an active share exists, never fan-out
+ * cardinality, duplicate history, or per-record outcomes.
+ */
 export interface HostedVaultShareDeliverResponse {
-  appendedCount: number;
-  duplicateCount: number;
   status: "delivered" | "no-active-share";
 }
 
@@ -105,15 +108,18 @@ export function parseHostedVaultShareDeliveryRecord(
     "Vault share delivery record recordKey",
   );
 
+  const occurredAt = requireIsoTimestamp(
+    record.occurredAt,
+    "Vault share delivery record occurredAt",
+  );
+
   return {
     data: parseHostedVaultShareDeliveryRecordData(record.data, {
+      occurredAt,
       projectionKind,
       recordKey,
     }),
-    occurredAt: requireIsoTimestamp(
-      record.occurredAt,
-      "Vault share delivery record occurredAt",
-    ),
+    occurredAt,
     recordKey,
   };
 }
@@ -121,19 +127,22 @@ export function parseHostedVaultShareDeliveryRecord(
 function parseHostedVaultShareDeliveryRecordData(
   value: unknown,
   context: {
+    occurredAt: string;
     projectionKind: HostedVaultShareProjectionKind;
     recordKey: string;
   },
 ): HostedVaultShareDeliveryRecordData {
   switch (context.projectionKind) {
     case "sleep-times.v0":
-      return parseHostedVaultShareSleepTimesData(value, context.recordKey);
+      return parseHostedVaultShareSleepTimesData(value, context);
   }
 }
 
+const HOSTED_VAULT_SHARE_SLEEP_MAX_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 function parseHostedVaultShareSleepTimesData(
   value: unknown,
-  recordKey: string,
+  context: { occurredAt: string; recordKey: string },
 ): HostedVaultShareSleepTimesData {
   const data = requireObject(value, "Vault share sleep-times data");
   const date = requireString(data.date, "Vault share sleep-times data date");
@@ -146,23 +155,40 @@ function parseHostedVaultShareSleepTimesData(
 
   // The record's identity is its night date; rejecting any drift keeps the dedupe key and
   // the destination vault path derived from recordKey byte-identical to the night itself.
-  if (recordKey !== date) {
+  if (context.recordKey !== date) {
     throw new TypeError(
       "Vault share sleep-times recordKey must equal the data date.",
     );
   }
 
-  return {
-    date,
-    sleepEndAt: requireIsoTimestamp(
-      data.sleepEndAt,
-      "Vault share sleep-times data sleepEndAt",
-    ),
-    sleepStartAt: requireIsoTimestamp(
-      data.sleepStartAt,
-      "Vault share sleep-times data sleepStartAt",
-    ),
-  };
+  // occurredAt is the envelope's only plaintext timestamp at rest (mailbox metadata).
+  // Pinning it to the night-date midnight keeps exact sleep times out of Postgres and
+  // anchors server-side recency filtering on the night itself, not a runtime-chosen time.
+  if (context.occurredAt !== `${date}T00:00:00.000Z`) {
+    throw new TypeError(
+      "Vault share sleep-times occurredAt must be the night date at UTC midnight.",
+    );
+  }
+
+  const sleepEndAt = requireIsoTimestamp(
+    data.sleepEndAt,
+    "Vault share sleep-times data sleepEndAt",
+  );
+  const sleepStartAt = requireIsoTimestamp(
+    data.sleepStartAt,
+    "Vault share sleep-times data sleepStartAt",
+  );
+  const windowMs = Date.parse(sleepEndAt) - Date.parse(sleepStartAt);
+
+  // Fails closed on corrupted projections: a sleep window must be a positive interval of
+  // plausible length, not reversed and not spanning multiple days.
+  if (!(windowMs > 0) || windowMs > HOSTED_VAULT_SHARE_SLEEP_MAX_WINDOW_MS) {
+    throw new TypeError(
+      "Vault share sleep-times window must end after it starts and span at most 24 hours.",
+    );
+  }
+
+  return { date, sleepEndAt, sleepStartAt };
 }
 
 export function parseHostedVaultShareDeliverRequest(
@@ -205,17 +231,7 @@ export function parseHostedVaultShareDeliverResponse(
     );
   }
 
-  return {
-    appendedCount: requireNonNegativeCount(
-      record.appendedCount,
-      "Vault share deliver response appendedCount",
-    ),
-    duplicateCount: requireNonNegativeCount(
-      record.duplicateCount,
-      "Vault share deliver response duplicateCount",
-    ),
-    status,
-  };
+  return { status };
 }
 
 export function parseHostedVaultShareDeliveryPayload(
@@ -271,12 +287,4 @@ function requireIsoTimestamp(value: unknown, label: string): string {
   }
 
   return text;
-}
-
-function requireNonNegativeCount(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new TypeError(`${label} must be a non-negative integer.`);
-  }
-
-  return value;
 }
