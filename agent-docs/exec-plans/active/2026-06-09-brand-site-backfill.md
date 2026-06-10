@@ -160,3 +160,7 @@ Conclusion: the regenerated candidate artifact is clean for the read-only checks
 ### Final session result
 
 - Structured `brand_site` rows: **7,063 → 23,786** (+16,723; **27% → 94.2%**, ~3.4x). Total brand_site 25,251 (479 non-supplements removed). The selector fix alone reclaimed ~760 rows previously written off as image-only floor.
+
+### Stopping point (2026-06-10): 94.3% structured
+
+- Image recovery tapered to ~23-28 clean per straggler sweep (declining; high-yield SFP brands exhausted, remaining brands increasingly 0-yield). FINAL: structured **23,809 / 25,251 = 94.3%** (from 27% at session start). Unstructured 1,442 = genuinely image-less brands (natures-plus etc. — facts not published as readable images) + anchor-failing sports/foreign-blend tail. NOT a hard floor — the long tail would yield a few hundred more over many low-yield batches — but a sound diminishing-returns stopping point.
