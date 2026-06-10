@@ -66,6 +66,7 @@ import {
 } from "./materialized-artifact-state.ts";
 import type {
   HostedRuntimePlatform,
+  HostedRuntimeWorkspaceSnapshotRestoreTimingDetails,
 } from "./platform.ts";
 
 const HOSTED_OPERATOR_HOME_ROOT_KEY = "operator-home";
@@ -93,6 +94,7 @@ export interface HostedWorkspaceRuntimeRestoreResult
   mode: HostedWorkspaceRuntimeRestoreMode;
   inboxSidecarNeedsRebuild: boolean;
   restoreWasCold: boolean;
+  restoreTiming: HostedRuntimeWorkspaceSnapshotRestoreTimingDetails | null;
 }
 
 export type HostedWorkspaceWarmIdleCheckpointOpenResult =
@@ -149,11 +151,12 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
         mode: "snapshot",
         restoreWasCold: false,
         inboxSidecarNeedsRebuild: true,
+        restoreTiming: null,
       };
     }
     await clearHostedWorkspaceRuntimeLocalRoots(restored);
     await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
-    await input.platform.workspaceSnapshotPort.restoreWorkspaceSnapshot({
+    const restoreTiming = await input.platform.workspaceSnapshotPort.restoreWorkspaceSnapshot({
       durableRoot: resolveHostedWorkspaceDurableRoot(restored.vaultRoot),
       ref: snapshotRef,
       scratchRoot: resolveHostedWorkspaceScratchRoot(restored.vaultRoot),
@@ -188,6 +191,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       mode: "snapshot",
       inboxSidecarNeedsRebuild: true,
       restoreWasCold: true,
+      restoreTiming: restoreTiming ?? null,
     };
   }
 
@@ -210,6 +214,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       mode: "null-bootstrap",
       inboxSidecarNeedsRebuild: true,
       restoreWasCold: true,
+      restoreTiming: null,
     };
   }
 
@@ -320,6 +325,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     mode: "snapshot",
     inboxSidecarNeedsRebuild: restoreWasCold,
     restoreWasCold,
+    restoreTiming: null,
   };
 }
 

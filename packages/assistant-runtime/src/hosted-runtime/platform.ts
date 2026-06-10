@@ -287,6 +287,18 @@ export interface HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails {
   snapshotDirectR2PutElapsedMs?: number;
 }
 
+export interface HostedRuntimeWorkspaceSnapshotRestoreTimingDetails {
+  sizeGuardMs?: number;
+  dataKeyUnwrapMs?: number;
+  scratchPrepareMs?: number;
+  presignGetMs?: number;
+  objectFetchMs?: number;
+  decryptMs?: number;
+  extractMs?: number;
+  encryptedBytes?: number;
+  plainBytes?: number;
+}
+
 export interface HostedRuntimeWorkspaceSnapshotPort {
   abortSnapshotSession(input: {
     objectKey: string;
@@ -307,7 +319,7 @@ export interface HostedRuntimeWorkspaceSnapshotPort {
     durableRoot: string;
     ref: HostedWorkspaceSnapshotV2Ref;
     scratchRoot?: string | null;
-  }): Promise<void>;
+  }): Promise<HostedRuntimeWorkspaceSnapshotRestoreTimingDetails | void>;
   startSnapshotSession(input: {
     expectedWorkspaceVersion: string;
     nextWakeAt?: string | null;

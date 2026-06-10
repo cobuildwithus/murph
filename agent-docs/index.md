@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-06-09
+Last verified: 2026-06-10
 
 ## Purpose
 
@@ -59,6 +59,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/operations/agent-workflow-routing.md` | Workflow router for task classes, plans, audits, verification, commit paths, default worktree/PR isolation, and paused giant-file policy status. | Agent workflow routing | High | 2026-06-09 |
 | `agent-docs/operations/verification-and-runtime.md` | Verification rules, build command semantics, hosted Temporal guard coverage, runtime assumptions, and doc-gardening scope for repo work. | Verification policy | High | 2026-06-09 |
 | `agent-docs/operations/completion-workflow.md` | Required post-implementation audit and completion flow. | Completion workflow | High | 2026-06-07 |
+| `agent-docs/operations/device-sync-ingestion-invariants.md` | The five device-sync push/pull ingestion invariants (pull floor, push-early/pull-eventually, degrade-to-fetch-never-silence, idempotent merge, louder-never-quieter) that any webhook/resource-job/reconcile change must preserve. | Device-sync ingestion contract | High | 2026-06-10 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |
 | `agent-docs/exec-plans/active/` | In-flight execution plans for current work. | Active work coordination | Medium | 2026-05-05 |

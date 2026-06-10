@@ -45,6 +45,9 @@ import type {
   HostedExecutionRedactedLogEntry,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
+import type {
+  HostedRuntimeLatencyPhaseBreakdown,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
@@ -546,12 +549,17 @@ export async function runHostedAssistantAutomation(
 }
 
 function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
+  admissionMs?: number;
   assistantInputIds: readonly string[];
   latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
+  preProviderSetupMs?: number;
+  promptBuildMs?: number;
   providerRequestOrdinal: number;
   runtimeAttemptId?: string | null;
+  sessionResolveMs?: number;
   source: string;
   startedAt: string;
+  turnLockWaitMs?: number;
 }): void {
   if (input.source !== "linq") {
     return;
@@ -560,10 +568,28 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
     return;
   }
 
+  // In-memory provider sub-split rides the EXISTING provider_started POST. No new
+  // request, await, or I/O: the durations were measured during turn setup and are
+  // attached to the request object already being sent best-effort.
+  const provider: NonNullable<
+    HostedRuntimeLatencyPhaseBreakdown["provider"]
+  > = {
+    ...(input.turnLockWaitMs === undefined ? {} : { turnLockWaitMs: input.turnLockWaitMs }),
+    ...(input.sessionResolveMs === undefined ? {} : { sessionResolveMs: input.sessionResolveMs }),
+    ...(input.promptBuildMs === undefined ? {} : { promptBuildMs: input.promptBuildMs }),
+    ...(input.admissionMs === undefined ? {} : { admissionMs: input.admissionMs }),
+    ...(input.preProviderSetupMs === undefined
+      ? {}
+      : { preProviderSetupMs: input.preProviderSetupMs }),
+  };
+
   void recordHostedAssistantProviderStartLatencyTraceWithRetry(input.latencyTracePort, {
     event: {
       assistantInputIds: [...input.assistantInputIds],
       at: input.startedAt,
+      ...(Object.keys(provider).length > 0
+        ? { phaseBreakdown: { schemaVersion: 1, provider } }
+        : {}),
       providerRequestOrdinal: input.providerRequestOrdinal,
       runtimeAttemptId: input.runtimeAttemptId ?? null,
       source: "linq",
@@ -1372,41 +1398,47 @@ async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
   state: HostedDeviceSyncRuntimeSyncState;
   wake: HostedRuntimeEvent;
 }): Promise<void> {
-  if (!input.platform?.logPort || input.processedJobs === 0 || !input.state.snapshot) {
+  if (!input.platform?.logPort) {
+    return;
+  }
+
+  // Per-attempt failure diagnostics are recorded by the worker at the moment a
+  // job attempt fails, so they survive a later job success that clears the
+  // account-level last_sync_error_at state in the same drain. Webhook-triggered
+  // wakes and idle maintenance both reach this writer through
+  // runHostedDeviceSyncPass.
+  const failureDiagnostics = input.service.listJobFailureDiagnostics();
+  if (failureDiagnostics.length === 0) {
     return;
   }
 
   const baselineByHostedConnectionId = new Map(
-    input.state.snapshot.connections.map((entry) => [entry.connection.id, entry]),
+    (input.state.snapshot?.connections ?? []).map((entry) => [entry.connection.id, entry]),
   );
-  const failureDiagnosticsByLocalAccountId = new Map(
-    input.service.listJobFailureDiagnostics().map((entry) => [entry.accountId, entry]),
+  const accountsByLocalAccountId = new Map(
+    input.service.listAccounts().map((account) => [account.id, account]),
   );
 
-  for (const account of input.service.listAccounts()) {
-    const hostedConnectionId = input.state.localToHostedAccountIds.get(account.id) ?? null;
-    if (!hostedConnectionId) {
-      continue;
-    }
-
-    const baseline = baselineByHostedConnectionId.get(hostedConnectionId) ?? null;
-
-    if (!account.lastSyncErrorAt || baseline?.localState.lastSyncErrorAt === account.lastSyncErrorAt) {
-      continue;
-    }
+  for (const failureDiagnostic of failureDiagnostics) {
+    const account = accountsByLocalAccountId.get(failureDiagnostic.accountId) ?? null;
+    const hostedConnectionId =
+      input.state.localToHostedAccountIds.get(failureDiagnostic.accountId) ?? null;
+    const baseline = hostedConnectionId
+      ? baselineByHostedConnectionId.get(hostedConnectionId) ?? null
+      : null;
 
     await writeHostedRuntimeLogBestEffort({
       entry: {
-        at: account.lastSyncErrorAt,
+        ...(failureDiagnostic.at ? { at: failureDiagnostic.at } : {}),
         component: "device-sync",
-        errorCode: toHostedRuntimeLogCode(account.lastErrorCode),
+        errorCode: toHostedRuntimeLogCode(failureDiagnostic.code),
         eventCode: "device-sync.job_failed",
         level: "warn",
         phase: "invoke",
         redactedJson: buildHostedDeviceSyncFailureLogRedactedJson({
           account,
           baseline,
-          failureDiagnostic: failureDiagnosticsByLocalAccountId.get(account.id) ?? null,
+          failureDiagnostic,
           hostedConnectionKnown: Boolean(hostedConnectionId),
           processedJobs: input.processedJobs,
           wake: input.wake,
@@ -1451,31 +1483,47 @@ type HostedDeviceSyncRuntimeService = NonNullable<ReturnType<typeof createHosted
 type HostedDeviceSyncRuntimeSnapshotEntry = NonNullable<HostedDeviceSyncRuntimeSyncState["snapshot"]>["connections"][number];
 
 function buildHostedDeviceSyncFailureLogRedactedJson(input: {
-  account: ReturnType<HostedDeviceSyncRuntimeService["listAccounts"]>[number];
+  account: ReturnType<HostedDeviceSyncRuntimeService["listAccounts"]>[number] | null;
   baseline: HostedDeviceSyncRuntimeSnapshotEntry | null;
-  failureDiagnostic: DeviceSyncJobFailureDiagnostic | null;
+  failureDiagnostic: DeviceSyncJobFailureDiagnostic;
   hostedConnectionKnown: boolean;
   processedJobs: number;
   wake: HostedRuntimeEvent;
 }): Record<string, boolean | number | string | null> {
-  const summary = sanitizeHostedDeviceSyncFailureSummary(input.account.lastErrorMessage);
+  const summary = sanitizeHostedDeviceSyncFailureSummary(
+    input.failureDiagnostic.summary
+      ?? (input.account && input.account.lastErrorCode === input.failureDiagnostic.code
+        ? input.account.lastErrorMessage
+        : null),
+  );
   const priorLocalState = input.baseline?.localState ?? null;
+  const provider = input.failureDiagnostic.provider ?? input.account?.provider ?? null;
 
   return {
-    failureCode: toHostedRuntimeLogCode(input.account.lastErrorCode),
+    failureCode: toHostedRuntimeLogCode(input.failureDiagnostic.code),
+    failureDisposition: input.failureDiagnostic.retryable ? "retry" : "drop",
+    ...(typeof input.failureDiagnostic.attempts === "number"
+      ? { failureJobAttempts: input.failureDiagnostic.attempts }
+      : {}),
+    ...(input.failureDiagnostic.jobKind
+      ? { failureJobKind: toHostedRuntimeLogCode(input.failureDiagnostic.jobKind) }
+      : {}),
+    ...(input.failureDiagnostic.resource
+      ? { failureResource: toHostedRuntimeLogCode(input.failureDiagnostic.resource) }
+      : {}),
     ...(summary ? { failureSummary: summary } : {}),
     ...buildHostedDeviceSyncFailureDiagnosticRedactedJson(input.failureDiagnostic),
     hadPriorFailure: Boolean(priorLocalState?.lastSyncErrorAt),
     hadPriorSuccess: Boolean(priorLocalState?.lastSyncCompletedAt),
     hostedConnectionKnown: input.hostedConnectionKnown,
-    nextReconcileAt: input.account.nextReconcileAt,
+    nextReconcileAt: input.account?.nextReconcileAt ?? null,
     processedJobs: input.processedJobs,
-    provider: toHostedRuntimeLogCode(input.account.provider),
-    setupPhase: input.account.setupPhase ?? null,
-    status: toHostedRuntimeLogCode(input.account.status),
-    syncCompletedAt: input.account.lastSyncCompletedAt,
-    syncFailedAt: input.account.lastSyncErrorAt,
-    syncStartedAt: input.account.lastSyncStartedAt,
+    provider: provider ? toHostedRuntimeLogCode(provider) : null,
+    setupPhase: input.account?.setupPhase ?? null,
+    status: input.account ? toHostedRuntimeLogCode(input.account.status) : null,
+    syncCompletedAt: input.account?.lastSyncCompletedAt ?? null,
+    syncFailedAt: input.account?.lastSyncErrorAt ?? null,
+    syncStartedAt: input.account?.lastSyncStartedAt ?? null,
     wakeKind: toHostedRuntimeLogCode(input.wake.kind),
     wakeReason: "reason" in input.wake
       ? toHostedRuntimeLogCode(input.wake.reason)
@@ -1558,12 +1606,8 @@ const DEVICE_SYNC_FAILURE_DIAGNOSTIC_BOOLEAN_FIELDS = [
 ] as const satisfies readonly DeviceSyncFailureDiagnosticBooleanField[];
 
 function buildHostedDeviceSyncFailureDiagnosticRedactedJson(
-  diagnostic: DeviceSyncJobFailureDiagnostic | null,
+  diagnostic: DeviceSyncJobFailureDiagnostic,
 ): Record<string, boolean | number | string | null> {
-  if (!diagnostic) {
-    return {};
-  }
-
   const redacted: Record<string, boolean | number | string | null> = {
     failureRetryable: diagnostic.retryable,
   };

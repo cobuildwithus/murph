@@ -16,6 +16,7 @@ import {
 } from '@murphai/operator-config/operator-config'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from './automation-tags.js'
 import { resolveDeliverableAutomationRoute } from './cron/targets.js'
+import { buildExperimentFinalResultsSeeds } from './experiment-support-automations.js'
 
 export type MurphManagedAutomationSchedule = Exclude<
   AutomationSchedule,
@@ -87,6 +88,8 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- notable changes',
       '- one suggested next step',
       '',
+      'If there is an active experiment with enough data to show movement, attach its progress image with `vault-cli experiment progress-card <slug> --format json` and fold its progress into the digest.',
+      '',
       'Do not overstate certainty. If data is missing, say that plainly.',
     ].join('\n'),
   },
@@ -95,8 +98,13 @@ export const MURPH_MANAGED_AUTOMATIONS = [
 export async function applyMurphManagedAutomations(
   input: ApplyMurphManagedAutomationsInput,
 ): Promise<ApplyMurphManagedAutomationsResult> {
-  const seeds = input.seeds ?? MURPH_MANAGED_AUTOMATIONS
   const now = input.now ?? new Date()
+  const seeds =
+    input.seeds ??
+    [
+      ...MURPH_MANAGED_AUTOMATIONS,
+      ...(await buildExperimentFinalResultsSeeds({ vaultRoot: input.vaultRoot, now })),
+    ]
   let createRoute: AutomationRoute | null | undefined
   const resolveCreateRoute = async (): Promise<AutomationRoute | null> => {
     if (createRoute !== undefined) {

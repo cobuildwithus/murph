@@ -102,6 +102,7 @@ declare module 'incur' {
       'experiment outcome analyze': { args: { id: string }; options: { requestId?: string; asOf?: string } }
       'experiment outcome write': { args: { id: string }; options: { requestId?: string; asOf?: string } }
       'experiment progress': { args: { id: string }; options: { requestId?: string; asOf?: string } }
+      'experiment progress-card': { args: { id: string }; options: { requestId?: string; asOf?: string; confounder?: string[] } }
       'experiment session attach': { args: { lookup: string; eventId: string }; options: { requestId?: string; replace?: boolean; allowOutOfWindow?: boolean } }
       'experiment session detach': { args: { eventId: string }; options: { requestId?: string } }
       'experiment session log': { args: { lookup: string }; options: { requestId?: string; date?: string; occurredAt?: string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; interventionType?: string; status?: "completed" | "partial" | "missed" | "skipped"; sessionStatus?: "completed" | "partial" | "missed" | "skipped"; durationMinutes?: number; protocolId?: string; timing?: string; temperatureC?: number; afterExercise?: boolean; symptoms?: string[]; confounders?: string[]; confounder?: string[] } }

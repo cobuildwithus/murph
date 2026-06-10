@@ -714,6 +714,150 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/milestone/u);
   });
 
+  it("round-trips phaseBreakdown on both latency events and rejects unsafe leaves", () => {
+    const stagedBreakdown = {
+      schemaVersion: 1,
+      restore: {
+        sizeGuardMs: 1,
+        dataKeyUnwrapMs: 2,
+        scratchPrepareMs: 3,
+        presignGetMs: 4,
+        objectFetchMs: 5,
+        decryptMs: 6,
+        extractMs: 7,
+        encryptedBytes: 8,
+        plainBytes: 9,
+      },
+      boot: { nodeStartupMs: 10, restoreWasCold: true },
+    };
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputId: "input_1",
+        at: "2026-04-26T00:00:00.000Z",
+        mailboxItemId: "mailbox_item_1",
+        phaseBreakdown: stagedBreakdown,
+        source: "linq",
+        type: "assistant_input_staged",
+      },
+    })).toEqual({
+      event: {
+        assistantInputId: "input_1",
+        at: "2026-04-26T00:00:00.000Z",
+        mailboxItemId: "mailbox_item_1",
+        phaseBreakdown: stagedBreakdown,
+        source: "linq",
+        type: "assistant_input_staged",
+      },
+    });
+
+    const providerBreakdown = {
+      schemaVersion: 1,
+      provider: {
+        turnLockWaitMs: 1,
+        sessionResolveMs: 2,
+        promptBuildMs: 3,
+        admissionMs: 4,
+        preProviderSetupMs: 5,
+      },
+    };
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputIds: ["input_1"],
+        at: "2026-04-26T00:00:01.000Z",
+        phaseBreakdown: providerBreakdown,
+        providerRequestOrdinal: 0,
+        source: "linq",
+        type: "provider_started",
+      },
+    })).toEqual({
+      event: {
+        assistantInputIds: ["input_1"],
+        at: "2026-04-26T00:00:01.000Z",
+        phaseBreakdown: providerBreakdown,
+        providerRequestOrdinal: 0,
+        source: "linq",
+        type: "provider_started",
+      },
+    });
+
+    // Secret-safety + robustness: a malformed phaseBreakdown is DROPPED (never
+    // reaches storage) while the core latency event still parses. phaseBreakdown is
+    // best-effort telemetry, so an unsafe/unknown shape must not poison the event
+    // and lose the essential milestones. Each unsafe input below must leave the
+    // returned event with no phaseBreakdown key.
+    for (const unsafeProvider of [
+      { sessionResolveMs: "not-a-number" }, // string leaf
+      { sessionResolveMs: { secret: 1 } }, // object leaf
+      { sessionResolveMs: [1, 2, 3] }, // array leaf
+      { networkToken: 1 }, // unknown sub key
+    ]) {
+      const parsed = parseHostedRuntimeLatencyTraceRequest({
+        event: {
+          assistantInputIds: ["input_1"],
+          at: "2026-04-26T00:00:01.000Z",
+          phaseBreakdown: { schemaVersion: 1, provider: unsafeProvider },
+          providerRequestOrdinal: 0,
+          source: "linq",
+          type: "provider_started",
+        },
+      });
+      expect(parsed.event.type).toBe("provider_started");
+      expect("phaseBreakdown" in parsed.event).toBe(false);
+    }
+
+    // Unknown top-level breakdown key is likewise dropped, not thrown, and the
+    // core staged event survives.
+    const droppedStaged = parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputId: "input_1",
+        at: "2026-04-26T00:00:00.000Z",
+        mailboxItemId: "mailbox_item_1",
+        phaseBreakdown: { schemaVersion: 1, network: { token: 1 } },
+        source: "linq",
+        type: "assistant_input_staged",
+      },
+    });
+    expect(droppedStaged.event.type).toBe("assistant_input_staged");
+    expect("phaseBreakdown" in droppedStaged.event).toBe(false);
+
+    // A malformed LEAF (not just an unknown key) inside the staged breakdown must
+    // drop ONLY the breakdown while PRESERVING the core staged milestone fields the
+    // dashboard depends on (runnerJobAcceptedAt, runtimeAttemptId,
+    // runtimePhaseStartedAt, workspaceRestoreDoneAt). This proves the lenient
+    // wrapper salvages the essential milestones, not merely that it omits the key.
+    const malformedLeafStaged = parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputId: "input_1",
+        at: "2026-04-26T00:00:00.000Z",
+        mailboxItemId: "mailbox_item_1",
+        phaseBreakdown: {
+          schemaVersion: 1,
+          // restore.decryptMs is a string, not a non-negative integer: malformed leaf.
+          restore: { decryptMs: "not-a-number" },
+          boot: { restoreWasCold: true },
+        },
+        runnerJobAcceptedAt: "2026-04-26T00:00:00.100Z",
+        runtimeAttemptId: "attempt_staged_1",
+        runtimePhaseStartedAt: "2026-04-26T00:00:00.200Z",
+        source: "linq",
+        type: "assistant_input_staged",
+        workspaceRestoreDoneAt: "2026-04-26T00:00:00.300Z",
+      },
+    });
+    expect("phaseBreakdown" in malformedLeafStaged.event).toBe(false);
+    expect(malformedLeafStaged.event).toEqual({
+      assistantInputId: "input_1",
+      at: "2026-04-26T00:00:00.000Z",
+      mailboxItemId: "mailbox_item_1",
+      runnerJobAcceptedAt: "2026-04-26T00:00:00.100Z",
+      runtimeAttemptId: "attempt_staged_1",
+      runtimePhaseStartedAt: "2026-04-26T00:00:00.200Z",
+      source: "linq",
+      type: "assistant_input_staged",
+      workspaceRestoreDoneAt: "2026-04-26T00:00:00.300Z",
+    });
+  });
+
   it("parses workspace checkpoint contracts as the hosted commit primitive", () => {
     const workspace = createWorkspaceState();
 

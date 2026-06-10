@@ -5,8 +5,6 @@ import type {
 import type {
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
-  HostedRuntimePrewarmRequest,
-  HostedRuntimePrewarmResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 
 import {
@@ -60,14 +58,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     },
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
     return this.runner.ensureRuntimeProcessingForUser(input);
-  }
-
-  async prewarmRuntimeContainerForUser(
-    input: HostedRuntimePrewarmRequest & {
-      userId: string;
-    },
-  ): Promise<HostedRuntimePrewarmResponse> {
-    return this.runner.prewarmRuntimeContainerForUser(input);
   }
 
   async validateRuntimeWriteFence(input: {

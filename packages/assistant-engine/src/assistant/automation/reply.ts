@@ -1187,10 +1187,21 @@ async function executeAssistantAutoReply(input: {
       onProviderEvent: watchdog.onProviderEvent,
       onProviderRequestStarted: input.onProviderRequestStarted
         ? (event) => input.onProviderRequestStarted?.({
+            ...(event.admissionMs === undefined ? {} : { admissionMs: event.admissionMs }),
             assistantInputIds: event.acceptedInputIds,
+            ...(event.preProviderSetupMs === undefined
+              ? {}
+              : { preProviderSetupMs: event.preProviderSetupMs }),
+            ...(event.promptBuildMs === undefined ? {} : { promptBuildMs: event.promptBuildMs }),
             providerRequestOrdinal: event.providerRequestOrdinal,
+            ...(event.sessionResolveMs === undefined
+              ? {}
+              : { sessionResolveMs: event.sessionResolveMs }),
             source: input.source,
             startedAt: event.startedAt,
+            ...(event.turnLockWaitMs === undefined
+              ? {}
+              : { turnLockWaitMs: event.turnLockWaitMs }),
           })
         : null,
       onTraceEvent: input.onTraceEvent,
@@ -1210,10 +1221,15 @@ async function executeAssistantAutoReply(input: {
 }
 
 export type AssistantAutoReplyProviderRequestStartHook = (event: {
+  admissionMs?: number
   assistantInputIds: readonly string[]
+  preProviderSetupMs?: number
+  promptBuildMs?: number
   providerRequestOrdinal: number
+  sessionResolveMs?: number
   source: string
   startedAt: string
+  turnLockWaitMs?: number
 }) => Promise<void> | void
 
 function shouldUseAssistantAutoReplyReceiptFallback(input: {

@@ -19,6 +19,9 @@ import {
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
+import type {
+  HostedRuntimeLatencyTraceStagedMilestones,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   buildHostedExecutionRuntimePlatform,
@@ -60,6 +63,7 @@ const HOSTED_RUNNER_WARM_LAUNCHER_DIRECTORY_NAMES = [
 ] as const;
 
 export interface HostedWorkspaceInvocationOptions {
+  nodeStartupMs?: number | null;
   onRuntimeWakeReady?: (sendWake: () => boolean) => void;
   runnerJobAcceptedAt?: string | null;
   signal?: AbortSignal;
@@ -180,11 +184,22 @@ export async function runHostedWorkspaceInvocation(
       timeoutMs: readHostedRunnerCommitTimeoutMs(job.runtime?.commitTimeoutMs ?? null),
     });
 
+    const latencyMilestones: HostedRuntimeLatencyTraceStagedMilestones = {
+      ...(options.runnerJobAcceptedAt
+        ? { runnerJobAcceptedAt: options.runnerJobAcceptedAt }
+        : {}),
+      ...(options.nodeStartupMs === null || options.nodeStartupMs === undefined
+        ? {}
+        : {
+            phaseBreakdown: {
+              schemaVersion: 1,
+              boot: { nodeStartupMs: options.nodeStartupMs },
+            },
+          }),
+    };
     const result = await runPackageHostedWorkspaceInvocation({
       job,
-      ...(options.runnerJobAcceptedAt
-        ? { latencyMilestones: { runnerJobAcceptedAt: options.runnerJobAcceptedAt } }
-        : {}),
+      ...(Object.keys(latencyMilestones).length > 0 ? { latencyMilestones } : {}),
       mailboxPayloadDecoder: decodeMailboxPayload,
       platform,
       readCurrentLease: () => currentLease,

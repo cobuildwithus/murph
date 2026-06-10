@@ -47,6 +47,12 @@ export interface JunctionProviderConnectionOrigin {
   sourceInstanceId?: string | null;
 }
 
+export interface JunctionProviderConnectionErrorDetails {
+  errorType: string | null;
+  errorMessage: string | null;
+  erroredAt: string | null;
+}
+
 export interface JunctionProviderConnection {
   id: string | null;
   slug: string;
@@ -55,6 +61,7 @@ export interface JunctionProviderConnection {
   source: JunctionProviderConnectionSource | null;
   origin: JunctionProviderConnectionOrigin;
   resourceAvailability: Record<string, unknown>;
+  errorDetails: JunctionProviderConnectionErrorDetails | null;
 }
 
 export type JunctionDateQueryFormat = "date" | "datetime";
@@ -775,7 +782,26 @@ function parseJunctionProviderConnection(value: unknown): JunctionProviderConnec
       sourceInstanceId: origin.sourceInstanceId,
     },
     resourceAvailability: readResourceAvailability(record),
+    errorDetails: readJunctionProviderConnectionErrorDetails(record),
   };
+}
+
+function readJunctionProviderConnectionErrorDetails(
+  record: Record<string, unknown>,
+): JunctionProviderConnectionErrorDetails | null {
+  const details = readPlainObject(record.error_details) ?? readPlainObject(record.errorDetails);
+  if (!details) {
+    return null;
+  }
+
+  const errorType = normalizeString(details.error_type) ?? normalizeString(details.errorType) ?? null;
+  const errorMessage = normalizeString(details.error_message) ?? normalizeString(details.errorMessage) ?? null;
+  const erroredAt = normalizeString(details.errored_at) ?? normalizeString(details.erroredAt) ?? null;
+  if (!errorType && !errorMessage && !erroredAt) {
+    return null;
+  }
+
+  return { errorType, errorMessage, erroredAt };
 }
 
 function readJunctionProviderConnectionId(record: Record<string, unknown>): string | null {

@@ -76,8 +76,13 @@ export interface AssistantHostedDeliveryIdempotencyContext {
 
 export type AssistantProviderRequestStartHook = (event: {
   acceptedInputIds: readonly string[]
+  admissionMs?: number
+  preProviderSetupMs?: number
+  promptBuildMs?: number
   providerRequestOrdinal: number
+  sessionResolveMs?: number
   startedAt: string
+  turnLockWaitMs?: number
 }) => Promise<void> | void
 
 export interface AssistantTurnEnvironment {
