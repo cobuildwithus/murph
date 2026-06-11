@@ -1709,6 +1709,20 @@ async function reconcileEventImportEntriesByExternalRef(
       continue;
     }
 
+    // externalRef identity does not include kind, so an under-faceted or
+    // malformed row could otherwise rewrite an existing event into a
+    // different kind. Event spines are kind-stable (upsertEvent enforces the
+    // same invariant per id), so reject the whole batch before anything is
+    // staged instead of superseding across kinds.
+    if (latest.kind !== entry.record.kind) {
+      throw new VaultError(
+        "EVENT_KIND_MISMATCH",
+        `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+          `${externalRef.facet ? `#${externalRef.facet}` : ""}" already belongs to kind ` +
+          `"${latest.kind}" and cannot be rewritten as "${entry.record.kind}"; nothing was imported.`,
+      );
+    }
+
     if (eventImportContentKey(latest) === eventImportContentKey(entry.record)) {
       skippedDuplicateCount += 1;
       records.push(latest);

@@ -387,6 +387,56 @@ test("importEventBatch treats rawRefs changes as content changes", async () => {
   assert.deepEqual(revision.rawRefs, ["raw/notes/source-b.md"]);
 });
 
+test("importEventBatch rejects kind rewrites through a shared externalRef", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-kind-stability");
+
+  const first = await importEventBatch({
+    vaultRoot,
+    payloads: [buildSleepSessionPayload(10)],
+    apply: true,
+  });
+  assert.equal(first.createdCount, 1);
+  const shardPath = first.eventShardPaths[0]!;
+  assert.equal((await readEventShard(vaultRoot, shardPath)).length, 1);
+
+  // Same externalRef identity (system + resourceType + resourceId, no facet)
+  // but a different kind: the spine is kind-stable, so the whole batch must
+  // reject atomically instead of superseding the sleep_session.
+  const conflictingKind = {
+    kind: "observation",
+    occurredAt: "2026-03-10T06:50:00.000Z",
+    source: "device",
+    title: "Sleep efficiency 2026-03-10",
+    metric: "sleep-efficiency",
+    value: 97,
+    unit: "%",
+    externalRef: {
+      system: "whoop",
+      resourceType: "sleep",
+      resourceId: "sleep-2026-03-10",
+    },
+  };
+
+  await assert.rejects(
+    importEventBatch({
+      vaultRoot,
+      payloads: [conflictingKind],
+      apply: true,
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      const vaultError = error as VaultError;
+      assert.equal(vaultError.code, "EVENT_KIND_MISMATCH");
+      assert.match(vaultError.message, /already belongs to kind "sleep_session"/u);
+      return true;
+    },
+  );
+
+  const records = await readEventShard(vaultRoot, shardPath);
+  assert.equal(records.length, 1);
+  assert.equal(records[0]!.kind, "sleep_session");
+});
+
 test("importEventBatch enforces batch-shape invariants in core", async () => {
   const vaultRoot = await makeVault("murph-event-batch-shape");
 
