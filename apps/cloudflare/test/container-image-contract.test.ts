@@ -176,6 +176,24 @@ describe("hosted runner container image contract", () => {
     expect(bundleAssemblyScript).toContain(
       "await rewriteRuntimeBinWrappers(stagingBundleDir);",
     );
+    expect(bundleAssemblyScript).toContain(
+      'import { bundleInstalledVaultCliBinary } from "./runner-bundle/bundle-cli.js";',
+    );
+    // The vault-cli esbuild step retargets the freshly rewritten bin wrappers
+    // at the bundle, so it must run after rewriteRuntimeBinWrappers and before
+    // the staging dir is materialized into the final bundle.
+    const rewriteBinWrappersCallIndex = bundleAssemblyScript.indexOf(
+      "await rewriteRuntimeBinWrappers(stagingBundleDir);",
+    );
+    const bundleVaultCliCallIndex = bundleAssemblyScript.indexOf(
+      "await bundleInstalledVaultCliBinary(stagingBundleDir);",
+    );
+    const materializeFinalBundleCallIndex = bundleAssemblyScript.indexOf(
+      "await materializeFinalRunnerBundle(",
+    );
+    expect(rewriteBinWrappersCallIndex).toBeGreaterThan(-1);
+    expect(bundleVaultCliCallIndex).toBeGreaterThan(rewriteBinWrappersCallIndex);
+    expect(materializeFinalBundleCallIndex).toBeGreaterThan(bundleVaultCliCallIndex);
     expect(runtimeShapeScript).toContain(
       'removeBundlePathIfPresent(path.join(bundleDir, "README.md"))',
     );

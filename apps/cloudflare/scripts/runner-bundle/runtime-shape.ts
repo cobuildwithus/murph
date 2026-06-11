@@ -303,7 +303,7 @@ function normalizeBinMap(packageJson: {
   );
 }
 
-function buildPortableNodeBinWrapper(relativeTargetPath: string): string {
+export function buildPortableNodeBinWrapper(relativeTargetPath: string): string {
   return [
     "#!/bin/sh",
     "basedir=$(dirname \"$(echo \"$0\" | sed -e 's,\\\\,/,g')\")",

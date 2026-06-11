@@ -13,6 +13,7 @@ import {
   resolveHostedRunnerBuildPackageNames,
   resolveHostedRunnerWorkspacePackageNames,
 } from "./runner-bundle-contract.js";
+import { bundleInstalledVaultCliBinary } from "./runner-bundle/bundle-cli.js";
 import {
   assertInstalledRunnerHealthCommonsRuntimeImport,
   installPackedRunnerDependencies,
@@ -140,6 +141,7 @@ async function assembleRunnerBundle(): Promise<void> {
     await pruneRunnerBundle(stagingBundleDir);
     await rewriteRuntimePackageManifest(stagingBundleDir);
     await rewriteRuntimeBinWrappers(stagingBundleDir);
+    await bundleInstalledVaultCliBinary(stagingBundleDir);
     await materializeFinalRunnerBundle(
       stagingBundleDir,
       runnerBundleDeployRoot,
