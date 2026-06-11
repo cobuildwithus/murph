@@ -7,7 +7,11 @@ type DatabaseSync = import("node:sqlite").DatabaseSync;
 
 installSqliteExperimentalWarningFilter();
 
-const { DatabaseSync: NodeSqliteDatabaseSync } = await import("node:sqlite");
+// process.getBuiltinModule keeps statement order (the warning filter above must
+// install before node:sqlite first loads) without top-level await, which would
+// poison every downstream module graph for single-file bundlers.
+const { DatabaseSync: NodeSqliteDatabaseSync } =
+  process.getBuiltinModule("node:sqlite");
 
 export const DEFAULT_SQLITE_TIMEOUT_MS = 5_000;
 
