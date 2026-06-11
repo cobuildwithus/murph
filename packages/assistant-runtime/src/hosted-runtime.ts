@@ -1326,7 +1326,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           phase: "checkpoint",
           requestId,
           stage: "workspace.checkpoint.idle_compact",
-          status: idleMaintenance.kind === "failed" ? "fail" : "done",
+          // A wake/shutdown abort is expected behavior, not an error; only
+          // genuine failures (timeout, rpc_error, process_exit, exception)
+          // should page through the error-level phase log.
+          status:
+            idleMaintenance.kind === "failed" && idleMaintenance.reason !== "aborted"
+              ? "fail"
+              : "done",
         });
         if (consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null)) {
           await runIdleWakeForegroundPass({

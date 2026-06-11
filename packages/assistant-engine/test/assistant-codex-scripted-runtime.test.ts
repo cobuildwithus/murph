@@ -236,13 +236,18 @@ describe('real codex app-server with scripted provider', () => {
     expect(Date.now() - abortedAt).toBeLessThan(5_000)
 
     // The aborted compact left the rollout uncompacted but intact: a fresh
-    // spawn resumes the same thread.
+    // spawn resumes the same thread. This is the wake-after-abort path, so it
+    // must be bounded by kill teardown (3s SIGTERM ceiling) + process spawn —
+    // never by the held-open provider request (8s) or the compact timeout
+    // (30s). The bound below fails if the resume ever waits on either.
     scenario.stub.queue({ text: 'POST_ABORT_OK' })
+    const resumeStartedAt = Date.now()
     const resumed = await executeCodexAppServerTurn({
       ...scenario.turnInput,
       prompt: 'Reply exactly POST_ABORT_OK.',
       resumeSessionId: seeded.sessionId,
     })
+    expect(Date.now() - resumeStartedAt).toBeLessThan(8_000)
     expect(resumed.finalMessage).toBe('POST_ABORT_OK')
     expect(resumed.threadId).toBe(seeded.threadId)
   })

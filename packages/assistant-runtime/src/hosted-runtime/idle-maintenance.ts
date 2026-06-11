@@ -91,29 +91,37 @@ export async function runHostedIdleCheckpointMaintenance(input: {
       return { kind: "failed", reason: "exception", threadContextTokensBefore: null };
     }
 
-    if (outcome.kind === "compacted" && outcome.usage && input.recordUsage) {
-      // Billing telemetry must never break the idle checkpoint nor delay a
-      // pending wake: build defensively and record fire-and-forget, exactly
-      // like turn usage recording.
-      try {
-        const assistantSessionId =
-          (await input.resolveAssistantSessionId?.(outcome.threadId)) ?? null;
-        if (assistantSessionId) {
-          const record = buildAssistantMaintenanceUsageRecord({
+    if (
+      outcome.kind === "compacted"
+      && outcome.usage
+      && input.recordUsage
+      && input.resolveAssistantSessionId
+    ) {
+      // The entire accounting path (session resolution + record write) is
+      // fire-and-forget: billing telemetry must never break the idle
+      // checkpoint nor delay a pending wake.
+      const { recordUsage, resolveAssistantSessionId } = input;
+      const { threadId, usage } = outcome;
+      const model = input.model;
+      void (async () => {
+        const assistantSessionId = await resolveAssistantSessionId(threadId);
+        if (!assistantSessionId) {
+          // No matching session: skip rather than write an ambiguous identity.
+          return;
+        }
+        await recordUsage(
+          buildAssistantMaintenanceUsageRecord({
             assistantSessionId,
-            codexThreadId: outcome.threadId,
+            codexThreadId: threadId,
             credentialSource: input.credentialSource,
             featureKey: "assistant_idle_compact",
             memberId: input.memberId,
-            model: input.model,
+            model,
             triggerKind: "automation_idle_compact",
-            usage: outcome.usage,
-          });
-          void input.recordUsage(record).catch(() => undefined);
-        }
-      } catch {
-        // Swallowed by design; the compact itself succeeded.
-      }
+            usage,
+          }),
+        );
+      })().catch(() => undefined);
     }
 
     return outcome;
