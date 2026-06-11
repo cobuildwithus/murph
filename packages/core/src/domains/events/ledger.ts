@@ -192,9 +192,9 @@ function buildEventRecord(
 // single-event upsert, gated to the public-write kinds, without touching the
 // ledger. Batch import builds records up front so an invalid payload can
 // reject the whole batch before any write. Explicit event ids are rejected:
-// batch dedupe reconciles per shard rather than vault-wide, so a caller-picked
-// id could silently skip an update or mint a colliding revision-1 copy in
-// another monthly shard; externalRef is the only re-import identity here.
+// externalRef is the only re-import identity for bulk import (reconciled
+// vault-wide), so a caller-picked id could only bypass that reconcile and
+// mint a colliding revision-1 copy of an existing event.
 export function buildPublicEventImportRecord(
   payload: JsonObject,
   fallbackTimeZone?: string,

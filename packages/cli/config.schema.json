@@ -7244,7 +7244,7 @@
                         },
                         "input": {
                           "type": "string",
-                          "description": "Payload input in @file.json form or - for stdin."
+                          "description": "JSON Lines input in @file.jsonl form or - for stdin."
                         },
                         "apply": {
                           "default": false,

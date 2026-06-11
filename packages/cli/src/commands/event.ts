@@ -950,7 +950,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
       'Each line is one canonical event payload in the same shape as import-json, except payloads must not carry an explicit id — externalRef is the re-import identity. Runs as a dry-run count report by default; re-run with --apply to write. Rows whose externalRef system + resourceType + resourceId + facet already exist are skipped (or updated in place when content changed); any invalid line rejects the whole batch.',
     args: z.object({}),
     options: withBaseOptions({
-      input: inputFileOptionSchema,
+      input: inputFileOptionSchema.describe('JSON Lines input in @file.jsonl form or - for stdin.'),
       apply: z
         .boolean()
         .default(false)
