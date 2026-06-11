@@ -443,6 +443,24 @@ test("summarizeSidebarDeviceSyncStatus reflects connected source state", () => {
   );
 });
 
+test("summarizeSidebarDeviceSyncStatus shortens the generic wearable source label", () => {
+  assert.deepEqual(
+    summarizeSidebarDeviceSyncStatus([
+      createDeviceSyncSource({
+        provider: "junction",
+        providerLabel: "Wearable source",
+        statusLabel: "Setup incomplete",
+        state: "active",
+        tone: "attention",
+      }),
+    ]),
+    {
+      message: "Wearable setup incomplete",
+      tone: "attention",
+    },
+  );
+});
+
 test("summarizeSidebarDeviceSyncStatus uses a single connected upstream source label", () => {
   assert.deepEqual(
     summarizeSidebarDeviceSyncStatus([
