@@ -61,6 +61,7 @@ import {
   resolveHostedLocalWorkerPortMode,
   runCommand,
   spawnChildProcess,
+  spawnHostedLocalDockerEventsForensics,
   spawnStripeListenerWithSecretCapture,
   StripeCliMissingError,
   terminateChildProcess,
@@ -257,6 +258,7 @@ export async function startHostedLocalDevStack(input: {
   let stopped = false;
   let stopPromise: Promise<void> | null = null;
   const children: BufferedNamedChildProcess[] = [];
+  let dockerEventsProcess: BufferedNamedChildProcess | null = null;
   let healthCommonsWatcher: BufferedNamedChildProcess | null = null;
   let linqTunnelProcess: BufferedNamedChildProcess | null = null;
   let linqWebhookSetup: HostedLocalLinqWebhookSetup | null = null;
@@ -588,6 +590,17 @@ export async function startHostedLocalDevStack(input: {
     }
     throwIfAbortSignalAborted(input.abortSignal);
 
+    // Start docker lifecycle forensics before wrangler dev so the stream also
+    // captures its container image builds and (buggy) duplicate-tag cleanup.
+    // Kept out of `children`: a forensics hiccup must not fail the stack.
+    dockerEventsProcess = workerRuntimeEnv === null
+      ? null
+      : spawnHostedLocalDockerEventsForensics(workerProcessEnv ?? workerRuntimeEnv, {
+        pipeOutput: input.pipeOutput,
+        stderrTarget: input.stderrTarget,
+        stdoutTarget: input.stdoutTarget,
+      });
+
     const cloudflareProcess = workerRuntimeEnv === null
       ? null
       : spawnChildProcess("cloudflare", "pnpm", [
@@ -745,6 +758,9 @@ export async function startHostedLocalDevStack(input: {
       if (stripeListener !== null) {
         terminateChildProcess(stripeListener.child, childSignal);
       }
+      if (dockerEventsProcess !== null) {
+        terminateChildProcess(dockerEventsProcess.child, childSignal);
+      }
       terminateKnownHostedLocalProcessResidue({
         config,
         owned: {
@@ -798,6 +814,12 @@ export async function startHostedLocalDevStack(input: {
           ),
           ...(stripeListener !== null
             ? [terminateChildProcessAndWait(stripeListener.child, { signal: childSignal })]
+            : []),
+          ...(dockerEventsProcess !== null
+            ? [
+              terminateChildProcessAndWait(dockerEventsProcess.child, { signal: childSignal })
+                .catch(() => {}),
+            ]
             : []),
         ]);
         const terminationFailure = terminationResults.find(
@@ -910,9 +932,11 @@ export async function startHostedLocalDevStack(input: {
       }
     })();
 
-    const reportingChildren = stripeListener === null
-      ? children
-      : [...children, stripeListener];
+    const reportingChildren = [
+      ...children,
+      ...(stripeListener === null ? [] : [stripeListener]),
+      ...(dockerEventsProcess === null ? [] : [dockerEventsProcess]),
+    ];
 
     return {
       config: {
@@ -959,6 +983,10 @@ export async function startHostedLocalDevStack(input: {
     }
     if (stripeListener !== null) {
       await terminateChildProcessAndWait(stripeListener.child, { signal: "SIGTERM" }).catch(() => {});
+    }
+    if (dockerEventsProcess !== null) {
+      await terminateChildProcessAndWait(dockerEventsProcess.child, { signal: "SIGTERM" })
+        .catch(() => {});
     }
     if (workerRuntimeEnv && workerPortMode === "start") {
       await cleanupHostedRunnerContainers({

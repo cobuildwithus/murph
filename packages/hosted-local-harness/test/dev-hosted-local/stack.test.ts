@@ -111,6 +111,22 @@ class StripeCliMissingError extends Error {
     this.name = "StripeCliMissingError";
   }
 }
+const spawnHostedLocalDockerEventsForensics = vi.fn<
+  (
+    env: NodeJS.ProcessEnv,
+    input?: {
+      pipeOutput?: boolean;
+      stderrTarget?: NodeJS.WritableStream;
+      stdoutTarget?: NodeJS.WritableStream;
+    },
+  ) => BufferedNamedChildProcess
+>(() =>
+  createBufferedChild({
+    exitCode: null,
+    name: "docker-events",
+    pid: nextChildPid++,
+  }),
+);
 const spawnStripeListenerWithSecretCapture = vi.fn<
   (input: {
     command: string;
@@ -358,6 +374,7 @@ vi.mock("../../src/dev-hosted-local/runtime.ts", () => ({
   resolveHostedLocalWorkerPortMode,
   runCommand,
   spawnChildProcess,
+  spawnHostedLocalDockerEventsForensics,
   spawnStripeListenerWithSecretCapture,
   StripeCliMissingError,
   terminateChildProcess,
@@ -614,7 +631,7 @@ describe("hosted local dev stack", () => {
       }),
     );
     expect(stack.config.workerPersistDir).toBe("/tmp/murph-dev-env-test/wrangler-state");
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(2);
     expect(waitForHealthyHttpEndpoint).toHaveBeenNthCalledWith(1, {
       host: "127.0.0.1",
@@ -774,7 +791,7 @@ describe("hosted local dev stack", () => {
     expect(webEnv.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
     expect(stack.processes.temporalServer).toBe(temporalServer);
     expect(stack.processes.temporalWorker).toBe(temporalWorker);
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(4);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(5);
     const pkillArgs = spawnSync.mock.calls
       .filter(([command]) => command === "pkill")
       .map(([, args]) => args);
@@ -1076,7 +1093,7 @@ describe("hosted local dev stack", () => {
     const stopPromise = stack.stop();
     await Promise.resolve();
 
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
     releaseFirstTermination();
     await stopPromise;
   });
@@ -1105,10 +1122,10 @@ describe("hosted local dev stack", () => {
     const secondStop = stack.stop("SIGKILL");
     await Promise.resolve();
 
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
     releaseFirstTermination();
     await Promise.all([firstStop, secondStop]);
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
   });
 
   it("treats Ctrl-C as child termination and force-sweeps owned worker residue", async () => {
@@ -1673,7 +1690,7 @@ describe("hosted local dev stack", () => {
     });
 
     await expect(stack.ready).rejects.toThrow("fetch failed");
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(1);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
   });
 
   it("starts a managed Linq cloudflared tunnel and registers the local webhook target", async () => {
@@ -1764,7 +1781,7 @@ describe("hosted local dev stack", () => {
       spawnSync.mock.invocationCallOrder[runnerImageInspectCallIndex] ?? Number.POSITIVE_INFINITY,
     ).toBeLessThan(waitForHostedLocalLinqWebhookTarget.mock.invocationCallOrder[0]);
     expect(stack.processes.linqTunnel?.name).toBe("linq-tunnel");
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(4);
   });
 
   it("uses prisma migrate deploy for non-local databases instead of forcing db push", async () => {
@@ -2104,7 +2121,7 @@ describe("hosted local dev stack", () => {
 
     expect(spawnChildProcess).toHaveBeenCalledTimes(1);
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(1);
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(1);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
     expect(stack.webBaseUrl).toBeNull();
   });
 
@@ -2180,7 +2197,7 @@ describe("hosted local dev stack", () => {
     await expect(stack.ready).rejects.toThrow(
       "cloudflare dev process exited before the hosted local stack became healthy.",
     );
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledWith(
       expect.objectContaining({
         ignoreErrors: true,
