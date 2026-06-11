@@ -77,6 +77,11 @@ viable — Junction maintains first-class bindings for all four frameworks):
 
 ## MVP Scope (v1, App Store reviewable)
 
+> Build plan narrowed 2026-06-10: the first shippable slice is two screens
+> (Privy login + Connect Apple Health) targeting TestFlight; see
+> `agent-docs/product-specs/companion-app-mvp.md`. The list below remains
+> the App-Store-ready surface.
+
 1. **Sign-in** via Privy linking to the member's existing Murph account.
 2. **HealthKit permission flow** — native UI, purpose copy matching Murph's
    actual use (`NSHealthShareUsageDescription`).

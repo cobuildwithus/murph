@@ -49,6 +49,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/product-specs/protocol-outcome-network.md` | Protocol outcome network boundary for private outcome cards now and future sharing, contribution, cohort summaries, and social guardrails. | Outcome network behavior | High | 2026-05-13 |
 | `agent-docs/product-specs/captures.md` | Capture primitive product boundary for dated private media evidence. | Capture behavior | High | 2026-04-21 |
 | `agent-docs/product-specs/companion-app.md` | Native Swift iOS companion app for Apple Health sync, hybrid WHOOP posture, MVP scope, and phases. | Companion app plan | High | 2026-06-10 |
+| `agent-docs/product-specs/companion-app-mvp.md` | Two-screen companion app MVP build spec: Privy login, Connect Apple Health, sign-in token endpoint. | Companion app build plan | High | 2026-06-10 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |
 | `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, smoke flows, CI, diff-aware package-boundary checks, hosted Temporal orchestration guard coverage, hosted web E2E testkit triggers, the hosted-local Workers AI transcription E2E gate, and the Cloudflare immediate-deploy Blacksmith path. | Testing and CI truth | High | 2026-06-10 |
