@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:53b6e2cb3183243719ec71afb3725c0c5c4d7126d49fbdbebd452f160caf0e1d",
+  "catalogHash": "sha256:10c16c91dec2febc46da570375d60d48140d57932bd05428b28c8046b3119e1d",
   "generatedAt": null,
   "items": [
     {
@@ -35284,7 +35284,18 @@
       ],
       "equipment": [],
       "id": "EX125",
-      "images": [],
+      "images": [
+        {
+          "alt": "Frog bridge setup with soles together, knees open, and hips grounded.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9d46aa1a-a192-4be3-fda9-07a77c7bb300/public"
+        },
+        {
+          "alt": "Frog bridge top position with hips lifted, knees open, and soles together.",
+          "step": "Top bridge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9cd2c6c8-4afa-4b7b-0b1a-6c4d341be400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -35323,7 +35334,18 @@
       ],
       "equipment": [],
       "id": "EX126",
-      "images": [],
+      "images": [
+        {
+          "alt": "Frog pump setup with soles together, knees open, and hips grounded.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/132f12bf-71e7-42f8-87a1-20c3d0ff9a00/public"
+        },
+        {
+          "alt": "Short top-range frog pump bridge with glutes squeezed and knees staying open.",
+          "step": "Top pump",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5dc79ab7-ffe9-49a0-c8f8-7ad8e8f11300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -35365,7 +35387,18 @@
         "Mini band optional"
       ],
       "id": "EX127",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person holds a glute bridge with hips level, feet planted, and knees over feet.",
+          "step": "Bridge setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/704fd0c1-3acb-4fbf-cac6-84856dc4a100/public"
+        },
+        {
+          "alt": "Person holds the bridge while pressing both knees outward, keeping hips level and feet planted.",
+          "step": "Press knees outward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e296f543-87e0-48f8-05ad-b62dd1bcdb00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -35407,7 +35440,18 @@
         "Pillow"
       ],
       "id": "EX128",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side-view bridge setup with a pillow held between the knees and feet planted.",
+          "step": "Bridge setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/44ffd4a7-87fd-4ac7-4b46-1f0e5c281600/public"
+        },
+        {
+          "alt": "Top bridge position with hips lifted and pillow squeezed between the knees.",
+          "step": "Bridge squeeze",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a8ba97bf-dbca-47bc-362d-a370d1bffa00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -35447,7 +35491,18 @@
       ],
       "equipment": [],
       "id": "EX129",
-      "images": [],
+      "images": [
+        {
+          "alt": "Supine bridge setup with feet planted and ribs quiet.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/650a8d3c-8f82-43cc-6142-070eb5a32300/public"
+        },
+        {
+          "alt": "Top bridge position with heels digging back while feet stay planted.",
+          "step": "Heel dig bridge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7e24e8cc-6998-4bfc-dd72-c7dedeced000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -35486,7 +35541,18 @@
       ],
       "equipment": [],
       "id": "EX130",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side-view bridge setup with knees bent, feet hip-width, and ribs quiet.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f7b95636-a7aa-4a13-cb21-b2fbbadc1100/public"
+        },
+        {
+          "alt": "Side-view glute bridge with toes lifted and heels pressing into the mat.",
+          "step": "Bridge top",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/314ce0e0-96d4-42fc-10ca-e61da2874600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -35526,7 +35592,18 @@
       ],
       "equipment": [],
       "id": "EX131",
-      "images": [],
+      "images": [
+        {
+          "alt": "Supine bridge setup with knees bent, feet planted under knees, ribs down, and arms relaxed by sides.",
+          "step": "Bridge setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6578bb59-f3df-4c30-a70a-cae77f6b0200/public"
+        },
+        {
+          "alt": "Long bridge walkout with hips lifted, heels walked farther out, and both feet grounded.",
+          "step": "Walkout reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dd168449-1683-43b4-b0c0-37148a58dc00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -35568,7 +35645,18 @@
         "Couch"
       ],
       "id": "EX132",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side-view hip thrust top setup with upper back on a low bench, hips lifted, knees bent, and feet planted.",
+          "step": "Top setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/239d46b6-73e9-4639-3576-c509ad017c00/public"
+        },
+        {
+          "alt": "Side-view hip thrust top position showing a small controlled hip pulse while the bench and feet stay fixed.",
+          "step": "Small pulse",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/68e83cb2-d358-480b-3da7-e4c3f8b56a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -35610,7 +35698,18 @@
         "Couch"
       ],
       "id": "EX133",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bench-supported hip thrust setup with feet under knees and ribs braced.",
+          "step": "Thrust setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4bc6b3b2-9fdc-4e23-ef7e-19f63c810900/public"
+        },
+        {
+          "alt": "Hip thrust top hold with upper back on bench, hips level, and shins vertical.",
+          "step": "Top hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/38cf620f-61af-4ee5-7a09-a6ae43256700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -35649,7 +35748,18 @@
       ],
       "equipment": [],
       "id": "EX134",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lies on one side with hips stacked, knees bent, and feet together for a clamshell setup.",
+          "step": "Side-lying setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4fda5baa-a389-42f1-cd70-852fd9aa1800/public"
+        },
+        {
+          "alt": "Adult side-lying with feet touching while the top knee opens upward and hips stay stacked.",
+          "step": "Open knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6980e428-f86b-4548-e076-ed868e081e00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -35690,7 +35800,18 @@
         "Mini band"
       ],
       "id": "EX135",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side-lying banded clamshell setup with knees bent, feet together, hips stacked, and a mini band above the knees.",
+          "step": "Banded setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/52ba7055-dd20-4d7c-96ef-f789207a2b00/public"
+        },
+        {
+          "alt": "Side-lying banded clamshell press-open position with feet together, top knee opening against the band, and pelvis stacked.",
+          "step": "Press open",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b9fa5ac6-883b-4593-53df-7d752349b200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -35730,7 +35851,18 @@
       ],
       "equipment": [],
       "id": "EX136",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side-lying reverse clamshell setup with knees together, hips stacked, and feet together.",
+          "step": "Side-lying setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e6ba18aa-66ab-4d87-bb51-08a3515dba00/public"
+        },
+        {
+          "alt": "Side-lying reverse clamshell with knees staying together while the top foot lifts and the bottom foot stays on the mat.",
+          "step": "Lift top foot",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f6866fae-afb7-4dbd-25ba-5b8745614d00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -35769,7 +35901,18 @@
       ],
       "equipment": [],
       "id": "EX137",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lies on one side with hips stacked, bottom arm supporting the head, and both legs long on a mat.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/81c87b03-8a3c-4f47-7b69-c8b0e77e5d00/public"
+        },
+        {
+          "alt": "Adult lies on one side and lifts the top leg while the lower leg stays quiet and hips remain stacked.",
+          "step": "Lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c6282af1-836e-4aae-1e60-716bfa88f400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -35808,7 +35951,18 @@
       ],
       "equipment": [],
       "id": "EX138",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lies side-lying with the top foot planted and bottom leg extended.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e22fc620-d8b4-4c34-07e9-d73ab5cf5100/public"
+        },
+        {
+          "alt": "Adult lifts the straight bottom leg while keeping the top foot planted.",
+          "step": "Lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/14d16359-5723-4ea5-8f82-6de3d9d2c400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -35847,7 +36001,18 @@
       ],
       "equipment": [],
       "id": "EX139",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side-lying setup with hips stacked and top leg long.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1b2a38e6-7176-49ee-2fb8-083bb6d8ff00/public"
+        },
+        {
+          "alt": "Side-lying leg circle with top leg lifted and circular motion cue.",
+          "step": "Leg circle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f0ea854d-1f1b-4bbc-7b83-f53822f22200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -35886,7 +36051,18 @@
       ],
       "equipment": [],
       "id": "EX140",
-      "images": [],
+      "images": [
+        {
+          "alt": "Gender-neutral adult lying side-on with hips stacked and top leg long.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b8baf464-ce16-4886-8d1d-83ce19525900/public"
+        },
+        {
+          "alt": "Gender-neutral adult lying side-on with top leg lifted for a small pulse.",
+          "step": "Small pulse",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1e1d194f-5b12-4697-d879-c9383daaf900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -35925,7 +36101,18 @@
       ],
       "equipment": [],
       "id": "EX141",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in quadruped tabletop position with alignment callouts.",
+          "step": "Quadruped setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1e29106c-e821-4c79-2676-f569c7d9c600/public"
+        },
+        {
+          "alt": "Adult in tabletop opening one bent knee to the side for a fire hydrant.",
+          "step": "Open hip",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3a22257a-9197-4b6e-24f5-3f2d1bb41900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -35964,7 +36151,18 @@
       ],
       "equipment": [],
       "id": "EX142",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in quadruped setup on a mat with alignment callouts.",
+          "step": "Quadruped setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/11a997be-ba1d-462f-99fb-f45d14562b00/public"
+        },
+        {
+          "alt": "Adult performing a fire hydrant pulse with the knee bent and lifted to the side.",
+          "step": "Small pulse",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3859654d-c96c-4200-666e-2d75bd643200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -36004,7 +36202,18 @@
       ],
       "equipment": [],
       "id": "EX143",
-      "images": [],
+      "images": [
+        {
+          "alt": "Tabletop setup for donkey kick with hands under shoulders, knees under hips, and spine neutral.",
+          "step": "Tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/182500b0-93d1-41b5-396d-de67a47c3400/public"
+        },
+        {
+          "alt": "Donkey kick top position with one knee bent and heel pressing upward while hips stay level.",
+          "step": "Heel press up",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d926238d-ee01-4ac6-8b1f-0ecd2d4bb700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -36043,7 +36252,18 @@
       ],
       "equipment": [],
       "id": "EX144",
-      "images": [],
+      "images": [
+        {
+          "alt": "Tabletop setup for straight-leg kickback with hands under shoulders and knees under hips.",
+          "step": "Tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c6808867-8e39-4974-25e9-9ab7545eaa00/public"
+        },
+        {
+          "alt": "Straight-leg kickback with one leg extended back from the hip and toes reaching long.",
+          "step": "Straight-leg kickback",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/600db300-e16b-4ce9-73a4-05003d427000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -36082,7 +36302,18 @@
       ],
       "equipment": [],
       "id": "EX145",
-      "images": [],
+      "images": [
+        {
+          "alt": "Quadruped bent-knee kickback top position with heel lifted and hips level.",
+          "step": "Bent-knee lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/03674712-bbc3-4d72-dc52-a9349563b800/public"
+        },
+        {
+          "alt": "Small controlled pulse at the top of a bent-knee kickback with the support limbs stable.",
+          "step": "Small pulse",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c2995755-4257-460d-9c8d-422e5217b800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -36122,7 +36353,18 @@
       ],
       "equipment": [],
       "id": "EX146",
-      "images": [],
+      "images": [
+        {
+          "alt": "Quadruped hip-circle start with hands under shoulders, knees under hips, and spine neutral.",
+          "step": "Tabletop start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/44026db4-9d82-4197-9d76-04bfb4717d00/public"
+        },
+        {
+          "alt": "Quadruped hip circle with one bent knee tracing a controlled circle while hips stay steady.",
+          "step": "Hip circle path",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/82b06a89-6ab0-427d-c8c1-994eb8487900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -36163,7 +36405,18 @@
         "Chair"
       ],
       "id": "EX147",
-      "images": [],
+      "images": [
+        {
+          "alt": "Tall standing hip extension setup with light chair support and both feet planted.",
+          "step": "Standing setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/37e8cc10-7092-4a08-daee-512c5bab7f00/public"
+        },
+        {
+          "alt": "Standing hip extension with one leg reaching behind while torso stays tall and hips square.",
+          "step": "Leg extends behind",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/675346dd-ad1a-4b38-f55b-3bc7395ac200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -36204,7 +36457,18 @@
         "Chair"
       ],
       "id": "EX148",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing hip abduction setup with light support, tall posture, and both feet planted.",
+          "step": "Standing setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cc2ff441-72f5-4d1a-d2ac-e5f2fa5b1700/public"
+        },
+        {
+          "alt": "Standing hip abduction with one leg lifting to the side while hips remain level.",
+          "step": "Leg lift top",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/13559f01-8c6c-42cb-a0d5-da23f28d3400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -36245,7 +36509,18 @@
         "Chair"
       ],
       "id": "EX149",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing hip adduction setup with light support and the moving leg ready to cross inward.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ed7dc139-fa7d-4413-4159-edb58f84cd00/public"
+        },
+        {
+          "alt": "Standing hip adduction with the moving leg crossing inward while torso stays tall.",
+          "step": "Movement position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4de26572-e175-40c3-a144-9147ee3d2700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -36286,7 +36561,18 @@
         "Chair"
       ],
       "id": "EX150",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing glute kickback setup with light support, tall posture, and both feet planted.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/548f1997-cca4-43e5-5167-498911b86000/public"
+        },
+        {
+          "alt": "Standing glute kickback with one leg reaching behind while hips stay square.",
+          "step": "Kickback",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1bbb4723-2899-4b44-eb75-65891e951900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -36327,7 +36613,18 @@
         "Chair"
       ],
       "id": "EX151",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing fire hydrant setup with tall posture, light support, and both feet planted.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b6b69b7c-e151-43a6-85ce-5f047cb17b00/public"
+        },
+        {
+          "alt": "Standing fire hydrant with one bent knee opening to the side while hips stay level.",
+          "step": "Knee opens out",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/970437a1-ac52-404b-6754-f6c2f19bc500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -36368,7 +36665,18 @@
         "Mini band"
       ],
       "id": "EX152",
-      "images": [],
+      "images": [
+        {
+          "alt": "Monster walk setup with a mini band, knees soft, and feet set wide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9b8629c8-1b11-4213-21e0-bc34b6772200/public"
+        },
+        {
+          "alt": "Monster walk diagonal step with knees tracking outward and band tension maintained.",
+          "step": "Diagonal forward step",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/406e74fe-5429-42e0-5703-ad2903db8600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -36409,7 +36717,18 @@
         "Mini band"
       ],
       "id": "EX153",
-      "images": [],
+      "images": [
+        {
+          "alt": "Lateral band walk setup with knees soft, feet hip-width, and band tension on.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/79a82ae7-5b97-474e-2444-a48d2e55e900/public"
+        },
+        {
+          "alt": "Lateral band walk side step with knees tracking outward and hips level.",
+          "step": "Side step",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/457c26e1-9bd1-4779-bbbf-230866197500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -36451,7 +36770,18 @@
         "Mini band"
       ],
       "id": "EX154",
-      "images": [],
+      "images": [
+        {
+          "alt": "Diagonal band walk setup with knees soft, feet set wide, and band tension maintained.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/caca1d85-5fe2-4f65-3abe-e2a2bd26d800/public"
+        },
+        {
+          "alt": "Diagonal band walk step with controlled hip position and steady band tension.",
+          "step": "Diagonal step",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1c4ac3b1-8259-485f-67c7-323540dfc800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -36493,7 +36823,18 @@
         "Mini band optional"
       ],
       "id": "EX155",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing clam setup with light support, knees softly bent, and hips square.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/238bcf0d-6c00-45b4-55d1-6a67780c3400/public"
+        },
+        {
+          "alt": "Standing clam movement with one bent knee opening outward while the foot stays near the support leg.",
+          "step": "Open knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/96fa19a2-f984-448e-5b5e-7b0555e0c900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -36532,7 +36873,18 @@
       ],
       "equipment": [],
       "id": "EX156",
-      "images": [],
+      "images": [
+        {
+          "alt": "Glute bridge top position with feet planted, hips lifted, and ribs quiet.",
+          "step": "Bridge top",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5f535efd-d16a-4776-3e87-190eddf36600/public"
+        },
+        {
+          "alt": "Glute bridge to sit-up transition with torso curling upward from the mat.",
+          "step": "Sit-up phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/072e6f49-06b5-4234-1274-147bed571400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -36572,7 +36924,18 @@
       ],
       "equipment": [],
       "id": "EX157",
-      "images": [],
+      "images": [
+        {
+          "alt": "Tabletop reverse bridge setup with hands behind the body, knees bent, and feet planted.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3c264796-6bb5-4189-8030-b9f977b14700/public"
+        },
+        {
+          "alt": "Tabletop reverse bridge top position with hips lifted and chest open.",
+          "step": "Top position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eadc17d9-8dd3-49e8-dd0a-615f864d0e00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -36612,7 +36975,18 @@
       ],
       "equipment": [],
       "id": "EX158",
-      "images": [],
+      "images": [
+        {
+          "alt": "Reverse plank setup with hands behind the body, legs long, and heels grounded.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b6ab5bbd-d32b-40a3-a169-b458f8be0000/public"
+        },
+        {
+          "alt": "Reverse plank hold with hips lifted, legs long, and chest open.",
+          "step": "Hold top",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c67ed72d-6d72-47f1-4806-3dc2bf4ff100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -36652,7 +37026,18 @@
       ],
       "equipment": [],
       "id": "EX159",
-      "images": [],
+      "images": [
+        {
+          "alt": "Reverse plank base with hands planted behind the body, hips lifted, and legs long.",
+          "step": "Reverse plank base",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3d3aef3d-e2af-4a78-dc1c-f716e224b700/public"
+        },
+        {
+          "alt": "Reverse plank leg lift with one leg lifting while hips stay high and shoulders stay broad.",
+          "step": "Leg lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a8b3affa-cfd9-42d8-cc94-35880d7cb600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -36693,7 +37078,18 @@
       ],
       "equipment": [],
       "id": "EX160",
-      "images": [],
+      "images": [
+        {
+          "alt": "Quadruped donkey kick phase with one bent knee lifting behind while hips stay level.",
+          "step": "Donkey kick",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1f37b0f1-5d2c-477d-bd03-9b8ce832b300/public"
+        },
+        {
+          "alt": "Quadruped fire hydrant phase with one bent knee opening to the side while support limbs stay steady.",
+          "step": "Fire hydrant",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4591a409-a9b3-41cc-c353-55c8961ebf00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -36732,7 +37128,18 @@
       ],
       "equipment": [],
       "id": "EX161",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side-view prone setup with forearms supporting the forehead, both legs long, pelvis level, and shoulders relaxed.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d28d71fa-111d-4584-100a-68ce5337d500/public"
+        },
+        {
+          "alt": "Side-view prone hip extension with one straight leg lifting from the hip while the opposite leg stays long.",
+          "step": "Hip extension",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/37cccd1f-758b-4933-424e-e2f7a3a57a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -36771,7 +37178,18 @@
       ],
       "equipment": [],
       "id": "EX162",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lying prone with knees opened outward, heels together, pelvis grounded, and upper body relaxed.",
+          "step": "Frog setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8fda42d2-5c3a-483a-4cb5-bf9e8865e400/public"
+        },
+        {
+          "alt": "Prone frog heel press with heels pressing together and a small controlled thigh lift.",
+          "step": "Heel press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/17bbe7df-bee2-49ba-598d-c4b137c22100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -36812,7 +37230,18 @@
         "Chair"
       ],
       "id": "EX163",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing hamstring curl setup with light chair support, upright torso, planted support leg, and knees aligned.",
+          "step": "Standing setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/07b52e84-3c94-44ea-20cd-4d1bcf22a400/public"
+        },
+        {
+          "alt": "Standing hamstring curl top position with heel curling up, knee under hip, and light chair support.",
+          "step": "Hamstring curl",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c100d46b-b553-44ca-9829-b911605ba100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -36851,7 +37280,18 @@
       ],
       "equipment": [],
       "id": "EX164",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side-view prone setup on a mat with both legs long, pelvis heavy, and arms lightly supporting the head.",
+          "step": "Prone setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b1c71d87-6594-42b8-2128-9f9adab42b00/public"
+        },
+        {
+          "alt": "Side-view prone hamstring curl with one heel curling toward the glute and opposite leg long.",
+          "step": "Hamstring curl",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0ead96aa-9745-4627-bea0-6327f7475c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -36892,7 +37332,18 @@
         "Chair"
       ],
       "id": "EX165",
-      "images": [],
+      "images": [
+        {
+          "alt": "Chair hamstring dig setup with one heel resting on a chair seat, opposite leg bent, and pelvis on the mat.",
+          "step": "Chair setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b9361284-42ea-4cd6-b281-1eacfecaad00/public"
+        },
+        {
+          "alt": "Chair hamstring dig hold with the heel pressing down into the chair seat and hips level.",
+          "step": "Hamstring dig",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/babc2269-8139-453b-5c35-f092078eb300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -36932,7 +37383,18 @@
       ],
       "equipment": [],
       "id": "EX166",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side view of a person lying supine with one foot planted near the hip and the opposite leg reaching long.",
+          "step": "Bridge setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d29d06c2-27bc-4f54-5303-721df4a4b300/public"
+        },
+        {
+          "alt": "Side view of a single-leg bridge with one foot grounded, hips lifted, and free leg reaching long.",
+          "step": "Bridge reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/775a2de9-d061-4cc4-0f25-56622d31f600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -37034,7 +37496,18 @@
         "Counter"
       ],
       "id": "EX168",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person in a straight diagonal plank with hands on a counter-height surface and feet planted on the floor.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bb6f7031-7208-451a-d12b-f24a2dde2d00/public"
+        },
+        {
+          "alt": "Person lowering their chest toward a counter with elbows bent, hands on the counter, feet planted, and body line preserved.",
+          "step": "Bottom/press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/491c029c-112d-4e66-739c-e1f0f1ff0b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -37132,7 +37605,18 @@
       ],
       "equipment": [],
       "id": "EX170",
-      "images": [],
+      "images": [
+        {
+          "alt": "Knee push-up setup with hands under shoulders, knees down, and body aligned from shoulders through hips to knees.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f1d7268a-7d7c-4f9e-e678-38b7fcf3c800/public"
+        },
+        {
+          "alt": "Knee push-up bottom position with chest lowered, elbows bent back, and knees clearly supporting the body.",
+          "step": "Bottom/press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f90351b0-980d-4e1b-556d-ea34e1498c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -37172,7 +37656,18 @@
       ],
       "equipment": [],
       "id": "EX171",
-      "images": [],
+      "images": [
+        {
+          "alt": "High plank push-up setup with hands under shoulders, toes planted, and body in one straight line.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bc717876-e2b5-4752-36ee-332effce0e00/public"
+        },
+        {
+          "alt": "Bottom of a standard push-up with chest near the floor, elbows angled back, toes planted, and body line maintained.",
+          "step": "Bottom press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/27eceb67-2a50-4ef8-8273-23a036b7e600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -37212,7 +37707,18 @@
       ],
       "equipment": [],
       "id": "EX172",
-      "images": [],
+      "images": [
+        {
+          "alt": "High plank setup with hands placed visibly wider than shoulders and toes grounded.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5f90b8e5-6fd4-4e7f-bd7b-85e39d014900/public"
+        },
+        {
+          "alt": "Wide push-up bottom position with chest near the floor, elbows wide, and toes grounded.",
+          "step": "Bottom/press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/044877a5-e2e8-4364-fe51-6a587a179b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -37252,7 +37758,18 @@
       ],
       "equipment": [],
       "id": "EX173",
-      "images": [],
+      "images": [
+        {
+          "alt": "High plank setup for a close-grip push-up with hands close under the chest and toes supporting.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/72be3d72-8aa3-4be8-4f70-5233d73e8400/public"
+        },
+        {
+          "alt": "Bottom position of a close-grip push-up with elbows close to the ribs, hands narrow, and toes supporting.",
+          "step": "Bottom/press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e2abef83-da7c-4346-f67c-b113272eec00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -37292,7 +37809,18 @@
       ],
       "equipment": [],
       "id": "EX174",
-      "images": [],
+      "images": [
+        {
+          "alt": "High plank setup with thumbs and index fingers touching in a diamond under the chest and toes anchored.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2ae535f7-e043-405d-ec2d-b0a8fa898200/public"
+        },
+        {
+          "alt": "Diamond push-up bottom position with chest lowered toward the hands, elbows close, toes anchored, and a hand-shape inset.",
+          "step": "Bottom/press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/66e56bba-3d21-4fb8-da5d-f0bd44d29800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -37334,7 +37862,18 @@
         "Chair or couch"
       ],
       "id": "EX175",
-      "images": [],
+      "images": [
+        {
+          "alt": "Decline push-up setup with hands on mat and feet elevated on a low box.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/10ab4e67-e0c6-4057-f8e8-4284bd050900/public"
+        },
+        {
+          "alt": "Decline push-up bottom position with elbows bent and feet elevated on a low box.",
+          "step": "Bottom position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1f8074eb-c5f4-43af-9548-b33356633700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -37374,7 +37913,18 @@
       ],
       "equipment": [],
       "id": "EX176",
-      "images": [],
+      "images": [
+        {
+          "alt": "Hand-release push-up setup in a long plank with hands under shoulders.",
+          "step": "Plank setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/643f3f87-4806-4e88-0899-11f69aade900/public"
+        },
+        {
+          "alt": "Hand-release push-up bottom phase with chest to floor and hands visibly lifted.",
+          "step": "Hand release",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/78c5ce94-096e-4a6d-5a92-b38906f1ed00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -37415,7 +37965,18 @@
       ],
       "equipment": [],
       "id": "EX177",
-      "images": [],
+      "images": [
+        {
+          "alt": "Tempo push-up setup in a high plank with hands under shoulders.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/767ed399-3dbc-4eae-ae5f-6b5a2ff3fa00/public"
+        },
+        {
+          "alt": "Tempo push-up slow lowering phase with controlled downward arrows and aligned body.",
+          "step": "Slow lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ba50b8a7-8b25-43e2-bf48-7bef90527400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -37456,7 +38017,18 @@
       ],
       "equipment": [],
       "id": "EX178",
-      "images": [],
+      "images": [
+        {
+          "alt": "Pause push-up setup in a long plank before lowering.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9c59c955-f967-4861-5582-855c76a55d00/public"
+        },
+        {
+          "alt": "Pause push-up bottom hold with chest hovering just above the floor and elbows bent.",
+          "step": "Bottom pause",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3bafa223-2650-4241-3529-3ae9ce569b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -37497,7 +38069,18 @@
       ],
       "equipment": [],
       "id": "EX179",
-      "images": [],
+      "images": [
+        {
+          "alt": "Push-up pulse bottom position with elbows bent and body aligned.",
+          "step": "Bottom position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6e3db517-07b8-4e31-71c1-bff4a7b3a800/public"
+        },
+        {
+          "alt": "Push-up pulse phase showing a small-range movement near the bottom.",
+          "step": "Small pulse",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ab0b555c-96a3-4d7b-5b1b-aac5d76b6c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -37538,7 +38121,18 @@
       ],
       "equipment": [],
       "id": "EX180",
-      "images": [],
+      "images": [
+        {
+          "alt": "Push-up hold setup in a high plank with hands under shoulders.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1b8ac6f6-aa4f-4270-e2a4-64be5ff58400/public"
+        },
+        {
+          "alt": "Push-up hold bottom isometric position with chest hovering and elbows bent.",
+          "step": "Bottom hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/13254c6b-eebd-4721-e84c-c783c9a6a000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -37579,7 +38173,18 @@
       ],
       "equipment": [],
       "id": "EX181",
-      "images": [],
+      "images": [
+        {
+          "alt": "High plank setup with shoulders over wrists and elbows straight.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ddd11df3-2bda-444b-23ef-8e42fa4e8700/public"
+        },
+        {
+          "alt": "Scapular push-up movement phase showing shoulder blades gliding while elbows stay straight.",
+          "step": "Movement",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4cecd0e0-b59f-49a7-afea-f46c138d0200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -37619,7 +38224,18 @@
       ],
       "equipment": [],
       "id": "EX182",
-      "images": [],
+      "images": [
+        {
+          "alt": "Kneeling scapular push-up setup with elbows straight and shoulders gliding back.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d6f4e336-07e0-4bfc-0c96-bd718f201300/public"
+        },
+        {
+          "alt": "Kneeling scapular push-up movement phase with elbows straight and shoulder blades protracted.",
+          "step": "Press away",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d2063be1-3984-4035-8c24-ed97f65c8300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -37659,7 +38275,18 @@
       ],
       "equipment": [],
       "id": "EX183",
-      "images": [],
+      "images": [
+        {
+          "alt": "Pike push-up setup with hips high and hands pressing into the mat.",
+          "step": "Pike setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dac2f1b4-e4bd-42d6-525e-ba6b78ebaf00/public"
+        },
+        {
+          "alt": "Pike push-up lowering phase with elbows bent and head lowering between planted hands.",
+          "step": "Controlled lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f0712b9e-60dc-4612-23e9-99dfe4d00200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -37701,7 +38328,18 @@
         "Chair or couch"
       ],
       "id": "EX184",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete in high pike with hands elevated on a low block, arms straight.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6a340ac6-0cee-49b6-3e1b-af524de09a00/public"
+        },
+        {
+          "alt": "Athlete lowers head and shoulders toward elevated hands while hips stay high.",
+          "step": "Lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/28e9ae71-95e6-4a54-8a68-b7c052375e00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -37741,7 +38379,18 @@
       ],
       "equipment": [],
       "id": "EX185",
-      "images": [],
+      "images": [
+        {
+          "alt": "Hips-high Hindu push-up start with hands rooted on the mat.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3839af1d-d6a9-4afd-b197-93949827ea00/public"
+        },
+        {
+          "alt": "Forward-swooped Hindu push-up finish with open chest and broad shoulders.",
+          "step": "Finish",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bfdfc141-4a15-467f-fcda-8b85840d5f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -37781,7 +38430,18 @@
       ],
       "equipment": [],
       "id": "EX186",
-      "images": [],
+      "images": [
+        {
+          "alt": "Pike setup with hands and feet planted, hips high, and head between arms.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/436ee41d-4670-4fc3-53d9-4be0a9555300/public"
+        },
+        {
+          "alt": "Forward scoop into upward chest with hands planted and shoulder-hip wave shown.",
+          "step": "Movement phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6c826892-e66c-46bc-0c89-748e85858900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -37821,7 +38481,18 @@
       ],
       "equipment": [],
       "id": "EX187",
-      "images": [],
+      "images": [
+        {
+          "alt": "High plank setup with hands staggered slightly ahead and behind the shoulder line.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c25bee92-c2c9-40fc-0ed8-d16df4987e00/public"
+        },
+        {
+          "alt": "Lowered staggered-hand push-up with chest between planted hands and hips square.",
+          "step": "Movement/end position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c13b9305-c2c0-4285-1d8e-b0baba9ec000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -37861,7 +38532,18 @@
       ],
       "equipment": [],
       "id": "EX188",
-      "images": [],
+      "images": [
+        {
+          "alt": "Archer push-up setup in a wide-hand high plank with straight body line and feet planted.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dba6544e-0434-4505-a38c-d24d5143e300/public"
+        },
+        {
+          "alt": "Archer push-up end position with chest shifted toward one bent support arm, opposite arm long and planted.",
+          "step": "Movement/end position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/38514247-a99e-47f9-61d7-1d38ee8ce600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -37901,7 +38583,18 @@
       ],
       "equipment": [],
       "id": "EX189",
-      "images": [],
+      "images": [
+        {
+          "alt": "Wide-hand plank setup with body straight, feet back, and both palms planted.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/63d6b80a-8dff-4930-bdd7-0bb35f0afd00/public"
+        },
+        {
+          "alt": "Bottom typewriter push-up with chest low, torso shifted sideways, opposite arm lengthened, and horizontal travel cue.",
+          "step": "Movement/end position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3c1692d1-659d-42c1-ff93-feccac139e00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -37941,7 +38634,18 @@
       ],
       "equipment": [],
       "id": "EX190",
-      "images": [],
+      "images": [
+        {
+          "alt": "High plank setup with hands under shoulders, body straight, and feet back on a mat.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e3115051-52cb-4620-8c96-97e8fc65b500/public"
+        },
+        {
+          "alt": "Lowered Spiderman push-up with one knee outside toward the same-side elbow and the other leg extended back.",
+          "step": "Movement/end position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4a45cfc9-4959-43a7-0727-b61389e6a000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -37982,7 +38686,18 @@
       ],
       "equipment": [],
       "id": "EX191",
-      "images": [],
+      "images": [
+        {
+          "alt": "High plank setup with hands under shoulders, straight body line, and feet wide for stability.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1c997ac7-ac7d-46ef-cc28-8c9685ebd300/public"
+        },
+        {
+          "alt": "One hand taps the opposite shoulder while the planted hand and both feet support a level high plank.",
+          "step": "Movement/end position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1923f40b-c417-4776-34a5-1ac16e106200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -38022,7 +38737,18 @@
       ],
       "equipment": [],
       "id": "EX192",
-      "images": [],
+      "images": [
+        {
+          "alt": "High plank setup with hands under shoulders, body straight, and toes grounded on the mat.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/800d40f2-2650-4718-7f84-13702093ff00/public"
+        },
+        {
+          "alt": "Side plank endpoint on one planted hand with chest open, top arm reaching upward, feet stacked, and hips lifted.",
+          "step": "Movement/end position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a2fe778c-7310-43ae-5c68-dc79e5978d00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
