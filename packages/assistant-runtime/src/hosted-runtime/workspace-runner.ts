@@ -971,17 +971,17 @@ async function writeHostedConversationMailboxConsumeSkipRuntimeLog(context: {
   input: HostedWorkspaceRunnerInput;
   skipReason: HostedConversationMailboxConsumeSkipReason;
 }): Promise<void> {
-  // reply_failed and pending_assistant_input are expected replay-safety skips;
-  // the other reasons mean the durable watermark can never advance and the
-  // replay guard is effectively disabled, so they log at warn.
-  const expectedSkip = context.skipReason === "reply_failed"
-    || context.skipReason === "pending_assistant_input";
+  // Routine passes legitimately skip (background passes carry no foreground
+  // reply outcome; fresh members have an empty watermark), so skips log at
+  // info — the prod question is the reason distribution on reply passes, not
+  // any single skip. A missing consume port is the one true wiring failure
+  // (the replay guard can never engage) and stays warn.
   await writeHostedRuntimeLogBestEffort({
     entry: {
       ...buildHostedRuntimeLogContextFields(context.input.runtimeLogContext),
       component: "mailbox",
       eventCode: "mailbox.consume_ack_skipped",
-      level: expectedSkip ? "info" : "warn",
+      level: context.skipReason === "consume_port_missing" ? "warn" : "info",
       mailboxLane: "conversation",
       phase: "checkpoint",
       redactedJson: {

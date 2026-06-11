@@ -417,6 +417,7 @@ export async function handleHostedRunnerInternalOutbound(
   // unattributable container deaths this sink exists for happen outside any
   // invocation, when no bound user or write fence exists.
   const containerFatalResponse = await maybeHandleHostedContainerFatalReport({
+    ctx,
     request,
     url,
     userId,
@@ -650,15 +651,43 @@ async function maybeHandleHostedDataApiRequest(input: {
 }
 
 const HOSTED_CONTAINER_FATAL_REPORT_MAX_BODY_BYTES = 8 * 1024;
+// Per-isolate fixed window: a real death produces a handful of reports, while
+// arbitrary in-container code could otherwise mint unlimited error-level log
+// lines through this unauthenticated sink and drown the attribution signal.
+const HOSTED_CONTAINER_FATAL_REPORT_LOG_WINDOW_MS = 60_000;
+const HOSTED_CONTAINER_FATAL_REPORT_LOG_WINDOW_LIMIT = 5;
+let hostedContainerFatalReportLogWindowStartedAtMs = 0;
+let hostedContainerFatalReportLogWindowCount = 0;
+
+function admitHostedContainerFatalReportLog(nowMs: number): "admitted" | "suppressed" | "suppressed_quietly" {
+  if (
+    nowMs - hostedContainerFatalReportLogWindowStartedAtMs
+      >= HOSTED_CONTAINER_FATAL_REPORT_LOG_WINDOW_MS
+  ) {
+    hostedContainerFatalReportLogWindowStartedAtMs = nowMs;
+    hostedContainerFatalReportLogWindowCount = 0;
+  }
+  hostedContainerFatalReportLogWindowCount += 1;
+  if (hostedContainerFatalReportLogWindowCount <= HOSTED_CONTAINER_FATAL_REPORT_LOG_WINDOW_LIMIT) {
+    return "admitted";
+  }
+  // One suppression marker per window, then silence until the window rolls.
+  return hostedContainerFatalReportLogWindowCount
+      === HOSTED_CONTAINER_FATAL_REPORT_LOG_WINDOW_LIMIT + 1
+    ? "suppressed"
+    : "suppressed_quietly";
+}
 
 // Durable sink for dying-container fatal reports (container-fatal-report.ts).
 // Deliberately reachable without a bound user or live write fence: the
 // container deaths this attributes happen outside any invocation, when no
-// fence or user binding exists. The only effect is one sanitized, size-capped
-// worker log line, and the host is reachable only from inside hosted
-// containers through this egress intercept. Never forwarded to the DO — the
-// DO may be the component that is wedged.
+// fence or user binding exists (trust boundary documented in
+// agent-docs/SECURITY.md). The only effect is one sanitized, size-capped,
+// rate-limited worker log line, and the host is reachable only from inside
+// hosted containers through this egress intercept. Never forwarded to the
+// DO — the DO may be the component that is wedged.
 async function maybeHandleHostedContainerFatalReport(input: {
+  ctx: HostedRunnerOutboundContext;
   request: Request;
   url: URL;
   userId: string | null;
@@ -680,6 +709,21 @@ async function maybeHandleHostedContainerFatalReport(input: {
     return new Response("Payload Too Large", { status: 413 });
   }
 
+  const admission = admitHostedContainerFatalReportLog(Date.now());
+  if (admission !== "admitted") {
+    if (admission === "suppressed") {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        level: "warn",
+        message: "Hosted container fatal report log suppressed by rate limit.",
+        phase: "failed",
+        userId: input.userId,
+      });
+    }
+    // Sink semantics stay identical for the dying container either way.
+    return new Response(null, { status: 204 });
+  }
+
   let parsed: unknown = null;
   try {
     parsed = JSON.parse(new TextDecoder().decode(body));
@@ -699,6 +743,9 @@ async function maybeHandleHostedContainerFatalReport(input: {
   emitHostedExecutionStructuredLog({
     component: "container",
     details: {
+      containerIdPresent: typeof input.ctx.containerId === "string"
+        && input.ctx.containerId.length > 0,
+      detailsTruncated: record.detailsTruncated === true,
       errorCode: readHostedContainerFatalReportCode(record.errorCode),
       errorName: readHostedContainerFatalReportCode(record.errorName),
       reportBodyBytes: body.byteLength,

@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedContainerFatalReportBody,
   buildHostedContainerFatalReportPayload,
+  HOSTED_CONTAINER_FATAL_REPORT_MAX_BODY_BYTES,
   HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS,
   reportHostedContainerFatalBestEffort,
 } from "../src/container-fatal-report.ts";
@@ -27,6 +29,27 @@ describe("buildHostedContainerFatalReportPayload", () => {
     expect(payload.safeErrorDetails).toBeDefined();
   });
 
+  it("degrades an oversized sanitized payload to a truncated envelope under the route cap", () => {
+    const hugeDetails: Record<string, string> = {};
+    for (let index = 0; index < 32; index += 1) {
+      hugeDetails[`detail_${index}`] = "x".repeat(300);
+    }
+    const body = buildHostedContainerFatalReportBody({
+      error: Object.assign(new TypeError("synthetic oversized fatal"), {
+        details: hugeDetails,
+      }),
+      stage: "uncaught_exception",
+    });
+
+    expect(new TextEncoder().encode(body).byteLength)
+      .toBeLessThanOrEqual(HOSTED_CONTAINER_FATAL_REPORT_MAX_BODY_BYTES);
+    const parsed = JSON.parse(body);
+    expect(parsed.detailsTruncated).toBe(true);
+    expect(parsed.stage).toBe("uncaught_exception");
+    expect(parsed.errorName).toBe("TypeError");
+    expect(parsed.safeErrorDetails).toBeUndefined();
+  });
+
   it("keeps non-Error fatal values out of the payload entirely", () => {
     const payload = buildHostedContainerFatalReportPayload({
       error: "raw string with possibly sensitive content",
@@ -41,7 +64,7 @@ describe("buildHostedContainerFatalReportPayload", () => {
 });
 
 describe("reportHostedContainerFatalBestEffort", () => {
-  it("posts the payload to the runner-control fatal endpoint with a bounded timeout", async () => {
+  it("posts the payload to the runner-control fatal endpoint", async () => {
     const requests: Array<{ init: RequestInit | undefined; url: string }> = [];
     const fetchImpl = (async (url: URL | RequestInfo, init?: RequestInit) => {
       requests.push({ init, url: String(url) });
@@ -90,7 +113,21 @@ describe("reportHostedContainerFatalBestEffort", () => {
     })).resolves.toBeUndefined();
   });
 
-  it("keeps the report timeout shorter than the entrypoint hard-exit backstop", () => {
-    expect(HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS).toBeLessThanOrEqual(2_000);
+  it("resolves on its own deadline even when fetch never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = (() => new Promise<Response>(() => {
+        // Never settles and ignores the abort signal entirely.
+      })) as typeof fetch;
+      const report = reportHostedContainerFatalBestEffort({
+        error: new Error("synthetic fatal"),
+        fetchImpl,
+        stage: "uncaught_exception",
+      });
+      await vi.advanceTimersByTimeAsync(HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS + 600);
+      await expect(report).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

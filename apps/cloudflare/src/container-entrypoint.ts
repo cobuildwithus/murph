@@ -105,6 +105,12 @@ const defaultHostedContainerExitScheduler = () => {
     process.exit(1);
   });
 };
+
+// Set by the process-fatal handlers before their bounded fatal report runs.
+// Module-level (not invocation closure state) so the request handler can
+// reject new invocations during the short pre-exit window: a process Node
+// deems unrecoverable must not accept work it would hard-kill mid-flight.
+let hostedContainerProcessFatalObserved = false;
 let hostedContainerRuntimeContractsLoader:
   | Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>
   | null = null;
@@ -328,14 +334,14 @@ export async function startHostedContainerEntrypoint(input: {
             runtime.startupConfig.hostedRuntimeArchitectureVersion,
           lastCleanupStatus,
           ok: true,
-          poisoned: hostedContainerPoisoned,
+          poisoned: hostedContainerPoisoned || hostedContainerProcessFatalObserved,
           service: "cloudflare-hosted-runner-node",
           ...(runnerBundle ? { runnerBundle } : {}),
         }));
         return;
       }
 
-      if (hostedContainerPoisoned) {
+      if (hostedContainerPoisoned || hostedContainerProcessFatalObserved) {
         discardUnreadRequestBody(request);
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -849,6 +855,7 @@ function installHostedContainerProcessFatalHandlers(): void {
         process.exit(1);
       }
       handlingFatalProcessError = true;
+      hostedContainerProcessFatalObserved = true;
       emitHostedExecutionStructuredLog({
         component: "container",
         details: { stage },

@@ -320,7 +320,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               component: "mailbox",
               eventCode: "mailbox.consume_ack_skipped",
               leaseGeneration: "1",
-              level: "warn",
+              level: "info",
               mailboxLane: "conversation",
               phase: "checkpoint",
               redactedJson: {
@@ -385,7 +385,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               component: "mailbox",
               eventCode: "mailbox.consume_ack_skipped",
               leaseGeneration: "1",
-              level: "warn",
+              level: "info",
               mailboxLane: "conversation",
               phase: "checkpoint",
               redactedJson: {
@@ -4873,7 +4873,9 @@ async function waitForCondition(predicate: () => boolean, timeoutMs = 1_000): Pr
 describe("hosted conversation mailbox consume ack", () => {
   async function runConsumeAckScenario(input: {
     consumeError?: Error;
+    items?: HostedMailboxItem[];
     runAssistantPhase: Parameters<typeof runHostedWorkspaceUntilIdleOrBudget>[0]["runAssistantPhase"];
+    stagePendingInput?: boolean;
     withoutConsumePort?: boolean;
   }) {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
@@ -4882,13 +4884,26 @@ describe("hosted conversation mailbox consume ack", () => {
     const { mailboxPort } = createMailboxPort({
       ...(input.consumeError ? { consumeError: input.consumeError } : {}),
       ...(input.withoutConsumePort ? {} : { consumeRequests }),
-      items: [
+      items: input.items ?? [
         createMailboxItem({
           id: "mailbox_item_runner_consume_ack",
           laneSeq: "1",
         }),
       ],
     });
+    if (input.stagePendingInput) {
+      // A staged auto-reply input the stub assistant phase never processes
+      // keeps hasPendingAssistantAutoReplyInput truthy at ack time.
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: TEST_NOW,
+        }],
+        updatedAt: TEST_NOW,
+        version: 1,
+      });
+    }
 
     try {
       await runHostedWorkspaceUntilIdleOrBudget({
@@ -4901,8 +4916,21 @@ describe("hosted conversation mailbox consume ack", () => {
           snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
-        async importItem() {
-          return { status: "imported" };
+        async importItem(item) {
+          if (!input.stagePendingInput) {
+            return { status: "imported" };
+          }
+          const staged = await upsertAssistantInputEvent({
+            event: createStoredAssistantInputEventForMailboxItem(
+              item.item,
+              "pending consume ack input",
+            ),
+            vault: vaultRoot,
+          });
+          return {
+            assistantInputId: staged.inputId,
+            status: "imported",
+          };
         },
         limitPerLane: 10,
         platform: createPlatform({
@@ -4985,7 +5013,7 @@ describe("hosted conversation mailbox consume ack", () => {
     );
   });
 
-  test("warns when the pass reported no foreground reply phase", async () => {
+  test("logs a skip when the pass reported no foreground reply phase", async () => {
     const { consumeAckLogEntries, consumeRequests } = await runConsumeAckScenario({
       async runAssistantPhase() {
         return { progressed: false };
@@ -5001,8 +5029,54 @@ describe("hosted conversation mailbox consume ack", () => {
       })),
       [{
         eventCode: "mailbox.consume_ack_skipped",
-        level: "warn",
+        level: "info",
         skipReason: "reply_outcome_missing",
+      }],
+    );
+  });
+
+  test("skips the ack while staged assistant input is still pending", async () => {
+    const { consumeAckLogEntries, consumeRequests } = await runConsumeAckScenario({
+      stagePendingInput: true,
+      async runAssistantPhase() {
+        return { foregroundReplyFailed: 0, progressed: false };
+      },
+    });
+
+    assert.deepEqual(consumeRequests, []);
+    assert.deepEqual(
+      consumeAckLogEntries.map((entry) => ({
+        eventCode: entry.eventCode,
+        level: entry.level,
+        skipReason: entry.redactedJson?.skipReason,
+      })),
+      [{
+        eventCode: "mailbox.consume_ack_skipped",
+        level: "info",
+        skipReason: "pending_assistant_input",
+      }],
+    );
+  });
+
+  test("skips the ack when the conversation watermark is still empty", async () => {
+    const { consumeAckLogEntries, consumeRequests } = await runConsumeAckScenario({
+      items: [],
+      async runAssistantPhase() {
+        return { foregroundReplyFailed: 0, progressed: false };
+      },
+    });
+
+    assert.deepEqual(consumeRequests, []);
+    assert.deepEqual(
+      consumeAckLogEntries.map((entry) => ({
+        eventCode: entry.eventCode,
+        level: entry.level,
+        skipReason: entry.redactedJson?.skipReason,
+      })),
+      [{
+        eventCode: "mailbox.consume_ack_skipped",
+        level: "info",
+        skipReason: "empty_watermark",
       }],
     );
   });

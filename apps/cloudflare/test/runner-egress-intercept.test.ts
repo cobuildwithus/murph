@@ -4950,11 +4950,40 @@ describe("maybeHandleHostedContainerFatalReport", () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
 
+    // With a bound user present, a non-handled internal path would be
+    // forwarded to the DO router — the fatal path must short-circuit anyway.
     const response = await postContainerFatal({
       body: JSON.stringify({ stage: "unhandled_rejection" }),
+      headers: { [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123" },
     });
 
     expect(response.status).toBe(204);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rate-limits fatal log emission per isolate while keeping sink semantics", async () => {
+    // Window budget note: the per-isolate fixed window is shared with the
+    // earlier tests in this describe (which admit a handful of fatal logs),
+    // so this test asserts bounds, not exact counts.
+    const responses: Response[] = [];
+    for (let index = 0; index < 8; index += 1) {
+      responses.push(await postContainerFatal({
+        body: JSON.stringify({ stage: "unhandled_rejection" }),
+      }));
+    }
+
+    for (const response of responses) {
+      expect(response.status).toBe(204);
+    }
+    const fatalLogCount = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .filter(([record]) => record?.message === "Hosted container fatal report received.")
+      .length;
+    const suppressionLogCount = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .filter(([record]) =>
+        record?.message === "Hosted container fatal report log suppressed by rate limit."
+      )
+      .length;
+    expect(fatalLogCount).toBeLessThanOrEqual(5);
+    expect(suppressionLogCount).toBe(1);
   });
 });

@@ -155,7 +155,10 @@ describe("container entrypoint abort boundary", () => {
     const invocationStarted = createDeferred<AbortSignal>();
     const invocationAborted = createDeferred();
     const exitCalled = createDeferred();
+    let fatalReportCallsWhenExitScheduled = -1;
     const exit = vi.fn(() => {
+      fatalReportCallsWhenExitScheduled =
+        mocks.reportHostedContainerFatalBestEffort.mock.calls.length;
       exitCalled.resolve();
     });
     mocks.runHostedWorkspaceInvocation.mockImplementation(
@@ -247,6 +250,7 @@ describe("container entrypoint abort boundary", () => {
         stage: "ambiguous_abort_poison",
       }),
     );
+    expect(fatalReportCallsWhenExitScheduled).toBe(1);
   });
 
   it("keeps the warm container when an aborted workspace request returns safely and cleanup passes", async () => {
