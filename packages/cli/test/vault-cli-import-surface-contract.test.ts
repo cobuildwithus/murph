@@ -118,6 +118,12 @@ interface ScopedProbeResult {
   readonly resolvedModuleUrls: readonly string[]
 }
 
+// Kill a wedged CLI well before the Vitest test timeout so the probe owns its
+// child's lifecycle and a hang fails with captured output instead of an
+// orphaned process and a bare test timeout.
+const IMPORT_SURFACE_CHILD_TIMEOUT_MS = 60_000
+const IMPORT_SURFACE_CHILD_KILL_GRACE_MS = 5_000
+
 async function runScopedImportSurfaceProbe(
   args: readonly string[],
 ): Promise<ScopedProbeResult> {
@@ -149,13 +155,35 @@ async function runScopedImportSurfaceProbe(
         },
       )
       const outputChunks: string[] = []
+      let timedOut = false
+      const killTimer = setTimeout(() => {
+        timedOut = true
+        child.kill('SIGTERM')
+        setTimeout(
+          () => child.kill('SIGKILL'),
+          IMPORT_SURFACE_CHILD_KILL_GRACE_MS,
+        ).unref()
+      }, IMPORT_SURFACE_CHILD_TIMEOUT_MS)
 
       child.stdout.setEncoding('utf8')
       child.stderr.setEncoding('utf8')
       child.stdout.on('data', (chunk: string) => outputChunks.push(chunk))
       child.stderr.on('data', (chunk: string) => outputChunks.push(chunk))
-      child.once('error', reject)
+      child.once('error', (error) => {
+        clearTimeout(killTimer)
+        reject(error)
+      })
       child.once('close', (code) => {
+        clearTimeout(killTimer)
+        if (timedOut) {
+          reject(
+            new Error(
+              `import-surface probe \`${args.join(' ')}\` timed out after ${IMPORT_SURFACE_CHILD_TIMEOUT_MS}ms; ` +
+                `output head: ${outputChunks.join('').slice(0, 400)}`,
+            ),
+          )
+          return
+        }
         resolve({ exitCode: code, output: outputChunks.join('') })
       })
     })
@@ -272,6 +300,16 @@ test(
       [...contractEntries].sort(),
       'vault-cli-import-surface-contract.json must stay sorted for diff-friendly reviews',
     )
+    assert.equal(
+      contractSet.size,
+      contractEntries.length,
+      'vault-cli-import-surface-contract.json must not contain duplicate entries',
+    )
+    assert.equal(
+      contractEntries.every((entry) => entry.trim().length > 0 && entry === entry.trim()),
+      true,
+      'vault-cli-import-surface-contract.json entries must be non-empty and untrimmed-whitespace-free',
+    )
 
     for (const probe of scopedImportSurfaceProbes) {
       const probeLabel = probe.args.join(' ')
@@ -296,20 +334,34 @@ test(
         true,
         `expected the probe \`${probeLabel}\` to record resolved modules`,
       )
-      assert.equal(
-        result.resolvedModuleUrls.length <= probe.maxResolvedModules,
-        true,
-        `probe \`${probeLabel}\` resolved ${result.resolvedModuleUrls.length} modules, above its ceiling of ${probe.maxResolvedModules}. ` +
-          'If this growth is deliberate, re-measure and raise the documented ceiling; otherwise find the import that dragged extra modules onto the scoped hot path.',
-      )
 
+      // Normalize before the ceiling assertion so a ceiling failure can say
+      // WHICH packages grew, not just by how much.
+      const probePackageModuleCounts = new Map<string, number>()
       for (const url of result.resolvedModuleUrls) {
         const packageName = await normalizeResolvedUrlToPackageName(url)
 
         if (packageName !== null) {
           resolvedPackageNames.add(packageName)
+          probePackageModuleCounts.set(
+            packageName,
+            (probePackageModuleCounts.get(packageName) ?? 0) + 1,
+          )
         }
       }
+
+      const largestPackageGroups = [...probePackageModuleCounts.entries()]
+        .sort(([, left], [, right]) => right - left)
+        .slice(0, 8)
+        .map(([packageName, moduleCount]) => `${packageName} ${moduleCount}`)
+        .join(', ')
+      assert.equal(
+        result.resolvedModuleUrls.length <= probe.maxResolvedModules,
+        true,
+        `probe \`${probeLabel}\` resolved ${result.resolvedModuleUrls.length} modules, above its ceiling of ${probe.maxResolvedModules}. ` +
+          'If this growth is deliberate, re-measure and raise the documented ceiling; otherwise find the import that dragged extra modules onto the scoped hot path. ' +
+          `Largest package groups: ${largestPackageGroups}`,
+      )
     }
 
     const newPackages = [...resolvedPackageNames]
@@ -319,13 +371,16 @@ test(
       (entry) => !resolvedPackageNames.has(entry),
     )
 
-    if (unusedContractEntries.length > 0) {
-      // Informational only: shrinking the contract is a win, so surface the
-      // candidates without failing the run.
-      console.info(
-        `vault-cli import-surface contract entries no longer resolved by any probe (remove them!): ${unusedContractEntries.join(', ')}`,
-      )
-    }
+    // A contract entry no probe resolves anymore is a completed collapse the
+    // file has not recorded yet. Failing keeps the contract a true ratchet:
+    // it can only describe the real surface, never a more permissive past.
+    assert.deepEqual(
+      unusedContractEntries,
+      [],
+      'vault-cli import-surface contract entries are no longer resolved by any probe. ' +
+        'Remove them from test/vault-cli-import-surface-contract.json to lock in the win: ' +
+        `${unusedContractEntries.join(', ')}`,
+    )
 
     assert.deepEqual(
       newPackages,
