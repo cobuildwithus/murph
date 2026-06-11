@@ -63,6 +63,32 @@ viable — Junction maintains first-class bindings for all four frameworks):
   (TestFlight/App Store cycles), a second codebase if Android-WHOOP demand
   ever materializes pre-approval.
 
+## Data Capture Posture (durable guidance, 2026-06-11)
+
+Connect once, capture everything useful. A member who connects Murph
+should never have to wonder whether some category of their health data
+was silently ignored: the default posture is to request and land **as
+much sparse data as possible**, so Murph can be as useful as possible
+from day one. Constraints that keep this safe and maintainable:
+
+1. **Sparse lands; bulk gets summarized.** Daily/nightly/event-grain data
+   (sleep, body, VO2max, BP readings, mindful sessions, nutrition events)
+   is always welcome in the vault. High-frequency raw streams
+   (per-second/per-minute series) must NOT land as raw dumps: aggregate
+   in memory at import time and store the daily summary observation.
+   Megabytes-per-member-month of raw is the smell test.
+2. **Permission breadth is decoupled from import volume.** The companion
+   app requests broad HealthKit read permissions (granting costs
+   nothing); the importer's resource allowlist plus bounded mappings are
+   the actual size gate. Widening a grant never obligates an import.
+3. **New data kinds get real homes.** When a captured kind has no
+   canonical vault store (e.g. ECG traces), adding a new vault surface /
+   store / CLI seam is the right move — provided it is minimal,
+   composable, and designed as a good primitive, not a dumping ground.
+4. The utmost priority remains clean, simple, long-term maintainable and
+   composable architecture with minimal complexity. Capture breadth never
+   justifies architectural sprawl.
+
 ## Sync Behavior and Product Constraints
 
 - HealthKit background delivery is hourly-advisory; iOS defers on battery,
