@@ -69,8 +69,9 @@ const scopedImportSurfaceProbes: readonly ScopedImportSurfaceProbe[] = [
   },
   {
     args: ['meal', 'totals', '--from', '2026-01-01', '--to', '2026-01-01', '--format', 'json'],
-    // Measured 430 resolved modules on 2026-06-11.
-    maxResolvedModules: 560,
+    // Measured 311 resolved modules on 2026-06-11 (down from 430 after the
+    // occurred-at-option @murphai/core import went lazy).
+    maxResolvedModules: 405,
   },
   {
     args: ['list', '--kind', 'meal', '--format', 'json'],

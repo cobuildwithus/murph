@@ -2,7 +2,6 @@
   "@cfworker/json-schema",
   "@modelcontextprotocol/server",
   "@murphai/contracts",
-  "@murphai/core",
   "@murphai/gateway-core",
   "@murphai/importers",
   "@murphai/murph",

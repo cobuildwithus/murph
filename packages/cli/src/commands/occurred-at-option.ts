@@ -3,7 +3,6 @@ import {
   isStrictIsoDate,
   normalizeIanaTimeZone,
 } from '@murphai/contracts'
-import { loadVault } from '@murphai/core'
 import {
   isoTimestampSchema,
   localDateSchema,
@@ -68,6 +67,11 @@ async function resolveOccurredAtLocalDateTimeZone(
     return normalized
   }
 
+  // Lazy import: this module registers on every command group that supports
+  // --occurred-at, so a static @murphai/core import would put the entire core
+  // write runtime (and its runtime-state subtree) on the read-only scoped hot
+  // path. Only an actual date-without-offset normalization needs the vault.
+  const { loadVault } = await import('@murphai/core')
   const vault = await loadVault({ vaultRoot: input.vault })
   return vault.metadata.timezone
 }
