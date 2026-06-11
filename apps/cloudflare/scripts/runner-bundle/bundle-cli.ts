@@ -16,7 +16,16 @@ import { buildPortableNodeBinWrapper } from "./runtime-shape.js";
 // - sharp/zxing-wasm: native binaries and WASM assets resolved relative to
 //   their own package directories; bundling their JS would detach it from
 //   those assets.
+// - @murphai/health-commons/@murphai/exercise-library: their runtimes load
+//   generated JSON artifacts via `new URL("../generated/...", import.meta.url)`;
+//   inlining the JS moves import.meta.url into @murphai/murph/.bundle/ and the
+//   assets stop resolving (June 2026 deploy smoke failure: ENOENT on
+//   @murphai/murph/generated/protocol-index.json).
 const VAULT_CLI_BUNDLE_EXTERNALS = [
+  "@murphai/exercise-library",
+  "@murphai/exercise-library/*",
+  "@murphai/health-commons",
+  "@murphai/health-commons/*",
   "ink",
   "react",
   "react/*",
@@ -30,6 +39,8 @@ const VAULT_CLI_BUNDLE_EXTERNALS = [
 // of these packages into the bundle fails the assembly instead of shipping a
 // duplicate runtime copy.
 const VAULT_CLI_BUNDLE_FORBIDDEN_INPUT_MARKERS = [
+  "/@murphai/exercise-library/",
+  "/@murphai/health-commons/",
   "/ink/",
   "/react/",
   "/react-devtools-core/",
@@ -76,6 +87,9 @@ const VAULT_CLI_BUNDLE_PARITY_PROBES: ReadonlyArray<readonly string[]> = [
   ["--llms-full", "--format", "json"],
   ["wearables", "day", "2026-01-01", "--format", "json"],
   ["meal", "totals", "--from", "2026-01-01", "--to", "2026-01-01", "--format", "json"],
+  // Reads health-commons generated artifacts through the external runtime
+  // package; catches asset-relative resolution breaking inside the bundle.
+  ["commons", "protocol", "list", "--query", "sauna", "--limit", "3", "--format", "json"],
 ];
 
 export async function bundleInstalledVaultCliBinary(
