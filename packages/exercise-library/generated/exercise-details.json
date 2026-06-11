@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:10c16c91dec2febc46da570375d60d48140d57932bd05428b28c8046b3119e1d",
+  "catalogHash": "sha256:a194ab5bb1df0588e89c97af301f535e20d91db3652effee48cbb930a123f7e7",
   "generatedAt": null,
   "items": [
     {
@@ -38788,7 +38788,23 @@
       ],
       "equipment": [],
       "id": "EX193",
-      "images": [],
+      "images": [
+        {
+          "alt": "T Push-Up setup instructional slide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bdaa777d-eb79-4129-d505-420f16430d00/public"
+        },
+        {
+          "alt": "T Push-Up lower rotation transition instructional slide.",
+          "step": "Lower Rotation Transition",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e0d0b877-6a80-4361-3f3f-12e082b59900/public"
+        },
+        {
+          "alt": "T Push-Up movement instructional slide.",
+          "step": "Movement",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c7b7a99b-a13d-433f-28f9-acd3eb520600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -38829,7 +38845,23 @@
       ],
       "equipment": [],
       "id": "EX194",
-      "images": [],
+      "images": [
+        {
+          "alt": "Plank Up-Down setup instructional slide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/479a356c-db87-416c-0e75-14979a5f7b00/public"
+        },
+        {
+          "alt": "Plank Up-Down press back up instructional slide.",
+          "step": "Press Back Up",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e8c72c90-839a-4e80-cede-e2db5b402f00/public"
+        },
+        {
+          "alt": "Plank Up-Down movement instructional slide.",
+          "step": "Movement",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/00285392-b1f8-404a-b69a-555f97241400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -38869,7 +38901,23 @@
       ],
       "equipment": [],
       "id": "EX195",
-      "images": [],
+      "images": [
+        {
+          "alt": "Knee Plank Up-Down setup instructional slide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4ed80ab2-009b-43f9-685a-811328c37f00/public"
+        },
+        {
+          "alt": "Knee Plank Up-Down press back up instructional slide.",
+          "step": "Press Back Up",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f3abd78c-349c-4e4d-e0fa-8e4586ca7c00/public"
+        },
+        {
+          "alt": "Knee Plank Up-Down movement instructional slide.",
+          "step": "Movement",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9ee46c1c-e5dc-4ff3-0c5b-424f3152b000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -38911,7 +38959,18 @@
         "Chair"
       ],
       "id": "EX196",
-      "images": [],
+      "images": [
+        {
+          "alt": "Triceps Dip setup instructional slide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d28d5b07-82ba-4ed8-03f3-f45cd38d6500/public"
+        },
+        {
+          "alt": "Triceps Dip movement instructional slide.",
+          "step": "Movement",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e24deff1-2584-4299-6b00-0dd54e7f7900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -38952,7 +39011,18 @@
         "Chair"
       ],
       "id": "EX197",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bent-Knee Chair Dip setup instructional slide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/27beb04c-abed-4017-b479-35e15d8d7200/public"
+        },
+        {
+          "alt": "Bent-Knee Chair Dip movement instructional slide.",
+          "step": "Movement",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/74b2c5d4-ffb2-49c2-8374-99146d41b200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -38994,7 +39064,18 @@
         "Chair"
       ],
       "id": "EX198",
-      "images": [],
+      "images": [
+        {
+          "alt": "Straight-Leg Chair Dip setup instructional slide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9a13fb38-f92a-430c-a0ac-bb6a97a01600/public"
+        },
+        {
+          "alt": "Straight-Leg Chair Dip movement instructional slide.",
+          "step": "Movement",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/328f2cce-2e7d-4db5-f0af-eb40b7ef1800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -39034,7 +39115,18 @@
       ],
       "equipment": [],
       "id": "EX199",
-      "images": [],
+      "images": [
+        {
+          "alt": "Floor Triceps Dip setup instructional slide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e631255d-368d-4808-b342-0a6a41b82400/public"
+        },
+        {
+          "alt": "Floor Triceps Dip movement instructional slide.",
+          "step": "Movement",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e324b212-5aeb-40d3-86b5-9887ff216600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -39073,7 +39165,23 @@
       ],
       "equipment": [],
       "id": "EX200",
-      "images": [],
+      "images": [
+        {
+          "alt": "Crab Reach setup instructional slide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/acc45b5d-f1b9-476a-3e8a-33631b090a00/public"
+        },
+        {
+          "alt": "Crab Reach opposite reach instructional slide.",
+          "step": "Opposite Reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f3124477-a18c-453b-3d71-8ffff7401b00/public"
+        },
+        {
+          "alt": "Crab Reach movement instructional slide.",
+          "step": "Movement",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d1bcdeb5-c834-4ff7-55ad-8c5e5fea3600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -39112,7 +39220,23 @@
       ],
       "equipment": [],
       "id": "EX201",
-      "images": [],
+      "images": [
+        {
+          "alt": "Shoulder Tap setup instructional slide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/53418777-62e2-4093-bfce-57d498d8b000/public"
+        },
+        {
+          "alt": "Shoulder Tap opposite tap instructional slide.",
+          "step": "Opposite Tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6c964a1f-8e66-42e5-94e6-5429bc99c600/public"
+        },
+        {
+          "alt": "Shoulder Tap movement instructional slide.",
+          "step": "Movement",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3eb470de-cf80-4890-6802-8da0631afe00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -39151,7 +39275,23 @@
       ],
       "equipment": [],
       "id": "EX202",
-      "images": [],
+      "images": [
+        {
+          "alt": "Knee Shoulder Tap setup instructional slide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ac70293d-c8ed-4e0d-43cb-a960b889c900/public"
+        },
+        {
+          "alt": "Knee Shoulder Tap opposite tap instructional slide.",
+          "step": "Opposite Tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b85272c2-1538-49a8-637e-188ba0222100/public"
+        },
+        {
+          "alt": "Knee Shoulder Tap movement instructional slide.",
+          "step": "Movement",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cecd6162-e34c-45a4-a2de-498e49049b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -39190,7 +39330,23 @@
       ],
       "equipment": [],
       "id": "EX203",
-      "images": [],
+      "images": [
+        {
+          "alt": "Plank Hand Walk step 01 instructional slide.",
+          "step": "Step 01",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/019784cf-a73c-4f68-0275-2a21d27f9800/public"
+        },
+        {
+          "alt": "Plank Hand Walk step 02 instructional slide.",
+          "step": "Step 02",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/50b6b340-05de-4162-95c6-df9fb9736400/public"
+        },
+        {
+          "alt": "Plank Hand Walk meet instructional slide.",
+          "step": "Meet",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2da046bf-9673-4f4a-1de8-cb0cd4f2e100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -39230,7 +39386,23 @@
       ],
       "equipment": [],
       "id": "EX204",
-      "images": [],
+      "images": [
+        {
+          "alt": "Lateral Plank Walk step 01 instructional slide.",
+          "step": "Step 01",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7c97dbd7-aac9-4fe6-17f8-fecc416c7d00/public"
+        },
+        {
+          "alt": "Lateral Plank Walk step 02 instructional slide.",
+          "step": "Step 02",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a39febb7-e1a3-4b9f-da76-326113737900/public"
+        },
+        {
+          "alt": "Lateral Plank Walk meet instructional slide.",
+          "step": "Meet",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1ac997c4-cf61-4ccb-c762-b1be7e51a900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -39270,7 +39442,18 @@
       ],
       "equipment": [],
       "id": "EX205",
-      "images": [],
+      "images": [
+        {
+          "alt": "Plank Jack step 01 instructional slide.",
+          "step": "Step 01",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/27854cc9-66a9-4467-46ae-fdf294120900/public"
+        },
+        {
+          "alt": "Plank Jack step 02 instructional slide.",
+          "step": "Step 02",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1975633b-c716-46d3-b968-4a7bccbbd100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -39311,7 +39494,23 @@
       ],
       "equipment": [],
       "id": "EX206",
-      "images": [],
+      "images": [
+        {
+          "alt": "Low-Impact Plank Jack step 01 instructional slide.",
+          "step": "Step 01",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/815e1f23-7512-4551-1cbc-63da96dcd900/public"
+        },
+        {
+          "alt": "Low-Impact Plank Jack step 02 instructional slide.",
+          "step": "Step 02",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cc5b4c4c-d807-49ed-f95c-0413bfe1cd00/public"
+        },
+        {
+          "alt": "Low-Impact Plank Jack opposite step out instructional slide.",
+          "step": "Opposite Step Out",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6f3524e2-5d75-47b3-50af-4fce593a1700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -39352,7 +39551,23 @@
       ],
       "equipment": [],
       "id": "EX207",
-      "images": [],
+      "images": [
+        {
+          "alt": "Mountain Climber Push-Up step 01 instructional slide.",
+          "step": "Step 01",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c45668b8-2185-4745-dde5-ae8ef0c33f00/public"
+        },
+        {
+          "alt": "Mountain Climber Push-Up step 02 instructional slide.",
+          "step": "Step 02",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d3d1d614-7350-468b-f824-6c5353425f00/public"
+        },
+        {
+          "alt": "Mountain Climber Push-Up opposite knee drive instructional slide.",
+          "step": "Opposite Knee Drive",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e9cb458c-69e0-46c9-b574-7da4eee1bd00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -39392,7 +39607,18 @@
       ],
       "equipment": [],
       "id": "EX208",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bear Plank Push-Up step 01 instructional slide.",
+          "step": "Step 01",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/198641e7-85dc-4dde-6e65-0b660094ee00/public"
+        },
+        {
+          "alt": "Bear Plank Push-Up step 02 instructional slide.",
+          "step": "Step 02",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1f5c2db0-99dc-4fd9-0e02-5dbf06513100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -39432,7 +39658,18 @@
       ],
       "equipment": [],
       "id": "EX209",
-      "images": [],
+      "images": [
+        {
+          "alt": "Kneeling Triceps Push-Up step 01 instructional slide.",
+          "step": "Step 01",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/630bb710-3510-496c-3f57-091d65e85000/public"
+        },
+        {
+          "alt": "Kneeling Triceps Push-Up step 02 instructional slide.",
+          "step": "Step 02",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d158eaca-26a4-4fa5-4935-f79f5c9b3a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -39472,7 +39709,23 @@
       ],
       "equipment": [],
       "id": "EX210",
-      "images": [],
+      "images": [
+        {
+          "alt": "Eccentric Push-Up step 01 instructional slide.",
+          "step": "Step 01",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f33e9d13-0982-40ca-27fb-ed07c6df5e00/public"
+        },
+        {
+          "alt": "Eccentric Push-Up step 02 instructional slide.",
+          "step": "Step 02",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4cbf4613-e8ed-4650-6073-1e495b1e4100/public"
+        },
+        {
+          "alt": "Eccentric Push-Up bottom slow lower instructional slide.",
+          "step": "Bottom Slow Lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f03a8e76-4eff-4fe3-e5c0-73418e3f3500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -39512,7 +39765,23 @@
       ],
       "equipment": [],
       "id": "EX211",
-      "images": [],
+      "images": [
+        {
+          "alt": "Explosive Push-Up step 01 instructional slide.",
+          "step": "Step 01",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/374e0ca8-3c0f-4780-d58b-0374287e1c00/public"
+        },
+        {
+          "alt": "Explosive Push-Up step 02 instructional slide.",
+          "step": "Step 02",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a2fc50f3-238e-4de4-d6f3-76e530854c00/public"
+        },
+        {
+          "alt": "Explosive Push-Up loaded lower instructional slide.",
+          "step": "Loaded Lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3ed402c5-0217-45a9-1e73-2ef5ff644f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -39553,7 +39822,23 @@
       ],
       "equipment": [],
       "id": "EX212",
-      "images": [],
+      "images": [
+        {
+          "alt": "Clap Push-Up step 01 instructional slide.",
+          "step": "Step 01",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f31fcdba-fda1-4d00-d59c-0acfc61afe00/public"
+        },
+        {
+          "alt": "Clap Push-Up step 02 instructional slide.",
+          "step": "Step 02",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a3b5a64c-f1f3-407b-33eb-1e90016f2700/public"
+        },
+        {
+          "alt": "Clap Push-Up soft landing instructional slide.",
+          "step": "Soft Landing",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9f4d56f9-cd7a-4533-2b7d-5047044bb400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -39597,7 +39882,23 @@
         "Wall"
       ],
       "id": "EX213",
-      "images": [],
+      "images": [
+        {
+          "alt": "Wall Handstand Hold kick up setup instructional slide.",
+          "step": "Kick Up Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/22396d1b-bd69-4d15-c488-4f80c52a1300/public"
+        },
+        {
+          "alt": "Wall Handstand Hold wall hold instructional slide.",
+          "step": "Wall Hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2a1115fa-06d7-4644-590e-8236816b5b00/public"
+        },
+        {
+          "alt": "Wall Handstand Hold controlled exit instructional slide.",
+          "step": "Controlled Exit",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/38fb911e-c799-45b3-e924-47142e869900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -39639,7 +39940,28 @@
         "Wall"
       ],
       "id": "EX214",
-      "images": [],
+      "images": [
+        {
+          "alt": "Wall Walk plank feet on wall instructional slide.",
+          "step": "Plank Feet on Wall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/16329fff-0a9c-414b-847c-1a6546779900/public"
+        },
+        {
+          "alt": "Wall Walk walk in instructional slide.",
+          "step": "Walk in",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/44c80a96-4c75-4f69-adc4-1c24c5b8d800/public"
+        },
+        {
+          "alt": "Wall Walk walk in top instructional slide.",
+          "step": "Walk in Top",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/42bd6d35-0f11-440d-9d3b-ad1745b82800/public"
+        },
+        {
+          "alt": "Wall Walk reverse return instructional slide.",
+          "step": "Reverse Return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/24799f95-723b-481b-0967-0360cd917500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -39679,7 +40001,23 @@
       ],
       "equipment": [],
       "id": "EX215",
-      "images": [],
+      "images": [
+        {
+          "alt": "Pike Shoulder Tap pike base instructional slide.",
+          "step": "Pike Base",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/28171931-2080-4a62-8d44-7597009b7e00/public"
+        },
+        {
+          "alt": "Pike Shoulder Tap shoulder tap instructional slide.",
+          "step": "Shoulder Tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/33b8f9e5-b084-405f-b736-154b1f6e9600/public"
+        },
+        {
+          "alt": "Pike Shoulder Tap opposite tap instructional slide.",
+          "step": "Opposite Tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a4f84823-745e-4736-bf33-e8a5e3b7fa00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -39718,7 +40056,18 @@
       ],
       "equipment": [],
       "id": "EX216",
-      "images": [],
+      "images": [
+        {
+          "alt": "Down-Dog Push-Up down dog start instructional slide.",
+          "step": "Down Dog Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9bf1c26d-e2d7-414f-f341-501d6a688900/public"
+        },
+        {
+          "alt": "Down-Dog Push-Up elbows bend instructional slide.",
+          "step": "Elbows Bend",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9d2c33a7-4e1c-4647-9b30-980830957d00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -39758,7 +40107,23 @@
       ],
       "equipment": [],
       "id": "EX217",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bear Crawl Push-Up bear base instructional slide.",
+          "step": "Bear Base",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/db302d77-92cc-4fed-c387-c4adc8ad9400/public"
+        },
+        {
+          "alt": "Bear Crawl Push-Up low push up instructional slide.",
+          "step": "Low Push Up",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5152f3f1-9b1a-4dac-7e57-eb0f6cc7a400/public"
+        },
+        {
+          "alt": "Bear Crawl Push-Up crawl transition instructional slide.",
+          "step": "Crawl Transition",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/77a837be-4163-491f-e940-19868d763300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -39800,7 +40165,18 @@
         "Water bottles"
       ],
       "id": "EX218",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bottle Shoulder Press rack position instructional slide.",
+          "step": "Rack Position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4ccaec3c-4225-427f-9716-3ebcb9bedd00/public"
+        },
+        {
+          "alt": "Bottle Shoulder Press overhead press instructional slide.",
+          "step": "Overhead Press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0ac8fd7a-67f7-4501-a7b8-163662963a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -39842,7 +40218,18 @@
         "Water bottles"
       ],
       "id": "EX219",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated Bottle Shoulder Press seated rack instructional slide.",
+          "step": "Seated Rack",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3c73dfd2-355c-4207-f356-b9f0a1eee700/public"
+        },
+        {
+          "alt": "Seated Bottle Shoulder Press seated press instructional slide.",
+          "step": "Seated Press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4bb24e06-b874-4b7b-b8f4-c40ffdca7600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -39884,7 +40271,18 @@
         "Water bottles"
       ],
       "id": "EX220",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bottle Front Raise arms down instructional slide.",
+          "step": "Arms Down",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bbc46b84-c436-41fd-86b9-f0e37ee20d00/public"
+        },
+        {
+          "alt": "Bottle Front Raise arms forward instructional slide.",
+          "step": "Arms Forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9a433e80-b8d0-4e0c-7de2-e9707797d800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -39926,7 +40324,18 @@
         "Water bottles"
       ],
       "id": "EX221",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bottle Lateral Raise arms by sides instructional slide.",
+          "step": "Arms By Sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7ecabd0e-3648-4943-1019-966a94877300/public"
+        },
+        {
+          "alt": "Bottle Lateral Raise arms wide instructional slide.",
+          "step": "Arms Wide",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7fa52edb-0be5-4602-c8bd-62f863ea3400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -39968,7 +40377,18 @@
         "Water bottles"
       ],
       "id": "EX222",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bottle Floor Press elbows on floor instructional slide.",
+          "step": "Elbows on Floor",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ff5f0f32-8d67-4449-aa67-237dde004600/public"
+        },
+        {
+          "alt": "Bottle Floor Press press up instructional slide.",
+          "step": "Press Up",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/35a5959f-416f-462b-2828-01ccf7b12d00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -40010,7 +40430,18 @@
         "Water bottle"
       ],
       "id": "EX223",
-      "images": [],
+      "images": [
+        {
+          "alt": "Single-Arm Bottle Floor Press setup instructional slide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cd06c989-072a-47d7-4d36-d6a059449600/public"
+        },
+        {
+          "alt": "Single-Arm Bottle Floor Press press top instructional slide.",
+          "step": "Press Top",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a8594ab5-43cd-4431-3930-9bb7161cf200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -40052,7 +40483,18 @@
         "Loaded backpack"
       ],
       "id": "EX224",
-      "images": [],
+      "images": [
+        {
+          "alt": "Backpack Floor Press setup instructional slide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e350f3bb-1265-419b-e936-0ea4c72b7a00/public"
+        },
+        {
+          "alt": "Backpack Floor Press press top instructional slide.",
+          "step": "Press Top",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/809d6ddc-b02b-4bdb-6918-422894db9f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -40094,7 +40536,18 @@
         "Loaded backpack"
       ],
       "id": "EX225",
-      "images": [],
+      "images": [
+        {
+          "alt": "Backpack Overhead Press rack instructional slide.",
+          "step": "Rack",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/91d02f88-6975-4945-1286-4aa644e93800/public"
+        },
+        {
+          "alt": "Backpack Overhead Press overhead instructional slide.",
+          "step": "Overhead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/75bf6e9d-6779-45dc-66ac-24d8efc66300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -40137,7 +40590,23 @@
         "Loaded backpack"
       ],
       "id": "EX226",
-      "images": [],
+      "images": [
+        {
+          "alt": "Backpack Push Press dip instructional slide.",
+          "step": "Dip",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8296fd67-b8ce-4fb8-af7f-a27da8f80000/public"
+        },
+        {
+          "alt": "Backpack Push Press drive overhead instructional slide.",
+          "step": "Drive Overhead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a091e09b-9b68-4f25-7f9b-0b5133699500/public"
+        },
+        {
+          "alt": "Backpack Push Press mid drive instructional slide.",
+          "step": "Mid Drive",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5f33c268-6b5d-4d6e-72da-5a84d7bb9600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -40177,7 +40646,18 @@
       ],
       "equipment": [],
       "id": "EX227",
-      "images": [],
+      "images": [
+        {
+          "alt": "Isometric Palm Press setup instructional slide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6b7e0d44-7fe2-4d00-a060-37183c387100/public"
+        },
+        {
+          "alt": "Isometric Palm Press hold instructional slide.",
+          "step": "Hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d9095259-2059-47fa-d9d1-fdf585f03d00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -40216,7 +40696,18 @@
       ],
       "equipment": [],
       "id": "EX228",
-      "images": [],
+      "images": [
+        {
+          "alt": "Prone Y Raise start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/36beb2cd-4575-4b0e-e7ff-f03f468def00/public"
+        },
+        {
+          "alt": "Prone Y Raise raise instructional slide.",
+          "step": "Raise",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/95fbcec6-7b32-4aa4-eb9a-25fa96aecb00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -40255,7 +40746,18 @@
       ],
       "equipment": [],
       "id": "EX229",
-      "images": [],
+      "images": [
+        {
+          "alt": "Prone T Raise start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fea618de-7e3d-4c48-9f33-630786e46800/public"
+        },
+        {
+          "alt": "Prone T Raise raise instructional slide.",
+          "step": "Raise",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8596d4e1-8497-4fbc-4295-9980d4906400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -40294,7 +40796,18 @@
       ],
       "equipment": [],
       "id": "EX230",
-      "images": [],
+      "images": [
+        {
+          "alt": "Prone W Raise start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7f393e0c-4e74-4e38-bf2e-0bf11b5a5500/public"
+        },
+        {
+          "alt": "Prone W Raise raise instructional slide.",
+          "step": "Raise",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5a9c66ee-cf89-40a3-c149-293ef4782000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -40333,7 +40846,18 @@
       ],
       "equipment": [],
       "id": "EX231",
-      "images": [],
+      "images": [
+        {
+          "alt": "Prone I Raise start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/be659820-7564-4905-eee1-1fc86e4b3f00/public"
+        },
+        {
+          "alt": "Prone I Raise raise instructional slide.",
+          "step": "Raise",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b417903e-a904-44b2-cb85-0e7eaa241900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -40372,7 +40896,28 @@
       ],
       "equipment": [],
       "id": "EX232",
-      "images": [],
+      "images": [
+        {
+          "alt": "Prone Y-T-W Series y to t instructional slide.",
+          "step": "Y to T",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/59c8e0dc-8cd1-4722-6103-c25db072aa00/public"
+        },
+        {
+          "alt": "Prone Y-T-W Series t to w instructional slide.",
+          "step": "T to W",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4c3381c6-e73b-4093-0ace-e4e3b5469000/public"
+        },
+        {
+          "alt": "Prone Y-T-W Series t shape instructional slide.",
+          "step": "T Shape",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cf6f9ea6-77af-4440-29cf-c8bc0e07b500/public"
+        },
+        {
+          "alt": "Prone Y-T-W Series w shape instructional slide.",
+          "step": "W Shape",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a20fe80e-d052-4fc3-ce37-c5837a626600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -40411,7 +40956,23 @@
       ],
       "equipment": [],
       "id": "EX233",
-      "images": [],
+      "images": [
+        {
+          "alt": "Reverse Snow Angel start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/66e9f6a9-a191-4948-792d-211dfde29200/public"
+        },
+        {
+          "alt": "Reverse Snow Angel sweep instructional slide.",
+          "step": "Sweep",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1739d563-465d-4055-ede8-2115458f0500/public"
+        },
+        {
+          "alt": "Reverse Snow Angel overhead endpoint instructional slide.",
+          "step": "Overhead Endpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2b8a4847-f7f9-42bd-e72f-9cdcbf098b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -40450,7 +41011,18 @@
       ],
       "equipment": [],
       "id": "EX234",
-      "images": [],
+      "images": [
+        {
+          "alt": "Superman prone setup instructional slide.",
+          "step": "Prone Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3a6465e8-7a58-4612-7b9f-a8fddbed5200/public"
+        },
+        {
+          "alt": "Superman lift instructional slide.",
+          "step": "Lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6aa9e924-ebb4-4886-1005-c15cbd805b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -40489,7 +41061,23 @@
       ],
       "equipment": [],
       "id": "EX235",
-      "images": [],
+      "images": [
+        {
+          "alt": "Alternating Superman right arm left leg instructional slide.",
+          "step": "Right Arm Left Leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/95b9724e-b729-4e7d-d260-ab7181ec6600/public"
+        },
+        {
+          "alt": "Alternating Superman left arm right leg instructional slide.",
+          "step": "Left Arm Right Leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/57f5b974-50a8-4d0c-67f1-da322cecc000/public"
+        },
+        {
+          "alt": "Alternating Superman side switch instructional slide.",
+          "step": "Side Switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d8c3cbe4-6915-436c-b16a-dfe784257900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -40528,7 +41116,18 @@
       ],
       "equipment": [],
       "id": "EX236",
-      "images": [],
+      "images": [
+        {
+          "alt": "Superman Hold lift into hold instructional slide.",
+          "step": "Lift Into Hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e0fd2e1b-5c29-4abf-bdf3-31d1a1f96200/public"
+        },
+        {
+          "alt": "Superman Hold steady hold instructional slide.",
+          "step": "Steady Hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0ae75058-4e19-4422-dc0b-f4d92b9a5700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -40567,7 +41166,18 @@
       ],
       "equipment": [],
       "id": "EX237",
-      "images": [],
+      "images": [
+        {
+          "alt": "Superman Pull-Down reach instructional slide.",
+          "step": "Reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f1dc8c9d-c38b-4d67-2758-9ae620e44a00/public"
+        },
+        {
+          "alt": "Superman Pull-Down pull down instructional slide.",
+          "step": "Pull Down",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d266214c-12d8-4bb4-59c9-13dc278f0900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -40606,7 +41216,23 @@
       ],
       "equipment": [],
       "id": "EX238",
-      "images": [],
+      "images": [
+        {
+          "alt": "Prone Swimmer forward reach instructional slide.",
+          "step": "Forward Reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3dc32131-aacb-4505-2cff-46350fd61e00/public"
+        },
+        {
+          "alt": "Prone Swimmer sweep to hips instructional slide.",
+          "step": "Sweep to Hips",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c7527417-b726-4cab-fb3a-5cff7b48f200/public"
+        },
+        {
+          "alt": "Prone Swimmer return wide instructional slide.",
+          "step": "Return Wide",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/775d7d6b-fe09-428b-ee8d-bcb896ebef00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -40645,7 +41271,18 @@
       ],
       "equipment": [],
       "id": "EX239",
-      "images": [],
+      "images": [
+        {
+          "alt": "Cobra Back Extension low start instructional slide.",
+          "step": "Low Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/14735ca6-2b65-4989-61d8-3d30eb0f6800/public"
+        },
+        {
+          "alt": "Cobra Back Extension cobra lift instructional slide.",
+          "step": "Cobra Lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/56c9efb0-5c62-48da-9abe-3083ed47b100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -40684,7 +41321,18 @@
       ],
       "equipment": [],
       "id": "EX240",
-      "images": [],
+      "images": [
+        {
+          "alt": "Prone Back Extension Hold setup instructional slide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bb28cba5-2246-43d3-2747-788f92107200/public"
+        },
+        {
+          "alt": "Prone Back Extension Hold hold instructional slide.",
+          "step": "Hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f5cebbd8-72fd-4db6-ef4d-d9af7c32d300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -40723,7 +41371,18 @@
       ],
       "equipment": [],
       "id": "EX241",
-      "images": [],
+      "images": [
+        {
+          "alt": "Prone Row arms forward instructional slide.",
+          "step": "Arms Forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b9c28901-529b-4b11-025e-66478755ea00/public"
+        },
+        {
+          "alt": "Prone Row row back instructional slide.",
+          "step": "Row Back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e18b609e-1170-475a-01f6-e6b5e5181f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -40762,7 +41421,18 @@
       ],
       "equipment": [],
       "id": "EX242",
-      "images": [],
+      "images": [
+        {
+          "alt": "Prone Goalpost Lift goalpost setup instructional slide.",
+          "step": "Goalpost Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c36dcd39-b64c-473a-95ee-5ad8b0af2700/public"
+        },
+        {
+          "alt": "Prone Goalpost Lift lift instructional slide.",
+          "step": "Lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0a5e3e7a-0bd4-44a3-c233-d251c7e97300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -40803,7 +41473,18 @@
         "Wall"
       ],
       "id": "EX243",
-      "images": [],
+      "images": [
+        {
+          "alt": "Scapular Wall Slide start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/678e9614-e110-4bab-5911-f6c934322400/public"
+        },
+        {
+          "alt": "Scapular Wall Slide slide up instructional slide.",
+          "step": "Slide Up",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8da62c6f-d1c0-46f9-5436-4f800d6ed300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -40845,7 +41526,18 @@
         "Wall"
       ],
       "id": "EX244",
-      "images": [],
+      "images": [
+        {
+          "alt": "Wall Angel low position instructional slide.",
+          "step": "Low Position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2493cd19-1a30-4d27-9fd1-ca85135c0d00/public"
+        },
+        {
+          "alt": "Wall Angel overhead instructional slide.",
+          "step": "Overhead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/035d109d-fe7d-463b-0346-c0b03517e800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -40885,7 +41577,18 @@
       ],
       "equipment": [],
       "id": "EX245",
-      "images": [],
+      "images": [
+        {
+          "alt": "Floor Angel low position instructional slide.",
+          "step": "Low Position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4f346a0f-8143-420d-bbff-e63dd5cd1600/public"
+        },
+        {
+          "alt": "Floor Angel overhead instructional slide.",
+          "step": "Overhead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bca56d1b-7681-4b5f-e4c1-28f607058b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -40926,7 +41629,18 @@
         "Resistance band"
       ],
       "id": "EX246",
-      "images": [],
+      "images": [
+        {
+          "alt": "Band Pull-Apart start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cb65fa66-e3b3-4181-ea51-e4b53f2a2f00/public"
+        },
+        {
+          "alt": "Band Pull-Apart pull instructional slide.",
+          "step": "Pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/05f6fa27-44d5-4e20-395a-ec80c0832000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -40968,7 +41682,18 @@
         "Resistance band"
       ],
       "id": "EX247",
-      "images": [],
+      "images": [
+        {
+          "alt": "Low Band Pull-Apart start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7bdb63c4-0e45-4d8f-9dac-1fb886b2e500/public"
+        },
+        {
+          "alt": "Low Band Pull-Apart pull instructional slide.",
+          "step": "Pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a3c64bd6-3d24-47b6-31f5-66aeebc31b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -41010,7 +41735,18 @@
         "Resistance band"
       ],
       "id": "EX248",
-      "images": [],
+      "images": [
+        {
+          "alt": "Overhead Band Pull-Apart start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/91e59188-ee2a-47e5-3788-01001fda3400/public"
+        },
+        {
+          "alt": "Overhead Band Pull-Apart pull instructional slide.",
+          "step": "Pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/54741091-a70c-4fd1-c535-601c2b8dd400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -41053,7 +41789,18 @@
         "Resistance band"
       ],
       "id": "EX249",
-      "images": [],
+      "images": [
+        {
+          "alt": "Band Face Pull start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e03f0c3d-62b2-4a0b-d985-641d772d2700/public"
+        },
+        {
+          "alt": "Band Face Pull pull instructional slide.",
+          "step": "Pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dbf0716e-d0a2-44ea-dfe1-0eadc8ca0f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -41095,7 +41842,18 @@
         "Resistance band"
       ],
       "id": "EX250",
-      "images": [],
+      "images": [
+        {
+          "alt": "Band Row start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/55ad177a-cfb7-47b5-246b-6643d7bf7700/public"
+        },
+        {
+          "alt": "Band Row row instructional slide.",
+          "step": "Row",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3573d535-b95c-4d3b-5003-3f16d6c2d600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -41137,7 +41895,18 @@
         "Resistance band"
       ],
       "id": "EX251",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated Band Row start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/62b0e66e-872a-4ba1-7945-f92f87cadf00/public"
+        },
+        {
+          "alt": "Seated Band Row row instructional slide.",
+          "step": "Row",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/97fa1f87-b4e5-454c-1b48-49af1ab59800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -41179,7 +41948,18 @@
         "Resistance band"
       ],
       "id": "EX252",
-      "images": [],
+      "images": [
+        {
+          "alt": "Single-Arm Band Row start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1f181a44-aa9c-4537-9d05-c6e0682a1200/public"
+        },
+        {
+          "alt": "Single-Arm Band Row row instructional slide.",
+          "step": "Row",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7c85863c-ec37-4bcd-f4c3-101f3b6d2b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -41221,7 +42001,18 @@
         "Resistance band"
       ],
       "id": "EX253",
-      "images": [],
+      "images": [
+        {
+          "alt": "Band Straight-Arm Pulldown start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/96f101f3-b636-4a59-3fd7-e2cace2a8300/public"
+        },
+        {
+          "alt": "Band Straight-Arm Pulldown pulldown instructional slide.",
+          "step": "Pulldown",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/91464e97-64d0-41af-d6e8-e45ed6516a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -41263,7 +42054,18 @@
         "Loaded backpack"
       ],
       "id": "EX254",
-      "images": [],
+      "images": [
+        {
+          "alt": "Backpack Bent-Over Row hinge instructional slide.",
+          "step": "Hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3fe94344-b72d-4d23-df24-616fb52ed900/public"
+        },
+        {
+          "alt": "Backpack Bent-Over Row row instructional slide.",
+          "step": "Row",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8eefa5b2-706b-4a01-4443-8bb31840b200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -41305,7 +42107,18 @@
         "Loaded backpack"
       ],
       "id": "EX255",
-      "images": [],
+      "images": [
+        {
+          "alt": "Single-Arm Backpack Row reach instructional slide.",
+          "step": "Reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4f14b251-78f0-4363-f020-0bca42dc3c00/public"
+        },
+        {
+          "alt": "Single-Arm Backpack Row row instructional slide.",
+          "step": "Row",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5f03ab12-1fb9-4b7b-9f0f-df993ce2bf00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -41347,7 +42160,18 @@
         "Water bottles"
       ],
       "id": "EX256",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bottle Bent-Over Row hinge instructional slide.",
+          "step": "Hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6de96d49-5b7f-48a2-d464-9b9e8767f400/public"
+        },
+        {
+          "alt": "Bottle Bent-Over Row row instructional slide.",
+          "step": "Row",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3665b977-fd25-4335-3a83-fbba09679100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -41389,7 +42213,18 @@
         "Water bottles"
       ],
       "id": "EX257",
-      "images": [],
+      "images": [
+        {
+          "alt": "Reverse Fly with Bottles hinge instructional slide.",
+          "step": "Hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f0dcb780-ef82-42b6-646e-8861f5725500/public"
+        },
+        {
+          "alt": "Reverse Fly with Bottles fly instructional slide.",
+          "step": "Fly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bbe8ae1a-0418-49ec-3028-4ed03c1f6400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -41431,7 +42266,18 @@
         "Loaded backpack"
       ],
       "id": "EX258",
-      "images": [],
+      "images": [
+        {
+          "alt": "Backpack Rear-Delt Row hinge instructional slide.",
+          "step": "Hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/15903623-eada-41a3-dda6-c0aae47be600/public"
+        },
+        {
+          "alt": "Backpack Rear-Delt Row high row instructional slide.",
+          "step": "High Row",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b3b99097-eeeb-44ec-0512-57efed7b3f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -41473,7 +42319,18 @@
         "Towel"
       ],
       "id": "EX259",
-      "images": [],
+      "images": [
+        {
+          "alt": "Towel Isometric Row setup instructional slide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b649a4fd-b480-4fc6-7e4e-e2e09f2e1900/public"
+        },
+        {
+          "alt": "Towel Isometric Row hold instructional slide.",
+          "step": "Hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4eec58d2-c645-4fc3-0162-9b33eeff3200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -41514,7 +42371,18 @@
         "Towel"
       ],
       "id": "EX260",
-      "images": [],
+      "images": [
+        {
+          "alt": "Towel Lat Pull Iso overhead instructional slide.",
+          "step": "Overhead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2568d679-02f7-4962-3963-c8eb23864800/public"
+        },
+        {
+          "alt": "Towel Lat Pull Iso pull instructional slide.",
+          "step": "Pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1fe7f5d9-aa7c-44cf-b47c-ebf239b0e500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -41555,7 +42423,18 @@
         "Towel"
       ],
       "id": "EX261",
-      "images": [],
+      "images": [
+        {
+          "alt": "Towel Upright Row Iso stand instructional slide.",
+          "step": "Stand",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/988a9fbe-1eed-4f72-a0d8-2e0da8280000/public"
+        },
+        {
+          "alt": "Towel Upright Row Iso hold instructional slide.",
+          "step": "Hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8f6c6e42-41a4-432e-f075-ebd848f36200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -41596,7 +42475,18 @@
         "Door frame"
       ],
       "id": "EX262",
-      "images": [],
+      "images": [
+        {
+          "alt": "Doorframe Row lean instructional slide.",
+          "step": "Lean",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/10057d77-6a32-484c-21ce-ada336f0a200/public"
+        },
+        {
+          "alt": "Doorframe Row row instructional slide.",
+          "step": "Row",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/221a5179-b2f0-4074-915a-08df579d2500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -41638,7 +42528,18 @@
         "Sturdy table"
       ],
       "id": "EX263",
-      "images": [],
+      "images": [
+        {
+          "alt": "Table Inverted Row step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/76563d1d-2f92-43a2-0787-3c6f6856ec00/public"
+        },
+        {
+          "alt": "Table Inverted Row step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aaedb471-3950-4b13-5769-83f4a2da9700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -41680,7 +42581,18 @@
         "Towels on smooth floor"
       ],
       "id": "EX264",
-      "images": [],
+      "images": [
+        {
+          "alt": "Towel Slider Row step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/71679cf6-b784-4af1-1dd5-8b9c98ac1200/public"
+        },
+        {
+          "alt": "Towel Slider Row step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/76355a2e-463c-42e0-c778-6d0837120a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -41721,7 +42633,23 @@
         "Water bottle"
       ],
       "id": "EX265",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bear Row with Bottle step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1a430a03-5082-43e3-9867-8084045adc00/public"
+        },
+        {
+          "alt": "Bear Row with Bottle step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0c19518c-7587-44e9-ec28-78603781cc00/public"
+        },
+        {
+          "alt": "Bear Row with Bottle switch side instructional slide.",
+          "step": "Switch Side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0e9c6efa-efe5-43f8-ba7f-29c7861f6c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -41763,7 +42691,23 @@
         "Water bottle"
       ],
       "id": "EX266",
-      "images": [],
+      "images": [
+        {
+          "alt": "Plank Row with Bottle step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d6f40cce-9dba-43ad-056b-01abd4b5fb00/public"
+        },
+        {
+          "alt": "Plank Row with Bottle step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b8e622ab-cdfb-4680-97be-8478bf8b5c00/public"
+        },
+        {
+          "alt": "Plank Row with Bottle switch side instructional slide.",
+          "step": "Switch Side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/52308eee-ccfe-430b-2556-2b9dd38a3100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -41804,7 +42748,18 @@
       ],
       "equipment": [],
       "id": "EX267",
-      "images": [],
+      "images": [
+        {
+          "alt": "Scapular Retraction Hold step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/63925cae-c7c3-499c-92bf-6f9b32247100/public"
+        },
+        {
+          "alt": "Scapular Retraction Hold step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ce257574-8641-48ef-9d14-0aa4b5aa9a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -41843,7 +42798,18 @@
       ],
       "equipment": [],
       "id": "EX268",
-      "images": [],
+      "images": [
+        {
+          "alt": "Shoulder Blade Push-Pull step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a92ba086-28a6-4e5c-7ab7-43096f55eb00/public"
+        },
+        {
+          "alt": "Shoulder Blade Push-Pull step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/880e3d43-1bea-4301-c664-927d02813500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -41882,7 +42848,18 @@
       ],
       "equipment": [],
       "id": "EX269",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing W Squeeze step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f494bac4-8f0a-4c79-54f1-b2bde7fb8600/public"
+        },
+        {
+          "alt": "Standing W Squeeze step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6e4ec7d5-8ada-4909-f35c-93af6ed5f900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -41921,7 +42898,18 @@
       ],
       "equipment": [],
       "id": "EX270",
-      "images": [],
+      "images": [
+        {
+          "alt": "No-Money Drill step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e1ac785f-1a63-4b03-146a-0637dc03c700/public"
+        },
+        {
+          "alt": "No-Money Drill step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/94d0b90f-e7eb-49c7-519c-441ad25d4400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -41962,7 +42950,18 @@
         "Resistance band"
       ],
       "id": "EX271",
-      "images": [],
+      "images": [
+        {
+          "alt": "Band No-Money Drill step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ef2fced2-ef12-4d75-1fd2-991e5e606600/public"
+        },
+        {
+          "alt": "Band No-Money Drill step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f5db51e9-e345-450b-87ae-0172c33e5c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -42004,7 +43003,18 @@
         "Resistance band"
       ],
       "id": "EX272",
-      "images": [],
+      "images": [
+        {
+          "alt": "Banded External Rotation step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ffb0fde2-252e-448a-c406-d92c7dcdd600/public"
+        },
+        {
+          "alt": "Banded External Rotation step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8a39ceb6-710b-4ea7-c722-fc6b9ef46a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -42046,7 +43056,18 @@
         "Water bottle optional"
       ],
       "id": "EX273",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side-Lying External Rotation setup instructional slide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7b64cd75-b161-4b5c-de5f-64dcf06d1b00/public"
+        },
+        {
+          "alt": "Side-Lying External Rotation open instructional slide.",
+          "step": "Open",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/20400e72-74a7-4822-fdf0-00fd2726c900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -42087,7 +43108,18 @@
         "Loaded backpack"
       ],
       "id": "EX274",
-      "images": [],
+      "images": [
+        {
+          "alt": "Backpack Curl start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/72bbad57-feb9-43a9-0dce-b37d9eb6e100/public"
+        },
+        {
+          "alt": "Backpack Curl top instructional slide.",
+          "step": "Top",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5db0cfc9-3119-4284-1e9b-89c99cabb400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -42129,7 +43161,18 @@
         "Water bottles"
       ],
       "id": "EX275",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bottle Biceps Curl start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/01537157-0cc5-41e2-1bbc-947df0295c00/public"
+        },
+        {
+          "alt": "Bottle Biceps Curl top instructional slide.",
+          "step": "Top",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4b1a1afb-578c-4683-ee54-46ec1616d700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -42171,7 +43214,18 @@
         "Water bottles"
       ],
       "id": "EX276",
-      "images": [],
+      "images": [
+        {
+          "alt": "Hammer Curl with Bottles start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/78e93c22-4d14-4d98-73b2-349f1d68a400/public"
+        },
+        {
+          "alt": "Hammer Curl with Bottles top instructional slide.",
+          "step": "Top",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9e17c154-3b69-472c-88a0-2f810ca31b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -42213,7 +43267,18 @@
         "Loaded backpack"
       ],
       "id": "EX277",
-      "images": [],
+      "images": [
+        {
+          "alt": "Backpack Upright Row start instructional slide.",
+          "step": "Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c781383c-7ddc-474f-1c6f-ad26c3016f00/public"
+        },
+        {
+          "alt": "Backpack Upright Row pull instructional slide.",
+          "step": "Pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a70d9f65-1ca0-4593-abc9-cc63975cd100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -42253,7 +43318,28 @@
       ],
       "equipment": [],
       "id": "EX278",
-      "images": [],
+      "images": [
+        {
+          "alt": "Dead Bug tabletop instructional slide.",
+          "step": "Tabletop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f535ddc7-6221-4e08-980d-0c8b5d04af00/public"
+        },
+        {
+          "alt": "Dead Bug opposite extension instructional slide.",
+          "step": "Opposite Extension",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/677e75e7-5db0-4284-defe-2088c9fe7700/public"
+        },
+        {
+          "alt": "Dead Bug return center instructional slide.",
+          "step": "Return Center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/57e2ebe5-dbb5-4e4c-848b-9295cc012c00/public"
+        },
+        {
+          "alt": "Dead Bug opposite extension side b instructional slide.",
+          "step": "Opposite Extension Side B",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e9ae3a07-c7be-4446-0b7c-07f414c7e100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -42293,7 +43379,23 @@
       ],
       "equipment": [],
       "id": "EX279",
-      "images": [],
+      "images": [
+        {
+          "alt": "Dead Bug Heel Tap tabletop instructional slide.",
+          "step": "Tabletop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b47035f4-e2c3-4ddd-d82e-d9f35c521500/public"
+        },
+        {
+          "alt": "Dead Bug Heel Tap tap instructional slide.",
+          "step": "Tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7a424fb5-ad0b-4113-d645-eda34b7a9900/public"
+        },
+        {
+          "alt": "Dead Bug Heel Tap opposite tap instructional slide.",
+          "step": "Opposite Tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/be29c5d0-7827-4ed0-8974-d844f5aca000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -42333,7 +43435,23 @@
       ],
       "equipment": [],
       "id": "EX280",
-      "images": [],
+      "images": [
+        {
+          "alt": "Dead Bug Arm Only tabletop instructional slide.",
+          "step": "Tabletop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/06757e29-ab49-4967-1366-799259267600/public"
+        },
+        {
+          "alt": "Dead Bug Arm Only reach instructional slide.",
+          "step": "Reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0481787f-7914-4df6-6231-b4405c292100/public"
+        },
+        {
+          "alt": "Dead Bug Arm Only opposite reach instructional slide.",
+          "step": "Opposite Reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1d7523ba-aa77-4390-71e9-7aca4cd10b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -42373,7 +43491,23 @@
       ],
       "equipment": [],
       "id": "EX281",
-      "images": [],
+      "images": [
+        {
+          "alt": "Dead Bug Leg Only tabletop instructional slide.",
+          "step": "Tabletop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e1d12ebc-6a4e-4a27-af8a-2812cee8aa00/public"
+        },
+        {
+          "alt": "Dead Bug Leg Only extend instructional slide.",
+          "step": "Extend",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c9f9a27e-4ce1-4d5c-483a-3a65c551ff00/public"
+        },
+        {
+          "alt": "Dead Bug Leg Only opposite extend instructional slide.",
+          "step": "Opposite Extend",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4d9c088c-0120-4225-fa84-712b01f58500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -42413,7 +43547,18 @@
       ],
       "equipment": [],
       "id": "EX282",
-      "images": [],
+      "images": [
+        {
+          "alt": "Dead Bug Hold setup instructional slide.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c6ed54fe-29e4-4345-83e9-30d5ca330f00/public"
+        },
+        {
+          "alt": "Dead Bug Hold brace instructional slide.",
+          "step": "Brace",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/019bb085-96ae-41aa-cc1c-0f5b5dc30400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -42455,7 +43600,23 @@
         "Wall"
       ],
       "id": "EX283",
-      "images": [],
+      "images": [
+        {
+          "alt": "Dead Bug with Wall Press step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0a62f388-f502-4e09-3486-75df5d9d3500/public"
+        },
+        {
+          "alt": "Dead Bug with Wall Press step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a5d10bea-3201-4740-f815-0ecc4b821c00/public"
+        },
+        {
+          "alt": "Dead Bug with Wall Press opposite reach instructional slide.",
+          "step": "Opposite Reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6f47e4ae-5f89-47a4-b5d7-fb0fe2dc8400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -42498,7 +43659,23 @@
         "Light object"
       ],
       "id": "EX284",
-      "images": [],
+      "images": [
+        {
+          "alt": "Dead Bug Pullover step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/366bb4b1-5f0c-43dd-0074-60b377e74200/public"
+        },
+        {
+          "alt": "Dead Bug Pullover step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a5f71a1e-ee9a-462c-bd81-2517cb560d00/public"
+        },
+        {
+          "alt": "Dead Bug Pullover opposite leg low instructional slide.",
+          "step": "Opposite Leg Low",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/52070ff1-fcc9-4559-1e38-76a02469d700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -42538,7 +43715,28 @@
       ],
       "equipment": [],
       "id": "EX285",
-      "images": [],
+      "images": [
+        {
+          "alt": "Dead Bug Bicycle step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4342d65f-f517-43cf-2453-f36972576200/public"
+        },
+        {
+          "alt": "Dead Bug Bicycle step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/38bb1018-5ebb-4962-cfa4-9b9fd844ca00/public"
+        },
+        {
+          "alt": "Dead Bug Bicycle pedal left leg low back control instructional slide.",
+          "step": "Pedal Left Leg Low Back Control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f8ed3116-43e7-46ae-a557-e552b86eed00/public"
+        },
+        {
+          "alt": "Dead Bug Bicycle pedal right leg ribs down instructional slide.",
+          "step": "Pedal Right Leg Ribs Down",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/34658318-ed3c-460c-5f46-201a714d7100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -42578,7 +43776,28 @@
       ],
       "equipment": [],
       "id": "EX286",
-      "images": [],
+      "images": [
+        {
+          "alt": "Dead Bug Iso Press step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/82485ebd-6962-4e03-5157-7f720ce26800/public"
+        },
+        {
+          "alt": "Dead Bug Iso Press step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/81c79c26-ae96-4292-137c-cb545f7f8300/public"
+        },
+        {
+          "alt": "Dead Bug Iso Press right hand left knee instructional slide.",
+          "step": "Right Hand Left Knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4f824d25-101c-447f-4b59-c9d9f3cd5700/public"
+        },
+        {
+          "alt": "Dead Bug Iso Press left hand right knee instructional slide.",
+          "step": "Left Hand Right Knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/465b81b3-2535-4657-71ac-e3994e184900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -42620,7 +43839,33 @@
         "Water bottle"
       ],
       "id": "EX287",
-      "images": [],
+      "images": [
+        {
+          "alt": "Weighted Dead Bug step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/933384d6-d4fc-4e63-841e-7d4113797b00/public"
+        },
+        {
+          "alt": "Weighted Dead Bug step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/28007de1-d892-4e2a-2fae-8547f69ac800/public"
+        },
+        {
+          "alt": "Weighted Dead Bug opposite extension load control instructional slide.",
+          "step": "Opposite Extension Load Control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3949be4c-a85f-43a5-8307-43d20aee1f00/public"
+        },
+        {
+          "alt": "Weighted Dead Bug reciprocal opposite extension instructional slide.",
+          "step": "Reciprocal Opposite Extension",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/87d9cb70-3148-4746-71c1-b9d7d43eed00/public"
+        },
+        {
+          "alt": "Weighted Dead Bug load control instructional slide.",
+          "step": "Load Control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a1b93c31-ad22-441c-c134-469e8588a400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -42721,7 +43966,28 @@
       ],
       "equipment": [],
       "id": "EX289",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bird Dog Hold step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0c2018ed-f0c1-411c-4c18-2f214bc0bb00/public"
+        },
+        {
+          "alt": "Bird Dog Hold step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1c753491-b0a9-4fc8-2d7b-084e953fd600/public"
+        },
+        {
+          "alt": "Bird Dog Hold foreground arm background leg instructional slide.",
+          "step": "Foreground Arm Background Leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/24f74e5a-9e3a-48ec-179f-d8902d727f00/public"
+        },
+        {
+          "alt": "Bird Dog Hold background arm foreground leg switch instructional slide.",
+          "step": "Background Arm Foreground Leg Switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d56196ac-96a2-4b0e-0fc0-a09128b54000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -42760,7 +44026,33 @@
       ],
       "equipment": [],
       "id": "EX290",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bird Dog Crunch step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d53cca4c-fc3b-4c31-da84-3c1dd11f3300/public"
+        },
+        {
+          "alt": "Bird Dog Crunch step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cabfb51a-fec2-4130-ac15-702959c7d200/public"
+        },
+        {
+          "alt": "Bird Dog Crunch tabletop setup instructional slide.",
+          "step": "Tabletop Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a6eccebf-3a5c-46a3-6f50-03b3e7c4ae00/public"
+        },
+        {
+          "alt": "Bird Dog Crunch crunch phase instructional slide.",
+          "step": "Crunch Phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3f3fb164-6831-49d5-9870-899967b04c00/public"
+        },
+        {
+          "alt": "Bird Dog Crunch opposite crunch instructional slide.",
+          "step": "Opposite Crunch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a1e8f337-ed35-4e89-531f-9d42c8c02300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -42802,7 +44094,28 @@
         "Water bottle"
       ],
       "id": "EX291",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bird Dog Row step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d8c02644-1f8c-4d35-31fb-59728bc4d700/public"
+        },
+        {
+          "alt": "Bird Dog Row step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/82e337fb-1fa8-4b0d-a887-d1a561295900/public"
+        },
+        {
+          "alt": "Bird Dog Row row start instructional slide.",
+          "step": "Row Start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a3c83d23-9ac2-4f26-56ee-ec13f6e69200/public"
+        },
+        {
+          "alt": "Bird Dog Row row top switch instructional slide.",
+          "step": "Row Top Switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f545109a-d1f0-43b4-498b-ab92c63e5f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -42841,7 +44154,33 @@
       ],
       "equipment": [],
       "id": "EX292",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bird Dog Knee Hover step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/69558d46-98e3-4a33-739c-559b5d9d5800/public"
+        },
+        {
+          "alt": "Bird Dog Knee Hover step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/24e6d5a4-98b6-416c-99e6-646792adf300/public"
+        },
+        {
+          "alt": "Bird Dog Knee Hover bear hover setup instructional slide.",
+          "step": "Bear Hover Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/45d4833b-9ea5-4beb-62a8-0c77a3855500/public"
+        },
+        {
+          "alt": "Bird Dog Knee Hover side a instructional slide.",
+          "step": "Side A",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6ba8be81-181e-4a59-8125-f9152f308b00/public"
+        },
+        {
+          "alt": "Bird Dog Knee Hover switch side instructional slide.",
+          "step": "Switch Side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/841d3956-d6ea-4676-9709-10885c45b600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -42880,7 +44219,23 @@
       ],
       "equipment": [],
       "id": "EX293",
-      "images": [],
+      "images": [
+        {
+          "alt": "Quadruped Shoulder Tap step 1 instructional slide.",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d098839d-7eb0-4c6f-7d3c-a36c0c528700/public"
+        },
+        {
+          "alt": "Quadruped Shoulder Tap step 2 instructional slide.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4652f517-d1b6-4da3-38e0-c58ed2bde000/public"
+        },
+        {
+          "alt": "Quadruped Shoulder Tap opposite tap instructional slide.",
+          "step": "Opposite Tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/17e8ab90-af7e-4809-17a9-42bb05db4a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
