@@ -51,6 +51,14 @@ export type WorkerProviderEgressTokenValidationResult =
       workspaceVersion: string | null;
     };
 
+/**
+ * Snapshot of the RunnerContainer DO's in-memory active workspace-invocation
+ * operation. "Active" spans the whole DO-side invoke, including its
+ * pre-dispatch readiness window — it proves the operation is in flight, not
+ * that the runner child has accepted work. Consumers narrow what they need:
+ * provider-egress fallback binds on `userId` only; the transport-failure
+ * liveness probe matches the full attempt identity.
+ */
 export type WorkerActiveRuntimeUserFenceResult =
   | {
       active: false;

@@ -57,6 +57,13 @@ import { RunnerStoreCache } from "./runner-store-cache.js";
 import type { RunnerAlarmCoordinator } from "./alarm-coordinator.js";
 
 const RUNTIME_ATTEMPT_LIVENESS_PROBE_TIMEOUT_MS = 5_000;
+
+type RuntimeAttemptLivenessProbeOutcome =
+  | "active"
+  | "error"
+  | "inactive"
+  | "mismatch"
+  | "timeout";
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_CONTEXT =
   "murph.hosted.workspace-snapshot-path-hash.v1";
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_TEXT_ENCODER = new TextEncoder();
@@ -189,12 +196,15 @@ export class RuntimeInvocationService {
       // container before revoking authority: clearing the fence under a live
       // invocation orphans it as an unwakeable zombie that blocks the runner
       // slot until its idle timer expires.
-      if (await this.readPreparedAttemptStillActiveBestEffort(input.prepared)) {
+      const probeOutcome = await this.readPreparedAttemptLivenessBestEffort(
+        input.prepared,
+      );
+      if (probeOutcome === "active") {
         if (input.acceptedProcessingAttempt) {
           await this.recordAcceptedRuntimeAttemptFailureBestEffort({
-            attemptStillActive: true,
             error,
             executionInput,
+            probeOutcome,
             token,
             workspaceVersion,
           });
@@ -259,9 +269,9 @@ export class RuntimeInvocationService {
       await this.input.alarmCoordinator.sync(failed.record);
       if (input.acceptedProcessingAttempt && failed.failed) {
         await this.recordAcceptedRuntimeAttemptFailureBestEffort({
-          attemptStillActive: false,
           error,
           executionInput,
+          probeOutcome,
           token,
           workspaceVersion,
         });
@@ -595,25 +605,31 @@ export class RuntimeInvocationService {
   }
 
   /**
-   * Best-effort check that the prepared invocation is still running inside the
-   * RunnerContainer Durable Object. Used on transport failure to distinguish
-   * "the invocation died" from "only my call to it died". Fails toward `false`
-   * (today's clear-the-fence behavior) on probe error or timeout, and cannot
-   * see liveness across a RunnerContainer DO restart because the active-op
-   * record is in-memory; both fall back to the pre-existing recovery paths.
+   * Best-effort check that the prepared invocation's Durable Object operation
+   * is still in flight inside the RunnerContainer. "Active" means the DO-side
+   * invoke for this exact fence identity has not settled — including its
+   * pre-dispatch readiness window. Keeping the fence is correct across that
+   * whole window: a live DO invoke either proceeds to run the invocation under
+   * the intact fence, or dies and releases the container slot, after which the
+   * pre-existing stale-fence replacement path reclaims the fence. Only
+   * `"active"` keeps the fence; every unconfirmed outcome (inactive, identity
+   * mismatch, probe error, probe timeout) fails toward today's
+   * clear-the-fence behavior. The probe cannot see liveness across a
+   * RunnerContainer DO restart because the active-op record is in-memory; that
+   * mode also falls back to the pre-existing recovery paths.
    */
-  private async readPreparedAttemptStillActiveBestEffort(
+  private async readPreparedAttemptLivenessBestEffort(
     prepared: PreparedRuntimeInvocation,
-  ): Promise<boolean> {
+  ): Promise<RuntimeAttemptLivenessProbeOutcome> {
     const namespace = this.input.runnerContainerNamespace;
     if (!namespace) {
-      return false;
+      return "inactive";
     }
     let probeTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       const container = namespace.getByName(prepared.runnerContainerName);
       if (!container.readActiveRuntimeUserFence) {
-        return false;
+        return "inactive";
       }
       const active = await Promise.race([
         container.readActiveRuntimeUserFence(),
@@ -629,20 +645,25 @@ export class RuntimeInvocationService {
           prepared,
           probeOutcome: "timeout",
         });
-        return false;
+        return "timeout";
       }
-      return active.active
-        && active.userId === prepared.input.userId
-        // Compare the generation actually sent in the container job request.
+      if (!active.active) {
+        return "inactive";
+      }
+      return active.userId === prepared.input.userId
         && active.attemptId === prepared.token.attemptId
-        && active.leaseGeneration === prepared.token.generation;
+        // The container records the generation from the job request; compare
+        // against that single source of truth.
+        && active.leaseGeneration === prepared.job.request.leaseGeneration
+        ? "active"
+        : "mismatch";
     } catch (error) {
       this.emitAttemptLivenessProbeUnconfirmedLog({
         error,
         prepared,
         probeOutcome: "error",
       });
-      return false;
+      return "error";
     } finally {
       if (probeTimer !== undefined) {
         clearTimeout(probeTimer);
@@ -674,12 +695,13 @@ export class RuntimeInvocationService {
   }
 
   private async recordAcceptedRuntimeAttemptFailureBestEffort(input: {
-    attemptStillActive: boolean;
     error: unknown;
     executionInput: RuntimeInvocationInput;
+    probeOutcome: RuntimeAttemptLivenessProbeOutcome;
     token: RunnerWriteFenceToken;
     workspaceVersion: string;
   }): Promise<void> {
+    const attemptStillActive = input.probeOutcome === "active";
     const body = {
       entries: [
         {
@@ -693,8 +715,9 @@ export class RuntimeInvocationService {
           phase: "error",
           redactedJson: {
             ...buildHostedRunnerRedactedErrorJson(input.error),
-            attemptStillActive: input.attemptStillActive,
-            fenceCleared: !input.attemptStillActive,
+            attemptLivenessProbeOutcome: input.probeOutcome,
+            attemptStillActive,
+            fenceCleared: !attemptStillActive,
           },
           workspaceVersion: input.workspaceVersion,
         },

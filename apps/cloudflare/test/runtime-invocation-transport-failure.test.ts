@@ -171,6 +171,31 @@ describe("runtime invocation transport failure fence handling", () => {
     await expect(harness.stateStore.readWriteFenceToken()).resolves.toBeNull();
   });
 
+  it("clears the write fence when only the lease generation differs", async () => {
+    const harness = await createTransportFailureHarness({
+      readActiveRuntimeUserFence: async (token) => ({
+        active: true,
+        attemptId: token.attemptId,
+        leaseGeneration: "999",
+        userId: TEST_USER_ID,
+      }),
+    });
+
+    await expect(harness.invoke()).rejects.toThrow("container transport failed");
+
+    await expect(harness.stateStore.readWriteFenceToken()).resolves.toBeNull();
+    expect(harness.loggedFailureEntries()).toEqual([
+      expect.objectContaining({
+        eventCode: "runner.accepted_attempt_failed",
+        redactedJson: expect.objectContaining({
+          attemptLivenessProbeOutcome: "mismatch",
+          attemptStillActive: false,
+          fenceCleared: true,
+        }),
+      }),
+    ]);
+  });
+
   it("clears the write fence when the container reports the attempt for a different user", async () => {
     const harness = await createTransportFailureHarness({
       readActiveRuntimeUserFence: async (token) => ({
@@ -284,6 +309,25 @@ describe("buildHostedRunnerRedactedErrorJson", () => {
 
   it("returns an empty redacted object for undefined errors", () => {
     expect(buildHostedRunnerRedactedErrorJson(undefined)).toEqual({});
+  });
+
+  it("drops errorCodeDetail values that do not look like plain code tokens", () => {
+    const pathShapedCode = new Error("boom");
+    Object.assign(pathShapedCode, { code: "/etc/passwd leaked via code" });
+
+    const redacted = buildHostedRunnerRedactedErrorJson(pathShapedCode);
+
+    expect(redacted).not.toHaveProperty("errorCodeDetail");
+    expect(JSON.stringify(redacted)).not.toContain("/etc/passwd");
+  });
+
+  it("keeps errorCodeDetail values that look like plain code tokens", () => {
+    const tokenCode = new Error("boom");
+    Object.assign(tokenCode, { code: "ECONNRESET" });
+
+    expect(buildHostedRunnerRedactedErrorJson(tokenCode)).toMatchObject({
+      errorCodeDetail: "ECONNRESET",
+    });
   });
 });
 
