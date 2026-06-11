@@ -22,7 +22,6 @@ describe("runtime-state sqlite warning filter", () => {
     process.emitWarning = originalEmitWarning;
     delete (process as ProcessWithSqliteWarningFilterFlag)[SQLITE_WARNING_FILTER_FLAG];
     delete (process as ProcessWithSqliteWarningFilterFlag)[SQLITE_WARNING_FILTER_INCLUDES_FLAG];
-    vi.doUnmock("node:sqlite");
   });
 
   it("suppresses only the sqlite experimental warning", async () => {
@@ -117,26 +116,31 @@ describe("runtime-state sqlite warning filter", () => {
     expect(process.emitWarning).toBe(includesWrappedEmitWarning);
   });
 
-  it("installs the sqlite warning filter before importing node:sqlite", async () => {
+  it("installs the sqlite warning filter before node:sqlite first loads", async () => {
     const forwardedWarnings: unknown[][] = [];
 
     process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
       forwardedWarnings.push([warning, ...args]);
     }) as typeof process.emitWarning;
 
-    vi.doMock("node:sqlite", () => {
-      process.emitWarning(
-        "SQLite is an experimental feature and might change at any time",
-        "ExperimentalWarning",
-      );
-
-      return {
-        DatabaseSync: class FakeDatabaseSync {},
-      };
-    });
+    // src/sqlite.ts loads node:sqlite through process.getBuiltinModule (no
+    // top-level await), which bypasses vitest module mocks, so this test
+    // exercises the real builtin: its ExperimentalWarning fires synchronously
+    // through process.emitWarning on first load. Guard against vacuity first —
+    // the ordering invariant is only provable on the first node:sqlite load in
+    // this process. moduleLoadList is real but untyped in @types/node.
+    const processWithModuleLoadList = process as NodeJS.Process & {
+      moduleLoadList?: readonly string[];
+    };
+    expect(processWithModuleLoadList.moduleLoadList ?? []).not.toContain(
+      "NativeModule sqlite",
+    );
 
     await import("../src/sqlite.ts");
 
+    expect(processWithModuleLoadList.moduleLoadList ?? []).toContain(
+      "NativeModule sqlite",
+    );
     expect(forwardedWarnings).toEqual([]);
   });
 });

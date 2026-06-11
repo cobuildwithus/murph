@@ -19,11 +19,17 @@ afterEach(async () => {
 
 // A miniature installed CLI that exercises the two bundle hazards the real
 // vault-cli has: createRequire(import.meta.url) + require('../package.json'),
-// and a deterministic response for every parity probe.
+// and a deterministic response for every parity probe. The hermeticity
+// tripwire emits a location-dependent line whenever a probe inherits operator
+// config (HOME or VAULT) from the assembling machine, so a regression in the
+// probes' env overrides surfaces as parity divergence.
 const FAKE_CLI_SOURCE = [
   "import { createRequire } from 'node:module';",
   "const require = createRequire(import.meta.url);",
   "const packageJson = require('../package.json');",
+  "if (!(process.env.HOME ?? '').endsWith('.parity-probe-home') || process.env.VAULT !== '') {",
+  "  console.log(import.meta.url);",
+  "}",
   "console.log(JSON.stringify({ args: process.argv.slice(2), version: packageJson.version }));",
   "",
 ].join("\n");
@@ -56,10 +62,23 @@ async function stageFakeInstalledCli(cliSource: string): Promise<string> {
 }
 
 describe("runner bundle vault-cli esbuild step", () => {
-  it("bundles the installed CLI, passes parity, and retargets both bin wrappers", async () => {
+  it("bundles the installed CLI, passes parity hermetically, and retargets both bin wrappers", async () => {
     const bundleDir = await stageFakeInstalledCli(FAKE_CLI_SOURCE);
 
-    await bundleInstalledVaultCliBinary(bundleDir);
+    // Simulate an operator vault configured on the assembling machine: the
+    // parity probes must not see it (the fake CLI's tripwire would otherwise
+    // diverge and fail the bundle step).
+    const previousVault = process.env.VAULT;
+    process.env.VAULT = path.join(bundleDir, "operator-vault-must-not-leak");
+    try {
+      await bundleInstalledVaultCliBinary(bundleDir);
+    } finally {
+      if (previousVault === undefined) {
+        delete process.env.VAULT;
+      } else {
+        process.env.VAULT = previousVault;
+      }
+    }
 
     const bundledEntry = path.join(
       bundleDir,
@@ -83,6 +102,11 @@ describe("runner bundle vault-cli esbuild step", () => {
     // location exactly like the unbundled one.
     const output = execFileSync(process.execPath, [bundledEntry, "--help"], {
       encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: path.join(bundleDir, ".parity-probe-home"),
+        VAULT: "",
+      },
     });
     expect(JSON.parse(output)).toEqual({ args: ["--help"], version: "9.9.9" });
   });
@@ -100,5 +124,53 @@ describe("runner bundle vault-cli esbuild step", () => {
     temporaryDirectories.push(bundleDir);
 
     await expect(bundleInstalledVaultCliBinary(bundleDir)).rejects.toThrow();
+  });
+
+  // The parity battery compares bundled vs unbundled output, so a probe whose
+  // command was renamed away makes BOTH sides emit the same command-not-found
+  // error and the battery silently stops exercising the scoped module graph.
+  // Pin every scoped probe to a literal command path in the vault-cli command
+  // manifest so a rename fails here instead.
+  it("aims every scoped parity probe at a real vault-cli command path", async () => {
+    const bundleCliSource = await readFile(
+      new URL("../scripts/runner-bundle/bundle-cli.ts", import.meta.url),
+      "utf8",
+    );
+    const probesSection = bundleCliSource
+      .split("VAULT_CLI_BUNDLE_PARITY_PROBES")[1]
+      ?.split("];")[0];
+    expect(probesSection).toBeDefined();
+    const parityProbes = [...(probesSection ?? "").matchAll(/\[([^\][]+)\]/g)]
+      .map((arrayMatch) => JSON.parse(`[${arrayMatch[1]}]`) as string[])
+      .filter((probe) => probe.length > 0);
+    expect(parityProbes).toContainEqual(["--help"]);
+    const scopedProbes = parityProbes.filter((probe) => !probe[0]?.startsWith("-"));
+    expect(scopedProbes.length).toBeGreaterThan(0);
+
+    const manifestSource = await readFile(
+      new URL(
+        "../../../packages/cli/src/vault-cli-command-manifest.ts",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const manifestCommandPaths = [
+      ...manifestSource.matchAll(/path: \[([^\]]+)\]/g),
+    ].map((pathMatch) =>
+      [...pathMatch[1].matchAll(/'([^']+)'/g)].map((segment) => segment[1]),
+    );
+    expect(manifestCommandPaths.length).toBeGreaterThan(50);
+
+    for (const probe of scopedProbes) {
+      const startsWithManifestCommandPath = manifestCommandPaths.some(
+        (commandPath) =>
+          commandPath.length > 0 &&
+          commandPath.every((segment, index) => probe[index] === segment),
+      );
+      expect(
+        startsWithManifestCommandPath,
+        `parity probe \`${probe.join(" ")}\` does not start with any command path from the vault-cli command manifest`,
+      ).toBe(true);
+    }
   });
 });

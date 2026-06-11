@@ -73,6 +73,19 @@ function assertVaultCliBundleParity(input: {
     const expected = runVaultCliParityProbe(input.entryPath, probe, input.cliPackageDir);
     const actual = runVaultCliParityProbe(bundledEntryPath, probe, input.cliPackageDir);
 
+    // Symmetric unknown-command output would otherwise "pass" parity while
+    // proving nothing — a renamed command or broken CLI bootstrap must fail
+    // the assembly, not slip through as matching error text.
+    if (expected.output.includes("is not a command for")) {
+      throw new Error(
+        [
+          `Unbundled vault-cli no longer recognizes parity probe \`${probe.join(" ")}\`.`,
+          `Update VAULT_CLI_BUNDLE_PARITY_PROBES to match the current command surface.`,
+          `unbundled head: ${expected.output.slice(0, 400)}`,
+        ].join("\n"),
+      );
+    }
+
     if (expected.output !== actual.output || expected.status !== actual.status) {
       throw new Error(
         [
