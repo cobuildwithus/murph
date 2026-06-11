@@ -207,6 +207,16 @@ Text: none or the exact minimal text requested.
 Constraints: accurate anatomy, correct limb positioning, no medical claims, no logo unless requested, no watermark, no clutter.
 ```
 
+## Movement-Specific Example Pattern
+
+For exercises where a small detail defines the movement, state the desired outcome and the distinguishing visual cues directly, then validate those cues after rendering. Keep this concise; do not add a permanent rule for every exercise variant.
+
+Example for a bridge variation:
+- Outcome: same side-view carousel from setup to top position.
+- Distinguishing cues: feet/knees/props stay visibly in the defining position; hips show the intended lift or pulse.
+- Annotation: add one motion arrow to the moving body part and use human-facing labels such as `Lift hips`, `Small pulse`, `Knees open`, or `Feet planted`.
+- Validation: reject if the camera angle drifts, the defining cue is hidden, or the image reads as a different exercise.
+
 ## Dead Bug Defaults
 
 For the standard dead bug carousel:
