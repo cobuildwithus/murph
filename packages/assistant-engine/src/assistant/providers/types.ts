@@ -166,6 +166,7 @@ export interface AssistantProviderUsage {
   requestedModel: string | null
   servedModel: string | null
   totalTokens: number | null
+  turnProfileJson?: Record<string, unknown> | null
   usageExtractionSourcePath?: string | null
   usageExtractionVersion?: string | null
 }

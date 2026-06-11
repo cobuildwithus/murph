@@ -93,6 +93,7 @@ export async function recordAssistantUsageEvent(input: {
       usageExtractionSourcePath: normalizeNullableString(usage.usageExtractionSourcePath),
       usageExtractionVersion: normalizeNullableString(usage.usageExtractionVersion) ?? 'unknown',
       totalTokens: usage.totalTokens,
+      turnProfileJson: usage.turnProfileJson ?? null,
     }
 
     void usageRecorder.recordUsage(record).catch((error: unknown) => {

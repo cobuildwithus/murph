@@ -16,8 +16,13 @@ assistant reads deliveries as ordinary mailbox context.
 Design rules:
 - Consent is a row (grantor, kind, destination, status), not an encoded string.
 - Shares are defined over canonical vault data (query projections), not a producer pipe.
-- No plaintext user data at rest in Postgres: deliveries ride the existing encrypted
-  mailbox payload path; grants hold no payload.
+- Delivery payloads ride the existing encrypted mailbox path; grants hold no payload. The
+  only delivery-specific plaintext-at-rest columns are mailbox envelope metadata: the
+  dedupe key (share id + night date) and `occurred_at`, parser-pinned to the night date at
+  UTC midnight so exact sleep timestamps never land in Postgres (follow-up to PR #104,
+  which originally stored the wake timestamp as `occurred_at`). Standard envelope columns
+  (kind, lane, destination user id, created_at) additionally reveal that and when a
+  delivery happened — not when sleep occurred.
 - Destination is a member; future group containers consume the same deliveries unchanged.
 - Projection and delivery are deterministic code; no assistant involvement on either side.
 
@@ -31,7 +36,8 @@ Design rules:
 - Re-delivery of an already-delivered night is a dedupe no-op (no duplicate items).
 - Projection/delivery failures never fail the runtime wake (fail-open, logged without payload).
 - Members with no sleep data make no delivery calls.
-- No plaintext user data added to Postgres; no new env vars; no new external surface.
+- No plaintext sleep timestamps added to Postgres (envelope metadata limited to ids plus
+  the night date); no new env vars; no new external surface.
 
 ## Scope
 
@@ -125,13 +131,18 @@ Out of scope (v1+ fights this list):
 2. Create referee member via normal invite flow (spare email; web/telegram channel).
 3. After explicit verbal consent in the group chat, per grantor:
    `INSERT INTO hosted_vault_share (id, grantor_member_id, projection_kind,
-    destination_member_id, status, source, granted_at) VALUES
+    destination_member_id, status, source, granted_at, updated_at) VALUES
     (<cuid>, '<grantor>', 'sleep-times.v0', '<referee>', 'granted',
-     'operator-recorded-verbal', now());`
+     'operator-recorded-verbal', now(), now());`
    plus a `hosted_consent_event` row (scope `vault-share:sleep-times.v0:<referee>`,
    action `granted`, source `operator-recorded-verbal`).
-4. Revoke: `UPDATE hosted_vault_share SET status='revoked', revoked_at=now() WHERE ...;`
-   plus matching consent event.
+   `updated_at` is required: the column is NOT NULL with no database default (Prisma's
+   `@updatedAt` only fills it on Prisma-client writes, not raw SQL).
+4. Revoke: `UPDATE hosted_vault_share SET status='revoked', revoked_at=now(),
+   updated_at=now() WHERE ...;` plus matching consent event.
+   Re-grant is an UPDATE back to `status='granted'` (with `revoked_at=NULL,
+   updated_at=now()`), never a second INSERT: the unique index on
+   (grantor, kind, destination) allows only one row per share.
 5. Verify after next overnight wake: referee assistant can state each grantor's bed/wake
    times; spot-check no plaintext payloads in `hosted_mailbox_item`.
 Completed: 2026-06-10

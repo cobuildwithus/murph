@@ -45,6 +45,7 @@ const BASE_USAGE_RECORD = {
   totalTokens: 165,
   triggerKind: null,
   turnId: "turn_123",
+  turnProfileJson: null,
   usageId: "turn_123.attempt-1",
   usageExtractionSourcePath: null,
   usageExtractionVersion: "codex-usage-v1",

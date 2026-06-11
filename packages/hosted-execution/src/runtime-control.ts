@@ -626,6 +626,17 @@ export type HostedRuntimeLatencyTraceMilestone =
 
 export interface HostedRuntimeLatencyPhaseBreakdown {
   schemaVersion: number;
+  // Durable Object dispatch stamps (DO-side Date.now() epoch ms), diagnostics
+  // only. invokeReceivedAtEpochMs is stamped when the DO invoke handler starts;
+  // containerEnsureReadyStartedAtEpochMs immediately before ensureContainerReady,
+  // which may be a warm no-op rather than a container start. The segment from
+  // there to runner_job_accepted_at therefore bundles container scheduling/boot
+  // (cold only, nodeStartupMs measures the boot slice), the runner POST, request
+  // body decode, and the lazy runtime-contract load — not pure CF scheduling.
+  dispatch?: {
+    invokeReceivedAtEpochMs?: number;
+    containerEnsureReadyStartedAtEpochMs?: number;
+  };
   restore?: {
     sizeGuardMs?: number;
     dataKeyUnwrapMs?: number;

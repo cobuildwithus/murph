@@ -28,6 +28,11 @@ const ASSISTANT_USAGE_RAW_DETAIL_TOKEN_KEYS = new Map<string, ReadonlySet<string
   ["output_tokens_details", new Set(["image_tokens", "reasoning_tokens", "text_tokens"])],
   ["prompt_tokens_details", new Set(["cached_tokens"])],
 ]);
+export const ASSISTANT_TURN_PROFILE_SCHEMA = "murph.assistant-turn-profile.v1";
+export const ASSISTANT_TURN_PROFILE_MAX_REQUESTS = 32;
+export const ASSISTANT_TURN_PROFILE_MAX_TOOLS = 16;
+export const ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH = 64;
+const ASSISTANT_TURN_PROFILE_TOOL_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/ -]*$/u;
 
 export type AssistantUsageCredentialSource = "member" | "platform" | "unknown";
 export type AssistantProviderRequestOutcome =
@@ -69,6 +74,7 @@ export interface AssistantUsageRecord {
   totalTokens: number | null;
   triggerKind: string | null;
   turnId: string;
+  turnProfileJson: Record<string, unknown> | null;
   usageId: string;
   usageExtractionSourcePath: string | null;
   usageExtractionVersion: string;
@@ -166,6 +172,7 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
     totalTokens: normalizeOptionalInteger(record.totalTokens, "totalTokens"),
     triggerKind: normalizeOptionalString(record.triggerKind, "triggerKind"),
     turnId,
+    turnProfileJson: normalizeOptionalTurnProfileJson(record.turnProfileJson, "turnProfileJson"),
     usageId,
     usageExtractionSourcePath: normalizeOptionalString(
       record.usageExtractionSourcePath,
@@ -402,6 +409,110 @@ function normalizeOptionalRawUsageJsonRecord(
   }
 
   return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
+// Strict allowlist for the per-turn profile: numeric series plus sanitized
+// tool labels only, so nothing member-authored can ride along into the DB.
+// The profile is droppable telemetry: an invalid profile becomes null instead
+// of rejecting the whole usage record, so token accounting never fails open
+// because of a telemetry-only validation mismatch.
+function normalizeOptionalTurnProfileJson(
+  value: unknown,
+  label: string,
+): Record<string, unknown> | null {
+  try {
+    return requireValidTurnProfileJson(value, label);
+  } catch {
+    return null;
+  }
+}
+
+function requireValidTurnProfileJson(
+  value: unknown,
+  label: string,
+): Record<string, unknown> | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const record = requireRecord(value, label);
+  if (record.schema !== ASSISTANT_TURN_PROFILE_SCHEMA) {
+    throw new TypeError(`${label}.schema must be ${ASSISTANT_TURN_PROFILE_SCHEMA}.`);
+  }
+  if (!isNonNegativeInteger(record.requestCount)) {
+    throw new TypeError(`${label}.requestCount must be a non-negative integer.`);
+  }
+  if (record.modelContextWindow !== null && !isNonNegativeInteger(record.modelContextWindow)) {
+    throw new TypeError(`${label}.modelContextWindow must be null or a non-negative integer.`);
+  }
+  if (typeof record.requestsTruncated !== "boolean" || typeof record.toolsTruncated !== "boolean") {
+    throw new TypeError(`${label} truncation flags must be booleans.`);
+  }
+  if (!Array.isArray(record.requests) || record.requests.length > ASSISTANT_TURN_PROFILE_MAX_REQUESTS) {
+    throw new TypeError(
+      `${label}.requests must be an array of at most ${ASSISTANT_TURN_PROFILE_MAX_REQUESTS} entries.`,
+    );
+  }
+  if (!Array.isArray(record.tools) || record.tools.length > ASSISTANT_TURN_PROFILE_MAX_TOOLS) {
+    throw new TypeError(
+      `${label}.tools must be an array of at most ${ASSISTANT_TURN_PROFILE_MAX_TOOLS} entries.`,
+    );
+  }
+
+  return {
+    modelContextWindow: record.modelContextWindow,
+    requestCount: record.requestCount,
+    requests: record.requests.map((entry, index) =>
+      normalizeTurnProfileIntegerRecord(
+        entry,
+        `${label}.requests[${index}]`,
+        ["cachedInput", "input", "output"],
+      ),
+    ),
+    requestsTruncated: record.requestsTruncated,
+    schema: ASSISTANT_TURN_PROFILE_SCHEMA,
+    tools: record.tools.map((entry, index) => {
+      const toolLabel = `${label}.tools[${index}]`;
+      const tool = requireRecord(entry, toolLabel);
+      if (
+        typeof tool.label !== "string"
+        || tool.label.length === 0
+        || tool.label.length > ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH
+        || !ASSISTANT_TURN_PROFILE_TOOL_LABEL_PATTERN.test(tool.label)
+      ) {
+        throw new TypeError(`${toolLabel}.label must be a short sanitized tool label.`);
+      }
+
+      return {
+        ...normalizeTurnProfileIntegerRecord(tool, toolLabel, [
+          "calls",
+          "durationMs",
+          "outputChars",
+        ]),
+        label: tool.label,
+      };
+    }),
+    toolsTruncated: record.toolsTruncated,
+  };
+}
+
+function normalizeTurnProfileIntegerRecord(
+  value: unknown,
+  label: string,
+  keys: readonly string[],
+): Record<string, number> {
+  const record = requireRecord(value, label);
+  const normalized: Record<string, number> = {};
+
+  for (const key of keys) {
+    const entry = record[key];
+    if (!isNonNegativeInteger(entry)) {
+      throw new TypeError(`${label}.${key} must be a non-negative integer.`);
+    }
+    normalized[key] = entry;
+  }
+
+  return normalized;
 }
 
 function isNonNegativeInteger(value: unknown): value is number {

@@ -812,6 +812,10 @@ export class RunnerContainer extends Container {
   private async invokeHostedExecution(
     input: HostedExecutionContainerInvokeInput,
   ): Promise<HostedExecutionRunnerJobResult> {
+    // Dispatch latency stamps (epoch ms, this DO's clock). Sent as headers on
+    // the runner POST so the latency trace can split DO dispatch work from
+    // Cloudflare container scheduling inside the temporal->runner-accept gap.
+    const dispatchInvokeReceivedAtEpochMs = Date.now();
     const routeUserId = readHostedExecutionRunnerJobUserId(input.job);
     const logContext: RunnerContainerLogContext = {
       userId: routeUserId,
@@ -846,6 +850,7 @@ export class RunnerContainer extends Container {
         phase: "container.starting",
         userId: routeUserId,
       });
+      const dispatchContainerEnsureReadyStartedAtEpochMs = Date.now();
       await this.ensureContainerReady(input, operationAbortController.signal);
       this.clearRecentReadinessProof();
       cleanupWarmContainerOnFailure = true;
@@ -871,6 +876,10 @@ export class RunnerContainer extends Container {
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
+            "x-dispatch-invoke-received-at-ms": String(dispatchInvokeReceivedAtEpochMs),
+            "x-dispatch-container-ensure-ready-started-at-ms": String(
+              dispatchContainerEnsureReadyStartedAtEpochMs,
+            ),
           },
           method: "POST",
           signal: operationAbortController.signal,

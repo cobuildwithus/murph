@@ -584,6 +584,7 @@ describe("assistant usage recording seam", () => {
         totalTokens: 41,
         triggerKind: null,
         turnId: "turn-usage",
+        turnProfileJson: null,
         usageId: "turn-usage:0:3",
         usageExtractionSourcePath: "params.usage",
         usageExtractionVersion: "codex-usage-v1",

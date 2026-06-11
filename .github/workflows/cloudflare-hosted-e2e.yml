@@ -21,6 +21,13 @@ env:
   # jobs need a real loopback Postgres target rather than the unreachable
   # build-only placeholder URL used by release/build verification lanes.
   DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test
+  # Stream harness child-process logs (web/wrangler/runner/temporal) straight
+  # to the CI log. Without this the harness buffers them in memory, so a
+  # beforeAll spin-up hang times out with zero diagnostic output (observed
+  # 2026-06-10: codex-image-media e2e hung 300s silently). This lane runs an
+  # all-synthetic local stack (stub tokens, loopback Postgres), so streaming
+  # exposes no real credentials; deploy lanes keep this set to "0".
+  MURPH_E2E_STREAM_DEV_LOGS: "1"
   HOSTED_DEVICE_ROUTING_INDEX_KEY: 0101010101010101010101010101010101010101010101010101010101010101
   HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
   HOSTED_MAILBOX_FINGERPRINT_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc

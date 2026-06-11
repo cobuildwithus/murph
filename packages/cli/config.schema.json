@@ -7228,6 +7228,29 @@
                     }
                   }
                 },
+                "dedupe-device-imports": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "apply": {
+                          "default": false,
+                          "description": "Apply the cleanup. Without this flag the command only reports what it would tombstone.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                },
                 "encounter": {
                   "type": "object",
                   "additionalProperties": false,

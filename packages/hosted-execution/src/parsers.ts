@@ -179,11 +179,12 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         ),
       });
     case "vault-share.delivery":
+      // The builder derives the envelope occurredAt from the delivery record, so a wire
+      // envelope timestamp that drifted from the record normalizes back to the record.
       return buildHostedExecutionVaultShareDeliveryWake({
         delivery: parseHostedVaultShareDeliveryPayload(record.delivery),
         eventId,
         memberId: wireUserId,
-        occurredAt,
       });
     case "member.channels.updated":
       return buildHostedExecutionMemberChannelsUpdatedWake({

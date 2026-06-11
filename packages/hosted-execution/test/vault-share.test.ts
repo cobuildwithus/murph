@@ -16,7 +16,7 @@ const VALID_RECORD = {
     sleepEndAt: "2026-06-10T06:31:00.000Z",
     sleepStartAt: "2026-06-09T22:04:00.000Z",
   },
-  occurredAt: "2026-06-10T06:31:00.000Z",
+  occurredAt: "2026-06-09T00:00:00.000Z",
   recordKey: "2026-06-09",
 };
 
@@ -103,6 +103,80 @@ describe("vault-share contracts", () => {
     ).toThrow(/recordKey must equal the data date/u);
   });
 
+  it("rejects a sleep record whose occurredAt is not the night-date UTC midnight", () => {
+    // occurredAt is plaintext mailbox metadata on the destination side; anything beyond
+    // the night date (e.g. the exact wake timestamp) would leak sleep timing into Postgres.
+    for (const occurredAt of ["2026-06-10T06:31:00.000Z", "2026-06-09T00:00:00Z"]) {
+      expect(() =>
+        parseHostedVaultShareDeliverRequest({
+          projectionKind: "sleep-times.v0",
+          records: [{ ...VALID_RECORD, occurredAt }],
+        }),
+      ).toThrow(/night date at UTC midnight/u);
+    }
+  });
+
+  it("rejects reversed or implausibly long sleep windows", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "sleep-times.v0",
+        records: [{
+          ...VALID_RECORD,
+          data: {
+            ...VALID_RECORD.data,
+            sleepEndAt: "2026-06-09T22:04:00.000Z",
+            sleepStartAt: "2026-06-10T06:31:00.000Z",
+          },
+        }],
+      }),
+    ).toThrow(/end after it starts/u);
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "sleep-times.v0",
+        records: [{
+          ...VALID_RECORD,
+          data: {
+            ...VALID_RECORD.data,
+            sleepEndAt: "2026-06-11T22:05:00.000Z",
+            sleepStartAt: "2026-06-09T22:04:00.000Z",
+          },
+        }],
+      }),
+    ).toThrow(/at most 24 hours/u);
+  });
+
+  it("accepts a sleep window of exactly 24 hours and rejects a zero-length one", () => {
+    // The plausibility bound is inclusive: exactly 24 hours is the longest valid window,
+    // and a window must be strictly positive — start == end fails closed.
+    const exactDayRecord = {
+      ...VALID_RECORD,
+      data: {
+        ...VALID_RECORD.data,
+        sleepEndAt: "2026-06-10T22:04:00.000Z",
+        sleepStartAt: "2026-06-09T22:04:00.000Z",
+      },
+    };
+
+    expect(
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "sleep-times.v0",
+        records: [exactDayRecord],
+      }).records,
+    ).toEqual([exactDayRecord]);
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "sleep-times.v0",
+        records: [{
+          ...VALID_RECORD,
+          data: {
+            ...VALID_RECORD.data,
+            sleepEndAt: VALID_RECORD.data.sleepStartAt,
+          },
+        }],
+      }),
+    ).toThrow(/end after it starts/u);
+  });
+
   it("rejects malformed dates and timestamps", () => {
     expect(() =>
       parseHostedVaultShareDeliverRequest({
@@ -150,24 +224,24 @@ describe("vault-share contracts", () => {
     ).toThrow(/ISO-8601/u);
   });
 
-  it("parses deliver responses and rejects unknown statuses", () => {
+  it("parses deliver responses to a bare status and rejects unknown statuses", () => {
+    // The response is deliberately status-only: counts would leak fan-out cardinality and
+    // duplicate history to the grantor runtime, and nothing consumes them.
     expect(
-      parseHostedVaultShareDeliverResponse({
-        appendedCount: 2,
-        duplicateCount: 1,
-        status: "delivered",
-      }),
-    ).toEqual({ appendedCount: 2, duplicateCount: 1, status: "delivered" });
+      parseHostedVaultShareDeliverResponse({ status: "delivered" }),
+    ).toEqual({ status: "delivered" });
+    expect(
+      parseHostedVaultShareDeliverResponse({ status: "no-active-share" }),
+    ).toEqual({ status: "no-active-share" });
     expect(() =>
-      parseHostedVaultShareDeliverResponse({
-        appendedCount: 0,
-        duplicateCount: 0,
-        status: "partial",
-      }),
+      parseHostedVaultShareDeliverResponse({ status: "partial" }),
     ).toThrow(/delivered or no-active-share/u);
   });
 
-  it("round-trips a vault-share delivery wake through the wake parser", () => {
+  it("round-trips a vault-share delivery wake and pins the envelope occurredAt to the record", () => {
+    // The envelope occurredAt becomes the plaintext occurred_at mailbox column, so the
+    // builder derives it from the parsed record: a wire envelope timestamp that drifted
+    // from the record normalizes back to the record's night-date midnight.
     const parsed = parseHostedExecutionWake({
       delivery: VALID_DELIVERY,
       eventId: "vault-share:share_1:2026-06-09",
@@ -180,7 +254,7 @@ describe("vault-share contracts", () => {
       delivery: VALID_DELIVERY,
       eventId: "vault-share:share_1:2026-06-09",
       kind: "vault-share.delivery",
-      occurredAt: "2026-06-10T07:00:00.000Z",
+      occurredAt: VALID_RECORD.occurredAt,
       userId: "member_referee",
     });
   });

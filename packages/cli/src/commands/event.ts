@@ -22,6 +22,7 @@ import {
   type JsonObject,
 } from '@murphai/vault-usecases'
 import {
+  dedupeDeviceImportEventRecords,
   deleteEventRecord,
   editEventRecord,
   upsertEventRecord,
@@ -58,6 +59,18 @@ const eventUpsertResultSchema = z.object({
   lookupId: z.string().min(1),
   ledgerFile: pathSchema,
   created: z.boolean(),
+})
+
+const eventDedupeDeviceImportsResultSchema = z.object({
+  vault: pathSchema,
+  applied: z.boolean(),
+  scannedLiveDeviceEventCount: z.number().int().nonnegative(),
+  duplicateGroupCount: z.number().int().nonnegative(),
+  tombstonedEventCount: z.number().int().nonnegative(),
+  tombstonedByKind: z.record(z.string(), z.number().int().nonnegative()),
+  skippedRevisedElsewhereCount: z.number().int().nonnegative(),
+  shardPaths: z.array(pathSchema),
+  auditPath: pathSchema.nullable(),
 })
 
 const eventListResultSchema = z.object({
@@ -913,6 +926,27 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
         vault: options.vault,
         kind: 'exposure',
         result,
+      })
+    },
+  })
+
+  event.command('dedupe-device-imports', {
+    description:
+      'Report duplicate device-imported events that share one provider record identity, and optionally tombstone all but the latest copy.',
+    hint:
+      'Runs as a dry-run report by default. Re-run with --apply to tombstone the duplicates; the latest copy of each record is kept.',
+    args: z.object({}),
+    options: withBaseOptions({
+      apply: z
+        .boolean()
+        .default(false)
+        .describe('Apply the cleanup. Without this flag the command only reports what it would tombstone.'),
+    }),
+    output: eventDedupeDeviceImportsResultSchema,
+    async run({ options }) {
+      return dedupeDeviceImportEventRecords({
+        vault: options.vault,
+        apply: options.apply,
       })
     },
   })

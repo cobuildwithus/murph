@@ -16,6 +16,7 @@ import {
 import {
   deliverHostedVaultShareRecords,
   findActiveHostedVaultShares,
+  type ActiveHostedVaultShare,
 } from "@/src/lib/hosted-mailbox/vault-share-store";
 import {
   signalHostedMailboxAppendRuntime,
@@ -30,9 +31,11 @@ const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_FUTURE_DAYS = 2;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const NO_ACTIVE_SHARE_RESPONSE: HostedVaultShareDeliverResponse = {
-  appendedCount: 0,
-  duplicateCount: 0,
   status: "no-active-share",
+};
+
+const DELIVERED_RESPONSE: HostedVaultShareDeliverResponse = {
+  status: "delivered",
 };
 
 /**
@@ -40,51 +43,53 @@ const NO_ACTIVE_SHARE_RESPONSE: HostedVaultShareDeliverResponse = {
  * signed Cloudflare callback; the grantor's runtime offers projected records without
  * knowing whether shares exist. Web is the sole authority: it fans the offer out to every
  * active HostedVaultShare for (grantor, projectionKind), skipping inactive destinations.
- * No grants — or only inactive destinations — resolves to `no-active-share` with nothing
- * appended, so the grantor runtime learns nothing about share configuration.
+ * The response is a function of share configuration alone — no grants, or only inactive
+ * destinations, resolves to `no-active-share`; everything else resolves to a bare
+ * `delivered`, so the grantor runtime learns nothing beyond "an active share exists".
  */
 export const POST = withJsonError(async (request: Request) => {
   const grantorMemberId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
   });
   const body = parseHostedVaultShareDeliverRequest(await readOptionalJsonObject(request));
-  const records = filterDeliverableRecords(body.records);
+  const prisma = getPrisma();
 
   const shares = await findActiveHostedVaultShares({
     grantorMemberId,
     projectionKind: body.projectionKind,
   });
+  const activeShares: ActiveHostedVaultShare[] = [];
 
-  if (shares.length === 0) {
+  for (const share of shares) {
+    const destination = await readHostedMemberCoreState({
+      memberId: share.destinationMemberId,
+      prisma,
+    });
+
+    if (destination && hasHostedMemberActiveAccess(destination)) {
+      activeShares.push(share);
+    }
+  }
+
+  if (activeShares.length === 0) {
     return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
   }
 
-  let appendedCount = 0;
-  let duplicateCount = 0;
+  // An all-stale offer appends nothing but still resolves `delivered`: the status reflects
+  // share configuration only, so record staleness can never probe finer-grained share
+  // state, and stale records never put the grantor runtime in a permanent error loop.
+  const records = filterDeliverableRecords(body.records);
 
-  // An all-stale offer skips delivery entirely but still resolves as delivered with zero
-  // counts: stale records must never produce a permanent error loop for the grantor runtime.
-  if (records.length > 0) {
-    let delivered = false;
+  if (records.length === 0) {
+    return jsonOk(DELIVERED_RESPONSE);
+  }
 
-    for (const share of shares) {
-      const destination = await readHostedMemberCoreState({
-        memberId: share.destinationMemberId,
-        prisma: getPrisma(),
-      });
-
-      if (!destination || !hasHostedMemberActiveAccess(destination)) {
-        continue;
-      }
-
+  for (const share of activeShares) {
+    try {
       const delivery = await deliverHostedVaultShareRecords({
         records,
         share,
       });
-
-      delivered = true;
-      appendedCount += delivery.appendedRecordKeys.length;
-      duplicateCount += delivery.duplicateRecordKeys.length;
 
       if (delivery.lastAppendedMailboxItemId !== null) {
         try {
@@ -93,22 +98,24 @@ export const POST = withJsonError(async (request: Request) => {
             mailboxItemId: delivery.lastAppendedMailboxItemId,
           });
         } catch {
-          // Durable append succeeded; the destination imports on its next wake. Matches the
-          // repo invariant that Temporal signal failures after durable append are not retried.
+          // The append is already durable; the destination imports on its next wake.
+          // Matches the repo invariant that signal failures after a durable append are
+          // not retried — and must not be logged as a delivery failure.
         }
       }
-    }
-
-    if (!delivered) {
-      return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
+    } catch (error) {
+      // Best-effort per destination: one failing share must not block delivery to the
+      // others, and the next wake re-offers (already-appended records dedupe). Log ids
+      // only — never payload fields or timestamps — so a persistently failing destination
+      // stays visible to operators.
+      console.error("Hosted vault-share delivery to a destination share failed.", {
+        errorName: error instanceof Error ? error.name : "unknown",
+        shareId: share.id,
+      });
     }
   }
 
-  return jsonOk({
-    appendedCount,
-    duplicateCount,
-    status: "delivered",
-  } satisfies HostedVaultShareDeliverResponse);
+  return jsonOk(DELIVERED_RESPONSE);
 });
 
 /**
