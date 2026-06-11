@@ -23,6 +23,7 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  findAssistantSessionIdByCodexThreadId,
   readAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import {
@@ -35,6 +36,13 @@ import {
 import {
   prepareHostedCodexRuntimeEnvironment,
 } from "./hosted-runtime/codex-config.ts";
+import {
+  resolveAssistantUsageCredentialSource,
+} from "@murphai/hosted-execution/assistant-usage";
+import {
+  HOSTED_IDLE_COMPACT_TIMEOUT_MS,
+  runHostedIdleCheckpointMaintenance,
+} from "./hosted-runtime/idle-maintenance.ts";
 import {
   getOrCreateHostedCliRuntimeBridge,
 } from "./hosted-runtime/cli-runtime-bridge.ts";
@@ -1273,6 +1281,66 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           });
           continue;
         }
+        const idleMaintenance = await runHostedIdleCheckpointMaintenance({
+          pendingWork:
+            accumulatedProjection.status === "budget_exhausted"
+            || (accumulatedProjection.nextWakeAt !== null
+              && Date.parse(accumulatedProjection.nextWakeAt) - Date.now()
+                < HOSTED_IDLE_COMPACT_TIMEOUT_MS),
+          // The compact call rides the same warm-process credential as turns,
+          // so attribute it the same way: members on their own OPENAI_API_KEY
+          // must not have platform allowance debited for it.
+          credentialSource: resolveAssistantUsageCredentialSource({
+            apiKeyEnv: null,
+            effectiveEnv: runtimeEnv,
+            provider: "codex-cli",
+            userEnvKeys: Object.keys(guardedRuntime.userEnv),
+          }),
+          memberId: input.request.userId,
+          model: runtimeEnv.HOSTED_ASSISTANT_MODEL ?? null,
+          recordUsage: guardedRuntime.platform.usageRecordPort
+            ? async (record) => {
+                await guardedRuntime.platform.usageRecordPort?.recordUsage(record);
+              }
+            : null,
+          resolveAssistantSessionId: (codexThreadId) =>
+            findAssistantSessionIdByCodexThreadId(restored.vaultRoot, codexThreadId),
+          shutdownSignal: options.shutdownSignal ?? null,
+          wakeSignal: options.runtimeWakeSignal ?? null,
+        });
+        emitPhaseLog({
+          details: {
+            idleCompactKind: idleMaintenance.kind,
+            ...("reason" in idleMaintenance ? { idleCompactReason: idleMaintenance.reason } : {}),
+            ...(idleMaintenance.threadContextTokensBefore !== null
+              ? { idleCompactThreadTokensBefore: idleMaintenance.threadContextTokensBefore }
+              : {}),
+            ...(idleMaintenance.kind === "compacted"
+              ? {
+                  idleCompactDurationMs: idleMaintenance.durationMs,
+                  idleCompactUsageCaptured: idleMaintenance.usage !== null,
+                }
+              : {}),
+          },
+          input,
+          phase: "checkpoint",
+          requestId,
+          stage: "workspace.checkpoint.idle_compact",
+          // A wake/shutdown abort is expected behavior, not an error; only
+          // genuine failures (timeout, rpc_error, process_exit, exception)
+          // should page through the error-level phase log.
+          status:
+            idleMaintenance.kind === "failed" && idleMaintenance.reason !== "aborted"
+              ? "fail"
+              : "done",
+        });
+        if (consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null)) {
+          await runIdleWakeForegroundPass({
+            projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
+            requestIdKind: "idle-wake",
+          });
+          continue;
+        }
         let checkpoint: HostedWorkspaceCheckpointResponse;
         try {
           latestCheckpointSnapshotCleanForWarmReuse = false;
@@ -1495,6 +1563,7 @@ const HOSTED_RUNTIME_PHASE_NAMES = [
   "runtime",
   "runtime.return",
   "workspace.checkpoint.durable_effect",
+  "workspace.checkpoint.idle_compact",
   "workspace.checkpoint.idle_shutdown",
   "workspace.read",
   "workspace.restore",

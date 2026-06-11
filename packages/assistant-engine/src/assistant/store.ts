@@ -326,6 +326,20 @@ export async function listAssistantSessions(
   return listAssistantSessionsLocal(vault)
 }
 
+// Maps a Codex thread back to the Murph assistant session that owns it (via
+// the persisted native-resume state). Used by idle-time maintenance, which
+// only knows the provider thread id, to attribute usage to the real session.
+export async function findAssistantSessionIdByCodexThreadId(
+  vault: string,
+  codexThreadId: string,
+): Promise<string | null> {
+  const sessions = await listAssistantSessionsLocal(vault)
+  return (
+    sessions.find((session) => session.resumeState?.threadId === codexThreadId)
+      ?.sessionId ?? null
+  )
+}
+
 export async function listAssistantSessionsLocal(
   vault: string,
 ): Promise<AssistantSession[]> {

@@ -6,11 +6,64 @@ import {
   ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH,
   ASSISTANT_TURN_PROFILE_MAX_TOOLS,
   ASSISTANT_USAGE_SCHEMA,
+  buildAssistantMaintenanceUsageRecord,
   createAssistantUsageId,
   createAssistantUsageReportingUserId,
   parseAssistantUsageRecord,
   resolveAssistantUsageCredentialSource,
 } from "../src/assistant-usage.ts";
+
+test("maintenance usage records parse, attribute, and dedupe like turn usage", () => {
+  const record = buildAssistantMaintenanceUsageRecord({
+    assistantSessionId: "asst_123",
+    codexThreadId: "thread_abc",
+    credentialSource: "platform",
+    featureKey: "assistant_idle_compact",
+    memberId: "member_123",
+    model: "gpt-5.5",
+    triggerKind: "automation_idle_compact",
+    usage: {
+      cachedInputTokens: 96_000,
+      inputTokens: 104_000,
+      outputTokens: 1_200,
+      totalTokens: 105_200,
+    },
+  });
+
+  // Round-trips through the canonical parser (build already parses; prove a
+  // re-parse is stable, mirroring what the web record route will do).
+  assert.deepEqual(parseAssistantUsageRecord({ ...record }), record);
+  assert.match(record.turnId, /^turn_maintenance_[0-9a-f]{32}$/u);
+  assert.equal(record.usageId, `${record.turnId}.attempt-1`);
+  assert.equal(record.credentialSource, "platform");
+  // sessionId is the Murph assistant session; the provider thread id lands in
+  // providerRequestId so the two identities can never be conflated.
+  assert.equal(record.sessionId, "asst_123");
+  assert.equal(record.providerRequestId, "thread_abc");
+  assert.equal(record.requestedModel, "gpt-5.5");
+  assert.equal(record.triggerKind, "automation_idle_compact");
+  assert.equal(record.inputTokens, 104_000);
+
+  // Distinct calls never collide on the turn-keyed unique constraint.
+  assert.notEqual(
+    buildAssistantMaintenanceUsageRecord({
+      assistantSessionId: "asst_123",
+      codexThreadId: null,
+      credentialSource: "member",
+      featureKey: "assistant_idle_compact",
+      memberId: "member_123",
+      model: "gpt-5.5",
+      triggerKind: "automation_idle_compact",
+      usage: {
+        cachedInputTokens: null,
+        inputTokens: null,
+        outputTokens: null,
+        totalTokens: null,
+      },
+    }).turnId,
+    record.turnId,
+  );
+});
 
 test("assistant usage ids validate and normalize turn ids before formatting", () => {
   assert.equal(

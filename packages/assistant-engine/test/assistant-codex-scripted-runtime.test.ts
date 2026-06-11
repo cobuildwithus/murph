@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 import {
+  compactWarmCodexThread,
   executeCodexAppServerTurn,
   stopWarmCodexAppServer,
 } from '../src/assistant-codex.ts'
@@ -88,6 +89,219 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('compacts the warm thread off-turn and keeps it resumable', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue({ text: 'COMPACT_SEED_OK' })
+    const seeded = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      prompt: 'Reply exactly COMPACT_SEED_OK.',
+    })
+    expect(seeded.finalMessage).toBe('COMPACT_SEED_OK')
+
+    // Below threshold: no provider traffic, warm process untouched. The
+    // reported size must be the real observed thread context from the seed
+    // turn's tokenUsage events, not a placeholder.
+    scenario.stub.markRequestBaseline()
+    const skipped = await compactWarmCodexThread({
+      minThreadTokens: 50_000,
+      timeoutMs: 30_000,
+    })
+    expect(skipped).toMatchObject({
+      kind: 'skipped',
+      reason: 'below_threshold',
+    })
+    expect(
+      skipped.kind === 'skipped' && typeof skipped.threadContextTokensBefore === 'number'
+        && skipped.threadContextTokensBefore > 0,
+    ).toBe(true)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
+
+    // Above threshold: the local-provider compaction summarization request is
+    // served by the stub and the thread reports compacted.
+    scenario.stub.queue({ text: 'SCRIPTED_COMPACT_SUMMARY' })
+    const compacted = await compactWarmCodexThread({
+      minThreadTokens: 1,
+      timeoutMs: 60_000,
+    })
+    expect(compacted).toMatchObject({
+      kind: 'compacted',
+      threadId: seeded.threadId,
+    })
+    // Billing depends on usage capture during compaction; if the app-server
+    // ever stops emitting tokenUsage for compact requests this must fail.
+    expect(compacted.kind === 'compacted' && compacted.usage).toBeTruthy()
+
+    // Repeat guard: a successful compact clears the thread vitals, so an
+    // immediate second idle pass must skip without provider traffic instead
+    // of re-compacting the just-compacted thread.
+    scenario.stub.markRequestBaseline()
+    expect(
+      await compactWarmCodexThread({
+        minThreadTokens: 1,
+        timeoutMs: 30_000,
+      }),
+    ).toEqual({
+      kind: 'skipped',
+      reason: 'no_thread_vitals',
+      threadContextTokensBefore: null,
+    })
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
+
+    // Cold-resume proof: kill the warm process so the resumed turn must
+    // spawn fresh and reconstruct the COMPACTED thread from the rollout on
+    // disk — the actual production payoff path (compact -> snapshot ->
+    // container dies -> next wake resumes small).
+    await stopWarmCodexAppServer('post-compact-cold-resume')
+    scenario.stub.queue({ text: 'POST_COMPACT_OK' })
+    const resumed = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      prompt: 'Reply exactly POST_COMPACT_OK.',
+      resumeSessionId: seeded.sessionId,
+    })
+    expect(resumed.finalMessage).toBe('POST_COMPACT_OK')
+    expect(resumed.threadId).toBe(seeded.threadId)
+  })
+
+  it('skips off-turn compaction while a member turn is in flight', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue({
+      delayMs: 2_000,
+      text: 'MID_TURN_COMPACT_OK',
+    })
+
+    let midTurnCompact: Promise<Awaited<ReturnType<typeof compactWarmCodexThread>>> | null = null
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      onLiveTurn: () => {
+        // Attempt the idle compact while the real app-server is mid-request.
+        midTurnCompact = delay(300).then(() =>
+          compactWarmCodexThread({
+            minThreadTokens: 1,
+            timeoutMs: 5_000,
+          }))
+        return () => {}
+      },
+      prompt: 'Reply exactly MID_TURN_COMPACT_OK.',
+    })
+
+    expect(midTurnCompact).not.toBeNull()
+    expect(await midTurnCompact).toEqual({
+      kind: 'skipped',
+      reason: 'turn_in_flight',
+      threadContextTokensBefore: null,
+    })
+    // The member turn was never disturbed by the compact attempt.
+    expect(result.finalMessage).toBe('MID_TURN_COMPACT_OK')
+  })
+
+  it('abort mid-compact kills the warm process and leaves the thread resumable', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue({ text: 'ABORT_SEED_OK' })
+    const seeded = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      prompt: 'Reply exactly ABORT_SEED_OK.',
+    })
+    expect(seeded.finalMessage).toBe('ABORT_SEED_OK')
+
+    // Hold the compaction summarization request open on the stub so the abort
+    // arrives while the compact is genuinely in flight, then abort. This is
+    // the wake path: it must settle promptly (process killed) instead of
+    // waiting out the provider response or the compact timeout.
+    scenario.stub.queue({
+      delayMs: 8_000,
+      text: 'NEVER_DELIVERED_COMPACT_SUMMARY',
+    })
+    const abortController = new AbortController()
+    const abortTimer = setTimeout(() => abortController.abort(), 500)
+    const abortedAt = Date.now()
+    const aborted = await compactWarmCodexThread({
+      minThreadTokens: 1,
+      signal: abortController.signal,
+      timeoutMs: 30_000,
+    })
+    clearTimeout(abortTimer)
+    expect(aborted).toMatchObject({
+      kind: 'failed',
+      reason: 'aborted',
+      threadId: seeded.threadId,
+    })
+    expect(Date.now() - abortedAt).toBeLessThan(5_000)
+
+    // The aborted compact left the rollout uncompacted but intact: a fresh
+    // spawn resumes the same thread. This is the wake-after-abort path, so it
+    // must be bounded by kill teardown (3s SIGTERM ceiling) + process spawn —
+    // never by the held-open provider request (8s) or the compact timeout
+    // (30s). The bound below fails if the resume ever waits on either.
+    scenario.stub.queue({ text: 'POST_ABORT_OK' })
+    const resumeStartedAt = Date.now()
+    const resumed = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      prompt: 'Reply exactly POST_ABORT_OK.',
+      resumeSessionId: seeded.sessionId,
+    })
+    expect(Date.now() - resumeStartedAt).toBeLessThan(8_000)
+    expect(resumed.finalMessage).toBe('POST_ABORT_OK')
+    expect(resumed.threadId).toBe(seeded.threadId)
+  })
+
+  it('provider failure mid-compact fails bounded and leaves the thread resumable', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue({ text: 'FAIL_SEED_OK' })
+    const seeded = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      prompt: 'Reply exactly FAIL_SEED_OK.',
+    })
+    expect(seeded.finalMessage).toBe('FAIL_SEED_OK')
+
+    // No queued stub response: the compaction summarization request gets a
+    // 500. The compact must fail within its bounded budget (never hang the
+    // idle checkpoint) and poison the warm process.
+    scenario.stub.markRequestBaseline()
+    const failed = await compactWarmCodexThread({
+      minThreadTokens: 1,
+      timeoutMs: 10_000,
+    })
+    expect(failed).toMatchObject({
+      kind: 'failed',
+      threadId: seeded.threadId,
+    })
+    // The failure came from a real provider attempt, not a pre-flight skip.
+    expect(scenario.stub.requestCountSinceBaseline()).toBeGreaterThanOrEqual(1)
+
+    // The failed compact wrote nothing incomplete: a fresh spawn resumes the
+    // same thread and serves the next member turn.
+    scenario.stub.queue({ text: 'POST_FAILURE_OK' })
+    const resumed = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      prompt: 'Reply exactly POST_FAILURE_OK.',
+      resumeSessionId: seeded.sessionId,
+    })
+    expect(resumed.finalMessage).toBe('POST_FAILURE_OK')
+    expect(resumed.threadId).toBe(seeded.threadId)
+  })
+
+  it('skips off-turn compaction when no warm process exists', async () => {
+    await stopWarmCodexAppServer('test-no-warm-process')
+    expect(
+      await compactWarmCodexThread({
+        minThreadTokens: 1,
+        timeoutMs: 5_000,
+      }),
+    ).toEqual({
+      kind: 'skipped',
+      reason: 'no_warm_process',
+      threadContextTokensBefore: null,
+    })
   })
 
   it('resumes a scripted thread through the real turn/start contract', {

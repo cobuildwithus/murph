@@ -177,6 +177,55 @@ type CodexAppServerActiveTurnBinding = {
   onStdoutText(text: string): void
 }
 
+// Last thread/tokenUsage/updated observed on the warm process. `last` is the
+// final provider request's usage, so `lastInputTokens` approximates the
+// current thread context size without any extra RPC or model call.
+export interface CodexWarmThreadTokenUsage {
+  lastInputTokens: number
+  threadId: string
+}
+
+// The 0.135 app-server reports compaction completion to v2 clients as a
+// contextCompaction item; `thread/compacted` is the legacy fan-out kept for
+// protocol drift tolerance.
+function isCodexContextCompactionCompletion(message: CodexRpcMessage): boolean {
+  const method = typeof message.method === 'string' ? message.method : null
+  if (method === 'thread/compacted' || method === 'thread.compacted') {
+    return true
+  }
+  if (method !== 'item/completed' && method !== 'item.completed') {
+    return false
+  }
+
+  return asCodexRecord(asCodexRecord(message.params)?.item)?.type === 'contextCompaction'
+}
+
+function isCodexThreadTokenUsageUpdatedMethod(method: string | null): boolean {
+  return (
+    method === 'thread/tokenUsage/updated' ||
+    method === 'thread/token_usage/updated' ||
+    method === 'thread.tokenUsage.updated' ||
+    method === 'thread.token.usage.updated' ||
+    method === 'thread.token_usage.updated'
+  )
+}
+
+function readCodexThreadTokenUsageUpdate(message: CodexRpcMessage): {
+  last: Record<string, unknown> | null
+  threadId: string | null
+} | null {
+  const method = typeof message.method === 'string' ? message.method : null
+  if (!isCodexThreadTokenUsageUpdatedMethod(method)) {
+    return null
+  }
+
+  const params = asCodexRecord(message.params)
+  return {
+    last: asCodexRecord(asCodexRecord(params?.tokenUsage)?.last),
+    threadId: typeof params?.threadId === 'string' ? params.threadId : null,
+  }
+}
+
 function buildCodexAppServerNotFoundError(codexCommand: string): VaultCliError {
   return new VaultCliError(
     'ASSISTANT_CODEX_NOT_FOUND',
@@ -532,6 +581,7 @@ class CodexAppServerProcess {
   private boundThreadId: string | null = null
   private cleanupProcessExitListener: () => void
   private completedTurnCount = 0
+  private lastThreadTokenUsage: CodexWarmThreadTokenUsage | null = null
   private readonly codexCommand: string
   private ignoredResponseIds = new Set<CodexRpcId>()
   private initialized = false
@@ -545,6 +595,7 @@ class CodexAppServerProcess {
   private startupFailure: Error | null = null
   private stdinFailure: VaultCliError | null = null
   private stdoutBuffer = ''
+  private stopPromise: Promise<void> | null = null
 
   constructor(input: CodexAppServerProcessInput) {
     this.codexCommand = input.codexCommand
@@ -755,11 +806,23 @@ class CodexAppServerProcess {
     })
   }
 
-  async stop(_reason: string): Promise<void> {
+  async stop(reason: string): Promise<void> {
     if (this.stopCompleted) {
       return
     }
+    // Memoized so detached kills (idle-compaction abort) and a racing turn's
+    // replacement stop share one teardown instead of double-signaling; an
+    // unsuccessful teardown clears the memo so later callers retry, matching
+    // the pre-memoization semantics.
+    this.stopPromise ??= this.runStop(reason).finally(() => {
+      if (!this.stopCompleted) {
+        this.stopPromise = null
+      }
+    })
+    await this.stopPromise
+  }
 
+  private async runStop(_reason: string): Promise<void> {
     this.normalShutdown = true
     this.state = 'stopping'
     let stopped = false
@@ -932,6 +995,38 @@ class CodexAppServerProcess {
     })
   }
 
+  get warmThreadTokenUsage(): CodexWarmThreadTokenUsage | null {
+    return this.lastThreadTokenUsage
+  }
+
+  private observeThreadTokenUsage(message: CodexRpcMessage): void {
+    // Any compaction (in-turn auto-compact included) invalidates the retained
+    // thread size: the compact request's own tokenUsage reports the large
+    // pre-compact context, so keeping it would buy one wasted idle re-compact.
+    if (isCodexContextCompactionCompletion(message)) {
+      this.lastThreadTokenUsage = null
+      return
+    }
+
+    const update = readCodexThreadTokenUsageUpdate(message)
+    const lastInputTokens =
+      typeof update?.last?.inputTokens === 'number' ? update.last.inputTokens : null
+    if (!update?.threadId || lastInputTokens === null) {
+      return
+    }
+    // Subagent threads emit tokenUsage on this connection too; vitals must
+    // only ever describe the bound (member) thread or idle compaction could
+    // target a child thread.
+    if (this.boundThreadId !== null && update.threadId !== this.boundThreadId) {
+      return
+    }
+
+    this.lastThreadTokenUsage = {
+      lastInputTokens,
+      threadId: update.threadId,
+    }
+  }
+
   // The most recent thread this process ran a turn for. Used between turns
   // to tell subagent-thread notifications apart from same-thread output
   // contamination, which must still poison the warm process.
@@ -952,7 +1047,7 @@ class CodexAppServerProcess {
   // active. Tolerate (and never bill) those between turns; deny their server
   // requests so the child does not hang. Idle output for the bound thread
   // keeps poisoning so the contamination guard is unchanged.
-  private shouldTolerateIdleSubagentMessage(message: CodexRpcMessage): boolean {
+  shouldTolerateIdleSubagentMessage(message: CodexRpcMessage): boolean {
     const messageThreadId = extractCodexThreadIdFromMessage(message)
     if (
       messageThreadId === null ||
@@ -978,6 +1073,7 @@ class CodexAppServerProcess {
   private handleStdoutLine(line: string): void {
     const parsed = tryParseJsonLine(line)
     if (parsed.ok) {
+      this.observeThreadTokenUsage(parsed.value)
       if (this.activeTurn) {
         this.activeTurn.onParsedMessage(parsed.value)
       } else if (
@@ -1176,6 +1272,208 @@ export async function stopWarmCodexAppServer(
   })
 }
 
+export interface CodexWarmThreadCompactionUsage {
+  cachedInputTokens: number
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+}
+
+export type CodexWarmThreadCompactionOutcome =
+  | {
+      kind: 'compacted'
+      durationMs: number
+      threadContextTokensBefore: number
+      threadId: string
+      usage: CodexWarmThreadCompactionUsage | null
+    }
+  | {
+      kind: 'failed'
+      reason: 'aborted' | 'process_exit' | 'rpc_error' | 'timeout'
+      threadContextTokensBefore: number
+      threadId: string
+    }
+  | {
+      kind: 'skipped'
+      reason: 'below_threshold' | 'no_thread_vitals' | 'no_warm_process' | 'turn_in_flight'
+      threadContextTokensBefore: number | null
+    }
+
+// Non-turn compaction of the warm Codex thread, for idle-time maintenance.
+// Modeled on the other warm-slot lifecycle exports above. Failure handling is
+// deliberately blunt: any non-success poisons (kills) the warm process, which
+// is always safe because rollouts only contain completed entries — an aborted
+// compact leaves the thread uncompacted and the next turn spawns a fresh
+// process and resumes natively. A pending wake therefore never waits on the
+// in-flight provider call or the compact timeout; it is bounded only by the
+// old process's kill teardown (SIGTERM, 3s ceiling, then SIGKILL — typically
+// milliseconds), which the next turn must join via the memoized stop because
+// two app-server processes must never write the same rollout concurrently.
+export async function compactWarmCodexThread(input: {
+  minThreadTokens: number
+  signal?: AbortSignal | null
+  timeoutMs: number
+}): Promise<CodexWarmThreadCompactionOutcome> {
+  const reservation = await withWarmCodexSlotLock(async () => {
+    const processInstance = warmCodexProcess
+    if (!processInstance || !processInstance.isReusableFor(processInstance.launchKey)) {
+      return processInstance?.hasInFlightTurn
+        ? ({ kind: 'skipped', reason: 'turn_in_flight', threadContextTokensBefore: null } as const)
+        : ({ kind: 'skipped', reason: 'no_warm_process', threadContextTokensBefore: null } as const)
+    }
+
+    const vitals = processInstance.warmThreadTokenUsage
+    if (!vitals) {
+      return { kind: 'skipped', reason: 'no_thread_vitals', threadContextTokensBefore: null } as const
+    }
+    if (vitals.lastInputTokens < input.minThreadTokens) {
+      return {
+        kind: 'skipped',
+        reason: 'below_threshold',
+        threadContextTokensBefore: vitals.lastInputTokens,
+      } as const
+    }
+
+    processInstance.reserveTurn()
+    return { kind: 'reserved', processInstance, vitals } as const
+  })
+  if (reservation.kind !== 'reserved') {
+    return reservation
+  }
+
+  const { processInstance, vitals } = reservation
+  const startedAt = Date.now()
+  let usageTotal: CodexWarmThreadCompactionUsage | null = null
+  type CompactionSettleReason = 'aborted' | 'compacted' | 'process_exit' | 'rpc_error' | 'timeout'
+  let resolveCompaction!: (reason: CompactionSettleReason) => void
+  const compactionSettled = new Promise<CompactionSettleReason>((resolve) => {
+    resolveCompaction = resolve
+  })
+
+  const binding: CodexAppServerActiveTurnBinding = {
+    onClose: () => resolveCompaction('process_exit'),
+    onError: () => resolveCompaction('rpc_error'),
+    onFramingError: () => resolveCompaction('rpc_error'),
+    onParsedMessage: (message) => {
+      const responseId = readCodexRpcResponseId(message)
+      if (responseId !== null) {
+        const resolveResult = resolvePendingCodexRpcRequest({
+          message,
+          pendingRequests: processInstance.pendingRequests,
+          responseId,
+        })
+        if (resolveResult === 'unknown_response_id') {
+          processInstance.consumeIgnoredResponseId(responseId)
+        }
+        return
+      }
+
+      if (processInstance.shouldTolerateIdleSubagentMessage(message)) {
+        return
+      }
+
+      const update = readCodexThreadTokenUsageUpdate(message)
+      if (update) {
+        if (update.last) {
+          const last = update.last
+          const request = {
+            cachedInputTokens:
+              typeof last.cachedInputTokens === 'number' ? last.cachedInputTokens : 0,
+            inputTokens: typeof last.inputTokens === 'number' ? last.inputTokens : 0,
+            outputTokens: typeof last.outputTokens === 'number' ? last.outputTokens : 0,
+            totalTokens: typeof last.totalTokens === 'number' ? last.totalTokens : 0,
+          }
+          usageTotal = usageTotal
+            ? {
+                cachedInputTokens: usageTotal.cachedInputTokens + request.cachedInputTokens,
+                inputTokens: usageTotal.inputTokens + request.inputTokens,
+                outputTokens: usageTotal.outputTokens + request.outputTokens,
+                totalTokens: usageTotal.totalTokens + request.totalTokens,
+              }
+            : request
+        }
+        return
+      }
+
+      if (isCodexContextCompactionCompletion(message)) {
+        resolveCompaction('compacted')
+      }
+    },
+    onStderrLine: () => {},
+    onStderrText: () => {},
+    onStdinError: () => {
+      resolveCompaction('rpc_error')
+      return null
+    },
+    onStdoutText: () => {},
+  }
+
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+  const onAbort = () => resolveCompaction('aborted')
+  try {
+    processInstance.bindTurn(binding)
+    processInstance
+      .sendRequest('thread/compact/start', { threadId: vitals.threadId })
+      .catch(() => resolveCompaction('rpc_error'))
+    timeoutHandle = setTimeout(() => resolveCompaction('timeout'), input.timeoutMs)
+    input.signal?.addEventListener('abort', onAbort, { once: true })
+    if (input.signal?.aborted) {
+      resolveCompaction('aborted')
+    }
+
+    const settledReason = await compactionSettled
+    if (settledReason === 'compacted') {
+      // Vitals were cleared by the stdout observer when the compaction item
+      // completed, so a repeat idle pass skips with no_thread_vitals instead
+      // of re-compacting; the next turn's tokenUsage events repopulate them.
+      return {
+        kind: 'compacted',
+        durationMs: Date.now() - startedAt,
+        threadContextTokensBefore: vitals.lastInputTokens,
+        threadId: vitals.threadId,
+        usage: usageTotal,
+      }
+    }
+
+    // Abort (pending wake or shutdown) detaches teardown: poison() flags the
+    // process unusable synchronously and SIGTERM->SIGKILL completes out of
+    // band; a racing turn joins it via the memoized stop (3s ceiling,
+    // typically milliseconds) and never waits on the provider call or the
+    // compact timeout. Non-abort failures (timeout/rpc_error/process_exit)
+    // have no wake racing and an idle checkpoint next, so they await
+    // teardown — the snapshot must never capture a rollout mid-teardown.
+    if (settledReason === 'aborted') {
+      void processInstance.poison('idle-compaction-failed')
+    } else {
+      await processInstance.poison('idle-compaction-failed')
+    }
+    return {
+      kind: 'failed',
+      reason: settledReason,
+      threadContextTokensBefore: vitals.lastInputTokens,
+      threadId: vitals.threadId,
+    }
+  } catch {
+    await processInstance.poison('idle-compaction-failed')
+    return {
+      kind: 'failed',
+      reason: 'rpc_error',
+      threadContextTokensBefore: vitals.lastInputTokens,
+      threadId: vitals.threadId,
+    }
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle)
+    }
+    input.signal?.removeEventListener('abort', onAbort)
+    processInstance.releaseTurn(binding)
+    processInstance.releaseReservation()
+    await withWarmCodexSlotLock(async () => {
+      clearWarmCodexProcessIfUnusable(processInstance)
+    })
+  }
+}
+
 export async function snapshotExpectedCodexRootProcess(): Promise<
   HostedExpectedCodexRootProcess | null
 > {
@@ -1214,11 +1512,7 @@ function codexEventMethodRequiresTurnCorrelation(method: string | null): boolean
   return (
     normalizedMethod === 'error' ||
     normalizedMethod === 'thread/compacted' ||
-    normalizedMethod === 'thread/tokenUsage/updated' ||
-    normalizedMethod === 'thread/token_usage/updated' ||
-    normalizedMethod === 'thread.tokenUsage.updated' ||
-    normalizedMethod === 'thread.token.usage.updated' ||
-    normalizedMethod === 'thread.token_usage.updated' ||
+    isCodexThreadTokenUsageUpdatedMethod(normalizedMethod) ||
     normalizedMethod.startsWith('turn/') ||
     normalizedMethod.startsWith('item/') ||
     normalizedMethod.startsWith('rawResponseItem/') ||
