@@ -8,6 +8,7 @@ import {
   buildCodexProcessExitError,
   buildCodexStdinFailureFallback,
   buildCodexTurnFailedError,
+  extractCodexThreadIdFromMessage,
   extractCodexThreadIdFromResult,
   extractCodexTurnErrorMessage,
   extractCodexTurnIdFromMessage,
@@ -101,6 +102,91 @@ describe('assistant Codex failure helpers', () => {
     expect(extractCodexTurnErrorMessage({ params: null })).toBeNull()
 
     expect(isFailedCodexTurnStatus(null)).toBe(false)
+  })
+
+  it('extracts thread identifiers from every notification shape codex emits', () => {
+    // Nested thread object wins over flat aliases.
+    expect(
+      extractCodexThreadIdFromMessage({
+        params: {
+          thread: {
+            id: ' thread-nested-wins ',
+          },
+          threadId: 'thread-flat-loses',
+        },
+      }),
+    ).toBe('thread-nested-wins')
+
+    // Blank nested ids fall through to the flat aliases.
+    expect(
+      extractCodexThreadIdFromMessage({
+        params: {
+          thread: {
+            id: '  ',
+          },
+          threadId: ' thread-params-camel ',
+        },
+      }),
+    ).toBe('thread-params-camel')
+    expect(
+      extractCodexThreadIdFromMessage({
+        params: {
+          thread_id: 'thread-params-snake',
+        },
+      }),
+    ).toBe('thread-params-snake')
+
+    // data-style envelopes and top-level fields are also honored.
+    expect(
+      extractCodexThreadIdFromMessage({
+        data: {
+          threadId: 'thread-data-camel',
+        },
+      }),
+    ).toBe('thread-data-camel')
+    expect(
+      extractCodexThreadIdFromMessage({
+        data: {
+          thread_id: 'thread-data-snake',
+        },
+      }),
+    ).toBe('thread-data-snake')
+    expect(
+      extractCodexThreadIdFromMessage({
+        thread: {
+          id: 'thread-top-nested',
+        },
+      }),
+    ).toBe('thread-top-nested')
+    expect(
+      extractCodexThreadIdFromMessage({
+        threadId: 'thread-top-camel',
+      }),
+    ).toBe('thread-top-camel')
+    expect(
+      extractCodexThreadIdFromMessage({
+        thread_id: 'thread-top-snake',
+      }),
+    ).toBe('thread-top-snake')
+
+    // Absent or blank ids never produce a thread id, so thread routing can
+    // never misclassify a thread-id-less parent event as a subagent event.
+    expect(extractCodexThreadIdFromMessage({ params: {} })).toBeNull()
+    expect(
+      extractCodexThreadIdFromMessage({
+        params: {
+          threadId: '   ',
+        },
+      }),
+    ).toBeNull()
+    expect(
+      extractCodexThreadIdFromMessage({
+        method: 'turn/completed',
+        params: {
+          turnId: 'turn-without-thread',
+        },
+      }),
+    ).toBeNull()
   })
 
   it('builds typed turn-failure and interruption errors', () => {
