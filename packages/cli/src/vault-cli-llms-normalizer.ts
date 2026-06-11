@@ -1,5 +1,4 @@
 import type { Cli } from 'incur'
-import { vaultCliCommandDescriptors } from './vault-cli-command-manifest.js'
 
 type CliServeOptions = Parameters<Cli.Cli['serve']>[1]
 
@@ -56,7 +55,7 @@ export function installVaultCliLlmsNormalizer(
     const result = await captureServeOutput(serve, argv, options)
     const output =
       request.kind === 'json-manifest'
-        ? normalizeLlmsJsonManifestOutput(result.output)
+        ? await normalizeLlmsJsonManifestOutput(result.output)
         : normalizeScopedLlmsMarkdownOutput(result.output, commandName, request.commandPath)
     writeStdout(options, output)
 
@@ -199,7 +198,7 @@ function normalizeScopedLlmsMarkdownOutput(
   return normalized
 }
 
-function normalizeLlmsJsonManifestOutput(output: string): string {
+async function normalizeLlmsJsonManifestOutput(output: string): Promise<string> {
   let parsed: unknown
   try {
     parsed = JSON.parse(output)
@@ -211,7 +210,7 @@ function normalizeLlmsJsonManifestOutput(output: string): string {
     return output
   }
 
-  const hintsByCommandName = collectVaultCliDescriptorHintsByCommandName()
+  const hintsByCommandName = await collectVaultCliDescriptorHintsByCommandName()
   let changed = false
   const commands = parsed.commands.map((command) => {
     if (!isRecord(command) || typeof command.name !== 'string') {
@@ -249,7 +248,15 @@ function normalizeLlmsJsonManifestOutput(output: string): string {
   )}\n`
 }
 
-function collectVaultCliDescriptorHintsByCommandName(): Map<string, string> {
+async function collectVaultCliDescriptorHintsByCommandName(): Promise<
+  Map<string, string>
+> {
+  // Lazy import: the command manifest transitively loads every command
+  // module, which is far too heavy for the per-invocation hot path. Only
+  // `--llms` manifest normalization needs the descriptor hints.
+  const { vaultCliCommandDescriptors } = await import(
+    './vault-cli-command-manifest.js'
+  )
   const hintsByCommandName = new Map<string, string>()
 
   for (const descriptor of vaultCliCommandDescriptors) {

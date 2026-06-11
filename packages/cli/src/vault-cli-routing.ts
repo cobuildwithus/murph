@@ -20,6 +20,7 @@ const lazyRootCommands = [
   'goal',
   'init',
   'list',
+  'meal',
   'measurement',
   'memory',
   'protocol',

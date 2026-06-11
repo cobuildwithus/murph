@@ -29,9 +29,6 @@ import {
   sendAssistantMessage,
   stopAssistantAutomation,
 } from '../assistant-runtime.js'
-import {
-  assertAssistantInkInteractiveInputAvailable,
-} from '../assistant-chat-ink.js'
 import { runAssistantDoctor } from '../assistant/doctor.js'
 import { getAssistantStatus } from '../assistant/status.js'
 import {
@@ -591,6 +588,11 @@ async function runAssistantChatCommand(context: {
   agent: boolean
   formatExplicit: boolean
 }) {
+  // Lazy import: the ink chat surface drags ink/react/yoga-layout into the
+  // module graph, which must stay off the per-invocation CLI hot path.
+  const { assertAssistantInkInteractiveInputAvailable } = await import(
+    '../assistant-chat-ink.js'
+  )
   assertAssistantInkInteractiveInputAvailable()
 
   const result = await runAssistantChat({
