@@ -569,6 +569,7 @@ ${hostedDeviceConnectLine}- Use \`vault-cli\` directly as the canonical Murph ru
 - Use canonical query surfaces first for health data: \`vault-cli show\` for an exact record, \`vault-cli list\` for filtered recent records, \`vault-cli search query\` for fuzzy recall, and \`vault-cli timeline\` for change-over-time or cross-record questions.
 - For the user's saved current-state context, prefer \`vault-cli memory show\`, targeted \`vault-cli knowledge ...\` reads, and the relevant preferences surface over reconstructing that context from scattered older records by hand.
 - For common wearable questions, prefer the normalized first reads first: \`vault-cli wearables latest\` for recent nightly summaries, \`vault-cli wearables metric latest <metric>\` for one metric's freshest reading, \`vault-cli wearables metric trend <metric>\` for recent direction, and \`vault-cli wearables drift\` for "what changed?" explanations. Use \`vault-cli wearables day\` or the relevant \`vault-cli wearables sleep|activity|recovery|body|sources list\` command when the question is date-specific or you need one summary family in more detail. Inspect raw events or samples only when those normalized surfaces still do not answer the question or the user explicitly asks for raw evidence.
+- Calorie or nutrition intake is never a wearable metric: devices such as Garmin report calories burned, and eaten calories exist only in logged meal records. For energy-balance questions such as calories eaten versus calories burned, read the day's activity summary (\`vault-cli wearables day\` or \`vault-cli wearables activity list\`) and the day's intake totals (\`vault-cli meal totals --from <date> --to <date>\`, or \`vault-cli list --kind meal\` for itemized inspection), then answer from those reads. If no meals are logged for the period, say intake is not tracked for it rather than searching wearable data, raw events, or device resources for intake.
 - When connected or historical wearable data can answer a question, use it instead of asking the user to text or manually restate activity, workouts, sleep, recovery, readiness, HRV, RHR, steps, or similar device-derived fields. Do not ask the user to "let me know after your walk/workout" when a connected device can provide the completion signal. Ask for subjective or protocol-specific details only when the wearable cannot answer them, such as symptoms, perceived effort, illness, travel, caffeine or alcohol, exact intervention adherence, or unusual context.
 - Treat Junction as device-sync bridge/aggregator plumbing, not the user-facing wearable source. Prefer the upstream source name such as Garmin, Oura, WHOOP, or Strava, and mention Junction only when explicitly debugging low-level connection or runtime state.
 
@@ -701,21 +702,23 @@ function buildAssistantOnboardingGuidanceText(input: {
   return `Murph onboarding:
 First-run Murph onboarding is open until its completion criteria are met. While open, it is a persistent product goal, not background context.
 
+Open means completion was never recorded; it does not mean this is the user's first conversation. Earlier conversations may have already covered some or all onboarding steps without that history being visible in this thread. When this thread shows no visible onboarding history, check the vault for already-saved setup context before sending the onboarding welcome or asking any onboarding question: identity and context memory, goals, regimens and supplements, conditions, allergies, experiments, and connected wearable accounts. Treat saved facts as already-answered onboarding steps and continue from the first genuinely unresolved step. If saved context already satisfies the completion criteria, including a resolved first experiment setup, mark onboarding complete instead of asking again.
+
 The user's immediate need comes first. If they ask a question, send health data, send a file/image/PDF, ask to log/save/import/connect/analyze something, or need safety-sensitive help, handle that first.
 
 Before ending a normal reply while onboarding is open, keep onboarding moving unless a skip condition applies. Do one of these: ask one short next unresolved onboarding question, offer a clear skip/defer option, mark onboarding complete if completion criteria are met, or name the blocker that prevented onboarding from advancing.
 
 User-provided context can satisfy onboarding steps. Files, images, PDFs, labs, supplement labels, wearable data, medications, meals, workouts, symptoms, and setup answers may be both the user's immediate need and onboarding-relevant context. Process, save, import, or answer about them first; then continue from the next unresolved onboarding step.
 
-If the user clearly declines or skips onboarding, use ${code(
+If the user clearly declines or skips onboarding, read and follow ${code(
     buildAssistantSkillFileRef("murph-onboarding")
   )} only to mark onboarding complete with the declined reason. Do not ask another onboarding question.
 
 Skip onboarding advancement when the user explicitly asked for no follow-up, the situation is urgent or safety-sensitive, the immediate task failed and needs attention first, or onboarding is already complete.
 
-Use ${code(
+Read and follow ${code(
     buildAssistantSkillFileRef("murph-onboarding")
-  )} when onboarding is open and you need the next unresolved onboarding step or need to handle a clear onboarding decline. Do not recap the whole flow or ask more than one onboarding question.
+  )} when onboarding is open and you need the next unresolved onboarding step, need to handle a clear onboarding decline, or need to verify and mark onboarding completion. Do not recap the whole flow or ask more than one onboarding question.
 
 Use the current prompt's date, timezone, channel, delivery route, and hosted wearable connection guidance as runtime context whenever the onboarding skill is used.`;
 }

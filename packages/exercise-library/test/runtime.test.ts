@@ -181,6 +181,77 @@ describe("exercise-library runtime", () => {
         url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6422b8f4-6a49-4288-4a7b-5201aa6caf00/public",
       }),
     ]);
+    expect(artifacts.details.items.find((item) => item.slug === "frog-bridge")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9d46aa1a-a192-4be3-fda9-07a77c7bb300/public",
+      }),
+      expect.objectContaining({
+        step: "Top bridge",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9cd2c6c8-4afa-4b7b-0b1a-6c4d341be400/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "frog-pump")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/132f12bf-71e7-42f8-87a1-20c3d0ff9a00/public",
+      }),
+      expect.objectContaining({
+        step: "Top pump",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5dc79ab7-ffe9-49a0-c8f8-7ad8e8f11300/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "bridge-abduction")?.images).toEqual([
+      expect.objectContaining({
+        step: "Bridge setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/704fd0c1-3acb-4fbf-cac6-84856dc4a100/public",
+      }),
+      expect.objectContaining({
+        step: "Press knees outward",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e296f543-87e0-48f8-05ad-b62dd1bcdb00/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "bridge-adduction-squeeze")?.images).toEqual([
+      expect.objectContaining({
+        step: "Bridge setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/44ffd4a7-87fd-4ac7-4b46-1f0e5c281600/public",
+      }),
+      expect.objectContaining({
+        step: "Bridge squeeze",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a8ba97bf-dbca-47bc-362d-a370d1bffa00/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "bridge-heel-dig")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/650a8d3c-8f82-43cc-6142-070eb5a32300/public",
+      }),
+      expect.objectContaining({
+        step: "Heel dig bridge",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7e24e8cc-6998-4bfc-dd72-c7dedeced000/public",
+      }),
+    ]);
+    expect(artifacts.details.items.find((item) => item.slug === "bridge-toe-lift")?.images).toEqual([
+      expect.objectContaining({
+        step: "Setup",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f7b95636-a7aa-4a13-cb21-b2fbbadc1100/public",
+      }),
+      expect.objectContaining({
+        step: "Bridge top",
+        url: "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/314ce0e0-96d4-42fc-10ca-e61da2874600/public",
+      }),
+    ]);
+    const generatedExerciseImageIds = [
+      ...Array.from({ length: 42 }, (_, index) => `EX${String(index + 125).padStart(3, "0")}`),
+      "EX168",
+      ...Array.from({ length: 23 }, (_, index) => `EX${String(index + 170).padStart(3, "0")}`),
+    ];
+    for (const exerciseId of generatedExerciseImageIds) {
+      const item = artifacts.details.items.find((candidate) => candidate.id === exerciseId);
+      expect(item?.images, exerciseId).toHaveLength(2);
+      expect(item?.images.every((image) => image.url.startsWith("https://imagedelivery.net/"))).toBe(true);
+      expect(item?.images.every((image) => image.step.length > 0 && image.alt.length > 0)).toBe(true);
+    }
     expect(artifacts.details.items.find((item) => item.slug === "wall-sit")?.images).toEqual([
       expect.objectContaining({
         step: "Setup",
