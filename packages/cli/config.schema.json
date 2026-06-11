@@ -7228,6 +7228,33 @@
                     }
                   }
                 },
+                "import-jsonl": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "input": {
+                          "type": "string",
+                          "description": "Payload input in @file.json form or - for stdin."
+                        },
+                        "apply": {
+                          "default": false,
+                          "description": "Apply the import. Without this flag the command only reports what it would create, skip, or update.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                },
                 "dedupe-device-imports": {
                   "type": "object",
                   "additionalProperties": false,

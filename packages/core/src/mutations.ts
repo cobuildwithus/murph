@@ -60,7 +60,12 @@ import {
   selectLatestEventSpineEntry,
   type EventSpineEntry,
 } from "./history/event-spine.ts";
-import { loadEventLedgerShardsById, selectLatestMatchedEvent } from "./domains/events/ledger.ts";
+import {
+  buildPublicEventImportRecord,
+  loadEventLedgerShardsById,
+  selectLatestMatchedEvent,
+  toEventLedgerFile,
+} from "./domains/events/ledger.ts";
 import {
   normalizeMealNutrition,
 } from "./nutrition.ts";
@@ -344,6 +349,7 @@ interface PreparedJsonlEntry<RecordType extends { id: string }> {
 interface JsonlAppendPlan {
   targetShardPaths: string[];
   appendedShardPaths: string[];
+  appendedRecordIds: string[];
   payloads: Map<string, string>;
 }
 
@@ -1083,6 +1089,7 @@ async function buildJsonlAppendPlan<RecordType extends { id: string }>(
   const payloads = new Map<string, string>();
   const existingIdsByShard = new Map<string, Set<string>>();
   const targetShardPaths = [...new Set(entries.map((entry) => entry.relativePath))].sort();
+  const appendedRecordIds: string[] = [];
 
   for (const entry of entries) {
     const existingIds =
@@ -1099,6 +1106,7 @@ async function buildJsonlAppendPlan<RecordType extends { id: string }>(
       existingIds.add(entry.record.id);
     }
 
+    appendedRecordIds.push(entry.record.id);
     const existingPayload = payloads.get(entry.relativePath) ?? "";
     payloads.set(entry.relativePath, `${existingPayload}${JSON.stringify(entry.record)}\n`);
   }
@@ -1106,6 +1114,7 @@ async function buildJsonlAppendPlan<RecordType extends { id: string }>(
   return {
     targetShardPaths,
     appendedShardPaths: [...payloads.keys()].sort(),
+    appendedRecordIds,
     payloads,
   };
 }
@@ -1655,7 +1664,7 @@ export interface DedupeDeviceEventsByExternalRefResult {
   auditPath: string | null;
 }
 
-const DEDUPE_AUDIT_TARGET_ID_LIMIT = 50;
+const AUDIT_TARGET_ID_LIMIT = 50;
 
 // One-time/maintenance cleanup for vaults that accumulated duplicate device
 // events before importDeviceBatch merged idempotently on externalRef: group
@@ -1760,8 +1769,8 @@ export async function dedupeDeviceEventsByExternalRef({
   }
 
   const touchedShardPaths = [...tombstonePayloadByShard.keys()].sort();
-  const truncationNote = tombstonedEventIds.length > DEDUPE_AUDIT_TARGET_ID_LIMIT
-    ? ` (first ${DEDUPE_AUDIT_TARGET_ID_LIMIT} target ids listed)`
+  const truncationNote = tombstonedEventIds.length > AUDIT_TARGET_ID_LIMIT
+    ? ` (first ${AUDIT_TARGET_ID_LIMIT} target ids listed)`
     : "";
   const summary =
     `Deduped device events by externalRef: tombstoned ${tombstonedEventIds.length} duplicate event(s) `
@@ -1802,7 +1811,7 @@ export async function dedupeDeviceEventsByExternalRef({
         summary,
         occurredAt: deletedAt,
         files: touchedShardPaths,
-        targetIds: tombstonedEventIds.slice(0, DEDUPE_AUDIT_TARGET_ID_LIMIT),
+        targetIds: tombstonedEventIds.slice(0, AUDIT_TARGET_ID_LIMIT),
       });
 
       return {
@@ -2533,6 +2542,122 @@ export async function importDeviceBatch({
         rawArtifacts: deviceBatchPlan.preparedRawArtifacts.map((artifact) => artifact.raw),
         auditPath: audit.relativePath,
         manifestPath,
+      };
+    },
+  });
+}
+
+export interface ImportEventBatchInput {
+  vaultRoot: string;
+  payloads: readonly LooseRecord[];
+  apply?: boolean;
+}
+
+type ImportEventBatchFailure = {
+  index: number;
+  message: string;
+};
+
+export interface ImportEventBatchResult {
+  applied: boolean;
+  receivedCount: number;
+  createdCount: number;
+  skippedExistingCount: number;
+  supersededCount: number;
+  eventShardPaths: string[];
+  auditPath: string | null;
+}
+
+const EVENT_BATCH_FAILURE_REPORT_LIMIT = 20;
+
+// Bulk canonical event import: every payload is validated through the same
+// strict contract path as the single-event upsert before anything is staged,
+// so one invalid payload rejects the whole batch. Valid rows reuse the
+// device-batch externalRef reconcile (idempotent skip / in-place supersede on
+// system + resourceType + resourceId + facet) and land in one canonical write
+// with one audit record. Dry-run by default; `apply` commits.
+export async function importEventBatch({
+  vaultRoot,
+  payloads,
+  apply = false,
+}: ImportEventBatchInput): Promise<ImportEventBatchResult> {
+  const vault = await loadVault({ vaultRoot });
+  const entries: PreparedJsonlEntry<EventRecord>[] = [];
+  const failures: ImportEventBatchFailure[] = [];
+
+  payloads.forEach((payload, index) => {
+    try {
+      const record = buildPublicEventImportRecord(payload, vault.metadata.timezone);
+      entries.push({ relativePath: toEventLedgerFile(record.occurredAt), record });
+    } catch (error) {
+      failures.push({
+        index,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  if (failures.length > 0) {
+    throw new VaultError(
+      "EVENT_BATCH_INVALID",
+      `${failures.length} of ${payloads.length} event payload(s) failed validation; nothing was imported.`,
+      {
+        failureCount: failures.length,
+        failures: failures.slice(0, EVENT_BATCH_FAILURE_REPORT_LIMIT),
+      },
+    );
+  }
+
+  const reconciliation = await reconcileDeviceEventEntriesByExternalRef(vaultRoot, entries);
+  const appendPlan = await buildJsonlAppendPlan(vaultRoot, reconciliation.appendEntries, {
+    dedupeWithinPlan: true,
+    forceAppendIds: reconciliation.forceAppendIds,
+  });
+  const appendedCount = appendPlan.appendedRecordIds.length;
+  const supersededCount = reconciliation.supersededCount;
+  const counts = {
+    receivedCount: payloads.length,
+    createdCount: appendedCount - supersededCount,
+    skippedExistingCount: payloads.length - appendedCount,
+    supersededCount,
+  };
+
+  if (!apply || appendedCount === 0) {
+    return {
+      applied: false,
+      ...counts,
+      eventShardPaths: appendPlan.appendedShardPaths,
+      auditPath: null,
+    };
+  }
+
+  const occurredAt = earliestTimestamp(entries.map((entry) => entry.record.occurredAt));
+
+  return runCanonicalWrite({
+    vaultRoot,
+    operationType: "event_batch_import",
+    summary: `Import event batch with ${appendedCount} appended event(s)`,
+    occurredAt,
+    mutate: async ({ batch }) => {
+      await stageJsonlAppendPlan(batch, appendPlan);
+      const audit = await emitAuditRecord({
+        vaultRoot,
+        batch,
+        action: "event_upsert",
+        commandName: "core.importEventBatch",
+        summary: `Imported event batch: ${counts.createdCount} created, ` +
+          `${counts.supersededCount} updated in place, ` +
+          `${counts.skippedExistingCount} skipped existing of ${counts.receivedCount} received.`,
+        occurredAt,
+        files: appendPlan.appendedShardPaths,
+        targetIds: appendPlan.appendedRecordIds.slice(0, AUDIT_TARGET_ID_LIMIT),
+      });
+
+      return {
+        applied: true,
+        ...counts,
+        eventShardPaths: appendPlan.appendedShardPaths,
+        auditPath: audit.relativePath,
       };
     },
   });
