@@ -164,3 +164,18 @@ Conclusion: the regenerated candidate artifact is clean for the read-only checks
 ### Stopping point (2026-06-10): 94.3% structured
 
 - Image recovery tapered to ~23-28 clean per straggler sweep (declining; high-yield SFP brands exhausted, remaining brands increasingly 0-yield). FINAL: structured **23,809 / 25,251 = 94.3%** (from 27% at session start). Unstructured 1,442 = genuinely image-less brands (natures-plus etc. — facts not published as readable images) + anchor-failing sports/foreign-blend tail. NOT a hard floor — the long tail would yield a few hundred more over many low-yield batches — but a sound diminishing-returns stopping point.
+
+### Wave 13 — rate-gate fix + full-pool re-run (2026-06-10)
+
+- ROOT-CAUSE: `context-dev-image-fetch.py` was missing the rate gate that `scrape_md.py` had. 8 unthrottled workers tripped context.dev's ~120/min cap, so a full re-run of the 1,410 remaining returned `{ok:537, no_images:31, scrape_error:842}` — 60% silently lost. The "image-less" tail was partly a rate-limit artifact (the 3rd premature floor call this effort). Added the 0.55s global gate; retrying the 842 returned `{ok:774, no_images:68, scrape_error:0}`.
+- Reprocessed the whole pool: haiku on the 1,311 newly-imaged rows (+121 landed), then **sonnet re-read of the 1,190 cached-image rows haiku couldn't crack** (+36 — diminishing but free of scrape cost). +5 from DSLD exact-UPC hydration (dropping `NP` placeholders). Net +162 → **23,998 / 25,251 = 95.0%**.
+- Genuinely-dead residue confirmed (whole pool through current selector + gate, errors retried, sonnet pass done): 1,248 rows = image-less brands + panels neither model can read. Backed up to `deleted_brand_site_backup_2026-06-10.json` (reversible) and deleted under a guarded `BEGIN/COMMIT … WHERE ingredientRows length=0`. **brand_site → 24,003 / 24,003 = 100%.**
+
+### Wave 14 — DailyMed origin structured from SPL (2026-06-10)
+
+- The `dailymed` origin (576 rows, 0% structured) was never a scraping problem: each row already held a structured FDA SPL array in `label.ingredients`. Wrote `scripts/dailymed-spl-transform.py` — pure deterministic map (active classCodes→ingredientRows, IACT→otherIngredientRows, denominator+title→serving, unit normalization, SPL name cleanup), same food/non-standalone guards. **dailymed 0% → 574/576 = 99.7%** (2 combo-pack kits held back). No scrape/vision/LLM.
+
+### Whole-DB final (2026-06-10)
+
+- **dsld 214,768/214,780 (100%) · brand_site 24,003/24,003 (100%) · dailymed 574/576 (99.7%) → 239,345/239,359 = 99.99% structured.** Remaining 14 = 12 dsld edge cases + 2 dailymed combo-packs.
+- Skill folded with the learnings: rate gate + alt-text/SFP selector in `context-dev-image-fetch.py`, new `dailymed-spl-transform.py`, and `references/context-dev-and-vision-ocr.md` updated (rate-gate failure mode, sonnet second lever, DSLD-UPC/DailyMed free recovery, reversible-delete protocol).

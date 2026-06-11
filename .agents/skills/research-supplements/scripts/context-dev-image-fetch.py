@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
 # fetch_batch.py <batch_tag> <start> <count> — fetch+select images for a pool slice
+#
+# Scrapes each row's product page via context.dev (markdown + images), then SELECTS the
+# facts-panel image(s) and downloads them for a downstream vision-OCR pass.
+#
+# TWO HARD-WON LESSONS BAKED IN — do not remove:
+#  1. RATE GATE (gate()): context.dev caps ~120 req/min. 8 unthrottled workers trip it and
+#     ~60% of scrapes silently return scrape_error. The 0.55s global gate (~109/min) fixes it.
+#     Without it a whole pool looks "image-less" when it's really just rate-limited.
+#  2. SELECTOR scoring (candidates()): the facts panel is often identified by ALT TEXT
+#     ("Supplement Facts", "Amount Per Serving") or an SFP/_sf filename, NOT the product name.
+#     Score alt-text highest (+8), then facts filename (+4), keep top-6. Filename-only scoring
+#     misses ~80% of panels.
 import json, sys, os, re, urllib.request, urllib.parse, time, threading, subprocess
 from concurrent.futures import ThreadPoolExecutor
 sys.argv_tag, start, count = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
@@ -8,7 +20,8 @@ CKEY=next(l.split('=',1)[1].strip().strip('"').strip("'") for l in open('/Users/
 UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 IMGDIR=f"/tmp/murph-supplement-audit/img_{TAG}"; os.makedirs(IMGDIR,exist_ok=True)
 EXCLUDE=re.compile(r'(logo|icon|banner|menu|thumbnail|thumb|badge|sprite|flag|payment|favicon|placeholder|\.svg|_96x|_100x|_small|bestseller|what.?s.?new)',re.I)
-FACTS_FN=re.compile(r'(supp_?fact|suppfacts|_sf[_.]|[_-]sf[_.]|supplement.?facts|nutrition.?facts|_b?back|_bfront|_panel|_nutrition|ingredient|_label|_facts?[_.])',re.I)
+FACTS_FN=re.compile(r'(supp_?fact|suppfacts|_sfp?[_.]|[_-]sfp?[_.]|sfp_|_sfp|supplement.?facts|nutrition.?facts|_b?back|_bfront|_panel|_nutrition|ingredient|_label|_facts?[_.])',re.I)
+FACTS_ALT=re.compile(r'(serving size|servings per|amount per serving|supplement facts|nutrition facts|daily value|%\s*dv|% daily)',re.I)
 STOP=set('the and for with plus advanced complex supplement capsules tablets softgels veggie vegetable count high potency formula softgel caplets liquid powder bottle servings one mg mcg iu oz size'.split())
 def ntoks(name): return [t for t in re.sub(r'[^a-z0-9 ]',' ',(name or '').lower()).split() if len(t)>3 and t not in STOP and not t.isdigit()]
 def candidates(md,name):
@@ -18,10 +31,10 @@ def candidates(md,name):
         if base in seen or EXCLUDE.search(u): continue
         seen.add(base); fn=base.split('/')[-1].lower(); altl=(alt or '').lower()
         nm=any(t in altl or t in fn for t in nt) if nt else True
-        s=(4 if FACTS_FN.search(fn) else 0)+(2 if nm else 0)+(1 if re.search(r'(_2[_.]|_3[_.]|-2\.|-3\.)',fn) else 0)
+        s=(8 if FACTS_ALT.search(altl) else 0)+(4 if FACTS_FN.search(fn) else 0)+(2 if nm else 0)+(1 if re.search(r'(_2[_.]|_3[_.]|-2\.|-3\.)',fn) else 0)
         scored.append((s,u))
     scored.sort(key=lambda x:-x[0])
-    top=[u for s,u in scored if s>0 or not nt][:5]
+    top=[u for s,u in scored if s>0 or not nt][:6]
     return top or [u for _,u in scored[:3]]
 def get(url,t=3):
     for a in range(t):
@@ -30,8 +43,15 @@ def get(url,t=3):
             if a==t-1: raise
             time.sleep(1)
 lock=threading.Lock(); manifest=[]
+_rl=threading.Lock(); _last=[0.0]
+def gate():
+    with _rl:
+        w=_last[0]+0.55-time.monotonic()
+        if w>0: time.sleep(w)
+        _last[0]=time.monotonic()
 def process(row):
     did,url=row['id'],row['url']; safe=re.sub(r'[^a-z0-9]+','_',did.lower())
+    gate()
     try:
         q=urllib.parse.urlencode({"url":url,"useMainContentOnly":"false","includeImages":"true"})
         md=json.loads(urllib.request.urlopen(urllib.request.Request(f"https://api.context.dev/v1/web/scrape/markdown?{q}",headers={"Authorization":f"Bearer {CKEY}","User-Agent":UA}),timeout=120).read()).get("markdown","")
