@@ -59,3 +59,30 @@ test('assistant command registration does not import the ink chat surface at mod
 
   await import('../src/commands/assistant.js')
 })
+
+// Module-load guarding alone would miss an eager import added inside the
+// registration body, so run the real registration with unwired services.
+test('registering assistant commands does not load the ink chat surface', async () => {
+  mockForbiddenStartupModules()
+
+  const [
+    { registerAssistantCommands },
+    { Cli },
+    { createIntegratedInboxServices },
+    { createUnwiredVaultServices },
+  ] = await Promise.all([
+    import('../src/commands/assistant.js'),
+    import('incur'),
+    import('@murphai/inbox-services'),
+    import('@murphai/vault-usecases'),
+  ])
+
+  const cli = Cli.create('vault-cli', {
+    description: 'startup import guard host',
+  })
+  registerAssistantCommands(
+    cli,
+    createIntegratedInboxServices(),
+    createUnwiredVaultServices(),
+  )
+})

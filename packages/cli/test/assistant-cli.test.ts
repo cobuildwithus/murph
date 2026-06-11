@@ -1714,11 +1714,15 @@ async function runInProcessCliWithTty(args: string[]): Promise<{
   const stdoutTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY')
   // Only fail tty opens: the chat command lazy-imports its ink surface, so a
   // blanket openSync stub would break Node's own module-file reads mid-run.
+  // Mirror the production tty path selection (CONIN$ on Windows, /dev/tty
+  // elsewhere) so this stub keeps simulating an unopenable controlling
+  // terminal on every platform.
+  const controllingTtyPath = process.platform === 'win32' ? 'CONIN$' : '/dev/tty'
   const realOpenSync = fs.openSync.bind(fs)
   const openSyncSpy = vi
     .spyOn(fs, 'openSync')
     .mockImplementation(((path: fs.PathLike, flags: fs.OpenMode, mode?: fs.Mode | null) => {
-      if (String(path) === '/dev/tty') {
+      if (String(path) === controllingTtyPath) {
         throw new Error('tty unavailable')
       }
       return realOpenSync(path, flags, mode)

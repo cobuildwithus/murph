@@ -76,8 +76,33 @@ test('scoped hot-path modules do not import the manifest or ink surfaces at modu
   }
 })
 
-test('model command registration does not import the setup assistant wizard at module load', async () => {
+// Module-load guards alone would miss an eager import added inside the
+// registration bodies, so exercise the real registration surfaces too.
+test('scoped command registration stays off the manifest and wizard surfaces', async () => {
   mockForbiddenStartupModules()
 
-  await import('../src/commands/model.ts')
+  const [{ createVaultCliShell }, { registerScopedVaultCliCommand }] =
+    await Promise.all([
+      import('../src/vault-cli-shell.js'),
+      import('../src/vault-cli-command-routing.js'),
+    ])
+
+  for (const root of ['list', 'meal', 'wearables'] as const) {
+    await registerScopedVaultCliCommand({
+      cli: createVaultCliShell('vault-cli'),
+      root,
+    })
+  }
+})
+
+test('model command registration does not import the setup assistant wizard', async () => {
+  mockForbiddenStartupModules()
+
+  const [{ registerModelCommands }, { createVaultCliShell }] =
+    await Promise.all([
+      import('../src/commands/model.ts'),
+      import('../src/vault-cli-shell.js'),
+    ])
+
+  registerModelCommands(createVaultCliShell('vault-cli'))
 })
