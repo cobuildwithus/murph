@@ -76,6 +76,7 @@ import {
   buildCodexStdinFailureFallback,
   buildCodexTurnFailedError,
   type CodexProcessExitDiagnostics,
+  extractCodexThreadIdFromMessage,
   extractCodexThreadIdFromResult,
   extractCodexThreadPathFromResult,
   extractCodexTurnErrorMessage,
@@ -85,6 +86,12 @@ import {
   isFailedCodexTurnStatus,
   readNodeErrorCode,
 } from './assistant-codex/failures.js'
+import {
+  type CodexSubagentTokenUsageSample,
+  extractCodexSubagentUsageDrafts,
+  isAssistantCodexTokenUsageEventType,
+  readCodexCollabReceiverThreadIds,
+} from './assistant/providers/helpers.js'
 import {
   materializeCodexImagePaths,
   type CodexAppServerImageInput,
@@ -127,6 +134,10 @@ const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
 const CODEX_APP_SERVER_TIMING_TRACE_TYPE =
   'assistant.codex.app_server_timing'
 const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
+// Bound on distinct subagent threads whose token usage is tracked per parent
+// turn. Far above any sane spawn fan-out; threads past the cap are counted
+// and surfaced via droppedSubagentUsageThreadCount on recorded drafts.
+const MAX_CODEX_SUBAGENT_USAGE_THREADS = 32
 
 type CodexAppServerProcessState =
   | 'idle'
@@ -557,6 +568,7 @@ class CodexAppServerProcess {
   readonly startedAt = Date.now()
 
   private activeTurn: CodexAppServerActiveTurnBinding | null = null
+  private boundThreadId: string | null = null
   private cleanupProcessExitListener: () => void
   private completedTurnCount = 0
   private lastThreadTokenUsage: CodexWarmThreadTokenUsage | null = null
@@ -979,11 +991,60 @@ class CodexAppServerProcess {
     if (!update?.threadId || lastInputTokens === null) {
       return
     }
+    // Subagent threads emit tokenUsage on this connection too; vitals must
+    // only ever describe the bound (member) thread or idle compaction could
+    // target a child thread.
+    if (this.boundThreadId !== null && update.threadId !== this.boundThreadId) {
+      return
+    }
 
     this.lastThreadTokenUsage = {
       lastInputTokens,
       threadId: update.threadId,
     }
+  }
+
+  // The most recent thread this process ran a turn for. Used between turns
+  // to tell subagent-thread notifications apart from same-thread output
+  // contamination, which must still poison the warm process.
+  noteBoundThreadId(threadId: string | null): void {
+    if (threadId) {
+      this.boundThreadId = threadId
+    }
+  }
+
+  // Exposed so a freshly bound turn can route foreign-thread events before
+  // its own thread/start response has produced the new thread id.
+  get lastBoundThreadId(): string | null {
+    return this.boundThreadId
+  }
+
+  // Subagent threads can outlive the parent turn: codex broadcasts their
+  // thread-scoped notifications on this connection even when no turn is
+  // active. Tolerate (and never bill) those between turns; deny their server
+  // requests so the child does not hang. Idle output for the bound thread
+  // keeps poisoning so the contamination guard is unchanged.
+  shouldTolerateIdleSubagentMessage(message: CodexRpcMessage): boolean {
+    const messageThreadId = extractCodexThreadIdFromMessage(message)
+    if (
+      messageThreadId === null ||
+      this.boundThreadId === null ||
+      messageThreadId === this.boundThreadId
+    ) {
+      return false
+    }
+
+    const requestId = readCodexRpcServerRequestId(message)
+    if (requestId !== null) {
+      void this.writeRpcMessage({
+        id: requestId,
+        error: {
+          code: -32000,
+          message: 'Server requests from codex subagent threads are not supported.',
+        },
+      })
+    }
+    return true
   }
 
   private handleStdoutLine(line: string): void {
@@ -992,7 +1053,10 @@ class CodexAppServerProcess {
       this.observeThreadTokenUsage(parsed.value)
       if (this.activeTurn) {
         this.activeTurn.onParsedMessage(parsed.value)
-      } else if (line.trim().length > 0) {
+      } else if (
+        line.trim().length > 0 &&
+        !this.shouldTolerateIdleSubagentMessage(parsed.value)
+      ) {
         void this.poison('off-turn-output')
       }
       return
@@ -1278,6 +1342,10 @@ export async function compactWarmCodexThread(input: {
         return
       }
 
+      if (processInstance.shouldTolerateIdleSubagentMessage(message)) {
+        return
+      }
+
       const update = readCodexThreadTokenUsageUpdate(message)
       if (update) {
         if (update.last) {
@@ -1498,6 +1566,13 @@ async function runCodexAppServerTurnOnProcess(
   let responseMedia: AssistantResponseMedia[] = []
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
+  const subagentTokenUsageByThread =
+    new Map<string, CodexSubagentTokenUsageSample>()
+  const subagentDroppedUsageThreadIds = new Set<string>()
+  // Thread ids named by this turn's collab tool calls (spawn/sendInput/...),
+  // collected live so evidenced subagent threads win buffer slots over
+  // stale/unattributed foreign threads when the cap is reached.
+  const collabReceiverThreadIds = new Set<string>()
   let rolloutRelativePath: string | null = null
   let providerActionCount = 0
   const providerActionItemIds = new Set<string>()
@@ -1554,6 +1629,18 @@ async function runCodexAppServerTurnOnProcess(
     terminationSignalSent,
   })
 
+  // Subagent usage drafts are derived lazily from the buffered per-thread
+  // samples so both the success result and the failure context can include
+  // whatever child usage was observed before the turn settled.
+  const buildSubagentUsageDrafts = (): AssistantProviderUsageDraft[] =>
+    extractCodexSubagentUsageDrafts({
+      droppedThreadCount: subagentDroppedUsageThreadIds.size,
+      modelProvider: normalizeNullableString(input.modelProvider) ?? null,
+      ordinalStart: nextDynamicToolUsageOrdinal,
+      parentRawEvents: jsonEvents,
+      subagentTokenUsageByThread,
+    })
+
   const annotateTurnFailureContext = (error: unknown) => {
     if (!error || typeof error !== 'object') {
       return
@@ -1561,7 +1648,7 @@ async function runCodexAppServerTurnOnProcess(
 
     const context = {
       jsonEvents: [...jsonEvents],
-      additionalUsages: [...additionalUsages],
+      additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
       providerActionCount,
       codexThreadId,
       providerTurnId: turnId,
@@ -2075,6 +2162,9 @@ async function runCodexAppServerTurnOnProcess(
   ): void => {
     acceptJsonEvent(message)
     codexThreadId = codexThreadId ?? extractCodexSessionId(message)
+    for (const receiverThreadId of readCodexCollabReceiverThreadIds(message)) {
+      collabReceiverThreadIds.add(receiverThreadId)
+    }
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
     lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
     if (isCodexTurnStartedMethod(method)) {
@@ -2181,6 +2271,57 @@ async function runCodexAppServerTurnOnProcess(
     return true
   }
 
+  const handleSubagentThreadMessage = (
+    threadId: string,
+    message: CodexRpcMessage,
+  ): void => {
+    const requestId = readCodexRpcServerRequestId(message)
+    if (requestId !== null) {
+      // Dynamic tools and approvals stay parent-thread-scoped; answer the
+      // child so it does not hang, without involving the parent turn.
+      void tryWriteRpcMessage({
+        id: requestId,
+        error: {
+          code: -32000,
+          message: 'Server requests from codex subagent threads are not supported.',
+        },
+      })
+      return
+    }
+
+    if (!isAssistantCodexTokenUsageEventType(readCodexEventMethod(message))) {
+      return
+    }
+
+    const sample = subagentTokenUsageByThread.get(threadId)
+    if (sample) {
+      sample.eventCount += 1
+      sample.lastEvent = message
+      return
+    }
+    if (subagentTokenUsageByThread.size >= MAX_CODEX_SUBAGENT_USAGE_THREADS) {
+      // Evidenced subagent threads win buffer slots: evict an unattributed
+      // sample (e.g. a stale flush from a previous warm-process thread, which
+      // is never billable) before dropping a billable child's usage.
+      const evictableThreadId = collabReceiverThreadIds.has(threadId)
+        ? [...subagentTokenUsageByThread.keys()].find(
+          (bufferedThreadId) => !collabReceiverThreadIds.has(bufferedThreadId),
+        )
+        : undefined
+      if (evictableThreadId === undefined) {
+        subagentDroppedUsageThreadIds.add(threadId)
+        return
+      }
+      subagentTokenUsageByThread.delete(evictableThreadId)
+      subagentDroppedUsageThreadIds.add(evictableThreadId)
+    }
+    subagentTokenUsageByThread.set(threadId, {
+      eventCount: 1,
+      firstEvent: message,
+      lastEvent: message,
+    })
+  }
+
   const handleParsedMessage = (message: CodexRpcMessage) => {
     const responseId = readCodexRpcResponseId(message)
     if (responseId !== null) {
@@ -2222,6 +2363,26 @@ async function runCodexAppServerTurnOnProcess(
           return
         }
       }
+      return
+    }
+
+    // Codex app-server auto-attaches this connection to every thread it
+    // creates, including spawned subagent threads, and their notifications
+    // carry foreign thread/turn ids. Route them off the single-turn
+    // correlation path: token usage is buffered for billing, server requests
+    // are denied without failing the parent turn, everything else is dropped.
+    // Before a fresh thread/start response produces this turn's thread id,
+    // fall back to the process's last bound thread id so a late child event
+    // in that window is still routed instead of failing correlation; events
+    // for the last bound thread itself keep today's strict stale handling.
+    const messageThreadId = extractCodexThreadIdFromMessage(message)
+    const knownParentThreadId = codexThreadId ?? codexProcess.lastBoundThreadId
+    if (
+      messageThreadId !== null &&
+      knownParentThreadId !== null &&
+      messageThreadId !== knownParentThreadId
+    ) {
+      handleSubagentThreadMessage(messageThreadId, message)
       return
     }
 
@@ -2527,6 +2688,7 @@ async function runCodexAppServerTurnOnProcess(
     closeLiveTurn()
     clearInterruptCleanupTimer()
     cleanupAbortListener()
+    codexProcess.noteBoundThreadId(codexThreadId)
     codexProcess.releaseTurn(activeTurnBinding)
     codexProcess.releaseReservation()
   }
@@ -2541,7 +2703,7 @@ async function runCodexAppServerTurnOnProcess(
 
   return {
     finalMessage,
-    additionalUsages,
+    additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
     responseMedia,
     jsonEvents,
     providerActionCount,

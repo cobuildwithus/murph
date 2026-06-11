@@ -76,6 +76,10 @@
       "path": "fixtures/sample-imports/measurements/measurement.json"
     },
     {
+      "id": "event-jsonl",
+      "path": "fixtures/sample-imports/events/events.jsonl"
+    },
+    {
       "id": "heart-rate-csv",
       "path": "fixtures/sample-imports/samples/heart-rate.csv"
     },
@@ -108,6 +112,10 @@
     {
       "id": "document-import",
       "path": "fixtures/golden-outputs/document-import"
+    },
+    {
+      "id": "event-import-jsonl",
+      "path": "fixtures/golden-outputs/event-import-jsonl"
     },
     {
       "id": "meal-add",

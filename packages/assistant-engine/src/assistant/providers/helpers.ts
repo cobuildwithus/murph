@@ -25,6 +25,7 @@ import type {
 import type {
   AssistantProviderTurnExecutionInput,
   AssistantProviderUsage,
+  AssistantProviderUsageDraft,
 } from './types.js'
 
 const CODEX_USAGE_EXTRACTION_VERSION = 'codex-usage-v1'
@@ -537,32 +538,23 @@ function readAssistantCodexThreadTokenUsageEvents(input: {
     })
 
   const events = input.rawEvents.flatMap((rawEvent, index) => {
-    if (turnStartedEventIndex !== null && index < turnStartedEventIndex) {
+    const pair = readAssistantCodexTokenUsagePairFromEvent(rawEvent)
+    if (
+      !pair ||
+      (turnStartedEventIndex !== null && index < turnStartedEventIndex)
+    ) {
       return []
     }
 
     const record = readAssistantProviderRecord(rawEvent)
-    const eventType = readAssistantProviderString(
-      record?.method,
-      record?.type,
-      record?.event,
-    )
-
-    if (!isAssistantCodexTokenUsageEventType(eventType)) {
-      return []
-    }
-
     if (!isAssistantCodexTokenUsageEventForTurn(record, input.turnId)) {
       return []
     }
 
-    const tokenUsage = readAssistantCodexTokenUsageRecord(record)
     return [
       {
         index,
-        last: readAssistantProviderRecord(tokenUsage?.last),
-        tokenUsage,
-        total: readAssistantProviderRecord(tokenUsage?.total),
+        ...pair,
       },
     ]
   })
@@ -963,7 +955,7 @@ function readAssistantCodexTurnIdFromCompletion(input: {
   )
 }
 
-function isAssistantCodexTokenUsageEventType(eventType: string | null): boolean {
+export function isAssistantCodexTokenUsageEventType(eventType: string | null): boolean {
   return (
     eventType === 'thread/tokenUsage/updated' ||
     eventType === 'thread/token_usage/updated' ||
@@ -987,6 +979,29 @@ function readAssistantCodexTokenUsageRecord(
     readAssistantProviderRecord(record?.tokenUsage) ??
     readAssistantProviderRecord(record?.token_usage)
   )
+}
+
+function readAssistantCodexTokenUsagePairFromEvent(rawEvent: unknown): {
+  last: Record<string, unknown> | null
+  tokenUsage: Record<string, unknown> | null
+  total: Record<string, unknown> | null
+} | null {
+  const record = readAssistantProviderRecord(rawEvent)
+  const eventType = readAssistantProviderString(
+    record?.method,
+    record?.type,
+    record?.event,
+  )
+  if (!isAssistantCodexTokenUsageEventType(eventType)) {
+    return null
+  }
+
+  const tokenUsage = readAssistantCodexTokenUsageRecord(record)
+  return {
+    last: readAssistantProviderRecord(tokenUsage?.last),
+    tokenUsage,
+    total: readAssistantProviderRecord(tokenUsage?.total),
+  }
 }
 
 function readAssistantCodexTurnIdFromRecord(
@@ -1112,6 +1127,212 @@ function subtractAssistantProviderUsageRecords(
   )
 
   return result
+}
+
+export interface CodexSubagentTokenUsageSample {
+  eventCount: number
+  firstEvent: unknown
+  lastEvent: unknown
+}
+
+// Codex ships no aggregate usage primitive for spawned subagent threads (no
+// usage RPC, no usage on the protocol Turn, no parent-side aggregation), so
+// the canonical pattern is consuming each child thread's tokenUsage
+// notifications. This converts the buffered first/final tokenUsage samples
+// per child thread into additional usage drafts on the parent turn, using
+// the same total-delta arithmetic as the parent's billed usage. Billing is
+// gated on collab evidence: only threads named in some parent-thread
+// collabAgentToolCall item's receiverThreadIds (spawnAgent, sendInput, wait,
+// resume — covering freshly spawned and reused children) become drafts; the
+// model is attributed from spawn items, the only ones that carry it. Warm
+// processes are reused across threads, so a foreign thread id alone is not
+// proof of a subagent — a stale flush from a previous thread must never mint
+// a usage row. Unattributed threads are counted, not billed.
+export function extractCodexSubagentUsageDrafts(input: {
+  droppedThreadCount: number
+  modelProvider: string | null
+  ordinalStart: number
+  parentRawEvents: readonly unknown[]
+  subagentTokenUsageByThread: ReadonlyMap<string, CodexSubagentTokenUsageSample>
+}): AssistantProviderUsageDraft[] {
+  if (input.subagentTokenUsageByThread.size === 0) {
+    return []
+  }
+
+  const spawnModelByThreadId = readCodexCollabSpawnModelsByThread(
+    input.parentRawEvents,
+  )
+  const attributedThreads = [...input.subagentTokenUsageByThread].filter(
+    ([threadId]) => spawnModelByThreadId.has(threadId),
+  )
+  const unattributedThreadCount =
+    input.subagentTokenUsageByThread.size - attributedThreads.length
+  const drafts: AssistantProviderUsageDraft[] = []
+  let ordinal = input.ordinalStart
+  for (const [threadId, sample] of attributedThreads) {
+    const pairs = (
+      sample.firstEvent === sample.lastEvent
+        ? [sample.firstEvent]
+        : [sample.firstEvent, sample.lastEvent]
+    ).flatMap((event) => {
+      const pair = readAssistantCodexTokenUsagePairFromEvent(event)
+      return pair ? [pair] : []
+    })
+    const delta = resolveAssistantCodexThreadTokenUsageTotalDelta(pairs)
+    if (!delta) {
+      continue
+    }
+
+    const model = spawnModelByThreadId.get(threadId) ?? null
+    const rawUsageJson: Record<string, unknown> = {
+      codexSubagentThreadId: threadId,
+      tokenUsage: delta,
+      tokenUsageEventCount: sample.eventCount,
+      ...(input.droppedThreadCount > 0
+        ? { droppedSubagentUsageThreadCount: input.droppedThreadCount }
+        : {}),
+      ...(unattributedThreadCount > 0
+        ? { unattributedSubagentUsageThreadCount: unattributedThreadCount }
+        : {}),
+    }
+    const inputTokens = readAssistantProviderInteger(
+      delta,
+      'inputTokens',
+      'input_tokens',
+    )
+    const outputTokens = readAssistantProviderInteger(
+      delta,
+      'outputTokens',
+      'output_tokens',
+    )
+    drafts.push({
+      provider: 'codex-cli',
+      providerRequestOrdinal: ordinal++,
+      providerRequestOutcome: 'succeeded',
+      usage: {
+        apiKeyEnv: null,
+        baseUrl: null,
+        cacheWriteTokens: readAssistantProviderInteger(
+          delta,
+          'cacheWriteTokens',
+          'cache_write_tokens',
+        ),
+        cachedInputTokens: readAssistantProviderInteger(
+          delta,
+          'cachedInputTokens',
+          'cached_input_tokens',
+        ),
+        inputTokens,
+        outputTokens,
+        providerMetadataJson: null,
+        providerName: input.modelProvider,
+        providerRequestId: null,
+        rawUsageJson,
+        rawUsageJsonHash: hashAssistantProviderStableJson(rawUsageJson),
+        reasoningTokens: readAssistantProviderInteger(
+          delta,
+          'reasoningTokens',
+          'reasoning_tokens',
+          'reasoningOutputTokens',
+          'reasoning_output_tokens',
+        ),
+        requestedModel: model,
+        servedModel: model,
+        totalTokens:
+          readAssistantProviderInteger(delta, 'totalTokens', 'total_tokens') ??
+          resolveAssistantProviderTotalTokens({
+            inputTokens,
+            outputTokens,
+          }),
+        usageExtractionSourcePath: 'subagent.thread.tokenUsage.total.delta',
+        usageExtractionVersion: CODEX_USAGE_EXTRACTION_VERSION,
+      },
+    })
+  }
+
+  return drafts
+}
+
+// Collab evidence map: every thread id named by a parent-thread collab tool
+// call item (spawnAgent, sendInput, wait, resumeAgent, ...) is a key — that
+// membership is what authorizes billing a foreign thread's usage, covering
+// both freshly spawned children and reused existing children. The effective
+// model is only known from spawn items and may be null otherwise.
+function readCodexCollabSpawnModelsByThread(
+  rawEvents: readonly unknown[],
+): Map<string, string | null> {
+  const modelByThreadId = new Map<string, string | null>()
+  for (const rawEvent of rawEvents) {
+    const collabToolCall = readCodexCollabToolCallFromEvent(rawEvent)
+    if (!collabToolCall) {
+      continue
+    }
+
+    for (const receiverThreadId of collabToolCall.receiverThreadIds) {
+      modelByThreadId.set(
+        receiverThreadId,
+        modelByThreadId.get(receiverThreadId) ?? collabToolCall.spawnModel,
+      )
+    }
+  }
+
+  return modelByThreadId
+}
+
+// Receiver thread ids named by a single parent-thread collab tool call
+// event, if any. Exported so the live turn loop can prioritize evidenced
+// subagent threads when its bounded usage buffer fills up.
+export function readCodexCollabReceiverThreadIds(
+  rawEvent: unknown,
+): readonly string[] {
+  return readCodexCollabToolCallFromEvent(rawEvent)?.receiverThreadIds ?? []
+}
+
+function readCodexCollabToolCallFromEvent(rawEvent: unknown): {
+  receiverThreadIds: string[]
+  spawnModel: string | null
+} | null {
+  const record = readAssistantProviderRecord(rawEvent)
+  const params = readAssistantProviderRecord(record?.params)
+  const data = readAssistantProviderRecord(record?.data)
+  const item =
+    readAssistantProviderRecord(params?.item) ??
+    readAssistantProviderRecord(data?.item) ??
+    readAssistantProviderRecord(record?.item)
+  if (!item) {
+    return null
+  }
+
+  const itemType = readAssistantProviderString(
+    item.type,
+    item.itemType,
+    item.item_type,
+  )
+  if (itemType !== 'collabAgentToolCall') {
+    return null
+  }
+
+  const rawReceiverThreadIds =
+    item.receiverThreadIds ?? item.receiver_thread_ids
+  if (!Array.isArray(rawReceiverThreadIds)) {
+    return null
+  }
+  const receiverThreadIds = rawReceiverThreadIds.flatMap((receiverThreadId) => {
+    const normalized = readAssistantProviderString(receiverThreadId)
+    return normalized ? [normalized] : []
+  })
+  if (receiverThreadIds.length === 0) {
+    return null
+  }
+
+  const tool = readAssistantProviderString(item.tool)
+  const isSpawnTool = tool === 'spawnAgent' || tool === 'spawn_agent'
+  return {
+    receiverThreadIds,
+    spawnModel: isSpawnTool
+      ? readAssistantProviderString(item.model) ?? null
+      : null,
+  }
 }
 
 function copyAssistantProviderUsageDifference(
