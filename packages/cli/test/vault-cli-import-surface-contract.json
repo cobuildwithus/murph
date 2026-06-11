@@ -1,0 +1,18 @@
+[
+  "@cfworker/json-schema",
+  "@modelcontextprotocol/server",
+  "@murphai/contracts",
+  "@murphai/core",
+  "@murphai/gateway-core",
+  "@murphai/importers",
+  "@murphai/murph",
+  "@murphai/operator-config",
+  "@murphai/query",
+  "@murphai/runtime-state",
+  "@murphai/vault-usecases",
+  "@toon-format/toon",
+  "incur",
+  "tokenx",
+  "yaml",
+  "zod"
+]
