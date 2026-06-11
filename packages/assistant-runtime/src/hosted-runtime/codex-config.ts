@@ -47,8 +47,15 @@ const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
 const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "low";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
-// Match local Codex defaults while staying below the gpt-5.5 context window.
-const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 233_000;
+// Hosted thread cost scales linearly with this ceiling: every tool round-trip
+// re-sends the whole thread, and OpenAI Standard-tier prompt caches evict
+// within ~45 minutes regardless of prefix size or prompt_cache_retention
+// (measured 2026-06-10 across 32k-170k prefixes), so member messages after an
+// idle gap re-pay the full thread at uncached input rates. 128k cuts both the
+// per-round-trip cached-read cost and the cold re-pay roughly in half versus
+// the previous 233k while keeping ample conversational context between
+// compactions.
+const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 128_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_API_KEY_ENV,
