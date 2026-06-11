@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { access, chmod, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { build } from "esbuild";
+import { build, type Metafile } from "esbuild";
 
 import { buildPortableNodeBinWrapper } from "./runtime-shape.js";
 
@@ -39,6 +39,18 @@ const VAULT_CLI_BUNDLE_FORBIDDEN_INPUT_MARKERS = [
 ];
 
 const VAULT_CLI_BUNDLE_DIRECTORY_NAME = ".bundle";
+
+// Byte budgets over the esbuild metafile, so import-graph creep in the real
+// installed artifact fails the assembly instead of shipping silently (the
+// June 2026 latency regression was exactly this: one static import dragged
+// the whole command surface onto the hot path with nothing watching).
+// Baselines measured from the real assembled bundle on 2026-06-11:
+// total 7,052,933 B across all chunks, entry bin.js 15,569 B. Budgets are
+// baseline + ~25-30% headroom. If a violation fires, investigate the listed
+// largest inputs first; only raise the budget deliberately for growth that
+// is understood and intended.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_000_000;
+const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 
 // Known divergence the parity battery cannot reach (it would need a live
 // codex session): assistant-engine resolves two assets relative to its own
@@ -96,6 +108,10 @@ export async function bundleInstalledVaultCliBinary(
   });
 
   assertVaultCliBundleInputsStayExternal(Object.keys(buildResult.metafile.inputs));
+  const bundleBytes = assertVaultCliBundleWithinBudgets(buildResult.metafile);
+  console.log(
+    `vault-cli bundle size: total ${bundleBytes.totalBytes}B of ${VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET}B budget, entry ${bundleBytes.entryBytes}B of ${VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET}B budget`,
+  );
   assertVaultCliBundleParity({ bundleOutDir, cliPackageDir, entryPath });
   await retargetVaultCliBinWrappers(bundleDir, cliPackageDir);
 }
@@ -116,6 +132,65 @@ function assertVaultCliBundleInputsStayExternal(inputPaths: string[]): void {
   }
 }
 
+// Exported for direct unit testing with synthetic metafiles; the production
+// call site always uses the default budgets above. Returns the measured
+// bytes so the assembly log can report actual-vs-budget on success.
+export function assertVaultCliBundleWithinBudgets(
+  metafile: Metafile,
+  budgets: { entryBytes: number; totalBytes: number } = {
+    entryBytes: VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET,
+    totalBytes: VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET,
+  },
+): { entryBytes: number; totalBytes: number } {
+  const outputs = Object.entries(metafile.outputs);
+  const totalBytes = outputs.reduce((sum, [, output]) => sum + output.bytes, 0);
+
+  // With code splitting, esbuild stamps `entryPoint` on dynamic-import
+  // chunks too, so entryPoint presence alone is ambiguous. The real CLI
+  // entry output keeps the entry file's plain name (`bin.js`) while shared
+  // and dynamic chunks carry content-hash suffixes.
+  const entryOutput = outputs.find(
+    ([outputPath, output]) =>
+      output.entryPoint !== undefined && path.basename(outputPath) === "bin.js",
+  );
+  if (!entryOutput) {
+    throw new Error(
+      "vault-cli bundle metafile has no bin.js entry-point output; cannot enforce the entry-chunk byte budget.",
+    );
+  }
+  const [entryPath, { bytes: entryBytes }] = entryOutput;
+
+  const violations: string[] = [];
+  if (totalBytes > budgets.totalBytes) {
+    violations.push(
+      `total output ${totalBytes}B exceeds budget ${budgets.totalBytes}B`,
+    );
+  }
+  if (entryBytes > budgets.entryBytes) {
+    violations.push(
+      `entry chunk ${entryPath} ${entryBytes}B exceeds budget ${budgets.entryBytes}B`,
+    );
+  }
+  if (violations.length === 0) {
+    return { entryBytes, totalBytes };
+  }
+
+  // List the heaviest inputs so the failure is diagnosable from the build
+  // log alone: the culprit of graph creep is almost always near the top.
+  const largestInputs = Object.entries(metafile.inputs)
+    .sort(([, left], [, right]) => right.bytes - left.bytes)
+    .slice(0, 10)
+    .map(([inputPath, input]) => `  ${input.bytes}B ${inputPath}`);
+
+  throw new Error(
+    [
+      `vault-cli bundle exceeded its byte budget: ${violations.join("; ")}.`,
+      "Investigate the largest metafile inputs below before raising the budget (see baseline comment on the budget constants):",
+      ...largestInputs,
+    ].join("\n"),
+  );
+}
+
 function assertVaultCliBundleParity(input: {
   bundleOutDir: string;
   cliPackageDir: string;
@@ -124,8 +199,19 @@ function assertVaultCliBundleParity(input: {
   const bundledEntryPath = path.join(input.bundleOutDir, "bin.js");
 
   for (const probe of VAULT_CLI_BUNDLE_PARITY_PROBES) {
+    const unbundledStartedAt = performance.now();
     const expected = runVaultCliParityProbe(input.entryPath, probe, input.cliPackageDir);
+    const unbundledDurationMs = Math.round(performance.now() - unbundledStartedAt);
+    const bundledStartedAt = performance.now();
     const actual = runVaultCliParityProbe(bundledEntryPath, probe, input.cliPackageDir);
+    const bundledDurationMs = Math.round(performance.now() - bundledStartedAt);
+
+    // Warn-only longitudinal trend signal in the assembly log. Never turn
+    // this into a hard assertion: shared CI runners make wall-time budgets
+    // flake, and a budget loose enough to be stable would catch nothing.
+    console.log(
+      `parity probe \`${probe.join(" ")}\`: unbundled ${unbundledDurationMs}ms, bundled ${bundledDurationMs}ms`,
+    );
 
     // Symmetric unknown-command output would otherwise "pass" parity while
     // proving nothing — a renamed command or broken CLI bootstrap must fail
