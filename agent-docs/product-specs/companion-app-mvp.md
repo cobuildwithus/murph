@@ -12,6 +12,13 @@ getting Apple Health data into the existing Junction → device-syncd
 pipeline. WHOOP is one important Apple Health writer among several; scoring
 and baselines key off data categories, never vendor identity.
 
+Growth framing: the nearest payoff is not WHOOP — it is **Apple Watch and
+iPhone-health members, who currently cannot connect to Murph at all**
+(`apple-health` is an `unavailableRoute` on the connect page today). The
+WHOOP relay rides along. Constraint framing: company survival mode means
+this build is **time-boxed at days, not weeks** of focused work; any scope
+growth beyond this doc is a signal to stop and re-justify.
+
 ## Scope: Two Screens
 
 1. **Login** — Privy sign-in with phone or email OTP.
@@ -156,20 +163,45 @@ verification (existing `@privy-io/node`):
 
 1. `POST /api/device-sync/companion/sign-in-token`
    — resolve member → resolve/create Junction user (existing
-   `junction-client`) → `POST /v2/user/{user_id}/sign_in_token` (small
-   junction-client addition) → return once. Never persist or log the token
-   (redaction test required). Rate-limited. Sandbox/prod must be impossible
-   to mix. Request body carries `appInstallationId`, app/SDK versions for a
-   minimal `companion_installations` record (no health data).
+   `junction-client`) → **ensure an active junction `device_connection`
+   account bound to that Junction user id** → `POST
+   /v2/user/{user_id}/sign_in_token` (small junction-client addition) →
+   return once. Never persist or log the token (redaction test required).
+   Rate-limited. Sandbox/prod must be impossible to mix. Request body
+   carries `appInstallationId`, app/SDK versions for a minimal
+   `companion_installations` record (no health data).
 2. `GET /api/device-sync/companion/status`
    — last data receipt overall and per resource (sleep / workouts / heart
    rate / respiratory), sourced from the existing pipeline. This is what the
    Connect screen renders.
 
-Data lands in the **existing** Junction webhook → device-syncd pipeline; no
-ingestion changes for MVP. Importer idempotency + day-level recompute for
-late-arriving sleep edits are existing-pipeline concerns to confirm during
-the spike (see duplicate-import history).
+### Why the account-ensure step is load-bearing (verified in repo)
+
+Webhook ingestion resolves the account via
+`getConnectionByExternalAccount`; **webhooks for a Junction user with no
+matching `device_connection` record are delayed as orphans**
+(`public-ingress.ts` "Delaying webhook for unknown device sync account").
+The SDK flow has no Link callback to create that record, so the
+sign-in-token endpoint must do it. Rules:
+
+- Idempotent: resolve any existing junction account for the member first
+  (a member with a prior Junction Link device shares the same Junction
+  user) — re-creating identity is exactly what caused the June 2026
+  duplicate-import incident; reuse its externalRef discipline.
+- HealthKit data then projects automatically: `resolveJunctionOrigin` is
+  slug-agnostic (verified), so `apple_health_kit` sources flow through
+  `projectJunctionSources` without importer changes.
+- Resource enablement: webhook jobs for resources outside the configured
+  Junction resource set are skipped (with a reconcile-floor fallback) —
+  confirm the HealthKit resource slugs fall inside
+  `JUNCTION_ALLOWED_SUMMARY_RESOURCES` / `_TIMESERIES_RESOURCES` during the
+  spike.
+- The `apple-health` connect source on the web connect page stays
+  `unavailableRoute` for MVP (it is a mobile flow); flipping its display to
+  "use the iPhone app" copy is a fast-follow, not MVP.
+
+Importer idempotency + day-level recompute for late-arriving sleep edits
+are existing-pipeline concerns to confirm during the spike.
 
 ## Phase-1 Spike Gates (before MVP build is "real")
 
@@ -179,7 +211,10 @@ the spike (see duplicate-import history).
 4. Junction session persists across relaunch; account-switch forces clean
    re-sign-in; no duplicate Junction users on reinstall.
 5. Sleep, workouts, heart-rate/RHR-equivalent, respiratory (if present)
-   arrive in Junction sandbox and Murph's pipeline from a real device.
+   arrive in Junction sandbox and Murph's pipeline from a real device —
+   specifically: the first webhook is **accepted, not orphan-delayed**
+   (account-ensure works), and the HealthKit resource slugs are inside the
+   enabled-resource config.
 6. Historical depth measured at default and 365d-configured settings;
    sufficient for baselines.
 7. Attribution fields inspected in real webhook payloads; overlapping
