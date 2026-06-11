@@ -1,22 +1,17 @@
 import assert from 'node:assert/strict'
-import { fileURLToPath } from 'node:url'
 import { afterEach, test, vi } from 'vitest'
-
-function assistantCliSourcePath(relativeSourcePath: string): string {
-  return fileURLToPath(
-    new URL(`../../assistant-cli/src/${relativeSourcePath}`, import.meta.url),
-  )
-}
 
 // Ordinary (non-chat, non-setup) vault-cli invocations must not load the full
 // command manifest or the interactive ink UI stack (ink/react/yoga-layout).
 // Both leaked into the eager startup graph before 2026-06-11 and multiplied
 // hosted per-invocation CLI latency. Each forbidden module is mocked to throw
 // at load, so any re-introduced static import fails these tests.
+// The ink chat surface itself is guarded in-package by
+// `packages/assistant-cli/test/assistant-command-startup-imports.test.ts`;
+// reaching into that package's src tree from here is forbidden by
+// `scripts/verify-package-shape.ts`.
 const forbiddenStartupModules = [
   '../src/vault-cli-command-manifest.js',
-  assistantCliSourcePath('assistant-chat-ink.ts'),
-  assistantCliSourcePath('assistant/ui/ink.ts'),
   '@murphai/setup-cli/setup-assistant-wizard',
 ] as const
 
@@ -79,12 +74,6 @@ test('scoped hot-path modules do not import the manifest or ink surfaces at modu
   for (const moduleId of scopedHotPathModules) {
     await import(moduleId)
   }
-})
-
-test('assistant command registration does not import the ink chat surface at module load', async () => {
-  mockForbiddenStartupModules()
-
-  await import('@murphai/assistant-cli/commands/assistant')
 })
 
 test('model command registration does not import the setup assistant wizard at module load', async () => {
