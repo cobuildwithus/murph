@@ -280,6 +280,7 @@ export interface UpsertPublicDeviceSyncConnectionInput {
   tokens?: ProviderAuthTokens;
   metadata?: Record<string, unknown>;
   existingAccountGuard?: UpsertPublicDeviceSyncExistingAccountGuard | null;
+  reuseEstablishedConnection?: boolean;
   connectedAt: string;
   nextReconcileAt?: string | null;
 }
@@ -289,6 +290,11 @@ export interface MarkPublicDeviceSyncConnectionSetupFailedInput {
   now: string;
   code: string;
   message: string;
+}
+
+export interface UpsertPublicDeviceSyncConnectionResult {
+  account: PublicDeviceSyncAccount;
+  previousAccount: PublicDeviceSyncAccount | null;
 }
 
 export interface DeviceSyncWebhookTraceRecord {
@@ -335,6 +341,9 @@ export interface DeviceSyncPublicIngressStore {
     expectedOwnerId?: string,
   ): ConsumeOAuthStateResult | Promise<ConsumeOAuthStateResult>;
   upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): PublicDeviceSyncAccount | Promise<PublicDeviceSyncAccount>;
+  upsertConnectionWithPrevious?(
+    input: UpsertPublicDeviceSyncConnectionInput,
+  ): UpsertPublicDeviceSyncConnectionResult | Promise<UpsertPublicDeviceSyncConnectionResult>;
   markConnectionSetupFailed(
     input: MarkPublicDeviceSyncConnectionSetupFailedInput,
   ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
@@ -345,6 +354,7 @@ export interface DeviceSyncPublicIngressStore {
     provider: string,
     externalAccountId: string,
   ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
+  getConnectionOwnerId?(accountId: string): string | null | Promise<string | null>;
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult | Promise<DeviceSyncWebhookTraceClaimResult>;
   completeWebhookTrace(provider: string, traceId: string, claimToken: string): boolean | Promise<boolean>;
   releaseWebhookTrace(provider: string, traceId: string, claimToken: string): void | Promise<void>;

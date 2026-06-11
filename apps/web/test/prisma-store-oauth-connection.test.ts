@@ -821,6 +821,79 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(tx.deviceConnectionSecret.upsert).not.toHaveBeenCalled();
   });
 
+  it("returns the previous hosted account when reusing an established connection", async () => {
+    const existing = createConnection({
+      credentialKind: "provider_config",
+      displayName: "Junction",
+      externalAccountIdEncrypted: "enc:junction-user-123",
+      id: "dsc_123",
+      provider: "junction",
+      providerAccountBlindIndex: buildHostedProviderAccountBlindIndex({
+        key: BLIND_INDEX_KEY,
+        provider: "junction",
+        externalAccountId: "junction-user-123",
+      }),
+      providerConfigKey: "junction",
+      setupPhase: "source_confirmed",
+      status: "active",
+      userId: "user-123",
+    });
+
+    const tx = {
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(existing)),
+        create: vi.fn(async () => {
+          throw new Error("create should not be called");
+        }),
+        update: vi.fn(async () => {
+          throw new Error("update should not be called");
+        }),
+      },
+    };
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    const result = await store.upsertConnectionWithPrevious({
+      ownerId: "user-123",
+      provider: "junction",
+      externalAccountId: "junction-user-123",
+      displayName: "Junction",
+      status: "active",
+      setupPhase: "source_confirmed",
+      scopes: [],
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      metadata: {},
+      reuseEstablishedConnection: true,
+      connectedAt: "2026-03-25T01:00:00.000Z",
+      nextReconcileAt: "2026-03-25T02:00:00.000Z",
+    });
+
+    expect(result.account).toEqual(expect.objectContaining({
+      id: "dsc_123",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+      status: "active",
+      updatedAt: "2026-03-25T00:00:00.000Z",
+    }));
+    expect(result.previousAccount).toEqual(expect.objectContaining({
+      id: "dsc_123",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+      status: "active",
+    }));
+    expect(tx.deviceConnection.create).not.toHaveBeenCalled();
+    expect(tx.deviceConnection.update).not.toHaveBeenCalled();
+  });
+
   it("reactivates a disconnected hosted connection on successful OAuth reconnect", async () => {
     let stored = createConnection({
       accessTokenEncrypted: null,

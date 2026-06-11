@@ -24,9 +24,12 @@ const COMPANION_SDK_VERSION_MAX_ENTRIES = 10;
  * compatibility and persist or log nothing from it.
  */
 export function validateCompanionSignInRequestBody(body: Record<string, unknown>): void {
-  assertOptionalBoundedString(body, "platform");
-  assertOptionalBoundedString(body, "appInstallationId");
-  assertOptionalBoundedString(body, "appVersion");
+  const platform = readOptionalBoundedString(body, "platform");
+  if (platform !== null && platform !== "ios") {
+    throw companionRequestInvalid("platform must be ios when provided.");
+  }
+  readOptionalBoundedString(body, "appInstallationId");
+  readOptionalBoundedString(body, "appVersion");
 
   const sdkVersions = body.sdkVersions;
   if (sdkVersions === undefined || sdkVersions === null) {
@@ -164,16 +167,18 @@ function maxIsoTimestamp(current: string | null, candidate: string | null): stri
   return Date.parse(candidate) > Date.parse(current) ? candidate : current;
 }
 
-function assertOptionalBoundedString(body: Record<string, unknown>, key: string): void {
+function readOptionalBoundedString(body: Record<string, unknown>, key: string): string | null {
   const value = body[key];
 
   if (value === undefined || value === null) {
-    return;
+    return null;
   }
 
   if (typeof value !== "string" || value.length > COMPANION_METADATA_STRING_MAX_LENGTH) {
     throw companionRequestInvalid(`${key} must be a short string when provided.`);
   }
+
+  return value;
 }
 
 function companionRequestInvalid(message: string) {

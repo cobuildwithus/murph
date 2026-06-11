@@ -46,6 +46,8 @@ import type {
   PublicProviderDescriptor,
   SdkSignInSessionResult,
   StartConnectionInput,
+  UpsertPublicDeviceSyncConnectionInput,
+  UpsertPublicDeviceSyncConnectionResult,
 } from "./types.ts";
 
 export interface CreateDeviceSyncPublicIngressInput {
@@ -398,6 +400,14 @@ function resolveConnectionSetupExpiresAt(input: {
   return input.seededSetupExpiresAt;
 }
 
+function isEstablishedSdkConnection(account: PublicDeviceSyncAccount): boolean {
+  return account.status === "active" && account.setupPhase === "source_confirmed";
+}
+
+function shouldRunSdkConnectionEstablishedHook(existingAccount: PublicDeviceSyncAccount | null): boolean {
+  return !existingAccount || !isEstablishedSdkConnection(existingAccount);
+}
+
 function assertSeededConnectionExternalAccountMatches(input: {
   provider: DeviceSyncProvider;
   seededExternalAccountId: string | null;
@@ -606,36 +616,54 @@ export class DeviceSyncPublicIngress {
       normalizeConfiguredDeviceSyncJobInput(provider.provider, job, "sdk sign-in")
     );
     const setupPhase = resolveConnectionSetupPhase(connection, descriptor.connectionKind);
+    const existingAccount = await this.store.getConnectionByExternalAccount(
+      provider.provider,
+      connection.externalAccountId,
+    );
+    const canReuseExistingAccount = existingAccount
+      ? await this.canReuseEstablishedSdkConnection(existingAccount, ownerId)
+      : false;
 
-    const account = await this.store.upsertConnection({
-      ownerId,
-      provider: provider.provider,
-      externalAccountId: connection.externalAccountId,
-      displayName: connection.displayName ?? null,
-      setupPhase,
-      setupExpiresAt: resolveConnectionSetupExpiresAt({
-        connection,
+    let account: PublicDeviceSyncAccount;
+    let previousAccount = existingAccount;
+    if (canReuseExistingAccount && existingAccount) {
+      account = existingAccount;
+    } else {
+      const persisted = await this.upsertConnectionWithPrevious({
+        ownerId,
+        provider: provider.provider,
+        externalAccountId: connection.externalAccountId,
+        displayName: connection.displayName ?? null,
         setupPhase,
-        seededSetupExpiresAt: null,
-      }),
-      scopes: connection.scopes?.length
-        ? [...connection.scopes]
-        : [...descriptor.defaultScopes],
-      credential: resolveAndValidateProviderConnectionCredential(provider, connection),
-      metadata: connection.metadata ?? {},
-      connectedAt: now,
-      nextReconcileAt: connection.nextReconcileAt ?? null,
-    });
+        setupExpiresAt: resolveConnectionSetupExpiresAt({
+          connection,
+          setupPhase,
+          seededSetupExpiresAt: null,
+        }),
+        scopes: connection.scopes?.length
+          ? [...connection.scopes]
+          : [...descriptor.defaultScopes],
+        credential: resolveAndValidateProviderConnectionCredential(provider, connection),
+        metadata: connection.metadata ?? {},
+        reuseEstablishedConnection: true,
+        connectedAt: now,
+        nextReconcileAt: connection.nextReconcileAt ?? null,
+      });
+      account = persisted.account;
+      previousAccount = persisted.previousAccount;
+    }
 
-    await this.hooks.onConnectionEstablished?.({
-      account,
-      connection: {
-        ...connection,
-        ...(initialJobs ? { initialJobs } : {}),
-      },
-      provider,
-      now,
-    } satisfies DeviceSyncPublicIngressConnectionEstablishedInput);
+    if (!canReuseExistingAccount && shouldRunSdkConnectionEstablishedHook(previousAccount)) {
+      await this.runSdkConnectionEstablishedHook({
+        account,
+        connection: {
+          ...connection,
+          ...(initialJobs ? { initialJobs } : {}),
+        },
+        provider,
+        now,
+      });
+    }
 
     const token = await handler.createSignInToken({
       externalAccountId: connection.externalAccountId,
@@ -646,6 +674,53 @@ export class DeviceSyncPublicIngress {
       signInToken: token.signInToken,
       environment: token.environment,
     };
+  }
+
+  private async upsertConnectionWithPrevious(
+    input: UpsertPublicDeviceSyncConnectionInput,
+  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
+    const upsertConnectionWithPrevious = this.store.upsertConnectionWithPrevious;
+    if (upsertConnectionWithPrevious) {
+      return await upsertConnectionWithPrevious.call(this.store, input);
+    }
+
+    const previousAccount = await this.store.getConnectionByExternalAccount(
+      input.provider,
+      input.externalAccountId,
+    );
+    const account = await this.store.upsertConnection(input);
+    return { account, previousAccount };
+  }
+
+  private async canReuseEstablishedSdkConnection(
+    account: PublicDeviceSyncAccount,
+    ownerId: string,
+  ): Promise<boolean> {
+    if (!isEstablishedSdkConnection(account)) {
+      return false;
+    }
+
+    const getConnectionOwnerId = this.store.getConnectionOwnerId;
+    if (!getConnectionOwnerId) {
+      return false;
+    }
+
+    return await getConnectionOwnerId.call(this.store, account.id) === ownerId;
+  }
+
+  private async runSdkConnectionEstablishedHook(
+    input: DeviceSyncPublicIngressConnectionEstablishedInput,
+  ): Promise<void> {
+    try {
+      await this.hooks.onConnectionEstablished?.(input);
+    } catch (error) {
+      this.logger.warn?.("Device sync SDK sign-in established hook failed; continuing token mint.", {
+        provider: input.provider.provider,
+        accountId: input.account.id,
+        externalAccountIdHash: hashExternalAccountIdForLogs(input.connection.externalAccountId),
+        error: summarizePublicIngressError(error),
+      });
+    }
   }
 
   async handleConnectionCallback(input: HandleConnectionCallbackInput): Promise<CompleteConnectionResult> {
@@ -1474,4 +1549,5 @@ export type {
   PublicProviderDescriptor,
   SdkSignInSessionResult,
   UpsertPublicDeviceSyncConnectionInput,
+  UpsertPublicDeviceSyncConnectionResult,
 } from "./types.ts";

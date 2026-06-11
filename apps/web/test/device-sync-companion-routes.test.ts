@@ -261,6 +261,30 @@ describe("device sync companion routes", () => {
       expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
     });
 
+    it("rejects non-iOS companion platform metadata without reaching Junction", async () => {
+      mockVerifiedPrivyUser();
+
+      const response = await signInTokenRoute.POST(signInTokenRequest({ platform: "android" }));
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: "COMPANION_REQUEST_INVALID" },
+      });
+      expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
+    });
+
+    it("rejects empty companion platform metadata without reaching Junction", async () => {
+      mockVerifiedPrivyUser();
+
+      const response = await signInTokenRoute.POST(signInTokenRequest({ platform: "" }));
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: "COMPANION_REQUEST_INVALID" },
+      });
+      expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
+    });
+
     it("returns exactly the sign-in token and environment for the resolved member", async () => {
       mockVerifiedPrivyUser();
 

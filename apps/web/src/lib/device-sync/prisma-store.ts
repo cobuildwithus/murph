@@ -9,6 +9,7 @@ import type {
   OAuthStateRecord,
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
+  UpsertPublicDeviceSyncConnectionResult,
 } from "@murphai/device-syncd/public-ingress";
 import type { HostedExecutionDeviceSyncStagedDirtyAck } from "@murphai/device-syncd/hosted-runtime";
 import type { HostedDeviceSyncSecretTestCodec } from "./prisma-store/connection-secrets";
@@ -141,6 +142,12 @@ export class PrismaDeviceSyncControlPlaneStore
 
   async upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): Promise<PublicDeviceSyncAccount> {
     return this.connections.upsertConnection(input);
+  }
+
+  async upsertConnectionWithPrevious(
+    input: UpsertPublicDeviceSyncConnectionInput,
+  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
+    return this.connections.upsertConnectionWithPrevious(input);
   }
 
   async markConnectionSetupFailed(
