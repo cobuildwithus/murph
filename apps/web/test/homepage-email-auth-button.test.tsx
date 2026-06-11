@@ -240,6 +240,19 @@ test("HomepageEmailAuthButton uses no-signup mode for login code sends and resen
     disableSignup: true,
   });
 
+  const codeInput = container.querySelector(
+    "input[data-input-otp]",
+  ) as HTMLInputElement | null;
+  expect(codeInput).toBeTruthy();
+
+  await act(async () => {
+    if (codeInput) {
+      setInputValue(window, codeInput, "654321");
+    }
+  });
+
+  expect(codeInput?.value).toBe("654321");
+
   const resendButton = Array.from(container.querySelectorAll("button")).find(
     (candidate) => candidate.textContent?.includes("Resend code"),
   );
@@ -253,6 +266,7 @@ test("HomepageEmailAuthButton uses no-signup mode for login code sends and resen
     email: "user@example.com",
     disableSignup: true,
   });
+  expect(codeInput?.value).toBe("");
 });
 
 test("HomepageEmailAuthButton does not expose no-account send-code errors in login mode", async () => {
