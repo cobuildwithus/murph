@@ -44,6 +44,17 @@ const DIVERGENT_CLI_SOURCE = [
   "",
 ].join("\n");
 
+// Same divergence, but on stderr with empty stdout and a nonzero exit — the
+// exact shape of the scoped no-vault probes.
+const STDERR_DIVERGENT_CLI_SOURCE = [
+  "import { createRequire } from 'node:module';",
+  "const require = createRequire(import.meta.url);",
+  "require('../package.json');",
+  "console.error(import.meta.url);",
+  "process.exitCode = 1;",
+  "",
+].join("\n");
+
 async function stageFakeInstalledCli(cliSource: string): Promise<string> {
   const bundleDir = await mkdtemp(path.join(tmpdir(), "murph-runner-cli-bundle-"));
   temporaryDirectories.push(bundleDir);
@@ -53,7 +64,12 @@ async function stageFakeInstalledCli(cliSource: string): Promise<string> {
   await mkdir(path.join(bundleDir, "node_modules", ".bin"), { recursive: true });
   await writeFile(
     path.join(cliPackageDir, "package.json"),
-    JSON.stringify({ name: "@murphai/murph", type: "module", version: "9.9.9" }),
+    JSON.stringify({
+      bin: { murph: "dist/bin.js", "vault-cli": "dist/bin.js" },
+      name: "@murphai/murph",
+      type: "module",
+      version: "9.9.9",
+    }),
     "utf8",
   );
   await writeFile(path.join(cliPackageDir, "dist", "bin.js"), cliSource, "utf8");
@@ -91,11 +107,25 @@ describe("runner bundle vault-cli esbuild step", () => {
     await access(bundledEntry);
 
     for (const binName of ["vault-cli", "murph"]) {
-      const wrapper = await readFile(
-        path.join(bundleDir, "node_modules", ".bin", binName),
-        "utf8",
-      );
+      const wrapperPath = path.join(bundleDir, "node_modules", ".bin", binName);
+      const wrapper = await readFile(wrapperPath, "utf8");
       expect(wrapper).toContain("../@murphai/murph/.bundle/bin.js");
+
+      // Execute the wrapper itself, exactly as the hosted runtime does via
+      // PATH — this catches shebang, chmod, and relative-path regressions
+      // that reading the wrapper text cannot.
+      const wrapperOutput = execFileSync(wrapperPath, ["--help"], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HOME: path.join(bundleDir, ".parity-probe-home"),
+          VAULT: "",
+        },
+      });
+      expect(JSON.parse(wrapperOutput)).toEqual({
+        args: ["--help"],
+        version: "9.9.9",
+      });
     }
 
     // The bundled binary must resolve ../package.json from its on-disk
@@ -113,6 +143,17 @@ describe("runner bundle vault-cli esbuild step", () => {
 
   it("fails the assembly when bundled output diverges from the unbundled binary", async () => {
     const bundleDir = await stageFakeInstalledCli(DIVERGENT_CLI_SOURCE);
+
+    await expect(bundleInstalledVaultCliBinary(bundleDir)).rejects.toThrow(
+      /Bundled vault-cli output diverged/,
+    );
+  });
+
+  // The scoped no-vault probes exit nonzero with their error on stderr and an
+  // empty stdout, so stderr must participate in parity — otherwise a broken
+  // bundled graph that fails differently still "matches".
+  it("fails the assembly when only stderr diverges between the binaries", async () => {
+    const bundleDir = await stageFakeInstalledCli(STDERR_DIVERGENT_CLI_SOURCE);
 
     await expect(bundleInstalledVaultCliBinary(bundleDir)).rejects.toThrow(
       /Bundled vault-cli output diverged/,
