@@ -207,7 +207,9 @@ describe('Codex assistant registry helpers', () => {
             item: {
               type: 'commandExecution',
               id: 'item_1',
-              command: "bash -lc vault-cli samples query --metric 'sleep score'",
+              // Codex shlex-joins the argv, so multi-word scripts arrive as a
+              // quoted `bash -lc "..."` wrapper around the real command.
+              command: 'bash -lc "vault-cli samples query --metric \'sleep score\'"',
               aggregatedOutput: 'x'.repeat(2048),
               durationMs: 420,
             },
@@ -389,13 +391,24 @@ describe('Codex assistant registry helpers', () => {
         // 'murph' is the second allowlisted head binary; labels stop at three
         // tokens so trailing args never persist.
         commandEvent('item_2', 'murph reminders list --all glucose', 30),
-        // Quoted shell wrapping leaves no safe head token: fail closed to the
-        // generic 'command' label instead of persisting quoted content.
+        // Quoted shell wrapping (Codex shlex-joins multi-word scripts into
+        // `bash -lc "..."`) unwraps one layer, then the same token rules apply.
         commandEvent('item_3', 'bash -lc "vault-cli samples query"', 20),
         // Repeated labels aggregate into one entry instead of multiplying.
         commandEvent('item_4', 'murph reminders list', 25),
         // Overlong safe binary names truncate to the persisted label cap.
         commandEvent('item_5', 'a'.repeat(70), 10),
+        // After unwrapping, escaped quoted member content still stops at the
+        // non-allowlisted binary name.
+        commandEvent('item_6', 'bash -lc "grep \\"glucose level\\" journal.md"', 15),
+        // Quoted path-invoked scripts still fail closed after unwrapping.
+        commandEvent('item_7', 'bash -lc "scripts/check-member.sh"', 5),
+        // A shell head inside the script would put the (possibly member-named)
+        // script filename in the head slot: fail closed, never skip into it.
+        commandEvent('item_8', 'bash -lc "bash my-glucose-analysis.sh"', 4),
+        // Multiple quoted regions are not a single wrapped script; the greedy
+        // splice must not surface inner words as a head binary.
+        commandEvent('item_9', 'bash -lc "hypertension log" > "out"', 3),
       ],
       turnId: 'turn_labels',
     })
@@ -410,8 +423,63 @@ describe('Codex assistant registry helpers', () => {
     expect(profile?.tools).toEqual([
       { calls: 2, durationMs: 20, label: 'murph reminders list', outputChars: 55 },
       { calls: 1, durationMs: 10, label: 'vault-cli', outputChars: 40 },
-      { calls: 1, durationMs: 10, label: 'command', outputChars: 20 },
+      { calls: 1, durationMs: 10, label: 'vault-cli samples query', outputChars: 20 },
+      { calls: 1, durationMs: 10, label: 'grep', outputChars: 15 },
+      { calls: 3, durationMs: 30, label: 'command', outputChars: 12 },
       { calls: 1, durationMs: 10, label: 'a'.repeat(64), outputChars: 10 },
+    ])
+  })
+
+  it('fails closed on adversarial shell-wrapper quoting shapes', () => {
+    const commandEvent = (id: string, command: string, outputChars: number) => ({
+      method: 'item/completed',
+      params: {
+        item: {
+          type: 'commandExecution',
+          id,
+          command,
+          aggregatedOutput: 'x'.repeat(outputChars),
+          durationMs: 10,
+        },
+      },
+    })
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_quoting' } } },
+        // Single-quoted wrappers (Python shlex.join quotes with ') unwrap the
+        // same way as double-quoted ones.
+        commandEvent('item_1', "bash -lc 'vault-cli samples query'", 30),
+        // Single-word scripts arrive unquoted; they pass through after the
+        // wrapper strip instead of failing closed.
+        commandEvent('item_2', 'bash -lc ls', 9),
+        // POSIX '\'' splice inside a single-quoted wrapper is two quoted
+        // regions, not one script: keep the original so the bash head fails
+        // closed instead of splicing member content into the label.
+        commandEvent('item_3', "bash -lc 'vault-cli '\\''member name'\\''", 6),
+        // `\\"` is an escaped backslash followed by a REAL closing quote
+        // (even backslash parity): a last-char-only escape check would
+        // wrongly unwrap and label 'grep'.
+        commandEvent('item_4', 'bash -lc "grep \\\\" glucose-note"', 5),
+        // Unclosed quote is not a complete quoted region: fail closed rather
+        // than stripping the lone leading quote.
+        commandEvent('item_5', 'bash -lc "grep glucose-log', 4),
+        // A lone quote both starts and ends with the quote char; the length
+        // guard must still fail it closed.
+        commandEvent('item_6', 'bash -lc "', 3),
+        // Flag clusters without 'c' are not command wrappers; the quoted
+        // remainder must not unwrap into a labelable head.
+        commandEvent('item_7', 'bash -x "vault-cli samples"', 2),
+        // A bare flag head without any wrapper fails closed instead of
+        // skipping forward into positional (possibly member) content.
+        commandEvent('item_8', '-x glucose-export', 1),
+      ],
+      turnId: 'turn_quoting',
+    })
+
+    expect(profile?.tools).toEqual([
+      { calls: 1, durationMs: 10, label: 'vault-cli samples query', outputChars: 30 },
+      { calls: 6, durationMs: 60, label: 'command', outputChars: 21 },
+      { calls: 1, durationMs: 10, label: 'ls', outputChars: 9 },
     ])
   })
 

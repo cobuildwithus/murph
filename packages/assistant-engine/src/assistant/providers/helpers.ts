@@ -590,6 +590,10 @@ function readAssistantCodexThreadTokenUsageEvents(input: {
 const ASSISTANT_TURN_PROFILE_SAFE_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/u
 const ASSISTANT_TURN_PROFILE_SUBCOMMAND_TOKEN_PATTERN = /^[a-z][a-z0-9-]{0,24}$/u
 const ASSISTANT_TURN_PROFILE_SHELL_TOKEN_PATTERN = /^(?:.*\/)?(?:ba|z|da)?sh$/u
+// Codex shlex-joins shell executions into `bash -lc <script>` (multi-word
+// scripts arrive double-quoted), so strip one wrapper prefix before labeling.
+const ASSISTANT_TURN_PROFILE_SHELL_WRAPPER_PREFIX_PATTERN =
+  /^\s*(?:\S*\/)?(?:ba|z|da)?sh\s+-[a-z]*c[a-z]*\s+/u
 // Only these head binaries get subcommand tokens in persisted labels. For any
 // other command the first positional token can be member content (search
 // terms, vault paths), so the label stops at the binary name.
@@ -735,13 +739,18 @@ function readAssistantTurnProfileToolAggregate(
 // argument of arbitrary commands (grep patterns, file paths) can carry member
 // health content even when it matches a benign-looking token charset.
 function buildAssistantTurnProfileCommandLabel(command: string | null): string {
-  const tokens = (command ?? '').split(/\s+/u).filter((token) => token.length > 0)
+  const tokens = unwrapAssistantTurnProfileShellWrapper(command ?? '')
+    .split(/\s+/u)
+    .filter((token) => token.length > 0)
   const labelTokens: string[] = []
 
   for (const token of tokens) {
     if (labelTokens.length === 0) {
+      // A shell or flag head surviving wrapper stripping is not a labelable
+      // binary (`bash member-script.sh` would put the script filename in the
+      // head slot): fail closed instead of skipping into positional content.
       if (ASSISTANT_TURN_PROFILE_SHELL_TOKEN_PATTERN.test(token) || token.startsWith('-')) {
-        continue
+        break
       }
       // Path-invoked binaries (`scripts/check-x.sh`) can carry member-named
       // files; only bare binary names may persist.
@@ -767,6 +776,44 @@ function buildAssistantTurnProfileCommandLabel(command: string | null): string {
   return truncateAssistantTurnProfileLabel(
     labelTokens.length > 0 ? labelTokens.join(' ') : 'command',
   )
+}
+
+// Strip one `bash -lc <script>` wrapper layer so the inner head binary can be
+// labeled. The quoted form unwraps only when the whole remainder is a single
+// quoted region with no unescaped inner quote of the same type; any other
+// shape keeps the original string, whose quote/shell head then fails closed in
+// the token sanitizer. This keeps the fail-closed guarantee independent of how
+// the provider quotes commands.
+function unwrapAssistantTurnProfileShellWrapper(command: string): string {
+  const wrapper = ASSISTANT_TURN_PROFILE_SHELL_WRAPPER_PREFIX_PATTERN.exec(command)
+  if (!wrapper) {
+    return command
+  }
+  const script = command.slice(wrapper[0].length)
+  const quote = script[0]
+  if (quote !== '"' && quote !== "'") {
+    return script
+  }
+  if (script.length < 2 || !script.endsWith(quote)) {
+    return command
+  }
+  const inner = script.slice(1, -1)
+  return hasAssistantTurnProfileUnescapedQuote(inner, quote) ? command : inner
+}
+
+function hasAssistantTurnProfileUnescapedQuote(inner: string, quote: string): boolean {
+  let backslashes = 0
+  for (const char of inner) {
+    if (char === '\\') {
+      backslashes += 1
+      continue
+    }
+    if (char === quote && backslashes % 2 === 0) {
+      return true
+    }
+    backslashes = 0
+  }
+  return false
 }
 
 function truncateAssistantTurnProfileLabel(label: string): string {
