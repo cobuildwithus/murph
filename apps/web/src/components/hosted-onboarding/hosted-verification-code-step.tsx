@@ -1,5 +1,5 @@
-import type { ReactNode, Ref } from "react";
-import { useId } from "react";
+import type { ReactNode, RefObject } from "react";
+import { useId, useRef } from "react";
 
 import { Button } from "@/src/components/ui/button";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/src/components/ui/input-otp";
@@ -33,12 +33,23 @@ export function HostedVerificationCodeStep({
   primaryActionPendingLabel: string;
   secondaryAction?: ReactNode;
   size?: "default" | "compact";
-  inputRef?: Ref<HTMLInputElement>;
+  inputRef?: RefObject<HTMLInputElement | null>;
   onCodeChange: (value: string) => void;
   onResendCode: () => void;
   onSubmit: () => void;
 }) {
   const codeInputId = useId();
+  const localInputRef = useRef<HTMLInputElement | null>(null);
+  const codeInputRef = inputRef ?? localInputRef;
+  // iOS draws native selection handles over the OTP boxes after one-time-code
+  // autofill (input-otp keeps a ranged selection on its hidden input, and CSS
+  // cannot hide the handles; see input-otp issues #75 and #110). Blurring on
+  // completion dismisses them, along with the keyboard, while the code
+  // auto-submits.
+  const handleComplete = () => {
+    codeInputRef.current?.blur();
+    onSubmit();
+  };
 
   return (
     <>
@@ -63,11 +74,11 @@ export function HostedVerificationCodeStep({
           data-1p-ignore
           data-lpignore="true"
           maxLength={CODE_LENGTH}
-          ref={inputRef}
+          ref={codeInputRef}
           value={code}
           disabled={disabled}
           onChange={onCodeChange}
-          onComplete={onSubmit}
+          onComplete={handleComplete}
         >
           <InputOTPGroup className="w-full justify-center gap-2">
             {Array.from({ length: CODE_LENGTH }, (_, index) => (
