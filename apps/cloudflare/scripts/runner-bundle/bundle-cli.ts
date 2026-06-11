@@ -40,6 +40,18 @@ const VAULT_CLI_BUNDLE_FORBIDDEN_INPUT_MARKERS = [
 
 const VAULT_CLI_BUNDLE_DIRECTORY_NAME = ".bundle";
 
+// Known divergence the parity battery cannot reach (it would need a live
+// codex session): assistant-engine resolves two assets relative to its own
+// module location, which differs inside chunks — `resolveAssistantSkillsRoot`
+// lands on `@murphai/murph/skills` (absent) instead of
+// `@murphai/assistant-engine/skills`, and the prebuilt CLI surface contract
+// path misses, silently falling back to runtime generation. Hosted production
+// is unaffected (the runtime runs the engine unbundled via
+// `dist/container-entrypoint.js`); only an in-container `vault-cli assistant
+// run` through the bundled wrapper would hit these, degrading softly. If that
+// path ever becomes load-bearing, make those resolvers honor env overrides
+// before relying on the bundle.
+
 // Bundled and unbundled binaries must produce byte-identical output on the
 // discovery surfaces and on a representative scoped command (which exercises
 // command routing, the loader-backed services, and the lazy runtime imports).

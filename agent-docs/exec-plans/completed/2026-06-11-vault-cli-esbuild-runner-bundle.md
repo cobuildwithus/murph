@@ -46,4 +46,4 @@ Silent-failure class is fenced by an assembly-time parity battery: bundled vs un
 
 ## Status
 
-Active.
+Completed 2026-06-11; shipped as PR #134 (stacked on PR #131).
