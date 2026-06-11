@@ -76,6 +76,10 @@
       "path": "fixtures/sample-imports/measurements/measurement.json"
     },
     {
+      "id": "event-jsonl",
+      "path": "fixtures/sample-imports/events/events.jsonl"
+    },
+    {
       "id": "heart-rate-csv",
       "path": "fixtures/sample-imports/samples/heart-rate.csv"
     },
