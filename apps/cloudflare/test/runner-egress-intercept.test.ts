@@ -375,7 +375,7 @@ describe("hostedRunnerIntercept", () => {
       createInterceptEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         MURPH_DATA_API_KEY: "data-api-worker-secret",
-        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
         validateActiveRuntimeWriteFence,
       }),
       { containerId: "opaque-container-id" },
@@ -420,7 +420,7 @@ describe("hostedRunnerIntercept", () => {
       createInterceptEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         MURPH_DATA_API_KEY: "data-api-worker-secret",
-        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
         validateActiveRuntimeWriteFence,
       }),
       { containerId: "opaque-container-id" },
@@ -439,7 +439,7 @@ describe("hostedRunnerIntercept", () => {
     }) => createActiveRuntimeWriteFenceValidationResult(input));
     const env = createInterceptEnv({
       MURPH_DATA_API_KEY: "data-api-worker-secret",
-      readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+      readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
       validateActiveRuntimeWriteFence,
     });
     delete env.HOSTED_WEB_BASE_URL;
@@ -473,7 +473,7 @@ describe("hostedRunnerIntercept", () => {
         createInterceptEnv({
           HOSTED_WEB_BASE_URL: "https://web.example.test",
           MURPH_DATA_API_KEY: dataApiKey,
-          readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+          readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
           validateActiveRuntimeWriteFence,
         }),
         { containerId: "opaque-container-id" },
@@ -519,7 +519,7 @@ describe("hostedRunnerIntercept", () => {
       createInterceptEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         MURPH_DATA_API_KEY: "data-api-worker-secret",
-        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
         validateActiveRuntimeWriteFence,
       }),
       { containerId: "opaque-container-id" },
@@ -565,7 +565,7 @@ describe("hostedRunnerIntercept", () => {
       createInterceptEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         MURPH_DATA_API_KEY: "data-api-worker-secret",
-        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
         validateActiveRuntimeWriteFence,
       }),
       { containerId: "opaque-container-id" },
@@ -595,7 +595,7 @@ describe("hostedRunnerIntercept", () => {
       createInterceptEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         MURPH_DATA_API_KEY: "data-api-worker-secret",
-        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
         validateActiveRuntimeWriteFence,
       }),
       { containerId: "opaque-container-id" },
@@ -666,7 +666,7 @@ describe("hostedRunnerIntercept", () => {
         HOSTED_WEB_BASE_URL: "http://localhost:3000",
         MURPH_DATA_API_KEY: "data-api-worker-secret",
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
-        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
         validateActiveRuntimeWriteFence,
       }),
       { containerId: "opaque-container-id" },
@@ -856,7 +856,7 @@ describe("hostedRunnerIntercept", () => {
     );
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
-      readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+      readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
       validateActiveRuntimeWriteFence,
       validateRuntimeProviderEgressToken,
     });
@@ -907,7 +907,7 @@ describe("hostedRunnerIntercept", () => {
     }) => createActiveRuntimeWriteFenceValidationResult(input));
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
-      readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+      readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
       validateActiveRuntimeWriteFence,
     });
 
@@ -990,7 +990,7 @@ describe("hostedRunnerIntercept", () => {
     );
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
-      readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+      readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
       validateActiveRuntimeWriteFence,
     });
 
@@ -1034,7 +1034,7 @@ describe("hostedRunnerIntercept", () => {
     );
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
-      readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+      readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
       validateActiveRuntimeWriteFence,
     });
 
@@ -4492,7 +4492,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       }),
       createInterceptEnv({
         AI: { run: aiRun },
-        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
         validateActiveRuntimeWriteFence,
       }),
       { containerId: "opaque-container-id" },
@@ -4536,7 +4536,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     }) => createActiveRuntimeWriteFenceValidationResult(input));
     const env = createInterceptEnv({
       AI: { run: aiRun },
-      readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+      readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
       validateActiveRuntimeWriteFence,
     });
 
@@ -4582,7 +4582,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         method: "POST",
       }),
       createInterceptEnv({
-        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
         validateActiveRuntimeWriteFence: async (input) =>
           createActiveRuntimeWriteFenceValidationResult(input),
       }),
@@ -4606,7 +4606,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       }),
       createInterceptEnv({
         AI: { run: vi.fn() },
-        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
         validateActiveRuntimeWriteFence: async (input) =>
           createActiveRuntimeWriteFenceValidationResult(input),
       }),
@@ -4625,7 +4625,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
             throw new Error("Workers AI unavailable");
           }),
         },
-        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
         validateActiveRuntimeWriteFence: async (input) =>
           createActiveRuntimeWriteFenceValidationResult(input),
       }),
@@ -4647,7 +4647,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
             text: "  text-only transcript  ",
           })),
         },
-        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
         validateActiveRuntimeWriteFence: async (input) =>
           createActiveRuntimeWriteFenceValidationResult(input),
       }),
@@ -4679,7 +4679,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
             transcription_info: { duration: -2, language: "   " },
           })),
         },
-        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
         validateActiveRuntimeWriteFence: async (input) =>
           createActiveRuntimeWriteFenceValidationResult(input),
       }),
@@ -4699,7 +4699,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       new Request(TRANSCRIBE_URL, { method: "POST" }),
       createInterceptEnv({
         AI: { run: vi.fn() },
-        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
         validateActiveRuntimeWriteFence: async (input) =>
           createActiveRuntimeWriteFenceValidationResult(input),
       }),
@@ -4718,7 +4718,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         }),
         createInterceptEnv({
           AI: { run: vi.fn(async () => output) },
-          readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+          readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
           validateActiveRuntimeWriteFence: async (input) =>
             createActiveRuntimeWriteFenceValidationResult(input),
         }),

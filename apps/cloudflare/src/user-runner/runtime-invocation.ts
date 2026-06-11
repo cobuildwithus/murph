@@ -41,6 +41,7 @@ import {
 } from "../web-control-plane.ts";
 import {
   buildHostedRunnerMetadataOnlyErrorDetails,
+  buildHostedRunnerRedactedErrorJson,
 } from "./diagnostics.js";
 import type {
   RuntimeProcessingCommandBudget,
@@ -55,6 +56,7 @@ import type { RunnerStateRecord } from "./types.js";
 import { RunnerStoreCache } from "./runner-store-cache.js";
 import type { RunnerAlarmCoordinator } from "./alarm-coordinator.js";
 
+const RUNTIME_ATTEMPT_LIVENESS_PROBE_TIMEOUT_MS = 5_000;
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_CONTEXT =
   "murph.hosted.workspace-snapshot-path-hash.v1";
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_TEXT_ENCODER = new TextEncoder();
@@ -183,6 +185,37 @@ export class RuntimeInvocationService {
     try {
       result = await this.invokePreparedWorkspaceRunner(input.prepared);
     } catch (error) {
+      // A failed transport call does not prove the invocation died. Probe the
+      // container before revoking authority: clearing the fence under a live
+      // invocation orphans it as an unwakeable zombie that blocks the runner
+      // slot until its idle timer expires.
+      if (await this.readPreparedAttemptStillActiveBestEffort(input.prepared)) {
+        if (input.acceptedProcessingAttempt) {
+          await this.recordAcceptedRuntimeAttemptFailureBestEffort({
+            attemptStillActive: true,
+            error,
+            executionInput,
+            token,
+            workspaceVersion,
+          });
+        }
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+            orchestrationAttemptId: executionInput.orchestrationAttemptId,
+            transportFailureFenceCleared: false,
+            workspaceAttemptId: token.attemptId,
+          },
+          level: "warn",
+          message:
+            "Hosted runner runtime transport failed while the invocation is still active; keeping the write fence.",
+          phase: "failed",
+          userId: executionInput.userId,
+        });
+        throw error;
+      }
+
       if (input.acceptedProcessingAttempt) {
         const committedResult =
           await this.readAcceptedRuntimeCommittedProgressAfterTransportFailure({
@@ -226,6 +259,7 @@ export class RuntimeInvocationService {
       await this.input.alarmCoordinator.sync(failed.record);
       if (input.acceptedProcessingAttempt && failed.failed) {
         await this.recordAcceptedRuntimeAttemptFailureBestEffort({
+          attemptStillActive: false,
           error,
           executionInput,
           token,
@@ -560,7 +594,87 @@ export class RuntimeInvocationService {
     });
   }
 
+  /**
+   * Best-effort check that the prepared invocation is still running inside the
+   * RunnerContainer Durable Object. Used on transport failure to distinguish
+   * "the invocation died" from "only my call to it died". Fails toward `false`
+   * (today's clear-the-fence behavior) on probe error or timeout, and cannot
+   * see liveness across a RunnerContainer DO restart because the active-op
+   * record is in-memory; both fall back to the pre-existing recovery paths.
+   */
+  private async readPreparedAttemptStillActiveBestEffort(
+    prepared: PreparedRuntimeInvocation,
+  ): Promise<boolean> {
+    const namespace = this.input.runnerContainerNamespace;
+    if (!namespace) {
+      return false;
+    }
+    let probeTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const container = namespace.getByName(prepared.runnerContainerName);
+      if (!container.readActiveRuntimeUserFence) {
+        return false;
+      }
+      const active = await Promise.race([
+        container.readActiveRuntimeUserFence(),
+        new Promise<null>((resolve) => {
+          probeTimer = setTimeout(
+            () => resolve(null),
+            RUNTIME_ATTEMPT_LIVENESS_PROBE_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      if (active === null) {
+        this.emitAttemptLivenessProbeUnconfirmedLog({
+          prepared,
+          probeOutcome: "timeout",
+        });
+        return false;
+      }
+      return active.active
+        && active.userId === prepared.input.userId
+        // Compare the generation actually sent in the container job request.
+        && active.attemptId === prepared.token.attemptId
+        && active.leaseGeneration === prepared.token.generation;
+    } catch (error) {
+      this.emitAttemptLivenessProbeUnconfirmedLog({
+        error,
+        prepared,
+        probeOutcome: "error",
+      });
+      return false;
+    } finally {
+      if (probeTimer !== undefined) {
+        clearTimeout(probeTimer);
+      }
+    }
+  }
+
+  private emitAttemptLivenessProbeUnconfirmedLog(input: {
+    error?: unknown;
+    prepared: PreparedRuntimeInvocation;
+    probeOutcome: "error" | "timeout";
+  }): void {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        ...(input.error === undefined
+          ? {}
+          : buildHostedRunnerMetadataOnlyErrorDetails(input.error)),
+        attemptLivenessProbeOutcome: input.probeOutcome,
+        orchestrationAttemptId: input.prepared.input.orchestrationAttemptId,
+        workspaceAttemptId: input.prepared.token.attemptId,
+      },
+      level: "warn",
+      message:
+        "Hosted runner attempt liveness probe was unconfirmed; clearing the write fence as before.",
+      phase: "failed",
+      userId: input.prepared.input.userId,
+    });
+  }
+
   private async recordAcceptedRuntimeAttemptFailureBestEffort(input: {
+    attemptStillActive: boolean;
     error: unknown;
     executionInput: RuntimeInvocationInput;
     token: RunnerWriteFenceToken;
@@ -570,11 +684,18 @@ export class RuntimeInvocationService {
       entries: [
         {
           at: new Date().toISOString(),
+          attemptId: input.token.attemptId,
           component: "runner",
           errorCode: deriveHostedExecutionErrorCode(input.error),
           eventCode: "runner.accepted_attempt_failed",
+          leaseGeneration: input.token.leaseGeneration,
           level: "warn",
           phase: "error",
+          redactedJson: {
+            ...buildHostedRunnerRedactedErrorJson(input.error),
+            attemptStillActive: input.attemptStillActive,
+            fenceCleared: !input.attemptStillActive,
+          },
           workspaceVersion: input.workspaceVersion,
         },
       ],

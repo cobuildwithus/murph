@@ -58,6 +58,8 @@ export type WorkerActiveRuntimeUserFenceResult =
     }
   | {
       active: true;
+      attemptId: string;
+      leaseGeneration: string;
       userId: string;
     };
 

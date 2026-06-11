@@ -319,14 +319,24 @@ describe("HostedUserRunner execution coordination", () => {
     };
     expect(runtimeLogBody.entries?.[0]).toEqual({
       at: expect.any(String),
+      attemptId: expect.stringMatching(/^runtime-write-/),
       component: "runner",
       errorCode: "runtime_error",
       eventCode: "runner.accepted_attempt_failed",
+      leaseGeneration: expect.any(String),
       level: "warn",
       phase: "error",
+      redactedJson: expect.objectContaining({
+        attemptStillActive: false,
+        fenceCleared: true,
+        safeErrorMessage: "Hosted execution runtime failed.",
+      }),
       workspaceVersion: "5",
     });
-    expect(JSON.stringify(runtimeLogBody)).not.toContain("runtime-write-");
+    // Error fields stay metadata-only: no internal write-attempt ids smuggled
+    // through error text; the attempt id is carried only by the typed field.
+    const redactedJson = runtimeLogBody.entries?.[0]?.redactedJson;
+    expect(JSON.stringify(redactedJson)).not.toContain("runtime-write-");
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({

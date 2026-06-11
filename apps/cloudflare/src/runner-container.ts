@@ -364,7 +364,12 @@ export class RunnerContainer extends Container {
   async readActiveRuntimeUserFence(): Promise<WorkerActiveRuntimeUserFenceResult> {
     const active = this.workspaceInvocationActiveOperation;
     return active
-      ? { active: true, userId: active.userId }
+      ? {
+          active: true,
+          attemptId: active.attemptId,
+          leaseGeneration: active.leaseGeneration,
+          userId: active.userId,
+        }
       : { active: false, reason: "no_active_runtime" };
   }
 

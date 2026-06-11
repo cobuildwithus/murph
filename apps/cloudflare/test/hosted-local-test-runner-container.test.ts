@@ -50,14 +50,14 @@ function createOutboundEnv(input: {
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
     RUNNER_CONTAINER: {
       get: () => ({
-        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
       }),
       getByName: () => ({
         destroyInstance: async () => {},
         invoke: async () => {
           throw new Error("Runner container must not be invoked by outbound wrapper tests.");
         },
-        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
         smokeHealth: async () => {
           throw new Error("Runner container smoke must not run in outbound wrapper tests.");
         },
