@@ -3,9 +3,13 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import type { Metafile } from "esbuild";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { bundleInstalledVaultCliBinary } from "../scripts/runner-bundle/bundle-cli.js";
+import {
+  assertVaultCliBundleWithinBudgets,
+  bundleInstalledVaultCliBinary,
+} from "../scripts/runner-bundle/bundle-cli.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -165,6 +169,63 @@ describe("runner bundle vault-cli esbuild step", () => {
     temporaryDirectories.push(bundleDir);
 
     await expect(bundleInstalledVaultCliBinary(bundleDir)).rejects.toThrow();
+  });
+
+  // Budget enforcement is unit-tested with injected budgets against synthetic
+  // metafiles; the production call site inside bundleInstalledVaultCliBinary
+  // uses the real constants against the real esbuild metafile.
+  it("fails the byte budgets with actual-vs-budget numbers and the largest inputs", () => {
+    const metafile: Metafile = {
+      inputs: {
+        "node_modules/heavy-dep/index.js": { bytes: 700, imports: [] },
+        "packages/cli/src/bin.ts": { bytes: 50, imports: [] },
+        "packages/cli/src/scoped-command.ts": { bytes: 250, imports: [] },
+      },
+      outputs: {
+        ".bundle/bin.js": {
+          bytes: 300,
+          entryPoint: "packages/cli/src/bin.ts",
+          exports: [],
+          imports: [],
+          inputs: {},
+        },
+        ".bundle/chunk-AAAA.js": {
+          bytes: 700,
+          exports: [],
+          imports: [],
+          inputs: {},
+        },
+        // Code splitting stamps entryPoint on dynamic-import chunks too; the
+        // entry budget must bind to bin.js, not whichever entry-point output
+        // happens to enumerate first.
+        ".bundle/scoped-command-BBBB.js": {
+          bytes: 100,
+          entryPoint: "packages/cli/src/scoped-command.ts",
+          exports: [],
+          imports: [],
+          inputs: {},
+        },
+      },
+    };
+
+    expect(() =>
+      assertVaultCliBundleWithinBudgets(metafile, { entryBytes: 200, totalBytes: 800 }),
+    ).toThrow(
+      new RegExp(
+        [
+          "total output 1100B exceeds budget 800B",
+          ".*entry chunk \\.bundle/bin\\.js 300B exceeds budget 200B",
+          // Largest inputs listed in descending byte order.
+          "[\\s\\S]*700B node_modules/heavy-dep/index\\.js",
+          "[\\s\\S]*250B packages/cli/src/scoped-command\\.ts",
+          "[\\s\\S]*50B packages/cli/src/bin\\.ts",
+        ].join(""),
+      ),
+    );
+
+    expect(
+      assertVaultCliBundleWithinBudgets(metafile, { entryBytes: 300, totalBytes: 1100 }),
+    ).toEqual({ entryBytes: 300, totalBytes: 1100 });
   });
 
   // The parity battery compares bundled vs unbundled output, so a probe whose
