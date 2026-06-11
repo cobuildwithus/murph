@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 
@@ -47,12 +47,21 @@ export interface HostedContainerCpuWatchdogProcessApi {
 interface HostedContainerCpuWatchdogProcessSample {
   comm: string;
   cpuTicks: number;
+  // stat field 22 kept as an opaque equality token: same pid + same start time
+  // is the same process; a changed start time is a reused pid.
+  startTimeTicks: string | null;
 }
 
 interface HostedContainerCpuWatchdogSample {
   cgroupUsageUsec: number | null;
   nrThrottled: number | null;
   perPid: Map<number, HostedContainerCpuWatchdogProcessSample>;
+  // False when /proc enumeration failed or a live process could not be read,
+  // meaning a process may be missing from perPid. Attribution for pids absent
+  // from an incomplete sample is unknowable and must be suppressed, or a
+  // long-running process missed once would have its whole lifetime counted as
+  // interval CPU on the next tick.
+  procScanComplete: boolean;
   sampledAtMs: number;
   throttledUsec: number | null;
 }
@@ -66,18 +75,25 @@ interface HostedContainerCpuWatchdogSample {
 export function startHostedContainerCpuWatchdog(input: {
   processApi: HostedContainerCpuWatchdogProcessApi;
 }): () => void {
+  const fingerprintSecret = resolveCpuWatchdogFingerprintSecret();
   let previous: HostedContainerCpuWatchdogSample | null = null;
   let sampling = false;
+  let stopped = false;
   const tick = async () => {
     // Skip overlapping ticks if /proc reads stall instead of queueing them.
-    if (sampling) {
+    if (stopped || sampling) {
       return;
     }
     sampling = true;
     try {
       const current = await readHostedContainerCpuWatchdogSample(input.processApi);
+      // A sample already in flight when the server closed must not emit into
+      // a shutting-down process or advance state.
+      if (stopped) {
+        return;
+      }
       if (previous) {
-        emitHostedContainerCpuWatchdogReport({ current, previous });
+        emitHostedContainerCpuWatchdogReport({ current, fingerprintSecret, previous });
       } else {
         // One-time liveness signal: steady-state watchdog silence is otherwise
         // ambiguous between "no burns" and "sampler broken on this platform",
@@ -112,8 +128,16 @@ export function startHostedContainerCpuWatchdog(input: {
   // The watchdog must never hold the process open during shutdown drain.
   interval.unref();
   return () => {
+    stopped = true;
     clearInterval(interval);
   };
+}
+
+function resolveCpuWatchdogFingerprintSecret(): string | null {
+  // Same resolution order as the hosted context diagnostics fingerprints.
+  const secret = process.env.HOSTED_LOG_FINGERPRINT_SECRET?.trim()
+    || process.env.HOSTED_AI_USAGE_REPORTING_SECRET?.trim();
+  return secret || null;
 }
 
 async function readHostedContainerCpuWatchdogSample(
@@ -123,29 +147,51 @@ async function readHostedContainerCpuWatchdogSample(
     await readOptionalCpuWatchdogText(processApi, "/sys/fs/cgroup/cpu.stat"),
   );
   const perPid = new Map<number, HostedContainerCpuWatchdogProcessSample>();
+  let procScanComplete = true;
   let processEntries: HostedContainerCpuWatchdogDirectoryEntryLike[] = [];
   try {
     processEntries = await processApi.readdir("/proc");
   } catch {
     // Tolerate an unreadable /proc; cgroup totals still report on their own.
+    procScanComplete = false;
   }
   for (const entry of processEntries) {
     if (!entry.isDirectory() || !/^\d+$/u.test(entry.name)) {
       continue;
     }
-    const stat = await readOptionalCpuWatchdogText(processApi, `/proc/${entry.name}/stat`);
-    const parsed = stat === null ? null : parseHostedContainerProcPidStat(stat);
+    let stat: string;
+    try {
+      stat = await processApi.readFile(`/proc/${entry.name}/stat`, "utf8");
+    } catch (error) {
+      // A process exiting between readdir and read is normal churn; any other
+      // failure means a live process may be missing from this sample.
+      if (!isCpuWatchdogGoneProcessError(error)) {
+        procScanComplete = false;
+      }
+      continue;
+    }
+    const parsed = parseHostedContainerProcPidStat(stat);
     if (parsed) {
       perPid.set(Number.parseInt(entry.name, 10), parsed);
+    } else {
+      procScanComplete = false;
     }
   }
   return {
     cgroupUsageUsec: cpuStat.usageUsec,
     nrThrottled: cpuStat.nrThrottled,
     perPid,
+    procScanComplete,
     sampledAtMs: Date.now(),
     throttledUsec: cpuStat.throttledUsec,
   };
+}
+
+function isCpuWatchdogGoneProcessError(error: unknown): boolean {
+  const code = error && typeof error === "object" && "code" in error
+    ? (error as { code?: unknown }).code
+    : null;
+  return code === "ENOENT" || code === "ESRCH";
 }
 
 async function readOptionalCpuWatchdogText(
@@ -195,17 +241,23 @@ function parseHostedContainerProcPidStat(
   }
   const comm = text.slice(commStart + 1, commEnd);
   const rest = text.slice(commEnd + 1).trim().split(/\s+/u);
-  // rest[0] is stat field 3 (state); utime/stime are stat fields 14 and 15.
+  // rest[0] is stat field 3 (state); utime/stime are stat fields 14 and 15,
+  // and starttime is stat field 22.
   const utime = Number.parseInt(rest[11] ?? "", 10);
   const stime = Number.parseInt(rest[12] ?? "", 10);
   if (!Number.isSafeInteger(utime) || !Number.isSafeInteger(stime)) {
     return null;
   }
-  return { comm, cpuTicks: utime + stime };
+  return {
+    comm,
+    cpuTicks: utime + stime,
+    startTimeTicks: rest[19] ?? null,
+  };
 }
 
 function emitHostedContainerCpuWatchdogReport(input: {
   current: HostedContainerCpuWatchdogSample;
+  fingerprintSecret: string | null;
   previous: HostedContainerCpuWatchdogSample;
 }): void {
   const intervalMs = input.current.sampledAtMs - input.previous.sampledAtMs;
@@ -216,18 +268,35 @@ function emitHostedContainerCpuWatchdogReport(input: {
   const topCpuProcesses: Array<{ comm: string; cpuCores: number; pid: number }> = [];
   let perPidTicksDelta = 0;
   for (const [pid, current] of input.current.perPid) {
-    // A reused pid can report fewer cumulative ticks than its predecessor;
-    // clamp to zero instead of letting it cancel real usage. A pid with no
-    // previous sample started inside the interval, so its full cumulative
-    // ticks are attributable to this interval.
-    const deltaTicks = Math.max(
-      0,
-      current.cpuTicks - (input.previous.perPid.get(pid)?.cpuTicks ?? 0),
-    );
+    const prior = input.previous.perPid.get(pid);
+    let deltaTicks: number | null = null;
+    if (prior) {
+      const pidReused = prior.startTimeTicks !== null
+        && current.startTimeTicks !== null
+        && prior.startTimeTicks !== current.startTimeTicks;
+      // Same pid + same start time is the same process: a monotonic counter
+      // delta (clamped defensively). A changed start time means the pid was
+      // reused by a process started after the previous sample, so its full
+      // cumulative ticks are interval CPU.
+      deltaTicks = pidReused
+        ? current.cpuTicks
+        : Math.max(0, current.cpuTicks - prior.cpuTicks);
+    } else if (input.previous.procScanComplete) {
+      // Absent from a complete previous scan proves the process started
+      // inside the interval, so its full cumulative ticks are interval CPU.
+      deltaTicks = current.cpuTicks;
+    }
+    // Absent from an incomplete previous scan stays unattributed: a
+    // long-running process missed by a failed /proc read would otherwise have
+    // its whole lifetime counted as interval CPU. Under-reporting is the
+    // right failure direction for a diagnostic.
+    if (deltaTicks === null) {
+      continue;
+    }
     perPidTicksDelta += deltaTicks;
     if (deltaTicks > 0) {
       topCpuProcesses.push({
-        comm: redactHostedContainerCpuWatchdogComm(current.comm),
+        comm: redactHostedContainerCpuWatchdogComm(current.comm, input.fingerprintSecret),
         cpuCores: roundHostedContainerCpuCores(
           deltaTicks / HOSTED_CONTAINER_CPU_WATCHDOG_TICKS_PER_SECOND / intervalSeconds,
         ),
@@ -279,11 +348,22 @@ function emitHostedContainerCpuWatchdogReport(input: {
   });
 }
 
-function redactHostedContainerCpuWatchdogComm(comm: string): string {
+// comm values are short, process-controlled text, so an unkeyed digest is
+// guessable by dictionary. With the hosted log fingerprint secret configured,
+// unknown names get a stable keyed label so a recurring unknown burner stays
+// distinguishable across intervals; without it they collapse into one
+// undifferentiated bucket rather than carrying any comm-derived identifier.
+function redactHostedContainerCpuWatchdogComm(
+  comm: string,
+  fingerprintSecret: string | null,
+): string {
   if (HOSTED_CONTAINER_CPU_WATCHDOG_KNOWN_COMMS.has(comm)) {
     return comm;
   }
-  return `other:${createHash("sha256").update(comm).digest("hex").slice(0, 8)}`;
+  if (fingerprintSecret === null) {
+    return "other";
+  }
+  return `other:${createHmac("sha256", fingerprintSecret).update(comm).digest("hex").slice(0, 16)}`;
 }
 
 function subtractOptionalCpuWatchdogCounters(

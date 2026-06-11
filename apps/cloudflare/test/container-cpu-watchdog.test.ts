@@ -33,7 +33,9 @@ function createFakeProcessApi(state: FakeProcessState): HostedContainerCpuWatchd
       const match = /^\/proc\/(\d+)\/stat$/u.exec(path);
       const statText = match ? state.pidStats.get(match[1] ?? "") : undefined;
       if (statText === undefined || statText === null) {
-        throw new Error(`unreadable ${path}`);
+        // Mirrors a process exiting between readdir and read: normal churn
+        // that must not mark the scan incomplete.
+        throw Object.assign(new Error(`unreadable ${path}`), { code: "ENOENT" });
       }
       return statText;
     },
@@ -65,14 +67,21 @@ function cpuStatText(input: {
   ].join("\n");
 }
 
-function pidStatText(input: { comm: string; pid: number; totalTicks: number }): string {
+function pidStatText(input: {
+  comm: string;
+  pid: number;
+  startTime?: string;
+  totalTicks: number;
+}): string {
   const tail = Array.from({ length: 38 }, () => "0");
   // The explicit `S` below is stat field 3, so tail[10]/tail[11] land at stat
-  // fields 14 (utime) and 15 (stime); split the ticks across both.
+  // fields 14 (utime) and 15 (stime); split the ticks across both. tail[18]
+  // is stat field 22 (starttime), the pid-reuse discriminator.
   const utime = Math.floor(input.totalTicks / 2);
   const stime = input.totalTicks - utime;
   tail[10] = String(utime);
   tail[11] = String(stime);
+  tail[18] = input.startTime ?? "5000";
   return `${input.pid} (${input.comm}) S ${tail.join(" ")}`;
 }
 
@@ -114,10 +123,12 @@ describe("startHostedContainerCpuWatchdog", () => {
   afterEach(() => {
     stopWatchdog?.();
     stopWatchdog = null;
+    vi.unstubAllEnvs();
     vi.useRealTimers();
   });
 
   it("attributes elevated CPU to the top processes by comm name", async () => {
+    vi.stubEnv("HOSTED_LOG_FINGERPRINT_SECRET", "test-secret");
     const state: FakeProcessState = {
       cpuStatText: cpuStatText({ usageUsec: 1_000_000 }),
       pidStats: new Map([
@@ -157,10 +168,37 @@ describe("startHostedContainerCpuWatchdog", () => {
     expect(details.topCpuProcesses).toEqual([
       // 1,300 ticks at 100 Hz over 20s = 0.65 cores. The comm parse keeps the
       // inner parens, and the non-allowlisted name is emitted as a stable
-      // sha256 digest label instead of raw process-controlled text.
-      { comm: "other:8b473696", cpuCores: 0.65, pid: 45 },
+      // keyed HMAC label instead of raw process-controlled text:
+      // hmac-sha256("test-secret", "codex (smoke)") truncated to 16 hex.
+      { comm: "other:30d556de684e009a", cpuCores: 0.65, pid: 45 },
       // 200 ticks = 0.1 cores; allowlisted infrastructure comm passes through.
       { comm: "node", cpuCores: 0.1, pid: 12 },
+    ]);
+  });
+
+  it("collapses unknown comms into one bucket without the fingerprint secret", async () => {
+    const state: FakeProcessState = {
+      cpuStatText: null,
+      pidStats: new Map([
+        ["45", pidStatText({ comm: "check_health.sh", pid: 45, totalTicks: 100 })],
+      ]),
+    };
+    stopWatchdog = await startWatchdog({
+      processApi: createFakeProcessApi(state),
+    });
+
+    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
+    state.pidStats.set(
+      "45",
+      pidStatText({ comm: "check_health.sh", pid: 45, totalTicks: 1_400 }),
+    );
+    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
+
+    const emits = watchdogEmits();
+    expect(emits).toHaveLength(1);
+    // No keyed secret configured: no comm-derived identifier at all.
+    expect((emits[0]?.details as Record<string, unknown>).topCpuProcesses).toEqual([
+      { comm: "other", cpuCores: 0.65, pid: 45 },
     ]);
   });
 
@@ -287,6 +325,93 @@ describe("startHostedContainerCpuWatchdog", () => {
     ]);
   });
 
+  it("attributes full ticks to a pid reused by a fresh process", async () => {
+    const state: FakeProcessState = {
+      cpuStatText: null,
+      pidStats: new Map([
+        ["12", pidStatText({ comm: "node", pid: 12, startTime: "100", totalTicks: 9_000 })],
+      ]),
+    };
+    stopWatchdog = await startWatchdog({
+      processApi: createFakeProcessApi(state),
+    });
+
+    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
+    // Same pid, new starttime: a fresh process whose 1,400 cumulative ticks
+    // (0.7 cores) all landed inside the interval, even though it reports
+    // fewer ticks than its predecessor did.
+    state.pidStats.set(
+      "12",
+      pidStatText({ comm: "node", pid: 12, startTime: "2200", totalTicks: 1_400 }),
+    );
+    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
+
+    const emits = watchdogEmits();
+    expect(emits).toHaveLength(1);
+    const details = emits[0]?.details as Record<string, unknown>;
+    expect(details.cpuCoresUsed).toBe(0.7);
+    expect(details.topCpuProcesses).toEqual([
+      { comm: "node", cpuCores: 0.7, pid: 12 },
+    ]);
+  });
+
+  it("never attributes lifetime ticks to pids missed by an incomplete scan", async () => {
+    // Pid 12 has 30,000 lifetime ticks (300s of CPU): if the failed first
+    // /proc scan were trusted as "complete and empty", the next interval
+    // would attribute all of it (a false 15 cores) to this interval.
+    let procReadable = false;
+    const state: FakeProcessState = {
+      cpuStatText: cpuStatText({ usageUsec: 1_000_000 }),
+      pidStats: new Map([
+        ["12", pidStatText({ comm: "node", pid: 12, totalTicks: 30_000 })],
+      ]),
+    };
+    const inner = createFakeProcessApi(state);
+    const processApi: HostedContainerCpuWatchdogProcessApi = {
+      readFile: (path, encoding) => inner.readFile(path, encoding),
+      readdir: (path) =>
+        procReadable ? inner.readdir(path) : Promise.reject(new Error("EACCES: /proc")),
+    };
+    stopWatchdog = await startWatchdog({ processApi });
+
+    procReadable = true;
+    state.cpuStatText = cpuStatText({ usageUsec: 16_000_000 });
+    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
+
+    const emits = watchdogEmits();
+    expect(emits).toHaveLength(1);
+    const details = emits[0]?.details as Record<string, unknown>;
+    // The cgroup truth still reports, with the unknown-history pid excluded
+    // from attribution rather than misreported.
+    expect(details.cpuCoresUsed).toBe(0.75);
+    expect(details.attributedCpuCores).toBe(0);
+    expect(details.topCpuProcesses).toEqual([]);
+  });
+
+  it("stays silent in fallback mode after an incomplete scan", async () => {
+    // The same missed-pid scenario without cgroup totals: with nothing
+    // trustworthy to report, the interval must not produce a false alarm.
+    let procReadable = false;
+    const state: FakeProcessState = {
+      cpuStatText: null,
+      pidStats: new Map([
+        ["12", pidStatText({ comm: "node", pid: 12, totalTicks: 30_000 })],
+      ]),
+    };
+    const inner = createFakeProcessApi(state);
+    const processApi: HostedContainerCpuWatchdogProcessApi = {
+      readFile: (path, encoding) => inner.readFile(path, encoding),
+      readdir: (path) =>
+        procReadable ? inner.readdir(path) : Promise.reject(new Error("EACCES: /proc")),
+    };
+    stopWatchdog = await startWatchdog({ processApi });
+
+    procReadable = true;
+    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
+
+    expect(watchdogEmits()).toHaveLength(0);
+  });
+
   it("reports from cgroup totals alone when /proc is unreadable", async () => {
     const state: FakeProcessState = {
       cpuStatText: cpuStatText({ usageUsec: 1_000_000 }),
@@ -396,6 +521,27 @@ describe("startHostedContainerCpuWatchdog", () => {
     const emits = watchdogEmits();
     expect(emits).toHaveLength(2);
     expect((emits[1]?.details as Record<string, unknown>).cpuCoresUsed).toBe(1);
+  });
+
+  it("does not emit from a sample still in flight when stopped", async () => {
+    let releaseRead: (text: string) => void = () => {};
+    const processApi: HostedContainerCpuWatchdogProcessApi = {
+      readFile: () =>
+        new Promise((resolve) => {
+          releaseRead = resolve;
+        }),
+      readdir: () => Promise.resolve([]),
+    };
+    stopWatchdog = await startWatchdog({ processApi });
+
+    // The seed sample is still stalled on its cgroup read when stop runs.
+    stopWatchdog();
+    stopWatchdog = null;
+    releaseRead(cpuStatText({ usageUsec: 1_000_000 }));
+    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
+
+    // Even the one-time started signal is suppressed after stop.
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
   });
 
   it("unrefs the sampling interval so it never holds the process open", () => {
