@@ -131,4 +131,4 @@ settle poll" covers the right surface.
 
 ## State
 
-Active. Changes left uncommitted per task instruction.
+Completed in PR #137. Shape B is fixed here; Shape C is handed off to the hosted-runner destroy-timeout lane (see handoff section).

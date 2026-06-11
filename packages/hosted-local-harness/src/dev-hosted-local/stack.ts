@@ -593,7 +593,11 @@ export async function startHostedLocalDevStack(input: {
     // Start docker lifecycle forensics before wrangler dev so the stream also
     // captures its container image builds and (buggy) duplicate-tag cleanup.
     // Kept out of `children`: a forensics hiccup must not fail the stack.
+    // Gated to E2E-isolated runs (plus an explicit opt-in) because the stream
+    // observes the whole Docker daemon: an ordinary local dev stack should not
+    // log unrelated local container/image lifecycle metadata by default.
     dockerEventsProcess = workerRuntimeEnv === null
+      || !shouldStreamHostedLocalDockerEventsForensics(initialEnv)
       ? null
       : spawnHostedLocalDockerEventsForensics(workerProcessEnv ?? workerRuntimeEnv, {
         pipeOutput: input.pipeOutput,
@@ -872,6 +876,12 @@ export async function startHostedLocalDevStack(input: {
       return await stopPromise;
     };
 
+    const buildReportingChildren = (): BufferedNamedChildProcess[] => [
+      ...children,
+      ...(stripeListener === null ? [] : [stripeListener]),
+      ...(dockerEventsProcess === null ? [] : [dockerEventsProcess]),
+    ];
+
     const ready = (async (): Promise<void> => {
       try {
         const healthChecks = [
@@ -925,18 +935,18 @@ export async function startHostedLocalDevStack(input: {
         if (!stopped) {
           await stop("SIGTERM");
         }
+        // Startup failures are exactly where the docker-events forensics
+        // matter (image untags, cold-start kills), so the rejection
+        // diagnostics must include that stream, not just the fail-fast
+        // children.
         throw appendStartupDiagnostics(error, await collectDockerDevDiagnostics({
           cwd: repoRoot,
           env: workerProcessEnv ?? workerRuntimeEnv ?? undefined,
-        }), children);
+        }), buildReportingChildren());
       }
     })();
 
-    const reportingChildren = [
-      ...children,
-      ...(stripeListener === null ? [] : [stripeListener]),
-      ...(dockerEventsProcess === null ? [] : [dockerEventsProcess]),
-    ];
+    const reportingChildren = buildReportingChildren();
 
     return {
       config: {
@@ -1260,6 +1270,13 @@ function assertHostedLocalE2eIsolation(
       ...failures.map((failure) => `- ${failure}`),
     ].join("\n"),
   );
+}
+
+function shouldStreamHostedLocalDockerEventsForensics(
+  env: NodeJS.ProcessEnv,
+): boolean {
+  return requiresHostedLocalE2eIsolation(env)
+    || env.MURPH_HOSTED_LOCAL_DOCKER_EVENTS_FORENSICS === "1";
 }
 
 function requiresHostedLocalE2eIsolation(env: NodeJS.ProcessEnv): boolean {

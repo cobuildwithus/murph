@@ -631,7 +631,7 @@ describe("hosted local dev stack", () => {
       }),
     );
     expect(stack.config.workerPersistDir).toBe("/tmp/murph-dev-env-test/wrangler-state");
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(2);
     expect(waitForHealthyHttpEndpoint).toHaveBeenNthCalledWith(1, {
       host: "127.0.0.1",
@@ -791,7 +791,7 @@ describe("hosted local dev stack", () => {
     expect(webEnv.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
     expect(stack.processes.temporalServer).toBe(temporalServer);
     expect(stack.processes.temporalWorker).toBe(temporalWorker);
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(5);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(4);
     const pkillArgs = spawnSync.mock.calls
       .filter(([command]) => command === "pkill")
       .map(([, args]) => args);
@@ -1093,7 +1093,7 @@ describe("hosted local dev stack", () => {
     const stopPromise = stack.stop();
     await Promise.resolve();
 
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
     releaseFirstTermination();
     await stopPromise;
   });
@@ -1122,10 +1122,10 @@ describe("hosted local dev stack", () => {
     const secondStop = stack.stop("SIGKILL");
     await Promise.resolve();
 
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
     releaseFirstTermination();
     await Promise.all([firstStop, secondStop]);
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
   });
 
   it("treats Ctrl-C as child termination and force-sweeps owned worker residue", async () => {
@@ -1781,7 +1781,7 @@ describe("hosted local dev stack", () => {
       spawnSync.mock.invocationCallOrder[runnerImageInspectCallIndex] ?? Number.POSITIVE_INFINITY,
     ).toBeLessThan(waitForHostedLocalLinqWebhookTarget.mock.invocationCallOrder[0]);
     expect(stack.processes.linqTunnel?.name).toBe("linq-tunnel");
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(4);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
   });
 
   it("uses prisma migrate deploy for non-local databases instead of forcing db push", async () => {
@@ -2121,7 +2121,7 @@ describe("hosted local dev stack", () => {
 
     expect(spawnChildProcess).toHaveBeenCalledTimes(1);
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(1);
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(1);
     expect(stack.webBaseUrl).toBeNull();
   });
 
@@ -2176,6 +2176,60 @@ describe("hosted local dev stack", () => {
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(2);
   });
 
+  it("streams docker-events forensics only for isolated or opted-in stacks", async () => {
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_HOSTED_LOCAL_DOCKER_EVENTS_FORENSICS: "",
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "",
+        MURPH_HOSTED_LOCAL_PROFILE: "",
+      },
+    });
+
+    // An ordinary dev stack must not observe the whole Docker daemon.
+    expect(spawnHostedLocalDockerEventsForensics).not.toHaveBeenCalled();
+    await stack.stop("SIGTERM");
+  });
+
+  it("includes docker-events output in startup-failure diagnostics", async () => {
+    const cloudflareChild = createBufferedChild({
+      exitCode: 1,
+      name: "cloudflare",
+      pid: 511,
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(cloudflareChild)
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 512 }));
+    spawnHostedLocalDockerEventsForensics.mockReturnValueOnce(
+      createBufferedChild({
+        exitCode: null,
+        name: "docker-events",
+        pid: 513,
+        stdoutText: '{"Action":"kill","Actor":{"Attributes":{"signal":"9"}}}',
+      }),
+    );
+    waitForHealthyHttpEndpoint.mockImplementationOnce(() => new Promise(() => {}));
+    waitForFirstChildExit.mockResolvedValueOnce(cloudflareChild);
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        // The opt-in flag streams forensics without requiring full E2E
+        // isolation, which keeps this unit test independent of isolation
+        // preconditions.
+        MURPH_HOSTED_LOCAL_DOCKER_EVENTS_FORENSICS: "1",
+      },
+    });
+
+    // Startup failures (image untags, cold-start kills) are exactly what the
+    // forensics exist to explain, so the rejection itself must carry them.
+    await expect(stack.ready).rejects.toThrow(/\[docker-events:stdout\][\s\S]*"signal":"9"/u);
+  });
+
   it("fails fast and cleans up when a dev child exits before readiness", async () => {
     const cloudflareChild = createBufferedChild({
       exitCode: 1,
@@ -2197,7 +2251,7 @@ describe("hosted local dev stack", () => {
     await expect(stack.ready).rejects.toThrow(
       "cloudflare dev process exited before the hosted local stack became healthy.",
     );
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledWith(
       expect.objectContaining({
         ignoreErrors: true,
