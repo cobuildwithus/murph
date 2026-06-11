@@ -33,6 +33,14 @@ def resolve_env_value(name: str, env_file_values: dict[str, str]) -> str | None:
     return os.environ.get(name) or env_file_values.get(name)
 
 
+def resolve_first_env_value(names: list[str], env_file_values: dict[str, str]) -> str | None:
+    for name in names:
+        value = resolve_env_value(name, env_file_values)
+        if value:
+            return value
+    return None
+
+
 def latest_generated_png(generated_root: Path) -> Path | None:
     candidates = [path for path in generated_root.rglob("*.png") if path.is_file()]
     if not candidates:
@@ -140,11 +148,17 @@ def main() -> int:
     args = parser.parse_args()
 
     env_values = parse_env_file(args.env_file)
-    images_token = resolve_env_value("CLOUDFLARE_IMAGES_API_KEY", env_values)
+    images_token = resolve_first_env_value(
+        ["CLOUDFLARE_IMAGES_API_KEY", "CLOUDFLARE_IMAGES_API_TOKEN"],
+        env_values,
+    )
     if not images_token:
         print(
             json.dumps(
-                {"success": False, "errors": [{"message": "CLOUDFLARE_IMAGES_API_KEY not found"}]},
+                {
+                    "success": False,
+                    "errors": [{"message": "CLOUDFLARE_IMAGES_API_KEY or CLOUDFLARE_IMAGES_API_TOKEN not found"}],
+                },
                 indent=2,
             )
         )

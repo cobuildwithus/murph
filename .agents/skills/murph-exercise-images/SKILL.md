@@ -149,7 +149,7 @@ python3 .agents/skills/murph-exercise-images/scripts/upload_cloudflare_image.py 
 ```
 
 The script:
-- Reads `CLOUDFLARE_IMAGES_API_KEY` from the environment or the current working directory's `.env`.
+- Reads `CLOUDFLARE_IMAGES_API_KEY` or `CLOUDFLARE_IMAGES_API_TOKEN` from the environment or the current working directory's `.env`.
 - Uses `CLOUDFLARE_ACCOUNT_ID` when available; otherwise it tries account lookup through `CLOUDFLARE_API_TOKEN` or the Images token.
 - Uploads to `POST https://api.cloudflare.com/client/v4/accounts/{account_id}/images/v1` using multipart `file`, `metadata`, and `requireSignedURLs`.
 - Returns safe JSON only: `success`, Cloudflare image `id`, `filename`, `variants`, and sanitized errors.
