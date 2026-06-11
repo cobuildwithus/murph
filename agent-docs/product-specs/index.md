@@ -13,6 +13,7 @@ Last verified: 2026-05-13
 | `agent-docs/product-specs/experiment-onboarding.md` | Chat-based experiment start, protocol onboarding contracts, assistant setup behavior, and private run handoff. | Active |
 | `agent-docs/product-specs/protocol-outcome-network.md` | Private outcome cards now, plus target-state sharing levels, contribution rules, cohort summaries, and social guardrails for the protocol outcome network. | Active |
 | `agent-docs/product-specs/captures.md` | Dated media-capture primitive for lightweight private evidence over time. | Active |
+| `agent-docs/product-specs/companion-app.md` | Native Swift iOS companion app for Apple Health sync (WHOOP relay), hybrid WHOOP posture, MVP scope, and phase plan. | Planned |
 
 ## Rule
 
