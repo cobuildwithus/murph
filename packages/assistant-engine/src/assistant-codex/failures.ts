@@ -100,6 +100,31 @@ export function extractCodexTurnIdFromMessage(
   )
 }
 
+// Codex app-server notifications are thread-scoped: every event names the
+// thread it belongs to. Spawned subagent threads broadcast on the same
+// connection, so callers use this to route foreign-thread events away from
+// the single-turn correlation path instead of rejecting the parent turn.
+export function extractCodexThreadIdFromMessage(
+  message: CodexTurnMessage,
+): string | null {
+  const params = asRecord(message.params)
+  const data = asRecord(message.data)
+  const thread =
+    asRecord(params?.thread) ??
+    asRecord(data?.thread) ??
+    asRecord(message.thread)
+  return (
+    normalizeNullableString(asString(thread?.id)) ??
+    normalizeNullableString(asString(params?.threadId)) ??
+    normalizeNullableString(asString(params?.thread_id)) ??
+    normalizeNullableString(asString(data?.threadId)) ??
+    normalizeNullableString(asString(data?.thread_id)) ??
+    normalizeNullableString(asString(message.threadId)) ??
+    normalizeNullableString(asString(message.thread_id)) ??
+    null
+  )
+}
+
 export function extractCodexTurnStatus(
   message: CodexTurnMessage,
 ): string | null {
