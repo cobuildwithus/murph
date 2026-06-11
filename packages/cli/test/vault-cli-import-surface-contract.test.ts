@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -23,8 +23,8 @@ import { binPath, ensureCliRuntimeArtifacts, repoRoot } from './cli-test-helpers
 // invocation must justify its transitive load cost); removals are wins.
 //
 // How it works: each representative scoped command runs the built
-// `dist/bin.js` as a subprocess with a `node:module` resolve hook
-// (`test/helpers/import-surface-hook.mjs`, passed via `--import`) that records
+// `dist/bin.js` as a subprocess with a `node:module` resolve hook (written to
+// the probe's temp dir at runtime and passed via `--import`) that records
 // every resolved module URL. The probes run hermetically (HOME pointed at a
 // temp dir, VAULT='') and exit nonzero with a missing_vault error AFTER
 // loading their module graph — the resolved-module set is the artifact, not
@@ -45,9 +45,41 @@ import { binPath, ensureCliRuntimeArtifacts, repoRoot } from './cli-test-helpers
 
 const IMPORT_SURFACE_PROBE_TIMEOUT_MS = 120_000
 
-const importSurfaceHookPath = fileURLToPath(
-  new URL('./helpers/import-surface-hook.mjs', import.meta.url),
-)
+// Module-resolution recorder passed to the built CLI subprocess via
+// `node --import <file>`. It installs a synchronous `node:module` resolve
+// hook (`module.registerHooks`, which observes both ESM `import` and CJS
+// `require` resolutions in-thread) that records every resolved module URL,
+// then writes the de-duplicated set — one URL per line — to the file named by
+// MURPH_IMPORT_SURFACE_LOG on process exit. It delegates to the default
+// resolver and never alters resolution behavior. The source lives inline and
+// is written to the probe's temp dir at runtime: a checked-in `.mjs` would
+// trip the repo's handwritten-source-outside-dist gate
+// (`scripts/prune-generated-source-sidecars.ts`), and inlining keeps the
+// probe fully hermetic.
+const IMPORT_SURFACE_HOOK_SOURCE = [
+  "import { writeFileSync } from 'node:fs'",
+  "import { registerHooks } from 'node:module'",
+  '',
+  'const logPath = process.env.MURPH_IMPORT_SURFACE_LOG',
+  "if (typeof logPath !== 'string' || logPath.length === 0) {",
+  "  throw new Error('import-surface hook requires MURPH_IMPORT_SURFACE_LOG to name the output file.')",
+  '}',
+  '',
+  'const resolvedModuleUrls = new Set()',
+  'registerHooks({',
+  '  resolve(specifier, context, nextResolve) {',
+  '    const resolution = nextResolve(specifier, context)',
+  '    resolvedModuleUrls.add(resolution.url)',
+  '    return resolution',
+  '  },',
+  '})',
+  '',
+  "process.on('exit', () => {",
+  "  writeFileSync(logPath, [...resolvedModuleUrls].join('\\n'), 'utf8')",
+  '})',
+  '',
+].join('\n')
+
 const contractPath = fileURLToPath(
   new URL('./vault-cli-import-surface-contract.json', import.meta.url),
 )
@@ -91,6 +123,8 @@ async function runScopedImportSurfaceProbe(
 ): Promise<ScopedProbeResult> {
   const probeHome = await mkdtemp(path.join(tmpdir(), 'murph-import-surface-'))
   const importLogPath = path.join(probeHome, 'resolved-imports.log')
+  const importSurfaceHookPath = path.join(probeHome, 'import-surface-hook.mjs')
+  await writeFile(importSurfaceHookPath, IMPORT_SURFACE_HOOK_SOURCE, 'utf8')
 
   try {
     const { exitCode, output } = await new Promise<{
