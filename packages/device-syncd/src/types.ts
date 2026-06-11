@@ -682,6 +682,28 @@ export interface DeviceConnectionHandler {
   revokeAccess?(account: DeviceSyncAccount): Promise<void>;
 }
 
+export interface DeviceSdkSignInToken {
+  /** Short-lived provider SDK sign-in token. Never log or persist it. */
+  signInToken: string;
+  environment: "sandbox" | "production";
+}
+
+/**
+ * Connection seam for providers whose devices connect through a native mobile
+ * SDK sign-in token exchange instead of a hosted Link/OAuth callback. The
+ * ensure step must resolve the same provider user a prior Link flow created
+ * for the owner so both flows share one device-sync account.
+ */
+export interface DeviceSdkConnectionHandler {
+  ensureConnection(input: {
+    ownerId: string;
+    now: string;
+  }): Promise<ProviderConnectionResult>;
+  createSignInToken(input: {
+    externalAccountId: string;
+  }): Promise<DeviceSdkSignInToken>;
+}
+
 export interface DeviceWebhookHandler {
   verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult>;
 }
@@ -708,6 +730,7 @@ export interface DeviceSyncProvider {
   descriptor: DeviceProviderDescriptor;
   credentialPolicy?: DeviceSyncProviderCredentialPolicy;
   connectionHandler?: DeviceConnectionHandler;
+  sdkConnectionHandler?: DeviceSdkConnectionHandler;
   diagnostics?: DeviceSyncProviderDiagnostics;
   webhookHandler?: DeviceWebhookHandler;
   jobExecutor?: DeviceJobExecutor;
@@ -763,6 +786,13 @@ export interface CompleteConnectionResult {
   connectSourceId?: string | null;
   connectTarget?: string | null;
   sourceProviderSlug?: string | null;
+}
+
+export interface SdkSignInSessionResult {
+  account: PublicDeviceSyncAccount;
+  /** Short-lived provider SDK sign-in token. Never log or persist it. */
+  signInToken: string;
+  environment: DeviceSdkSignInToken["environment"];
 }
 
 export interface HandleWebhookResult {

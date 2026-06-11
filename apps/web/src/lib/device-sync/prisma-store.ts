@@ -267,6 +267,14 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.signals.createSignal(input);
   }
 
+  async listRecentConnectionWebhookSignals(input: {
+    userId: string;
+    connectionIds: readonly string[];
+    limit?: number;
+  }): Promise<HostedSignalRecord[]> {
+    return this.signals.listRecentConnectionWebhookSignals(input);
+  }
+
   async upsertDirtyConnection(
     input: UpsertHostedDeviceSyncDirtyConnectionInput,
   ): Promise<UpsertHostedDeviceSyncDirtyConnectionResult> {

@@ -102,6 +102,10 @@ export class HostedDeviceSyncControlPlane {
     return this.handleConnectionCallback(provider, options);
   }
 
+  async createSdkSignInSession(userId: string, provider: string) {
+    return this.connections.createSdkSignInSession(userId, provider);
+  }
+
   async handleConnectionCallback(provider: string, options: { expectedOwnerId?: string | null } = {}) {
     return this.connections.handleConnectionCallback(provider, options);
   }

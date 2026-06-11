@@ -37,6 +37,10 @@ export interface JunctionLinkToken {
   linkWebUrl: string;
 }
 
+export interface JunctionSignInToken {
+  signInToken: string;
+}
+
 export interface JunctionProviderConnectionSource {
   deviceId: string | null;
   appId: string | null;
@@ -248,6 +252,41 @@ export class JunctionClient {
 
     assertValidJunctionLinkWebUrl(linkWebUrl, this.allowedLinkHosts);
     return { linkWebUrl };
+  }
+
+  /**
+   * Mints a short-lived Junction Mobile SDK sign-in token for an existing
+   * Junction user. The token is returned to the caller exactly once and must
+   * never be logged or persisted anywhere on the backend.
+   */
+  async createSignInToken(
+    userId: string,
+    options: { signal?: AbortSignal | null } = {},
+  ): Promise<JunctionSignInToken> {
+    const normalizedUserId = normalizeString(userId);
+    if (!normalizedUserId) {
+      throw new TypeError("Junction sign-in token creation requires a Junction user id.");
+    }
+
+    const payload = await this.requestJson<Record<string, unknown>>(
+      "POST",
+      `/v2/user/${encodeURIComponent(normalizedUserId)}/sign_in_token`,
+      undefined,
+      { endpointKind: "junction_user_sign_in_token", signal: options.signal ?? null },
+    );
+    const signInToken =
+      normalizeString(payload?.sign_in_token) ?? normalizeString(payload?.signInToken);
+
+    if (!signInToken) {
+      throw deviceSyncError({
+        code: "JUNCTION_SIGN_IN_TOKEN_INVALID",
+        message: "Junction sign-in token response did not include sign_in_token.",
+        retryable: false,
+        httpStatus: 502,
+      });
+    }
+
+    return { signInToken };
   }
 
   async listUserProviders(

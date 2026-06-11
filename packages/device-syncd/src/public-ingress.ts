@@ -44,6 +44,7 @@ import type {
   ProviderBeginConnectionResult,
   PublicDeviceSyncAccount,
   PublicProviderDescriptor,
+  SdkSignInSessionResult,
   StartConnectionInput,
 } from "./types.ts";
 
@@ -557,6 +558,94 @@ export class DeviceSyncPublicIngress {
 
   async handleOAuthCallback(input: HandleOAuthCallbackInput): Promise<CompleteConnectionResult> {
     return this.handleConnectionCallback(input);
+  }
+
+  /**
+   * Ensures an established device-sync account for a mobile SDK sign-in and
+   * mints the provider's short-lived SDK sign-in token.
+   *
+   * This reuses the exact established-connection persistence the Link/OAuth
+   * callback uses: `store.upsertConnection` is keyed on
+   * (provider, externalAccountId), so an owner with a prior Link connection
+   * resolves to the same account row instead of a duplicate, and webhook
+   * ingestion (`getConnectionByExternalAccount`) can accept SDK-driven
+   * webhooks immediately instead of orphan-delaying them. The sign-in token
+   * is minted only after the account exists, is returned exactly once, and is
+   * never logged or persisted.
+   */
+  async createSdkSignInSession(input: {
+    provider: string;
+    ownerId: string;
+  }): Promise<SdkSignInSessionResult> {
+    const provider = this.requireProvider(input.provider);
+    const handler = provider.sdkConnectionHandler;
+
+    if (!handler) {
+      throw deviceSyncError({
+        code: "SDK_SIGN_IN_NOT_SUPPORTED",
+        message: `Device sync provider ${provider.provider} does not support SDK sign-in sessions.`,
+        retryable: false,
+        httpStatus: 500,
+      });
+    }
+
+    const ownerId = normalizeString(input.ownerId);
+    if (!ownerId) {
+      throw deviceSyncError({
+        code: "CONNECTION_OWNER_REQUIRED",
+        message: "SDK sign-in sessions must be initiated by an authenticated user.",
+        retryable: false,
+        httpStatus: 400,
+      });
+    }
+
+    const now = toIsoTimestamp(new Date());
+    const descriptor = this.describeProvider(provider);
+    const connection = await handler.ensureConnection({ ownerId, now });
+    const initialJobs = connection.initialJobs?.map((job) =>
+      normalizeConfiguredDeviceSyncJobInput(provider.provider, job, "sdk sign-in")
+    );
+    const setupPhase = resolveConnectionSetupPhase(connection, descriptor.connectionKind);
+
+    const account = await this.store.upsertConnection({
+      ownerId,
+      provider: provider.provider,
+      externalAccountId: connection.externalAccountId,
+      displayName: connection.displayName ?? null,
+      setupPhase,
+      setupExpiresAt: resolveConnectionSetupExpiresAt({
+        connection,
+        setupPhase,
+        seededSetupExpiresAt: null,
+      }),
+      scopes: connection.scopes?.length
+        ? [...connection.scopes]
+        : [...descriptor.defaultScopes],
+      credential: resolveAndValidateProviderConnectionCredential(provider, connection),
+      metadata: connection.metadata ?? {},
+      connectedAt: now,
+      nextReconcileAt: connection.nextReconcileAt ?? null,
+    });
+
+    await this.hooks.onConnectionEstablished?.({
+      account,
+      connection: {
+        ...connection,
+        ...(initialJobs ? { initialJobs } : {}),
+      },
+      provider,
+      now,
+    } satisfies DeviceSyncPublicIngressConnectionEstablishedInput);
+
+    const token = await handler.createSignInToken({
+      externalAccountId: connection.externalAccountId,
+    });
+
+    return {
+      account,
+      signInToken: token.signInToken,
+      environment: token.environment,
+    };
   }
 
   async handleConnectionCallback(input: HandleConnectionCallbackInput): Promise<CompleteConnectionResult> {
@@ -1351,6 +1440,7 @@ export { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";
 export type { WhoopDeviceSyncProviderConfig } from "./providers/whoop.ts";
 export { createStravaDeviceSyncProvider, resolveStravaWebhookPreflightResponse } from "./providers/strava.ts";
 export type { StravaDeviceSyncProviderConfig } from "./providers/strava.ts";
+export { normalizeJunctionResourceName, readJunctionWebhookResourceName } from "./providers/junction.ts";
 export {
   DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
   DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
@@ -1361,6 +1451,8 @@ export type {
   CompleteConnectionResult,
   ConsumeOAuthStateResult,
   DeviceConnectionHandler,
+  DeviceSdkConnectionHandler,
+  DeviceSdkSignInToken,
   DeviceSyncAccount,
   DeviceSyncAccountStatus,
   DeviceSyncIngressWebhook,
@@ -1380,5 +1472,6 @@ export type {
   ProviderConnectionResult,
   PublicDeviceSyncAccount,
   PublicProviderDescriptor,
+  SdkSignInSessionResult,
   UpsertPublicDeviceSyncConnectionInput,
 } from "./types.ts";

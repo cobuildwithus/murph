@@ -44,6 +44,23 @@ export function readHostedPrivyIdentityTokenFromRequestCookies(request: Request)
   return readHostedPrivyIdentityTokenFromCookieHeader(request.headers.get("cookie"));
 }
 
+/**
+ * Reads a Privy identity token from `Authorization: Bearer <token>`.
+ * Used by native (non-browser) clients such as the iOS companion app.
+ * Deliberately no cookie fallback: bearer-authenticated routes carry no
+ * browser-session ambient authority, so they stay CSRF-immune.
+ */
+export function readHostedPrivyIdentityTokenFromAuthorizationHeader(request: Request): string | null {
+  const header = request.headers.get("authorization");
+
+  if (typeof header !== "string") {
+    return null;
+  }
+
+  const match = /^Bearer\s+(\S+)$/iu.exec(header.trim());
+  return match ? normalizeHostedPrivyIdentityToken(match[1]) : null;
+}
+
 export function requireHostedPrivyIdentityToken(value: string | null | undefined): string {
   const token = normalizeHostedPrivyIdentityToken(value);
 

@@ -464,6 +464,63 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
+  // Mobile SDK (companion app) connection ensure. This mirrors the
+  // beginConnection/completeConnection identity discipline exactly: the same
+  // secret-derived deterministic client_user_id resolves the same Junction
+  // user a prior Junction Link flow created for this owner, so both flows
+  // share one device-sync account and SDK webhooks are never orphan-delayed.
+  async function ensureSdkConnection(context: {
+    ownerId: string;
+    now: string;
+  }): Promise<ProviderConnectionResult> {
+    const ownerId = normalizeString(context.ownerId);
+    if (!ownerId) {
+      throw deviceSyncError({
+        code: "JUNCTION_OWNER_ID_REQUIRED",
+        message: "Junction SDK sign-in requires an owner id to derive a stable client_user_id.",
+        retryable: false,
+        httpStatus: 400,
+      });
+    }
+
+    const clientUserId = buildJunctionClientUserId(config.clientUserIdSecret, ownerId);
+    const user = await client.createOrResolveUser(clientUserId);
+
+    return {
+      externalAccountId: user.userId,
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: JUNCTION_PROVIDER_CONFIG_KEY,
+      },
+      setupPhase: "source_confirmed",
+      initialJobs: buildInitialJobs(context.now),
+      nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+    };
+  }
+
+  async function createSdkSignInToken(input: {
+    externalAccountId: string;
+  }): Promise<{ signInToken: string; environment: JunctionEnvironment }> {
+    const userId = normalizeString(input.externalAccountId);
+    if (!userId) {
+      throw deviceSyncError({
+        code: "JUNCTION_USER_ID_MISSING",
+        message: "Junction sign-in token creation requires a stored Junction user id.",
+        retryable: false,
+        httpStatus: 409,
+      });
+    }
+
+    const { signInToken } = await client.createSignInToken(userId);
+
+    // The active environment comes from the validated Junction client config
+    // (the API key prefix is asserted against environment/region at
+    // construction), so sandbox and production can never mix silently.
+    return { signInToken, environment: config.environment };
+  }
+
   async function completeConnection(
     context: ProviderCompleteConnectionContext,
   ): Promise<ProviderConnectionResult> {
@@ -1678,6 +1735,10 @@ export function createJunctionDeviceSyncProvider(
       beginConnection,
       completeConnection,
       revokeAccess,
+    },
+    sdkConnectionHandler: {
+      ensureConnection: ensureSdkConnection,
+      createSignInToken: createSdkSignInToken,
     },
     webhookHandler: {
       verifyAndParseWebhook,
@@ -4393,6 +4454,17 @@ function inferJunctionWebhookResource(
     name: resource,
     category: inferJunctionResourceCategory(explicitCategory, resource),
   };
+}
+
+export { normalizeJunctionResourceName } from "@murphai/importers/device-providers/junction-resources";
+
+/**
+ * Resolves the normalized Junction resource name carried by a webhook event
+ * type such as `daily.data.sleep.created`. Lifecycle events (for example
+ * `provider.connection.created`) carry no data resource and resolve to null.
+ */
+export function readJunctionWebhookResourceName(eventType: string): string | null {
+  return normalizeJunctionResourceName(readJunctionWebhookResourceFromEventType(eventType));
 }
 
 function readJunctionWebhookResourceFromEventType(eventType: string): string | null {

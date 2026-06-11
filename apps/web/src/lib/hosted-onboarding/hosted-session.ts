@@ -8,6 +8,7 @@ import {
   verifyHostedPrivyIdentityToken,
 } from "./privy";
 import {
+  readHostedPrivyIdentityTokenFromAuthorizationHeader,
   readHostedPrivyIdentityTokenFromCookieStore,
   readHostedPrivyIdentityTokenFromRequestCookies,
 } from "./privy-token";
@@ -51,6 +52,24 @@ export async function resolveHostedPrivySessionFromRequest(
   request: Request,
 ): Promise<HostedPrivySession | null> {
   const identityToken = readHostedPrivyIdentityTokenFromRequestCookies(request);
+
+  if (!identityToken) {
+    return null;
+  }
+
+  return resolveHostedPrivySessionFromIdentityToken(identityToken);
+}
+
+/**
+ * Resolves a Privy session from a bearer-carried identity token for native
+ * (non-browser) clients. Verification reuses the exact same
+ * `verifyHostedPrivyIdentityToken` path as cookie sessions; only the token
+ * transport differs, and there is intentionally no cookie fallback.
+ */
+export async function resolveHostedPrivySessionFromBearerToken(
+  request: Request,
+): Promise<HostedPrivySession | null> {
+  const identityToken = readHostedPrivyIdentityTokenFromAuthorizationHeader(request);
 
   if (!identityToken) {
     return null;
