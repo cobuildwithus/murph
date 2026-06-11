@@ -18,6 +18,7 @@ import {
   slugSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
+  inputFileOptionSchema,
   normalizeRepeatableFlagOption,
   type JsonObject,
 } from '@murphai/vault-usecases'
@@ -25,6 +26,7 @@ import {
   dedupeDeviceImportEventRecords,
   deleteEventRecord,
   editEventRecord,
+  importEventRecordsFromJsonl,
   upsertEventRecord,
 } from '@murphai/vault-usecases/records'
 import {
@@ -59,6 +61,17 @@ const eventUpsertResultSchema = z.object({
   lookupId: z.string().min(1),
   ledgerFile: pathSchema,
   created: z.boolean(),
+})
+
+const eventImportJsonlResultSchema = z.object({
+  vault: pathSchema,
+  applied: z.boolean(),
+  receivedCount: z.number().int().nonnegative(),
+  createdCount: z.number().int().nonnegative(),
+  skippedExistingCount: z.number().int().nonnegative(),
+  supersededCount: z.number().int().nonnegative(),
+  eventShardPaths: z.array(pathSchema),
+  auditPath: pathSchema.nullable(),
 })
 
 const eventDedupeDeviceImportsResultSchema = z.object({
@@ -926,6 +939,29 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
         vault: options.vault,
         kind: 'exposure',
         result,
+      })
+    },
+  })
+
+  event.command('import-jsonl', {
+    description:
+      'Import many canonical events from JSON Lines input in one transactional batch with externalRef dedupe.',
+    hint:
+      'Each line is one canonical event payload in the same shape as import-json, except payloads must not carry an explicit id — externalRef is the re-import identity. Runs as a dry-run count report by default; re-run with --apply to write. Rows whose externalRef system + resourceType + resourceId + facet already exist are skipped (or updated in place when content changed); any invalid line rejects the whole batch.',
+    args: z.object({}),
+    options: withBaseOptions({
+      input: inputFileOptionSchema.describe('JSON Lines input in @file.jsonl form or - for stdin.'),
+      apply: z
+        .boolean()
+        .default(false)
+        .describe('Apply the import. Without this flag the command only reports what it would create, skip, or update.'),
+    }),
+    output: eventImportJsonlResultSchema,
+    async run({ options }) {
+      return importEventRecordsFromJsonl({
+        vault: options.vault,
+        inputFile: options.input,
+        apply: options.apply,
       })
     },
   })

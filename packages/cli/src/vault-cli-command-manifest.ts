@@ -1073,6 +1073,30 @@ export const vaultCliCommandDescriptors = [
         description: 'Import one canonical event from an explicit JSON payload file or stdin.',
       },
       {
+        path: ['event', 'import-jsonl'],
+        description:
+          'Import many canonical events from JSON Lines input in one transactional batch with externalRef dedupe.',
+        examples: [
+          {
+            description: 'Dry-run a bulk import to see created/skipped/updated counts.',
+            options: {
+              input: '@events.jsonl',
+              vault: './vault',
+            },
+          },
+          {
+            description: 'Apply the same bulk import after the dry-run counts look right.',
+            options: {
+              apply: true,
+              input: '@events.jsonl',
+              vault: './vault',
+            },
+          },
+        ],
+        hint:
+          'Use for backfills with many events instead of repeated import-json calls. Each line is one canonical event payload (same shape as import-json, but without an explicit id — externalRef is the re-import identity); dry-run by default, --apply writes.',
+      },
+      {
         path: ['event', 'note', 'add'],
         description: 'Append one canonical note event from typed fields.',
       },

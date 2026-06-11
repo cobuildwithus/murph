@@ -515,6 +515,7 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
     'capture import-json',
     'condition import-json',
     'event import-json',
+    'event import-jsonl',
     'family import-json',
     'food import-json',
     'genetics import-json',
