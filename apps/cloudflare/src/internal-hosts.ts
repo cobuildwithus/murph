@@ -28,5 +28,13 @@ export const CLOUDFLARE_HOSTED_TRANSCRIBE_PATH = "/v1/transcribe";
 export const CLOUDFLARE_HOSTED_TRANSCRIBE_ENDPOINT =
   `http://${CLOUDFLARE_HOSTED_TRANSCRIBE_HOST}${CLOUDFLARE_HOSTED_TRANSCRIBE_PATH}`;
 
+// Container fatal reports ride the runner-control internal host so a dying
+// entrypoint can leave one durable worker-side log line (container stdout is
+// console-only and unrecoverable after the process exits). Handled at the
+// stateless egress layer; never forwarded to the Durable Object.
+export const CLOUDFLARE_HOSTED_CONTAINER_FATAL_PATH = "/v1/container-fatal";
+export const CLOUDFLARE_HOSTED_CONTAINER_FATAL_ENDPOINT =
+  `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.runnerControl}${CLOUDFLARE_HOSTED_CONTAINER_FATAL_PATH}`;
+
 export const HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER =
   "x-hosted-execution-internal-host";

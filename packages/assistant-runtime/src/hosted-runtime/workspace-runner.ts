@@ -883,13 +883,28 @@ async function acknowledgeHostedConversationMailboxConsumedBestEffort(context: {
   // Ordering invariant: this must run after checkpointHostedWorkspaceAssistantPhase —
   // foregroundReplyFailed does not count post-checkpoint delivery-effect failures,
   // so lost-reply safety relies on any failed intent already being in that snapshot.
+  // Every skip is logged: prod showed consumed_seq never advancing for any
+  // member (2026-06-11 rollback incident) with zero observable evidence of
+  // which gate was responsible. A silent skip here is an unbounded replay
+  // window after an unclean container death.
   if (context.assistantPhaseResult.foregroundReplyFailed !== 0) {
+    await writeHostedConversationMailboxConsumeSkipRuntimeLog({
+      input: context.input,
+      skipReason: context.assistantPhaseResult.foregroundReplyFailed == null
+        ? "reply_outcome_missing"
+        : "reply_failed",
+    });
     return;
   }
   const mailboxPort = context.input.platform.mailboxPort;
-  if (!mailboxPort.consume) {
+  if (!mailboxPort?.consume) {
+    await writeHostedConversationMailboxConsumeSkipRuntimeLog({
+      input: context.input,
+      skipReason: "consume_port_missing",
+    });
     return;
   }
+  const consume = mailboxPort.consume.bind(mailboxPort);
 
   try {
     const pendingInputWakeAt = await resolveHostedPendingAssistantInputWakeAt({
@@ -898,6 +913,10 @@ async function acknowledgeHostedConversationMailboxConsumedBestEffort(context: {
       vaultRoot: context.input.vaultRoot,
     });
     if (pendingInputWakeAt) {
+      await writeHostedConversationMailboxConsumeSkipRuntimeLog({
+        input: context.input,
+        skipReason: "pending_assistant_input",
+      });
       return;
     }
     const consumedSeq = (
@@ -905,9 +924,13 @@ async function acknowledgeHostedConversationMailboxConsumedBestEffort(context: {
         ?? context.initialMailboxImport
     ).state.watermarks.conversation;
     if (consumedSeq === "0") {
+      await writeHostedConversationMailboxConsumeSkipRuntimeLog({
+        input: context.input,
+        skipReason: "empty_watermark",
+      });
       return;
     }
-    await mailboxPort.consume({
+    await consume({
       lanes: [
         {
           consumedSeq,
@@ -916,12 +939,58 @@ async function acknowledgeHostedConversationMailboxConsumedBestEffort(context: {
       ],
       requestId: `${context.input.requestId}:mailbox-consume`,
     });
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields(context.input.runtimeLogContext),
+        component: "mailbox",
+        eventCode: "mailbox.consume_ack_advanced",
+        level: "info",
+        mailboxLane: "conversation",
+        mailboxSeqEnd: consumedSeq,
+        phase: "checkpoint",
+      },
+      now: context.input.now,
+      platform: context.input.platform,
+    });
   } catch (error) {
     await writeHostedConversationMailboxConsumeFailureRuntimeLog({
       error,
       input: context.input,
     });
   }
+}
+
+type HostedConversationMailboxConsumeSkipReason =
+  | "consume_port_missing"
+  | "empty_watermark"
+  | "pending_assistant_input"
+  | "reply_failed"
+  | "reply_outcome_missing";
+
+async function writeHostedConversationMailboxConsumeSkipRuntimeLog(context: {
+  input: HostedWorkspaceRunnerInput;
+  skipReason: HostedConversationMailboxConsumeSkipReason;
+}): Promise<void> {
+  // reply_failed and pending_assistant_input are expected replay-safety skips;
+  // the other reasons mean the durable watermark can never advance and the
+  // replay guard is effectively disabled, so they log at warn.
+  const expectedSkip = context.skipReason === "reply_failed"
+    || context.skipReason === "pending_assistant_input";
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields(context.input.runtimeLogContext),
+      component: "mailbox",
+      eventCode: "mailbox.consume_ack_skipped",
+      level: expectedSkip ? "info" : "warn",
+      mailboxLane: "conversation",
+      phase: "checkpoint",
+      redactedJson: {
+        skipReason: context.skipReason,
+      },
+    },
+    now: context.input.now,
+    platform: context.input.platform,
+  });
 }
 
 async function writeHostedConversationMailboxConsumeFailureRuntimeLog(context: {

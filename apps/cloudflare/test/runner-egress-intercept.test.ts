@@ -30,6 +30,9 @@ import {
   hostedRunnerIntercept,
 } from "../src/runner-egress-intercept.ts";
 import {
+  buildHostedContainerFatalReportPayload,
+} from "../src/container-fatal-report.ts";
+import {
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
 } from "../src/runner-effects-contract.ts";
 import {
@@ -4842,3 +4845,116 @@ function readFetchTargetUrl(target: Parameters<typeof fetch>[0]): string {
   }
   return String(target);
 }
+
+describe("maybeHandleHostedContainerFatalReport", () => {
+  const CONTAINER_FATAL_URL = "http://runner-control.worker/v1/container-fatal";
+
+  function postContainerFatal(input: {
+    body?: BodyInit;
+    headers?: Record<string, string>;
+    method?: string;
+  }) {
+    return hostedRunnerIntercept(
+      new Request(CONTAINER_FATAL_URL, {
+        body: input.body ?? null,
+        headers: {
+          "content-type": "application/json",
+          ...(input.headers ?? {}),
+        },
+        method: input.method ?? "POST",
+      }),
+      createInterceptEnv({}),
+      { containerId: "opaque-container-id" },
+    );
+  }
+
+  it("accepts a fatal report without a bound user and emits one sanitized worker log", async () => {
+    const payload = buildHostedContainerFatalReportPayload({
+      error: Object.assign(new TypeError("synthetic fatal"), { code: "ECONNRESET" }),
+      stage: "uncaught_exception",
+    });
+
+    const response = await postContainerFatal({ body: JSON.stringify(payload) });
+
+    expect(response.status).toBe(204);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "container",
+        details: expect.objectContaining({
+          errorName: "TypeError",
+          stage: "uncaught_exception",
+        }),
+        level: "error",
+        message: "Hosted container fatal report received.",
+        phase: "failed",
+        userId: null,
+      }),
+    );
+  });
+
+  it("attributes the report to the bound user when the header is present", async () => {
+    const response = await postContainerFatal({
+      body: JSON.stringify(buildHostedContainerFatalReportPayload({
+        error: new Error("synthetic fatal"),
+        stage: "ambiguous_abort_poison",
+      })),
+      headers: { [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123" },
+    });
+
+    expect(response.status).toBe(204);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Hosted container fatal report received.",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("normalizes unrecognized report fields instead of relaying them", async () => {
+    const response = await postContainerFatal({
+      body: JSON.stringify({
+        errorCode: 5,
+        errorName: "x".repeat(200),
+        stage: "../../etc/passwd injected text",
+      }),
+    });
+
+    expect(response.status).toBe(204);
+    const fatalCall = mocks.emitHostedExecutionStructuredLog.mock.calls.find(
+      ([record]) => record?.message === "Hosted container fatal report received.",
+    );
+    expect(fatalCall?.[0]?.details).toEqual(
+      expect.objectContaining({
+        errorCode: "unclassified",
+        errorName: "unclassified",
+        stage: "unclassified",
+      }),
+    );
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
+      .not.toContain("etc/passwd");
+  });
+
+  it("rejects non-POST methods", async () => {
+    const response = await postContainerFatal({ method: "GET" });
+    expect(response.status).toBe(405);
+  });
+
+  it("caps the report body", async () => {
+    const response = await postContainerFatal({
+      body: JSON.stringify({ stage: "uncaught_exception", padding: "y".repeat(9 * 1024) }),
+    });
+    expect(response.status).toBe(413);
+  });
+
+  it("never forwards the fatal path to the Durable Object outbound router", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await postContainerFatal({
+      body: JSON.stringify({ stage: "unhandled_rejection" }),
+    });
+
+    expect(response.status).toBe(204);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

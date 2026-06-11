@@ -4235,6 +4235,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "runtime.log:mailbox.imported",
         "assistant.phase",
         "runtime.log:checkpoint.runtime_residue_deferred",
+        "runtime.log:mailbox.consume_ack_skipped",
       ]);
       assert.deepEqual(checkpointRequests, []);
       const deferredLogs = logRequests.flatMap((request) => request.entries)

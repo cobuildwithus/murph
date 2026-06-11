@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
 
 const mocks = vi.hoisted(() => ({
+  reportHostedContainerFatalBestEffort: vi.fn(async () => undefined),
   runHostedWorkspaceInvocation: vi.fn(),
 }));
 
@@ -15,6 +16,16 @@ vi.mock("../src/hosted-workspace-invocation.js", async () => {
   return {
     ...actual,
     runHostedWorkspaceInvocation: mocks.runHostedWorkspaceInvocation,
+  };
+});
+
+vi.mock("../src/container-fatal-report.js", async () => {
+  const actual = await vi.importActual<typeof import("../src/container-fatal-report.js")>(
+    "../src/container-fatal-report.js",
+  );
+  return {
+    ...actual,
+    reportHostedContainerFatalBestEffort: mocks.reportHostedContainerFatalBestEffort,
   };
 });
 
@@ -228,6 +239,14 @@ describe("container entrypoint abort boundary", () => {
       error: "Hosted runner container is poisoned.",
     });
     expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(1);
+    // The poison must leave a durable fatal trace before the exit scheduler
+    // runs — this is the only attributable record once the process dies.
+    expect(mocks.reportHostedContainerFatalBestEffort).toHaveBeenCalledWith(
+      expect.objectContaining({
+        boundUserId: "u1",
+        stage: "ambiguous_abort_poison",
+      }),
+    );
   });
 
   it("keeps the warm container when an aborted workspace request returns safely and cleanup passes", async () => {

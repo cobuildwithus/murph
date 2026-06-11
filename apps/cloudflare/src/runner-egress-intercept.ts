@@ -5,6 +5,7 @@ import {
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
+  sanitizeHostedExecutionStructuredLogDetails,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
@@ -12,6 +13,7 @@ import {
 } from "@murphai/hosted-execution/routes";
 
 import {
+  CLOUDFLARE_HOSTED_CONTAINER_FATAL_PATH,
   CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
@@ -411,6 +413,22 @@ export async function handleHostedRunnerInternalOutbound(
     message: "Hosted runner internal outbound request received.",
     phase: "wake.running",
   });
+  // Container fatal reports are accepted before the user-binding gate: the
+  // unattributable container deaths this sink exists for happen outside any
+  // invocation, when no bound user or write fence exists.
+  const containerFatalResponse = await maybeHandleHostedContainerFatalReport({
+    request,
+    url,
+    userId,
+  });
+  if (containerFatalResponse) {
+    await emitHostedRunnerInternalOutboundResponseCompleted({
+      diagnosticDetails,
+      response: containerFatalResponse,
+      startedAt,
+    });
+    return containerFatalResponse;
+  }
   if (!userId) {
     const response = new Response("Missing hosted runner identity.", { status: 403 });
     await emitHostedRunnerInternalOutboundResponseCompleted({
@@ -629,6 +647,82 @@ async function maybeHandleHostedDataApiRequest(input: {
     ),
     url: input.url,
   });
+}
+
+const HOSTED_CONTAINER_FATAL_REPORT_MAX_BODY_BYTES = 8 * 1024;
+
+// Durable sink for dying-container fatal reports (container-fatal-report.ts).
+// Deliberately reachable without a bound user or live write fence: the
+// container deaths this attributes happen outside any invocation, when no
+// fence or user binding exists. The only effect is one sanitized, size-capped
+// worker log line, and the host is reachable only from inside hosted
+// containers through this egress intercept. Never forwarded to the DO — the
+// DO may be the component that is wedged.
+async function maybeHandleHostedContainerFatalReport(input: {
+  request: Request;
+  url: URL;
+  userId: string | null;
+}): Promise<Response | null> {
+  if (
+    input.url.hostname !== CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl
+    || input.url.pathname !== CLOUDFLARE_HOSTED_CONTAINER_FATAL_PATH
+  ) {
+    return null;
+  }
+  if (input.request.method.toUpperCase() !== "POST") {
+    return new Response("Method Not Allowed", { status: 405 });
+  }
+  const body = await readBoundedRequestBody(
+    input.request,
+    HOSTED_CONTAINER_FATAL_REPORT_MAX_BODY_BYTES,
+  );
+  if (body === null) {
+    return new Response("Payload Too Large", { status: 413 });
+  }
+
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    parsed = null;
+  }
+  const record: Record<string, unknown> =
+    parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  const safeErrorDetails = sanitizeHostedExecutionStructuredLogDetails(
+    record.safeErrorDetails && typeof record.safeErrorDetails === "object"
+        && !Array.isArray(record.safeErrorDetails)
+      ? (record.safeErrorDetails as HostedExecutionStructuredLogDetails)
+      : null,
+  );
+  emitHostedExecutionStructuredLog({
+    component: "container",
+    details: {
+      errorCode: readHostedContainerFatalReportCode(record.errorCode),
+      errorName: readHostedContainerFatalReportCode(record.errorName),
+      reportBodyBytes: body.byteLength,
+      stage: readHostedContainerFatalReportCode(record.stage),
+      ...(safeErrorDetails ? { safeErrorDetails } : {}),
+    },
+    level: "error",
+    message: "Hosted container fatal report received.",
+    phase: "failed",
+    userId: input.userId,
+  });
+  return new Response(null, { status: 204 });
+}
+
+function readHostedContainerFatalReportCode(value: unknown): string {
+  if (typeof value !== "string") {
+    return "unclassified";
+  }
+  const normalized = value.trim();
+  return normalized.length > 0
+      && normalized.length <= 96
+      && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(normalized)
+    ? normalized
+    : "unclassified";
 }
 
 async function maybeHandleHostedTranscribeRequest(input: {
