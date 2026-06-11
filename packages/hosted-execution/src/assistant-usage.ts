@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 
 export const ASSISTANT_USAGE_SCHEMA = "murph.assistant-usage.v1";
 const HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS = new Set<string>(["OPENAI_API_KEY"]);
@@ -95,6 +95,49 @@ export function createAssistantUsageId(input: {
   return providerRequestOrdinal === 0
     ? `${turnId}.attempt-${attemptCount}`
     : `${turnId}.request-${providerRequestOrdinal}.attempt-${attemptCount}`;
+}
+
+// Usage record for provider work that happens outside any member turn (today:
+// idle-time thread compaction). Uses a synthetic turn id so the existing
+// turn-keyed dedupe and storage path apply unchanged.
+export function buildAssistantMaintenanceUsageRecord(input: {
+  credentialSource: AssistantUsageCredentialSource;
+  featureKey: string;
+  memberId: string;
+  model: string;
+  sessionId: string;
+  triggerKind: string;
+  usage: {
+    cachedInputTokens: number | null;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    totalTokens: number | null;
+  };
+}): AssistantUsageRecord {
+  const turnId = `turn_maintenance_${randomUUID().replaceAll("-", "")}`;
+
+  return parseAssistantUsageRecord({
+    attemptCount: 1,
+    cachedInputTokens: input.usage.cachedInputTokens,
+    credentialSource: input.credentialSource,
+    featureKey: input.featureKey,
+    inputTokens: input.usage.inputTokens,
+    memberId: input.memberId,
+    occurredAt: new Date().toISOString(),
+    outputTokens: input.usage.outputTokens,
+    provider: "codex-cli",
+    requestedModel: input.model,
+    schema: ASSISTANT_USAGE_SCHEMA,
+    sessionId: input.sessionId,
+    surface: "hosted-runtime",
+    totalTokens: input.usage.totalTokens,
+    triggerKind: input.triggerKind,
+    turnId,
+    usageId: createAssistantUsageId({
+      attemptCount: 1,
+      turnId,
+    }),
+  });
 }
 
 export function createAssistantUsageReportingUserId(input: {
