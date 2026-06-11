@@ -16,6 +16,7 @@ const mockedModules = [
   '../src/commands/experiment.js',
   '../src/commands/exercise.js',
   '../src/commands/health-goal-save.js',
+  '../src/commands/meal.js',
   '../src/commands/measurement.js',
   '../src/commands/memory.js',
   '../src/commands/protocol.js',
@@ -276,6 +277,11 @@ for (const input of [
     root: 'goal',
   },
   {
+    moduleId: '../src/commands/meal.js',
+    registerName: 'registerMealCommands',
+    root: 'meal',
+  },
+  {
     moduleId: '../src/commands/supplement.js',
     registerName: 'registerSupplementCommands',
     root: 'supplement',
@@ -363,7 +369,6 @@ const intentionallyFullOnlyRootCommandReasons = {
   intervention: 'Intervention helper commands are not currently a frequent agent path.',
   journal: 'Journal commands are not currently part of the optimized onboarding path.',
   knowledge: 'Knowledge writes are assistant-authored derived-page flows, not ordinary reads.',
-  meal: 'Meal commands include import/capture flows and are not a measured hot path.',
   model: 'Model commands are runtime/model-card operator diagnostics.',
   provider: 'Provider registry commands are not currently a frequent agent path.',
   recipe: 'Recipe commands are not currently part of the optimized onboarding path.',

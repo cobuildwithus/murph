@@ -28,11 +28,22 @@ import {
   formatAssistantDefaultsSummary,
   formatSavedAssistantDefaultsSummary,
 } from '@murphai/setup-cli/setup-assistant-defaults'
-import {
+import type {
   runSetupAssistantWizard,
-  type SetupAssistantWizardInput,
-  type SetupAssistantWizardResult,
+  SetupAssistantWizardInput,
+  SetupAssistantWizardResult,
 } from '@murphai/setup-cli/setup-assistant-wizard'
+
+// Lazy import: the setup assistant wizard renders with ink, which must stay
+// off the per-invocation CLI hot path. Load it only when the wizard runs.
+const runSetupAssistantWizardLazily: typeof runSetupAssistantWizard = async (
+  ...args
+) => {
+  const { runSetupAssistantWizard: wizard } = await import(
+    '@murphai/setup-cli/setup-assistant-wizard'
+  )
+  return wizard(...args)
+}
 
 const modelCommandPresetSchema = z.literal('codex')
 
@@ -152,7 +163,7 @@ export function registerModelCommands(
   const assistantSetup =
     dependencies.assistantSetup ?? createSetupAssistantResolver()
   const assistantWizard =
-    dependencies.assistantWizard ?? runSetupAssistantWizard
+    dependencies.assistantWizard ?? runSetupAssistantWizardLazily
   const input = dependencies.input ?? defaultInput
   const output = dependencies.output ?? defaultOutput
   const readDefaults =

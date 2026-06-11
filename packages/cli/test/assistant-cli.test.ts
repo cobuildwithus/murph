@@ -1712,9 +1712,17 @@ async function runInProcessCliWithTty(args: string[]): Promise<{
   const stdinTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
   const stdinRawModeDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'setRawMode')
   const stdoutTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY')
-  const openSyncSpy = vi.spyOn(fs, 'openSync').mockImplementation(() => {
-    throw new Error('tty unavailable')
-  })
+  // Only fail tty opens: the chat command lazy-imports its ink surface, so a
+  // blanket openSync stub would break Node's own module-file reads mid-run.
+  const realOpenSync = fs.openSync.bind(fs)
+  const openSyncSpy = vi
+    .spyOn(fs, 'openSync')
+    .mockImplementation(((path: fs.PathLike, flags: fs.OpenMode, mode?: fs.Mode | null) => {
+      if (String(path) === '/dev/tty') {
+        throw new Error('tty unavailable')
+      }
+      return realOpenSync(path, flags, mode)
+    }) as typeof fs.openSync)
   const stderrWriteSpy = vi
     .spyOn(process.stderr, 'write')
     .mockImplementation(((chunk: string | Uint8Array) => {
