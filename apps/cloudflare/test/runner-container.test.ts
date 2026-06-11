@@ -1317,6 +1317,35 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
   });
 
+  it("does not run deploy smoke cleanup when pre-smoke recycle never settles", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const destroy = vi.fn(async () => {});
+      const getState = vi.fn(async () => ({
+        lastChange: Date.now(),
+        status: "running",
+      }));
+      const { container, containerFetch, startAndWaitForPorts } = createContainerDouble({
+        destroy,
+        getState,
+        initialStatus: "running",
+      });
+
+      const smokeResult = container.smokeHealth().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_500);
+
+      await expect(smokeResult).resolves.toMatchObject({
+        message: "Hosted runner container smoke could not recycle the existing shell.",
+      });
+      expect(destroy).toHaveBeenCalledTimes(1);
+      expect(startAndWaitForPorts).not.toHaveBeenCalled();
+      expect(containerFetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("cold-starts deploy smoke after recycle even when status still reports running", async () => {
     let containerRef: RunnerContainer | null = null;
     const destroy = vi.fn(async () => {

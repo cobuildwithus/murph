@@ -521,6 +521,7 @@ export class RunnerContainer extends Container {
   async smokeHealth(input: HostedExecutionContainerSmokeHealthInput = {}): Promise<HostedExecutionContainerSmokeHealthResult> {
     return await this.withLifecycleLock(async () => {
       const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
+      let smokeStartAttempted = false;
 
       try {
         const containerSettledForSmoke = await this.stopWarmContainer({
@@ -530,6 +531,7 @@ export class RunnerContainer extends Container {
         if (!containerSettledForSmoke) {
           throw new Error("Hosted runner container smoke could not recycle the existing shell.");
         }
+        smokeStartAttempted = true;
         await this.ensureSmokeContainerReady(readyTimeoutMs, {
           forceColdStart: true,
         });
@@ -578,10 +580,12 @@ export class RunnerContainer extends Container {
           status: response.status,
         };
       } finally {
-        await this.stopWarmContainer({
-          failClosed: false,
-          reason: "deploy-smoke-cleanup",
-        });
+        if (smokeStartAttempted) {
+          await this.stopWarmContainer({
+            failClosed: false,
+            reason: "deploy-smoke-cleanup",
+          });
+        }
       }
     });
   }
