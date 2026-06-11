@@ -4,41 +4,54 @@ Last verified: 2026-06-10
 
 Parent spec: `agent-docs/product-specs/companion-app.md` (strategy, phases,
 review posture). This doc is the concrete build plan for the first shippable
-slice.
+slice, revised after external architecture review (2026-06-10).
+
+Framing rule: this is **an Apple Health sync companion, not a Murph mobile
+client and not a WHOOP integration**. Its only durable responsibility is
+getting Apple Health data into the existing Junction → device-syncd
+pipeline. WHOOP is one important Apple Health writer among several; scoring
+and baselines key off data categories, never vendor identity.
 
 ## Scope: Two Screens
 
 1. **Login** — Privy sign-in with phone or email OTP.
 2. **Connect Apple Health** — one button that runs the HealthKit permission
-   flow and starts Junction sync. After connecting, the same screen shows
-   connected state and last-sync time.
+   flow and starts Junction sync, then shows honest backend-confirmed sync
+   state.
 
 Nothing else. No settings, no data browsing, no chat, no vault. Distribution
-target is TestFlight (family challenge testers); the App-Store-ready deltas
-are listed at the end and deliberately deferred.
+target is TestFlight (family challenge testers); App-Store-ready deltas are
+listed at the end and deliberately deferred.
 
 ### Login methods: verified constraint
 
 Privy's Swift SDK natively supports **email OTP and SMS OTP**. Its native
 OAuth support is currently **Google-only — Telegram login is web-only and
-not available in the iOS SDK**. MVP therefore ships **phone + email**;
-Telegram joins when Privy lands it on iOS (tracked as an open item, not
-worked around).
+not available in the iOS SDK**. MVP ships **phone + email**; Telegram joins
+when Privy lands it on iOS.
 
 Guideline note: Apple's 4.8 (must offer Sign in with Apple) is triggered by
 third-party *social* login. Email/SMS OTP does not trigger it. The day we
 add Telegram or Google, we must add Sign in with Apple in the same release.
 
-## Stack (verified versions, 2026-06-10)
+## Stack (verified 2026-06-10)
 
 | Piece | Detail |
 | --- | --- |
 | UI | SwiftUI, `@main App` + `UIApplicationDelegateAdaptor` (Junction requires an AppDelegate hook) |
-| Health | `vital-ios` 1.8.8 via SPM (`https://github.com/tryvital/vital-ios`), products `VitalCore` + `VitalHealthKit`; platform minimum iOS 14 |
+| Health | `vital-ios` 1.8.8 via SPM (`https://github.com/tryvital/vital-ios`), products **`VitalCore` + `VitalHealthKit` only** — never `VitalDevices` in v1 (separate enterprise license; BLE is out of scope anyway) |
 | Auth | `privy-ios` via SPM (`https://github.com/privy-io/privy-ios`, binary XCFramework) |
-| Deployment target | iOS 16 proposed (comfortably above both SDK floors; confirm Privy's exact floor at scaffold time) |
+| Deployment target | **iOS 17** (Privy Swift SDK floor is iOS 17+ / Xcode 16+, verified; vital-ios floor is iOS 14) |
 | Bundle ID | `ai.withmurph.app` |
-| Repo placement | top-level `apps/ios`, outside the pnpm workspace graph |
+| Repo placement | top-level `apps/ios`, outside the pnpm workspace graph; no local database, no local HealthKit readers, no challenge/scoring logic in the app |
+
+### Licensing gate (ship/no-ship)
+
+`vital-ios` core is **AGPLv3** (verified in the repo LICENSE; `VitalDevices`
+is separately enterprise-licensed). Embedding AGPL code in a closed-source
+distributed app requires a commercial license. **Before TestFlight:** obtain
+written confirmation from Junction that Murph's plan covers commercial
+mobile SDK use. Tracked as a hard gate, not an implementation detail.
 
 ## App Flow
 
@@ -47,92 +60,167 @@ Launch
   └─ AppDelegate.didFinishLaunching
        └─ VitalHealthKitClient.automaticConfiguration()   // mandatory, synchronous
   └─ PrivySdk.initialize(PrivyConfig(appId:, appClientId:))
-       ├─ existing Privy session?  ──yes──▶ Connect screen
-       └─ no ──▶ Login screen
+  └─ session reconciliation (per Junction guidance — do NOT fetch a fresh
+     sign-in token every launch):
+       ├─ Privy signed out                      → Junction signOut if needed → Login
+       ├─ Privy signed in + Junction signed in  → Connect/status screen
+       └─ Privy signed in + Junction signed out → token exchange → Connect
+  └─ account-switch guard: if the Privy member differs from the member the
+     Junction session was created for, force Junction signOut + re-exchange
 Login screen
   └─ phone → privy.sms.sendCode(to:) → privy.sms.loginWithCode(_:sentTo:)
   └─ email → equivalent email OTP flow
-  └─ success ──▶ token exchange (below) ──▶ Connect screen
-Token exchange (once per install, repeatable on failure)
+Token exchange (on demand, immediately before SDK exchange; retry = new token)
   └─ app sends Privy auth token to Murph web API
   └─ backend verifies Privy identity (@privy-io/node, already a dependency)
-  └─ backend ensures the member's Junction user (junction-client already has
-     resolve/createUser) and calls POST /v2/user/{user_id}/sign_in_token
+  └─ backend resolves/creates the member's Junction user (existing
+     junction-client) and calls POST /v2/user/{user_id}/sign_in_token
   └─ app: try await VitalClient.signIn(withRawToken: token)
-       // SDK exchanges the short-lived token for permanent OAuth credentials
-       // stored on-device, then discards it — backend never stores it
+       // SDK exchanges the short-lived token for on-device credentials,
+       // then discards it — backend never stores or logs it
 Connect screen
   └─ [Connect Apple Health] button:
-       1. VitalHealthKitClient.configure(.init(backgroundDeliveryEnabled: true))
+       1. VitalHealthKitClient.configure(.init(
+            backgroundDeliveryEnabled: true,
+            connectionPolicy: .explicit))   // deliberate user action, not auto
        2. await VitalHealthKitClient.shared.ask(
             readPermissions: [.sleep, .activity, .workout, /* heart-rate +
             respiratory resources — finalize against the VitalResource enum
             at build time */],
             writePermissions: [])
-       3. iOS shows the system HealthKit sheet → grant
-  └─ connected state: "Connected ✓ · last synced <relative time>"
+       3. iOS shows the system HealthKit sheet
+  └─ status states (below), driven by backend evidence
 ```
 
-## Project Configuration (verified against Junction docs)
+### Sync-status states (backend evidence is the truth)
 
-Entitlements:
-- HealthKit, including **HealthKit Background Delivery**
-- Background Modes → **Background Processing**
+Apple deliberately hides whether HealthKit *read* permission was granted —
+after `ask()` the app must assume zero knowledge. "Connected" can only mean
+"the backend has received data." UI states:
 
-Info.plist:
-- `NSHealthShareUsageDescription` — honest copy: Murph reads sleep, heart
-  rate, respiratory, and workout data you choose to share, to set your
-  baselines and score experiments you join.
-- `BGTaskSchedulerPermittedIdentifiers` →
-  `io.tryvital.VitalHealthKit.ProcessingTask`
+| State | Meaning |
+| --- | --- |
+| Not connected | Health flow not started |
+| Access requested · waiting for first data | Sheet completed; actual permission unknown |
+| Synced · last data received <relative time> | Backend confirmed receipt (status endpoint) |
+| Delayed | No new data inside the expected envelope |
+| Needs attention | Prolonged silence (revoked-permission symptom) → guide to Health settings; chat nudge fires server-side |
 
-## Backend Work (the only server change)
+The button after connect is **"Check for new data"** — opening the app is
+itself the sync trigger (Junction syncs on every launch and on HealthKit
+background wake; there is no manual `syncData()` call, verified) — the
+button just refreshes backend status.
 
-One new authenticated endpoint in `apps/web`, e.g.
-`POST /api/device-sync/companion/sign-in-token`:
+## Background Sync Behavior (verified, corrected)
 
-1. Authenticate the caller as a Murph member via their Privy auth token
-   (server-side verification through the existing `@privy-io/node`
-   dependency — no new auth system).
-2. Resolve-or-create the member's Junction user via the existing
-   `junction-client` (`resolveUser`/`createUser` already implemented).
-3. Call Junction `POST /v2/user/{user_id}/sign_in_token` (needs a small
-   addition to `junction-client`; follows its existing request patterns).
-4. Return `{ signInToken }`. Do not log or persist the token; it is
-   single-exchange and discarded by the SDK.
+- Junction documents that the Background Delivery subscription **persists
+  even if the user never opens the app, force-quits it, or restarts the
+  iPhone**. (HealthKit background delivery is an exception to the usual
+  iOS force-quit rule.)
+- Cadence remains **hourly-advisory, hour-to-day in practice** — iOS defers
+  on battery, CPU, connectivity, Low Power Mode. Treat persistence claims as
+  best-effort and verify empirically over 24–48h (incl. force-quit + reboot)
+  in the phase-1 spike before relying on them in product copy.
+- Server-side staleness detection + the existing chat channel is the
+  recovery mechanism: data goes quiet → referee nudges in chat → member
+  opens the app → launch sync fires immediately.
 
-Data then lands in the **existing** Junction webhook → device-syncd
-pipeline. No ingestion changes expected for MVP; the phase-1 spike question
-(does Junction preserve per-source attribution for HealthKit-relayed WHOOP
-data?) is answered by looking at what this pipeline receives.
+## Historical Backfill (verified, corrected)
 
-## What "done" means (MVP acceptance)
+Junction's Apple HealthKit ingestion defaults to **30 days** of history,
+configurable to a **maximum of 365 days**. Full device-lifetime history in
+the Apple Health store is NOT automatically ingested. Implications:
 
-- Fresh install → phone or email OTP login → one tap → HealthKit sheet →
-  grant → Junction dashboard (sandbox) and Murph's pipeline show the
-  member's sleep/RHR/respiratory/workout data, including WHOOP-relayed
-  history.
-- Kill the app, wait a day: background delivery lands new samples without
-  opening the app (hour-to-day envelope per parent spec).
-- Sign-out/in on a second device reaches connected state without backend
-  changes.
+- Configure the pull range explicitly (365d covers current members'
+  WHOOP-relay history; baselines need ~2 weeks minimum).
+- Phase-1 spike measures actual received depth at default and configured
+  settings; baseline sufficiency is a spike gate, not an assumption.
+
+## Source Attribution (verified, resolved pessimistically)
+
+Junction tags Apple Watch / iPhone / Apple Health app data, but **data
+written by third-party apps (the WHOOP case) is tagged `source.type:
+unknown`**; `source.app_id` exists on summary resources only, never on
+timeseries. Therefore:
+
+- Scoring and baselines are **source-agnostic** (data categories +
+  confidence), with attribution as opportunistic debug metadata.
+- Backend must expect duplicate/overlapping writers (Apple Watch + WHOOP
+  both writing workouts/sleep) and dedupe or apply source-precedence
+  server-side — spike includes an overlapping-writers test.
+
+## Backend Work
+
+Two small endpoints in `apps/web`, both authenticated via Privy token
+verification (existing `@privy-io/node`):
+
+1. `POST /api/device-sync/companion/sign-in-token`
+   — resolve member → resolve/create Junction user (existing
+   `junction-client`) → `POST /v2/user/{user_id}/sign_in_token` (small
+   junction-client addition) → return once. Never persist or log the token
+   (redaction test required). Rate-limited. Sandbox/prod must be impossible
+   to mix. Request body carries `appInstallationId`, app/SDK versions for a
+   minimal `companion_installations` record (no health data).
+2. `GET /api/device-sync/companion/status`
+   — last data receipt overall and per resource (sleep / workouts / heart
+   rate / respiratory), sourced from the existing pipeline. This is what the
+   Connect screen renders.
+
+Data lands in the **existing** Junction webhook → device-syncd pipeline; no
+ingestion changes for MVP. Importer idempotency + day-level recompute for
+late-arriving sleep edits are existing-pipeline concerns to confirm during
+the spike (see duplicate-import history).
+
+## Phase-1 Spike Gates (before MVP build is "real")
+
+1. Compiles on iOS 17 with pinned Privy + vital-ios versions.
+2. Privy email + SMS OTP on a real device.
+3. Sign-in token exchange works; tokens never logged (verified by test).
+4. Junction session persists across relaunch; account-switch forces clean
+   re-sign-in; no duplicate Junction users on reinstall.
+5. Sleep, workouts, heart-rate/RHR-equivalent, respiratory (if present)
+   arrive in Junction sandbox and Murph's pipeline from a real device.
+6. Historical depth measured at default and 365d-configured settings;
+   sufficient for baselines.
+7. Attribution fields inspected in real webhook payloads; overlapping
+   Apple Watch + WHOOP writes examined for dedupe behavior.
+8. Background delivery observed over 24–48h including force-quit and
+   reboot.
+9. Junction commercial-license confirmation in writing (AGPL gate).
+
+## No-Go Conditions
+
+Stop and reconsider the architecture if the spike shows: backfill too
+shallow for credible baselines; background latency incompatible with daily
+challenge mechanics; overlapping-writer dedupe intractable server-side; or
+licensing unresolved.
+
+## TestFlight MVP Acceptance
+
+1. Fresh install → OTP login → one tap → HealthKit sheet → backend status
+   shows first data receipt.
+2. App states are honest (waiting / synced / delayed / needs attention) and
+   driven by the status endpoint, not local SDK optimism.
+3. Background samples land with the app unopened over a multi-day window.
+4. Logs redact Privy tokens, Junction tokens, and health payloads.
+5. Sandbox/prod environment unambiguous in app and backend.
 
 ## Deferred (explicitly out of MVP)
 
-- Telegram login (blocked on Privy iOS SDK; re-check before App Store
-  submission), Google/Apple login (4.8 pairing rule above).
-- Sync-status detail screen, per-type toggles, disconnect/delete UI — these
-  are the App Store 4.2 utility surface; TestFlight review does not demand
-  them. Required before public App Store submission, along with the 2.5.1
-  description, 5.1.3(i) data disclosure, privacy nutrition labels, and the
-  open Apple AI-data-sharing disclosure question (parent spec).
-- Android, BLE, widgets, Live Activities, watchOS (parent spec roadmap).
+- Telegram login (Privy iOS gap), Google/Apple login (4.8 pairing rule).
+- Sync-status detail screen, per-type toggles, disconnect/delete UI,
+  support copy — the App Store 4.2 utility surface; required with the 2.5.1
+  description, 5.1.3(i) specific-data disclosure, privacy nutrition labels,
+  and explicit consent for third-party AI processing of synced health data
+  (Apple's Nov 2025 guideline) before public submission.
+- Android, BLE (`VitalDevices`), widgets, Live Activities, watchOS (parent
+  spec roadmap).
+- No analytics events containing health payloads.
 
 ## Open Items
 
-- Confirm Privy iOS SDK minimum deployment target at scaffold time.
-- Finalize the exact `VitalResource` read set against the SDK enum (resting
-  heart rate / heart rate / respiratory naming differs from product naming).
-- Junction environment: point the app's first build at **sandbox** (matches
-  hosted-local) and switch to production keys for TestFlight.
+- Finalize the exact `VitalResource` read set against the SDK enum.
+- Junction environment: first build on **sandbox** (matches hosted-local),
+  production keys for TestFlight.
 - Telegram-on-iOS support tracking with Privy.
+- AGPL/commercial confirmation from Junction (gate above).

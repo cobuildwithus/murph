@@ -70,10 +70,15 @@ viable — Junction maintains first-class bindings for all four frameworks):
   **one hour to one day**. Foreground delivery is immediate.
 - Design scoring and referee dispatches around the envelope ("yesterday's
   sleep scores this morning"), never around real-time arrival.
-- Force-quitting the app stops background wake until next launch — an
-  onboarding-education item, not a fixable bug.
-- The app must surface honest sync expectations plus a foreground
-  "Sync now" affordance (immediate flush).
+- Junction documents that its Background Delivery subscription persists
+  through force-quit and device restart (HealthKit background delivery is
+  an exception to the usual iOS force-quit rule). Treat as best-effort and
+  verify empirically in the phase-1 spike; server-side staleness detection
+  plus the existing chat channel is the recovery path either way.
+- The app must surface honest, backend-confirmed sync state (Apple hides
+  HealthKit read-permission status by design — only data receipt proves a
+  connection). Opening the app triggers an immediate launch sync; there is
+  no manual sync API.
 
 ## MVP Scope (v1, App Store reviewable)
 
@@ -124,11 +129,13 @@ watchOS, Android.
 
 ## Open Questions
 
-- Does Junction preserve WHOOP as the source attribution through HealthKit
-  ingestion and normalization (vendor docs are silent)? Phase-1 spike
-  answers this empirically.
-- How deep can the phase-1 spike backfill via Junction's SDK read window
-  (device store holds full history; SDK read window undocumented)?
+- ~~Does Junction preserve WHOOP source attribution?~~ Resolved 2026-06-10:
+  third-party-app data is tagged `source.type: unknown`; `app_id` on summary
+  resources only. Scoring must be source-agnostic; see the MVP spec.
+- ~~SDK backfill depth?~~ Resolved 2026-06-10: Junction HealthKit ingestion
+  defaults to 30 days, configurable to 365 max. Spike measures actual depth.
+- `vital-ios` core is AGPLv3 — written commercial-license confirmation from
+  Junction is a pre-TestFlight gate (MVP spec).
 - Apple AI data-sharing disclosure (above).
 - Bundle identifier: `ai.withmurph.app` proposed.
 
