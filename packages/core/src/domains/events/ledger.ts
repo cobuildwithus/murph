@@ -188,6 +188,36 @@ function buildEventRecord(
   );
 }
 
+// Validates one canonical event payload through the same contract path as the
+// single-event upsert, gated to the public-write kinds, without touching the
+// ledger. Batch import builds records up front so an invalid payload can
+// reject the whole batch before any write. Explicit event ids are rejected:
+// externalRef is the only re-import identity for bulk import (reconciled
+// vault-wide), so a caller-picked id could only bypass that reconcile and
+// mint a colliding revision-1 copy of an existing event.
+export function buildPublicEventImportRecord(
+  payload: JsonObject,
+  fallbackTimeZone?: string,
+): EventRecord {
+  const kind = normalizeEventKind(payload);
+
+  if (!PUBLIC_EVENT_WRITE_KINDS.has(kind)) {
+    throw new VaultError(
+      "EVENT_KIND_INVALID",
+      `Event kind "${kind}" is not supported by generic event import.`,
+    );
+  }
+
+  if (normalizeEventId(payload) !== undefined) {
+    throw new VaultError(
+      "EVENT_ID_NOT_ALLOWED",
+      "Bulk event import payloads must not carry an explicit event id; re-import identity comes from externalRef.",
+    );
+  }
+
+  return buildEventRecord(payload, fallbackTimeZone);
+}
+
 export function toEventLedgerFile(occurredAt: string): string {
   return toMonthlyShardRelativePath(
     VAULT_LAYOUT.eventLedgerDirectory,

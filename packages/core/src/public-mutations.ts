@@ -9,6 +9,7 @@ import {
   addMeal as addMealInternal,
   dedupeDeviceEventsByExternalRef as dedupeDeviceEventsByExternalRefInternal,
   importDeviceBatch as importDeviceBatchInternal,
+  importEventBatch as importEventBatchInternal,
   importDocument as importDocumentInternal,
   importSamples as importSamplesInternal,
 } from "./mutations.ts";
@@ -596,6 +597,12 @@ export async function dedupeDeviceEventsByExternalRef(
   input: Parameters<typeof dedupeDeviceEventsByExternalRefInternal>[0],
 ): ReturnType<typeof dedupeDeviceEventsByExternalRefInternal> {
   return withCanonicalInputWriteLock(input, dedupeDeviceEventsByExternalRefInternal);
+}
+
+export async function importEventBatch(
+  input: Parameters<typeof importEventBatchInternal>[0],
+): ReturnType<typeof importEventBatchInternal> {
+  return withCanonicalInputWriteLock(input, importEventBatchInternal);
 }
 
 export async function importAssessmentResponse(

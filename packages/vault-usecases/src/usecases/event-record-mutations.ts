@@ -6,6 +6,7 @@ import {
   loadQueryRuntime,
   type QueryCanonicalEntity,
 } from '../query-runtime.js'
+import { loadTextInput } from '../json-input.js'
 import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -47,6 +48,19 @@ interface EventMutationCoreRuntime {
     tombstonedByKind: Record<string, number>
     skippedRevisedElsewhereCount: number
     shardPaths: string[]
+    auditPath: string | null
+  }>
+  importEventBatch(input: {
+    vaultRoot: string
+    payloads: JsonObject[]
+    apply?: boolean
+  }): Promise<{
+    applied: boolean
+    receivedCount: number
+    createdCount: number
+    skippedExistingCount: number
+    supersededCount: number
+    eventShardPaths: string[]
     auditPath: string | null
   }>
 }
@@ -454,6 +468,142 @@ export async function deleteEventRecord(
         code: 'contract_invalid',
       },
     })
+  }
+}
+
+const JSONL_FAILURE_REPORT_LIMIT = 20
+
+const JSONL_FAILURE_MESSAGE_LIMIT = 3
+
+function summarizeLineFailures(
+  failures: ReadonlyArray<{ line: number | null, message: string }>,
+): string {
+  const summarized = failures
+    .slice(0, JSONL_FAILURE_MESSAGE_LIMIT)
+    .map((failure) => `line ${failure.line ?? '?'}: ${failure.message}`)
+    .join('; ')
+  const suffix = failures.length > JSONL_FAILURE_MESSAGE_LIMIT ? '; …' : ''
+
+  return `First failures: ${summarized}${suffix}`
+}
+
+function toJsonlLineFailure(failure: unknown, lineNumbers: readonly number[]) {
+  if (!isJsonObject(failure)) {
+    return failure
+  }
+
+  const index = typeof failure.index === 'number' ? failure.index : -1
+
+  return {
+    line: lineNumbers[index] ?? null,
+    message: String(failure.message ?? ''),
+  }
+}
+
+export async function importEventRecordsFromJsonl(input: {
+  vault: string
+  inputFile: string
+  apply?: boolean
+}) {
+  const raw = await loadTextInput(input.inputFile, 'events JSONL', {
+    stdinHint: 'Pass --input @events.jsonl or pipe JSON Lines to --input -.',
+  })
+  const payloads: JsonObject[] = []
+  const lineNumbers: number[] = []
+  const parseFailures: Array<{ line: number, message: string }> = []
+
+  raw.split('\n').forEach((lineText, lineIndex) => {
+    const trimmed = lineText.trim()
+
+    if (trimmed === '') {
+      return
+    }
+
+    const line = lineIndex + 1
+    let parsed: unknown
+
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch (error) {
+      parseFailures.push({
+        line,
+        message: error instanceof Error ? error.message : String(error),
+      })
+      return
+    }
+
+    if (!isJsonObject(parsed)) {
+      parseFailures.push({
+        line,
+        message: 'Each JSONL line must contain one JSON object event payload.',
+      })
+      return
+    }
+
+    payloads.push(parsed)
+    lineNumbers.push(line)
+  })
+
+  if (parseFailures.length > 0) {
+    throw new VaultCliError(
+      'invalid_payload',
+      `${parseFailures.length} JSONL line(s) failed to parse; nothing was imported. ${summarizeLineFailures(parseFailures)}`,
+      {
+        failureCount: parseFailures.length,
+        failures: parseFailures.slice(0, JSONL_FAILURE_REPORT_LIMIT),
+      },
+    )
+  }
+
+  if (payloads.length === 0) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'events JSONL input contained no event payloads.',
+    )
+  }
+
+  const core = await loadEventMutationCoreRuntime()
+
+  try {
+    const result = await core.importEventBatch({
+      vaultRoot: input.vault,
+      payloads,
+      apply: input.apply === true,
+    })
+
+    return {
+      vault: input.vault,
+      ...result,
+    }
+  } catch (error) {
+    const mapped = toVaultCliError(error, {
+      EVENT_BATCH_INVALID: {
+        code: 'contract_invalid',
+        details: (details) => ({
+          ...details,
+          failures: Array.isArray(details.failures)
+            ? details.failures.map((failure) => toJsonlLineFailure(failure, lineNumbers))
+            : details.failures,
+        }),
+      },
+    })
+
+    // The CLI error envelope only surfaces code/message, so fold the first
+    // mapped line failures into the message itself instead of leaving them
+    // buried in structured details the user never sees.
+    if (
+      mapped instanceof VaultCliError &&
+      mapped.context?.vaultCode === 'EVENT_BATCH_INVALID' &&
+      Array.isArray(mapped.context.failures)
+    ) {
+      throw new VaultCliError(
+        mapped.code,
+        `${mapped.message} ${summarizeLineFailures(mapped.context.failures as Array<{ line: number | null, message: string }>)}`,
+        mapped.context,
+      )
+    }
+
+    throw mapped
   }
 }
 

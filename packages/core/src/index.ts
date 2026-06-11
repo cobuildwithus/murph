@@ -97,6 +97,7 @@ export {
   importAssessmentResponse,
   importDeviceBatch,
   importDocument,
+  importEventBatch,
   importSamples,
   initializeVault,
   linkJournalEventIds,
