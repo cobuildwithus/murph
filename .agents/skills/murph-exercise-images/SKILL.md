@@ -33,6 +33,7 @@ Use restrained Murph-style annotations:
 - Graphite text, sentence case, short phrases such as `Shoulders over wrists`, `Hips over knees`, `Open chest`, `Round spine`.
 - Keep labels specific to what changes or what must stay aligned. Avoid generic encouragement.
 - For side-sensitive limb movements, use exact right/left limb names in the prompt's movement map, but avoid visible in-image labels like `Right arm` or `Left leg` unless the generated leader line can be validated against the correct visible limb. Prefer neutral visible labels such as `Reach forward`, `Opposite leg back`, `Moving arm`, or `Hips level`, or add exact right/left labels later with deterministic external typography.
+- Do not use camera/debug terms in visible annotation text. Keep terms like `foreground arm`, `background leg`, `near-side foot`, or `far-side hand` inside the prompt's movement map only. Visible labels should describe what the user should do or notice, such as `Reach forward`, `Heels planted`, `Toes lift`, or `Hips level`.
 
 For static setup slides, prioritize alignment callouts. For movement slides, prioritize motion callouts and one key stability cue. For comparison slides, label each endpoint and add one arrow showing the flow.
 
