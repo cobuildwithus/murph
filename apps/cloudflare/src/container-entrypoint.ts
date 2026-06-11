@@ -37,6 +37,7 @@ import {
   snapshotExpectedCodexRootProcess,
   stopWarmCodexAppServer,
 } from "@murphai/assistant-engine/codex-lifecycle";
+import { startHostedContainerCpuWatchdog } from "./container-cpu-watchdog.ts";
 import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "./hosted-runtime-architecture.ts";
@@ -809,12 +810,23 @@ function isHostedContainerCliEntrypoint(): boolean {
 async function startHostedContainerEntrypointCli(): Promise<void> {
   const port = Number.parseInt(process.env.PORT ?? "8080", 10) || 8080;
 
-  await startHostedContainerEntrypoint({
+  const server = await startHostedContainerEntrypoint({
     port,
     runtime: {
       processIsolation: true,
     },
   });
+
+  // Always-on CPU attribution sampler: the per-job diagnostic heartbeat only
+  // observes active invocations, but production CPU burns have been observed
+  // both at boot and on long-lived warm containers between jobs. CLI-only on
+  // the real process API: entrypoint unit tests inject sequenced processApi
+  // mocks that the watchdog must not consume. Job-activity correlation comes
+  // from the adjacent active-job heartbeat logs in the same stream.
+  const stopCpuWatchdog = startHostedContainerCpuWatchdog({
+    processApi: defaultHostedContainerProcessApi,
+  });
+  server.once("close", stopCpuWatchdog);
 }
 
 async function readHostedContainerInvocationRequestBody(
