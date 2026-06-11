@@ -250,10 +250,14 @@ import status for workflow completion or status projection. The narrow liveness
 exception is the exact `runner.accepted_attempt_failed` event: after web has
 durably recorded that metadata-only row, it may send a cooldown-throttled,
 payload-free `runtime_recheck_requested` Temporal signal. That row carries the
-fence `attemptId`/`leaseGeneration` plus metadata-only error diagnostics and
-`attemptStillActive`/`fenceCleared` flags in `redactedJson`, so transport-only
-failures against a still-live invocation stay distinguishable from real
-invocation deaths. That signal only
+fence `attemptId`/`leaseGeneration` plus metadata-only error diagnostics and,
+in `redactedJson`, the `attemptLivenessProbeOutcome` enum
+(`active`/`inactive`/`mismatch`/`error`/`timeout`) alongside the derived
+`attemptStillActive`/`fenceCleared` flags. The probe outcome is the primary
+diagnostic for distinguishing transport-only failures against a still-live
+invocation (`active`) from real invocation deaths, and for watching the
+documented RunnerContainer DO-restart residual (`inactive` despite a live
+container suggests the in-memory active-op record was lost to a DO restart). That signal only
 interrupts the workflow's current wait so Temporal re-reads web-owned
 reconciliation facts; it sets no mailbox, manual, browser-vault, lag, or
 device-sync work flag.
