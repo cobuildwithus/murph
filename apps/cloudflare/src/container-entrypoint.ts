@@ -39,6 +39,11 @@ import {
 } from "@murphai/assistant-engine/codex-lifecycle";
 import { startHostedContainerCpuWatchdog } from "./container-cpu-watchdog.ts";
 import {
+  HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS,
+  reportHostedContainerFatalBestEffort,
+  type HostedContainerFatalStage,
+} from "./container-fatal-report.ts";
+import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "./hosted-runtime-architecture.ts";
 import {
@@ -100,6 +105,12 @@ const defaultHostedContainerExitScheduler = () => {
     process.exit(1);
   });
 };
+
+// Set by the process-fatal handlers before their bounded fatal report runs.
+// Module-level (not invocation closure state) so the request handler can
+// reject new invocations during the short pre-exit window: a process Node
+// deems unrecoverable must not accept work it would hard-kill mid-flight.
+let hostedContainerProcessFatalObserved = false;
 let hostedContainerRuntimeContractsLoader:
   | Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>
   | null = null;
@@ -323,14 +334,14 @@ export async function startHostedContainerEntrypoint(input: {
             runtime.startupConfig.hostedRuntimeArchitectureVersion,
           lastCleanupStatus,
           ok: true,
-          poisoned: hostedContainerPoisoned,
+          poisoned: hostedContainerPoisoned || hostedContainerProcessFatalObserved,
           service: "cloudflare-hosted-runner-node",
           ...(runnerBundle ? { runnerBundle } : {}),
         }));
         return;
       }
 
-      if (hostedContainerPoisoned) {
+      if (hostedContainerPoisoned || hostedContainerProcessFatalObserved) {
         discardUnreadRequestBody(request);
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -610,6 +621,11 @@ export async function startHostedContainerEntrypoint(input: {
       });
       if (error instanceof HostedRunnerShellIsolationError) {
         hostedContainerPoisoned = true;
+        await reportHostedContainerFatalBestEffort({
+          boundUserId: job ? readHostedExecutionRunnerJobUserId(job) : null,
+          error,
+          stage: "shell_isolation_poison",
+        });
         runtime.exitScheduler();
       }
       const classified = classifyRunnerJobError(error);
@@ -633,6 +649,20 @@ export async function startHostedContainerEntrypoint(input: {
           message: "Hosted container entrypoint poisoned after an ambiguous aborted runner job.",
           phase: "failed",
           userId: readHostedExecutionRunnerJobUserId(job),
+        });
+        await reportHostedContainerFatalBestEffort({
+          boundUserId: readHostedExecutionRunnerJobUserId(job),
+          error: Object.assign(
+            new Error("Hosted container entrypoint poisoned after an ambiguous aborted runner job."),
+            {
+              details: {
+                cleanupPassed: cleanupPassedForRequest,
+                directInvocationReturned,
+                resultDelivered,
+              },
+            },
+          ),
+          stage: "ambiguous_abort_poison",
         });
         runtime.exitScheduler();
       }
@@ -787,13 +817,17 @@ async function parseHostedExecutionContainerInvocationRequest(
 }
 
 if (isHostedContainerCliEntrypoint()) {
-  void startHostedContainerEntrypointCli().catch((error) => {
+  void startHostedContainerEntrypointCli().catch(async (error) => {
     emitHostedExecutionStructuredLog({
       component: "container",
       error,
       level: "error",
       message: "Hosted container entrypoint failed to start.",
       phase: "failed",
+    });
+    await reportHostedContainerFatalBestEffort({
+      error,
+      stage: "entrypoint_start_failed",
     });
     process.exitCode = 1;
     setImmediate(() => {
@@ -807,7 +841,47 @@ function isHostedContainerCliEntrypoint(): boolean {
     && import.meta.url === pathToFileURL(process.argv[1]).href;
 }
 
+// Node's default for an uncaught exception or unhandled rejection is a stderr
+// trace plus exit code 1 — exactly the unattributable `unrequested-nonzero-stop`
+// container deaths observed in prod (2026-06-11 rollback incidents), because
+// container stdout/stderr never reaches a queryable sink. These handlers keep
+// the exit-1 contract but leave one durable worker-side fatal report first.
+// CLI-only install: entrypoint unit tests must keep Node's default behavior.
+function installHostedContainerProcessFatalHandlers(): void {
+  let handlingFatalProcessError = false;
+  const handleFatalProcessError =
+    (stage: HostedContainerFatalStage) => (error: unknown) => {
+      if (handlingFatalProcessError) {
+        process.exit(1);
+      }
+      handlingFatalProcessError = true;
+      hostedContainerProcessFatalObserved = true;
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: { stage },
+        // Non-Error fatal values stay out of logs and reports entirely: the
+        // raw value could hold anything, and the stage already locates the
+        // failure class.
+        error: error instanceof Error ? error : new Error("Non-Error process-fatal value."),
+        level: "error",
+        message: "Hosted container entrypoint hit a process-fatal error.",
+        phase: "failed",
+      });
+      // Hard backstop in case the report fetch ignores its own timeout.
+      setTimeout(() => {
+        process.exit(1);
+      }, HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS + 1_000).unref();
+      void reportHostedContainerFatalBestEffort({ error, stage }).finally(() => {
+        process.exitCode = 1;
+        process.exit(1);
+      });
+    };
+  process.on("uncaughtException", handleFatalProcessError("uncaught_exception"));
+  process.on("unhandledRejection", handleFatalProcessError("unhandled_rejection"));
+}
+
 async function startHostedContainerEntrypointCli(): Promise<void> {
+  installHostedContainerProcessFatalHandlers();
   const port = Number.parseInt(process.env.PORT ?? "8080", 10) || 8080;
 
   // Always-on CPU attribution sampler: the per-job diagnostic heartbeat only

@@ -841,6 +841,8 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "device-sync.reconnect_notice_duplicate",
   "device-sync.reconnect_notice_skipped",
   "mailbox.appended",
+  "mailbox.consume_ack_advanced",
+  "mailbox.consume_ack_skipped",
   "mailbox.dedupe_conflict",
   "mailbox.imported",
   "mailbox.linq_attachment_download_finished",

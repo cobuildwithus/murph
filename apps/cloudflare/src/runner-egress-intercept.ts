@@ -5,6 +5,7 @@ import {
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
+  sanitizeHostedExecutionStructuredLogDetails,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
@@ -12,6 +13,7 @@ import {
 } from "@murphai/hosted-execution/routes";
 
 import {
+  CLOUDFLARE_HOSTED_CONTAINER_FATAL_PATH,
   CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
@@ -411,6 +413,23 @@ export async function handleHostedRunnerInternalOutbound(
     message: "Hosted runner internal outbound request received.",
     phase: "wake.running",
   });
+  // Container fatal reports are accepted before the user-binding gate: the
+  // unattributable container deaths this sink exists for happen outside any
+  // invocation, when no bound user or write fence exists.
+  const containerFatalResponse = await maybeHandleHostedContainerFatalReport({
+    ctx,
+    request,
+    url,
+    userId,
+  });
+  if (containerFatalResponse) {
+    await emitHostedRunnerInternalOutboundResponseCompleted({
+      diagnosticDetails,
+      response: containerFatalResponse,
+      startedAt,
+    });
+    return containerFatalResponse;
+  }
   if (!userId) {
     const response = new Response("Missing hosted runner identity.", { status: 403 });
     await emitHostedRunnerInternalOutboundResponseCompleted({
@@ -629,6 +648,128 @@ async function maybeHandleHostedDataApiRequest(input: {
     ),
     url: input.url,
   });
+}
+
+const HOSTED_CONTAINER_FATAL_REPORT_ROUTE_MAX_BODY_BYTES = 8 * 1024;
+// Per-isolate fixed window: a real death produces a handful of reports, while
+// arbitrary in-container code could otherwise mint unlimited error-level log
+// lines through this unauthenticated sink and drown the attribution signal.
+const HOSTED_CONTAINER_FATAL_REPORT_LOG_WINDOW_MS = 60_000;
+const HOSTED_CONTAINER_FATAL_REPORT_LOG_WINDOW_LIMIT = 5;
+let hostedContainerFatalReportLogWindowStartedAtMs = 0;
+let hostedContainerFatalReportLogWindowCount = 0;
+
+function admitHostedContainerFatalReportLog(nowMs: number): "admitted" | "suppressed" | "suppressed_quietly" {
+  if (
+    nowMs - hostedContainerFatalReportLogWindowStartedAtMs
+      >= HOSTED_CONTAINER_FATAL_REPORT_LOG_WINDOW_MS
+  ) {
+    hostedContainerFatalReportLogWindowStartedAtMs = nowMs;
+    hostedContainerFatalReportLogWindowCount = 0;
+  }
+  hostedContainerFatalReportLogWindowCount += 1;
+  if (hostedContainerFatalReportLogWindowCount <= HOSTED_CONTAINER_FATAL_REPORT_LOG_WINDOW_LIMIT) {
+    return "admitted";
+  }
+  // One suppression marker per window, then silence until the window rolls.
+  return hostedContainerFatalReportLogWindowCount
+      === HOSTED_CONTAINER_FATAL_REPORT_LOG_WINDOW_LIMIT + 1
+    ? "suppressed"
+    : "suppressed_quietly";
+}
+
+// Durable sink for dying-container fatal reports (container-fatal-report.ts).
+// Deliberately reachable without a bound user or live write fence: the
+// container deaths this attributes happen outside any invocation, when no
+// fence or user binding exists (trust boundary documented in
+// agent-docs/SECURITY.md). The only effect is one sanitized, size-capped,
+// rate-limited worker log line, and the host is reachable only from inside
+// hosted containers through this egress intercept. Never forwarded to the
+// DO — the DO may be the component that is wedged.
+async function maybeHandleHostedContainerFatalReport(input: {
+  ctx: HostedRunnerOutboundContext;
+  request: Request;
+  url: URL;
+  userId: string | null;
+}): Promise<Response | null> {
+  if (
+    input.url.hostname !== CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl
+    || input.url.pathname !== CLOUDFLARE_HOSTED_CONTAINER_FATAL_PATH
+  ) {
+    return null;
+  }
+  if (input.request.method.toUpperCase() !== "POST") {
+    return new Response("Method Not Allowed", { status: 405 });
+  }
+  const body = await readBoundedRequestBody(
+    input.request,
+    HOSTED_CONTAINER_FATAL_REPORT_ROUTE_MAX_BODY_BYTES,
+  );
+  if (body === null) {
+    return new Response("Payload Too Large", { status: 413 });
+  }
+
+  const admission = admitHostedContainerFatalReportLog(Date.now());
+  if (admission !== "admitted") {
+    if (admission === "suppressed") {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        level: "warn",
+        message: "Hosted container fatal report log suppressed by rate limit.",
+        phase: "failed",
+        userId: input.userId,
+      });
+    }
+    // Sink semantics stay identical for the dying container either way.
+    return new Response(null, { status: 204 });
+  }
+
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    parsed = null;
+  }
+  const record: Record<string, unknown> =
+    parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  const safeErrorDetails = sanitizeHostedExecutionStructuredLogDetails(
+    record.safeErrorDetails && typeof record.safeErrorDetails === "object"
+        && !Array.isArray(record.safeErrorDetails)
+      ? (record.safeErrorDetails as HostedExecutionStructuredLogDetails)
+      : null,
+  );
+  emitHostedExecutionStructuredLog({
+    component: "container",
+    details: {
+      containerIdPresent: typeof input.ctx.containerId === "string"
+        && input.ctx.containerId.length > 0,
+      detailsTruncated: record.detailsTruncated === true,
+      errorCode: readHostedContainerFatalReportCode(record.errorCode),
+      errorName: readHostedContainerFatalReportCode(record.errorName),
+      reportBodyBytes: body.byteLength,
+      stage: readHostedContainerFatalReportCode(record.stage),
+      ...(safeErrorDetails ? { safeErrorDetails } : {}),
+    },
+    level: "error",
+    message: "Hosted container fatal report received.",
+    phase: "failed",
+    userId: input.userId,
+  });
+  return new Response(null, { status: 204 });
+}
+
+function readHostedContainerFatalReportCode(value: unknown): string {
+  if (typeof value !== "string") {
+    return "unclassified";
+  }
+  const normalized = value.trim();
+  return normalized.length > 0
+      && normalized.length <= 96
+      && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(normalized)
+    ? normalized
+    : "unclassified";
 }
 
 async function maybeHandleHostedTranscribeRequest(input: {

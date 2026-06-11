@@ -312,6 +312,24 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             },
           ],
         },
+        {
+          entries: [
+            {
+              at: TEST_NOW,
+              attemptId: "attempt_synthetic_runner_001",
+              component: "mailbox",
+              eventCode: "mailbox.consume_ack_skipped",
+              leaseGeneration: "1",
+              level: "info",
+              mailboxLane: "conversation",
+              phase: "checkpoint",
+              redactedJson: {
+                skipReason: "reply_outcome_missing",
+              },
+              workspaceVersion: "0",
+            },
+          ],
+        },
       ]);
 
       releaseEffect();
@@ -354,6 +372,24 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 stateChanged: true,
                 systemSeqEnd: "0",
                 systemSeqStart: "0",
+              },
+              workspaceVersion: "0",
+            },
+          ],
+        },
+        {
+          entries: [
+            {
+              at: TEST_NOW,
+              attemptId: "attempt_synthetic_runner_001",
+              component: "mailbox",
+              eventCode: "mailbox.consume_ack_skipped",
+              leaseGeneration: "1",
+              level: "info",
+              mailboxLane: "conversation",
+              phase: "checkpoint",
+              redactedJson: {
+                skipReason: "reply_outcome_missing",
               },
               workspaceVersion: "0",
             },
@@ -1571,9 +1607,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       ]);
       assert.deepEqual(logRequests.map((request) => request.entries[0]?.phase), [
         "import",
+        "checkpoint",
         "import",
       ]);
-      assert.deepEqual(logRequests[1]?.entries[0]?.redactedJson, {
+      assert.deepEqual(logRequests[2]?.entries[0]?.redactedJson, {
         attemptedCount: 1,
         effectAttachmentEvidenceUpdated: [true],
         effectKinds: ["inbox_projection"],
@@ -1735,6 +1772,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "import:1",
         "optional:log",
         "assistant",
+        "optional:log",
         "optional:log",
         "optional:projection",
         "optional:log",
@@ -4835,20 +4873,37 @@ async function waitForCondition(predicate: () => boolean, timeoutMs = 1_000): Pr
 describe("hosted conversation mailbox consume ack", () => {
   async function runConsumeAckScenario(input: {
     consumeError?: Error;
+    items?: HostedMailboxItem[];
     runAssistantPhase: Parameters<typeof runHostedWorkspaceUntilIdleOrBudget>[0]["runAssistantPhase"];
+    stagePendingInput?: boolean;
+    withoutConsumePort?: boolean;
   }) {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const consumeRequests: HostedMailboxConsumeRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
     const { mailboxPort } = createMailboxPort({
       ...(input.consumeError ? { consumeError: input.consumeError } : {}),
-      consumeRequests,
-      items: [
+      ...(input.withoutConsumePort ? {} : { consumeRequests }),
+      items: input.items ?? [
         createMailboxItem({
           id: "mailbox_item_runner_consume_ack",
           laneSeq: "1",
         }),
       ],
     });
+    if (input.stagePendingInput) {
+      // A staged auto-reply input the stub assistant phase never processes
+      // keeps hasPendingAssistantAutoReplyInput truthy at ack time.
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: TEST_NOW,
+        }],
+        updatedAt: TEST_NOW,
+        version: 1,
+      });
+    }
 
     try {
       await runHostedWorkspaceUntilIdleOrBudget({
@@ -4861,11 +4916,25 @@ describe("hosted conversation mailbox consume ack", () => {
           snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
-        async importItem() {
-          return { status: "imported" };
+        async importItem(item) {
+          if (!input.stagePendingInput) {
+            return { status: "imported" };
+          }
+          const staged = await upsertAssistantInputEvent({
+            event: createStoredAssistantInputEventForMailboxItem(
+              item.item,
+              "pending consume ack input",
+            ),
+            vault: vaultRoot,
+          });
+          return {
+            assistantInputId: staged.inputId,
+            status: "imported",
+          };
         },
         limitPerLane: 10,
         platform: createPlatform({
+          logRequests,
           mailboxPort,
           workspacePort: createWorkspacePort({ checkpointRequests: [] }),
         }),
@@ -4882,11 +4951,19 @@ describe("hosted conversation mailbox consume ack", () => {
       });
     }
 
-    return consumeRequests;
+    return {
+      consumeAckLogEntries: logRequests
+        .flatMap((request) => request.entries)
+        .filter((entry) =>
+          entry.eventCode === "mailbox.consume_ack_advanced"
+          || entry.eventCode === "mailbox.consume_ack_skipped"
+        ),
+      consumeRequests,
+    };
   }
 
   test("advances the conversation watermark after a clean foreground pass", async () => {
-    const consumeRequests = await runConsumeAckScenario({
+    const { consumeAckLogEntries, consumeRequests } = await runConsumeAckScenario({
       async runAssistantPhase() {
         return { foregroundReplyFailed: 0, progressed: false };
       },
@@ -4900,30 +4977,135 @@ describe("hosted conversation mailbox consume ack", () => {
       consumeRequests[0]?.requestId,
       "request_synthetic_runner_consume_ack:mailbox-consume",
     );
+    assert.deepEqual(
+      consumeAckLogEntries.map((entry) => ({
+        eventCode: entry.eventCode,
+        level: entry.level,
+        mailboxSeqEnd: entry.mailboxSeqEnd,
+      })),
+      [{
+        eventCode: "mailbox.consume_ack_advanced",
+        level: "info",
+        mailboxSeqEnd: "1",
+      }],
+    );
   });
 
-  test("does not ack when a foreground reply failed", async () => {
-    const consumeRequests = await runConsumeAckScenario({
+  test("does not ack when a foreground reply failed and logs the skip reason", async () => {
+    const { consumeAckLogEntries, consumeRequests } = await runConsumeAckScenario({
       async runAssistantPhase() {
         return { foregroundReplyFailed: 1, progressed: false };
       },
     });
 
     assert.deepEqual(consumeRequests, []);
+    assert.deepEqual(
+      consumeAckLogEntries.map((entry) => ({
+        eventCode: entry.eventCode,
+        level: entry.level,
+        skipReason: entry.redactedJson?.skipReason,
+      })),
+      [{
+        eventCode: "mailbox.consume_ack_skipped",
+        level: "info",
+        skipReason: "reply_failed",
+      }],
+    );
   });
 
-  test("does not ack when the pass reported no foreground reply phase", async () => {
-    const consumeRequests = await runConsumeAckScenario({
+  test("logs a skip when the pass reported no foreground reply phase", async () => {
+    const { consumeAckLogEntries, consumeRequests } = await runConsumeAckScenario({
       async runAssistantPhase() {
         return { progressed: false };
       },
     });
 
     assert.deepEqual(consumeRequests, []);
+    assert.deepEqual(
+      consumeAckLogEntries.map((entry) => ({
+        eventCode: entry.eventCode,
+        level: entry.level,
+        skipReason: entry.redactedJson?.skipReason,
+      })),
+      [{
+        eventCode: "mailbox.consume_ack_skipped",
+        level: "info",
+        skipReason: "reply_outcome_missing",
+      }],
+    );
+  });
+
+  test("skips the ack while staged assistant input is still pending", async () => {
+    const { consumeAckLogEntries, consumeRequests } = await runConsumeAckScenario({
+      stagePendingInput: true,
+      async runAssistantPhase() {
+        return { foregroundReplyFailed: 0, progressed: false };
+      },
+    });
+
+    assert.deepEqual(consumeRequests, []);
+    assert.deepEqual(
+      consumeAckLogEntries.map((entry) => ({
+        eventCode: entry.eventCode,
+        level: entry.level,
+        skipReason: entry.redactedJson?.skipReason,
+      })),
+      [{
+        eventCode: "mailbox.consume_ack_skipped",
+        level: "info",
+        skipReason: "pending_assistant_input",
+      }],
+    );
+  });
+
+  test("skips the ack when the conversation watermark is still empty", async () => {
+    const { consumeAckLogEntries, consumeRequests } = await runConsumeAckScenario({
+      items: [],
+      async runAssistantPhase() {
+        return { foregroundReplyFailed: 0, progressed: false };
+      },
+    });
+
+    assert.deepEqual(consumeRequests, []);
+    assert.deepEqual(
+      consumeAckLogEntries.map((entry) => ({
+        eventCode: entry.eventCode,
+        level: entry.level,
+        skipReason: entry.redactedJson?.skipReason,
+      })),
+      [{
+        eventCode: "mailbox.consume_ack_skipped",
+        level: "info",
+        skipReason: "empty_watermark",
+      }],
+    );
+  });
+
+  test("warns when the platform mailbox port has no consume", async () => {
+    const { consumeAckLogEntries, consumeRequests } = await runConsumeAckScenario({
+      withoutConsumePort: true,
+      async runAssistantPhase() {
+        return { foregroundReplyFailed: 0, progressed: false };
+      },
+    });
+
+    assert.deepEqual(consumeRequests, []);
+    assert.deepEqual(
+      consumeAckLogEntries.map((entry) => ({
+        eventCode: entry.eventCode,
+        level: entry.level,
+        skipReason: entry.redactedJson?.skipReason,
+      })),
+      [{
+        eventCode: "mailbox.consume_ack_skipped",
+        level: "warn",
+        skipReason: "consume_port_missing",
+      }],
+    );
   });
 
   test("treats a failed consume ack as best-effort and finishes the pass", async () => {
-    const consumeRequests = await runConsumeAckScenario({
+    const { consumeAckLogEntries, consumeRequests } = await runConsumeAckScenario({
       consumeError: new Error("synthetic consume outage"),
       async runAssistantPhase() {
         return { foregroundReplyFailed: 0, progressed: false };
@@ -4931,5 +5113,7 @@ describe("hosted conversation mailbox consume ack", () => {
     });
 
     assert.equal(consumeRequests.length, 1);
+    // The failed ack logs through the existing failure path, not as an advance.
+    assert.deepEqual(consumeAckLogEntries, []);
   });
 });
