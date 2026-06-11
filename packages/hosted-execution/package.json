@@ -82,6 +82,10 @@
       "types": "./dist/side-effects.d.ts",
       "default": "./dist/side-effects.js"
     },
+    "./vault-share": {
+      "types": "./dist/vault-share.d.ts",
+      "default": "./dist/vault-share.js"
+    },
     "./temporal-env": {
       "types": "./dist/temporal-env.d.ts",
       "default": "./dist/temporal-env.js"

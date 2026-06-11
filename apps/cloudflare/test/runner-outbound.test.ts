@@ -53,6 +53,7 @@ import {
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
+  HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import type {
@@ -626,6 +627,167 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(401);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects vault-share deliveries without the active runtime fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH}`, {
+        body: JSON.stringify({
+          projectionKind: "sleep-times.v0",
+          records: [
+            {
+              data: {
+                date: "2026-06-09",
+                sleepEndAt: "2026-06-10T06:31:00.000Z",
+                sleepStartAt: "2026-06-09T22:04:00.000Z",
+              },
+              occurredAt: "2026-06-09T00:00:00.000Z",
+              recordKey: "2026-06-09",
+            },
+          ],
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("forwards vault-share deliveries after active runtime fence validation", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> =>
+      new Response(JSON.stringify({
+        status: "delivered",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH}`, {
+        body: JSON.stringify({
+          projectionKind: "sleep-times.v0",
+          records: [
+            {
+              data: {
+                date: "2026-06-09",
+                sleepEndAt: "2026-06-10T06:31:00.000Z",
+                sleepStartAt: "2026-06-09T22:04:00.000Z",
+              },
+              occurredAt: "2026-06-09T00:00:00.000Z",
+              recordKey: "2026-06-09",
+            },
+          ],
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestInit = fetchMock.mock.calls[0]?.[1];
+    const headers = new Headers(requestInit?.headers);
+    expect(headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(headers.get("authorization")).toBeNull();
+    expect(headers.get("x-api-key")).toBeNull();
+  });
+
+  it("rejects vault-share deliveries when the runtime fence is stale", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH}`, {
+        body: JSON.stringify({
+          projectionKind: "sleep-times.v0",
+          records: [
+            {
+              data: {
+                date: "2026-06-09",
+                sleepEndAt: "2026-06-10T06:31:00.000Z",
+                sleepStartAt: "2026-06-09T22:04:00.000Z",
+              },
+              occurredAt: "2026-06-09T00:00:00.000Z",
+              recordKey: "2026-06-09",
+            },
+          ],
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -1647,14 +1809,16 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("authorizes email sends after live lease validation", async () => {
+  it("authorizes email sends after live lease validation and ignores legacy identityId payloads", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
-    const emailSendMock = vi.fn(async () => undefined);
+    const emailSendMock = vi.fn(async (_message: unknown) => undefined);
 
     const response = await handleRunnerOutboundRequest(
       new Request("http://results.worker/send", {
         body: JSON.stringify({
-          identityId: "assistant@mail.example.test",
+          // Regression: older runners forwarded the privacy-blinded binding
+          // identity. It must be ignored, not rejected as a sender override.
+          identityId: "hid_0123456789abcdef0123456789abcdef",
           message: "hello",
           target: "assistant@example.com",
           targetKind: "explicit",
@@ -1684,6 +1848,69 @@ describe("handleRunnerOutboundRequest", () => {
       userId: "member_123",
     });
     expect(emailSendMock).toHaveBeenCalledOnce();
+    expect(emailSendMock.mock.calls[0]?.[0]).toMatchObject({
+      from: "assistant@mail.example.test",
+    });
+  });
+
+  it("authorizes thread reply email sends that carry legacy identityId and timeoutMs fields", async () => {
+    // Incident regression: hosted email replies (targetKind "thread") from
+    // older runner bundles carried the privacy-blinded binding identity as
+    // identityId (plus a dead timeoutMs field) and failed HTTP 400. Legacy
+    // reply payloads must still send from the config-owned sender.
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const emailSendMock = vi.fn(async (_message: unknown) => undefined);
+    const env = createRunnerOutboundEnv({
+      HOSTED_EMAIL: {
+        send: emailSendMock,
+      },
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+      HOSTED_EMAIL_SIGNING_SECRET: "fixture-signing-key",
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+
+    const firstResponse = await handleRunnerOutboundRequest(
+      new Request("http://results.worker/send", {
+        body: JSON.stringify({
+          message: "hello",
+          target: "owner@example.com",
+          targetKind: "explicit",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      env,
+      "member_123",
+    );
+    expect(firstResponse.status).toBe(200);
+    const firstPayload = await firstResponse.json() as { target: string };
+    expect(firstPayload.target.length).toBeGreaterThan(0);
+
+    const replyResponse = await handleRunnerOutboundRequest(
+      new Request("http://results.worker/send", {
+        body: JSON.stringify({
+          identityId: "hid_0123456789abcdef0123456789abcdef",
+          message: "reply from murph",
+          target: firstPayload.target,
+          targetKind: "thread",
+          timeoutMs: 45_000,
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(replyResponse.status).toBe(200);
+    expect(emailSendMock).toHaveBeenCalledTimes(2);
+    expect(emailSendMock.mock.calls[1]?.[0]).toMatchObject({
+      from: "assistant@mail.example.test",
+      to: "owner@example.com",
+    });
   });
 
   it("authorizes email sends when the workspace version header is stale", async () => {
@@ -1693,7 +1920,6 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request("http://results.worker/send", {
         body: JSON.stringify({
-          identityId: "assistant@mail.example.test",
           message: "hello",
           target: "assistant@example.com",
           targetKind: "explicit",
@@ -1818,7 +2044,6 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request("http://results.worker/send", {
         body: JSON.stringify({
-          identityId: "assistant@mail.example.test",
           message: "hello",
           target: "assistant@example.com",
           targetKind: "explicit",

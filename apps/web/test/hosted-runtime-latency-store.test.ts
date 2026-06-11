@@ -260,6 +260,10 @@ describe("hosted runtime latency dashboard store", () => {
       mailboxItemId: "mailbox_latency_1",
       phaseBreakdown: {
         schemaVersion: 1,
+        dispatch: {
+          invokeReceivedAtEpochMs: 1_777_000_000_000,
+          containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
+        },
         restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
         boot: { nodeStartupMs: 4200, restoreWasCold: true },
       },
@@ -271,11 +275,15 @@ describe("hosted runtime latency dashboard store", () => {
     let trace = prisma.readTrace();
     expect(trace?.phaseBreakdownJson).toEqual({
       schemaVersion: 1,
+      dispatch: {
+        invokeReceivedAtEpochMs: 1_777_000_000_000,
+        containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
+      },
       restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
       boot: { nodeStartupMs: 4200, restoreWasCold: true },
     });
 
-    // Idempotent re-send must not clobber the already-populated restore/boot.
+    // Idempotent re-send must not clobber the already-populated dispatch/restore/boot.
     await recordHostedIngressAssistantInputStaged({
       assistantInputId: "input_phase_1",
       at: instant("2026-06-09T10:00:01.000Z"),
@@ -283,6 +291,7 @@ describe("hosted runtime latency dashboard store", () => {
       mailboxItemId: "mailbox_latency_1",
       phaseBreakdown: {
         schemaVersion: 1,
+        dispatch: { invokeReceivedAtEpochMs: 999 },
         restore: { sizeGuardMs: 999 },
         boot: { nodeStartupMs: 999 },
       },
@@ -293,6 +302,10 @@ describe("hosted runtime latency dashboard store", () => {
     trace = prisma.readTrace();
     expect(trace?.phaseBreakdownJson).toEqual({
       schemaVersion: 1,
+      dispatch: {
+        invokeReceivedAtEpochMs: 1_777_000_000_000,
+        containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
+      },
       restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
       boot: { nodeStartupMs: 4200, restoreWasCold: true },
     });
@@ -314,6 +327,10 @@ describe("hosted runtime latency dashboard store", () => {
     trace = prisma.readTrace();
     expect(trace?.phaseBreakdownJson).toEqual({
       schemaVersion: 1,
+      dispatch: {
+        invokeReceivedAtEpochMs: 1_777_000_000_000,
+        containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
+      },
       restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
       boot: { nodeStartupMs: 4200, restoreWasCold: true },
       provider: { sessionResolveMs: 11, promptBuildMs: 22, admissionMs: 33 },

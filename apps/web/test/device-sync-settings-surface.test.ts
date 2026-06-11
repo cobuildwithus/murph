@@ -352,6 +352,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
       headline: "Finishing setup",
       primaryAction: null,
       secondaryAction: { kind: "disconnect", label: "Disconnect" },
+      setupIncomplete: false,
       state: "active",
       statusLabel: "Setting up",
       tone: "muted",
@@ -374,6 +375,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
       headline: "Setup needs attention",
       primaryAction: null,
       secondaryAction: { kind: "disconnect", label: "Disconnect" },
+      setupIncomplete: true,
       state: "active",
       statusLabel: "Setup incomplete",
       tone: "attention",
@@ -417,6 +419,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     expect(source).toMatchObject({
       headline: "Setup needs attention",
       primaryAction: null,
+      setupIncomplete: true,
       statusLabel: "Setup incomplete",
       tone: "attention",
     });
@@ -522,5 +525,18 @@ describe("isActiveHostedDeviceSyncSource", () => {
       connectionId: "dspc_unavailable",
       state: "unavailable",
     })).toBe(false);
+  });
+
+  it("ignores connections whose setup never finished", () => {
+    expect(isActiveHostedDeviceSyncSource({
+      connectionId: "dspc_setup_incomplete",
+      setupIncomplete: true,
+      state: "active",
+    })).toBe(false);
+    expect(isActiveHostedDeviceSyncSource({
+      connectionId: "dspc_setting_up",
+      setupIncomplete: false,
+      state: "active",
+    })).toBe(true);
   });
 });

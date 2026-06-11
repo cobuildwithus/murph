@@ -62,8 +62,6 @@ describe("hosted local Linq webhook e2e", () => {
       HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
       LINQ_ATTACHMENT_CDN_BASE_URL: linq.attachmentDownloadBaseUrl,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-      WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
-      WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",
     }));
   }, 300_000);
 
@@ -832,7 +830,10 @@ async function startLinqScenario(
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
-      MURPH_DEV_TEMPORAL: "disabled",
+      // Temporal is the only hosted wake authority, and the hosted-local test
+      // worker entrypoint provides the deterministic fake AI binding the
+      // audio transcription path needs.
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       ...resolvedAdditionalEnv,
     },
     localDatabaseUrl,

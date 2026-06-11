@@ -38,15 +38,8 @@ import {
   stopWarmCodexAppServer,
 } from "@murphai/assistant-engine/codex-lifecycle";
 import {
-  readHostedAssistantCliSurfaceBootstrapContext,
-} from "@murphai/assistant-runtime/hosted-assistant-bootstrap";
-import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "./hosted-runtime-architecture.ts";
-import {
-  HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
-  countAssistantCliSurfaceHotPathProofs,
-} from "./hosted-runner-smoke-contract.ts";
 import {
   runHostedWorkspaceInvocation as runHostedWorkspaceInvocationDirect,
 } from "./hosted-workspace-invocation.ts";
@@ -284,9 +277,31 @@ export async function startHostedContainerEntrypoint(input: {
   // port is listening and consumed by the FIRST (cold) invocation only; a warm
   // process predates its message so its startup is not attributable to that turn.
   let pendingColdNodeStartupMs: number | null = null;
+  // Deploy rollouts SIGTERM the container with a rollout grace window
+  // (wrangler `rollout_active_grace_period`, currently 300s) before SIGKILL.
+  // Shutdown contract: finish the in-flight invocation (which checkpoints
+  // immediately via the shutdown signal), then exit 0. New work arriving after
+  // exit fails over to a replacement container through the platform's normal
+  // container-stopped retry path.
+  const containerShutdownController = new AbortController();
   const server = createServer(async (request, response) => {
     response.setHeader("connection", "close");
     const requestAbort = createRequestAbortController(request, response);
+    // Once shutdown began, the runtime must finish its immediate idle
+    // checkpoint even if the DO connection drops (the same deploy restarts the
+    // DO). Snapshot durability must not depend on response deliverability, so
+    // request aborts stop propagating to the runtime after the shutdown signal.
+    const invocationAbort = new AbortController();
+    const relayInvocationAbort = () => {
+      if (!containerShutdownController.signal.aborted) {
+        invocationAbort.abort(requestAbort.signal.reason);
+      }
+    };
+    if (requestAbort.signal.aborted) {
+      relayInvocationAbort();
+    } else {
+      requestAbort.signal.addEventListener("abort", relayInvocationAbort, { once: true });
+    }
     let claimedRunnerSlot = false;
     let runtimeWakeForRequest: (() => boolean) | null = null;
     let job: HostedExecutionRunnerJobInput | null = null;
@@ -508,6 +523,7 @@ export async function startHostedContainerEntrypoint(input: {
       const runnerJobAcceptedAt = new Date().toISOString();
       const coldNodeStartupMs = pendingColdNodeStartupMs;
       pendingColdNodeStartupMs = null;
+      const dispatchMilestones = readHostedContainerDispatchMilestones(request);
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -554,8 +570,10 @@ export async function startHostedContainerEntrypoint(input: {
           }
         },
         ...(coldNodeStartupMs === null ? {} : { nodeStartupMs: coldNodeStartupMs }),
+        ...(dispatchMilestones ? { dispatch: dispatchMilestones } : {}),
         runnerJobAcceptedAt,
-        signal: requestAbort.signal,
+        shutdownSignal: containerShutdownController.signal,
+        signal: invocationAbort.signal,
       });
       directInvocationReturned = true;
 
@@ -633,6 +651,7 @@ export async function startHostedContainerEntrypoint(input: {
         activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);
       }
       requestAbort.cleanup();
+      maybeExitAfterContainerShutdownDrain();
     }
   });
 
@@ -657,6 +676,50 @@ export async function startHostedContainerEntrypoint(input: {
         userId: null,
       });
     });
+  });
+
+  const maybeExitAfterContainerShutdownDrain = () => {
+    if (
+      !containerShutdownController.signal.aborted
+      || activeHostedRunnerJobCount > 0
+    ) {
+      return;
+    }
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      level: "warn",
+      message: "Hosted container entrypoint drained after shutdown signal; exiting cleanly.",
+      phase: "wake.running",
+    });
+    server.close(() => {
+      process.exit(0);
+    });
+    // Lingering keep-alive sockets must not hold the doomed container open.
+    setTimeout(() => {
+      process.exit(0);
+    }, 5_000).unref();
+  };
+  const handleContainerShutdownSignal = () => {
+    if (containerShutdownController.signal.aborted) {
+      return;
+    }
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      level: "warn",
+      message: "Hosted container entrypoint received SIGTERM; requesting immediate idle checkpoint.",
+      phase: "wake.running",
+    });
+    containerShutdownController.abort(
+      new DOMException("Hosted container received SIGTERM.", "AbortError"),
+    );
+    maybeExitAfterContainerShutdownDrain();
+  };
+  // process.on, not once: repeated SIGTERMs (orchestrator retries, local
+  // docker stop) must stay no-ops instead of restoring default termination
+  // mid-checkpoint.
+  process.on("SIGTERM", handleContainerShutdownSignal);
+  server.once("close", () => {
+    process.removeListener("SIGTERM", handleContainerShutdownSignal);
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -805,6 +868,35 @@ function writeJsonResponse(
   response.statusCode = statusCode;
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.end(JSON.stringify(payload));
+}
+
+// Best-effort dispatch telemetry stamped by the Durable Object onto the runner
+// POST headers. Invalid or absent values are dropped rather than failing the
+// job; these stamps are diagnostics, not authority.
+function readHostedContainerDispatchMilestones(
+  request: IncomingMessage,
+): { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null {
+  const invokeReceivedAtEpochMs = readDispatchEpochMs(
+    request.headers["x-dispatch-invoke-received-at-ms"],
+  );
+  const containerEnsureReadyStartedAtEpochMs = readDispatchEpochMs(
+    request.headers["x-dispatch-container-ensure-ready-started-at-ms"],
+  );
+  if (invokeReceivedAtEpochMs === null && containerEnsureReadyStartedAtEpochMs === null) {
+    return null;
+  }
+  return {
+    ...(invokeReceivedAtEpochMs === null ? {} : { invokeReceivedAtEpochMs }),
+    ...(containerEnsureReadyStartedAtEpochMs === null ? {} : { containerEnsureReadyStartedAtEpochMs }),
+  };
+}
+
+function readDispatchEpochMs(raw: string | string[] | undefined): number | null {
+  if (typeof raw !== "string" || !/^\d+$/u.test(raw)) {
+    return null;
+  }
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : null;
 }
 
 function discardUnreadRequestBody(request: IncomingMessage): void {
@@ -1381,6 +1473,18 @@ async function runHostedContainerCliSurfaceContractSmoke(smokeVaultRoot: string)
   contractBytes: number;
   hotPathProofCount: number;
 }> {
+  // Deploy-smoke-only modules: loaded lazily so the cold-boot job path never
+  // pays their module-evaluation cost.
+  const [
+    { readHostedAssistantCliSurfaceBootstrapContext },
+    {
+      HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
+      countAssistantCliSurfaceHotPathProofs,
+    },
+  ] = await Promise.all([
+    import("@murphai/assistant-runtime/hosted-assistant-bootstrap"),
+    import("./hosted-runner-smoke-contract.ts"),
+  ]);
   const contract = await readHostedAssistantCliSurfaceBootstrapContext({
     sessionId: "hosted-container-deploy-smoke",
     vault: smokeVaultRoot,
@@ -2083,16 +2187,20 @@ async function runHostedWorkspaceInvocation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
+    dispatch?: { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null;
     nodeStartupMs?: number | null;
     onRuntimeWakeReady?: (sendWake: () => boolean) => void;
     runnerJobAcceptedAt?: string | null;
+    shutdownSignal?: AbortSignal | null;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof runHostedWorkspaceInvocationDirect>>> {
   return await runtime.runWorkspaceInvocation(input, {
+    dispatch: options?.dispatch ?? null,
     nodeStartupMs: options?.nodeStartupMs ?? null,
     onRuntimeWakeReady: options?.onRuntimeWakeReady,
     runnerJobAcceptedAt: options?.runnerJobAcceptedAt ?? null,
+    shutdownSignal: options?.shutdownSignal ?? null,
     signal: options?.signal,
     supervisorEnv: runtime.startupConfig.supervisorEnv,
   });
@@ -2102,10 +2210,12 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
+    dispatch?: { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null;
     nodeStartupMs?: number | null;
     onCleanupStatus?: (status: Exclude<HostedContainerCleanupStatus, "not_run">) => void;
     onRuntimeWakeReady?: (sendWake: () => boolean) => void;
     runnerJobAcceptedAt?: string | null;
+    shutdownSignal?: AbortSignal | null;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof runHostedWorkspaceInvocationDirect>>> {

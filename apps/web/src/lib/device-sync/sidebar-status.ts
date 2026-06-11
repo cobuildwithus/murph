@@ -94,6 +94,9 @@ function describeSourceStatus(
   tone: SidebarAccountStatusTone,
 ): SidebarAccountStatus {
   const fragment = toSentenceFragment(source.statusLabel);
+  const providerLabel = source.providerLabel === "Wearable source"
+    ? "Wearable"
+    : source.providerLabel;
   const connectedUpstreamSources = source.upstreamSources.filter(
     (upstreamSource) => upstreamSource.status === "connected",
   );
@@ -114,7 +117,7 @@ function describeSourceStatus(
   }
 
   return {
-    message: `${source.providerLabel} ${fragment}`,
+    message: `${providerLabel} ${fragment}`,
     tone,
   };
 }

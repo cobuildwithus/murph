@@ -1,4 +1,3 @@
-import { garminProviderAdapter } from "./garmin.ts";
 import { junctionProviderAdapter } from "./junction.ts";
 import { ouraProviderAdapter } from "./oura.ts";
 import { stravaProviderAdapter } from "./strava.ts";
@@ -26,7 +25,6 @@ export {
 export const defaultDeviceProviderAdapters: readonly DeviceProviderAdapter[] = Object.freeze([
   whoopProviderAdapter,
   ouraProviderAdapter,
-  garminProviderAdapter,
   stravaProviderAdapter,
   junctionProviderAdapter,
 ]);

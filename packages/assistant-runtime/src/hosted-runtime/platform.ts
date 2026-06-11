@@ -3,6 +3,8 @@ import type {
   HostedAssistantDeliverySideEffect,
 } from "@murphai/hosted-execution/side-effects";
 import type {
+  HostedMailboxConsumeRequest,
+  HostedMailboxConsumeResponse,
   HostedMailboxFetchRequest,
   HostedMailboxFetchResponse,
   HostedMailboxPayloadFetchRequest,
@@ -30,6 +32,10 @@ import type {
 import type {
   HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
+import type {
+  HostedVaultShareDeliverRequest,
+  HostedVaultShareDeliverResponse,
+} from "@murphai/hosted-execution/vault-share";
 import type {
   HostedWorkspaceSnapshotV2Aad,
   HostedWorkspaceSnapshotV2Ref,
@@ -245,6 +251,10 @@ export interface HostedRuntimeIssueExportPort {
 }
 
 export interface HostedRuntimeMailboxPort {
+  // Optional for deploy-window compatibility with older platform builds.
+  // Advances the durable per-lane consumed watermark after a clean pass;
+  // idempotent monotonic max on the web side.
+  consume?(request: HostedMailboxConsumeRequest): Promise<HostedMailboxConsumeResponse>;
   fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse>;
   fetchPayload(
     request: HostedMailboxPayloadFetchRequest,
@@ -336,6 +346,12 @@ export interface HostedRuntimeLatencyTracePort {
   record(request: HostedRuntimeLatencyTraceRequest): Promise<HostedRuntimeLatencyTraceResponse>;
 }
 
+export interface HostedRuntimeVaultSharePort {
+  deliver(
+    request: HostedVaultShareDeliverRequest,
+  ): Promise<HostedVaultShareDeliverResponse>;
+}
+
 export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
@@ -352,6 +368,7 @@ export interface HostedRuntimePlatform {
   runtimeLivenessPort?: RuntimeLivenessPort | null;
   runtimeLivenessRequired?: boolean | null;
   usageRecordPort?: HostedRuntimeUsageRecordPort | null;
+  vaultSharePort?: HostedRuntimeVaultSharePort | null;
   workspacePort?: HostedRuntimeWorkspacePort | null;
   workspaceSnapshotPort?: HostedRuntimeWorkspaceSnapshotPort | null;
 }

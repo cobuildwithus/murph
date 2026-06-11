@@ -4454,7 +4454,284 @@ describe("hostedRunnerIntercept", () => {
   });
 });
 
+describe("maybeHandleHostedTranscribeRequest", () => {
+  const TRANSCRIBE_URL = "http://murph-transcribe.worker/v1/transcribe";
+
+  it("routes the transcribe host through the open-internet multiplexer", () => {
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.transcribe])
+      .toBe(handleHostedRunnerOpenInternetOutbound);
+    expect(HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.transcribe).toBe("murph-transcribe.worker");
+  });
+
+  it("authorizes via the active user fence and maps Workers AI output to the transcript payload", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const aiRun = vi.fn(async (model: string, payload: Record<string, unknown>) => {
+      expect(model).toBe("@cf/openai/whisper-large-v3-turbo");
+      expect(Buffer.from(String(payload.audio), "base64").toString("utf8")).toBe("wav-bytes");
+      return {
+        segments: [
+          { end: 1.5, start: 0, text: "Remember to" },
+          { end: 2.94, start: 1.5, text: "log the voice note" },
+        ],
+        text: "Remember to log the voice note",
+        transcription_info: { duration: 2.94, language: "en" },
+      };
+    });
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      userId: string;
+    }) => createActiveRuntimeWriteFenceValidationResult(input));
+
+    const response = await hostedRunnerIntercept(
+      new Request(TRANSCRIBE_URL, {
+        body: "wav-bytes",
+        headers: {
+          "content-type": "audio/wav",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        AI: { run: aiRun },
+        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        validateActiveRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      durationMs: 2_940,
+      language: "en",
+      segments: [
+        { endMs: 1_500, startMs: 0, text: "Remember to" },
+        { endMs: 2_940, startMs: 1_500, text: "log the voice note" },
+      ],
+      text: "Remember to log the voice note",
+    });
+    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          host: "murph-transcribe.worker",
+          providerKind: "workers_ai_transcribe",
+          providerRequestAuthorized: true,
+          writeFenceValidationMode: "active_user_fence",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+    const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+    expect(serializedLogs).not.toContain("Remember to log the voice note");
+    expect(serializedLogs).not.toContain("wav-bytes");
+  });
+
+  it("rejects unknown transcribe paths and non-POST methods before authorization", async () => {
+    const aiRun = vi.fn();
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      userId: string;
+    }) => createActiveRuntimeWriteFenceValidationResult(input));
+    const env = createInterceptEnv({
+      AI: { run: aiRun },
+      readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+      validateActiveRuntimeWriteFence,
+    });
+
+    const wrongPath = await hostedRunnerIntercept(
+      new Request("http://murph-transcribe.worker/v1/other", { method: "POST" }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+    expect(wrongPath.status).toBe(403);
+
+    const wrongMethod = await hostedRunnerIntercept(
+      new Request(TRANSCRIBE_URL, { method: "GET" }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+    expect(wrongMethod.status).toBe(403);
+    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(aiRun).not.toHaveBeenCalled();
+  });
+
+  it("rejects unauthorized transcribe requests without calling Workers AI", async () => {
+    const aiRun = vi.fn();
+
+    const response = await hostedRunnerIntercept(
+      new Request(TRANSCRIBE_URL, {
+        body: "wav-bytes",
+        method: "POST",
+      }),
+      createInterceptEnv({
+        AI: { run: aiRun },
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(aiRun).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the Workers AI binding is missing", async () => {
+    const response = await hostedRunnerIntercept(
+      new Request(TRANSCRIBE_URL, {
+        body: "wav-bytes",
+        method: "POST",
+      }),
+      createInterceptEnv({
+        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        validateActiveRuntimeWriteFence: async (input) =>
+          createActiveRuntimeWriteFenceValidationResult(input),
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.text()).toBe(
+      "Hosted transcription Workers AI binding is not configured.",
+    );
+  });
+
+  it("bounds the transcribe request body and surfaces Workers AI failures as 502", async () => {
+    const oversized = await hostedRunnerIntercept(
+      new Request(TRANSCRIBE_URL, {
+        body: "wav-bytes",
+        headers: {
+          "content-length": String(64 * 1024 * 1024),
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        AI: { run: vi.fn() },
+        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        validateActiveRuntimeWriteFence: async (input) =>
+          createActiveRuntimeWriteFenceValidationResult(input),
+      }),
+      { containerId: "opaque-container-id" },
+    );
+    expect(oversized.status).toBe(413);
+
+    const failing = await hostedRunnerIntercept(
+      new Request(TRANSCRIBE_URL, {
+        body: "wav-bytes",
+        method: "POST",
+      }),
+      createInterceptEnv({
+        AI: {
+          run: vi.fn(async () => {
+            throw new Error("Workers AI unavailable");
+          }),
+        },
+        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        validateActiveRuntimeWriteFence: async (input) =>
+          createActiveRuntimeWriteFenceValidationResult(input),
+      }),
+      { containerId: "opaque-container-id" },
+    );
+    expect(failing.status).toBe(502);
+    expect(await failing.text()).toBe("Hosted transcription failed.");
+  });
+
+  it("falls back to an empty segment list and drops malformed segments", async () => {
+    const response = await hostedRunnerIntercept(
+      new Request(TRANSCRIBE_URL, {
+        body: "wav-bytes",
+        method: "POST",
+      }),
+      createInterceptEnv({
+        AI: {
+          run: vi.fn(async () => ({
+            text: "  text-only transcript  ",
+          })),
+        },
+        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        validateActiveRuntimeWriteFence: async (input) =>
+          createActiveRuntimeWriteFenceValidationResult(input),
+      }),
+      { containerId: "opaque-container-id" },
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      durationMs: null,
+      language: null,
+      segments: [],
+      text: "text-only transcript",
+    });
+
+    const malformedSegments = await hostedRunnerIntercept(
+      new Request(TRANSCRIBE_URL, {
+        body: "wav-bytes",
+        method: "POST",
+      }),
+      createInterceptEnv({
+        AI: {
+          run: vi.fn(async () => ({
+            segments: [
+              null,
+              "junk",
+              { end: 1.5, start: 0, text: "   " },
+              { end: Number.NaN, start: -1, text: "kept segment" },
+            ],
+            text: "kept segment",
+            transcription_info: { duration: -2, language: "   " },
+          })),
+        },
+        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        validateActiveRuntimeWriteFence: async (input) =>
+          createActiveRuntimeWriteFenceValidationResult(input),
+      }),
+      { containerId: "opaque-container-id" },
+    );
+    expect(malformedSegments.status).toBe(200);
+    await expect(malformedSegments.json()).resolves.toEqual({
+      durationMs: null,
+      language: null,
+      segments: [{ endMs: null, startMs: null, text: "kept segment" }],
+      text: "kept segment",
+    });
+  });
+
+  it("rejects empty transcribe bodies and surfaces transcript-less Workers AI output as 502", async () => {
+    const emptyBody = await hostedRunnerIntercept(
+      new Request(TRANSCRIBE_URL, { method: "POST" }),
+      createInterceptEnv({
+        AI: { run: vi.fn() },
+        readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+        validateActiveRuntimeWriteFence: async (input) =>
+          createActiveRuntimeWriteFenceValidationResult(input),
+      }),
+      { containerId: "opaque-container-id" },
+    );
+    expect(emptyBody.status).toBe(400);
+    expect(await emptyBody.text()).toBe(
+      "Hosted transcription request body must include audio bytes.",
+    );
+
+    for (const output of [{}, { text: "   " }, "transcript", null]) {
+      const response = await hostedRunnerIntercept(
+        new Request(TRANSCRIBE_URL, {
+          body: "wav-bytes",
+          method: "POST",
+        }),
+        createInterceptEnv({
+          AI: { run: vi.fn(async () => output) },
+          readActiveRuntimeUserFence: async () => ({ active: true, userId: "member_123" }),
+          validateActiveRuntimeWriteFence: async (input) =>
+            createActiveRuntimeWriteFenceValidationResult(input),
+        }),
+        { containerId: "opaque-container-id" },
+      );
+      expect(response.status).toBe(502);
+      expect(await response.text()).toBe("Hosted transcription failed.");
+    }
+  });
+});
+
 function createInterceptEnv(input: {
+  AI?: RunnerOutboundEnvironmentSource["AI"];
   HOSTED_EXECUTION_RUNNER_HOST_ALIAS?: string;
   HOSTED_LOG_FINGERPRINT_SECRET?: string;
   HOSTED_WEB_BASE_URL?: string;
@@ -4487,6 +4764,7 @@ function createInterceptEnv(input: {
 }): RunnerOutboundEnvironmentSource {
   return {
     ...createHostedExecutionTestEnv(),
+    AI: input.AI,
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
     HOSTED_EXECUTION_RUNNER_HOST_ALIAS: input.HOSTED_EXECUTION_RUNNER_HOST_ALIAS,
     HOSTED_LOG_FINGERPRINT_SECRET: input.HOSTED_LOG_FINGERPRINT_SECRET,

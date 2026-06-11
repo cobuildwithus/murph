@@ -16,7 +16,6 @@ describe("@murphai/hosted-local-harness package boundary", () => {
         ["@murphai/hosted-local-harness", ["startHostedLocalHarness", "resolveHostedLocalE2eScenarios"]],
         ["@murphai/hosted-local-harness/cli", ["runHostedLocalCli"]],
         ["@murphai/hosted-local-harness/compat", ["normalizeLegacyCloudflareHostedLocalE2eArgs"]],
-        ["@murphai/hosted-local-harness/codex-app-server-stub", ["maybeInstallHostedLocalCodexAppServerStub"]],
         ["@murphai/hosted-local-harness/dev-hosted-local/environment", ["loadHostedLocalBaseEnvironment"]],
         ["@murphai/hosted-local-harness/dev-hosted-local/stack", ["startHostedLocalDevStack"]],
         ["@murphai/hosted-local-harness/harness", ["startHostedLocalHarness"]],

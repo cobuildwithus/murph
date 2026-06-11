@@ -50,6 +50,7 @@ export interface HostedDeviceSyncSettingsSource {
   providerConfigured: boolean;
   providerLabel: string;
   secondaryAction: HostedDeviceSyncSettingsAction | null;
+  setupIncomplete?: boolean;
   state: HostedDeviceSyncSettingsSourceState;
   statusLabel: string;
   tone: HostedDeviceSyncSettingsTone;
@@ -71,9 +72,10 @@ export interface HostedDeviceSyncSettingsResponse {
 }
 
 export function isActiveHostedDeviceSyncSource(
-  source: Pick<HostedDeviceSyncSettingsSource, "connectionId" | "state">,
+  source: Pick<HostedDeviceSyncSettingsSource, "connectionId" | "setupIncomplete" | "state">,
 ): boolean {
   return Boolean(source.connectionId)
+    && source.setupIncomplete !== true
     && source.state !== "available"
     && source.state !== "disconnected"
     && source.state !== "unavailable";
@@ -271,6 +273,7 @@ function buildConnectedSource(input: {
         kind: "disconnect",
         label: "Disconnect",
       },
+      setupIncomplete: setupNeedsAttention,
       state: connection.status,
       statusLabel: setupNeedsAttention ? "Setup incomplete" : "Setting up",
       tone: setupNeedsAttention ? "attention" : "muted",

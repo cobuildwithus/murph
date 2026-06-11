@@ -18,11 +18,6 @@ export {
   WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
 } from "./defaults.ts";
 export {
-  normalizeGarminSnapshot,
-  garminProviderAdapter,
-  type GarminSnapshotInput,
-} from "./garmin.ts";
-export {
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,

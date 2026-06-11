@@ -290,17 +290,15 @@ export async function importHostedConversationMailboxItem(input: {
     input.prepareWakeContext ?? prepareHostedConversationMailboxWakeContext;
   if (!input.prepareWakeContext) {
     await requireHostedBootstrapForWake(input.vaultRoot, decoded.wake);
-    if (decoded.wake.message.channel === "linq") {
-      await prepareHostedAssistantAutoReplyForWake(
-        input.vaultRoot,
-        decoded.wake,
-        {
-          ...input.runtime.forwardedEnv,
-          ...input.runtime.userEnv,
-        },
-        input.runtime.resolvedConfig,
-      );
-    }
+    await prepareHostedAssistantAutoReplyForWake(
+      input.vaultRoot,
+      decoded.wake,
+      {
+        ...input.runtime.forwardedEnv,
+        ...input.runtime.userEnv,
+      },
+      input.runtime.resolvedConfig,
+    );
   }
 
   const stagedInput = await stageAssistantInputEvent({
@@ -733,9 +731,16 @@ function createHostedConversationAssistantInputEvent(input: {
     ),
     occurredAt: input.wake.occurredAt,
     receivedAt: input.item.item.createdAt,
-    replyTarget: createHostedConversationAssistantInputReplyTarget(
-      input.wake,
-    ),
+    // A durably-consumed item is a replay of an already-handled message: it
+    // must stay in conversation context but never become a reply candidate
+    // again. assistant-engine automation/reply.ts gates reply eligibility on a
+    // replyTarget channel match (reply.ts:1600, 2073), so staging a null
+    // replyTarget keeps the event context-only.
+    replyTarget: input.item.durablyConsumed === true
+      ? null
+      : createHostedConversationAssistantInputReplyTarget(
+          input.wake,
+        ),
     sourceMetadata: createHostedConversationAssistantInputSourceMetadata(
       input.wake,
       identifierBlind,

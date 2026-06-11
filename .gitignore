@@ -80,3 +80,8 @@ apps/cloudflare/.deploy
 research-artifacts/
 source-artifacts/
 scripts/murph-age/
+
+# Private founder strategy docs & assets — local only, never published
+agent-docs/product-ideas.md
+*.local.md
+*.local.png

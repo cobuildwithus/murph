@@ -580,7 +580,11 @@ test("automation edit patches sparse fields without implicit route rebinding", a
     assert.equal(saved.exitCode, null);
     assert.equal(saved.envelope.ok, true);
     assert.equal(saved.envelope.data?.created, true);
-    assert.deepEqual(bridge.requests, []);
+    // Save fetches the current route to enrich same-conversation targets; the
+    // linq current route must not leak into this explicit telegram route.
+    assert.deepEqual(bridge.requests, [
+      HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+    ]);
 
     const edited = await runInProcessJsonCli<{
       automationId: string;
@@ -599,7 +603,10 @@ test("automation edit patches sparse fields without implicit route rebinding", a
     assert.equal(edited.envelope.ok, true);
     assert.equal(edited.envelope.data?.automationId, saved.envelope.data?.automationId);
     assert.equal(edited.envelope.data?.created, false);
-    assert.deepEqual(bridge.requests, []);
+    // Edit never consults the current route.
+    assert.deepEqual(bridge.requests, [
+      HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+    ]);
 
     const shown = await runInProcessJsonCli<{
       automation: {

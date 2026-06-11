@@ -12,6 +12,7 @@ import {
 } from "@/src/components/ui/dialog";
 import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 
+import { HostedEmailPrivyLinkHandOff } from "./hosted-email-privy-link-hand-off";
 import { HostedEmailSettings } from "./hosted-email-settings";
 import { HostedPhoneSettings } from "./hosted-phone-settings";
 import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
@@ -43,6 +44,21 @@ export function HostedSettingsIdentityLinkDialog({
     onOpenChange(false);
     router.refresh();
   };
+
+  // The server told us the Privy user has no email linked, which means the
+  // inline update form cannot work — Privy only supports linking an email
+  // through its own modal. Skip our dialog entirely and hand off to Privy's,
+  // so the member sees a single dialog instead of two stacked ones.
+  if (initialMode === "email" && account.email.privyEmailLinked === false && appId) {
+    return (
+      <HostedPrivyProvider appId={appId} clientId={clientId}>
+        <HostedEmailPrivyLinkHandOff
+          onAborted={() => onOpenChange(false)}
+          onSynced={closeAndRefresh}
+        />
+      </HostedPrivyProvider>
+    );
+  }
 
   return (
     <Dialog open onOpenChange={onOpenChange}>

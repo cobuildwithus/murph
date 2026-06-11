@@ -220,6 +220,7 @@ export async function runHostedAssistantAutomationLane(input: {
         nextWakeAt: null,
         progressed: false,
         redactedLogEntries: [],
+        replyFailed: 0,
         timings: undefined,
       };
   const assistantAutomationElapsedMs = elapsedSince(assistantStartedAt);
@@ -237,6 +238,7 @@ export async function runHostedAssistantAutomationLane(input: {
     assistantAutomationElapsedMs,
     assistantAutomationPassElapsedMs: assistantResult.timings?.passElapsedMs ?? null,
     assistantAutomationProgressed: assistantResult.progressed,
+    assistantAutomationReplyFailed: assistantResult.replyFailed,
     assistantAutomationTotalElapsedMs: assistantResult.timings?.totalElapsedMs ?? null,
     assistantInputCandidateListed:
       assistantResult.timings?.inputCandidateListed ?? false,
@@ -268,6 +270,7 @@ export async function runHostedAssistantAutomation(
   nextWakeAt: string | null;
   progressed: boolean;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
+  replyFailed: number;
   timings?: {
     activeTurnInputIngested?: boolean | null;
     afterStateElapsedMs: number;
@@ -497,6 +500,7 @@ export async function runHostedAssistantAutomation(
       nextWakeAt,
       progressed: result.progressed,
       redactedLogEntries,
+      replyFailed: replies.failed,
       timings: {
         activeTurnInputIngested,
         afterStateElapsedMs,
@@ -530,6 +534,7 @@ export async function runHostedAssistantAutomation(
         nextWakeAt,
         progressed: true,
         redactedLogEntries,
+        replyFailed: 0,
       };
     }
 

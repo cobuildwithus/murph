@@ -30,6 +30,27 @@ describe("Junction wearable fixture testing helpers", () => {
     }
   });
 
+  it("rejects fixtures whose records share a constant-redacted id", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-fixture-"));
+    const fixturePath = path.join(tempRoot, "junction-wearables-hosted-smoke.json");
+
+    try {
+      const fixture = buildSafeFixture({ recordCount: 3 });
+      for (const artifact of fixture.rawArtifacts) {
+        for (const record of artifact.content as Array<Record<string, unknown>>) {
+          record.id = "<redacted>";
+        }
+      }
+      await writeFile(fixturePath, JSON.stringify(fixture), "utf8");
+
+      await expect(
+        buildJunctionWearableHostedReplayPlan({ fixturePath }),
+      ).rejects.toThrow(/duplicate record id/u);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it("promotes capture exports into hosted-smoke fixtures", () => {
     const promoted = promoteWearableCaptureToJunctionHostedSmokeFixture({
       ...buildCaptureFixture(),

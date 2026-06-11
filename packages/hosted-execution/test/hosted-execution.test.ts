@@ -439,6 +439,7 @@ describe("hosted execution coverage gaps", () => {
       "./runtime-control",
       "./side-effects",
       "./temporal-env",
+      "./vault-share",
       "./workspace-snapshot-v2",
     ]);
     expect(exportKeys.filter((key) => key.startsWith("./") && key.slice(2).includes("/")))
@@ -527,13 +528,18 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_ISSUE_RECORD_PATH",
       "HOSTED_RUNTIME_LATENCY_TRACE_PATH",
       "HOSTED_RUNTIME_LOG_PATH",
+      "HOSTED_RUNTIME_MAILBOX_CONSUME_PATH",
       "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",
       "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
       "HOSTED_RUNTIME_STATUS_PATH",
       "HOSTED_RUNTIME_USAGE_RECORD_PATH",
+      "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH",
       "HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_PATH",
     ]);
+    expect(routeModule.HOSTED_RUNTIME_MAILBOX_CONSUME_PATH).toBe(
+      "/api/internal/hosted-mailbox/consume",
+    );
     expect(routeModule.HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH).toBe(
       "/api/internal/hosted-mailbox/payload/fetch",
     );

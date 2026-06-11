@@ -1,3 +1,7 @@
+import {
+  sanitizeHostedRuntimeErrorCode,
+  sanitizeHostedRuntimeErrorText,
+} from "@murphai/device-syncd/hosted-runtime";
 import { isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
 
 import {
@@ -38,6 +42,15 @@ export async function GET(
     );
   } catch (error) {
     if (isDeviceSyncError(error)) {
+      // The only hosted log line for failed callbacks. The route param and
+      // some provider messages can carry request-controlled text, so both go
+      // through the shared redaction helpers before emission.
+      console.warn("Hosted device-sync connection callback failed.", {
+        provider: sanitizeHostedRuntimeErrorCode(providerName),
+        errorCode: error.code,
+        httpStatus: error.httpStatus,
+        message: sanitizeHostedRuntimeErrorText(error.message),
+      });
       const connectSourceId = typeof error.details?.connectSourceId === "string"
         ? error.details.connectSourceId
         : null;

@@ -437,8 +437,10 @@ export function sanitizeWearableCaptureValue(
       return redactedValue;
     }
     if (looksLikeUuid(value)) {
-      state.report.pseudonymizedValues += 1;
-      return redactedValue;
+      // UUIDs are usually provider record/reference ids, so they must stay
+      // 1:1 distinct: collapsing them all to one constant makes every record
+      // share one identity and breaks externalRef-idempotent replay imports.
+      return pseudonymizeValue(state, keyPath.at(-1) ?? "uuid", value) ?? redactedValue;
     }
   }
 

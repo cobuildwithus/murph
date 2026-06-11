@@ -255,7 +255,7 @@ const WEBMAIL_PROVIDERS: ReadonlyArray<{
   params: { body: string; subject: string; to: string };
 }> = [
   {
-    composeUrl: "https://mail.google.com/mail/?view=cm&fs=1",
+    composeUrl: "https://mail.google.com/mail/u/0/?tf=cm",
     domains: ["gmail.com", "googlemail.com"],
     label: "Gmail",
     params: { body: "body", subject: "su", to: "to" },

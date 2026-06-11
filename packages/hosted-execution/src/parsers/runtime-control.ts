@@ -24,11 +24,14 @@ import {
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
+  type HostedMailboxConsumeRequest,
+  type HostedMailboxConsumeResponse,
   type HostedMailboxFetchRequest,
   type HostedMailboxFetchResponse,
   type HostedMailboxItem,
   type HostedMailboxKind,
   type HostedMailboxLane,
+  type HostedMailboxLaneConsumed,
   type HostedMailboxLaneCounterState,
   type HostedMailboxLaneCursor,
   type HostedMailboxLaneHighWater,
@@ -250,9 +253,14 @@ const HOSTED_RUNTIME_LATENCY_TRACE_PROVIDER_STARTED_KEYS = new Set([
 ]);
 const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS = new Set([
   "schemaVersion",
+  "dispatch",
   "restore",
   "boot",
   "provider",
+]);
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_DISPATCH_KEYS = new Set([
+  "invokeReceivedAtEpochMs",
+  "containerEnsureReadyStartedAtEpochMs",
 ]);
 const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_RESTORE_KEYS = new Set([
   "sizeGuardMs",
@@ -460,6 +468,17 @@ export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFe
   const record = requireObject(value, "Hosted mailbox fetch response");
 
   return {
+    ...(record.consumedSeqByLane === undefined || record.consumedSeqByLane === null
+      ? {}
+      : {
+          consumedSeqByLane: requireArray(
+            record.consumedSeqByLane,
+            "Hosted mailbox fetch response consumedSeqByLane",
+          ).map((entry, index) => parseHostedMailboxLaneConsumed(
+            entry,
+            `Hosted mailbox fetch response consumedSeqByLane[${index}]`,
+          )),
+        }),
     fetchedAt: requireString(record.fetchedAt, "Hosted mailbox fetch response fetchedAt"),
     items: requireArray(record.items, "Hosted mailbox fetch response items")
       .map((entry) => parseHostedMailboxItem(entry)),
@@ -471,6 +490,38 @@ export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFe
       `Hosted mailbox fetch response maxSeqByLane[${index}]`,
     )),
     userId: requireString(record.userId, "Hosted mailbox fetch response userId"),
+  };
+}
+
+export function parseHostedMailboxConsumeRequest(value: unknown): HostedMailboxConsumeRequest {
+  const record = requireObject(value, "Hosted mailbox consume request");
+
+  return {
+    lanes: requireArray(record.lanes, "Hosted mailbox consume request lanes")
+      .map((entry, index) => parseHostedMailboxLaneConsumed(
+        entry,
+        `Hosted mailbox consume request lanes[${index}]`,
+      )),
+    requestId: requireString(record.requestId, "Hosted mailbox consume request requestId"),
+  };
+}
+
+export function parseHostedMailboxConsumeResponse(value: unknown): HostedMailboxConsumeResponse {
+  const record = requireObject(value, "Hosted mailbox consume response");
+
+  return {
+    acknowledgedAt: requireString(
+      record.acknowledgedAt,
+      "Hosted mailbox consume response acknowledgedAt",
+    ),
+    consumedSeqByLane: requireArray(
+      record.consumedSeqByLane,
+      "Hosted mailbox consume response consumedSeqByLane",
+    ).map((entry, index) => parseHostedMailboxLaneConsumed(
+      entry,
+      `Hosted mailbox consume response consumedSeqByLane[${index}]`,
+    )),
+    userId: requireString(record.userId, "Hosted mailbox consume response userId"),
   };
 }
 
@@ -751,6 +802,20 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       `${label}.schemaVersion`,
     ),
   };
+
+  if (record.dispatch !== undefined) {
+    const dispatchLabel = `${label}.dispatch`;
+    const dispatch = requireObject(record.dispatch, dispatchLabel);
+    assertAllowedObjectKeys(
+      dispatch,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_DISPATCH_KEYS,
+      dispatchLabel,
+    );
+    breakdown.dispatch = {
+      ...requireOptionalNonNegativeInteger(dispatch, "invokeReceivedAtEpochMs", dispatchLabel),
+      ...requireOptionalNonNegativeInteger(dispatch, "containerEnsureReadyStartedAtEpochMs", dispatchLabel),
+    };
+  }
 
   if (record.restore !== undefined) {
     const restoreLabel = `${label}.restore`;
@@ -1571,6 +1636,18 @@ function parseHostedMailboxLaneCursor(
 
   return {
     importedSeq: requireNonNegativeBigIntString(record.importedSeq, `${label}.importedSeq`),
+    lane: parseHostedMailboxLane(record.lane),
+  };
+}
+
+function parseHostedMailboxLaneConsumed(
+  value: unknown,
+  label: string,
+): HostedMailboxLaneConsumed {
+  const record = requireObject(value, label);
+
+  return {
+    consumedSeq: requireNonNegativeBigIntString(record.consumedSeq, `${label}.consumedSeq`),
     lane: parseHostedMailboxLane(record.lane),
   };
 }

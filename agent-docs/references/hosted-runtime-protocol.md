@@ -204,6 +204,17 @@ Hosted producers for exact user-visible events append one `HostedMailboxItem` in
 the same transaction as the product/control-plane mutation that made work
 necessary. Large payloads use `HostedMailboxPayload`; lane sequence allocation
 uses `HostedMailboxLaneCounter`.
+`HostedMailboxLaneCounter` also carries the durable per-lane `consumed_seq`
+watermark: after a foreground assistant pass finishes with zero failed replies
+and no pending foreground assistant input, the runtime acks the conversation
+watermark through the runner-allowlisted `/api/internal/hosted-mailbox/consume`
+callback (monotonic max, clamped to the lane append high-water, best-effort).
+The mailbox fetch response returns `consumedSeqByLane`; replayed items at or
+below the watermark are re-staged as conversation context with a null reply
+target, never as fresh reply candidates, so a workspace restore from a stale
+snapshot cannot re-reply to an already-handled message. A container rollout
+SIGTERM additionally makes the runtime treat the idle window as elapsed and run
+its normal `idle_shutdown` checkpoint inside the termination grace period.
 Hosted Linq and Telegram conversation webhook routes read the raw body and
 verification headers only in the route/service process. That code verifies the
 provider payload, appends the canonical encrypted mailbox item transactionally,

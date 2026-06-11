@@ -7,7 +7,6 @@ on:
     paths:
       - ".github/workflows/cloudflare-runner-base-image.yml"
       - "Dockerfile.cloudflare-hosted-runner-base"
-      - "Dockerfile.cloudflare-whisper-model"
       - "apps/cloudflare/scripts/runner-base-image.ts"
       - "apps/cloudflare/scripts/runner-base-image-contract.ts"
       - "apps/cloudflare/package.json"
@@ -18,6 +17,10 @@ on:
 permissions:
   contents: read
   packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   publish:
@@ -43,32 +46,6 @@ jobs:
 
       - name: Login to GHCR
         run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-
-      - name: Publish Whisper model image
-        shell: bash
-        run: |
-          set -euo pipefail
-          whisper_model_image="$(
-            sed -n 's/^ARG WHISPER_MODEL_IMAGE=//p' Dockerfile.cloudflare-hosted-runner-base | tail -n 1
-          )"
-          if [[ -z "${whisper_model_image}" ]]; then
-            echo "Missing WHISPER_MODEL_IMAGE in Dockerfile.cloudflare-hosted-runner-base" >&2
-            exit 1
-          fi
-
-          if docker buildx imagetools inspect "${whisper_model_image}" >/dev/null 2>&1; then
-            echo "Whisper model image already exists: ${whisper_model_image}"
-            exit 0
-          fi
-
-          docker buildx build \
-            --platform linux/amd64 \
-            --file Dockerfile.cloudflare-whisper-model \
-            --tag "${whisper_model_image}" \
-            --label org.opencontainers.image.source=https://github.com/cobuildwithus/murph \
-            --label "org.opencontainers.image.description=Murph hosted runner Whisper base.en model" \
-            --push \
-            .
 
       - name: Publish runner base image
         run: pnpm --dir apps/cloudflare runner:docker:base -- --push

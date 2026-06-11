@@ -74,6 +74,22 @@ vi.mock("@/src/components/settings/hosted-email-settings", () => ({
   },
 }));
 
+vi.mock("@/src/components/settings/hosted-email-privy-link-hand-off", () => ({
+  HostedEmailPrivyLinkHandOff(props: {
+    onAborted: () => void;
+    onSynced?: (payload: { mode: string }) => void;
+  }) {
+    return createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => props.onSynced?.({ mode: "email" }),
+      },
+      "Privy hand-off child",
+    );
+  },
+}));
+
 vi.mock("@/src/components/settings/hosted-telegram-card-settings", () => ({
   HostedTelegramCardSettings(props: {
     autoLink?: boolean;
@@ -142,6 +158,75 @@ describe("HostedSettingsIdentityLinkDialog", () => {
 
       expect(mocks.onOpenChange).toHaveBeenCalledWith(false);
       expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("skips the Murph dialog and hands off to Privy when the Privy user has no email", async () => {
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account: {
+          ...makeAccountSnapshot(),
+          email: {
+            address: "member@example.com",
+            privyEmailLinked: false,
+            verifiedAt: null,
+          },
+        },
+        initialMode: "email",
+        onOpenChange: mocks.onOpenChange,
+      }),
+    );
+
+    try {
+      expect(container.querySelector("[data-dialog-open]")).toBeNull();
+      expect(container.textContent).toContain("Privy hand-off child");
+      expect(container.textContent).not.toContain("Link email child");
+
+      const handOffButton = Array.from(container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent?.includes("Privy hand-off child"),
+      );
+
+      await act(async () => {
+        handOffButton?.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+
+      expect(mocks.onOpenChange).toHaveBeenCalledWith(false);
+      expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("keeps the inline email dialog when the Privy user already has an email", async () => {
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account: {
+          ...makeAccountSnapshot(),
+          email: {
+            address: "member@example.com",
+            privyEmailLinked: true,
+            verifiedAt: "2026-05-02T00:00:00.000Z",
+          },
+        },
+        initialMode: "email",
+        onOpenChange: mocks.onOpenChange,
+      }),
+    );
+
+    try {
+      expect(container.querySelector('[data-dialog-open="true"]')).toBeTruthy();
+      expect(container.textContent).toContain("Link email child");
+      expect(container.textContent).not.toContain("Privy hand-off child");
     } finally {
       await cleanup();
     }

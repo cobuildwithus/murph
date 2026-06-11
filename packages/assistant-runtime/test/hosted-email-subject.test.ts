@@ -19,7 +19,6 @@ describe('hosted runtime email subject support', () => {
   it('parses the optional hosted email subject field', () => {
     expect(
       parseHostedEmailSendRequest({
-        identityId: 'assistant@example.com',
         message: 'Hello from Murph',
         subject: 'Daily check-in',
         target: 'user@example.com',
@@ -27,7 +26,6 @@ describe('hosted runtime email subject support', () => {
       }),
     ).toEqual({
       idempotencyKey: null,
-      identityId: 'assistant@example.com',
       message: 'Hello from Murph',
       replyToMessageId: null,
       subject: 'Daily check-in',
@@ -41,10 +39,12 @@ describe('hosted runtime email subject support', () => {
     const sentRequests: HostedEmailSendRequest[] = []
 
     try {
+      // Regression: hosted intents carry a privacy-blinded binding identity
+      // (hid_<hex>); it must never be forwarded into the email send request.
       const intent = await createAssistantOutboxIntent({
         channel: 'email',
         explicitTarget: 'user@example.com',
-        identityId: 'assistant@example.com',
+        identityId: 'hid_0123456789abcdef0123456789abcdef',
         message: 'Hello from Murph',
         sessionId: 'session_123',
         subject: 'Daily check-in',
@@ -63,7 +63,7 @@ describe('hosted runtime email subject support', () => {
               channel: 'email',
               explicitTarget: 'user@example.com',
               idempotencyKey: 'idempotency_123',
-              identityId: 'assistant@example.com',
+              identityId: 'hid_0123456789abcdef0123456789abcdef',
               media: [],
               message: 'Hello from Murph',
               subject: 'Daily check-in',
@@ -110,13 +110,13 @@ describe('hosted runtime email subject support', () => {
       expect(sentRequests).toHaveLength(1)
       expect(sentRequests[0]).toMatchObject({
         idempotencyKey: `assistant-outbox:${intent.intentId}`,
-        identityId: 'assistant@example.com',
         message: 'Hello from Murph',
         replyToMessageId: null,
         subject: 'Daily check-in',
         target: 'user@example.com',
         targetKind: 'explicit',
       })
+      expect(sentRequests[0]).not.toHaveProperty('identityId')
       expect(outcomes[0]?.deliveryStatus).toBe('sent')
     } finally {
       await rm(vaultRoot, {

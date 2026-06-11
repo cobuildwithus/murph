@@ -13,7 +13,7 @@ Adding a new wearable provider? Pair the importer work with the transport half d
 
 ## Built-in Device Providers
 
-`createImporters()` and `prepareDeviceProviderSnapshotImport()` ship with built-in adapters for `whoop`, `oura`, `garmin`, and `strava`.
+`createImporters()` and `prepareDeviceProviderSnapshotImport()` ship with built-in adapters for `whoop`, `oura`, and `strava`. Garmin data is supported exclusively through the `junction` provider.
 
 Provider transport stays separate from normalization. Each adapter accepts one provider snapshot, preserves only provider evidence that is needed for replay or product facts, and promotes fields that fit the current canonical device batch surface. High-frequency provider telemetry should be reduced in memory to compact display-grade events or metric facts instead of being persisted as full sample arrays.
 
@@ -30,8 +30,6 @@ For the next provider, importers should only need:
 
 Auth, webhook preflight/admin behavior, token storage, and hosted control-plane
 wiring stay outside this package. Importers own normalization only.
-
-The Garmin adapter keeps one provider key, `garmin`, and expects a snapshot object with optional `profile`, `dailySummaries`, `epochSummaries`, `sleeps`, `activities`, `activityFiles`, `womenHealth`, and `deletions` collections. It validates the canonical record collections at the adapter boundary, preserves unsupported top-level sections as raw `snapshot-section:*` artifacts when they actually produce retained evidence, accepts Garmin activity exports only through `activityFiles`, and retains metadata-only activity-file evidence on first-class `activity-asset:*` raw-artifact roles instead of synthesizing fake `.fit` / `.gpx` / `.tcx` payloads.
 
 ## Core Integration Seam
 

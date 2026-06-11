@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  advanceHostedMailboxConsumedSeqByLane,
   appendHostedMailboxEnvelopeTx,
   appendHostedMailboxItemTx,
   decodeHostedMailboxStoredPayload,
@@ -11,6 +12,7 @@ import {
   hasHostedMailboxItemByKind,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+  readHostedMailboxConsumedSeqByLane,
   readHostedMailboxItemCheckpointById,
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPendingSystemItemsNeedAiUsageGate,
@@ -1318,3 +1320,131 @@ function normalizeHostedSecureBoxTestValue(value: unknown): unknown {
 
   return value;
 }
+
+describe("advanceHostedMailboxConsumedSeqByLane", () => {
+  function createLaneCounterClient(initialRow: {
+    consumedSeq: bigint;
+    nextSeq: bigint;
+  } | null) {
+    const state = initialRow ? { ...initialRow } : null;
+    const findUnique = vi.fn(async () =>
+      state
+        ? {
+            consumedSeq: state.consumedSeq,
+            lane: "conversation",
+            nextSeq: state.nextSeq,
+            updatedAt: new Date("2026-06-10T00:00:00.000Z"),
+            userId: "member_mailbox_1",
+          }
+        : null
+    );
+    const updateMany = vi.fn(async (args: { data: { consumedSeq: bigint } }) => {
+      if (state && args.data.consumedSeq > state.consumedSeq) {
+        state.consumedSeq = args.data.consumedSeq;
+        return { count: 1 };
+      }
+      return { count: 0 };
+    });
+    const prisma = Object.assign(Object.create(null), {
+      hostedMailboxLaneCounter: { findUnique, updateMany },
+    }) as Parameters<typeof advanceHostedMailboxConsumedSeqByLane>[0]["prisma"];
+
+    return { findUnique, prisma, updateMany };
+  }
+
+  it("clamps the requested seq to the lane append high-water", async () => {
+    const { prisma, updateMany } = createLaneCounterClient({
+      consumedSeq: 1n,
+      nextSeq: 5n,
+    });
+
+    const result = await advanceHostedMailboxConsumedSeqByLane({
+      lanes: [{ consumedSeq: "9".repeat(30), lane: "conversation" }],
+      prisma,
+      userId: "member_mailbox_1",
+    });
+
+    expect(updateMany).toHaveBeenCalledTimes(1);
+    expect(updateMany.mock.calls[0]?.[0]).toMatchObject({
+      data: { consumedSeq: 4n },
+    });
+    expect(result).toEqual([{ consumedSeq: "4", lane: "conversation" }]);
+  });
+
+  it("never moves the watermark backwards", async () => {
+    const { prisma, updateMany } = createLaneCounterClient({
+      consumedSeq: 3n,
+      nextSeq: 5n,
+    });
+
+    const result = await advanceHostedMailboxConsumedSeqByLane({
+      lanes: [{ consumedSeq: "2", lane: "conversation" }],
+      prisma,
+      userId: "member_mailbox_1",
+    });
+
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(result).toEqual([{ consumedSeq: "3", lane: "conversation" }]);
+  });
+
+  it("treats a lane with no counter row as a no-op", async () => {
+    const { prisma, updateMany } = createLaneCounterClient(null);
+
+    const result = await advanceHostedMailboxConsumedSeqByLane({
+      lanes: [{ consumedSeq: "7", lane: "conversation" }],
+      prisma,
+      userId: "member_mailbox_1",
+    });
+
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(result).toEqual([{ consumedSeq: "0", lane: "conversation" }]);
+  });
+
+  it("rejects duplicate lanes in one request", async () => {
+    const { prisma } = createLaneCounterClient({
+      consumedSeq: 0n,
+      nextSeq: 5n,
+    });
+
+    await expect(advanceHostedMailboxConsumedSeqByLane({
+      lanes: [
+        { consumedSeq: "1", lane: "conversation" },
+        { consumedSeq: "2", lane: "conversation" },
+      ],
+      prisma,
+      userId: "member_mailbox_1",
+    })).rejects.toThrow(/consumed more than once/u);
+  });
+});
+
+describe("readHostedMailboxConsumedSeqByLane", () => {
+  it("returns the stored watermark and zero for missing rows", async () => {
+    const findUnique = vi.fn(async (args: {
+      where: { userId_lane: { lane: string } };
+    }) =>
+      args.where.userId_lane.lane === "conversation"
+        ? {
+            consumedSeq: 6n,
+            lane: "conversation",
+            nextSeq: 9n,
+            updatedAt: new Date("2026-06-10T00:00:00.000Z"),
+            userId: "member_mailbox_1",
+          }
+        : null
+    );
+    const prisma = Object.assign(Object.create(null), {
+      hostedMailboxLaneCounter: { findUnique },
+    }) as Parameters<typeof readHostedMailboxConsumedSeqByLane>[0]["prisma"];
+
+    const result = await readHostedMailboxConsumedSeqByLane({
+      lanes: ["conversation", "system"],
+      prisma,
+      userId: "member_mailbox_1",
+    });
+
+    expect(result).toEqual([
+      { consumedSeq: "6", lane: "conversation" },
+      { consumedSeq: "0", lane: "system" },
+    ]);
+  });
+});

@@ -56,12 +56,6 @@ function createDeployEnvironment() {
   }
 }
 
-function readDockerArg(contents: string, name: string): string {
-  const match = contents.match(new RegExp(`^ARG ${name}=(.+)$`, "mu"));
-  expect(match?.[1]).toBeTruthy();
-  return match?.[1] ?? "";
-}
-
 describe("hosted runner container image contract", () => {
   it("keeps runner bundle assembly app-owned and materializes a runtime-only leaf artifact", async () => {
     const bundleAssemblyScript = await readFile(
@@ -227,6 +221,32 @@ describe("hosted runner container image contract", () => {
     ).rejects.toThrow();
   });
 
+  it("ships the hosted-local e2e ffmpeg stub behind the bundle test flag without whisper stubs", async () => {
+    const bundleAssemblyScript = await readFile(
+      new URL("../scripts/assemble-runner-bundle.ts", import.meta.url),
+      "utf8",
+    );
+
+    // The shared CI bundle job sets MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN=1
+    // so the linq-webhook media E2E can drain fixture audio through the ffmpeg
+    // stub; the whisper-cli/ggml stub lane is deleted (Worker-mediated
+    // Workers AI transcription replaces it).
+    expect(bundleAssemblyScript).toContain(
+      'if (process.env.MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN === "1") {',
+    );
+    expect(bundleAssemblyScript).toContain(
+      "await writeHostedLocalE2eParserToolchain(runnerBundleDeployRoot);",
+    );
+    expect(bundleAssemblyScript).toContain(
+      'path.join(bundleRoot, "test-parser-toolchain")',
+    );
+    expect(bundleAssemblyScript).toContain(
+      'await writeExecutable(path.join(toolchainRoot, "ffmpeg"), [',
+    );
+    expect(bundleAssemblyScript.toLowerCase()).not.toContain("whisper");
+    expect(bundleAssemblyScript).not.toContain("ggml");
+  });
+
   it("excludes build-only workspace packages from the runtime package manifest", async () => {
     const packageJson = await readRunnerPackageManifest();
     const runtimeDependencyNames = Object.keys(packageJson.dependencies ?? {});
@@ -368,89 +388,25 @@ describe("hosted runner container image contract", () => {
       new URL("../../../Dockerfile.cloudflare-hosted-runner-base", import.meta.url),
       "utf8",
     );
-    const whisperModelDockerfile = await readFile(
-      new URL("../../../Dockerfile.cloudflare-whisper-model", import.meta.url),
-      "utf8",
-    );
     const runnerBasePublishWorkflow = await readFile(
       new URL("../../../.github/workflows/cloudflare-runner-base-image.yml", import.meta.url),
       "utf8",
     );
-    const deployDocs = await readFile(new URL("../DEPLOY.md", import.meta.url), "utf8");
-    const hostedLocalHarnessDocs = await readFile(
-      new URL("../../../packages/hosted-local-harness/README.md", import.meta.url),
-      "utf8",
-    );
 
-    const whisperModelImage = readDockerArg(baseDockerfile, "WHISPER_MODEL_IMAGE");
-    const whisperModelSha256 = readDockerArg(baseDockerfile, "WHISPER_MODEL_SHA256");
-
-    expect(baseDockerfile).toContain("ARG WHISPER_CPP_VERSION=v1.8.1");
-    expect(baseDockerfile).toContain("ARG WHISPER_MODEL_FILE=ggml-base.en.bin");
-    expect(whisperModelSha256).toMatch(/^[a-f0-9]{64}$/u);
-    expect(whisperModelImage).toBe(
-      `ghcr.io/cobuildwithus/murph-whisper-model:ggml-base-en-sha256-${whisperModelSha256}`,
-    );
     expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.135.0");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
     expect(baseDockerfile).toContain(
       "ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c",
     );
     expect(baseDockerfile).toContain(
-      "ARG WHISPER_CPP_SHA256=b7c6b05635e5fda85cbcc5a012d29b3a4ca1cc22d9fa54d5b6c33e4ac271e5e0",
-    );
-    expect(baseDockerfile).toContain("ARG WHISPER_CPP_BUILD_JOBS=1");
-    expect(baseDockerfile).toContain(
-      "ARG WHISPER_MODEL_SHA256=a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
-    );
-    expect(baseDockerfile).toContain(
-      "FROM ${WHISPER_MODEL_IMAGE} AS whisper-model",
-    );
-    expect(baseDockerfile).toContain(
-      "FROM node:${NODE_VERSION}-bookworm-slim@${NODE_IMAGE_DIGEST} AS whisper-builder",
-    );
-    expect(baseDockerfile).toContain(
       "FROM node:${NODE_VERSION}-bookworm-slim@${NODE_IMAGE_DIGEST}\n\nARG NODE_VERSION",
     );
-    expect(baseDockerfile).toContain(
-      "https://github.com/ggml-org/whisper.cpp/archive/refs/tags/${WHISPER_CPP_VERSION}.tar.gz",
-    );
-    expect(baseDockerfile).toContain(
-      "printf '%s  %s\\n' \"${WHISPER_CPP_SHA256}\" /tmp/whisper.cpp.tar.gz | sha256sum -c -",
-    );
-    expect(baseDockerfile).toContain("-DBUILD_SHARED_LIBS=ON");
-    expect(baseDockerfile).toContain("-DGGML_BACKEND_DL=ON");
-    expect(baseDockerfile).toContain("-DGGML_CPU_ALL_VARIANTS=ON");
-    expect(baseDockerfile).toContain("-DGGML_NATIVE=OFF");
-    expect(baseDockerfile).not.toContain("GGML_CPU_ARM_ARCH");
-    expect(baseDockerfile).toContain(
-      "cmake --build build -j\"${WHISPER_CPP_BUILD_JOBS}\" --config Release --target whisper-cli",
-    );
-    expect(baseDockerfile).toContain("cp -a build/bin/libggml-cpu*.so /opt/whisper/bin/");
-    expect(baseDockerfile).toContain("COPY --from=whisper-builder /opt/whisper/bin/whisper-cli /usr/local/bin/whisper-cli");
-    expect(baseDockerfile).toContain("COPY --from=whisper-builder /opt/whisper/bin/libggml-cpu*.so /usr/local/bin/");
-    expect(baseDockerfile).toContain("COPY --from=whisper-builder /opt/whisper/lib/ /usr/local/lib/");
-    expect(baseDockerfile).toContain(
-      "COPY --from=whisper-model /model.bin /opt/whisper/${WHISPER_MODEL_FILE}",
-    );
-    expect(baseDockerfile).toContain(
-      "printf '%s  %s\\n' \"${WHISPER_MODEL_SHA256}\" \"/opt/whisper/${WHISPER_MODEL_FILE}\" | sha256sum -c -",
-    );
-    expect(baseDockerfile).not.toContain(
-      "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${WHISPER_MODEL_FILE}",
-    );
-    expect(whisperModelDockerfile).toContain(`ADD --checksum=sha256:${whisperModelSha256}`);
-    expect(whisperModelDockerfile).toContain(
-      "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
-    );
-    expect(runnerBasePublishWorkflow).toContain("s/^ARG WHISPER_MODEL_IMAGE=//p");
-    expect(runnerBasePublishWorkflow).toContain(
-      'docker buildx imagetools inspect "${whisper_model_image}"',
-    );
-    expect(runnerBasePublishWorkflow).toContain(
-      'echo "Whisper model image already exists: ${whisper_model_image}"',
-    );
-    expect(runnerBasePublishWorkflow).toContain('--tag "${whisper_model_image}"');
+    // Hosted transcription is Worker-mediated Workers AI; the runner image
+    // must not ship whisper.cpp binaries or model layers anymore.
+    expect(baseDockerfile.toLowerCase()).not.toContain("whisper");
+    expect(baseDockerfile).not.toContain("ggml");
+    expect(baseDockerfile).not.toContain("huggingface.co");
+    expect(runnerBasePublishWorkflow.toLowerCase()).not.toContain("whisper");
     expect(runnerBasePublishWorkflow).toContain("permissions:\n  contents: read\n  packages: write");
     expect(runnerBasePublishWorkflow).toContain(
       "if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}",
@@ -459,19 +415,9 @@ describe("hosted runner container image contract", () => {
     expect(runnerBasePublishWorkflow).toContain(
       "run: pnpm --dir apps/cloudflare runner:docker:base -- --push",
     );
-    expect(deployDocs).toContain(
-      "Pull-request hosted-local E2E does not authenticate to GHCR",
-    );
-    expect(deployDocs).toContain(
-      "For Whisper model bumps, publish the new pinned GHCR model tag before opening or",
-    );
-    expect(hostedLocalHarnessDocs).toContain(
-      "prepublish that new model tag from the branch's",
-    );
-    expect(baseDockerfile).toContain(
-      "COPY --from=whisper-builder --chown=runner:runner /opt/whisper/${WHISPER_MODEL_FILE} /home/runner/.murph/models/whisper/model.bin",
-    );
-    expect(baseDockerfile).not.toContain("/home/runner/.murph/models/whisper/${WHISPER_MODEL_FILE}");
+    await expect(
+      access(new URL("../../../Dockerfile.cloudflare-whisper-model", import.meta.url)),
+    ).rejects.toThrow();
     expect(baseDockerfile).not.toContain(
       "COPY --chown=root:root .deploy/runner-bundle/ /app/",
     );
@@ -486,8 +432,6 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
     expect(baseDockerfile).not.toContain("/etc/profile.d/murph-runner-path.sh");
     expect(baseDockerfile).not.toContain("export PATH=");
-    expect(baseDockerfile).not.toContain("WHISPER_COMMAND=");
-    expect(baseDockerfile).not.toContain("WHISPER_MODEL_PATH=");
     expect(baseDockerfile).not.toContain("FFMPEG_COMMAND=");
     expect(baseDockerfile).not.toContain("PDFTOTEXT_COMMAND=");
     expect(baseDockerfile).toContain("file \\");
@@ -498,7 +442,6 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("python3 \\");
     expect(baseDockerfile).toContain("qpdf \\");
     expect(baseDockerfile).toContain("zstd \\");
-    expect(baseDockerfile).toContain("RUN ldconfig");
     expect(baseDockerfile).toContain("python3 --version");
     expect(baseDockerfile).toContain("python --version");
     expect(baseDockerfile).toContain("jq --version");
@@ -544,6 +487,10 @@ describe("hosted runner container image contract", () => {
     );
     expect(finalDockerfile).toContain("RUN chmod -R a-w /app");
     expect(finalDockerfile).toContain("  && chmod -R a+rX /app");
+    // Measured 2026-06-10: a baked NODE_COMPILE_CACHE was a no-op for this
+    // bundle (real-bundle module eval ~0.8s even under qemu; cache hits gave
+    // no speedup), so the image intentionally ships no compile-cache warm step.
+    expect(finalDockerfile).not.toContain("NODE_COMPILE_CACHE");
     expect(readLastDockerUser(baseDockerfile)).toBe("runner");
     expect(readDockerUsers(finalDockerfile)).toEqual(["root", "runner"]);
     expect(finalDockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "-s", "--"]');

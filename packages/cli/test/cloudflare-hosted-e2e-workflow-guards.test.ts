@@ -27,10 +27,23 @@ function expectPostgresServiceContract(workflow: string, expectedServiceCount: n
   expect(workflow.match(/- 5432:5432/g)).toHaveLength(expectedServiceCount)
 }
 
+function extractHostedLocalE2eScenarios(workflow: string): string[] {
+  const literalCommands = Array.from(
+    workflow.matchAll(/pnpm hosted-local e2e ([^\s\\"]+)/g),
+    (match) => match[1],
+  )
+  const matrixScenarios = Array.from(
+    workflow.matchAll(/^\s+scenarios:\s+(.+)$/gm),
+    (match) => match[1].trim().split(/\s+/),
+  ).flat()
+
+  return Array.from(new Set([...literalCommands, ...matrixScenarios])).sort()
+}
+
 describe('cloudflare hosted e2e workflow guards', () => {
   it('provisions a real local postgres service for hosted local e2e jobs', () => {
     const workflow = readFileSync(hostedE2eWorkflowPath, 'utf8')
-    const hostedLocalE2eScenarios = Array.from(workflow.matchAll(/pnpm hosted-local e2e ([^\s\\]+)/g), (match) => match[1])
+    const hostedLocalE2eScenarios = extractHostedLocalE2eScenarios(workflow)
     const postgresBackedScenarioCount = hostedLocalE2eScenarios.filter(
       (scenario) => scenario !== 'direct-r2-presigned-put',
     ).length
@@ -47,14 +60,25 @@ describe('cloudflare hosted e2e workflow guards', () => {
     expect(workflow).not.toContain('DEVICE_SYNC_ENCRYPTION_KEY_VERSION')
     expect(hostedLocalE2eScenarios).not.toHaveLength(0)
     expect(postgresBackedScenarioCount).toBeGreaterThan(0)
-    expectPostgresServiceContract(workflow, postgresBackedScenarioCount)
-    expect(workflow).toContain('pnpm hosted-local e2e device-connect')
-    expect(workflow).toContain('pnpm hosted-local e2e linq-delivery')
-    expect(workflow).toContain('pnpm hosted-local e2e linq-scheduled-reminder')
-    expect(workflow).toContain('pnpm hosted-local e2e idle-checkpoint-deferred-progress')
-    expect(workflow).toContain('pnpm hosted-local e2e direct-r2-presigned-put')
-    expect(workflow).toContain('pnpm hosted-local e2e telegram')
-    expect(workflow.match(/\.artifacts\/hosted-local\/\*\*\/state\.json/g)).toHaveLength(postgresBackedScenarioCount)
+    expectPostgresServiceContract(workflow, 1)
+    expect(hostedLocalE2eScenarios).toEqual([
+      'codex-image-media-delivery',
+      'device-connect',
+      'direct-r2-presigned-put',
+      'idle-checkpoint-deferred-progress',
+      'linq-delivery',
+      'linq-scheduled-reminder',
+      'linq-webhook',
+      'telegram',
+      'temporal-orchestration',
+    ])
+    expect(workflow).toContain('for scenario in ${{ matrix.scenarios }}; do')
+    expect(workflow).toContain('pnpm hosted-local e2e "$scenario" --no-bundle')
+    // The linq-webhook media job gates the Workers AI transcription path and
+    // depends on the shared bundle shipping the e2e parser toolchain stub.
+    expect(workflow).toContain('MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN: "1"')
+    expect(workflow).not.toContain('WHISPER_COMMAND')
+    expect(workflow.match(/\.artifacts\/hosted-local\/\*\*\/state\.json/g)).toHaveLength(1)
     expect(workflow).not.toContain('pnpm --dir apps/cloudflare test:e2e:linq-delivery:local')
     expect(workflow).not.toContain('pnpm --dir apps/cloudflare test:e2e:telegram:local')
   })

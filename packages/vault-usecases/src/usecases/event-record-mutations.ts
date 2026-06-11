@@ -36,6 +36,19 @@ interface EventMutationCoreRuntime {
     retainedPaths: string[]
     deleted: true
   }>
+  dedupeDeviceEventsByExternalRef(input: {
+    vaultRoot: string
+    apply?: boolean
+  }): Promise<{
+    applied: boolean
+    scannedLiveDeviceEventCount: number
+    duplicateGroupCount: number
+    tombstonedEventCount: number
+    tombstonedByKind: Record<string, number>
+    skippedRevisedElsewhereCount: number
+    shardPaths: string[]
+    auditPath: string | null
+  }>
 }
 
 interface EventRecordMutationLookupInput {
@@ -437,6 +450,31 @@ export async function deleteEventRecord(
         code: 'not_found',
         message: `No ${input.entityLabel} found for "${input.lookup}".`,
       },
+      EVENT_CONTRACT_INVALID: {
+        code: 'contract_invalid',
+      },
+    })
+  }
+}
+
+export async function dedupeDeviceImportEventRecords(input: {
+  vault: string
+  apply?: boolean
+}) {
+  const core = await loadEventMutationCoreRuntime()
+
+  try {
+    const result = await core.dedupeDeviceEventsByExternalRef({
+      vaultRoot: input.vault,
+      apply: input.apply === true,
+    })
+
+    return {
+      vault: input.vault,
+      ...result,
+    }
+  } catch (error) {
+    throw toVaultCliError(error, {
       EVENT_CONTRACT_INVALID: {
         code: 'contract_invalid',
       },

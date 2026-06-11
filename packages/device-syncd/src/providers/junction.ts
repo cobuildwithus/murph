@@ -21,7 +21,8 @@ import {
 } from "@murphai/importers/device-providers/junction-resources";
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 
-import { deviceSyncError, isDeviceSyncError } from "../errors.ts";
+import { deviceSyncError, isDeviceSyncError, type DeviceSyncError } from "../errors.ts";
+import { sanitizeHostedRuntimeDiagnosticText } from "../hosted-runtime.ts";
 import {
   addMilliseconds,
   normalizeString,
@@ -612,7 +613,7 @@ export function createJunctionDeviceSyncProvider(
     if (job.kind !== "backfill" || summaryHasFetchedRecords) {
       await context.importSnapshot({
         provider: "junction",
-        accountId: buildJunctionImportAccountId(context.account.id),
+        accountId: buildJunctionImportAccountId(context.account.externalAccountId),
         connectionId: context.account.id,
         importedAt: summaryWindow.windowEnd,
         windowStart: summaryWindow.windowStart,
@@ -1141,7 +1142,7 @@ export function createJunctionDeviceSyncProvider(
     const sourceProviders = await loadAndProjectSourceProviders();
     await context.importSnapshot({
       provider: "junction",
-      accountId: buildJunctionImportAccountId(context.account.id),
+      accountId: buildJunctionImportAccountId(context.account.externalAccountId),
       connectionId: context.account.id,
       importedAt: context.now,
       windowStart: window.windowStart,
@@ -1445,7 +1446,7 @@ export function createJunctionDeviceSyncProvider(
     if (executionWindowStart && executionWindowEnd && hasJunctionSnapshotRecords(dedupedTimeseries)) {
       await context.importSnapshot({
         provider: "junction",
-        accountId: buildJunctionImportAccountId(context.account.id),
+        accountId: buildJunctionImportAccountId(context.account.externalAccountId),
         connectionId: context.account.id,
         importedAt: executionWindowEnd,
         windowStart: executionWindowStart,
@@ -1491,7 +1492,7 @@ export function createJunctionDeviceSyncProvider(
 
       await context.importSnapshot({
         provider: "junction",
-        accountId: buildJunctionImportAccountId(context.account.id),
+        accountId: buildJunctionImportAccountId(context.account.externalAccountId),
         connectionId: context.account.id,
         importedAt: window.windowEnd,
         windowStart: window.windowStart,
@@ -1525,7 +1526,7 @@ export function createJunctionDeviceSyncProvider(
 
     await context.importSnapshot({
       provider: "junction",
-      accountId: buildJunctionImportAccountId(context.account.id),
+      accountId: buildJunctionImportAccountId(context.account.externalAccountId),
       connectionId: context.account.id,
       importedAt: context.now,
       windowStart,
@@ -3369,14 +3370,8 @@ function buildJunctionRedirectUrl(callbackUrl: string, state: string): string {
 }
 
 function validateJunctionLinkOutcome(query: URLSearchParams): void {
-  const error = normalizeString(query.get("error")) ?? normalizeString(query.get("error_description"));
-  if (error) {
-    throw deviceSyncError({
-      code: "JUNCTION_LINK_FAILED",
-      message: "Junction Link callback reported a failed link outcome.",
-      retryable: false,
-      httpStatus: 400,
-    });
+  if (normalizeString(query.get("error")) ?? normalizeString(query.get("error_description"))) {
+    throw junctionLinkFailedError("Junction Link callback reported a failed link outcome.", query);
   }
 
   const status = normalizeString(query.get("status"))?.toLowerCase();
@@ -3385,23 +3380,35 @@ function validateJunctionLinkOutcome(query: URLSearchParams): void {
     (status && ["cancelled", "canceled", "error", "failed"].includes(status))
     || (linkState && ["cancelled", "canceled", "error", "failed"].includes(linkState))
   ) {
-    throw deviceSyncError({
-      code: "JUNCTION_LINK_FAILED",
-      message: "Junction Link callback reported a failed link state.",
-      retryable: false,
-      httpStatus: 400,
-    });
+    throw junctionLinkFailedError("Junction Link callback reported a failed link state.", query);
   }
 
   const success = normalizeString(query.get("success"))?.toLowerCase();
   if (success && !["1", "true", "yes"].includes(success)) {
-    throw deviceSyncError({
-      code: "JUNCTION_LINK_FAILED",
-      message: "Junction Link callback did not report a successful link outcome.",
-      retryable: false,
-      httpStatus: 400,
-    });
+    throw junctionLinkFailedError("Junction Link callback did not report a successful link outcome.", query);
   }
+}
+
+// Junction reports why a hosted Link attempt failed only through these
+// callback query params. Fold them into one sanitized reason inside the error
+// message so the persisted `last_error_message` and hosted logs carry the
+// cause. The diagnostic helper fails closed: it redacts secrets, identifiers,
+// and URLs, and drops a value entirely when it still looks unsafe.
+function junctionLinkFailedError(message: string, query: URLSearchParams): DeviceSyncError {
+  const reason = ["error", "error_type", "error_description", "status", "state", "success"]
+    .map((name) => {
+      const value = sanitizeHostedRuntimeDiagnosticText(normalizeString(query.get(name)) ?? null);
+      return value ? `${name}=${value}` : null;
+    })
+    .filter((part) => part !== null)
+    .join(", ");
+
+  return deviceSyncError({
+    code: "JUNCTION_LINK_FAILED",
+    message: reason ? `${message} (${reason})` : message,
+    retryable: false,
+    httpStatus: 400,
+  });
 }
 
 function readJunctionCallbackUserId(query: URLSearchParams): string | null {
@@ -5147,10 +5154,15 @@ function mergeJunctionSourceStatus(
   return "disconnected";
 }
 
-function buildJunctionImportAccountId(connectionId: string): string {
+// Derive import identity from the stable Junction user id, never from the
+// local device-sync account row id: row ids are re-minted whenever the
+// machine-local device-sync store is recreated (every hosted cold start), and
+// an unstable accountId changes the deterministic event identity of every
+// re-imported record.
+function buildJunctionImportAccountId(externalAccountId: string): string {
   return `jxn_acct_${
     createHash("sha256")
-      .update(JSON.stringify(["junction-import-account", connectionId]))
+      .update(JSON.stringify(["junction-import-account", externalAccountId]))
       .digest("hex")
       .slice(0, 32)
   }`;

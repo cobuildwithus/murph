@@ -6,6 +6,7 @@ import {
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS,
+  MURPH_PRODUCT_ORIGIN,
   buildExperimentProgressCardPath,
   commonsProtocolRefSchema,
   effectiveProtocolSnapshotSchema,
@@ -1128,6 +1129,9 @@ const experimentProgressCardResultSchema = z.object({
   slug: slugSchema,
   card: experimentProgressCardSchema,
   path: z.string().min(1),
+  // The url is never null at runtime since MURPH_PRODUCT_ORIGIN became the
+  // resolver fallback; nullable stays only to avoid a generated CLI schema
+  // change. Safe to tighten alongside the next intentional regeneration.
   url: z.string().url().nullable(),
   warnings: z.array(z.string().min(1)),
 })
@@ -1162,11 +1166,13 @@ function parseExperimentProgressCardConfounderOptions(
  * Resolve the public product base URL for progress-card links. Mirrors the
  * assistant-engine product base URL resolution (HOSTED_ONBOARDING_PUBLIC_BASE_URL,
  * then HOSTED_WEB_BASE_URL, then VERCEL_PROJECT_PRODUCTION_URL with an implied
- * https scheme) without importing assistant-engine from the CLI.
+ * https scheme) without importing assistant-engine from the CLI. Falls back to
+ * the canonical production origin so environments without a configured base
+ * URL (e.g. hosted runners) still emit shareable links.
  */
 function resolveExperimentProgressCardBaseUrl(
   env: Readonly<Record<string, string | undefined>> = process.env,
-): string | null {
+): string {
   const candidates = [
     env.HOSTED_ONBOARDING_PUBLIC_BASE_URL,
     env.HOSTED_WEB_BASE_URL,
@@ -1189,7 +1195,7 @@ function resolveExperimentProgressCardBaseUrl(
     }
   }
 
-  return null
+  return MURPH_PRODUCT_ORIGIN
 }
 
 const experimentFollowupDueDecisionSchema = z.object({
@@ -1979,21 +1985,14 @@ export function registerExperimentCommands(
         confounders,
       })
       const cardPath = buildExperimentProgressCardPath(result.experimentId, result.card)
-      const warnings = [...result.warnings]
-      const baseUrl = resolveExperimentProgressCardBaseUrl()
-      if (!baseUrl) {
-        warnings.push(
-          'No product base URL is configured (HOSTED_ONBOARDING_PUBLIC_BASE_URL, HOSTED_WEB_BASE_URL, or VERCEL_PROJECT_PRODUCTION_URL); url is null.',
-        )
-      }
 
       return {
         experimentId: result.experimentId,
         slug: result.slug,
         card: result.card,
         path: cardPath,
-        url: baseUrl ? `${baseUrl}${cardPath}` : null,
-        warnings,
+        url: `${resolveExperimentProgressCardBaseUrl()}${cardPath}`,
+        warnings: [...result.warnings],
       }
     },
   })

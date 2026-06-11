@@ -37,6 +37,7 @@ import {
   buildCanonicalAutomationUpsertInput,
   buildVisibleLocalAssistantCronStore,
   isCanonicalAssistantCronSourceEnabled,
+  automationContinuityUsesSessionPin,
   listCanonicalAssistantCronRecords,
   projectCanonicalAssistantCronJob,
   type CanonicalAssistantCronJobRecord,
@@ -60,7 +61,7 @@ import {
 
 const ASSISTANT_CRON_RUN_SCHEMA = 'murph.assistant-cron-run.v1'
 const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
-const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 30 * 60 * 1000
+const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR =
   'Assistant cron notification expired before delivery.'
 
@@ -239,6 +240,7 @@ export async function executeClaimedAssistantCronJob(input: {
   job: AssistantCronJob
   removedAfterRun: boolean
   run: AssistantCronRunRecord
+  runErrorCode: string | null
 }> {
   const claimedJob = input.job.job
   const startedAt = new Date().toISOString()
@@ -246,6 +248,7 @@ export async function executeClaimedAssistantCronJob(input: {
   let sessionId: string | null = null
   let response: string | null = null
   let errorText: string | null = null
+  let errorCode: string | null = null
   let status: AssistantCronRunRecord['status'] = 'failed'
   let pendingDeliveryIntentId: string | null = null
   const occurrenceAt =
@@ -348,6 +351,7 @@ export async function executeClaimedAssistantCronJob(input: {
     }
   } catch (error) {
     errorText = errorMessage(error)
+    errorCode = error instanceof VaultCliError ? error.code : null
     status = 'failed'
   } finally {
     finishedAt = new Date().toISOString()
@@ -428,6 +432,7 @@ export async function executeClaimedAssistantCronJob(input: {
     }
     await appendAssistantCronRun(input.paths, run)
 
+    const usesSessionPin = automationContinuityUsesSessionPin(input.job.source)
     const updatedRuntimeState = finalizeCanonicalAssistantCronRuntimeAfterRun({
       finishedAt,
       run: {
@@ -435,26 +440,20 @@ export async function executeClaimedAssistantCronJob(input: {
         status,
       },
       runtimeState: currentRuntimeState,
-      responseSessionId:
-        input.job.source.kind === 'automation' &&
-        input.job.source.continuityPolicy === 'preserve'
-          ? sessionId
-          : null,
+      responseSessionId: usesSessionPin ? sessionId : null,
       pendingDeliveryIntentId,
       source: input.job.source,
     })
     const persistedRuntimeState: AssistantCronCanonicalRuntimeRecord = {
       ...currentRuntimeState,
+      // Aliases are explicit creation-time bindings and survive preserve runs;
+      // only the automatic session pin is gated by the conversation key.
       alias:
         input.job.source.kind === 'automation' &&
         input.job.source.continuityPolicy === 'preserve'
           ? updatedRuntimeState.alias
           : null,
-      sessionId:
-        input.job.source.kind === 'automation' &&
-        input.job.source.continuityPolicy === 'preserve'
-          ? updatedRuntimeState.sessionId
-          : null,
+      sessionId: usesSessionPin ? updatedRuntimeState.sessionId : null,
       updatedAt: finishedAt,
       state: updatedRuntimeState.state,
     }
@@ -512,6 +511,9 @@ export async function executeClaimedAssistantCronJob(input: {
     job: finalized.job,
     removedAfterRun: finalized.removedAfterRun,
     run,
+    // Typed failure class (e.g. ASSISTANT_CODEX_USAGE_LIMIT) for runtime-log
+    // observability; the persisted run record keeps only the error text.
+    runErrorCode: errorCode,
   }
 }
 

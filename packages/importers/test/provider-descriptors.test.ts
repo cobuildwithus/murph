@@ -4,7 +4,6 @@ import { defaultDeviceProviderAdapters } from "../src/device-providers/defaults.
 import {
   DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
   defaultDeviceProviderDescriptors,
-  GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
   resolveDeviceProviderConnectionDescriptor,
@@ -17,9 +16,15 @@ import { createDeviceProviderRegistry } from "../src/device-providers/registry.t
 
 describe("device provider descriptors", () => {
   it("keeps the built-in adapters aligned with the shared provider descriptors", () => {
-    expect(defaultDeviceProviderAdapters.map((adapter) => adapter.provider)).toEqual(
-      defaultDeviceProviderDescriptors.map((descriptor) => descriptor.provider),
-    );
+    const descriptorProviders = defaultDeviceProviderDescriptors.map((descriptor) => descriptor.provider);
+
+    expect(defaultDeviceProviderAdapters.map((adapter) => adapter.provider)).toEqual([
+      "whoop",
+      "oura",
+      "strava",
+      "junction",
+    ]);
+    expect(descriptorProviders).toEqual(["whoop", "oura", "garmin", "strava", "junction"]);
 
     for (const adapter of defaultDeviceProviderAdapters) {
       const descriptor = resolveDeviceProviderDescriptor(adapter.provider);
@@ -40,16 +45,6 @@ describe("device provider descriptors", () => {
 
     expect(registry.get(" WhOoP ")?.provider).toBe("whoop");
     expect(registry.get("OURA")?.provider).toBe("oura");
-    expect(registry.get("garmin")?.provider).toBe("garmin");
-  });
-
-  it("keeps Garmin as import-only descriptor metadata", () => {
-    expect(GARMIN_DEVICE_PROVIDER_DESCRIPTOR.transportModes).toEqual(["async_export"]);
-    expect(resolveDeviceProviderConnectionDescriptor(GARMIN_DEVICE_PROVIDER_DESCRIPTOR)).toEqual({
-      kind: "none",
-    });
-    expect("oauth" in GARMIN_DEVICE_PROVIDER_DESCRIPTOR).toBe(false);
-    expect("sync" in GARMIN_DEVICE_PROVIDER_DESCRIPTOR).toBe(false);
   });
 
   it("keeps the common scheduled device-sync backfill window at 180 days", () => {
@@ -100,7 +95,6 @@ describe("device provider descriptors", () => {
     });
     const directProviderPriorities = [
       OURA_DEVICE_PROVIDER_DESCRIPTOR,
-      GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
       WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
       STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
     ].map((directDescriptor) => resolveDeviceProviderSourcePriority(directDescriptor, {

@@ -4,12 +4,49 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   isCodexConnectionLossText,
   normalizeStatusText,
+  type CodexStructuredErrorInfo,
 } from '../assistant-codex-events.js'
 
 type CodexTurnMessage = Record<string, unknown>
 
 export const ASSISTANT_CODEX_USAGE_LIMIT_ERROR_CODE =
   'ASSISTANT_CODEX_USAGE_LIMIT'
+
+// CodexErrorInfo variants (app-server protocol, pinned codex 0.135.0) that
+// describe a lost or unusable provider connection. These map to the
+// retryable ASSISTANT_CODEX_CONNECTION_LOST process-exit classification.
+const CODEX_CONNECTION_LOSS_ERROR_INFO_KINDS = new Set([
+  'httpConnectionFailed',
+  'responseStreamConnectionFailed',
+  'responseStreamDisconnected',
+  'responseTooManyFailedAttempts',
+  'serverOverloaded',
+])
+
+function isCodexUsageLimitErrorInfo(
+  errorInfo: CodexStructuredErrorInfo | null,
+): boolean {
+  return errorInfo?.kind === 'usageLimitExceeded'
+}
+
+function isCodexConnectionLossErrorInfo(
+  errorInfo: CodexStructuredErrorInfo | null,
+): boolean {
+  return errorInfo !== null &&
+    CODEX_CONNECTION_LOSS_ERROR_INFO_KINDS.has(errorInfo.kind)
+}
+
+function buildCodexErrorInfoContext(
+  errorInfo: CodexStructuredErrorInfo | null,
+): Record<string, boolean | number | string> {
+  return {
+    codexErrorInfoPresent: errorInfo !== null,
+    ...(errorInfo ? { codexErrorInfo: errorInfo.kind } : {}),
+    ...(errorInfo?.httpStatusCode !== null && errorInfo?.httpStatusCode !== undefined
+      ? { codexErrorHttpStatusCode: errorInfo.httpStatusCode }
+      : {}),
+  }
+}
 
 export function extractCodexThreadIdFromResult(result: unknown): string | null {
   const record = asRecord(result)
@@ -120,6 +157,7 @@ export function isFailedCodexTurnStatus(status: string | null): boolean {
 }
 
 export function buildCodexTurnFailedError(input: {
+  errorInfo: CodexStructuredErrorInfo | null
   fallback: string | null
   providerActionCount: number
   codexThreadId: string | null
@@ -141,7 +179,7 @@ export function buildCodexTurnFailedError(input: {
   if (detail) {
     parts.push(detail)
   }
-  const usageLimit = isCodexUsageLimitFailureText(detail)
+  const usageLimit = isCodexUsageLimitErrorInfo(input.errorInfo)
 
   return new VaultCliError(
     usageLimit ? ASSISTANT_CODEX_USAGE_LIMIT_ERROR_CODE : 'ASSISTANT_CODEX_FAILED',
@@ -151,6 +189,7 @@ export function buildCodexTurnFailedError(input: {
       codexDiagnosticsPresent: true,
       codexFailureStage: 'turn_failed',
       codexTurnStatus: input.status,
+      ...buildCodexErrorInfoContext(input.errorInfo),
       providerActionCount: input.providerActionCount,
       codexThreadIdPresent: input.codexThreadId !== null,
       ...(usageLimit ? { providerUsageLimit: true } : {}),
@@ -162,6 +201,7 @@ export function buildCodexTurnFailedError(input: {
 export function buildCodexFailure(input: {
   code: number | null
   diagnostics?: CodexProcessExitDiagnostics
+  errorInfo: CodexStructuredErrorInfo | null
   fallback: string | null
   providerActionCount: number
   codexThreadId: string | null
@@ -173,9 +213,15 @@ export function buildCodexFailure(input: {
     normalizeStatusText(input.fallback ?? stderrTail) ??
     input.fallback ??
     stderrTail
-  const usageLimit = isCodexUsageLimitFailureText(detail)
+  const usageLimit = isCodexUsageLimitErrorInfo(input.errorInfo)
+  // Prefer the structured protocol classification when an RPC error arrived
+  // before the process died; fall back to stderr text sniffing only for true
+  // process crashes where no structured error was ever observed.
   const connectionLost =
-    !usageLimit && detail !== null && isCodexConnectionLossText(detail)
+    !usageLimit &&
+    (input.errorInfo
+      ? isCodexConnectionLossErrorInfo(input.errorInfo)
+      : detail !== null && isCodexConnectionLossText(detail))
 
   return new VaultCliError(
     connectionLost
@@ -206,6 +252,7 @@ export function buildCodexFailure(input: {
           }
         : {}),
       ...buildCodexProcessExitDiagnosticsContext(input.diagnostics),
+      ...buildCodexErrorInfoContext(input.errorInfo),
       providerActionCount: input.providerActionCount,
       ...(usageLimit ? { providerUsageLimit: true } : {}),
       codexThreadIdPresent: input.codexThreadId !== null,
@@ -215,25 +262,11 @@ export function buildCodexFailure(input: {
   )
 }
 
-export function isCodexUsageLimitFailureText(value: string | null): boolean {
-  const normalized = value?.toLowerCase() ?? ''
-
-  return (
-    normalized.includes('usage limit') ||
-    normalized.includes('quota exceeded') ||
-    normalized.includes('current quota') ||
-    normalized.includes('insufficient quota') ||
-    normalized.includes('purchase more credits') ||
-    normalized.includes('out of credits') ||
-    normalized.includes('credit balance') ||
-    normalized.includes('plan and billing details')
-  )
-}
-
 export function buildCodexProcessExitError(input: {
   abortRequested: boolean
   code: number | null
   diagnostics?: CodexProcessExitDiagnostics
+  errorInfo: CodexStructuredErrorInfo | null
   fallback: string | null
   providerActionCount: number
   codexThreadId: string | null
@@ -395,40 +428,12 @@ function buildCodexFailureMessage(input: {
   signal: NodeJS.Signals | null
   stderr: string
 }): string {
+  // Connection-loss phrasing is chosen by buildCodexFailure (the only
+  // caller), which routes those failures to buildCodexConnectionFailureMessage.
   const detail =
     normalizeStatusText(input.fallback ?? tailText(input.stderr)) ??
     input.fallback ??
     tailText(input.stderr)
-  const recoverableConnectionLoss =
-    !isCodexUsageLimitFailureText(detail) &&
-    detail !== null &&
-    isCodexConnectionLossText(detail)
-
-  if (recoverableConnectionLoss) {
-    const parts = ['Codex app-server lost the provider stream before the turn finished.']
-
-    if (typeof input.code === 'number') {
-      parts.push(`exit code ${input.code}.`)
-    }
-
-    if (input.signal) {
-      parts.push(`signal ${input.signal}.`)
-    }
-
-    if (detail) {
-      parts.push(detail)
-    }
-
-    if (input.codexThreadId) {
-      parts.push(
-        'Codex thread id was captured for diagnostics only. Send another message to retry the turn.',
-      )
-    } else {
-      parts.push('Send another message to retry the turn.')
-    }
-
-    return parts.join(' ')
-  }
 
   const parts = ['Codex app-server failed.']
 

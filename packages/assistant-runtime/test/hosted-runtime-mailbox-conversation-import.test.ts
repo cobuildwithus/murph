@@ -218,6 +218,117 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(afterProjection.events[0]?.attachmentEvidence.attachments.length, 0);
   });
 
+  test("stages a durably consumed conversation item with a null reply target", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-consumed-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const item: HostedMailboxResolvedImportItem = {
+      ...createResolvedConversationMailboxItem(),
+      durablyConsumed: true,
+    };
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_consumed_replay",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_consumed_replay",
+          parts: [
+            {
+              type: "text",
+              value: "already handled replayed message",
+            },
+          ],
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: null,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext() {},
+      item,
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    assert.equal(listed.events.length, 1);
+    // Replayed, already-handled messages stay conversation context only: a null
+    // replyTarget fails the reply-eligibility channel match in assistant-engine.
+    assert.equal(listed.events[0]?.replyTarget, null);
+    assert.equal(
+      listed.events[0]?.content.text,
+      "already handled replayed message",
+    );
+  });
+
+  test("keeps the reply target for a fresh conversation item", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-fresh-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_fresh_input",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_fresh_input",
+          parts: [
+            {
+              type: "text",
+              value: "fresh message",
+            },
+          ],
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: null,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext() {},
+      item,
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    assert.equal(listed.events.length, 1);
+    assert.deepEqual(listed.events[0]?.replyTarget, {
+      channel: "linq",
+      messageId: "msg_fresh_input",
+      threadId: "chat_fresh_input",
+    });
+  });
+
   test("adds runtime latency milestones to Linq staged trace callbacks", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-latency-"));
     tempRoots.push(parentRoot);
@@ -354,6 +465,78 @@ describe("hosted mailbox conversation import adapter", () => {
       })),
       [{
         channel: "linq",
+        eligibleAfter: null,
+      }],
+    );
+  });
+
+  test("self-heals email auto-reply before staging a mailbox input", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-email-admission-"));
+    tempRoots.push(parentRoot);
+    const operatorHomeRoot = path.join(parentRoot, "home");
+    const vaultRoot = path.join(parentRoot, "vault");
+    await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, Buffer.from("{}\n"));
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake();
+
+    const outcome = await withOperatorHomeRoot(operatorHomeRoot, () =>
+      importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        item,
+        runtime: createRuntime({
+          resolvedConfig: {
+            channelCapabilities: {
+              emailSendReady: true,
+              telegramBotConfigured: false,
+              whatsappCloudApiConfigured: false,
+            },
+            deviceSync: null,
+            managedAutoReplyChannels: [
+              {
+                capabilityReady: true,
+                channel: "email",
+                memberChannel: "email",
+              },
+              {
+                capabilityReady: true,
+                channel: "linq",
+                memberChannel: "linq",
+              },
+            ],
+          },
+          userEnv: HOSTED_ASSISTANT_SEED_ENV,
+        }),
+        async stageAssistantInputEvent() {
+          const state = await readAssistantAutomationState(vaultRoot);
+          assert.deepEqual(
+            state.autoReply.map((entry) => ({
+              channel: entry.channel,
+              eligibleAfter: entry.eligibleAfter,
+            })),
+            [{
+              channel: "email",
+              eligibleAfter: null,
+            }],
+          );
+          return {
+            inputId: "input_email_admission",
+            async recordProjection() {},
+          };
+        },
+        vaultRoot,
+      })
+    );
+
+    assert.equal(outcome.status, "imported");
+    assert.equal(outcome.assistantInputId !== null, true);
+    const state = await readAssistantAutomationState(vaultRoot);
+    assert.deepEqual(
+      state.autoReply.map((entry) => ({
+        channel: entry.channel,
+        eligibleAfter: entry.eligibleAfter,
+      })),
+      [{
+        channel: "email",
         eligibleAfter: null,
       }],
     );

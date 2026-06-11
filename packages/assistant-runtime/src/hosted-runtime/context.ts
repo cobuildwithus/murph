@@ -41,6 +41,7 @@ import type {
 } from "./models.ts";
 import {
   createDefaultHostedManagedAutoReplyChannels,
+  HOSTED_INBOUND_SELF_HEAL_AUTO_REPLY_CHANNELS,
 } from "./managed-auto-reply.ts";
 import {
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
@@ -581,6 +582,10 @@ function resolveHostedAutoReplySelfHealTarget(
   managedAutoReplyChannels: readonly HostedAssistantRuntimeManagedAutoReplyChannel[],
 ): HostedAssistantRuntimeManagedAutoReplyChannel | null {
   if (wake.kind !== "conversation.message") {
+    return null;
+  }
+
+  if (!HOSTED_INBOUND_SELF_HEAL_AUTO_REPLY_CHANNELS.has(wake.message.channel)) {
     return null;
   }
 

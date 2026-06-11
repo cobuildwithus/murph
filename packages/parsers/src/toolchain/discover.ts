@@ -3,6 +3,7 @@ import path from "node:path";
 
 import type { FfmpegToolOptions } from "../adapters/ffmpeg.js";
 import { createPopplerPdfProvider } from "../adapters/poppler-pdf.js";
+import { createRemoteTranscriptionProvider } from "../adapters/remote-transcription.js";
 import { createTextFileProvider } from "../adapters/text-file.js";
 import { createWhisperCppProvider } from "../adapters/whisper-cpp.js";
 import { createZxingWasmProvider } from "../adapters/zxing-wasm.js";
@@ -30,6 +31,7 @@ export interface ParserToolchainRuntimeConfig {
 export interface ParserToolDiscovery {
   available: boolean;
   command: string | null;
+  endpoint?: string | null;
   modelPath?: string | null;
   source: ParserToolDiscoverySource;
   reason: string;
@@ -138,6 +140,10 @@ async function discoverParserToolchainStateFromContext(input: {
     configSource: input.configSource,
     vaultRoot: input.vaultRoot,
   });
+  const transcription = discoverTranscriptionTool({
+    config: input.config,
+    configSource: input.configSource,
+  });
 
   return {
     doctor: {
@@ -147,6 +153,7 @@ async function discoverParserToolchainStateFromContext(input: {
         ffmpeg,
         pdfinfo,
         pdftotext,
+        transcription,
         whisper: toPublicWhisperToolDiscovery(whisper),
       },
     },
@@ -175,6 +182,8 @@ export async function createConfiguredParserRegistry(input: {
     vaultRoot: input.vaultRoot,
   });
 
+  const transcriptionEndpoint = state.doctor.tools.transcription.endpoint ?? null;
+
   return {
     doctor: state.doctor,
     registry: createParserRegistry([
@@ -184,6 +193,9 @@ export async function createConfiguredParserRegistry(input: {
       createWhisperCppProvider(
         whisperProviderOptionsFromDiscovery(state.whisper),
       ),
+      ...(transcriptionEndpoint
+        ? [createRemoteTranscriptionProvider({ endpoint: transcriptionEndpoint })]
+        : []),
     ]),
     ffmpeg: ffmpegOptionsFromDoctor(state.doctor),
   };
@@ -335,6 +347,30 @@ async function discoverWhisperTool(input: {
     absoluteModelPath,
     source,
     reason: "whisper.cpp CLI and model path configured.",
+  };
+}
+
+function discoverTranscriptionTool(input: {
+  config: ParserToolchainConfig | null;
+  configSource: "config" | "platform";
+}): ParserToolDiscovery {
+  const endpoint = normalizeNullableString(input.config?.tools.transcription?.endpoint);
+  if (!endpoint) {
+    return {
+      available: false,
+      command: null,
+      endpoint: null,
+      source: "missing",
+      reason: "Remote transcription endpoint is not configured.",
+    };
+  }
+
+  return {
+    available: true,
+    command: null,
+    endpoint,
+    source: input.configSource,
+    reason: "Remote transcription endpoint configured.",
   };
 }
 

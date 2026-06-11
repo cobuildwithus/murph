@@ -18,6 +18,7 @@ import {
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
+  HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
@@ -127,6 +128,9 @@ export async function handleRunnerWebControlRequest(input: {
   const isRuntimeLatencyTraceRequest =
     input.url.pathname === HOSTED_RUNTIME_LATENCY_TRACE_PATH
     && input.request.method === "POST";
+  const isVaultShareDeliverRequest =
+    input.url.pathname === HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH
+    && input.request.method === "POST";
   let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority | null =
     null;
   if (
@@ -134,6 +138,7 @@ export async function handleRunnerWebControlRequest(input: {
     || isBrowserVaultReplicaPublishRequest
     || isDeviceSyncRuntimeSnapshotRequest
     || isRuntimeLatencyTraceRequest
+    || isVaultShareDeliverRequest
   ) {
     try {
       writeAuthority = await (

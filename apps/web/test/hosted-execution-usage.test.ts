@@ -175,6 +175,62 @@ describe("recordHostedAiUsageRecords", () => {
     }));
   });
 
+  it("persists the validated per-turn profile JSON and drops invalid profiles", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    const turnProfileJson = {
+      modelContextWindow: 258400,
+      requestCount: 1,
+      requests: [{ cachedInput: 12, input: 120, output: 45 }],
+      requestsTruncated: false,
+      schema: "murph.assistant-turn-profile.v1",
+      tools: [
+        { calls: 1, durationMs: 420, label: "vault-cli samples query", outputChars: 2048 },
+      ],
+      toolsTruncated: false,
+    };
+
+    const result = await recordHostedAiUsageRecords({
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [{ ...BASE_USAGE_RECORD, turnProfileJson }],
+    });
+
+    expect(result.recordedIds).toEqual(["turn_123.attempt-1"]);
+    expect(hostedAiUsageUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        turnProfileJson,
+      }),
+    }));
+
+    // Out-of-contract profiles must not reject the row: the usage record is
+    // still persisted for billing, just without the telemetry payload.
+    const droppedUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const droppedPrisma = makeUsagePrisma(droppedUpsert);
+
+    const droppedResult = await recordHostedAiUsageRecords({
+      prisma: droppedPrisma as never,
+      trustedUserId: "member_123",
+      usage: [{
+        ...BASE_USAGE_RECORD,
+        turnProfileJson: {
+          ...turnProfileJson,
+          tools: [
+            { calls: 1, durationMs: 0, label: "grep 'member glucose'", outputChars: 1 },
+          ],
+        },
+      }],
+    });
+
+    expect(droppedResult.recordedIds).toEqual(["turn_123.attempt-1"]);
+    const droppedCreate = droppedUpsert.mock.calls[0]?.[0]?.create as
+      | Record<string, unknown>
+      | undefined;
+    expect(droppedCreate).toBeDefined();
+    expect(droppedCreate?.turnProfileJson).toBeUndefined();
+    expect(droppedCreate?.inputTokens).toBe(120);
+  });
+
   it("dedupes identical usage rows by usageId before persisting them", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const prisma = makeUsagePrisma(hostedAiUsageUpsert);

@@ -3360,7 +3360,122 @@ test("Junction completeConnection rejects failed Link callbacks", async () => {
       now: "2026-04-03T00:00:00.000Z",
       grantedScopes: [],
     }),
-    (error) => error instanceof DeviceSyncError && error.code === "JUNCTION_LINK_FAILED",
+    (error) =>
+      error instanceof DeviceSyncError
+      && error.code === "JUNCTION_LINK_FAILED"
+      && error.message.includes("state=failed"),
+  );
+});
+
+test("Junction completeConnection preserves the sanitized Link failure reason", async () => {
+  const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
+
+  await assert.rejects(
+    requireJunctionConnectionHandler(provider).completeConnection({
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+      state: "state-1",
+      query: new URLSearchParams({
+        murph_state: "state-1",
+        error: "provider_connection_error",
+        error_type: "provider_credential_error",
+        error_description: "User denied access",
+      }),
+      now: "2026-04-03T00:00:00.000Z",
+      grantedScopes: [],
+    }),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_LINK_FAILED");
+      assert.ok(error.message.includes("error=provider_connection_error"));
+      assert.ok(error.message.includes("error_type=provider_credential_error"));
+      assert.ok(error.message.includes("error_description=User denied access"));
+      return true;
+    },
+  );
+});
+
+test("Junction completeConnection drops secret-bearing Link failure reason values entirely", async () => {
+  // sanitizeHostedRuntimeDiagnosticText fails closed: a value that still looks
+  // unsafe after redaction is dropped from the reason instead of partially
+  // surfaced.
+  const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
+
+  await assert.rejects(
+    requireJunctionConnectionHandler(provider).completeConnection({
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+      state: "state-1",
+      query: new URLSearchParams({
+        murph_state: "state-1",
+        error: "provider_connection_error",
+        error_description: "User denied access access_token=secret-value-1",
+      }),
+      now: "2026-04-03T00:00:00.000Z",
+      grantedScopes: [],
+    }),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_LINK_FAILED");
+      assert.ok(error.message.includes("error=provider_connection_error"));
+      assert.ok(!error.message.includes("secret-value-1"));
+      assert.ok(!error.message.includes("error_description="));
+      return true;
+    },
+  );
+});
+
+test("Junction completeConnection rejects non-truthy success callbacks with the outcome suffix", async () => {
+  const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
+
+  await assert.rejects(
+    requireJunctionConnectionHandler(provider).completeConnection({
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+      state: "state-1",
+      query: new URLSearchParams({
+        murph_state: "state-1",
+        success: "false",
+        state: "pending",
+      }),
+      now: "2026-04-03T00:00:00.000Z",
+      grantedScopes: [],
+    }),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_LINK_FAILED");
+      assert.ok(error.message.includes("did not report a successful link outcome"));
+      assert.ok(error.message.includes("(state=pending, success=false)"));
+      return true;
+    },
+  );
+});
+
+test("Junction completeConnection omits token-shaped Link callback values from failure reasons", async () => {
+  // JWT-shaped values are redacted then dropped by the fail-closed check, and
+  // long opaque tokens are dropped outright, so neither can leak into the
+  // persisted/logged failure message.
+  const jwtDescription = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJlLXBhcnQ";
+  const opaqueState = "a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8";
+  const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
+
+  await assert.rejects(
+    requireJunctionConnectionHandler(provider).completeConnection({
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+      state: "state-1",
+      query: new URLSearchParams({
+        murph_state: "state-1",
+        error_description: jwtDescription,
+        state: opaqueState,
+      }),
+      now: "2026-04-03T00:00:00.000Z",
+      grantedScopes: [],
+    }),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_LINK_FAILED");
+      assert.equal(error.message, "Junction Link callback reported a failed link outcome.");
+      assert.ok(!error.message.includes(jwtDescription));
+      assert.ok(!error.message.includes(opaqueState));
+      return true;
+    },
   );
 });
 
@@ -6701,4 +6816,39 @@ test("Junction resource job with an unresolvable resource records an observable 
   const metadataPatch = result.metadataPatch ?? {};
   assert.equal(metadataPatch.junctionSkippedResourceLast, "summary.mystery_records.0.unsupported");
   assert.equal(metadataPatch.junctionSkippedResourceJobCount, 1);
+});
+
+test("Junction import accountId is stable across local account row re-registration", async () => {
+  const importedAccountIds: string[] = [];
+  const provider = createEmptyJunctionBackfillProvider();
+
+  const runReconcileWithAccountRowId = async (rowId: string) => {
+    await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({ id: rowId }),
+        importSnapshot: async (snapshot) => {
+          const accountId = (snapshot as { accountId?: string }).accountId;
+          if (accountId) {
+            importedAccountIds.push(accountId);
+          }
+          return { imported: true };
+        },
+      }),
+      createJob("reconcile", {
+        windowStart: "2026-04-02T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    );
+  };
+
+  // Hosted cold starts recreate the machine-local device-sync store, so the
+  // same Junction user is re-registered under a fresh local row id. Import
+  // identity must follow the stable Junction user, not the local row.
+  await runReconcileWithAccountRowId("dsa_cold_start_row_a");
+  await runReconcileWithAccountRowId("dsa_cold_start_row_b");
+
+  assert.ok(importedAccountIds.length >= 2, "expected reconcile runs to import snapshots");
+  assert.match(importedAccountIds[0] ?? "", /^jxn_acct_[a-f0-9]{32}$/u);
+  assert.equal(new Set(importedAccountIds).size, 1);
 });

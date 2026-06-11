@@ -8,7 +8,7 @@ product
 
 Self-directed individuals who take their own health seriously and want to run structured experiments on themselves — not consume generic wellness advice. They already track data (sleep, HRV, glucose, training load) and want a tool that respects their intelligence and produces conclusions they can act on.
 
-Primary context: desktop, focused session, reviewing results or planning the next protocol. Not a phone-first notification app.
+Primary context (inverted 2026-06-10): the group chat on the phone — challenges and day-to-day Murph contact happen where people already talk (iMessage, WhatsApp, Telegram). The desktop web vault is the secondary surface: a focused session reviewing results or planning the next protocol. Design the vault for depth, but never assume it's where users meet Murph first — almost nobody visits the website unprompted.
 
 For deeper positioning, ICP detail, and brand voice see `agent-docs/product-marketing-context.md`.
 
@@ -25,6 +25,13 @@ Named after Murph from Interstellar — the physicist who solved the equation. T
 Curiosity-driven, rigorous, warm underneath the science. Not cold or clinical. Not gamified or cheerful. A tool for someone who takes their health seriously and wants real answers.
 
 The voice of a careful researcher writing up results — direct, specific, unafraid of nuance. No marketing hype, no "you got this!" cheerleading, no jargon-for-jargon's-sake. When the data is ambiguous, say so.
+
+Two registers, one personality (group register is a hypothesis, untested as of 2026-06-10):
+
+- **Group chat — the referee.** Keeps the challenge fun and the participants accountable: kickoffs, scoring dispatches, nudges, humor. Looser and warmer than the private voice, never a cheerleader.
+- **Private chat & vault — the researcher.** The careful voice described above.
+
+If the referee reads dry and clinical, it's failing; if the private write-ups start performing for an audience, they're failing.
 
 ## Anti-references
 

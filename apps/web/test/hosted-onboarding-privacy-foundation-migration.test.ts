@@ -92,6 +92,9 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
 
 const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedAiUsage",
+  // VaultShare v0: consent-grant relation only (grantor/destination back-references).
+  // No new scalar member data; share payloads stay on the encrypted mailbox path.
+  "HostedVaultShare",
   "HostedAiUsagePeriod",
   "HostedConsentEvent",
   "HostedConsentGrant",
@@ -303,6 +306,9 @@ describe("hosted Prisma baseline migration", () => {
       "2026060300_hosted_latency_milestones",
       "2026060501_device_sync_source_confirmed_backfill",
       "2026060900_hosted_latency_phase_breakdown",
+      "2026061000_hosted_mailbox_consumed_seq",
+      "2026061000_hosted_vault_share",
+      "2026061001_hosted_ai_usage_turn_profile",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');

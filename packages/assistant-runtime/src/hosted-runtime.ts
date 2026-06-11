@@ -56,6 +56,9 @@ import type {
   HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,
 } from "./hosted-runtime/mailbox-import.ts";
+import {
+  offerHostedVaultShareProjectionBestEffort,
+} from "./hosted-runtime/vault-share-projection.ts";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimePlatform,
@@ -337,6 +340,14 @@ export interface HostedWorkspaceRuntimeJobOptions {
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   runAssistantPhase?: HostedWorkspaceRuntimeAssistantPhase;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
+  /**
+   * Fires when the container has been told to exit (for example a deploy
+   * rollout SIGTERM). The runtime treats it as the idle window elapsing now:
+   * the next dirty wait returns immediately so the normal idle_shutdown
+   * checkpoint runs inside the termination grace period instead of the state
+   * dying unsnapshotted. Active foreground work is not interrupted.
+   */
+  shutdownSignal?: AbortSignal | null;
   signal?: AbortSignal | null;
   vaultRoot: string;
 }
@@ -579,8 +590,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     // await, or I/O: restore timings were returned in-memory by the restore call,
     // and the boot.nodeStartupMs (if any) rode in via options.latencyMilestones.
     const incomingBoot = initialAssistantInputLatencyMilestones.phaseBreakdown?.boot;
+    const incomingDispatch = initialAssistantInputLatencyMilestones.phaseBreakdown?.dispatch;
     initialAssistantInputLatencyMilestones.phaseBreakdown = {
       schemaVersion: 1,
+      ...(incomingDispatch ? { dispatch: incomingDispatch } : {}),
       ...(restored.restoreTiming ? { restore: restored.restoreTiming } : {}),
       boot: {
         ...(incomingBoot ?? {}),
@@ -1127,6 +1140,26 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       if (result.runtimeStateDirty) {
         markIdleCheckpointTimerAfterDirtyWork();
       }
+      // Best-effort consented vault-share offer: runs once per wake after the foreground
+      // pass so it never delays user-facing work, holds no share state (web is the
+      // authority), and never throws.
+      const vaultShareOffer = await offerHostedVaultShareProjectionBestEffort({
+        vaultRoot: restored.vaultRoot,
+        vaultSharePort: guardedRuntime.platform.vaultSharePort ?? null,
+      });
+      if (vaultShareOffer.outcome === "error") {
+        emitHostedExecutionStructuredLog({
+          component: "runtime",
+          details: {
+            requestId,
+            vaultShareOfferOutcome: vaultShareOffer.outcome,
+          },
+          level: "warn",
+          message: "Hosted vault-share projection offer failed; continuing wake.",
+          phase: "wake.running",
+          userId: null,
+        });
+      }
       let accumulatedProjection = buildHostedWorkspaceInvocationProjection({
         mailboxBudgetExhausted: mailboxBudgetExhausted(),
         result,
@@ -1195,6 +1228,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             projectedRuntimeWakeAt,
             runtimeAbortSignal: runtimeAbortController.signal,
             runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+            shutdownSignal: options.shutdownSignal ?? null,
           });
           if (
             dirtyWaitResult === "external_wake"
@@ -1850,8 +1884,12 @@ async function waitForHostedRuntimeDirtyWindow(input: {
   projectedRuntimeWakeAt: string | null;
   runtimeAbortSignal: AbortSignal;
   runtimeWakeSignal: RuntimeWakeSignal | null;
+  shutdownSignal: AbortSignal | null;
 }): Promise<HostedRuntimeDirtyWaitResult> {
   const nowMs = Date.now();
+  if (input.shutdownSignal?.aborted === true) {
+    return "idle_checkpoint";
+  }
   if (input.idleCheckpointStartByMs <= nowMs) {
     return "idle_checkpoint";
   }
@@ -1886,9 +1924,13 @@ async function waitForHostedRuntimeDirtyWindow(input: {
     const abort = () => {
       settle(() => reject(readHostedRuntimeAbortReason(input.runtimeAbortSignal)));
     };
+    const shutdown = () => {
+      settle(() => resolve("idle_checkpoint"));
+    };
     const cleanup = () => {
       clearTimeout(timer);
       input.runtimeAbortSignal.removeEventListener("abort", abort);
+      input.shutdownSignal?.removeEventListener("abort", shutdown);
       if (!wakeAbortController.signal.aborted) {
         wakeAbortController.abort(
           new DOMException("Hosted runtime idle checkpoint wait finished.", "AbortError"),
@@ -1905,6 +1947,7 @@ async function waitForHostedRuntimeDirtyWindow(input: {
     };
 
     input.runtimeAbortSignal.addEventListener("abort", abort, { once: true });
+    input.shutdownSignal?.addEventListener("abort", shutdown, { once: true });
     input.runtimeWakeSignal?.wait(wakeAbortController.signal).then(
       () => settle(() => resolve("external_wake")),
       (error) => {
@@ -2152,6 +2195,14 @@ function createAbortGuardedHostedRuntimePlatform(
       ? {
           usageRecordPort: {
             recordUsage: (usage) => guard(() => platform.usageRecordPort!.recordUsage(usage)),
+          },
+        }
+      : {}),
+    ...(platform.vaultSharePort
+      ? {
+          vaultSharePort: {
+            deliver: (deliverInput) =>
+              guard(() => platform.vaultSharePort!.deliver(deliverInput)),
           },
         }
       : {}),

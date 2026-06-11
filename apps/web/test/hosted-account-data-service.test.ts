@@ -72,6 +72,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_invite",
   "prisma.hosted_consent_event",
   "prisma.hosted_consent_grant",
+  "prisma.hosted_vault_share",
   "prisma.device_connection",
   "prisma.device_sync_dirty_connection",
   "prisma.device_sync_dirty_payload",
@@ -271,6 +272,7 @@ describe("buildHostedDataExport", () => {
       },
       counts: {
         "prisma.hosted_mailbox_payload": 1,
+        "prisma.hosted_vault_share": 1,
         "prisma.hosted_web_session": 1,
         "prisma.hosted_user_crypto_audit": 1,
         "prisma.hosted_user_crypto_envelope": 1,
@@ -338,6 +340,15 @@ describe("buildHostedDataExport", () => {
         ],
       },
       vault: {
+        shares: [
+          {
+            destinationMemberId: "member_destination_123",
+            grantorMemberId: "member_123",
+            idPresent: true,
+            projectionKind: "sleep-times.v0",
+            status: "granted",
+          },
+        ],
         workspace: {
           browserVaultReplicaRefPresent: true,
           snapshotRefPresent: true,
@@ -1564,6 +1575,22 @@ async function createHostedAccountDataExportPrisma(input: {
           source: "settings",
           status: "granted",
           updatedAt: new Date("2026-04-27T00:18:31.000Z"),
+        },
+      ],
+    },
+    hostedVaultShare: {
+      count,
+      findMany: async () => [
+        {
+          createdAt: new Date("2026-06-09T00:30:00.000Z"),
+          destinationMemberId: "member_destination_123",
+          grantedAt: new Date("2026-06-09T00:30:00.000Z"),
+          grantorMemberId: memberId,
+          projectionKind: "sleep-times.v0",
+          revokedAt: null,
+          source: "assistant",
+          status: "granted",
+          updatedAt: new Date("2026-06-09T00:30:00.000Z"),
         },
       ],
     },

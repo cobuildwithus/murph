@@ -201,6 +201,9 @@ function buildHostedAiUsageCreateData(
       ? normalizeHostedAiUsageJsonObject(record.rawUsageJson, "rawUsageJson")
       : undefined,
     rawUsageJsonHash: record.rawUsageJsonHash,
+    turnProfileJson: record.turnProfileJson
+      ? normalizeHostedAiUsageJsonObject(record.turnProfileJson, "turnProfileJson")
+      : undefined,
     usageExtractionSourcePath: record.usageExtractionSourcePath,
     usageExtractionVersion: record.usageExtractionVersion,
     providerRequestOutcome: record.providerRequestOutcome ?? "succeeded",

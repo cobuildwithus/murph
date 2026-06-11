@@ -185,3 +185,197 @@ test("automation save preserves hosted iMessage current-route continuity locator
     await rm(parentRoot, { recursive: true, force: true });
   }
 });
+
+// Hosted linq conversation locators are hid_-blinded; an explicit delivery
+// target naming the current conversation must still inherit them so the saved
+// route can resolve that conversation's session at fire time.
+test("automation save enriches an explicit same-conversation target with blinded locators", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-current-route-enrich-",
+  );
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    response: {
+      route: {
+        channel: "linq",
+        deliveryTarget: "linq_chat_real",
+        identityId: "hid_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        participantId: "hid_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        threadId: "hid_cccccccccccccccccccccccccccccccc",
+      },
+    },
+    token: "test-bridge-token",
+  });
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation current route enrichment test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Explicit current conversation reminder",
+      "--slug",
+      "explicit-current-conversation-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2026-12-06T12:00:00.000Z",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      "linq_chat_real",
+      // Model-echoed placeholder flags are stripped and replaced by the
+      // trusted bridge locators for the same conversation.
+      "--thread-id",
+      "hid_model_echoed_thread",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(
+      saved.envelope.ok,
+      true,
+      saved.envelope.ok
+        ? undefined
+        : `${saved.envelope.error.code ?? "unknown"}: ${
+            saved.envelope.error.message ?? "unknown error"
+          }`,
+    );
+    assert.equal(saved.exitCode, null);
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        route: {
+          channel: string;
+          deliveryTarget: string | null;
+          identityId: string | null;
+          participantId: string | null;
+          threadId: string | null;
+        };
+      } | null;
+      vault: string;
+    }>(cli, [
+      "automation",
+      "show",
+      "explicit-current-conversation-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.equal(shown.envelope.data?.automation?.route.channel, "linq");
+    assert.equal(
+      shown.envelope.data?.automation?.route.deliveryTarget,
+      "linq_chat_real",
+    );
+    assert.equal(
+      shown.envelope.data?.automation?.route.identityId,
+      "hid_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
+    assert.equal(
+      shown.envelope.data?.automation?.route.participantId,
+      "hid_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    );
+    assert.equal(
+      shown.envelope.data?.automation?.route.threadId,
+      "hid_cccccccccccccccccccccccccccccccc",
+    );
+    assert.deepEqual(bridge.requests, [
+      HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+    ]);
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+// A different conversation's explicit target must not absorb the current
+// conversation's locators.
+test("automation save does not enrich an explicit different-conversation target", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-current-route-no-enrich-",
+  );
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    response: {
+      route: {
+        channel: "linq",
+        deliveryTarget: "linq_chat_real",
+        identityId: "hid_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        participantId: "hid_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        threadId: "hid_cccccccccccccccccccccccccccccccc",
+      },
+    },
+    token: "test-bridge-token",
+  });
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation current route no-enrichment test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Other conversation reminder",
+      "--slug",
+      "other-conversation-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2026-12-06T12:00:00.000Z",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      "linq_chat_other",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.envelope.ok, true);
+    assert.equal(saved.exitCode, null);
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        route: {
+          channel: string;
+          deliveryTarget: string | null;
+          identityId: string | null;
+          participantId: string | null;
+          threadId: string | null;
+        };
+      } | null;
+      vault: string;
+    }>(cli, [
+      "automation",
+      "show",
+      "other-conversation-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.equal(
+      shown.envelope.data?.automation?.route.deliveryTarget,
+      "linq_chat_other",
+    );
+    assert.equal(shown.envelope.data?.automation?.route.identityId, null);
+    assert.equal(shown.envelope.data?.automation?.route.participantId, null);
+    assert.equal(shown.envelope.data?.automation?.route.threadId, null);
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});

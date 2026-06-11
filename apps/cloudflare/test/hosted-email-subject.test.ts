@@ -63,7 +63,6 @@ describe('hosted Cloudflare email subject handling', () => {
         },
       },
       request: {
-        identityId: 'assistant@example.com',
         message: 'Hello from Murph',
         subject: 'Daily check-in',
         target: 'user@example.com',
@@ -91,7 +90,6 @@ describe('hosted Cloudflare email subject handling', () => {
       config,
       emailBinding: binding,
       request: {
-        identityId: 'assistant@example.com',
         message: 'Hello from Murph',
         target: 'user@example.com',
         targetKind: 'explicit',
@@ -106,7 +104,6 @@ describe('hosted Cloudflare email subject handling', () => {
         config,
         emailBinding: binding,
         request: {
-          identityId: 'assistant@example.com',
           message: 'Reply from Murph',
           subject: 'Override subject',
           target: firstSend.target,

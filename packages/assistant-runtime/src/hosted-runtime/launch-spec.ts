@@ -164,6 +164,14 @@ function readHostedRuntimeLaunchParserToolchain(
               `parserToolchain.tools.${toolName}.command`,
             ),
           }),
+      ...(config.endpoint === undefined
+        ? {}
+        : {
+            endpoint: normalizeHostedRuntimeLaunchParserToolEndpoint(
+              config.endpoint,
+              `parserToolchain.tools.${toolName}.endpoint`,
+            ),
+          }),
       ...(config.modelPath === undefined
         ? {}
         : {
@@ -176,6 +184,28 @@ function readHostedRuntimeLaunchParserToolchain(
   }
 
   return { tools };
+}
+
+function normalizeHostedRuntimeLaunchParserToolEndpoint(
+  value: string | null | undefined,
+  label: string,
+): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError(`${label} must be a non-empty http(s) URL.`);
+  }
+
+  const normalized = value.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new TypeError(`${label} must be an absolute http(s) URL.`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new TypeError(`${label} must be an absolute http(s) URL.`);
+  }
+
+  return normalized;
 }
 
 function normalizeHostedRuntimeLaunchParserToolPath(

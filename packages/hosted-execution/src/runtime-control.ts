@@ -33,6 +33,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
+  "vault-share.delivery",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
@@ -526,10 +527,29 @@ export interface HostedMailboxLaneHighWater {
   maxUpdatedAt?: string | null;
 }
 
+export interface HostedMailboxLaneConsumed {
+  consumedSeq: string;
+  lane: HostedMailboxLane;
+}
+
 export interface HostedMailboxFetchResponse {
+  // Optional for deploy-window compatibility: older web responses omit it and
+  // the runtime treats every lane as consumed through seq 0.
+  consumedSeqByLane?: HostedMailboxLaneConsumed[] | null;
   fetchedAt: string;
   items: HostedMailboxItem[];
   maxSeqByLane: HostedMailboxLaneHighWater[];
+  userId: string;
+}
+
+export interface HostedMailboxConsumeRequest {
+  lanes: HostedMailboxLaneConsumed[];
+  requestId: string;
+}
+
+export interface HostedMailboxConsumeResponse {
+  acknowledgedAt: string;
+  consumedSeqByLane: HostedMailboxLaneConsumed[];
   userId: string;
 }
 
@@ -606,6 +626,17 @@ export type HostedRuntimeLatencyTraceMilestone =
 
 export interface HostedRuntimeLatencyPhaseBreakdown {
   schemaVersion: number;
+  // Durable Object dispatch stamps (DO-side Date.now() epoch ms), diagnostics
+  // only. invokeReceivedAtEpochMs is stamped when the DO invoke handler starts;
+  // containerEnsureReadyStartedAtEpochMs immediately before ensureContainerReady,
+  // which may be a warm no-op rather than a container start. The segment from
+  // there to runner_job_accepted_at therefore bundles container scheduling/boot
+  // (cold only, nodeStartupMs measures the boot slice), the runner POST, request
+  // body decode, and the lazy runtime-contract load — not pure CF scheduling.
+  dispatch?: {
+    invokeReceivedAtEpochMs?: number;
+    containerEnsureReadyStartedAtEpochMs?: number;
+  };
   restore?: {
     sizeGuardMs?: number;
     dataKeyUnwrapMs?: number;

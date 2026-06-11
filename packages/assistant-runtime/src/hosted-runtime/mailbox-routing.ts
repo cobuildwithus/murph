@@ -16,6 +16,7 @@ export const HOSTED_MAILBOX_IMPORT_ACTIONS = [
   "dispatch-assistant-notification",
   "run-device-sync-wake",
   "apply-runtime-control-request",
+  "import-vault-share-delivery",
 ] as const;
 
 export type HostedMailboxImportAction =
@@ -65,6 +66,7 @@ const ACTION_BY_KIND = {
   "runtime.device-sync-recovery-requested": "apply-runtime-control-request",
   "runtime.mailbox-lag-observed": "apply-runtime-control-request",
   "runtime.manual-requested": "apply-runtime-control-request",
+  "vault-share.delivery": "import-vault-share-delivery",
 } satisfies Record<HostedMailboxKind, HostedMailboxImportAction>;
 
 export function createHostedMailboxRoutingPlan(

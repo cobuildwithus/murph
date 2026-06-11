@@ -8,6 +8,7 @@ import {
   ASSISTANT_SKILLS,
   buildAssistantSkillFileRef,
 } from "../assistant-skill-assets.js";
+import { MURPH_PRODUCT_ORIGIN } from "@murphai/contracts";
 import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
@@ -398,11 +399,12 @@ function formatAssistantHumanReadableLocalDate(localDate: string): string {
 
 export function resolveAssistantMurphProductBaseUrl(
   source: Readonly<Record<string, string | undefined>> = process.env
-): string | null {
+): string {
   return (
     normalizeAssistantProductBaseUrl(source.HOSTED_ONBOARDING_PUBLIC_BASE_URL)
     ?? normalizeAssistantProductBaseUrl(source.HOSTED_WEB_BASE_URL)
     ?? readAssistantVercelProductionBaseUrl(source)
+    ?? MURPH_PRODUCT_ORIGIN
   );
 }
 
@@ -490,7 +492,7 @@ function buildAssistantHealthReasoningText(): string {
 - When saving a meal and the user provides enough food identity, ingredients, portion hints, package/menu facts, or attachment evidence to form a useful estimate, do not leave nutrition blank just because exact serving weights are missing. Make ordinary portion assumptions, estimate calories first, estimate protein/carbs/fat/fiber when reasonably inferable, set nutrition provenance to \`estimated\`, choose low or medium confidence based on specificity, and put the key assumptions in provenance detail. Ask one targeted follow-up only when the meal is too vague to identify the food or rough amount.
 - For foods, drinks, menu items, and other non-supplement consumed products, use web lookup before writing when the item is identifiable and local context or attachments do not provide key facts.
 - For supplements, pills, powders, and supplement-like consumed products, default to \`vault-cli supplement search-labels\` for one item or \`vault-cli supplement search-labels-batch\` for several before web lookup. The default label lookup returns one match; pass an explicit higher limit only when the first result is ambiguous, generic, or missing likely product variants. If the lookup returns a usable serving, dose, or amount, use it instead of asking the user to restate dosage. The hosted label database covers many supplements but is not exhaustive; if it misses the product or brand, or lacks needed ingredients, fall back to web lookup.
-- When saving known supplement label facts, preserve the full active ingredient panel with repeated \`vault-cli supplement save --ingredient\` JSON-object flags. Do not collapse multi-ingredient labels to one primary ingredient.
+- When saving known supplement label facts, preserve the full active ingredient panel with repeated \`vault-cli supplement save --ingredient\` JSON-object flags, keeping each ingredient's label amount and unit, and save the label serving size with \`--serving-size\`. Do not collapse multi-ingredient labels to one primary ingredient.
 - For any product lookup, prefer official labels, manufacturer pages, restaurant/menu nutrition pages, or other primary sources. Try to recover serving size, ingredients, active compounds, dose, calories, protein, carbs, fat, fiber, caffeine, alcohol, sodium, sugar, allergens, and warnings when available. If the item is generic, the user asks you to just note it, or evidence is unavailable, log what is known, mark estimates and confidence, and do not imply a lookup happened.
 - Use product lookups to make the answer or saved record accurate, not to create visible citation clutter. Do not add inline source links after ingredient or nutrition facts unless the user asks for links.
 - When recommending or explaining a specific exercise, stretch, mobility drill, or movement routine, first use \`vault-cli exercise list ... --format json\` to find catalog candidates, then \`vault-cli exercise show <id-or-slug> --format json\` for final movements so the answer reflects catalog steps, tips, equipment, level, targets, and source-backed safety notes. If the catalog has no useful match, say so plainly and keep the suggestion conservative.
@@ -768,7 +770,7 @@ When creating automations, choose continuity deliberately. Use ${code(
     "--continuity-policy preserve"
   )} for simple reminders, check-ins, and lightweight support where recent prior automation context can help. Use ${code(
     "--continuity-policy fresh"
-  )} for larger automations such as research, audits, roundups, content inspection, or any recurring task likely to need multiple tool calls, so each run starts from current vault/tool evidence instead of prior run transcript context.
+  )} for larger automations such as research, audits, roundups, content inspection, or any recurring task likely to need multiple tool calls, so each run starts from current vault/tool evidence instead of prior run transcript context. For an automation meant for the current conversation, route flags may name this conversation or be omitted entirely; the route then inherits this conversation, and a preserve automation continues it instead of starting a separate thread.
 
 Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.`;
 }

@@ -4,6 +4,7 @@ import { getPrisma } from "../prisma";
 import { createHostedMemberReplyAliasRouteFromLookupKey } from "./hosted-email-reply-alias";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
 import {
+  extractHostedPrivyEmailAccount,
   extractHostedPrivyTelegramAccount,
   type PrivyLinkedAccountLike,
 } from "./privy-shared";
@@ -12,6 +13,13 @@ export interface HostedAccountSettingsSnapshot {
   email: {
     address: string | null;
     murphEmailAddress?: string | null;
+    /**
+     * Whether the server-approved Privy session has an email linked. Privy's
+     * headless update-email flow only works when this is true; otherwise the
+     * email must be linked through Privy's own modal. Null when the Privy
+     * session could not be confirmed server-side.
+     */
+    privyEmailLinked?: boolean | null;
     verifiedAt: string | null;
   };
   phone: {
@@ -57,12 +65,18 @@ export async function readHostedAccountSettingsSnapshot(input: {
   };
 }
 
-export function withServerApprovedTelegramUsernameHint(input: {
+export function withServerApprovedPrivyAccountHints(input: {
   serverApprovedPrivyLinkedAccounts?: PrivyLinkedAccountLike[] | null;
   snapshot: HostedAccountSettingsSnapshot;
 }): HostedAccountSettingsSnapshot {
   return {
     ...input.snapshot,
+    email: {
+      ...input.snapshot.email,
+      privyEmailLinked: input.serverApprovedPrivyLinkedAccounts
+        ? extractHostedPrivyEmailAccount(input.serverApprovedPrivyLinkedAccounts) !== null
+        : null,
+    },
     telegram: {
       ...input.snapshot.telegram,
       username: resolveHostedAccountTelegramUsername({

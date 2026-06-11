@@ -204,6 +204,9 @@ describe("hosted deploy automation helpers", () => {
       TELEGRAM_BOT_USERNAME: "hosted_bot",
     });
     const config = buildHostedWranglerDeployConfig(environment) as {
+      ai?: {
+        binding: string;
+      };
       containers: Array<{
         class_name: string;
         image: string;
@@ -352,6 +355,7 @@ describe("hosted deploy automation helpers", () => {
         name: "HOSTED_EMAIL",
       },
     ]);
+    expect(config.ai).toEqual({ binding: "AI" });
     expect(config.vars.HOSTED_WEB_BASE_URL).toBe("https://web.example.test");
     expect(config.vars.AGENTMAIL_BASE_URL).toBeUndefined();
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
@@ -483,6 +487,39 @@ describe("hosted deploy automation helpers", () => {
     expect(checkedInConfig.version_metadata).toEqual(generatedConfig.version_metadata);
   });
 
+  it("keeps the checked-in wrangler scaffold vars aligned with default-rendered deploy vars", async () => {
+    // Guards the drift class where a scaffold var (e.g. the runner idle TTL)
+    // is edited in source but real deploys silently keep shipping another
+    // value. Required vars are exempt: the scaffold holds placeholders and
+    // deploys supply them from the GitHub environment.
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "murph-hosted",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+    });
+    const generatedConfig = buildHostedWranglerDeployConfig(environment) as {
+      vars: Record<string, string>;
+    };
+    const checkedInConfig = parseJsoncObject(
+      await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
+    ) as {
+      vars: Record<string, string>;
+    };
+    const requiredVarNames = new Set<string>(HOSTED_WORKER_REQUIRED_VAR_NAMES);
+    const scaffoldDefaultVars = Object.fromEntries(
+      Object.entries(checkedInConfig.vars).filter(([key]) => !requiredVarNames.has(key)),
+    );
+
+    expect(Object.keys(scaffoldDefaultVars).length).toBeGreaterThan(0);
+    for (const [key, scaffoldValue] of Object.entries(scaffoldDefaultVars)) {
+      expect(
+        { [key]: generatedConfig.vars[key] },
+        `wrangler.jsonc scaffold var ${key} must match the value default deploys render`,
+      ).toEqual({ [key]: scaffoldValue });
+    }
+  });
+
   it("keeps the hosted deploy workflow env surface, defaults, and summary aligned", async () => {
     const workflow = await readFile(
       new URL("../../../.github/workflows/deploy-cloudflare-hosted.yml", import.meta.url),
@@ -571,7 +608,7 @@ describe("hosted deploy automation helpers", () => {
       "run: pnpm --dir apps/cloudflare runner:docker:base -- --force",
       "name: Save immediate build artifacts",
       "tar --hard-dereference -czf .artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz \\",
-      "docker save murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-codex0.135.0-base-en \\",
+      "docker save murph-cloudflare-runner-base:node24.14.1-codex0.135.0 \\",
       "name: Upload immediate build handoff",
       "cloudflare-hosted-immediate-build-${{ github.sha }}",
       "name: Download immediate build handoff",
@@ -796,6 +833,8 @@ describe("hosted deploy automation helpers", () => {
     expect(environment.workerVars).toEqual({
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram,whatsapp",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000",
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
     });
   });
 

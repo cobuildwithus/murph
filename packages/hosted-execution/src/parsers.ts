@@ -1,4 +1,10 @@
 import {
+  parseHostedVaultShareDeliveryPayload,
+} from "./vault-share.ts";
+import {
+  buildHostedExecutionVaultShareDeliveryWake,
+} from "./builders.ts";
+import {
   normalizeIanaTimeZone,
 } from "@murphai/contracts";
 
@@ -98,6 +104,8 @@ export {
   parseHostedWorkspaceSnapshotV2Ref,
 } from "./parsers/workspace-snapshot-v2.ts";
 export {
+  parseHostedMailboxConsumeRequest,
+  parseHostedMailboxConsumeResponse,
   parseHostedMailboxFetchRequest,
   parseHostedMailboxFetchResponse,
   parseHostedMailboxItem,
@@ -169,6 +177,14 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
           record.timeZone,
           "Hosted execution wake member.activated timeZone",
         ),
+      });
+    case "vault-share.delivery":
+      // The builder derives the envelope occurredAt from the delivery record, so a wire
+      // envelope timestamp that drifted from the record normalizes back to the record.
+      return buildHostedExecutionVaultShareDeliveryWake({
+        delivery: parseHostedVaultShareDeliveryPayload(record.delivery),
+        eventId,
+        memberId: wireUserId,
       });
     case "member.channels.updated":
       return buildHostedExecutionMemberChannelsUpdatedWake({

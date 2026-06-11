@@ -75,6 +75,9 @@
       "preview_bucket_name": "murph-hosted-bundles-preview"
     }
   ],
+  "ai": {
+    "binding": "AI"
+  },
   "send_email": [
     {
       "name": "HOSTED_EMAIL"
@@ -101,6 +104,10 @@
       "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK"
     ]
   },
+  // Non-placeholder values below are the defaults real deploys ship (kept aligned
+  // with deploy-automation defaults by deploy-automation.test.ts). Production
+  // overrides live in GitHub `production` environment variables — check
+  // `gh variable list --env production` before assuming a value here is live.
   "vars": {
     "HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION": "projects/.../cryptoKeyVersions/1",
     "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM": "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",

@@ -60,6 +60,26 @@ describe("shouldShowHomeDeviceSyncStep", () => {
     });
   });
 
+  it("keeps the device step visible when the only connection never finished setup", async () => {
+    mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+      generatedAt: "2026-05-01T00:00:00.000Z",
+      ok: true,
+      sources: [
+        {
+          connectionId: "dspc_junction",
+          setupIncomplete: true,
+          state: "active",
+        },
+      ],
+    });
+
+    const { shouldShowHomeDeviceSyncStep } = await import(
+      "@/src/lib/device-sync/home-onboarding"
+    );
+
+    await expect(shouldShowHomeDeviceSyncStep({ member: MEMBER })).resolves.toBe(true);
+  });
+
   it("keeps the device step visible without positive active-source evidence", async () => {
     mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
       generatedAt: "2026-05-01T00:00:00.000Z",

@@ -6,9 +6,6 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import {
-  HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV as HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
-} from "@murphai/hosted-local-harness/codex-app-server-stub";
-import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
@@ -362,7 +359,6 @@ function buildActivationWake(memberId: string) {
 function isLiveCodexAppServerEnvironment(): boolean {
   return (
     process.env.MURPH_E2E_ASSISTANT_PROVIDER_MODE === "live"
-    && !process.env[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]?.trim()
     && Boolean(process.env.OPENAI_API_KEY?.trim())
   );
 }
@@ -371,11 +367,6 @@ function requireLiveCodexAppServerEnvironment(): void {
   if (process.env.MURPH_E2E_ASSISTANT_PROVIDER_MODE !== "live") {
     throw new Error(
       "hosted-local vault-persistence requires --profile e2e:live so it uses the real Codex app-server path.",
-    );
-  }
-  if (process.env[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]?.trim()) {
-    throw new Error(
-      "hosted-local vault-persistence must not run with the Codex app-server E2E shim enabled.",
     );
   }
   if (!process.env.OPENAI_API_KEY?.trim()) {

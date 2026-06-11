@@ -179,6 +179,7 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     totalTokens: 3,
     triggerKind: null,
     turnId: "turn_usage",
+    turnProfileJson: null,
     usageExtractionSourcePath: null,
     usageExtractionVersion: "test",
     usageId: "turn_usage.attempt-1",
@@ -5076,7 +5077,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     const readResult = await effectsPort.readRawEmailMessage("raw_123");
     const sendResult = await effectsPort.sendEmail({
-      identityId: "identity_123",
       message: "hello",
       subject: "subject",
       target: "assistant@example.com",

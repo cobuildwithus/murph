@@ -1887,6 +1887,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(result).toEqual({
+      foregroundReplyFailed: 0,
       progressed: false,
       redactedStatus: expect.objectContaining({
         hostedAssistantNextWakeAt: null,
@@ -4760,6 +4761,7 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     totalTokens: 15,
     triggerKind: null,
     turnId: "turn_direct_usage",
+    turnProfileJson: null,
     usageId: "turn_direct_usage.attempt-1",
     usageExtractionSourcePath: null,
     usageExtractionVersion: "codex-usage-v1",

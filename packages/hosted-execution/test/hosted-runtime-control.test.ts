@@ -99,6 +99,7 @@ describe("hosted runtime control contracts", () => {
       "member.channels.updated",
       "assistant.notification.requested",
       "device-sync.wake",
+      "vault-share.delivery",
       "runtime.manual-requested",
       "runtime.browser-vault-refresh-requested",
       "runtime.device-sync-recovery-requested",
@@ -717,6 +718,10 @@ describe("hosted runtime control contracts", () => {
   it("round-trips phaseBreakdown on both latency events and rejects unsafe leaves", () => {
     const stagedBreakdown = {
       schemaVersion: 1,
+      dispatch: {
+        invokeReceivedAtEpochMs: 1_777_000_000_000,
+        containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
+      },
       restore: {
         sizeGuardMs: 1,
         dataKeyUnwrapMs: 2,
@@ -752,6 +757,9 @@ describe("hosted runtime control contracts", () => {
 
     const providerBreakdown = {
       schemaVersion: 1,
+      dispatch: {
+        invokeReceivedAtEpochMs: 1_777_000_000_000,
+      },
       provider: {
         turnLockWaitMs: 1,
         sessionResolveMs: 2,
@@ -802,6 +810,29 @@ describe("hosted runtime control contracts", () => {
         },
       });
       expect(parsed.event.type).toBe("provider_started");
+      expect("phaseBreakdown" in parsed.event).toBe(false);
+    }
+
+    // Dispatch is the same trust boundary: unknown sub keys and non-integer or
+    // negative epoch leaves must drop the whole breakdown (never partially
+    // salvage it) while the staged event itself still parses.
+    for (const unsafeDispatch of [
+      { invokeReceivedAtEpochMs: 1, routedThroughColo: 1 }, // unknown sub key
+      { invokeReceivedAtEpochMs: 1.5 }, // non-integer leaf
+      { containerEnsureReadyStartedAtEpochMs: -1 }, // negative leaf
+      { invokeReceivedAtEpochMs: "1777000000000" }, // string leaf
+    ]) {
+      const parsed = parseHostedRuntimeLatencyTraceRequest({
+        event: {
+          assistantInputId: "input_1",
+          at: "2026-04-26T00:00:00.000Z",
+          mailboxItemId: "mailbox_item_1",
+          phaseBreakdown: { schemaVersion: 1, dispatch: unsafeDispatch },
+          source: "linq",
+          type: "assistant_input_staged",
+        },
+      });
+      expect(parsed.event.type).toBe("assistant_input_staged");
       expect("phaseBreakdown" in parsed.event).toBe(false);
     }
 
@@ -1640,6 +1671,7 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     totalTokens: 15,
     triggerKind: "conversation.message",
     turnId: "turn_usage",
+    turnProfileJson: null,
     usageId: "turn_usage.attempt-1",
     usageExtractionSourcePath: null,
     usageExtractionVersion: "legacy",

@@ -371,6 +371,10 @@ const JUNCTION_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
   weightKg: 55,
 } as const satisfies Record<string, number>);
 
+// Garmin has no direct import adapter (ingestion is Junction-only), but the
+// descriptor stays registered: it is Garmin's public identity for data already
+// in vaults - the query layer resolves the "Garmin" display name and
+// per-metric selection priorities from this registry.
 export const GARMIN_DEVICE_PROVIDER_DESCRIPTOR = {
   provider: "garmin",
   displayName: "Garmin",
