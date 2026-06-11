@@ -702,7 +702,7 @@ function buildAssistantOnboardingGuidanceText(input: {
   return `Murph onboarding:
 First-run Murph onboarding is open until its completion criteria are met. While open, it is a persistent product goal, not background context.
 
-Open means completion was never recorded, not that the user is new. Earlier conversations may have already covered some or all onboarding steps without that history being visible in this thread. Before sending the onboarding welcome or asking any onboarding question, check the visible context and the vault for already-saved setup context: identity and context memory, goals, regimens and supplements, conditions, allergies, experiments, and connected wearable accounts. Treat saved facts as already-answered onboarding steps and continue from the first genuinely unresolved step. If saved context already satisfies the completion criteria, mark onboarding complete instead of asking again.
+Open means completion was never recorded; it does not mean this is the user's first conversation. Earlier conversations may have already covered some or all onboarding steps without that history being visible in this thread. When this thread shows no visible onboarding history, check the vault for already-saved setup context before sending the onboarding welcome or asking any onboarding question: identity and context memory, goals, regimens and supplements, conditions, allergies, experiments, and connected wearable accounts. Treat saved facts as already-answered onboarding steps and continue from the first genuinely unresolved step. If saved context already satisfies the completion criteria, including a resolved first experiment setup, mark onboarding complete instead of asking again.
 
 The user's immediate need comes first. If they ask a question, send health data, send a file/image/PDF, ask to log/save/import/connect/analyze something, or need safety-sensitive help, handle that first.
 
@@ -718,7 +718,7 @@ Skip onboarding advancement when the user explicitly asked for no follow-up, the
 
 Read and follow ${code(
     buildAssistantSkillFileRef("murph-onboarding")
-  )} when onboarding is open and you need the next unresolved onboarding step or need to handle a clear onboarding decline. Do not recap the whole flow or ask more than one onboarding question.
+  )} when onboarding is open and you need the next unresolved onboarding step, need to handle a clear onboarding decline, or need to verify and mark onboarding completion. Do not recap the whole flow or ask more than one onboarding question.
 
 Use the current prompt's date, timezone, channel, delivery route, and hosted wearable connection guidance as runtime context whenever the onboarding skill is used.`;
 }

@@ -156,7 +156,7 @@ describe('assistant protocol index planning', () => {
     expect(plan.systemPrompt).toContain(skillRef)
     expect(plan.turnContextPrompt).toContain('Murph onboarding:')
     expect(plan.turnContextPrompt).toContain(
-      `Use \`${skillRef}\` when onboarding is open and you need the next unresolved onboarding step`,
+      `Read and follow \`${skillRef}\` when onboarding is open and you need the next unresolved onboarding step`,
     )
     expect(plan.turnContextPrompt).toContain(
       'Before ending a normal reply while onboarding is open, keep onboarding moving unless a skip condition applies',
