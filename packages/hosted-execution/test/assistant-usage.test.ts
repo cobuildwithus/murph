@@ -15,11 +15,12 @@ import {
 
 test("maintenance usage records parse, attribute, and dedupe like turn usage", () => {
   const record = buildAssistantMaintenanceUsageRecord({
+    assistantSessionId: "asst_123",
+    codexThreadId: "thread_abc",
     credentialSource: "platform",
     featureKey: "assistant_idle_compact",
     memberId: "member_123",
     model: "gpt-5.5",
-    sessionId: "thread_abc",
     triggerKind: "automation_idle_compact",
     usage: {
       cachedInputTokens: 96_000,
@@ -35,6 +36,10 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
   assert.match(record.turnId, /^turn_maintenance_[0-9a-f]{32}$/u);
   assert.equal(record.usageId, `${record.turnId}.attempt-1`);
   assert.equal(record.credentialSource, "platform");
+  // sessionId is the Murph assistant session; the provider thread id lands in
+  // providerRequestId so the two identities can never be conflated.
+  assert.equal(record.sessionId, "asst_123");
+  assert.equal(record.providerRequestId, "thread_abc");
   assert.equal(record.requestedModel, "gpt-5.5");
   assert.equal(record.triggerKind, "automation_idle_compact");
   assert.equal(record.inputTokens, 104_000);
@@ -42,11 +47,12 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
   // Distinct calls never collide on the turn-keyed unique constraint.
   assert.notEqual(
     buildAssistantMaintenanceUsageRecord({
+      assistantSessionId: "asst_123",
+      codexThreadId: null,
       credentialSource: "member",
       featureKey: "assistant_idle_compact",
       memberId: "member_123",
       model: "gpt-5.5",
-      sessionId: "thread_abc",
       triggerKind: "automation_idle_compact",
       usage: {
         cachedInputTokens: null,

@@ -20,9 +20,10 @@ export const HOSTED_IDLE_COMPACT_TIMEOUT_MS = 120_000;
 
 export type HostedIdleMaintenanceOutcome =
   | CodexWarmThreadCompactionOutcome
+  | { kind: "failed"; reason: "exception"; threadContextTokensBefore: null }
   | {
       kind: "skipped";
-      reason: "no_model" | "pending_work" | "shutdown";
+      reason: "missing_model" | "pending_work" | "shutdown" | "unpriced_model";
       threadContextTokensBefore: null;
     };
 
@@ -37,6 +38,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   model: string | null;
   pendingWork: boolean;
   recordUsage: ((record: AssistantUsageRecord) => Promise<void>) | null;
+  resolveAssistantSessionId: ((codexThreadId: string) => Promise<string | null>) | null;
   shutdownSignal: AbortSignal | null;
   wakeSignal: RuntimeWakeSignal | null;
 }): Promise<HostedIdleMaintenanceOutcome> {
@@ -49,11 +51,15 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     // work, which is exactly what this feature must never do.
     return { kind: "skipped", reason: "pending_work", threadContextTokensBefore: null };
   }
-  if (!input.model || !normalizeHostedAiUsageAllowancePricedModelId(input.model)) {
-    // Without a priced hosted model id the compact call's usage cannot be
-    // accounted against the member's allowance, so do not spend
-    // unattributable tokens.
-    return { kind: "skipped", reason: "no_model", threadContextTokensBefore: null };
+  // Without a priced hosted model id the compact call's usage cannot be
+  // accounted against the member's allowance, so do not spend unattributable
+  // tokens. The two reasons are distinct on purpose: missing_model means a
+  // misconfigured runtime; unpriced_model means a deliberate unsupported model.
+  if (!input.model) {
+    return { kind: "skipped", reason: "missing_model", threadContextTokensBefore: null };
+  }
+  if (!normalizeHostedAiUsageAllowancePricedModelId(input.model)) {
+    return { kind: "skipped", reason: "unpriced_model", threadContextTokensBefore: null };
   }
 
   const abortController = new AbortController();
@@ -71,28 +77,40 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     .catch(() => undefined);
 
   try {
-    const outcome = await compactWarmCodexThread({
-      minThreadTokens: HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
-      signal: abortController.signal,
-      timeoutMs: HOSTED_IDLE_COMPACT_TIMEOUT_MS,
-    });
+    // Structurally fail-open: the runtime seam must not assume the engine
+    // helper can never throw — an exception here aborts idle maintenance,
+    // never the checkpoint.
+    let outcome: CodexWarmThreadCompactionOutcome;
+    try {
+      outcome = await compactWarmCodexThread({
+        minThreadTokens: HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
+        signal: abortController.signal,
+        timeoutMs: HOSTED_IDLE_COMPACT_TIMEOUT_MS,
+      });
+    } catch {
+      return { kind: "failed", reason: "exception", threadContextTokensBefore: null };
+    }
 
     if (outcome.kind === "compacted" && outcome.usage && input.recordUsage) {
-      // Structurally fail-open: building the record can throw synchronously
-      // on a validation mismatch, and billing telemetry must never break the
-      // idle checkpoint.
+      // Billing telemetry must never break the idle checkpoint nor delay a
+      // pending wake: build defensively and record fire-and-forget, exactly
+      // like turn usage recording.
       try {
-        await input.recordUsage(
-          buildAssistantMaintenanceUsageRecord({
+        const assistantSessionId =
+          (await input.resolveAssistantSessionId?.(outcome.threadId)) ?? null;
+        if (assistantSessionId) {
+          const record = buildAssistantMaintenanceUsageRecord({
+            assistantSessionId,
+            codexThreadId: outcome.threadId,
             credentialSource: input.credentialSource,
             featureKey: "assistant_idle_compact",
             memberId: input.memberId,
             model: input.model,
-            sessionId: outcome.threadId,
             triggerKind: "automation_idle_compact",
             usage: outcome.usage,
-          }),
-        );
+          });
+          void input.recordUsage(record).catch(() => undefined);
+        }
       } catch {
         // Swallowed by design; the compact itself succeeded.
       }

@@ -23,6 +23,7 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  findAssistantSessionIdByCodexThreadId,
   readAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import {
@@ -1302,6 +1303,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 await guardedRuntime.platform.usageRecordPort?.recordUsage(record);
               }
             : null,
+          resolveAssistantSessionId: (codexThreadId) =>
+            findAssistantSessionIdByCodexThreadId(restored.vaultRoot, codexThreadId),
           shutdownSignal: options.shutdownSignal ?? null,
           wakeSignal: options.runtimeWakeSignal ?? null,
         });

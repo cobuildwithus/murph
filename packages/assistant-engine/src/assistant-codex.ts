@@ -200,12 +200,22 @@ function isCodexContextCompactionCompletion(message: CodexRpcMessage): boolean {
   return asCodexRecord(asCodexRecord(message.params)?.item)?.type === 'contextCompaction'
 }
 
+function isCodexThreadTokenUsageUpdatedMethod(method: string | null): boolean {
+  return (
+    method === 'thread/tokenUsage/updated' ||
+    method === 'thread/token_usage/updated' ||
+    method === 'thread.tokenUsage.updated' ||
+    method === 'thread.token.usage.updated' ||
+    method === 'thread.token_usage.updated'
+  )
+}
+
 function readCodexThreadTokenUsageUpdate(message: CodexRpcMessage): {
   last: Record<string, unknown> | null
   threadId: string | null
 } | null {
   const method = typeof message.method === 'string' ? message.method : null
-  if (method !== 'thread/tokenUsage/updated' && method !== 'thread.tokenUsage.updated') {
+  if (!isCodexThreadTokenUsageUpdatedMethod(method)) {
     return null
   }
 
@@ -585,6 +595,7 @@ class CodexAppServerProcess {
   private startupFailure: Error | null = null
   private stdinFailure: VaultCliError | null = null
   private stdoutBuffer = ''
+  private stopPromise: Promise<void> | null = null
 
   constructor(input: CodexAppServerProcessInput) {
     this.codexCommand = input.codexCommand
@@ -795,11 +806,23 @@ class CodexAppServerProcess {
     })
   }
 
-  async stop(_reason: string): Promise<void> {
+  async stop(reason: string): Promise<void> {
     if (this.stopCompleted) {
       return
     }
+    // Memoized so detached kills (idle-compaction abort) and a racing turn's
+    // replacement stop share one teardown instead of double-signaling; an
+    // unsuccessful teardown clears the memo so later callers retry, matching
+    // the pre-memoization semantics.
+    this.stopPromise ??= this.runStop(reason).finally(() => {
+      if (!this.stopCompleted) {
+        this.stopPromise = null
+      }
+    })
+    await this.stopPromise
+  }
 
+  private async runStop(_reason: string): Promise<void> {
     this.normalShutdown = true
     this.state = 'stopping'
     let stopped = false
@@ -1409,7 +1432,11 @@ export async function compactWarmCodexThread(input: {
       }
     }
 
-    await processInstance.poison('idle-compaction-failed')
+    // Detached: poison() flags the process unusable synchronously; the
+    // SIGTERM->SIGKILL teardown (seconds) completes out of band so a pending
+    // wake is never held behind it. The memoized stop makes a racing turn's
+    // replacement stop await the same teardown safely.
+    void processInstance.poison('idle-compaction-failed')
     return {
       kind: 'failed',
       reason: settledReason,
@@ -1417,7 +1444,7 @@ export async function compactWarmCodexThread(input: {
       threadId: vitals.threadId,
     }
   } catch {
-    await processInstance.poison('idle-compaction-failed')
+    void processInstance.poison('idle-compaction-failed')
     return {
       kind: 'failed',
       reason: 'rpc_error',
@@ -1475,11 +1502,7 @@ function codexEventMethodRequiresTurnCorrelation(method: string | null): boolean
   return (
     normalizedMethod === 'error' ||
     normalizedMethod === 'thread/compacted' ||
-    normalizedMethod === 'thread/tokenUsage/updated' ||
-    normalizedMethod === 'thread/token_usage/updated' ||
-    normalizedMethod === 'thread.tokenUsage.updated' ||
-    normalizedMethod === 'thread.token.usage.updated' ||
-    normalizedMethod === 'thread.token_usage.updated' ||
+    isCodexThreadTokenUsageUpdatedMethod(normalizedMethod) ||
     normalizedMethod.startsWith('turn/') ||
     normalizedMethod.startsWith('item/') ||
     normalizedMethod.startsWith('rawResponseItem/') ||

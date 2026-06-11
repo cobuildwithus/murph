@@ -101,11 +101,14 @@ export function createAssistantUsageId(input: {
 // idle-time thread compaction). Uses a synthetic turn id so the existing
 // turn-keyed dedupe and storage path apply unchanged.
 export function buildAssistantMaintenanceUsageRecord(input: {
+  // The Murph assistant session/conversation id — never a provider thread id.
+  assistantSessionId: string;
+  // Provider-side correlation handle, stored as providerRequestId.
+  codexThreadId: string | null;
   credentialSource: AssistantUsageCredentialSource;
   featureKey: string;
   memberId: string;
   model: string;
-  sessionId: string;
   triggerKind: string;
   usage: {
     cachedInputTokens: number | null;
@@ -126,9 +129,10 @@ export function buildAssistantMaintenanceUsageRecord(input: {
     occurredAt: new Date().toISOString(),
     outputTokens: input.usage.outputTokens,
     provider: "codex-cli",
+    providerRequestId: input.codexThreadId,
     requestedModel: input.model,
     schema: ASSISTANT_USAGE_SCHEMA,
-    sessionId: input.sessionId,
+    sessionId: input.assistantSessionId,
     surface: "hosted-runtime",
     totalTokens: input.usage.totalTokens,
     triggerKind: input.triggerKind,

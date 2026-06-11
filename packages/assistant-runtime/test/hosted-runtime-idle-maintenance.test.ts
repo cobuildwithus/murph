@@ -27,6 +27,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         model: "gpt-5.5",
         pendingWork: false,
         recordUsage: null,
+        resolveAssistantSessionId: null,
         shutdownSignal: AbortSignal.abort(),
         wakeSignal: null,
       }),
@@ -39,10 +40,11 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         model: null,
         pendingWork: false,
         recordUsage: null,
+        resolveAssistantSessionId: null,
         shutdownSignal: null,
         wakeSignal: null,
       }),
-    ).toEqual({ kind: "skipped", reason: "no_model", threadContextTokensBefore: null });
+    ).toEqual({ kind: "skipped", reason: "missing_model", threadContextTokensBefore: null });
 
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
   });
@@ -70,11 +72,15 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       recordUsage: async (record) => {
         recorded.push(record);
       },
+      resolveAssistantSessionId: async (codexThreadId) =>
+        codexThreadId === "thread_xyz" ? "asst_real_session" : null,
       shutdownSignal: null,
       wakeSignal: null,
     });
 
     expect(outcome.kind).toBe("compacted");
+    // Recording is fire-and-forget; flush the microtask queue before asserting.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(compactWarmCodexThread).toHaveBeenCalledWith({
       minThreadTokens: HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
       signal: expect.any(AbortSignal),
@@ -86,8 +92,9 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       featureKey: "assistant_idle_compact",
       inputTokens: 140_000,
       memberId: "member_1",
+      providerRequestId: "thread_xyz",
       requestedModel: "gpt-5.5",
-      sessionId: "thread_xyz",
+      sessionId: "asst_real_session",
       triggerKind: "automation_idle_compact",
     });
   });
@@ -114,6 +121,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       recordUsage: async () => {
         throw new Error("record endpoint down");
       },
+      resolveAssistantSessionId: async () => "asst_real_session",
       shutdownSignal: null,
       wakeSignal: null,
     });
@@ -142,6 +150,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       model: "gpt-5.5",
       pendingWork: false,
       recordUsage: null,
+      resolveAssistantSessionId: null,
       shutdownSignal: null,
       wakeSignal,
     });
@@ -177,6 +186,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       model: "gpt-5.5",
       pendingWork: false,
       recordUsage: null,
+      resolveAssistantSessionId: null,
       shutdownSignal: shutdownController.signal,
       wakeSignal: null,
     });
@@ -192,6 +202,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         model: "gpt-5.5",
         pendingWork: true,
         recordUsage: null,
+        resolveAssistantSessionId: null,
         shutdownSignal: null,
         wakeSignal: null,
       }),
@@ -207,10 +218,61 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         model: "gpt-unpriced-experimental",
         pendingWork: false,
         recordUsage: null,
+        resolveAssistantSessionId: null,
         shutdownSignal: null,
         wakeSignal: null,
       }),
-    ).toEqual({ kind: "skipped", reason: "no_model", threadContextTokensBefore: null });
+    ).toEqual({ kind: "skipped", reason: "unpriced_model", threadContextTokensBefore: null });
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
+  });
+
+  it("fails open when the engine helper throws", async () => {
+    compactWarmCodexThread.mockRejectedValue(new Error("engine exploded"));
+    expect(
+      await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_1",
+        model: "gpt-5.5",
+        pendingWork: false,
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        wakeSignal: null,
+      }),
+    ).toEqual({ kind: "failed", reason: "exception", threadContextTokensBefore: null });
+  });
+
+  it("skips recording when no assistant session matches the thread", async () => {
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "compacted",
+      durationMs: 700,
+      threadContextTokensBefore: 110_000,
+      threadId: "thread_orphan",
+      usage: {
+        cachedInputTokens: 0,
+        inputTokens: 110_000,
+        outputTokens: 400,
+        totalTokens: 110_400,
+      },
+    });
+    const recorded: unknown[] = [];
+
+    const outcome = await runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      memberId: "member_1",
+      model: "gpt-5.5",
+      pendingWork: false,
+      recordUsage: async (record) => {
+        recorded.push(record);
+      },
+      resolveAssistantSessionId: async () => null,
+      shutdownSignal: null,
+      wakeSignal: null,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(outcome.kind).toBe("compacted");
+    // No ambiguous identity ever reaches the ledger.
+    expect(recorded).toHaveLength(0);
   });
 });
