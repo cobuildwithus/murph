@@ -3,6 +3,9 @@ import {
   deriveHostedExecutionErrorCode,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
+import type {
+  HostedRuntimeRedactedJson,
+} from "@murphai/hosted-execution/runtime-control";
 
 import type {
   RunnerContainerEnsureProcessingResult,
@@ -117,6 +120,52 @@ export function readRunnerWriteFenceValidationRejectReason(input: {
     return "workspace_version_mismatch";
   }
   return "unknown";
+}
+
+/**
+ * Same metadata-only picks as `buildHostedRunnerMetadataOnlyErrorDetails`, but
+ * narrowed to the persisted runtime-log `redactedJson` value shape. Keys must
+ * pass the hosted runtime-log redacted-key gate; the sanitized error summary is
+ * emitted under the allowlisted `safeErrorMessage` key because bare
+ * `errorMessage` is rejected by that gate.
+ */
+const SAFE_REDACTED_ERROR_CODE_DETAIL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$/u;
+
+export function buildHostedRunnerRedactedErrorJson(
+  error: unknown,
+): HostedRuntimeRedactedJson {
+  const details = buildHostedRunnerMetadataOnlyErrorDetails(error);
+  const redacted: HostedRuntimeRedactedJson = {};
+  for (const [key, value] of Object.entries(details)) {
+    // `errorCodeDetail` is read from raw `.code`-shaped error properties and is
+    // the only value here not safe by construction; keep it only when it looks
+    // like a plain code token so one odd value can never make the web parser
+    // reject the whole runtime-log request.
+    if (key === "errorCodeDetail") {
+      if (
+        typeof value === "string"
+        && SAFE_REDACTED_ERROR_CODE_DETAIL_PATTERN.test(value)
+      ) {
+        redacted[key] = value;
+      }
+      continue;
+    }
+    const redactedKey = key === "errorMessage" ? "safeErrorMessage" : key;
+    if (
+      typeof value === "boolean"
+      || typeof value === "number"
+      || typeof value === "string"
+      || value === null
+    ) {
+      redacted[redactedKey] = value;
+    } else if (
+      Array.isArray(value)
+      && value.every((item): item is string => typeof item === "string")
+    ) {
+      redacted[redactedKey] = value;
+    }
+  }
+  return redacted;
 }
 
 export function buildHostedRunnerMetadataOnlyErrorDetails(

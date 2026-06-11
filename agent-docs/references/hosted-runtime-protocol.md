@@ -249,7 +249,15 @@ remain diagnostic evidence only; they must not be merged into checkpointed
 import status for workflow completion or status projection. The narrow liveness
 exception is the exact `runner.accepted_attempt_failed` event: after web has
 durably recorded that metadata-only row, it may send a cooldown-throttled,
-payload-free `runtime_recheck_requested` Temporal signal. That signal only
+payload-free `runtime_recheck_requested` Temporal signal. That row carries the
+fence `attemptId`/`leaseGeneration` plus metadata-only error diagnostics and,
+in `redactedJson`, the `attemptLivenessProbeOutcome` enum
+(`active`/`inactive`/`mismatch`/`error`/`timeout`) alongside the derived
+`attemptStillActive`/`fenceCleared` flags. The probe outcome is the primary
+diagnostic for distinguishing transport-only failures against a still-live
+invocation (`active`) from real invocation deaths, and for watching the
+documented RunnerContainer DO-restart residual (`inactive` despite a live
+container suggests the in-memory active-op record was lost to a DO restart). That signal only
 interrupts the workflow's current wait so Temporal re-reads web-owned
 reconciliation facts; it sets no mailbox, manual, browser-vault, lag, or
 device-sync work flag.
@@ -345,6 +353,14 @@ runtime fence whose child is missing is replaced after the startup grace window
 when a later ensure command observes it. A wake-unconfirmed active child is not
 replaced; the caller retries until the child finishes, becomes wakeable, or is no
 longer active.
+A failed transport call to an accepted invocation does not prove the invocation
+died. Before clearing the write fence after an invoke transport failure, the
+UserRunner probes the RunnerContainer for the exact fence identity
+(`attemptId`, `leaseGeneration`, `userId`); a still-active matching attempt
+keeps its fence so wakes keep routing to the live invocation, while a missing,
+mismatched, or unreachable attempt clears the fence exactly as before. This
+prevents orphaned write-fenced invocations that block the runner slot until
+their idle timer expires while no wake can reach them.
 The Durable Object keeps lease, in-flight invocation, alarm, and short-lived
 coordination metadata only. It does not persist queue history, per-message
 completion, outbox truth, assistant channel enablement state, or checkpoint

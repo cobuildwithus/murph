@@ -715,6 +715,32 @@ describe('assistant system prompt cache stability', () => {
     expect(closedDynamicSuffix).not.toContain('Murph onboarding:')
   })
 
+  it('guards open onboarding against restarting from scratch in fresh threads', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      onboardingGuidance: true,
+    }))
+
+    expect(prompt).toContain(
+      "Open means completion was never recorded; it does not mean this is the user's first conversation.",
+    )
+    expect(prompt).toContain(
+      'When this thread shows no visible onboarding history, check the vault for already-saved setup context before sending the onboarding welcome or asking any onboarding question',
+    )
+    expect(prompt).toContain(
+      'Treat saved facts as already-answered onboarding steps and continue from the first genuinely unresolved step.',
+    )
+    expect(prompt).toContain(
+      'If saved context already satisfies the completion criteria, including a resolved first experiment setup, mark onboarding complete instead of asking again.',
+    )
+
+    const closedPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      onboardingGuidance: false,
+    }))
+    expect(closedPrompt).not.toContain(
+      "Open means completion was never recorded; it does not mean this is the user's first conversation.",
+    )
+  })
+
   it('keeps the notification decision prefix stable across dynamic turn context', () => {
     const cacheInput = {
       toolSchemaHash: 'assistant-notification-tools-test',
@@ -1010,7 +1036,7 @@ describe('assistant Murph onboarding guidance', () => {
       'Skip onboarding advancement when the user explicitly asked for no follow-up',
     )
     expect(prompt).toContain(
-      'Use `$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md` when onboarding is open and you need the next unresolved onboarding step or need to handle a clear onboarding decline',
+      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md` when onboarding is open and you need the next unresolved onboarding step, need to handle a clear onboarding decline, or need to verify and mark onboarding completion',
     )
     expect(prompt).toContain(
       'Use the current prompt\'s date, timezone, channel, delivery route, and hosted wearable connection guidance as runtime context whenever the onboarding skill is used',

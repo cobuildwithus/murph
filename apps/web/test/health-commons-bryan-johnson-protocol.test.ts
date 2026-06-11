@@ -6,6 +6,7 @@ import {
 } from "@murphai/health-commons/runtime";
 import {
   listHealthCommonsExperimentBrowseProtocols,
+  listHealthCommonsExperimentRouteParams as listHealthCommonsExperimentBrowseRouteParams,
 } from "@/src/lib/health-commons/experiment-browse";
 import {
   listHealthCommonsBiomarkerRoutes,
@@ -23,6 +24,7 @@ import {
   resolveHealthCommonsExperimentShell,
 } from "@/src/lib/health-commons/experiment-projections";
 import {
+  getGeneratedExperimentIndex,
   loadGeneratedExperimentProjection,
 } from "@/src/lib/health-commons/generated-experiment-artifacts";
 import {
@@ -226,15 +228,6 @@ describe("Health Commons experiment protocol metadata", () => {
         ],
       },
       {
-        labels: ["rehab session"],
-        routeId: "it-band-syndrome-rehab-and-return-to-run",
-        ticks: [
-          { label: "0", offsetMinutes: 0 },
-          { label: "20 min minimum", offsetMinutes: 20 },
-          { label: "45 min", offsetMinutes: 45 },
-        ],
-      },
-      {
         labels: ["wake/rise window"],
         routeId: "consistent-wake-time",
         ticks: ["target wake", "+60 min"],
@@ -264,16 +257,6 @@ describe("Health Commons experiment protocol metadata", () => {
 
     expect(protocol).not.toBeNull();
     expect(protocol?.image).toBe("/design-assets/hero-caffeine-curfew.jpeg");
-  });
-
-  it("uses the simplified IT band rehab title and dedicated artwork", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol(
-      "it-band-syndrome-rehab-and-return-to-run",
-    );
-
-    expect(protocol).not.toBeNull();
-    expect(protocol?.title).toBe("IT Band Rehab");
-    expect(protocol?.image).toBe("/design-assets/hero-it-band-rehab.jpeg");
   });
 
   it("uses the simplified intermittent fasting title", () => {
@@ -352,6 +335,29 @@ describe("Health Commons experiment protocol metadata", () => {
 
   it("does not resolve hidden generated protocols by direct route id", () => {
     expect(resolveHealthCommonsExperimentProtocol("hydrolyzed-collagen-peptides")).toBeNull();
+  });
+
+  it("omits hidden generated protocols from the experiment browse list and route params", () => {
+    const hiddenRouteIds = getGeneratedExperimentIndex()
+      .experiments
+      .filter((entry) => entry.hidden === true)
+      .map((entry) => entry.routeId);
+
+    expect(hiddenRouteIds).toContain("it-band-syndrome-rehab-and-return-to-run");
+
+    const browseProtocolIds = listHealthCommonsExperimentBrowseProtocols()
+      .map((protocol) => protocol.id);
+    const browseRouteParamIds = listHealthCommonsExperimentBrowseRouteParams()
+      .map((entry) => entry.experimentId);
+
+    for (const hiddenRouteId of hiddenRouteIds) {
+      expect(browseProtocolIds).not.toContain(hiddenRouteId);
+      expect(browseRouteParamIds).not.toContain(hiddenRouteId);
+    }
+
+    expect(
+      resolveHealthCommonsExperimentProtocol("it-band-syndrome-rehab-and-return-to-run"),
+    ).toBeNull();
   });
 
   it("prefers page-owned cold plunge artwork when the protocol declares media", () => {

@@ -7,6 +7,7 @@ title: IT Band Rehab
 summary: Hip and glute strengthening with graded run/walk re-entry, where stronger lateral-hip control reduces the load the iliotibial band puts on the outer knee at each stride.
 status: draft
 quality: usable
+hidden: true
 aliases:
 - IT band syndrome rehab
 - ITBS rehab

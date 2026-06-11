@@ -27,6 +27,11 @@ import type { WorkerSendEmailBindingLike } from "../worker-contracts.ts";
 import type { HostedEmailConfig } from "./config.ts";
 import { createHostedEmailUserAddress } from "./routes.ts";
 
+// Display name shown by mail clients instead of the raw sender address. The
+// SMTP envelope sender stays the bare address so Cloudflare's sender checks
+// keep matching.
+const HOSTED_EMAIL_FROM_DISPLAY_NAME = "Murph";
+
 export class HostedEmailSendValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -262,7 +267,7 @@ function buildRawMimeMessage(input: {
   to: string[];
 }): string {
   const headers = [
-    formatMimeHeaderLine("From", input.fromAddress),
+    formatMimeHeaderLine("From", `${HOSTED_EMAIL_FROM_DISPLAY_NAME} <${input.fromAddress}>`),
     formatMimeHeaderLine("To", input.to.join(", ")),
     input.cc.length > 0 ? formatMimeHeaderLine("Cc", input.cc.join(", ")) : null,
     formatMimeHeaderLine("Subject", encodeMimeHeader(input.subject)),

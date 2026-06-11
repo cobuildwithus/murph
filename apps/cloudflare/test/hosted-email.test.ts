@@ -459,6 +459,7 @@ describe("hosted email routing and transport", () => {
       from: "assistant@mail.example.test",
       to: "owner@example.com",
     });
+    expect((sentMessage as { raw: string }).raw).toContain("From: Murph <assistant@mail.example.test>");
     expect((sentMessage as { raw: string }).raw).toContain("Reply-To: ");
     expect((sentMessage as { raw: string }).raw).toMatch(/Reply-To: assistant\+[A-Za-z0-9-]+@mail\.example\.test/u);
   });

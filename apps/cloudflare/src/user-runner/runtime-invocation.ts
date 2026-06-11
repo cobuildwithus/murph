@@ -41,6 +41,7 @@ import {
 } from "../web-control-plane.ts";
 import {
   buildHostedRunnerMetadataOnlyErrorDetails,
+  buildHostedRunnerRedactedErrorJson,
 } from "./diagnostics.js";
 import type {
   RuntimeProcessingCommandBudget,
@@ -55,6 +56,14 @@ import type { RunnerStateRecord } from "./types.js";
 import { RunnerStoreCache } from "./runner-store-cache.js";
 import type { RunnerAlarmCoordinator } from "./alarm-coordinator.js";
 
+const RUNTIME_ATTEMPT_LIVENESS_PROBE_TIMEOUT_MS = 5_000;
+
+type RuntimeAttemptLivenessProbeOutcome =
+  | "active"
+  | "error"
+  | "inactive"
+  | "mismatch"
+  | "timeout";
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_CONTEXT =
   "murph.hosted.workspace-snapshot-path-hash.v1";
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_TEXT_ENCODER = new TextEncoder();
@@ -183,6 +192,40 @@ export class RuntimeInvocationService {
     try {
       result = await this.invokePreparedWorkspaceRunner(input.prepared);
     } catch (error) {
+      // A failed transport call does not prove the invocation died. Probe the
+      // container before revoking authority: clearing the fence under a live
+      // invocation orphans it as an unwakeable zombie that blocks the runner
+      // slot until its idle timer expires.
+      const probeOutcome = await this.readPreparedAttemptLivenessBestEffort(
+        input.prepared,
+      );
+      if (probeOutcome === "active") {
+        if (input.acceptedProcessingAttempt) {
+          await this.recordAcceptedRuntimeAttemptFailureBestEffort({
+            error,
+            executionInput,
+            probeOutcome,
+            token,
+            workspaceVersion,
+          });
+        }
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+            orchestrationAttemptId: executionInput.orchestrationAttemptId,
+            transportFailureFenceCleared: false,
+            workspaceAttemptId: token.attemptId,
+          },
+          level: "warn",
+          message:
+            "Hosted runner runtime transport failed while the invocation is still active; keeping the write fence.",
+          phase: "failed",
+          userId: executionInput.userId,
+        });
+        throw error;
+      }
+
       if (input.acceptedProcessingAttempt) {
         const committedResult =
           await this.readAcceptedRuntimeCommittedProgressAfterTransportFailure({
@@ -228,6 +271,7 @@ export class RuntimeInvocationService {
         await this.recordAcceptedRuntimeAttemptFailureBestEffort({
           error,
           executionInput,
+          probeOutcome,
           token,
           workspaceVersion,
         });
@@ -560,21 +604,121 @@ export class RuntimeInvocationService {
     });
   }
 
+  /**
+   * Best-effort check that the prepared invocation's Durable Object operation
+   * is still in flight inside the RunnerContainer. "Active" means the DO-side
+   * invoke for this exact fence identity has not settled — including its
+   * pre-dispatch readiness window. Keeping the fence is correct across that
+   * whole window: a live DO invoke either proceeds to run the invocation under
+   * the intact fence, or dies and releases the container slot, after which the
+   * pre-existing stale-fence replacement path reclaims the fence. Only
+   * `"active"` keeps the fence; every unconfirmed outcome (inactive, identity
+   * mismatch, probe error, probe timeout) fails toward today's
+   * clear-the-fence behavior. The probe cannot see liveness across a
+   * RunnerContainer DO restart because the active-op record is in-memory; that
+   * mode also falls back to the pre-existing recovery paths.
+   */
+  private async readPreparedAttemptLivenessBestEffort(
+    prepared: PreparedRuntimeInvocation,
+  ): Promise<RuntimeAttemptLivenessProbeOutcome> {
+    const namespace = this.input.runnerContainerNamespace;
+    if (!namespace) {
+      return "inactive";
+    }
+    let probeTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const container = namespace.getByName(prepared.runnerContainerName);
+      if (!container.readActiveRuntimeUserFence) {
+        return "inactive";
+      }
+      const active = await Promise.race([
+        container.readActiveRuntimeUserFence(),
+        new Promise<null>((resolve) => {
+          probeTimer = setTimeout(
+            () => resolve(null),
+            RUNTIME_ATTEMPT_LIVENESS_PROBE_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      if (active === null) {
+        this.emitAttemptLivenessProbeUnconfirmedLog({
+          prepared,
+          probeOutcome: "timeout",
+        });
+        return "timeout";
+      }
+      if (!active.active) {
+        return "inactive";
+      }
+      return active.userId === prepared.input.userId
+        && active.attemptId === prepared.token.attemptId
+        // The container records the generation from the job request; compare
+        // against that single source of truth.
+        && active.leaseGeneration === prepared.job.request.leaseGeneration
+        ? "active"
+        : "mismatch";
+    } catch (error) {
+      this.emitAttemptLivenessProbeUnconfirmedLog({
+        error,
+        prepared,
+        probeOutcome: "error",
+      });
+      return "error";
+    } finally {
+      if (probeTimer !== undefined) {
+        clearTimeout(probeTimer);
+      }
+    }
+  }
+
+  private emitAttemptLivenessProbeUnconfirmedLog(input: {
+    error?: unknown;
+    prepared: PreparedRuntimeInvocation;
+    probeOutcome: "error" | "timeout";
+  }): void {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        ...(input.error === undefined
+          ? {}
+          : buildHostedRunnerMetadataOnlyErrorDetails(input.error)),
+        attemptLivenessProbeOutcome: input.probeOutcome,
+        orchestrationAttemptId: input.prepared.input.orchestrationAttemptId,
+        workspaceAttemptId: input.prepared.token.attemptId,
+      },
+      level: "warn",
+      message:
+        "Hosted runner attempt liveness probe was unconfirmed; clearing the write fence as before.",
+      phase: "failed",
+      userId: input.prepared.input.userId,
+    });
+  }
+
   private async recordAcceptedRuntimeAttemptFailureBestEffort(input: {
     error: unknown;
     executionInput: RuntimeInvocationInput;
+    probeOutcome: RuntimeAttemptLivenessProbeOutcome;
     token: RunnerWriteFenceToken;
     workspaceVersion: string;
   }): Promise<void> {
+    const attemptStillActive = input.probeOutcome === "active";
     const body = {
       entries: [
         {
           at: new Date().toISOString(),
+          attemptId: input.token.attemptId,
           component: "runner",
           errorCode: deriveHostedExecutionErrorCode(input.error),
           eventCode: "runner.accepted_attempt_failed",
+          leaseGeneration: input.token.leaseGeneration,
           level: "warn",
           phase: "error",
+          redactedJson: {
+            ...buildHostedRunnerRedactedErrorJson(input.error),
+            attemptLivenessProbeOutcome: input.probeOutcome,
+            attemptStillActive,
+            fenceCleared: !attemptStillActive,
+          },
           workspaceVersion: input.workspaceVersion,
         },
       ],
