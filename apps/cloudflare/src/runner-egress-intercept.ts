@@ -650,7 +650,7 @@ async function maybeHandleHostedDataApiRequest(input: {
   });
 }
 
-const HOSTED_CONTAINER_FATAL_REPORT_MAX_BODY_BYTES = 8 * 1024;
+const HOSTED_CONTAINER_FATAL_REPORT_ROUTE_MAX_BODY_BYTES = 8 * 1024;
 // Per-isolate fixed window: a real death produces a handful of reports, while
 // arbitrary in-container code could otherwise mint unlimited error-level log
 // lines through this unauthenticated sink and drown the attribution signal.
@@ -703,7 +703,7 @@ async function maybeHandleHostedContainerFatalReport(input: {
   }
   const body = await readBoundedRequestBody(
     input.request,
-    HOSTED_CONTAINER_FATAL_REPORT_MAX_BODY_BYTES,
+    HOSTED_CONTAINER_FATAL_REPORT_ROUTE_MAX_BODY_BYTES,
   );
   if (body === null) {
     return new Response("Payload Too Large", { status: 413 });

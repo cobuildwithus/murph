@@ -1,6 +1,6 @@
 # Runner-death debugging instrumentation
 
-Status: ACTIVE — 2026-06-11
+Status: completed
 
 ## Why
 
@@ -66,3 +66,5 @@ changes were considered and rejected by the operator.
 New runtime-log event codes are posted by the runner and validated by the web
 route parser from the same `@murphai/hosted-execution` source: deploy web
 (Vercel) before Cloudflare, mirroring PR #110's order.
+Updated: 2026-06-11
+Completed: 2026-06-11
