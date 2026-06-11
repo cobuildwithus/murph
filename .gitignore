@@ -39,11 +39,11 @@ apps/web/next-env.d.ts
 !/.agents/skills/research-supplements/agents/
 !/.agents/skills/research-supplements/agents/openai.yaml
 !/.agents/skills/research-supplements/references/
-!/.agents/skills/research-supplements/references/database-contract.md
-!/.agents/skills/research-supplements/references/source-quality.md
+!/.agents/skills/research-supplements/references/*.md
 !/.agents/skills/research-supplements/scripts/
 !/.agents/skills/research-supplements/scripts/*.mjs
 !/.agents/skills/research-supplements/scripts/*.d.mts
+!/.agents/skills/research-supplements/scripts/*.py
 .claude/
 .windsurf/
 /skills/

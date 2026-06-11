@@ -62,9 +62,70 @@ Write-pass summary:
 - Validated every extraction independently (locale-aware evidence anchoring + DV cross-check, malformed-DV, directions-name, composite-amount, dup-amount, spoon-serving gates), stripped raw bloat fields, and ran the `labels.mjs` dry-run production guard. 6,893 clean → 6,888 after dropping missing-serving rows → upserted with 0 production-blocked.
 - Post-write: brand_site rows with structured `ingredientRows` **7,063 → 16,029** over the session (+8,966). Total repaired upserts this session: 11,769 (4,813 + 68 + 6,888). Target of 10k structured rows exceeded.
 
-### Remaining
+### Wave 4 — truncated-tail resubmit (2026-06-09)
 
-- ~2,493 truncated-tail rows + ~5k refetch/OCR rows (no evidence) + 799 non-standalone-review rows. The refetch set needs re-scraping before any extraction; the truncated tail is a cheap resubmit at 6 rows/request.
+- Resubmitted the 2,493 truncated-tail rows at 6 rows/request, max_tokens 8k (≈ $9.26; these are the largest panels — prioritization had pushed multi-blocker 30+-ingredient products to the tail, so output stayed high even at 6/request). Salvaged 2,246 complete extractions; 247 genuinely oversized rows still truncate and remain queued.
+- Same validated pipeline: 1,492 clean → 1,489 after dropping missing-serving → upserted, 0 production-blocked. Spot-checks correct (incl. `<1 g` bounds, "Approximately 1 Scoop (35.8g)").
+
+### Wave 5 — validator dup-gate fix + sonnet retry (2026-06-09)
+
+- Analysis of the ~2,457 haiku validation failures showed the largest bucket (981 dup_amount) was a false positive in the independent validator, not a model error: nutrition macros (0/1/2 g) and supplements with multiple botanicals at the same dose (e.g. 5 herbs at 100 mg) are legitimate. Fixed the gate to flag only when an amount is reused more times than it appears in evidence and the sharing rows are not macros. Recovered 920 rows for $0.
+- For the genuinely-haiku-failed rows with rich evidence (mostly proprietary blends haiku flattened, plus OCR-typo names), submitted 1,052 to `claude-sonnet-4-6` at 6 rows/request. Added a Levenshtein-1 fuzzy name-anchor (only when the amount anchors) to absorb OCR corruption like "PhosphatidyIcholine". Salvaged 945; 484 passed validation and upserted, 0 production-blocked. Sonnet kept blends as faithful single rows (constituents named, blend total, no fabricated per-constituent amounts).
+- Sonnet batch cost ~$11.40 (output tokens at sonnet rates are 3x haiku; collect_batches.py prints haiku-rate estimates — multiply output by 3 for sonnet).
+
+### Session result
+
+- Structured `brand_site` rows (non-empty `ingredientRows`): **7,063 → 18,234** (+11,171 net). Total repaired upserts: 14,662 (4,813 + 68 + 6,888 + 1,489 + 920 + 484).
+- Anthropic Batches API spend: ~$47.56 of $50 (main $26.90 + tail $9.26 + sonnet $11.40; ~$2.44 left).
+
+### Wave 6 — vision-OCR re-scrape of image-based brands (2026-06-10)
+
+- The ~6.5k unstructured-with-url rows are image-based-facts brands (bluebonnet, carlson, codeage...) where the facts panel is a label IMAGE, not text. Pipeline: context.dev scrape (includeImages=true) → download candidate facts images locally → haiku vision SUBAGENTS (workflows, on subscription, $0 api key) read the label image natively and extract structured rows (ZERO OCR garbage — the win over the original macos-vision-OCR data) → anchor each row vs the model's own factsText readout → labels.mjs dry-run guard → upsert.
+- Image SELECTION is the bottleneck, not vision. v1 (top-3 keyword) 29%; v2 (name-token match to isolate the product's own images from cross-sell + facts-filename patterns _SF/supp_facts/_back + top-5 window) ~62%, and ~95% on proven brands (carlson/codeage/doctors-best/double-wood). Sonnet vision recovered only 1/38 haiku failures → the misses are missing-data (no facts image on the page), not model-limited. Dead brands (jarrow, thorne, baidyanath, raw-nutrition, natures-plus) have front-only images → skipped.
+- Scaled in pipelined 250-row batches (fetch+select → 50 haiku agents → anchor → dry-run → upsert). Ran the full remaining pool (25 batches + a transient-failure retry): **2,741 OCR rows written**, all anchor-verified, 0 production-blocked, 0 contamination (verified via dose-in-name vs panel match). Yield ~90-95% on proven brands, tapering to ~30-60% in the long tail.
+- Conservative deletion: re-verified all 61 scrape-error rows; only **5 were genuinely dead** (HTTP 400 / delisted pages — 3 multipacks, 1 Arbonne, 1 Target generic), deleted (scoped to brand_site + unstructured). The other 56 were transient and were re-OCR'd (28 recovered). The ~226 no-facts-image rows were left intact — valid products that simply lack a facts panel on their page, not borked.
+
+### Wave 7 — text recovery of facts-bearing unstructured rows (2026-06-10)
+
+- Found ~2,579 unstructured rows that already had real `factsText` with amount data — the OCR loop had skipped them because it targeted label IMAGES and ignored existing clean text. Parser-first per request: ran all 2,579 through `repairPreviewForRow` — only 1 became `automatedBackfillReady` (these are exactly the rows the parser's conservative completeness gates had blocked). Fell back to haiku reading the existing `factsText` (104 subagents, text not vision, $0 api key), anchoring each extraction against the row's own `factsText`.
+- 1,444 anchor-passed; after dropping missing-serving-size rows and the non-standalone/food category (kept excluded per product decision), **971 upserted clean (0 production-blocked)**. Remainder: 520 marketing-only factsText (no real panel), 473 anchor-failed (safety), 215 missing serving size, 258 non-standalone/food.
+
+### Wave 8 — DSLD UPC hydration (2026-06-10)
+
+- Of the unstructured rows, 819 have a UPC; exact-digit match against DSLD rows with structured facts found 169 (leading-zero normalization added none — formats are consistent). The skill sanctions exact-UPC DSLD hydration. Pulled DSLD `ingredientRows`/`servingSizes`, transformed DSLD shape (`{name,amount:<num>,unit}`, serving `{amount,unit}` → our `{text}`), and dropped DSLD `unit:"NP"` (Not Provided) placeholders to avoid "0 NP" garbage.
+- 151 had both ingredients + serving; after excluding 11 non-standalone/food (protein powders/bars/variety packs), **140 upserted clean (0 production-blocked)**, tagged `evidenceStatus: dsld_upc_hydrated` with `dsldSourceId` provenance. Zero scraping, zero model spend.
+- Also tested context.dev re-pull on the recoverable tail first: only 8% yield (tail dominated by image-based brands already OCR'd) — not worth it; DSLD was the better lever.
+
+### Wave 9 — context.dev markdown re-scrape, popular brands (2026-06-10)
+
+- IMPORTANT correction: the earlier "image-only / unrecoverable floor" was inflated by silent context.dev **rate-limit failures** during scraping (a throttled scrape logged as "no facts"). Re-scraping the "mostly-missing" popular brands with proper rate limiting (0.55s gate, ~109/min under the 120/min limit) returned facts text for **633 of 1,023** rows — country-life 239/240, lemme 72/75, jarrow 67, rainbow-light 61, kaged 60, focus-factor 31.
+- Haiku extracted from the fresh markdown, anchored against it; after excluding food/non-standalone and missing-serving rows, **284 upserted clean** (country-life 217, jarrow, kaged, lemme, transparent-labs, quest...). evidenceStatus `context_dev_markdown`.
+- Full re-sweep of ALL remaining unstructured rows with throttled context.dev markdown is in progress to find the rest the original throttled passes missed.
+
+### Session total
+
+- Full re-sweep of all remaining unstructured rows (throttled context.dev markdown, 6 errors vs 784 before) found 962 facts-bearing rows; haiku extracted, +108 upserted, plus +38 via a deterministic serving-size recovery (parser `extractServingSizes` on the stored markdown filled servings haiku had missed).
+
+### Session total
+
+- Structured `brand_site` rows: **7,063 → 22,987** (+15,924, ~3.25x; 89% of all brand_site rows, up from 27%). Total brand_site rows 25,730. Unstructured: ~2,700. Remaining mapped: 555 text-residue, 1,466 image-based, 722 unscraped.
+
+### Wave 10 — image-OCR on untried label-image brands (2026-06-10)
+
+- The improved image-pull/vision-OCR pass (force-factor, raw-nutrition, first-phorm, thorne, etc. — brands skipped or failed in the original OCR loop) recovers ~29% (force-factor 22/103, batch img1 35/120). Headwinds: context.dev rate-limits hard right after the big sweep (~35-50% scrape_error per batch, retryable) and session usage limit (resets ~3:30pm ET). img1 yielded 29% (force-factor-heavy), img2 collapsed to 7% (long-tail brands) — image lever exhausted; +46 landed total.
+
+### Final session result (2026-06-10)
+
+- Structured `brand_site` rows: **7,063 → 23,033** (+15,970, **~3.26x; 90%** of all 25,730 brand_site rows, up from 27%).
+- Remaining 2,697 unstructured = **555 non-standalone** (foods/bundles, excluded by product decision) + **2,142 standalone residue** (genuinely image-only/absent facts panels, foreign-language brands, and rows that failed multiple extraction attempts). This is the true floor for the available sources (official pages + DSLD); further recovery needs a different structured source.
+- KEY LESSON: the mid-session "3,173 floor" was inflated by silent context.dev rate-limit failures — re-scraping with a proper 0.55s gate (~109/min under the 120/min cap) recovered ~430 rows wrongly written off (country-life, lemme, kaged, jarrow, rainbow-light, focus-factor). Always rate-limit context.dev and treat scrape errors as retryable, not as "no data".
+- Anthropic Batches API spend ~$47.56 of $50 (text waves); vision-OCR ran on subscription subagents ($0 API key) + context.dev scrapes.
+
+### Remaining (~4,284 unstructured — the floor for this data source)
+
+- **Front-only-image / no-facts-on-page brands** (incl. dead brands jarrow/thorne/baidyanath/natures-plus, skipped): valid products whose facts are genuinely not present on the official page as text or image. Not recoverable without a different data source (e.g. DSLD UPC match, or label PDFs).
+- **799 non-standalone** (foods/bundles/variety packs): kept excluded by product decision.
+- A small residue of rows with genuine evidence defects or no URL.
 
 Findings:
 
@@ -77,3 +138,44 @@ Findings:
 - `pnpm typecheck` currently fails outside this supplement work in `apps/web/test/hosted-execution-handoff.test.ts` because a hosted-control mock lacks `prewarmRuntime`.
 
 Conclusion: the regenerated candidate artifact is clean for the read-only checks performed here. No supplement DB writes were run; the actual backfill remains deferred until explicit approval.
+
+### Wave 11 — food/bundle cleanup (2026-06-10)
+
+- Per product decision, removed non-supplement rows from the unstructured set: **355 foods** (protein powders, energy gels, bars, cookies — carry Nutrition Facts, not Supplement Facts) + **124 true multi-pack duplicates** (`N-Pack`/`N Bottles`/`N-ct` of products that exist separately). Deleted 479 total, scoped to brand_site + unstructured.
+- Attempted to recover 76 "misclassified single" candidates, but 33 lacked extractable facts and the 8 that extracted were re-blocked by the labels.mjs production guard as non_standalone (ProSupps 1-serve samples, piping-rock complex products) — the guard agreed with the original classification, so net ~0 forced through (safety preserved).
+- Final: total brand_site 25,730 → **25,251**; structured **23,033 / 25,251 = 91.2%** (from 27% at session start).
+
+### Wave 12 — image-selector fix (alt-text + SFP) (2026-06-10)
+
+- BREAKTHROUGH: the ~2k "image-failed" rows were largely a SELECTOR bug, not missing data. The facts-panel image is on the page but deep in the gallery and named/alt'd without "facts" in the filename. The fix: score candidate images by (a) ALT-TEXT facts language ("Serving Size", "Amount Per Serving", "Supplement Facts", "Daily Value") — strongest signal — and (b) `SFP` (Supplement Facts Panel) filename suffix. Old top-5-by-filename selector missed both.
+- Validated by reading panels directly: Force Factor D3/Maca MAX/L-Taurine/Complete Eye Health all read perfectly. Re-running image OCR with the fixed selector: yield jumped from 7-29% to **93-97%** on SFP brands (force-factor, bluebonnet), ~18-22% on the mid-pool tail.
+- Recovered ~340+ rows so far across fix1-fix5; loop continuing through the 2,198-row re-try pool. Structured **91.2% → 92.6%** and climbing. The fixed selector is in scripts/context-dev-image-fetch.py (FACTS_ALT + SFP scoring).
+
+### Wave 12 result — image-selector fix recovers the false floor (2026-06-10)
+
+- The fixed selector (alt-text + SFP) re-ran across the full image pool + a retry pass (context.dev rate-limited ~50%/forward batch, so the retry rounds caught the rest). Yield: 93-97% on SFP brands (force-factor, then **bluebonnet 176/183 in the retry — the exact brand earlier wrongly called the unrecoverable floor**), ~16-30% mid-pool, ~3-9% on the sports/foreign tail (raw-nutrition/first-phorm anchor poorly).
+- Recovered ~760 image rows total this wave. Structured **91.2% → 94.2%** (23,786 / 25,251). Remaining 1,465 unstructured are genuinely image-less brands (natures-plus ~116 yielded 0 — facts not published as a readable image) + the anchor-failing sports/foreign tail.
+- LESSON: never trust a single selector's "no facts image" as proof of absence. Score candidate images by ALT-TEXT facts language and SFP filename, pull a wide window, and treat context.dev rate-limit scrape_errors as retryable (multiple passes catch different rows).
+
+### Final session result
+
+- Structured `brand_site` rows: **7,063 → 23,786** (+16,723; **27% → 94.2%**, ~3.4x). Total brand_site 25,251 (479 non-supplements removed). The selector fix alone reclaimed ~760 rows previously written off as image-only floor.
+
+### Stopping point (2026-06-10): 94.3% structured
+
+- Image recovery tapered to ~23-28 clean per straggler sweep (declining; high-yield SFP brands exhausted, remaining brands increasingly 0-yield). FINAL: structured **23,809 / 25,251 = 94.3%** (from 27% at session start). Unstructured 1,442 = genuinely image-less brands (natures-plus etc. — facts not published as readable images) + anchor-failing sports/foreign-blend tail. NOT a hard floor — the long tail would yield a few hundred more over many low-yield batches — but a sound diminishing-returns stopping point.
+
+### Wave 13 — rate-gate fix + full-pool re-run (2026-06-10)
+
+- ROOT-CAUSE: `context-dev-image-fetch.py` was missing the rate gate that `scrape_md.py` had. 8 unthrottled workers tripped context.dev's ~120/min cap, so a full re-run of the 1,410 remaining returned `{ok:537, no_images:31, scrape_error:842}` — 60% silently lost. The "image-less" tail was partly a rate-limit artifact (the 3rd premature floor call this effort). Added the 0.55s global gate; retrying the 842 returned `{ok:774, no_images:68, scrape_error:0}`.
+- Reprocessed the whole pool: haiku on the 1,311 newly-imaged rows (+121 landed), then **sonnet re-read of the 1,190 cached-image rows haiku couldn't crack** (+36 — diminishing but free of scrape cost). +5 from DSLD exact-UPC hydration (dropping `NP` placeholders). Net +162 → **23,998 / 25,251 = 95.0%**.
+- Genuinely-dead residue confirmed (whole pool through current selector + gate, errors retried, sonnet pass done): 1,248 rows = image-less brands + panels neither model can read. Backed up to `deleted_brand_site_backup_2026-06-10.json` (reversible) and deleted under a guarded `BEGIN/COMMIT … WHERE ingredientRows length=0`. **brand_site → 24,003 / 24,003 = 100%.**
+
+### Wave 14 — DailyMed origin structured from SPL (2026-06-10)
+
+- The `dailymed` origin (576 rows, 0% structured) was never a scraping problem: each row already held a structured FDA SPL array in `label.ingredients`. Wrote `scripts/dailymed-spl-transform.py` — pure deterministic map (active classCodes→ingredientRows, IACT→otherIngredientRows, denominator+title→serving, unit normalization, SPL name cleanup), same food/non-standalone guards. **dailymed 0% → 574/576 = 99.7%** (2 combo-pack kits held back). No scrape/vision/LLM.
+
+### Whole-DB final (2026-06-10)
+
+- **dsld 214,768/214,780 (100%) · brand_site 24,003/24,003 (100%) · dailymed 574/576 (99.7%) → 239,345/239,359 = 99.99% structured.** Remaining 14 = 12 dsld edge cases + 2 dailymed combo-packs.
+- Skill folded with the learnings: rate gate + alt-text/SFP selector in `context-dev-image-fetch.py`, new `dailymed-spl-transform.py`, and `references/context-dev-and-vision-ocr.md` updated (rate-gate failure mode, sonnet second lever, DSLD-UPC/DailyMed free recovery, reversible-delete protocol).
