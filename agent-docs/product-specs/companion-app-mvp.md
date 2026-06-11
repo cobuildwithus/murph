@@ -1,6 +1,6 @@
 # iOS Companion App — MVP Build Spec
 
-Last verified: 2026-06-10
+Last verified: 2026-06-11
 
 Parent spec: `agent-docs/product-specs/companion-app.md` (strategy, phases,
 review posture). This doc is the concrete build plan for the first shippable
@@ -167,9 +167,16 @@ verification (existing `@privy-io/node`):
    account bound to that Junction user id** → `POST
    /v2/user/{user_id}/sign_in_token` (small junction-client addition) →
    return once. Never persist or log the token (redaction test required).
-   Rate-limited. Sandbox/prod must be impossible to mix. Request body
-   carries `appInstallationId`, app/SDK versions for a minimal
-   `companion_installations` record (no health data).
+   Sandbox/prod must be impossible to mix (the junction client validates the
+   API key prefix against the configured environment and returns the active
+   environment in the response). Request body carries `appInstallationId`,
+   app/SDK versions; the once-considered `companion_installations` record is
+   **deferred until operationally needed** (simplicity: it carries no
+   load-bearing behavior for the MVP) — the backend validates the body shape
+   and discards the metadata without persisting or logging it. Rate limiting
+   is also deferred: the hosted app has no rate-limiting layer for
+   authenticated routes today and this change does not invent one; the
+   existing Privy verification is the auth boundary.
 2. `GET /api/device-sync/companion/status`
    — last data receipt overall and per resource (sleep / workouts / heart
    rate / respiratory), sourced from the existing pipeline. This is what the

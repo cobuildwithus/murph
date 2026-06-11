@@ -25,6 +25,7 @@ import {
 import { type PrivyLinkedAccountLike } from "./privy-shared";
 import {
   type HostedPrivySession,
+  resolveHostedPrivySessionFromBearerToken,
   resolveHostedPrivySessionFromRequest,
 } from "./hosted-session";
 
@@ -190,6 +191,53 @@ export async function requireActivePrivyMemberAuth(
   const context = await requirePrivyMemberAuth(request, prisma);
   assertHostedMemberActiveAccessAllowed(context.member);
   return context;
+}
+
+/**
+ * Bearer-token variant of `requireActivePrivyMemberAuth` for native
+ * (non-browser) clients such as the iOS companion app. The bearer token is
+ * the Privy identity token and is verified through the same server-side
+ * Privy verification path as cookie sessions; member resolution and the
+ * active-access entitlement check are identical. There is intentionally no
+ * cookie fallback, so these routes carry no browser ambient authority.
+ */
+export async function requireActivePrivyMemberAuthFromBearerToken(
+  request: Request,
+  prisma: PrismaClient = getPrisma(),
+): Promise<AuthenticatedPrivyMemberAuthContext> {
+  const session = await resolveHostedPrivySessionFromBearerToken(request);
+
+  if (!session) {
+    throw hostedOnboardingError({
+      code: "AUTH_REQUIRED",
+      message: "Sign in to continue.",
+      httpStatus: 401,
+    });
+  }
+
+  const { member, memberLookup } = await resolvePrivyMemberAuthFromSession({
+    identity: session.identity,
+    memberId: session.memberId,
+    prisma,
+  });
+
+  if (!member) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_NOT_FOUND",
+      message: "Finish signup from your latest Murph link before continuing.",
+      httpStatus: 403,
+    });
+  }
+
+  assertHostedMemberActiveAccessAllowed(member);
+
+  return {
+    identity: session.identity,
+    linkedAccounts: session.linkedAccounts,
+    member,
+    memberLookup,
+    verifiedPrivyUser: session.verifiedPrivyUser,
+  };
 }
 
 export async function requireFreshPrivyMemberAuthForHostedAppSession(

@@ -9,6 +9,7 @@ import type {
   OAuthStateRecord,
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
+  UpsertPublicDeviceSyncConnectionResult,
 } from "@murphai/device-syncd/public-ingress";
 import type { HostedExecutionDeviceSyncStagedDirtyAck } from "@murphai/device-syncd/hosted-runtime";
 import type { HostedDeviceSyncSecretTestCodec } from "./prisma-store/connection-secrets";
@@ -143,6 +144,12 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.upsertConnection(input);
   }
 
+  async upsertConnectionWithPrevious(
+    input: UpsertPublicDeviceSyncConnectionInput,
+  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
+    return this.connections.upsertConnectionWithPrevious(input);
+  }
+
   async markConnectionSetupFailed(
     input: MarkPublicDeviceSyncConnectionSetupFailedInput,
   ): Promise<PublicDeviceSyncAccount | null> {
@@ -265,6 +272,14 @@ export class PrismaDeviceSyncControlPlaneStore
 
   async createSignal(input: CreateHostedSignalInput): Promise<HostedSignalRecord> {
     return this.signals.createSignal(input);
+  }
+
+  async listRecentConnectionWebhookSignals(input: {
+    userId: string;
+    connectionIds: readonly string[];
+    limit?: number;
+  }): Promise<HostedSignalRecord[]> {
+    return this.signals.listRecentConnectionWebhookSignals(input);
   }
 
   async upsertDirtyConnection(

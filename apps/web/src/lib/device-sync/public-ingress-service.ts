@@ -8,6 +8,7 @@ import {
   type HandleWebhookResult,
   type PublicDeviceSyncAccount,
   type PublicProviderDescriptor,
+  type SdkSignInSessionResult,
 } from "@murphai/device-syncd/public-ingress";
 
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
@@ -147,6 +148,22 @@ export class HostedDeviceSyncPublicIngressService {
     return this.handleConnectionCallback(provider, options);
   }
 
+  /**
+   * Companion (mobile SDK) sign-in: ensures the established device-sync
+   * account through the same shared ingress core the Link callback uses,
+   * then mints the provider's short-lived SDK sign-in token. The token must
+   * never be logged or persisted.
+   */
+  async createSdkSignInSession(
+    userId: string,
+    provider: string,
+  ): Promise<SdkSignInSessionResult> {
+    return this.ingress.createSdkSignInSession({
+      provider,
+      ownerId: userId,
+    });
+  }
+
   async handleConnectionCallback(
     provider: string,
     options: { expectedOwnerId?: string | null } = {},
@@ -269,15 +286,26 @@ const CONNECTION_SOURCE_SUMMARY_METADATA_KEYS = new Set([
   "sourceInstanceKeyFallback",
 ]);
 
+/**
+ * True when a `resourceAvailabilitySummary` entry names an available resource
+ * rather than bookkeeping metadata or an unavailable marker.
+ */
+export function isAvailableConnectionSourceResource(
+  key: string,
+  value: unknown,
+): boolean {
+  return !CONNECTION_SOURCE_SUMMARY_METADATA_KEYS.has(key)
+    && value !== false
+    && value !== null
+    && value !== undefined;
+}
+
 function countSourceResources(summary: HostedDeviceConnectionSource["resourceAvailabilitySummary"]): number {
   if (!summary) {
     return 0;
   }
 
   return Object.entries(summary).filter(([key, value]) =>
-    !CONNECTION_SOURCE_SUMMARY_METADATA_KEYS.has(key)
-    && value !== false
-    && value !== null
-    && value !== undefined
+    isAvailableConnectionSourceResource(key, value)
   ).length;
 }

@@ -35,7 +35,44 @@ export class PrismaHostedSignalStore {
 
     return mapHostedSignalRecord(record);
   }
+
+  /**
+   * Bounded newest-first read of durable webhook receipt signals
+   * (`kind: "webhook_hint"`) for a set of connections. This is read-only
+   * companion/status evidence over the existing signal ledger; rows are
+   * written once per durably accepted provider webhook.
+   */
+  async listRecentConnectionWebhookSignals(input: {
+    userId: string;
+    connectionIds: readonly string[];
+    limit?: number;
+  }): Promise<HostedSignalRecord[]> {
+    if (input.connectionIds.length === 0) {
+      return [];
+    }
+
+    const limit = Math.min(
+      Math.max(input.limit ?? DEFAULT_WEBHOOK_SIGNAL_READ_LIMIT, 1),
+      MAX_WEBHOOK_SIGNAL_READ_LIMIT,
+    );
+    // userId is required both as an ownership guard and so the newest-first
+    // read can walk the existing (userId, id) index.
+    const records = await this.prisma.deviceSyncSignal.findMany({
+      where: {
+        userId: input.userId,
+        connectionId: { in: [...input.connectionIds] },
+        kind: "webhook_hint",
+      },
+      orderBy: { id: "desc" },
+      take: limit,
+    });
+
+    return records.map(mapHostedSignalRecord);
+  }
 }
+
+const DEFAULT_WEBHOOK_SIGNAL_READ_LIMIT = 300;
+const MAX_WEBHOOK_SIGNAL_READ_LIMIT = 500;
 
 function mapHostedSignalRecord(record: HostedSignalPrismaRecord): HostedSignalRecord {
   return {

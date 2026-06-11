@@ -35,6 +35,7 @@ import {
 class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   private readonly oauthStates = new Map<string, OAuthStateRecord>();
   private readonly accounts = new Map<string, PublicDeviceSyncAccount>();
+  private readonly accountOwners = new Map<string, string>();
   private readonly accountsByProviderExternal = new Map<string, string>();
   private readonly webhookTraces = new Map<
     string,
@@ -49,6 +50,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   claimWebhookTraceCalls = 0;
   completedWebhookTraceCalls = 0;
   markConnectionSetupFailedError: Error | null = null;
+  upsertConnectionCalls = 0;
   private accountCounter = 0;
 
   deleteExpiredOAuthStates(now: string): number {
@@ -113,13 +115,36 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   }
 
   upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): PublicDeviceSyncAccount {
+    this.upsertConnectionCalls += 1;
     const key = `${input.provider}:${input.externalAccountId}`;
     const existingId = this.accountsByProviderExternal.get(key) ?? null;
     const existing = existingId ? this.accounts.get(existingId) ?? null : null;
     assertExistingAccountGuard(existing, input.existingAccountGuard ?? null);
+    const existingOwnerId = existing ? this.accountOwners.get(existing.id) ?? null : null;
+
+    if (existingOwnerId && input.ownerId && existingOwnerId !== input.ownerId) {
+      throw deviceSyncError({
+        code: "CONNECTION_OWNERSHIP_CONFLICT",
+        message: "This provider account is already connected to a different Murph user.",
+        retryable: false,
+        httpStatus: 409,
+      });
+    }
+
+    if (
+      input.reuseEstablishedConnection === true
+      && existing
+      && input.ownerId
+      && existingOwnerId === input.ownerId
+      && existing.status === "active"
+      && existing.setupPhase === "source_confirmed"
+    ) {
+      return existing;
+    }
 
     const now = input.connectedAt;
     const id = existing?.id ?? `acct_${String(++this.accountCounter).padStart(2, "0")}`;
+    const ownerId = input.ownerId ?? existingOwnerId;
     const tokens = readOAuthCredentialTokens(input);
     const setupPhase = Object.prototype.hasOwnProperty.call(input, "setupPhase")
       ? input.setupPhase ?? null
@@ -152,8 +177,17 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     };
 
     this.accounts.set(id, record);
+    if (ownerId) {
+      this.accountOwners.set(id, ownerId);
+    }
     this.accountsByProviderExternal.set(key, id);
     return record;
+  }
+
+  upsertConnectionWithPrevious(input: UpsertPublicDeviceSyncConnectionInput) {
+    const previousAccount = this.getConnectionByExternalAccount(input.provider, input.externalAccountId);
+    const account = this.upsertConnection(input);
+    return { account, previousAccount };
   }
 
   markConnectionSetupFailed(input: {
@@ -194,6 +228,10 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
 
   getConnectionById(accountId: string): PublicDeviceSyncAccount | null {
     return this.accounts.get(accountId) ?? null;
+  }
+
+  getConnectionOwnerId(accountId: string): string | null {
+    return this.accountOwners.get(accountId) ?? null;
   }
 
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult {
@@ -3607,4 +3645,356 @@ test("public ingress rejects built-in webhook jobs that drift from the provider 
 
   assert.equal(store.completedWebhookTraceCalls, 0);
   assert.equal(readRecordedWebhookTrace(store), null);
+});
+
+test("public ingress SDK sign-in session ensures the account before minting and stays idempotent", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const connectionEvents: Array<{ accountId: string; initialJobs: number }> = [];
+  const orderOfOperations: string[] = [];
+  let mintedTokens = 0;
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        sdkConnectionHandler: {
+          async ensureConnection(input) {
+            orderOfOperations.push(`ensure:${input.ownerId}`);
+            return {
+              externalAccountId: "demo-sdk-user-1",
+              displayName: "Demo",
+              scopes: [],
+              tokens: {
+                accessToken: "<REDACTED_ACCESS_TOKEN>",
+              } satisfies ProviderAuthTokens,
+              setupPhase: "source_confirmed",
+              initialJobs: [
+                {
+                  kind: "backfill",
+                  payload: {
+                    windowStart: "2026-01-01T00:00:00.000Z",
+                  },
+                },
+              ],
+              nextReconcileAt: "2026-03-24T00:00:00.000Z",
+            };
+          },
+          async createSignInToken(input) {
+            orderOfOperations.push(`mint:${input.externalAccountId}`);
+            mintedTokens += 1;
+            return {
+              signInToken: `sdk-sign-in-token-${mintedTokens}`,
+              environment: "sandbox",
+            };
+          },
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onConnectionEstablished({ account, connection }) {
+        connectionEvents.push({
+          accountId: account.id,
+          initialJobs: connection.initialJobs?.length ?? 0,
+        });
+      },
+    },
+  });
+
+  const first = await ingress.createSdkSignInSession({
+    provider: "demo",
+    ownerId: "member-1",
+  });
+
+  assert.equal(first.signInToken, "sdk-sign-in-token-1");
+  assert.equal(first.environment, "sandbox");
+  assert.equal(first.account.externalAccountId, "demo-sdk-user-1");
+  assert.equal(first.account.status, "active");
+  assert.equal(first.account.setupPhase, "source_confirmed");
+  // The account must exist before the token is minted so SDK webhooks are
+  // never orphan-delayed behind a token-only exchange.
+  assert.deepEqual(orderOfOperations, ["ensure:member-1", "mint:demo-sdk-user-1"]);
+
+  const second = await ingress.createSdkSignInSession({
+    provider: "demo",
+    ownerId: "member-1",
+  });
+
+  // Idempotent ensure: the second call resolves the same account row.
+  assert.equal(second.account.id, first.account.id);
+  assert.equal(second.signInToken, "sdk-sign-in-token-2");
+  assert.deepEqual(orderOfOperations, [
+    "ensure:member-1",
+    "mint:demo-sdk-user-1",
+    "ensure:member-1",
+    "mint:demo-sdk-user-1",
+  ]);
+  assert.equal(store.upsertConnectionCalls, 1);
+  assert.deepEqual(connectionEvents, [
+    { accountId: first.account.id, initialJobs: 1 },
+  ]);
+
+  // The webhook resolver sees the ensured account through the same
+  // external-account lookup ingestion uses.
+  const resolved = await store.getConnectionByExternalAccount("demo", "demo-sdk-user-1");
+  assert.equal(resolved?.id, first.account.id);
+  assert.equal(resolved?.status, "active");
+});
+
+test("public ingress SDK sign-in session refuses to reuse an established account for a different owner", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let mintedTokens = 0;
+  let connectionEstablishedEvents = 0;
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        sdkConnectionHandler: {
+          async ensureConnection() {
+            return {
+              externalAccountId: "demo-sdk-user-1",
+              displayName: "Demo",
+              scopes: [],
+              tokens: {
+                accessToken: "<REDACTED_ACCESS_TOKEN>",
+              } satisfies ProviderAuthTokens,
+              setupPhase: "source_confirmed",
+            };
+          },
+          async createSignInToken() {
+            mintedTokens += 1;
+            return {
+              signInToken: `sdk-sign-in-token-${mintedTokens}`,
+              environment: "sandbox",
+            };
+          },
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onConnectionEstablished() {
+        connectionEstablishedEvents += 1;
+      },
+    },
+  });
+
+  const first = await ingress.createSdkSignInSession({
+    provider: "demo",
+    ownerId: "member-1",
+  });
+
+  assert.equal(first.signInToken, "sdk-sign-in-token-1");
+  assert.equal(connectionEstablishedEvents, 1);
+
+  await assert.rejects(
+    () =>
+      ingress.createSdkSignInSession({
+        provider: "demo",
+        ownerId: "member-2",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "CONNECTION_OWNERSHIP_CONFLICT" &&
+      error.httpStatus === 409,
+  );
+
+  assert.equal(mintedTokens, 1);
+  assert.equal(connectionEstablishedEvents, 1);
+  assert.equal(store.upsertConnectionCalls, 2);
+});
+
+test("public ingress SDK sign-in session skips established side effects when upsert sees a concurrent create", async () => {
+  class ConcurrentCreateStore extends InMemoryPublicIngressStore {
+    hideNextExternalLookup = false;
+
+    override getConnectionByExternalAccount(provider: string, externalAccountId: string): PublicDeviceSyncAccount | null {
+      if (this.hideNextExternalLookup) {
+        this.hideNextExternalLookup = false;
+        return null;
+      }
+
+      return super.getConnectionByExternalAccount(provider, externalAccountId);
+    }
+
+    override upsertConnectionWithPrevious(input: UpsertPublicDeviceSyncConnectionInput) {
+      const previousAccount = super.getConnectionByExternalAccount(input.provider, input.externalAccountId);
+      const account = super.upsertConnection(input);
+      return { account, previousAccount };
+    }
+  }
+
+  const store = new ConcurrentCreateStore();
+  const connectionEvents: Array<{ accountId: string; initialJobs: number }> = [];
+  let mintedTokens = 0;
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        sdkConnectionHandler: {
+          async ensureConnection() {
+            return {
+              externalAccountId: "demo-sdk-user-1",
+              displayName: "Demo",
+              scopes: [],
+              tokens: {
+                accessToken: "<REDACTED_ACCESS_TOKEN>",
+              } satisfies ProviderAuthTokens,
+              setupPhase: "source_confirmed",
+              initialJobs: [
+                {
+                  kind: "backfill",
+                  payload: {
+                    windowStart: "2026-01-01T00:00:00.000Z",
+                  },
+                },
+              ],
+            };
+          },
+          async createSignInToken() {
+            mintedTokens += 1;
+            return {
+              signInToken: `sdk-sign-in-token-${mintedTokens}`,
+              environment: "sandbox",
+            };
+          },
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onConnectionEstablished({ account, connection }) {
+        connectionEvents.push({
+          accountId: account.id,
+          initialJobs: connection.initialJobs?.length ?? 0,
+        });
+      },
+    },
+  });
+
+  const first = await ingress.createSdkSignInSession({
+    provider: "demo",
+    ownerId: "member-1",
+  });
+
+  store.hideNextExternalLookup = true;
+  const second = await ingress.createSdkSignInSession({
+    provider: "demo",
+    ownerId: "member-1",
+  });
+
+  assert.equal(second.account.id, first.account.id);
+  assert.equal(second.signInToken, "sdk-sign-in-token-2");
+  assert.equal(second.account.updatedAt, first.account.updatedAt);
+  assert.equal(store.upsertConnectionCalls, 2);
+  assert.deepEqual(connectionEvents, [
+    { accountId: first.account.id, initialJobs: 1 },
+  ]);
+});
+
+test("public ingress SDK sign-in session treats connection-established hook failure as non-fatal", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const warnings: Array<{ message: string; context: Record<string, unknown> | undefined }> = [];
+  let hookCalls = 0;
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        sdkConnectionHandler: {
+          async ensureConnection() {
+            return {
+              externalAccountId: "demo-sdk-user-1",
+              displayName: "Demo",
+              scopes: [],
+              tokens: {
+                accessToken: "<REDACTED_ACCESS_TOKEN>",
+              } satisfies ProviderAuthTokens,
+              setupPhase: "source_confirmed",
+              initialJobs: [
+                {
+                  kind: "backfill",
+                  payload: {
+                    windowStart: "2026-01-01T00:00:00.000Z",
+                  },
+                },
+              ],
+            };
+          },
+          async createSignInToken() {
+            return {
+              signInToken: "sdk-sign-in-token",
+              environment: "sandbox",
+            };
+          },
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onConnectionEstablished() {
+        hookCalls += 1;
+        throw new Error("wake enqueue failed with authorization=<REDACTED_AUTHORIZATION>");
+      },
+    },
+    log: {
+      warn(message, context) {
+        warnings.push({ message, context });
+      },
+    },
+  });
+
+  const session = await ingress.createSdkSignInSession({
+    provider: "demo",
+    ownerId: "member-1",
+  });
+
+  assert.equal(session.signInToken, "sdk-sign-in-token");
+  assert.equal(session.account.status, "active");
+  assert.equal(session.account.setupPhase, "source_confirmed");
+  assert.equal(hookCalls, 1);
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.message, "Device sync SDK sign-in established hook failed; continuing token mint.");
+  assert.doesNotMatch(JSON.stringify(warnings), /sdk-sign-in-token/u);
+  assert.doesNotMatch(JSON.stringify(warnings), /REDACTED_AUTHORIZATION/u);
+});
+
+test("public ingress SDK sign-in session rejects unsupported providers and missing owners", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider(),
+      createFakeProvider({
+        provider: "demo-sdk",
+        sdkConnectionHandler: {
+          async ensureConnection() {
+            return {
+              externalAccountId: "demo-sdk-user-1",
+              tokens: {
+                accessToken: "<REDACTED_ACCESS_TOKEN>",
+              } satisfies ProviderAuthTokens,
+            };
+          },
+          async createSignInToken() {
+            return {
+              signInToken: "sdk-sign-in-token",
+              environment: "production",
+            };
+          },
+        },
+      }),
+    ]),
+    store,
+  });
+
+  await assert.rejects(
+    () => ingress.createSdkSignInSession({ provider: "demo", ownerId: "member-1" }),
+    (error: unknown) => error instanceof DeviceSyncError && error.code === "SDK_SIGN_IN_NOT_SUPPORTED",
+  );
+
+  await assert.rejects(
+    () => ingress.createSdkSignInSession({ provider: "demo-sdk", ownerId: "  " }),
+    (error: unknown) => error instanceof DeviceSyncError && error.code === "CONNECTION_OWNER_REQUIRED",
+  );
+
+  assert.equal(store.getConnectionByExternalAccount("demo-sdk", "demo-sdk-user-1"), null);
 });

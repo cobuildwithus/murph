@@ -6,6 +6,7 @@ import {
   type ProviderAuthTokens,
   type PublicDeviceSyncAccount,
   type UpsertPublicDeviceSyncConnectionInput,
+  type UpsertPublicDeviceSyncConnectionResult,
 } from "@murphai/device-syncd/public-ingress";
 import { resolveConfiguredDeviceSyncProviderManifest } from "@murphai/device-syncd/config";
 import type {
@@ -41,6 +42,7 @@ import {
   type HostedConnectionRecord,
   type HostedStoredDeviceSyncAccount,
 } from "./connection-records";
+import { isUniqueViolation } from "./prisma-errors";
 
 export { sanitizeHostedDeviceSyncConnectionMetadata } from "./connection-records";
 import {
@@ -107,6 +109,26 @@ export class PrismaHostedConnectionStore {
   }
 
   async upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): Promise<PublicDeviceSyncAccount> {
+    return (await this.upsertConnectionWithPrevious(input)).account;
+  }
+
+  async upsertConnectionWithPrevious(
+    input: UpsertPublicDeviceSyncConnectionInput,
+  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
+    try {
+      return await this.upsertConnectionWithPreviousOnce(input);
+    } catch (error) {
+      if (!isUniqueViolation(error)) {
+        throw error;
+      }
+
+      return this.resolveUpsertConnectionUniqueRace(input, error);
+    }
+  }
+
+  private async upsertConnectionWithPreviousOnce(
+    input: UpsertPublicDeviceSyncConnectionInput,
+  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
     const ownerId = normalizeNullableString(input.ownerId);
     const displayName = normalizeNullableString(input.displayName);
     const metadata = sanitizeHostedDeviceSyncConnectionMetadata(input.metadata ?? {});
@@ -119,7 +141,7 @@ export class PrismaHostedConnectionStore {
     const credential = resolveHostedUpsertConnectionCredential(input);
     const setupWrite = buildHostedConnectionSetupWrite(input, connectedAt, "create");
 
-    const record = await this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.deviceConnection.findUnique({
         where: {
           provider_providerAccountBlindIndex: {
@@ -142,6 +164,18 @@ export class PrismaHostedConnectionStore {
           });
         }
 
+        if (
+          input.reuseEstablishedConnection === true
+          && ownerId
+          && existing.userId === ownerId
+          && isHostedEstablishedConnectionRecord(existing)
+        ) {
+          return {
+            record: existing,
+            previousRecord: existing,
+          };
+        }
+
         assertNoActiveHostedConnectionRefreshLease(existing, connectedAt);
 
         const credentialWrite = await buildHostedConnectionCredentialWrite({
@@ -156,7 +190,7 @@ export class PrismaHostedConnectionStore {
           userId: existing.userId,
         });
 
-        return tx.deviceConnection.update({
+        const updated = await tx.deviceConnection.update({
           where: {
             id: existing.id,
           },
@@ -187,6 +221,10 @@ export class PrismaHostedConnectionStore {
           },
           ...hostedConnectionRecordArgs,
         });
+        return {
+          record: updated,
+          previousRecord: existing,
+        };
       }
 
       assertHostedUpsertExistingConnectionGuard(null, input.existingAccountGuard ?? null);
@@ -211,7 +249,7 @@ export class PrismaHostedConnectionStore {
         userId: ownerId,
       });
 
-      return tx.deviceConnection.create({
+      const created = await tx.deviceConnection.create({
         data: {
           ...credentialWrite,
           ...setupWrite,
@@ -237,9 +275,54 @@ export class PrismaHostedConnectionStore {
         },
         ...hostedConnectionRecordArgs,
       });
+      return {
+        record: created,
+        previousRecord: null,
+      };
     });
 
-    return await this.buildDurableConnectionRecord(record);
+    return {
+      account: await this.buildDurableConnectionRecord(result.record),
+      previousAccount: result.previousRecord
+        ? await this.buildDurableConnectionRecord(result.previousRecord, {
+            externalAccountId: input.externalAccountId,
+          })
+        : null,
+    };
+  }
+
+  private async resolveUpsertConnectionUniqueRace(
+    input: UpsertPublicDeviceSyncConnectionInput,
+    originalError: unknown,
+  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
+    const ownerId = normalizeNullableString(input.ownerId);
+    if (!ownerId) {
+      throw originalError;
+    }
+
+    const existing = await this.getConnectionByExternalAccount(input.provider, input.externalAccountId);
+    if (!existing) {
+      throw originalError;
+    }
+
+    const existingOwnerId = await this.getConnectionOwnerId(existing.id);
+    if (existingOwnerId !== ownerId) {
+      throw deviceSyncError({
+        code: "CONNECTION_OWNERSHIP_CONFLICT",
+        message: "This provider account is already connected to a different Murph user.",
+        retryable: false,
+        httpStatus: 409,
+      });
+    }
+
+    if (input.reuseEstablishedConnection === true && isEstablishedPublicConnection(existing)) {
+      return {
+        account: existing,
+        previousAccount: existing,
+      };
+    }
+
+    return this.upsertConnectionWithPreviousOnce(input);
   }
 
   async getConnectionByExternalAccount(
@@ -969,6 +1052,14 @@ function assertNoActiveHostedConnectionRefreshLease(
     retryable: true,
     httpStatus: 409,
   });
+}
+
+function isHostedEstablishedConnectionRecord(record: HostedConnectionRecord): boolean {
+  return record.status === "active" && record.setupPhase === "source_confirmed";
+}
+
+function isEstablishedPublicConnection(account: PublicDeviceSyncAccount): boolean {
+  return account.status === "active" && account.setupPhase === "source_confirmed";
 }
 
 function requireHostedDeviceSyncSetupPhase(
