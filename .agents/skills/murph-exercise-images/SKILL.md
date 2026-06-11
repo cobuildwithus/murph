@@ -22,6 +22,17 @@ Default visual direction:
 
 Keep text minimal. Prefer generating clean image art and adding final typography outside the image when exact wording matters.
 
+## Carousel Slide Count
+
+Choose the number of slides from the movement, not from a fixed template. Use 2-5 images per exercise:
+
+- Use 2 slides for simple setup/end-position movements where one start frame and one movement or hold frame fully explain the exercise.
+- Use 3 slides when the exercise has a setup plus one important transition, range endpoint, or form-check frame.
+- Use 4 slides for alternating, bilateral, cross-body, or side-sensitive movements that need setup plus side A and side B, or for multi-phase movements where two frames would hide the sequence.
+- Use 5 slides only when the exercise needs setup, multiple phases, side switching, and a common mistake or safety/form correction to be clear.
+
+Do not force every exercise to 2 slides. Before generation, write the intended slide count and the reason. After generation, reject a carousel that technically has the requested number of images but skips an essential side, transition, or form cue.
+
 ## Annotation Defaults
 
 Instructional exercise slides should include annotations by default unless the user asks for clean art or no text.
@@ -201,6 +212,7 @@ Scene/backdrop: plain warm cream setting, simple mat, uncluttered.
 Subject: one gender-neutral adult in modest neutral athletic clothing.
 Subject lock: same person/gender presentation/body type/skin tone/hair/clothing/shoes across every slide.
 Composition/framing: square slide, consistent camera angle across the carousel.
+Slide count: choose 2-5 based on setup, phases, side switching, and form-check needs.
 Movement map: moving limbs, stable limbs, camera angle, body orientation, viewer-side check, key position, must-not-show.
 Annotations: 2-3 short callouts with muted olive dotted leader lines/dots; motion arrows for moving parts.
 Text: none or the exact minimal text requested.
