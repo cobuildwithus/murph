@@ -115,17 +115,32 @@ function runVaultCliParityProbe(
         HOME: path.join(cwd, ".parity-probe-home"),
         VAULT: "",
       },
+      // The full `--llms-full` manifest exceeds the 1MiB execFileSync default;
+      // a too-small buffer kills the child mid-stream and turns OS pipe
+      // chunking into phantom parity divergence.
+      maxBuffer: 64 * 1024 * 1024,
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 60_000,
     });
     return { output: stdout, status: 0 };
   } catch (error) {
     const failure = error as {
+      code?: string;
       status?: number | null;
       stdout?: string | Buffer;
     };
+
+    // A child that exited on its own has a numeric status; anything else
+    // (ENOBUFS, timeout kill, spawn failure) is probe infrastructure breaking
+    // and must fail the assembly loudly instead of posing as a parity result.
+    if (typeof failure.status !== "number") {
+      throw new Error(
+        `vault-cli parity probe \`${args.join(" ")}\` did not exit cleanly (${failure.code ?? "unknown"}).`,
+      );
+    }
+
     const stdout = failure.stdout?.toString() ?? "";
-    return { output: stdout, status: failure.status ?? 1 };
+    return { output: stdout, status: failure.status };
   }
 }
 
