@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
 browser_binary_path="${browser_binary_path:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"
-managed_browser_user_data_dir="${managed_browser_user_data_dir:-$HOME/Library/Application Support/MurphReviewGPT/Phlebas}"
+managed_browser_user_data_dir="${managed_browser_user_data_dir:-$HOME/Library/Application Support/MurphReviewGPT/Eragon}"
 managed_browser_profile="${managed_browser_profile:-Default}"
-managed_browser_port="${managed_browser_port:-9442}"
+managed_browser_port="${managed_browser_port:-9443}"
 
 name_prefix="murph-chatgpt-audit"
 repo_context_url="https://github.com/cobuildwithus/murph"
@@ -90,6 +90,11 @@ review_gpt_register_dir_preset "legacy-removal" "legacy-removal.md" \
   "legacy-cleanup" \
   "hard-cut" \
   "greenfield-hard-cut"
+review_gpt_register_dir_preset "pr-review" "pr-deep-review.md" \
+  "Deep PR review for bugs, edge cases, and minimal-complexity architecture via the GitHub connector." \
+  "pr-deep-review" \
+  "deep-pr-review" \
+  "pr-bugs-and-architecture"
 review_gpt_register_dir_preset "package-boundaries" "package-boundaries.md" \
   "Package-boundary, circular-dependency, and mixed-concern audit focused on workspace ownership seams." \
   "package-boundary" \
