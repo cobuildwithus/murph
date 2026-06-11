@@ -113,6 +113,7 @@ describe("hosted device-sync callback route", () => {
   });
 
   it("preserves source intent on generic connect callback error redirects", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.handleConnectionCallback.mockRejectedValue(deviceSyncError({
       code: "OAUTH_CALLBACK_REJECTED",
       message: "OAuth authorization was denied or canceled.",
@@ -138,9 +139,42 @@ describe("hosted device-sync callback route", () => {
     expect(location).toContain("deviceSyncError=OAUTH_CALLBACK_REJECTED");
     expect(location).toContain("connectSource=garmin");
     expect(location).toContain("connectTarget=garmin");
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted device-sync connection callback failed.",
+      {
+        provider: "junction",
+        errorCode: "OAUTH_CALLBACK_REJECTED",
+        httpStatus: 400,
+        message: "OAuth authorization was denied or canceled.",
+      },
+    );
+  });
+
+  it("redacts secret-bearing device error messages in the callback failure log", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.handleConnectionCallback.mockRejectedValue(deviceSyncError({
+      code: "OAUTH_TOKEN_EXCHANGE_FAILED",
+      message: "Token exchange failed access_token=secret-value-1",
+      retryable: false,
+      httpStatus: 502,
+    }));
+
+    await connectCallbackRoute.GET(
+      new Request("https://control.example.test/api/device-sync/connect/junction/callback?murph_state=xyz"),
+      createRouteContext({ provider: "junction" }),
+    );
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted device-sync connection callback failed.",
+      expect.objectContaining({
+        errorCode: "OAUTH_TOKEN_EXCHANGE_FAILED",
+        message: "Token exchange failed access_token=[redacted]",
+      }),
+    );
   });
 
   it("redirects stale disconnected connect callbacks through completion return targets", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.handleConnectionCallback.mockRejectedValue(deviceSyncError({
       code: "CONNECTION_ALREADY_DISCONNECTED",
       message: "Device sync connection callback was received after the seeded account was disconnected.",
@@ -182,6 +216,7 @@ describe("hosted device-sync callback route", () => {
   });
 
   it("uses generic callback html when device errors cannot redirect safely", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.handleConnectionCallback.mockRejectedValue(deviceSyncError({
       code: "CONNECTION_ALREADY_DISCONNECTED",
       message: "Device sync connection callback was received after the seeded account was disconnected.",
@@ -212,6 +247,15 @@ describe("hosted device-sync callback route", () => {
     expect(html).not.toContain("dsc_");
     expect(html).not.toContain("CONNECTION_ALREADY_DISCONNECTED");
     expect(html).not.toContain("javascript");
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted device-sync connection callback failed.",
+      {
+        provider: "junction",
+        errorCode: "CONNECTION_ALREADY_DISCONNECTED",
+        httpStatus: 409,
+        message: "Device sync connection callback was received after the seeded account was disconnected.",
+      },
+    );
   });
 
   it("does not include the raw connection id in the fallback callback html", async () => {
