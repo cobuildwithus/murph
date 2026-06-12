@@ -65,12 +65,10 @@ const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR =
   'Assistant cron notification expired before delivery.'
-// Hosted cron turns are off the user hotpath, so clean first runs use the
-// OpenAI flex tier (~50% token cost) bounded by this deadline. A deadline or
-// provider failure lands in the normal cron failure backoff (30s first retry),
-// and that retry runs at the standard tier because consecutiveFailures > 0, so
-// reminders stay within a bounded few minutes of their scheduled time.
-const ASSISTANT_CRON_FLEX_TURN_DEADLINE_MS = 120_000
+// Hosted cron turns are off the user hotpath, so clean first runs prefer the
+// OpenAI flex tier (~50% token cost). The Codex provider boundary validates
+// route support and bounds flex execution with a deadline; failures land in the
+// normal cron backoff (30s first retry), and that retry runs at standard tier.
 
 interface DueAssistantCronCandidate {
   canonicalEntry?: {
@@ -314,9 +312,7 @@ export async function executeClaimedAssistantCronJob(input: {
         deliveryDispatchMode: input.deliveryDispatchMode,
         executionContext: input.executionContext,
         serviceTier,
-        signal: serviceTier
-          ? composeAssistantCronFlexDeadlineSignal(input.signal)
-          : input.signal,
+        signal: input.signal,
         turnEnvironment: input.turnEnvironment ?? null,
         turnTrigger: 'automation-cron',
       })
@@ -547,13 +543,6 @@ function resolveAssistantCronTurnServiceTier(input: {
   // Retries after a failed (or deadline-aborted) flex run use the standard
   // tier so the existing 30s failure backoff bounds reminder lateness.
   return input.job.state.consecutiveFailures === 0 ? 'flex' : null
-}
-
-function composeAssistantCronFlexDeadlineSignal(
-  signal: AbortSignal | undefined,
-): AbortSignal {
-  const deadline = AbortSignal.timeout(ASSISTANT_CRON_FLEX_TURN_DEADLINE_MS)
-  return signal ? AbortSignal.any([signal, deadline]) : deadline
 }
 
 function resolveAssistantCronNotificationResponsePolicy(

@@ -2,6 +2,9 @@ import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  OPENAI_CODEX_MODEL_PROVIDER_ID,
+} from '@murphai/operator-config/assistant/target-runtime'
+import {
   resolveAssistantUsageCredentialSource,
 } from '@murphai/hosted-execution/assistant-usage'
 import {
@@ -9,6 +12,7 @@ import {
   resolveCodexAssistantTargetCapabilities,
 } from './codex-runtime.js'
 import type {
+  AssistantProviderServiceTier,
   AssistantProviderAttemptMetadata,
   AssistantProviderRequestOutcome,
   AssistantProviderUsage,
@@ -72,6 +76,7 @@ import type {
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = 'assistant.provider.plan'
+const ASSISTANT_PROVIDER_FLEX_TURN_DEADLINE_MS = 120_000
 
 export {
   resolveAssistantCodexThreadScope,
@@ -365,8 +370,15 @@ async function executeAssistantCodexAttempt(input: {
       executionPlan,
       hostedMemberId: executionPlan.executionContext?.hosted?.memberId ?? null,
     })
+    const serviceTier = resolveCodexAttemptServiceTier({
+      executionContext: executionPlan.executionContext,
+      requestedServiceTier: executionPlan.input.serviceTier ?? null,
+      routeModelProvider: attemptPlan.route.providerOptions.modelProvider ?? null,
+    })
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
-      abortSignal: executionPlan.input.abortSignal,
+      abortSignal: serviceTier
+        ? composeAssistantProviderFlexDeadlineSignal(executionPlan.input.abortSignal)
+        : executionPlan.input.abortSignal,
       activeTurnId: executionPlan.turnId,
       activeTurnSteering: executionPlan.activeTurnSteering,
       activeTurnSessionId: attemptPlan.session.sessionId,
@@ -414,7 +426,7 @@ async function executeAssistantCodexAttempt(input: {
       reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
       sandbox: attemptPlan.route.providerOptions.sandbox,
       // Per-turn execution policy from the message input, not route identity.
-      serviceTier: executionPlan.input.serviceTier ?? null,
+      serviceTier,
       approvalPolicy: attemptPlan.route.providerOptions.approvalPolicy,
       conversationHistoryMessages:
         attemptPlan.routePlan.conversationHistoryMessages,
@@ -581,6 +593,29 @@ function isAssistantProviderAbortError(error: unknown): boolean {
 
   const name = 'name' in error ? (error as { name?: unknown }).name : null
   return typeof name === 'string' && name === 'AbortError'
+}
+
+function resolveCodexAttemptServiceTier(input: {
+  executionContext: AssistantCodexTurnExecutionPlan['executionContext']
+  requestedServiceTier: AssistantProviderServiceTier | null
+  routeModelProvider: string | null
+}): AssistantProviderServiceTier | null {
+  if (input.requestedServiceTier === null) {
+    return null
+  }
+  if (!input.executionContext?.hosted) {
+    return null
+  }
+  return input.routeModelProvider === OPENAI_CODEX_MODEL_PROVIDER_ID
+    ? input.requestedServiceTier
+    : null
+}
+
+function composeAssistantProviderFlexDeadlineSignal(
+  signal: AbortSignal | undefined,
+): AbortSignal {
+  const deadline = AbortSignal.timeout(ASSISTANT_PROVIDER_FLEX_TURN_DEADLINE_MS)
+  return signal ? AbortSignal.any([signal, deadline]) : deadline
 }
 
 function readAssistantErrorCode(error: unknown): string | null {

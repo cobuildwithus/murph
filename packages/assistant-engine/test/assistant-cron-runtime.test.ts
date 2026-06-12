@@ -1229,8 +1229,7 @@ describe('assistant cron runtime orchestration', () => {
     cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
       async (input: { abortSignal?: AbortSignal; serviceTier?: string | null }) => {
         expect(input.serviceTier).toBe('flex')
-        expect(input.abortSignal).toBeInstanceOf(AbortSignal)
-        expect(input.abortSignal).not.toBe(upstreamAbort.signal)
+        expect(input.abortSignal).toBe(upstreamAbort.signal)
         expect(input.abortSignal?.aborted).toBe(false)
         upstreamAbort.abort()
         expect(input.abortSignal?.aborted).toBe(true)
