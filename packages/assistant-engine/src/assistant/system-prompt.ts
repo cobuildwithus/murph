@@ -64,6 +64,14 @@ export interface AssistantSystemPromptLayers {
   prompt: string;
   stableRouteCapabilityPrompt: string;
   staticCacheableCorePrompt: string;
+  /**
+   * Thread-birth-stable context (timezone/date-style prose, evidence/reply
+   * style, onboarding guidance, link self-check). Joined into the thread-level
+   * developer instructions so it costs one resident copy per thread instead of
+   * one copy per turn; a change rotates the thread through the contract
+   * fingerprint.
+   */
+  threadContextPrompt: string;
 }
 
 export interface AssistantPromptCacheMetadata {
@@ -144,6 +152,10 @@ export function buildAssistantSystemPromptLayers(
     buildStableRouteCapabilityPrompt(input),
     input.assistantToolNameAliases
   );
+  const threadContextPrompt = renderAssistantToolNameAliases(
+    buildThreadContextPrompt(input),
+    input.assistantToolNameAliases
+  );
   const dynamicTurnContextPrompt = renderAssistantToolNameAliases(
     buildDynamicTurnContextPrompt(input),
     input.assistantToolNameAliases
@@ -152,7 +164,11 @@ export function buildAssistantSystemPromptLayers(
     staticCacheableCorePrompt,
     stableRouteCapabilityPrompt
   );
-  const prompt = joinPromptSections(stablePrefix, dynamicTurnContextPrompt);
+  const prompt = joinPromptSections(
+    stablePrefix,
+    threadContextPrompt,
+    dynamicTurnContextPrompt
+  );
 
   return {
     dynamicContextStartsAfterStaticCore: stablePrefix.length,
@@ -160,6 +176,7 @@ export function buildAssistantSystemPromptLayers(
     prompt,
     stableRouteCapabilityPrompt,
     staticCacheableCorePrompt,
+    threadContextPrompt,
   };
 }
 
@@ -203,22 +220,27 @@ function buildStableRouteCapabilityPrompt(
   );
 }
 
-function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): string {
+function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
   return joinPromptSections(
-    buildAssistantCurrentDateContextText({
-      currentLocalDate: input.currentLocalDate,
+    buildAssistantTimeStyleContextText({
       currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
       currentTimeZone: input.currentTimeZone,
     }),
-    input.assistantContextSnapshotPrompt ?? null,
     buildAssistantEvidenceAndReplyStyleText(input.channel),
-    buildAssistantExecutionContextText({
-      turnTrigger: input.turnTrigger ?? null,
-    }),
     buildAssistantOnboardingGuidanceText({
       enabled: input.onboardingGuidance,
     }),
     buildAssistantUserFacingLinkSelfCheckText()
+  );
+}
+
+function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): string {
+  return joinPromptSections(
+    buildAssistantCurrentDateLineText(input.currentLocalDate),
+    input.assistantContextSnapshotPrompt ?? null,
+    buildAssistantExecutionContextText({
+      turnTrigger: input.turnTrigger ?? null,
+    })
   );
 }
 
@@ -282,6 +304,9 @@ export function buildAssistantNotificationDecisionSystemPromptLayers(
     prompt,
     stableRouteCapabilityPrompt,
     staticCacheableCorePrompt,
+    // Notification-decision turns run on isolated one-shot threads, so a
+    // separate thread-stable layer buys nothing; keep its context per-turn.
+    threadContextPrompt: "",
   };
 }
 
@@ -340,22 +365,52 @@ function stableStringifyAssistantPromptCacheValue(value: unknown): string {
   return `{${entries.join(",")}}`;
 }
 
+const ASSISTANT_DATE_STYLE_GUIDANCE_TEXT =
+  'In user-facing prose, refer to dates with a month name and day, such as "April 3" or "April 3, 2026" when the year matters, instead of raw ISO dates. Keep ISO dates for command arguments, filenames, frontmatter, ids, or other machine-readable fields.';
+
+function buildAssistantTimezoneLineText(currentTimeZone: string): string {
+  return `The user's canonical timezone for this vault is ${currentTimeZone}.`;
+}
+
+function buildAssistantCurrentDateLineText(currentLocalDate: string): string {
+  return `Today's date for the user is ${formatAssistantHumanReadableLocalDate(
+    currentLocalDate
+  )}.`;
+}
+
+function buildAssistantProductBaseUrlLineText(
+  currentMurphProductBaseUrl: string | null
+): string | null {
+  return currentMurphProductBaseUrl
+    ? `Current Murph product base URL for user-facing app links: ${currentMurphProductBaseUrl}`
+    : null;
+}
+
+function buildAssistantTimeStyleContextText(input: {
+  currentMurphProductBaseUrl: string | null;
+  currentTimeZone: string;
+}): string {
+  return joinPromptSections(
+    [
+      buildAssistantTimezoneLineText(input.currentTimeZone),
+      ASSISTANT_DATE_STYLE_GUIDANCE_TEXT,
+    ].join("\n"),
+    buildAssistantProductBaseUrlLineText(input.currentMurphProductBaseUrl)
+  );
+}
+
 function buildAssistantCurrentDateContextText(input: {
   currentLocalDate: string;
   currentMurphProductBaseUrl: string | null;
   currentTimeZone: string;
 }): string {
-  const humanReadableCurrentLocalDate = formatAssistantHumanReadableLocalDate(
-    input.currentLocalDate
-  );
-
   return joinPromptSections(
-    `The user's canonical timezone for this vault is ${input.currentTimeZone}.
-Today's date for the user is ${humanReadableCurrentLocalDate}.
-In user-facing prose, refer to dates with a month name and day, such as "April 3" or "April 3, 2026" when the year matters, instead of raw ISO dates. Keep ISO dates for command arguments, filenames, frontmatter, ids, or other machine-readable fields.`,
-    input.currentMurphProductBaseUrl
-      ? `Current Murph product base URL for user-facing app links: ${input.currentMurphProductBaseUrl}`
-      : null
+    [
+      buildAssistantTimezoneLineText(input.currentTimeZone),
+      buildAssistantCurrentDateLineText(input.currentLocalDate),
+      ASSISTANT_DATE_STYLE_GUIDANCE_TEXT,
+    ].join("\n"),
+    buildAssistantProductBaseUrlLineText(input.currentMurphProductBaseUrl)
   );
 }
 

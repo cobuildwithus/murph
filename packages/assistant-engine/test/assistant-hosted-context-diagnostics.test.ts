@@ -90,6 +90,23 @@ describe('hosted assistant context diagnostics', () => {
     ).toMatch(/^h1_[a-f0-9]{24}$/u)
   })
 
+  it('ignores the container CPU watchdog fingerprint key', () => {
+    const env = {
+      HOSTED_LOG_FINGERPRINT_SECRET: undefined,
+      HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET: 'watchdog-secret',
+    }
+
+    expect(resolveHostedAssistantContextFingerprintSecret(env)).toBeNull()
+    expect(buildHostedAssistantContextFingerprintDetails({
+      actorId: 'actor-alpha',
+      channel: 'linq',
+      env,
+      identityId: 'identity-alpha',
+      threadId: 'thread-one',
+      threadIsDirect: true,
+    }).fingerprintReady).toBe(false)
+  })
+
   it('prefers the hosted log secret and rejects incomplete fingerprint inputs', () => {
     expect(resolveHostedAssistantContextFingerprintSecret({
       HOSTED_AI_USAGE_REPORTING_SECRET: 'usage-secret',
