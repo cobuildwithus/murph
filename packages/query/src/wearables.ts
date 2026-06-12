@@ -17,9 +17,14 @@ import {
   inferDaySummaryConfidence,
   summarizeMetricsConfidence,
 } from "./wearables/confidence.ts";
-import { formatMetricLabel, formatProviderName, inferDefaultMetricFamily } from "./wearables/provider-policy.ts";
+import {
+  formatMetricLabel,
+  formatProviderName,
+  inferDefaultMetricFamily,
+  resolveMetricTolerance,
+} from "./wearables/provider-policy.ts";
 import { buildWearableSourceHealth } from "./wearables/source-health.ts";
-import { wearableDataOriginKey } from "./wearables/origin.ts";
+import { resolveWearablePublicSourceProvider, wearableDataOriginKey } from "./wearables/origin.ts";
 import { buildCandidateId, collectLatestDate, collectSortedDatesDesc, latestIsoTimestamp, uniqueStrings } from "./wearables/shared.ts";
 import {
   resolveMetric,
@@ -547,7 +552,7 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
       ["spo2", spo2],
     ], {
       missingSummaryNote: "No sleep metrics were available for this date.",
-      extraNotes: windowSelection.confidence.reasons,
+      extraNotes: buildPublicSleepWindowConflictNotes(sleepWindows, selectedWindow),
     });
     const notes = summarizeSleepNotes({
       summaryConfidence,
@@ -582,6 +587,54 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
       timeInBedMinutes,
       totalSleepMinutes,
     };
+  });
+}
+
+function buildPublicSleepWindowConflictNotes(
+  sleepWindows: readonly WearableSleepWindowCandidate[],
+  selectedWindow: WearableSleepWindowCandidate | null,
+): string[] {
+  if (!selectedWindow) {
+    return [];
+  }
+
+  const selectedPublicProvider = resolveSleepWindowPublicProvider(selectedWindow);
+  const conflictingPublicProviders = uniqueStrings(
+    sleepWindows
+      .filter((window) => window.candidateId !== selectedWindow.candidateId)
+      .filter((window) =>
+        Math.abs(window.durationMinutes - selectedWindow.durationMinutes) > resolveMetricTolerance("sessionMinutes")
+      )
+      .map(resolveSleepWindowPublicProvider)
+      .filter((provider) => provider !== selectedPublicProvider),
+  ).sort();
+  const samePublicProviderConflict = sleepWindows
+    .filter((window) => window.candidateId !== selectedWindow.candidateId)
+    .some((window) =>
+      resolveSleepWindowPublicProvider(window) === selectedPublicProvider
+      && Math.abs(window.durationMinutes - selectedWindow.durationMinutes) > resolveMetricTolerance("sessionMinutes")
+    );
+
+  if (conflictingPublicProviders.length > 0) {
+    return [
+      `Sleep windows differed across ${conflictingPublicProviders.map(formatProviderName).join(", ")}.`,
+    ];
+  }
+
+  return samePublicProviderConflict
+    ? [
+        `Duplicate sleep-window evidence from ${formatProviderName(selectedPublicProvider)} disagreed after source reconciliation.`,
+      ]
+    : [];
+}
+
+function resolveSleepWindowPublicProvider(window: WearableSleepWindowCandidate): string {
+  return resolveWearablePublicSourceProvider({
+    dataOrigin: window.dataOrigin ?? null,
+    externalRef: window.externalRef,
+    provider: window.provider,
+  }, {
+    useSourceInstanceFallback: false,
   });
 }
 

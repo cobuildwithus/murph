@@ -1384,6 +1384,104 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
     }),
     makeEntity({
       attributes: {
+        dayKey: "2026-04-12",
+        durationMinutes: 480,
+        endAt: "2026-04-12T06:30:00Z",
+        externalRef: makeExternalRef({
+          resourceId: "garmin-sleep-direct-cross-window",
+          resourceType: "sleep_session",
+          system: "garmin",
+        }),
+        recordedAt: "2026-04-12T06:35:00Z",
+        startAt: "2026-04-11T22:30:00Z",
+      },
+      entityId: "event_sleep_session_garmin_cross_public",
+      family: "event",
+      kind: "sleep_session",
+      occurredAt: "2026-04-11T22:30:00Z",
+      recordClass: "ledger",
+      title: "Garmin cross-public sleep window",
+    }),
+    makeEntity({
+      attributes: {
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "oura",
+          sourceType: "ring",
+          version: 1,
+        },
+        dayKey: "2026-04-12",
+        durationMinutes: 240,
+        endAt: "2026-04-12T03:30:00Z",
+        externalRef: makeExternalRef({
+          resourceId: "junction-oura-sleep-cross-window",
+          resourceType: "junction-oura-sleep",
+          system: "junction",
+        }),
+        recordedAt: "2026-04-12T05:35:00Z",
+        startAt: "2026-04-11T23:30:00Z",
+      },
+      entityId: "event_sleep_session_junction_oura_cross_public",
+      family: "event",
+      kind: "sleep_session",
+      occurredAt: "2026-04-11T23:30:00Z",
+      recordClass: "ledger",
+      title: "Junction Oura cross-public sleep window",
+    }),
+    makeEntity({
+      attributes: {
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          version: 1,
+        },
+        dayKey: "2026-04-13",
+        externalRef: makeExternalRef({
+          resourceId: "junction-garmin-ambiguous-steps",
+          resourceType: "junction-garmin-activity",
+          system: "junction",
+        }),
+        metric: "daily-steps",
+        recordedAt: "2026-04-13T08:00:00Z",
+        unit: "count",
+        value: 9000,
+      },
+      entityId: "event_steps_junction_garmin_ambiguous",
+      family: "event",
+      kind: "observation",
+      occurredAt: "2026-04-13T08:00:00Z",
+      recordClass: "ledger",
+      title: "Junction Garmin ambiguous steps",
+    }),
+    makeEntity({
+      attributes: {
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "oura",
+          sourceType: "ring",
+          version: 1,
+        },
+        dayKey: "2026-04-13",
+        externalRef: makeExternalRef({
+          resourceId: "junction-oura-ambiguous-steps",
+          resourceType: "junction-oura-activity",
+          system: "junction",
+        }),
+        metric: "daily-steps",
+        recordedAt: "2026-04-13T08:00:00Z",
+        unit: "count",
+        value: 6000,
+      },
+      entityId: "event_steps_junction_oura_ambiguous",
+      family: "event",
+      kind: "observation",
+      occurredAt: "2026-04-13T08:00:00Z",
+      recordClass: "ledger",
+      title: "Junction Oura ambiguous steps",
+    }),
+    makeEntity({
+      attributes: {
         dataOrigin: {
           aggregatorProvider: "junction",
           sourceProviderSlug: "whoop_v2",
@@ -1412,7 +1510,7 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
 
   const garminDataset = collectWearableDataset(vault, { providers: ["garmin"] });
   const junctionDataset = collectWearableDataset(vault, { providers: ["junction"] });
-  assert.equal(garminDataset.rawMetricCandidates.length, 3);
+  assert.equal(garminDataset.rawMetricCandidates.length, 4);
   assert.equal(
     garminDataset.rawMetricCandidates.some((candidate) => candidate.provider === "junction"),
     true,
@@ -1482,6 +1580,46 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
     directConflictSleep?.notes.some((note) => note.startsWith("Selected sleep window from Garmin ")),
     true,
   );
+  assert.equal(
+    directConflictSleep?.summaryConfidence.notes.some((note) =>
+      note === "Duplicate sleep-window evidence from Garmin disagreed after source reconciliation."
+    ),
+    true,
+  );
+  assert.equal(
+    directConflictSleep?.notes.some((note) =>
+      note === "Duplicate sleep-window evidence from Garmin disagreed after source reconciliation."
+    ),
+    true,
+  );
+  const crossPublicSleep = summarizeWearableSleep(vault)
+    .find((night) => night.date === "2026-04-12");
+  assert.equal(crossPublicSleep?.sessionMinutes.selection.provider, "garmin");
+  assert.equal(
+    crossPublicSleep?.summaryConfidence.notes.some((note) => note === "Sleep windows differed across Oura."),
+    true,
+  );
+  assert.equal(
+    crossPublicSleep?.notes.some((note) => note === "Sleep windows differed across Oura."),
+    true,
+  );
+  assert.equal(
+    crossPublicSleep?.summaryConfidence.notes.some((note) => /\bjunction\b/iu.test(note)),
+    false,
+  );
+
+  const ambiguousEvidenceDay = summarizeWearableDay(vault, "2026-04-13");
+  const ambiguousStepReason = ambiguousEvidenceDay?.activity?.steps.confidence.reasons.find((reason) =>
+    reason.startsWith("Selected ")
+  ) ?? "";
+  assert.equal(ambiguousEvidenceDay?.activity?.steps.selection.provider, "garmin");
+  assert.equal(
+    ambiguousStepReason.includes("Garmin/Oura observation:daily-steps recorded 2026-04-13T08:00:00Z"),
+    true,
+  );
+  assert.equal(ambiguousStepReason.includes("Junction observation:daily-steps recorded"), false);
+  assert.equal(ambiguousStepReason.includes("ahead of Garmin observation recorded"), false);
+  assert.equal(ambiguousStepReason.includes("ahead of Oura observation recorded"), false);
 
   const mixedSourceSleep = summarizeWearableSleep(vault)
     .find((night) => night.date === "2026-04-08");

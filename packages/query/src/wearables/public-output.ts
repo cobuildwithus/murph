@@ -193,7 +193,7 @@ export function projectWearableSleepNightPublicSources(night: WearableSleepNight
   const summaryConfidence = {
     ...rawSummaryConfidence,
     notes: rawSummaryConfidence.notes
-      .filter((note) => !isSleepWindowProviderNote(note))
+      .filter((note) => !isSleepWindowSelectionReason(note))
       .map((note) => projectProviderTextPublicSources(note, sleepProviderTextEntries)),
   };
 
@@ -377,6 +377,9 @@ function projectWearableResolvedMetricPublicSources(
 ): WearableResolvedMetric {
   const selectedCandidate = selectMetricSelectionCandidate(resolved);
   const titleProjectionEntries = buildProviderTextProjectionEntries(resolved.candidates);
+  const selectionTitleProjectionEntries = selectedCandidate
+    ? buildProviderTextProjectionEntries([selectedCandidate])
+    : titleProjectionEntries;
   const selectionProvider = resolved.selection.provider
     ? selectedCandidate
       ? resolvePublicSourceProvider(selectedCandidate)
@@ -408,7 +411,7 @@ function projectWearableResolvedMetricPublicSources(
     selection: {
       ...resolved.selection,
       provider: selectionProvider,
-      title: projectProviderTextPublicSources(resolved.selection.title, titleProjectionEntries),
+      title: projectProviderTextPublicSources(resolved.selection.title, selectionTitleProjectionEntries),
     },
   };
 }
@@ -467,6 +470,10 @@ function buildPublicSleepWindowNotes(
 
 function isSleepWindowProviderNote(note: string): boolean {
   return /\b(?:sleep|nap) windows?\b/iu.test(note);
+}
+
+function isSleepWindowSelectionReason(note: string): boolean {
+  return /^Selected .*\b(?:sleep|nap) window recorded /iu.test(note);
 }
 
 interface ProviderTextProjectionEntry {
@@ -670,22 +677,65 @@ function projectMetricEvidenceReasonPublicProviders(
   candidates: readonly WearableMetricCandidate[],
 ): string {
   let projected = reason;
+  const replacements = buildMetricEvidenceLabelReplacements(candidates);
 
-  for (const candidate of candidates) {
-    const sourceLabel = formatMetricEvidenceLabel(candidate, candidate.provider);
-    const publicLabel = formatMetricEvidenceLabel(candidate, resolvePublicSourceProvider(candidate));
-
-    if (sourceLabel !== publicLabel) {
-      projected = projected.replaceAll(sourceLabel, publicLabel);
+  for (const replacement of replacements) {
+    if (replacement.sourceLabel !== replacement.publicLabel) {
+      projected = projected.replaceAll(replacement.sourceLabel, replacement.publicLabel);
     }
   }
 
   return projected;
 }
 
+function buildMetricEvidenceLabelReplacements(
+  candidates: readonly WearableMetricCandidate[],
+): Array<{ publicLabel: string; sourceLabel: string }> {
+  const replacementGroups = new Map<string, {
+    candidate: WearableMetricCandidate;
+    publicProviders: Set<string>;
+  }>();
+
+  for (const candidate of candidates) {
+    const sourceLabel = formatMetricEvidenceLabel(candidate, candidate.provider);
+    const publicProvider = resolvePublicSourceProvider(candidate);
+    const group = replacementGroups.get(sourceLabel);
+    if (group) {
+      group.publicProviders.add(publicProvider);
+      continue;
+    }
+
+    replacementGroups.set(sourceLabel, {
+      candidate,
+      publicProviders: new Set([publicProvider]),
+    });
+  }
+
+  return [...replacementGroups.entries()].map(([sourceLabel, group]) => {
+    const publicProviders = [...group.publicProviders].sort();
+    const publicLabel = publicProviders.length === 1
+      ? formatMetricEvidenceLabel(group.candidate, publicProviders[0]!)
+      : formatAmbiguousMetricEvidenceLabel(group.candidate, publicProviders);
+
+    return {
+      publicLabel,
+      sourceLabel,
+    };
+  });
+}
+
 function formatMetricEvidenceLabel(candidate: WearableMetricCandidate, provider: string): string {
   const timestamp = candidate.recordedAt ?? candidate.occurredAt ?? "unknown time";
   return `${formatProviderName(provider)} ${candidate.sourceKind} recorded ${timestamp}`;
+}
+
+function formatAmbiguousMetricEvidenceLabel(
+  candidate: WearableMetricCandidate,
+  publicProviders: readonly string[],
+): string {
+  const timestamp = candidate.recordedAt ?? candidate.occurredAt ?? "unknown time";
+  const providerLabel = publicProviders.map(formatProviderName).join("/");
+  return `${providerLabel} ${candidate.sourceKind} recorded ${timestamp}`;
 }
 
 function selectMetricSelectionCandidate(resolved: WearableResolvedMetric): WearableMetricCandidate | null {
