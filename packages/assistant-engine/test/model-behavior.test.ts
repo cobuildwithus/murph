@@ -763,7 +763,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'bb7cdf8d5eacb2fb340216b1ea832bcbca4944ad25cfbe4f800e77cbd4dc1f88',
+      '65ff167c02df9cf73e9810cb9baa6e6dfffb65ec885a2a029daf6abcca29a836',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
