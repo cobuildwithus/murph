@@ -7,6 +7,7 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { test, vi } from "vitest";
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
+import type { MetricPoint } from "@murphai/health-metrics";
 import {
   INBOX_DB_RELATIVE_PATH,
   QUERY_DB_RELATIVE_PATH,
@@ -51,6 +52,7 @@ import {
   summarizeWearableSourceHealth,
 } from "../src/wearables.ts";
 import {
+  listMetricPointsRuntime,
   listMetricTargetsRuntime,
   selectMetricGoalProgressRuntime,
   summarizeWearableActivityRuntime,
@@ -65,6 +67,8 @@ import {
   resolveCanonicalRecordClass,
 } from "../src/canonical-entities.ts";
 import { ALL_QUERY_ENTITY_FAMILIES } from "../src/entity-families.ts";
+import { insertMetricPoints as insertProjectionMetricPoints } from "../src/projection/metric-store.ts";
+import { QUERY_PROJECTION_SQLITE_VERSION } from "../src/projection/schema.ts";
 import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.ts";
 import { parseMarkdownDocument } from "../src/markdown.ts";
 import {
@@ -3881,10 +3885,8 @@ test("query projection runtime goal progress resolves stored metric targets and 
           source_result_index,
           source_path,
           confidence,
-          provenance_json,
-          context_json,
           metric_point_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       insertMetricPoint.run(
         labPoint.id,
@@ -3909,8 +3911,6 @@ test("query projection runtime goal progress resolves stored metric targets and 
         labPoint.source.resultIndex,
         labPoint.source.path,
         labPoint.confidence,
-        JSON.stringify(labPoint.provenance),
-        JSON.stringify(labPoint.context),
         JSON.stringify(labPoint),
       );
       insertMetricPoint.run(
@@ -3936,8 +3936,6 @@ test("query projection runtime goal progress resolves stored metric targets and 
         wearablePoint.source.resultIndex,
         wearablePoint.source.path,
         wearablePoint.confidence,
-        JSON.stringify(wearablePoint.provenance),
-        JSON.stringify(wearablePoint.context),
         JSON.stringify(wearablePoint),
       );
       for (let index = 0; index < 10_005; index += 1) {
@@ -3978,8 +3976,6 @@ test("query projection runtime goal progress resolves stored metric targets and 
           noisePoint.source.resultIndex,
           noisePoint.source.path,
           noisePoint.confidence,
-          JSON.stringify(noisePoint.provenance),
-          JSON.stringify(noisePoint.context),
           JSON.stringify(noisePoint),
         );
       }
@@ -4404,6 +4400,184 @@ test("rebuildQueryProjection indexes compact structured terms without raw attrib
   }
 });
 
+test("rebuildQueryProjection creates the compact metric point schema", async () => {
+  const vaultRoot = await createFixtureVault();
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const database = openSqliteRuntimeDatabase(runtimeDatabasePath, {
+      create: false,
+      readOnly: true,
+    });
+
+    try {
+      // Pin the literal version: a revert of the 6 -> 7 bump would keep every
+      // constant-relative assertion green while legacy v6 stores (with the
+      // dropped NOT NULL columns) were treated as current, breaking the
+      // narrower INSERT on rebuild.
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 7);
+      assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
+
+      const columnRows = database
+        .prepare("PRAGMA table_info(query_metric_points)")
+        .all() as Array<{ name: string }>;
+      const columnNames = columnRows.map((row) => row.name);
+
+      assert.ok(columnNames.includes("metric_point_json"));
+      assert.equal(columnNames.includes("provenance_json"), false);
+      assert.equal(columnNames.includes("context_json"), false);
+    } finally {
+      database.close();
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("rebuildQueryProjection resets stale v6 projections that still carry the dropped metric point columns", async () => {
+  const vaultRoot = await createFixtureVault();
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const staleDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
+    try {
+      staleDatabase.exec(`
+        PRAGMA user_version = 6;
+
+        DROP TABLE query_metric_points;
+
+        CREATE TABLE query_metric_points (
+          id TEXT PRIMARY KEY,
+          sort_rank INTEGER NOT NULL,
+          metric_key TEXT NOT NULL,
+          biomarker_key TEXT,
+          value REAL,
+          text_value TEXT,
+          comparator TEXT,
+          unit TEXT,
+          canonical_value REAL,
+          canonical_unit TEXT,
+          observed_at TEXT NOT NULL,
+          effective_date TEXT NOT NULL,
+          recorded_at TEXT,
+          reported_at TEXT,
+          grain TEXT NOT NULL,
+          statistic TEXT NOT NULL,
+          source_family TEXT NOT NULL,
+          source_kind TEXT NOT NULL,
+          source_record_id TEXT NOT NULL,
+          source_result_index INTEGER,
+          source_path TEXT NOT NULL,
+          confidence TEXT NOT NULL,
+          provenance_json TEXT NOT NULL,
+          context_json TEXT NOT NULL,
+          metric_point_json TEXT NOT NULL
+        );
+
+        INSERT INTO query_metric_points (
+          id, sort_rank, metric_key, biomarker_key, value, text_value, comparator, unit,
+          canonical_value, canonical_unit, observed_at, effective_date, recorded_at, reported_at,
+          grain, statistic, source_family, source_kind, source_record_id, source_result_index,
+          source_path, confidence, provenance_json, context_json, metric_point_json
+        ) VALUES (
+          'metric-point:legacy-v6:0', 0, 'apob', 'biomarker:apob', 82, NULL, NULL, 'mg/dL',
+          82, 'mg/dL', '2026-04-29T07:30:00.000Z', '2026-04-29', NULL, NULL,
+          'event', 'value', 'event', 'test-result', 'evt_legacy_v6', 0,
+          'ledger/events/2026/2026-04.jsonl', 'high', '{}', '{}', '{}'
+        );
+      `);
+    } finally {
+      staleDatabase.close();
+    }
+
+    const statusBefore = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(statusBefore.fresh, false);
+
+    await rebuildQueryProjection(vaultRoot);
+
+    const reopened = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false, readOnly: true });
+    try {
+      assert.equal(readSqliteRuntimeUserVersion(reopened), QUERY_PROJECTION_SQLITE_VERSION);
+
+      const columnNames = (reopened
+        .prepare("PRAGMA table_info(query_metric_points)")
+        .all() as Array<{ name: string }>).map((row) => row.name);
+      assert.equal(columnNames.includes("provenance_json"), false);
+      assert.equal(columnNames.includes("context_json"), false);
+
+      const legacyRow = reopened
+        .prepare("SELECT id FROM query_metric_points WHERE id = 'metric-point:legacy-v6:0'")
+        .get() as { id: string } | undefined;
+      assert.equal(legacyRow, undefined);
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("listMetricPointsRuntime round-trips stored metric points purely from metric_point_json", async () => {
+  const vaultRoot = await createFixtureVault();
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const point: MetricPoint = {
+    biomarkerKey: "biomarker:apob",
+    canonicalUnit: "mg/dL",
+    canonicalValue: 82,
+    comparator: null,
+    confidence: "high",
+    context: { fastingStatus: "fasting", referenceRange: { high: 90, low: 40 } },
+    effectiveDate: "2026-04-29",
+    grain: "event",
+    id: "metric-point:apob:2026-04-29:compact-roundtrip:0",
+    metricKey: "apob",
+    observedAt: "2026-04-29T07:30:00.000Z",
+    provenance: {
+      dataOrigin: null,
+      externalRef: { resourceId: "lab-123", system: "function-health" },
+      labName: "Function Health",
+      provider: null,
+      rawRefs: ["raw:lab-123"],
+      sourceLabel: "Function Health",
+    },
+    recordedAt: null,
+    reportedAt: null,
+    schemaVersion: "murph.metric-point.v1",
+    source: {
+      family: "event",
+      kind: "test-result",
+      path: "ledger/events/2026/2026-04.jsonl",
+      recordId: "evt_apob_roundtrip",
+      resultIndex: 0,
+    },
+    statistic: "value",
+    textValue: null,
+    unit: "mg/dL",
+    value: 82,
+  };
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const database = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
+    try {
+      insertProjectionMetricPoints(database, [point]);
+    } finally {
+      database.close();
+    }
+
+    const points = await listMetricPointsRuntime(vaultRoot, { metricKey: "apob" });
+    const stored = points.find((candidate) => candidate.id === point.id);
+    assert.deepEqual(stored, point);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("rebuildQueryProjection discards unsupported local stores and recreates the current projection", async () => {
   const vaultRoot = await createFixtureVault();
   const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
@@ -4485,7 +4659,7 @@ test("rebuildQueryProjection discards unsupported local stores and recreates the
 
     try {
       assert.equal(rebuilt.schemaVersion, "murph.query-projection");
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 6);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), QUERY_PROJECTION_SQLITE_VERSION);
       const legacyLookupTable = reopened
         .prepare(`
           SELECT name
@@ -4529,7 +4703,7 @@ test("rebuildQueryProjection discards malformed local stores and recreates the c
 
     try {
       assert.equal(rebuilt.schemaVersion, "murph.query-projection");
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 6);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), QUERY_PROJECTION_SQLITE_VERSION);
       const queryMetaTable = reopened
         .prepare(`
           SELECT name
@@ -4592,7 +4766,7 @@ test("searchVaultRuntime discards unsupported local stores before serving result
     });
 
     try {
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 6);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), QUERY_PROJECTION_SQLITE_VERSION);
       const staleLookupTable = reopened
         .prepare(`
           SELECT name
@@ -4764,7 +4938,7 @@ test("searchVaultRuntime rebuilds old v4 projections before serving dense or uns
 
     const reopened = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false, readOnly: true });
     try {
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 6);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), QUERY_PROJECTION_SQLITE_VERSION);
       const denseEntity = reopened
         .prepare(`
           SELECT entity_id AS entityId
