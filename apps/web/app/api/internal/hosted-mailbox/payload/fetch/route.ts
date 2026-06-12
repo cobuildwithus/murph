@@ -20,6 +20,7 @@ import {
   readHostedMemberCoreState,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
+  hostedRuntimeMailboxEntryNeedsAiUsageGate,
   resolveHostedRuntimeAiUsageGate,
 } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 import { readOptionalJsonObject } from "@/src/lib/http";
@@ -77,12 +78,13 @@ async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
   if (
     !input.item
     || input.item.userId !== input.userId
-    || !hostedRuntimeMailboxPayloadNeedsAiUsageGate(input.item)
+    || !hostedRuntimeMailboxEntryNeedsAiUsageGate(input.item)
   ) {
     return;
   }
 
   const gate = await resolveHostedRuntimeAiUsageGate({
+    mode: "read_first",
     userId: input.userId,
   });
 
@@ -107,12 +109,4 @@ async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
     httpStatus: 403,
     message: "Hosted runtime mailbox payload AI usage is denied.",
   });
-}
-
-function hostedRuntimeMailboxPayloadNeedsAiUsageGate(input: {
-  kind: string;
-  lane: string;
-}): boolean {
-  return input.lane === "conversation"
-    || input.kind === "runtime.manual-requested";
 }

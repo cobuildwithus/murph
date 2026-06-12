@@ -435,6 +435,29 @@ export async function readHostedAiUsageGate(input: {
   });
 }
 
+// Read-first gate for hot-path checks: serve allow decisions from the
+// write-free read gate and only run the mutating period-bookkeeping
+// transaction when the read decision would block AI work, so steady-state
+// gate checks stay off the usage-period upsert/lock path. Denials are always
+// confirmed by the mutating gate before callers act on them. The read path
+// includes write-free billing carryover spend, but it still cannot materialize
+// period rows or plan-change limit updates. The guaranteed mutating resolve on
+// the reply path is turn admission (runtime reconciliation facts); spend
+// accounting also ensure-creates the period inside the spend transaction as
+// the backstop.
+export async function checkHostedAiUsageGate(input: {
+  memberId: string;
+  now?: Date | string;
+  prisma?: HostedAiUsageAllowanceClient;
+}): Promise<HostedAiUsageGateDecision> {
+  const decision = await readHostedAiUsageGate(input);
+  if (decision.allowed) {
+    return decision;
+  }
+
+  return resolveHostedAiUsageGate(input);
+}
+
 export async function claimHostedAiUsageLimitNotice(input: {
   memberId: string;
   periodStart: Date | string;
@@ -734,6 +757,13 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     };
   }
 
+  const carryoverSpentUsdMicros =
+    await readHostedAiUsageAllowanceCarryoverSpendTx({
+      memberId: input.memberId,
+      resolved,
+      tx: input.tx,
+    });
+
   const current = await input.tx.hostedAiUsagePeriod.findUnique({
     where: {
       memberId_periodStart: {
@@ -764,11 +794,11 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
       limitUsdMicros: periodMatches ? current.limitUsdMicros : resolved.limitUsdMicros,
       periodEnd: periodMatches ? current.periodEnd : resolved.periodEnd,
       periodStart: periodMatches ? current.periodStart : resolved.periodStart,
-      spentUsdMicros: current.spentUsdMicros,
+      spentUsdMicros: current.spentUsdMicros + carryoverSpentUsdMicros,
     };
   }
 
-  const spentUsdMicros = await readHostedAiUsageAllowancePeriodSpendTx({
+  const periodSpentUsdMicros = await readHostedAiUsageAllowancePeriodSpendTx({
     memberId: input.memberId,
     periodStart: resolved.periodStart,
     tx: input.tx,
@@ -780,7 +810,7 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     limitUsdMicros: resolved.limitUsdMicros,
     periodEnd: resolved.periodEnd,
     periodStart: resolved.periodStart,
-    spentUsdMicros,
+    spentUsdMicros: periodSpentUsdMicros + carryoverSpentUsdMicros,
   };
 }
 
@@ -800,6 +830,51 @@ async function readHostedAiUsageAllowancePeriodSpendTx(input: {
       allowanceCounted: true,
       allowancePeriodStart: input.periodStart,
       memberId: input.memberId,
+    },
+  });
+
+  return aggregate._sum.allowanceCostUsdMicros ?? 0n;
+}
+
+async function readHostedAiUsageAllowanceCarryoverSpendTx(input: {
+  memberId: string;
+  resolved: {
+    periodEnd: Date;
+    periodStart: Date;
+    source: "billing" | "calendar" | "trial";
+  };
+  tx: Prisma.TransactionClient;
+}): Promise<bigint> {
+  if (input.resolved.source !== "billing") {
+    return 0n;
+  }
+
+  const aggregate = await input.tx.hostedAiUsage.aggregate({
+    _sum: {
+      allowanceCostUsdMicros: true,
+    },
+    where: {
+      allowanceAccountedAt: {
+        not: null,
+      },
+      allowanceCounted: true,
+      AND: [
+        {
+          allowancePeriodStart: {
+            not: null,
+          },
+        },
+        {
+          allowancePeriodStart: {
+            not: input.resolved.periodStart,
+          },
+        },
+      ],
+      memberId: input.memberId,
+      occurredAt: {
+        gte: input.resolved.periodStart,
+        lt: input.resolved.periodEnd,
+      },
     },
   });
 
