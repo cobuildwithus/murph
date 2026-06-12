@@ -27,6 +27,19 @@ export function buildHostedRuntimeLogContextFields(
   };
 }
 
+// Every awaited runtime log write costs a full runner->worker->web round trip
+// (~150ms in production), and several sit directly on the reply hot path
+// between mailbox import and provider start. Info-level entries are durable
+// diagnostics, not control flow: queue them so the caller returns immediately
+// while writes flush in the background in enqueue order. warn/error entries
+// still block — they are the crash-diagnostic tail and must be durable before
+// the runtime proceeds. `at` is stamped at enqueue, so persisted ordering
+// still reflects logical time. A single module-level tail is enough: hosted
+// runner processes hold one live log port per invocation, and chaining every
+// write preserves per-port enqueue order as a strict subset. The chain never
+// rejects (each write swallows its own failure).
+let pendingHostedRuntimeLogWriteTail: Promise<void> = Promise.resolve();
+
 export async function writeHostedRuntimeLogBestEffort(input: {
   entry: Omit<HostedRuntimeLogEntry, "at"> & { at?: string };
   platform: Pick<HostedRuntimePlatform, "logPort">;
@@ -42,17 +55,36 @@ export async function writeHostedRuntimeLogBestEffort(input: {
     ...input.entry,
   };
 
-  try {
-    await logPort.write({
-      entries: [entry],
-    });
-  } catch (error) {
-    console.warn("Hosted runtime durable log write failed.", {
-      component: entry.component,
-      errorName: error instanceof Error ? error.name : typeof error,
-      eventCode: entry.eventCode,
-    });
+  const write = async () => {
+    try {
+      await logPort.write({
+        entries: [entry],
+      });
+    } catch (error) {
+      console.warn("Hosted runtime durable log write failed.", {
+        component: entry.component,
+        errorName: error instanceof Error ? error.name : typeof error,
+        eventCode: entry.eventCode,
+      });
+    }
+  };
+  pendingHostedRuntimeLogWriteTail = pendingHostedRuntimeLogWriteTail.then(write);
+
+  if (entry.level === "info") {
+    return;
   }
+  await pendingHostedRuntimeLogWriteTail;
+}
+
+// Awaited at invocation end so a normal shutdown never drops queued entries.
+// Queued writes swallow their own failures, so this never rejects. Re-reads
+// the tail after each await in case settled writes enqueued more entries.
+export async function drainHostedRuntimeLogWritesBestEffort(): Promise<void> {
+  let observed: Promise<void>;
+  do {
+    observed = pendingHostedRuntimeLogWriteTail;
+    await observed;
+  } while (observed !== pendingHostedRuntimeLogWriteTail);
 }
 
 export function compactHostedRuntimeLogCodes(codes: readonly string[]): string[] {
