@@ -1876,12 +1876,24 @@ function pushProfileSummary(
 ): void {
   const baseTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
   // Profile entries carry no observed-at timestamp, so the generic resolver
-  // falls back to the sync window. Pin the identity-bearing observedAtRaw to
-  // the provider's updated/created timestamps so repeated syncs reconcile to
-  // the same external ref instead of minting one event per window.
+  // falls back to the sync window. Pin the FULL event time (occurredAt,
+  // recordedAt, dayKey) plus the identity-bearing observedAtRaw to the
+  // provider's updated/created timestamps: a window-drifting occurredAt
+  // would revise the event spine on every reconcile and duplicate the
+  // profile across month shards (cross-shard reconcile only indexes the
+  // target shard). Without any provider timestamp the row stays raw-only.
+  const providerTimestampRaw = firstValueFromPaths(entry, ["updatedAt", "updated_at", "createdAt", "created_at"]);
+  const providerTimestamp = resolveSafeTimestamp(providerTimestampRaw, resourceContext.sourceProviderSlug);
+  const pinnedOccurredAt = baseTimestamp.observedAtRaw ? baseTimestamp.occurredAt : providerTimestamp;
+  if (!pinnedOccurredAt) {
+    return;
+  }
   const timestamp = withTimestampOverride(baseTimestamp, {
+    occurredAt: pinnedOccurredAt,
+    recordedAt: baseTimestamp.observedAtRaw ? baseTimestamp.recordedAt : providerTimestamp,
+    dayKey: extractIsoDatePrefix(pinnedOccurredAt) ?? baseTimestamp.dayKey,
     observedAtRaw: baseTimestamp.observedAtRaw
-      ?? firstStringFromPaths(entry, ["updatedAt", "updated_at", "createdAt", "created_at"])
+      ?? stringId(providerTimestampRaw)
       ?? "current",
   });
 
@@ -1959,20 +1971,28 @@ function pushMenstrualCycleSummary(
   const baseTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
   const periodStart = firstIsoDateFromPaths(entry, ["periodStart", "period_start"]);
   const periodEnd = firstIsoDateFromPaths(entry, ["periodEnd", "period_end"]);
+  const cycleStart = firstIsoDateFromPaths(entry, ["cycleStart", "cycle_start"]);
   const cycleEnd = firstIsoDateFromPaths(entry, ["cycleEnd", "cycle_end"]);
+  const cycleAnchorDate = periodStart ?? cycleStart;
 
-  if (periodStart) {
-    const cycleTimestamp = junctionDateOnlyTimestamp(baseTimestamp, periodStart);
+  if (cycleAnchorDate) {
+    const cycleTimestamp = junctionDateOnlyTimestamp(baseTimestamp, cycleAnchorDate);
+    // Date-derived lengths win; explicit provider length fields are the
+    // fallback (the backfill completion predicate already treats them as
+    // useful, so a record carrying only the explicit fields must still
+    // land its observation). Both paths share the 1..120-day guard.
     const cycleObservations = [
       {
         metric: "period-length-days",
         title: "Junction period length",
-        value: inclusiveDaysBetween(periodStart, periodEnd),
+        value: (periodStart ? inclusiveDaysBetween(periodStart, periodEnd) : undefined)
+          ?? plausibleCycleLengthDays(firstNumberFromPaths(entry, ["periodLengthDays", "period_length_days"])),
       },
       {
         metric: "cycle-length-days",
         title: "Junction cycle length",
-        value: inclusiveDaysBetween(periodStart, cycleEnd),
+        value: (periodStart ? inclusiveDaysBetween(periodStart, cycleEnd) : undefined)
+          ?? plausibleCycleLengthDays(firstNumberFromPaths(entry, ["cycleLengthDays", "cycle_length_days"])),
       },
     ];
 
@@ -2141,6 +2161,12 @@ function junctionDateOnlyTimestamp(
     dayKey: date,
     observedAtRaw: date,
   });
+}
+
+function plausibleCycleLengthDays(value: number | undefined): number | undefined {
+  return value !== undefined && Number.isInteger(value) && value >= 1 && value <= 120
+    ? value
+    : undefined;
 }
 
 function inclusiveDaysBetween(startDate: string, endDate: string | undefined): number | undefined {

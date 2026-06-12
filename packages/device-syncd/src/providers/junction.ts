@@ -3441,9 +3441,13 @@ function junctionTimeseriesRecordValueIdentity(
     return [];
   }
 
-  const rowId = normalizeString(entry.id);
-  if (rowId) {
-    return [rowId];
+  // Same stable-id alias list as the importer's reading identity: rows
+  // distinguished only by a provider id must survive fetch-side dedupe.
+  for (const key of ["id", "resourceId", "resource_id", "externalId", "external_id"]) {
+    const rowId = normalizeString(entry[key]);
+    if (rowId) {
+      return [rowId];
+    }
   }
 
   // Field names mirror the importer's blood-pressure value paths.

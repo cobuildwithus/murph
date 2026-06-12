@@ -3102,7 +3102,30 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
   assert.equal(demographics?.externalRef?.facet, "profile-demographics");
   assert.equal(demographics?.externalRef?.resourceId, height?.externalRef?.resourceId);
   assert.equal(demographics?.recordedAt, "2026-04-20T09:00:00.000Z");
+  // The full event time is pinned to the provider's updated_at — never the
+  // sync window — so reconciles don't revise the spine and month-boundary
+  // syncs can't duplicate the profile.
+  assert.equal(demographics?.occurredAt, "2026-04-20T09:00:00.000Z");
+  assert.equal(demographics?.dayKey, "2026-04-20");
+  assert.equal(height?.occurredAt, "2026-04-20T09:00:00.000Z");
   assertEventRawArtifactRolesExist(payload);
+
+  // A profile with no provider timestamp at all stays raw-only: inventing
+  // an event time from the sync window would drift per sync.
+  const noTimestampPayload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    windowStart: "2026-04-22T00:00:00.000Z",
+    windowEnd: "2026-04-22T11:00:00.000Z",
+    summaries: {
+      profile: {
+        id: "profile-no-timestamp",
+        height: 181,
+        source: { provider: "oura", type: "ring" },
+      },
+    },
+  });
+  assert.equal((noTimestampPayload.events ?? []).length, 0);
+  assert.ok(noTimestampPayload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-profile"));
 
   // The raw profile artifact stays identity-sanitized even though the
   // normalized events carry the structured fields.
@@ -3146,6 +3169,35 @@ test("Junction oversized menstrual deviation strings land with capped facet and 
     `menstrual-cycle-deviation-${"a".repeat(80)}-2026-04-30`,
   );
   assert.equal(qualifiers?.deviation, "a".repeat(80));
+});
+
+test("Junction menstrual cycles land explicit provider length fields when end dates are absent", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    summaries: {
+      menstrual_cycle: [{
+        id: "cycle-explicit-lengths",
+        period_start: "2026-04-07",
+        period_length_days: 5,
+        cycle_length_days: 28,
+        source: { provider: "apple_health", type: "phone" },
+      }, {
+        // No period_start at all: cycle_start anchors the explicit length.
+        id: "cycle-start-only",
+        cycle_start: "2026-05-05",
+        cycle_length_days: 200, // implausible (>120) — must drop
+        period_length_days: 4,
+        source: { provider: "apple_health", type: "phone" },
+      }],
+    },
+  });
+  const observations = (payload.events ?? []).filter((event) => event.kind === "observation");
+  const byKey = new Map(observations.map((event) => [`${event.fields?.metric}:${event.dayKey}`, event]));
+
+  assert.equal(byKey.get("period-length-days:2026-04-07")?.fields?.value, 5);
+  assert.equal(byKey.get("cycle-length-days:2026-04-07")?.fields?.value, 28);
+  assert.equal(byKey.get("period-length-days:2026-05-05")?.fields?.value, 4);
+  assert.equal(byKey.has("cycle-length-days:2026-05-05"), false);
 });
 
 test("Junction ECG summaries drop negative metrics and cap qualifier lengths", () => {
