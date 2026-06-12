@@ -1,4 +1,5 @@
 import { normalizeWearableMetricValue } from "@murphai/importers/device-providers/metric-catalog";
+import { canonicalizeDeviceProviderSlug } from "@murphai/importers/device-providers/provider-descriptors";
 import { deviceDataOriginSchema, extractIsoDatePrefix, type DeviceDataOrigin } from "@murphai/contracts";
 
 import type { CanonicalEntity } from "../canonical-entities.ts";
@@ -45,7 +46,12 @@ export function collectWearableDataset(
   const sleepStageCandidates: WearableMetricCandidate[] = [];
   const sleepWindows: WearableSleepWindowCandidate[] = [];
   const providerSet = filters.providers
-    ? new Set(filters.providers.map((provider) => provider.trim().toLowerCase()).filter(Boolean))
+    ? new Set(
+        filters.providers
+          .map((provider) => provider.trim().toLowerCase())
+          .filter(Boolean)
+          .map((provider) => canonicalizeDeviceProviderSlug(provider)),
+      )
     : null;
 
   for (const entity of [...vault.events, ...vault.samples.filter((sample) => sample.kind !== "metric_sample")]) {

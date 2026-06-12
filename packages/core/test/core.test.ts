@@ -1123,6 +1123,11 @@ test("nutrition-only structured meals remain valid meal events", async () => {
     nutrition: {
       totals: {
         calories: 420,
+        waterGrams: 350,
+      },
+      micros: {
+        ironMg: 4.2,
+        vitaminCMg: 30,
       },
       provenance: {
         source: "estimated",
@@ -1142,6 +1147,11 @@ test("nutrition-only structured meals remain valid meal events", async () => {
   assert.deepEqual(mealEvent.nutrition, {
     totals: {
       calories: 420,
+      waterGrams: 350,
+    },
+    micros: {
+      ironMg: 4.2,
+      vitaminCMg: 30,
     },
     provenance: {
       source: "estimated",
