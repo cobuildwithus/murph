@@ -923,6 +923,13 @@ export function buildWranglerLocalDevConfig(
     image: runnerContainerImage,
     image_build_context: runnerContainerImageBuildContext,
     image_vars: {
+      // The per-class build arg keeps the two class images' Docker image IDs
+      // distinct. Without it, wrangler dev's duplicate-tag cleanup
+      // (`cleanupDuplicateImageTags`) untags the runner image right after the
+      // deploy-smoke image build (both tags point at one image ID), and hosted
+      // cold starts then fail with "No such image available named
+      // cloudflare-dev/runnercontainer:<tag>" until the harness times out.
+      HOSTED_RUNNER_CONTAINER_CLASS: input.className,
       HOSTED_RUNNER_LOCAL_BUILD_ID: hostedRunnerLocalBuildId,
     },
     instance_type: "standard-1",

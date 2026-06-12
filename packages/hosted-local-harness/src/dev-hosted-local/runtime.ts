@@ -423,6 +423,59 @@ export function spawnChildProcess(
   };
 }
 
+// Container/image lifecycle actions worth keeping in CI logs. `kill` carries
+// the delivered signal, `die` carries the exit code, `oom` marks cgroup OOM
+// kills, and `tag`/`untag`/`delete` expose image-tag churn (wrangler dev's
+// duplicate-tag cleanup untagging a runner image mid-session). High-churn
+// noise such as health-check `exec_*` events is intentionally excluded.
+const HOSTED_LOCAL_DOCKER_FORENSICS_EVENTS = [
+  "create",
+  "start",
+  "kill",
+  "die",
+  "stop",
+  "destroy",
+  "oom",
+  "tag",
+  "untag",
+  "delete",
+] as const;
+
+// Streams `docker events` for the lifetime of the hosted-local dev stack so a
+// container that exits 137 (SIGKILL) is attributable from CI logs alone:
+// the event stream shows which container/image got which action, the signal
+// behind a kill, the exit code behind a die, and whether an OOM kill occurred.
+// Locally and in CI the only SIGKILL paths are docker force-removes keyed by
+// the deterministic per-DO container name, which this stream timestamps.
+// Diagnostics-only: the child must never gate stack startup or teardown, so
+// callers keep it out of the fail-fast `children` set.
+export function spawnHostedLocalDockerEventsForensics(
+  env: NodeJS.ProcessEnv,
+  input: {
+    pipeOutput?: boolean;
+    stderrTarget?: NodeJS.WritableStream;
+    stdoutTarget?: NodeJS.WritableStream;
+  } = {},
+): BufferedNamedChildProcess {
+  const forensics = spawnChildProcess("docker-events", "docker", [
+    "events",
+    "--format",
+    "{{json .}}",
+    "--filter",
+    "type=container",
+    "--filter",
+    "type=image",
+    ...HOSTED_LOCAL_DOCKER_FORENSICS_EVENTS.flatMap((event) => [
+      "--filter",
+      `event=${event}`,
+    ]),
+  ], env, input);
+  // Diagnostics must stay best-effort: a missing/failing docker CLI here must
+  // not crash the harness with an unhandled "error" event.
+  forensics.child.once("error", () => {});
+  return forensics;
+}
+
 export async function waitForFirstChildExit(
   children: readonly NamedChildProcess[],
 ): Promise<NamedChildProcess> {

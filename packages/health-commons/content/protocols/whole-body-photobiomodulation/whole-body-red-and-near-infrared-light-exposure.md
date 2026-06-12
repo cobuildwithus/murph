@@ -336,6 +336,7 @@ expectedSignalDescriptions:
     biomarkerKey: biomarker:resting-heart-rate
     expected: Could trend lower
     expectedDirection: down_or_stable
+    displayValue: "Up to 5 bpm lower"
     estimatedChange:
       kind: absolute
       low: -5
