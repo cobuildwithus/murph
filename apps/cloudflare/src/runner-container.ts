@@ -522,13 +522,26 @@ export class RunnerContainer extends Container {
     return await this.withLifecycleLock(async () => {
       const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
       let smokeStartAttempted = false;
+      let destroyAlreadyRequestedForRecycle = false;
 
       try {
+        const destroyRequestBeforeRecycle = this.lastDestroyRequest;
         const containerSettledForSmoke = await this.stopWarmContainer({
           failClosed: false,
           reason: "deploy-smoke-recycle",
         });
+        destroyAlreadyRequestedForRecycle = destroyRequestBeforeRecycle !== null
+          || this.lastDestroyRequest !== destroyRequestBeforeRecycle;
         if (!containerSettledForSmoke) {
+          // If recycle failed before it could request destroy, make one
+          // cleanup attempt. If destroy was already requested, avoid issuing a
+          // duplicate destroy while the platform may still be settling it.
+          if (!destroyAlreadyRequestedForRecycle) {
+            await this.stopWarmContainer({
+              failClosed: false,
+              reason: "deploy-smoke-cleanup",
+            });
+          }
           throw new Error("Hosted runner container smoke could not recycle the existing shell.");
         }
         smokeStartAttempted = true;
