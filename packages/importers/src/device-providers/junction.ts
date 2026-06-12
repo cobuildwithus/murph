@@ -2032,9 +2032,12 @@ function pushMenstrualCycleSummary(
         continue;
       }
 
+      // The facet carries the normalized result so two same-day tests with
+      // different outcomes (e.g. negative then surge) keep distinct
+      // identities; repeated identical (date, result) rows still merge.
       pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
         date: sub.date,
-        facet: `${test.metric}-${sub.date}`,
+        facet: `${test.metric}-${slugify(result, "result")}-${sub.date}`,
         measurement: {
           metric: test.metric,
           value,
@@ -2159,7 +2162,11 @@ function pushElectrocardiogramSummary(
   const baseTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
   const sessionStartRaw = firstValueFromPaths(entry, ["sessionStart", "session_start"]);
   const sessionStart = resolveSafeTimestamp(sessionStartRaw, resourceContext.sourceProviderSlug);
-  const occurredAt = sessionStart ?? baseTimestamp.occurredAt;
+  // A recording is a point-in-time clinical fact: without a valid
+  // session_start the row stays raw-only rather than inheriting a
+  // sync-window/import-time fallback that would invent the recording
+  // moment (and let the externalRef drift with the fetch window).
+  const occurredAt = sessionStart;
 
   if (!occurredAt) {
     return;

@@ -2862,6 +2862,9 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
         ],
         ovulation_test: [
           { date: "2026-04-19", test_result: "luteinizing_hormone_surge" },
+          // Same-day second test with a different result must keep its own
+          // identity (the classic negative-then-surge pattern).
+          { date: "2026-04-19", test_result: "negative" },
           { date: "2026-04-22", test_result: "indeterminate" },
         ],
         home_pregnancy_test: [
@@ -2934,13 +2937,23 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
   assert.equal(flowEvents[0]?.externalRef?.facet, "menstrual-flow-2026-04-07");
 
   const ovulationEvents = measurementEvents.filter((event) => event.title === "Junction ovulation test");
-  assert.equal(ovulationEvents.length, 1);
+  // Two same-day tests with different results land as two events with
+  // distinct result-bearing facets; the indeterminate row stays raw-only.
+  assert.equal(ovulationEvents.length, 2);
   assert.deepEqual(readMeasurement(ovulationEvents[0]), {
     metric: "ovulation-test",
     value: 1,
     unit: "result",
     qualifiers: { result: "luteinizing_hormone_surge" },
   });
+  assert.deepEqual(readMeasurement(ovulationEvents[1]), {
+    metric: "ovulation-test",
+    value: 0,
+    unit: "result",
+    qualifiers: { result: "negative" },
+  });
+  assert.notEqual(ovulationEvents[0]?.externalRef?.facet, ovulationEvents[1]?.externalRef?.facet);
+  assert.equal(ovulationEvents[0]?.externalRef?.facet?.includes("luteinizing"), true);
 
   const pregnancyEvent = measurementEvents.find((event) => event.title === "Junction pregnancy test");
   assert.deepEqual(readMeasurement(pregnancyEvent), {
@@ -2969,7 +2982,7 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
   );
   // Sexual activity is deliberately unmapped and basal body temperature is
   // canonical on the dedicated timeseries; both stay raw-only here.
-  assert.equal(events.length, 7);
+  assert.equal(events.length, 8);
 
   assert.match(JSON.stringify(rawCycleArtifact?.content), /period_start/u);
   assert.match(JSON.stringify(rawCycleArtifact?.content), /menstrual_flow/u);
@@ -3162,6 +3175,13 @@ test("Junction ECG summaries drop negative metrics and cap qualifier lengths", (
       }, {
         id: "ecg-empty",
         session_start: "2026-04-23T09:00:00Z",
+        source: { provider: "apple_health_kit", type: "watch" },
+      }, {
+        // No session_start: the recording moment cannot be invented from
+        // the sync window, so the row stays raw-only.
+        id: "ecg-no-session-start",
+        heart_rate_mean: 70,
+        classification: "sinus_rhythm",
         source: { provider: "apple_health_kit", type: "watch" },
       }],
     },

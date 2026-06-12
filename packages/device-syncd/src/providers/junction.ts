@@ -315,6 +315,16 @@ const JUNCTION_RAW_ONLY_COMPLETION_PATHS = Object.freeze({
       "symptoms",
       "sexualActivity",
       "sexual_activity",
+      // Facet arrays the importer normalizes; a window containing only
+      // these must not be classified as an empty backfill.
+      "ovulationTest",
+      "ovulation_test",
+      "homePregnancyTest",
+      "home_pregnancy_test",
+      "detectedDeviations",
+      "detected_deviations",
+      "basalBodyTemperature",
+      "basal_body_temperature",
     ],
   },
   electrocardiogram: {
@@ -3415,7 +3425,29 @@ function buildJunctionTimeseriesRecordKey(resource: string, record: unknown): st
     normalizeString(origin.sourceType) ?? "",
     normalizeString(origin.sourceInstanceId) ?? "",
     timestamp,
+    ...junctionTimeseriesRecordValueIdentity(resource, entry),
   ]);
+}
+
+// Blood-pressure readings carry their paired values as part of identity
+// (the importer keeps distinct same-second readings as distinct events), so
+// the pre-import dedupe key must not collapse same-timestamp rows whose
+// values differ. A stable provider row id wins when present.
+function junctionTimeseriesRecordValueIdentity(
+  resource: string,
+  entry: Record<string, unknown>,
+): string[] {
+  if (resource !== "blood_pressure") {
+    return [];
+  }
+
+  const rowId = normalizeString(entry.id);
+  if (rowId) {
+    return [rowId];
+  }
+
+  // Field names mirror the importer's blood-pressure value paths.
+  return [String(entry.systolic ?? ""), String(entry.diastolic ?? "")];
 }
 
 function resolveJunctionTimeseriesRecordTimestamp(record: Record<string, unknown>): string | null {
