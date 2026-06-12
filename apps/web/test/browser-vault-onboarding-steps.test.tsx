@@ -199,6 +199,29 @@ test("BrowserVaultOnboardingStepsContent shows in-progress runs and hides the ex
   assert.doesNotMatch(markup, /Start an experiment/);
 });
 
+test("BrowserVaultOnboardingStepsContent treats tracked-only planned runs as in progress", async () => {
+  mocks.useBrowserVault.mockReturnValue({
+    client: createClient([], [experimentEntity({
+      id: "exp:private-plan",
+      status: "planned",
+      title: "Private planned run",
+    })]),
+    status: "ready",
+  });
+
+  const { BrowserVaultOnboardingStepsContent } = await import(
+    "@/src/components/home/browser-vault-onboarding-steps"
+  );
+  const markup = renderToStaticMarkup(
+    createElement(BrowserVaultOnboardingStepsContent, { protocols: [] }),
+  );
+
+  assert.match(markup, /In progress/);
+  assert.match(markup, /Private planned run/);
+  assert.doesNotMatch(markup, /Your history/);
+  assert.doesNotMatch(markup, /Start an experiment/);
+});
+
 test("BrowserVaultOnboardingStepsContent keeps the experiment step and shows history for finished runs", async () => {
   mocks.useBrowserVault.mockReturnValue({
     client: createClient([], [experimentEntity({
@@ -218,6 +241,29 @@ test("BrowserVaultOnboardingStepsContent keeps the experiment step and shows his
 
   assert.match(markup, /Your history/);
   assert.match(markup, /Finnish sauna/);
+  assert.match(markup, /Start an experiment/);
+});
+
+test("BrowserVaultOnboardingStepsContent keeps ambiguous tracked-only statuses in history", async () => {
+  mocks.useBrowserVault.mockReturnValue({
+    client: createClient([], [experimentEntity({
+      id: "exp:private-ambiguous",
+      status: "waiting-for-review",
+      title: "Ambiguous private run",
+    })]),
+    status: "ready",
+  });
+
+  const { BrowserVaultOnboardingStepsContent } = await import(
+    "@/src/components/home/browser-vault-onboarding-steps"
+  );
+  const markup = renderToStaticMarkup(
+    createElement(BrowserVaultOnboardingStepsContent, { protocols: [] }),
+  );
+
+  assert.match(markup, /Your history/);
+  assert.match(markup, /Ambiguous private run/);
+  assert.doesNotMatch(markup, /In progress/);
   assert.match(markup, /Start an experiment/);
 });
 

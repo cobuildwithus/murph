@@ -1,5 +1,4 @@
 import {
-  isActiveOverviewExperimentStatus,
   selectBrowserVaultExperimentResults,
   type BrowserVaultExperimentBiomarkerResult,
   type BrowserVaultExperimentExpectedRange,
@@ -20,21 +19,9 @@ import type {
   TimelineEvent,
   TrendData,
 } from "@/src/types/experiments";
+import { normalizeExperimentRunStatus } from "@/src/lib/browser-vault/experiment-status";
 import { resolveBiomarkerDesiredDirection } from "@/src/lib/health-commons/biomarker-desired-direction";
 import type { HealthCommonsBiomarkerDesiredDirection } from "@murphai/contracts";
-
-const FINISHED_EXPERIMENT_STATUSES = new Set([
-  "complete",
-  "completed",
-  "concluded",
-  "done",
-  "finished",
-]);
-
-const STOPPED_EXPERIMENT_STATUSES = new Set([
-  "abandoned",
-  "closed",
-]);
 
 export interface ResolveBrowserVaultExperimentRunInput {
   client: BrowserVaultQueryClient | null;
@@ -851,27 +838,12 @@ function readCurrentBiomarkerValue(
 
 function normalizePrivateRunStatus(
   results: BrowserVaultExperimentResultsView,
-): Exclude<ExperimentStatus, "upcoming"> {
-  const phase = results.experiment.phase;
-  const status = results.experiment.status?.trim().toLowerCase() ?? "";
-
-  if (phase === "paused" || status === "paused") {
-    return "paused";
-  }
-
-  if (phase === "abandoned" || STOPPED_EXPERIMENT_STATUSES.has(status)) {
-    return "stopped";
-  }
-
-  if (phase === "completed" || phase === "review_due" || FINISHED_EXPERIMENT_STATUSES.has(status)) {
-    return "finished";
-  }
-
-  if (isActiveOverviewExperimentStatus(status) || status === "planned" || results.experiment.startedOn) {
-    return "active";
-  }
-
-  return "active";
+): ReturnType<typeof normalizeExperimentRunStatus> {
+  return normalizeExperimentRunStatus({
+    phase: results.experiment.phase,
+    startedOn: results.experiment.startedOn,
+    status: results.experiment.status,
+  });
 }
 
 function buildRunNextStep(input: {

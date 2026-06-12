@@ -1,10 +1,10 @@
 import {
-  isActiveOverviewExperimentStatus,
   type BrowserVaultQueryClient,
   type OverviewExperiment,
 } from "@murphai/query/browser-overview";
 
 import { formatIsoDate, formatStatusLabel } from "@/src/lib/browser-vault/display";
+import { normalizeExperimentRunStatus } from "@/src/lib/browser-vault/experiment-status";
 import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
 import type { ExperimentProtocol, ExperimentRunProjection } from "@/src/types/experiments";
 
@@ -197,21 +197,10 @@ function statusVariantForRunStatus(status: ExperimentRunStatus): ExperimentCardS
 }
 
 function runStatusForTrackedExperiment(entry: OverviewExperiment): ExperimentRunStatus {
-  const status = entry.status?.trim().toLowerCase() ?? "";
-
-  if (isActiveOverviewExperimentStatus(status)) {
-    return "active";
-  }
-
-  if (status === "paused") {
-    return "paused";
-  }
-
-  if (["abandoned", "closed", "stopped"].includes(status)) {
-    return "stopped";
-  }
-
-  return "finished";
+  return normalizeExperimentRunStatus({
+    fallback: "finished",
+    status: entry.status,
+  });
 }
 
 function selectTrackedExperimentImage(entry: OverviewExperiment): string {
