@@ -336,8 +336,7 @@ export function mergeCloudflareLocalEnv(input: {
 function resolveHostedLocalR2PresignEnvironment(
   env: Readonly<Record<string, string | undefined>>,
 ): Record<string, string> {
-  const testRoutesEnabled =
-    env.NODE_ENV === "test" && env.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1";
+  const testRoutesEnabled = usesWranglerLocalDevTestRoutes(env);
   const allowLocalEndpoint = normalizeOptionalString(env.HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT);
   const controlEndpoint = normalizeOptionalString(env.HOSTED_R2_PRESIGN_CONTROL_ENDPOINT);
   const dockerBridgeHost = normalizeOptionalString(env.MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST);
@@ -979,6 +978,23 @@ export function buildWranglerLocalDevConfig(
         preview_bucket_name: "murph-hosted-bundles-preview",
       },
     ],
+    // Wrangler proxies the Workers AI binding through a remote session, so the
+    // binding requires `wrangler login` (or a user-scoped token) on the dev
+    // machine and would call live Workers AI. Hosted-local test routes must
+    // keep `env.AI` unset so the deterministic fake binding in
+    // apps/cloudflare/src/hosted-local-test/runner-container.ts composes, and
+    // MURPH_DEV_SKIP_WORKERS_AI=1 lets unauthenticated dev stacks start with
+    // hosted transcription failing closed at use time instead of `wrangler
+    // dev` failing at startup.
+    ...(includesWranglerLocalDevAiBinding(source) ? { ai: { binding: "AI" } } : {}),
+    send_email: [
+      {
+        name: "HOSTED_EMAIL",
+      },
+    ],
+    version_metadata: {
+      binding: "CF_VERSION_METADATA",
+    },
     observability: {
       enabled: true,
       head_sampling_rate: 1,
@@ -1001,10 +1017,23 @@ export function buildWranglerLocalDevConfig(
   };
 }
 
+function usesWranglerLocalDevTestRoutes(
+  source: Readonly<Record<string, string | undefined>>,
+): boolean {
+  return source.NODE_ENV === "test" && source.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1";
+}
+
+export function includesWranglerLocalDevAiBinding(
+  source: Readonly<Record<string, string | undefined>>,
+): boolean {
+  return !usesWranglerLocalDevTestRoutes(source)
+    && source.MURPH_DEV_SKIP_WORKERS_AI !== "1";
+}
+
 function resolveWranglerLocalDevWorkerEntrypoint(
   source: Readonly<Record<string, string | undefined>>,
 ): string {
-  return source.NODE_ENV === "test" && source.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1"
+  return usesWranglerLocalDevTestRoutes(source)
     ? "hosted-local-test-index.ts"
     : "index.ts";
 }

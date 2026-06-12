@@ -267,6 +267,11 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
   buildWranglerEnvFileText: vi.fn(() => 'HOSTED_WEB_BASE_URL="http://localhost:3000"'),
   buildWranglerLocalDevConfig: vi.fn(() => ({ name: "murph-hosted" })),
   buildWranglerVarArgs: vi.fn(() => ["--var", "HOSTED_WEB_BASE_URL:http://localhost:3000"]),
+  includesWranglerLocalDevAiBinding: vi.fn(
+    (source: Readonly<Record<string, string | undefined>>) =>
+      !(source.NODE_ENV === "test" && source.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1")
+        && source.MURPH_DEV_SKIP_WORKERS_AI !== "1",
+  ),
   normalizeLocalDatabaseUrl: vi.fn((value: string | undefined) => value ?? "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync"),
   resolveHostedLocalDatabaseUrl: vi.fn((input: {
     databaseUrlOverride?: string | null;
@@ -630,6 +635,59 @@ describe("hosted local dev stack", () => {
       port: 3000,
       protocol: "http",
     });
+  });
+
+  it("drops CLOUDFLARE_API_TOKEN from the wrangler child when the Workers AI binding is active", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    vi.stubEnv("CLOUDFLARE_API_TOKEN", "account-scoped-token");
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(spawnChildProcess).toHaveBeenCalledWith(
+      "cloudflare",
+      "pnpm",
+      expect.arrayContaining(["worker:dev:prepared"]),
+      expect.not.objectContaining({
+        CLOUDFLARE_API_TOKEN: expect.anything(),
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("keeps CLOUDFLARE_API_TOKEN for the wrangler child when MURPH_DEV_SKIP_WORKERS_AI is set", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    vi.stubEnv("CLOUDFLARE_API_TOKEN", "account-scoped-token");
+    vi.stubEnv("MURPH_DEV_SKIP_WORKERS_AI", "1");
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(spawnChildProcess).toHaveBeenCalledWith(
+      "cloudflare",
+      "pnpm",
+      expect.arrayContaining(["worker:dev:prepared"]),
+      expect.objectContaining({
+        CLOUDFLARE_API_TOKEN: "account-scoped-token",
+      }),
+      expect.any(Object),
+    );
   });
 
   it("force-resets local Temporal residue before starting the stack", async () => {

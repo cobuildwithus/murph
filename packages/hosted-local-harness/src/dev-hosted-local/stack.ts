@@ -28,6 +28,7 @@ import {
   buildWranglerEnvFileText,
   buildWranglerLocalDevConfig,
   buildWranglerVarArgs,
+  includesWranglerLocalDevAiBinding,
   resolveHostedLocalDatabaseUrl,
   resolveHostedLocalPersistentCryptoStatePath,
   readOptionalSimpleEnvFile,
@@ -588,6 +589,21 @@ export async function startHostedLocalDevStack(input: {
     }
     throwIfAbortSignalAborted(input.abortSignal);
 
+    // Wrangler prefers CLOUDFLARE_API_TOKEN over OAuth, and account-scoped
+    // tokens cannot open the remote session backing the Workers AI binding,
+    // which makes `wrangler dev` fail at startup. Drop the token from the
+    // wrangler child only; every other tool keeps the inherited env.
+    const wranglerSpawnEnv = { ...(workerProcessEnv ?? workerRuntimeEnv) };
+    if (
+      workerRuntimeEnv !== null
+      && includesWranglerLocalDevAiBinding(wranglerSpawnEnv)
+      && wranglerSpawnEnv.CLOUDFLARE_API_TOKEN
+    ) {
+      delete wranglerSpawnEnv.CLOUDFLARE_API_TOKEN;
+      (input.stderrTarget ?? process.stderr).write(
+        "[cloudflare] Dropping CLOUDFLARE_API_TOKEN for `wrangler dev` so OAuth backs the Workers AI remote session; run `wrangler login` once, or set MURPH_DEV_SKIP_WORKERS_AI=1 to start without Workers AI.\n",
+      );
+    }
     const cloudflareProcess = workerRuntimeEnv === null
       ? null
       : spawnChildProcess("cloudflare", "pnpm", [
@@ -608,8 +624,8 @@ export async function startHostedLocalDevStack(input: {
         "--env-file",
         workerEnvPath,
         ...resolveWranglerDebugArgs(initialEnv),
-        ...buildWranglerVarArgs(workerProcessEnv ?? workerRuntimeEnv),
-      ], workerProcessEnv ?? workerRuntimeEnv, {
+        ...buildWranglerVarArgs(wranglerSpawnEnv),
+      ], wranglerSpawnEnv, {
         pipeOutput: input.pipeOutput,
         stderrTarget: input.stderrTarget,
         stdoutTarget: input.stdoutTarget,

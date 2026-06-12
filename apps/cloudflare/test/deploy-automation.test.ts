@@ -17,21 +17,12 @@ import {
 } from "../scripts/deploy-automation.js";
 import { HOSTED_WORKER_OPTIONAL_SECRET_NAMES } from "../scripts/deploy-automation/worker-secret-names.ts";
 import { renderWorkerSecretsFile } from "../scripts/render-worker-secrets.ts";
+import { parseJsoncObject } from "./helpers/jsonc.js";
 
 afterEach(() => {
   vi.doUnmock("node:fs/promises");
   vi.resetModules();
 });
-
-function parseJsoncObject(rawConfig: string): Record<string, unknown> {
-  return JSON.parse(
-    rawConfig
-      .split("\n")
-      .filter((line) => !line.trimStart().startsWith("//"))
-      .join("\n")
-      .replace(/,\s*([}\]])/gu, "$1"),
-  ) as Record<string, unknown>;
-}
 
 async function importRenderWorkerSecretsWithMockedAccess(
   blockedPath: string,

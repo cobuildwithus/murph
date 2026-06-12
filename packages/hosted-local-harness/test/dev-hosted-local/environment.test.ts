@@ -343,6 +343,42 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBe("hosted-local-r2-secret-key");
   });
 
+  it("fills local R2 presign placeholders for hosted-local test routes without e2e isolation", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {},
+      oidcIdentity,
+      overrides: {
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+        NODE_ENV: "test",
+      },
+    });
+
+    expect(merged.HOSTED_R2_PRESIGN_ACCESS_KEY_ID).toBe("hosted-local-r2-access-key");
+    expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBe("hosted-local-r2-account");
+    expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
+    expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBe("hosted-local-r2-secret-key");
+  });
+
+  it("keeps R2 presign env absent when only one hosted-local test-routes flag is set", () => {
+    for (const overrides of [
+      { NODE_ENV: "test" },
+      { MURPH_HOSTED_LOCAL_TEST_ROUTES: "1" },
+    ]) {
+      const merged = mergeCloudflareLocalEnv({
+        config: localConfig,
+        existing: {},
+        oidcIdentity,
+        overrides,
+      });
+
+      expect(merged.HOSTED_R2_PRESIGN_ACCESS_KEY_ID).toBeUndefined();
+      expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBeUndefined();
+      expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBeUndefined();
+      expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBeUndefined();
+    }
+  });
+
   it("passes hosted-local MinIO endpoint overrides through for dev profile without e2e isolation", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
@@ -1305,6 +1341,42 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(container.image_build_context).toBe("../../workspace/apps/cloudflare");
     expect(smokeContainer.image).toBe(container.image);
     expect(smokeContainer.image_build_context).toBe(container.image_build_context);
+  });
+
+  it("includes the production Worker bindings for the dev profile", () => {
+    const config = buildWranglerLocalDevConfig({});
+
+    expect(config.ai).toEqual({ binding: "AI" });
+    expect(config.send_email).toEqual([{ name: "HOSTED_EMAIL" }]);
+    expect(config.version_metadata).toEqual({ binding: "CF_VERSION_METADATA" });
+  });
+
+  it("omits the Workers AI binding for hosted-local test routes so the fake binding composes", () => {
+    const config = buildWranglerLocalDevConfig({
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+
+    expect(config).not.toHaveProperty("ai");
+    expect(config.send_email).toEqual([{ name: "HOSTED_EMAIL" }]);
+    expect(config.version_metadata).toEqual({ binding: "CF_VERSION_METADATA" });
+  });
+
+  it("omits the Workers AI binding when MURPH_DEV_SKIP_WORKERS_AI is set", () => {
+    const config = buildWranglerLocalDevConfig({
+      MURPH_DEV_SKIP_WORKERS_AI: "1",
+    });
+
+    expect(config).not.toHaveProperty("ai");
+  });
+
+  it("keeps the Workers AI binding when only one hosted-local test-routes flag is set", () => {
+    expect(buildWranglerLocalDevConfig({ NODE_ENV: "test" }).ai).toEqual({
+      binding: "AI",
+    });
+    expect(
+      buildWranglerLocalDevConfig({ MURPH_HOSTED_LOCAL_TEST_ROUTES: "1" }).ai,
+    ).toEqual({ binding: "AI" });
   });
 
   it("uses the hosted-local test Worker entrypoint only when test routes are enabled", () => {
