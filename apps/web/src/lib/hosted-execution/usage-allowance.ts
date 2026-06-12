@@ -68,6 +68,11 @@ export interface HostedAiUsageGateUserNotice {
   message: string;
 }
 
+export interface HostedAiUsageAllowanceLimitCrossing {
+  periodStart: Date;
+  userNotice: HostedAiUsageGateUserNotice;
+}
+
 export interface HostedAiUsageAllowancePricingResult {
   costUsdMicros: bigint;
   counted: boolean;
@@ -231,7 +236,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   now?: Date;
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<HostedAiUsageAllowanceLimitCrossing | null> {
   const now = input.now ?? new Date();
   const period = await ensureHostedAiUsageAllowancePeriodTx({
     at: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
@@ -247,7 +252,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
       record: input.record,
       tx: input.tx,
     });
-    return;
+    return null;
   }
 
   const priced = priceHostedAiUsageForAllowance(input.record);
@@ -269,10 +274,10 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   });
 
   if (accounted.count !== 1 || !priced.counted) {
-    return;
+    return null;
   }
 
-  await incrementHostedAiUsageAllowancePeriodSpendTx({
+  const crossedLimit = await incrementHostedAiUsageAllowancePeriodSpendTx({
     deltaUsdMicros: priced.costUsdMicros,
     memberId: input.memberId,
     now,
@@ -280,6 +285,17 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
     usageAt: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
     tx: input.tx,
   });
+  if (!crossedLimit) {
+    return null;
+  }
+
+  return {
+    periodStart: period.periodStart,
+    userNotice: buildHostedAiUsageGateLimitNotice({
+      billingPlanCode: period.billingPlanCode,
+      limitUsdMicros: period.limitUsdMicros,
+    }),
+  };
 }
 
 async function markHostedAiUsageAllowanceDeniedTx(input: {
@@ -462,6 +478,26 @@ export async function claimHostedAiUsageLimitNotice(input: {
   });
 
   return claimed.count === 1;
+}
+
+export async function releaseHostedAiUsageLimitNotice(input: {
+  memberId: string;
+  periodStart: Date | string;
+  prisma?: HostedAiUsageAllowanceClient;
+  sentAt: Date | string;
+}): Promise<void> {
+  const prisma = input.prisma ?? getPrisma();
+
+  await prisma.hostedAiUsagePeriod.updateMany({
+    where: {
+      limitNoticeSentAt: normalizeHostedAiUsageAllowanceDate(input.sentAt),
+      memberId: input.memberId,
+      periodStart: normalizeHostedAiUsageAllowanceDate(input.periodStart),
+    },
+    data: {
+      limitNoticeSentAt: null,
+    },
+  });
 }
 
 function resolveHostedAiUsageInactiveGateDecision(input: {
@@ -1121,8 +1157,8 @@ async function incrementHostedAiUsageAllowancePeriodSpendTx(input: {
   periodStart: Date;
   tx: Prisma.TransactionClient;
   usageAt: Date;
-}): Promise<void> {
-  const updated = await input.tx.$executeRaw`
+}): Promise<boolean> {
+  const updated = await input.tx.$queryRaw<Array<{ crossed_limit: boolean | null }>>`
     UPDATE "hosted_ai_usage_period"
     SET
       "spent_usd_micros" = "spent_usd_micros" + ${input.deltaUsdMicros},
@@ -1140,11 +1176,14 @@ async function incrementHostedAiUsageAllowancePeriodSpendTx(input: {
       "updated_at" = ${input.now}
     WHERE "member_id" = ${input.memberId}
       AND "period_start" = ${input.periodStart}
+    RETURNING ("blocked_at" = ${input.now}) AS "crossed_limit"
   `;
 
-  if (updated !== 1) {
+  if (updated.length !== 1) {
     throw new Error("Hosted AI usage allowance period was missing during spend accounting.");
   }
+
+  return updated[0]?.crossed_limit === true;
 }
 
 async function lockHostedAiUsageAllowancePeriodTx(input: {

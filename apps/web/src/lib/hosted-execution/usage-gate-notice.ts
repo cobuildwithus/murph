@@ -6,7 +6,9 @@ import { getPrisma } from "../prisma";
 import { sha256Hex } from "../primitives";
 import {
   claimHostedAiUsageLimitNotice,
+  releaseHostedAiUsageLimitNotice,
   type HostedAiUsageGateDecision,
+  type HostedAiUsageGateUserNotice,
 } from "./usage-allowance";
 
 type HostedAiUsageGateNoticeClient = PrismaClient | Prisma.TransactionClient;
@@ -31,9 +33,25 @@ export async function notifyHostedAiUsageGateDeniedForPendingNudge(input: {
     return { status: "not_applicable" };
   }
 
-  const noticeCode = input.decision.userNotice.code;
+  return sendHostedAiUsageLimitNotice({
+    memberId: input.memberId,
+    notice: input.decision.userNotice,
+    periodStart: input.decision.periodStart,
+    prisma: input.prisma,
+  });
+}
+
+export async function sendHostedAiUsageLimitNotice(input: {
+  memberId: string;
+  notice: HostedAiUsageGateUserNotice;
+  periodStart: Date;
+  prisma?: HostedAiUsageGateNoticeClient;
+}): Promise<HostedAiUsageGateDeniedNoticeResult> {
+  const noticeCode = input.notice.code;
+  const prisma = input.prisma ?? getPrisma();
+  let claimSentAt: Date | null = null;
+
   try {
-    const prisma = input.prisma ?? getPrisma();
     const routing = await readHostedMemberHomeLinqRoute({
       memberId: input.memberId,
       prisma,
@@ -42,10 +60,12 @@ export async function notifyHostedAiUsageGateDeniedForPendingNudge(input: {
       return { status: "no_route" };
     }
 
+    claimSentAt = new Date();
     const claimedNotice = await claimHostedAiUsageLimitNotice({
       memberId: input.memberId,
-      periodStart: input.decision.periodStart,
+      periodStart: input.periodStart,
       prisma,
+      sentAt: claimSentAt,
     });
     if (!claimedNotice) {
       return { status: "already_claimed" };
@@ -56,15 +76,32 @@ export async function notifyHostedAiUsageGateDeniedForPendingNudge(input: {
       idempotencyKey: buildHostedAiUsageGateNoticeIdempotencyKey({
         memberId: input.memberId,
         noticeCode,
-        periodStart: input.decision.periodStart,
+        periodStart: input.periodStart,
       }),
-      message: input.decision.userNotice.message,
+      message: input.notice.message,
     });
   } catch (error) {
     console.warn("Hosted AI usage gate notice delivery failed.", {
       errorName: error instanceof Error ? error.name : "unknown",
       noticeCode,
     });
+    // Release the once-per-period claim so a later gate denial retries the
+    // notice instead of suppressing it for the rest of the period. The exact
+    // sentAt match keeps a competing successful claim untouched.
+    if (claimSentAt) {
+      try {
+        await releaseHostedAiUsageLimitNotice({
+          memberId: input.memberId,
+          periodStart: input.periodStart,
+          prisma,
+          sentAt: claimSentAt,
+        });
+      } catch {
+        console.warn("Hosted AI usage gate notice claim release failed.", {
+          noticeCode,
+        });
+      }
+    }
     return { status: "failed" };
   }
 

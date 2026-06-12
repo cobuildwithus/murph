@@ -10,6 +10,7 @@ import {
   claimHostedAiUsageLimitNotice,
   priceHostedAiUsageForAllowance,
   readHostedAiUsageGate,
+  releaseHostedAiUsageLimitNotice,
   resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
 
@@ -164,12 +165,12 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       hostedAiUsageUpdateMany: updateMany,
     });
 
-    await accountHostedAiUsageForAllowanceTx({
+    await expect(accountHostedAiUsageForAllowanceTx({
       memberId: "member_123",
       now: new Date("2026-03-29T12:00:05.000Z"),
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    });
+    })).resolves.toBeNull();
 
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
@@ -184,13 +185,75 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         id: "turn_123.attempt-1",
       },
     }));
-    expect(executeRaw).toHaveBeenCalledOnce();
+    expect(countIncrementCalls(tx)).toBe(1);
+  });
+
+  it("reports the limit crossing with the plan notice when spend first crosses the limit", async () => {
+    const tx = createAllowanceTx({
+      billingPlanCode: "launch_edge_monthly",
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      incrementRows: [{ crossed_limit: true }],
+      limitUsdMicros: 25_000_000n,
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    })).resolves.toEqual({
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      userNotice: {
+        code: "edge_usage_limit_reached",
+        message:
+          "Hey, you've reached your usage limit for the month. Murph will resume when your included allowance resets: https://withmurph.ai/home",
+      },
+    });
+  });
+
+  it("reports the pulse upgrade notice when a pulse member first crosses the limit", async () => {
+    const tx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      incrementRows: [{ crossed_limit: true }],
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    })).resolves.toEqual({
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      userNotice: {
+        code: "pulse_upgrade_edge",
+        message:
+          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+      },
+    });
+  });
+
+  it("does not report a crossing when the period was already blocked", async () => {
+    const tx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      incrementRows: [{ crossed_limit: null }],
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    })).resolves.toBeNull();
   });
 
   it("fails closed when the allowance period disappears before spend is incremented", async () => {
     const tx = createAllowanceTx({
-      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 0),
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      incrementRows: [],
     });
 
     await expect(accountHostedAiUsageForAllowanceTx({
@@ -208,13 +271,13 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 0 })),
     });
 
-    await accountHostedAiUsageForAllowanceTx({
+    await expect(accountHostedAiUsageForAllowanceTx({
       memberId: "member_123",
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    });
+    })).resolves.toBeNull();
 
-    expect(executeRaw).not.toHaveBeenCalled();
+    expect(countIncrementCalls(tx)).toBe(0);
   });
 
   it("marks usage rows as allowance-denied when trial billing state is stale", async () => {
@@ -254,7 +317,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         allowancePricingVersion: "hosted-ai-usage-allowance-denied-2026-05-05",
       }),
     }));
-    expect(executeRaw).not.toHaveBeenCalled();
+    expect(countIncrementCalls(tx)).toBe(0);
     expect(tx.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
   });
 
@@ -265,18 +328,25 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
     });
 
-    await accountHostedAiUsageForAllowanceTx({
+    await expect(accountHostedAiUsageForAllowanceTx({
       memberId: "member_123",
       record: {
         ...BASE_USAGE_RECORD,
         credentialSource: "member",
       },
       tx: tx as never,
-    });
+    })).resolves.toBeNull();
 
-    expect(executeRaw).not.toHaveBeenCalled();
+    expect(countIncrementCalls(tx)).toBe(0);
   });
 });
+
+function countIncrementCalls(tx: { $queryRaw: ReturnType<typeof vi.fn> }): number {
+  return tx.$queryRaw.mock.calls.filter(([sql]) => {
+    const sqlText = Array.isArray(sql) ? sql.join("") : String(sql);
+    return sqlText.includes('"crossed_limit"');
+  }).length;
+}
 
 describe("resolveHostedAiUsageGate", () => {
   it("allows active members while recorded spend is below the period limit", async () => {
@@ -848,12 +918,43 @@ describe("claimHostedAiUsageLimitNotice", () => {
   });
 });
 
+describe("releaseHostedAiUsageLimitNotice", () => {
+  it("clears only a claim with the exact sentAt timestamp", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const prisma = {
+      hostedAiUsagePeriod: {
+        updateMany,
+      },
+    };
+
+    await releaseHostedAiUsageLimitNotice({
+      memberId: "member_123",
+      periodStart: "2026-03-01T00:00:00.000Z",
+      prisma: prisma as never,
+      sentAt: "2026-03-29T12:00:00.000Z",
+    });
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        limitNoticeSentAt: null,
+      },
+      where: {
+        limitNoticeSentAt: new Date("2026-03-29T12:00:00.000Z"),
+        memberId: "member_123",
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      },
+    });
+  });
+});
+
 function createAllowanceTx(input: {
   billingPhase?: string | null;
   billingPlanCode?: string;
   checkoutOffer?: string | null;
   executeRaw: AllowanceExecuteRawMock;
   hostedAiUsageUpdateMany: ReturnType<typeof vi.fn>;
+  incrementRows?: Array<{ crossed_limit: boolean | null }>;
+  limitUsdMicros?: bigint;
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
   trialEndsAt?: Date | null;
@@ -861,21 +962,27 @@ function createAllowanceTx(input: {
 }) {
   return {
     $executeRaw: input.executeRaw,
-    $queryRaw: vi.fn(async () => []),
+    $queryRaw: vi.fn(async (sql: TemplateStringsArray) => {
+      const sqlText = Array.isArray(sql) ? sql.join("") : String(sql);
+      if (sqlText.includes('"crossed_limit"')) {
+        return input.incrementRows ?? [{ crossed_limit: false }];
+      }
+      return [];
+    }),
     hostedAiUsage: {
       updateMany: input.hostedAiUsageUpdateMany,
     },
     hostedAiUsagePeriod: {
       findUniqueOrThrow: vi.fn(async () => ({
         billingPlanCode: input.billingPlanCode ?? "launch_monthly",
-        limitUsdMicros: 10_000_000n,
+        limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
         periodEnd: new Date("2026-04-01T00:00:00.000Z"),
         periodStart: new Date("2026-03-01T00:00:00.000Z"),
         spentUsdMicros: 0n,
       })),
       upsert: vi.fn(async () => ({
         billingPlanCode: input.billingPlanCode ?? "launch_monthly",
-        limitUsdMicros: 10_000_000n,
+        limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
         periodEnd: new Date("2026-04-01T00:00:00.000Z"),
         periodStart: new Date("2026-03-01T00:00:00.000Z"),
         spentUsdMicros: 0n,

@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   claimHostedAiUsageLimitNotice: vi.fn(),
   readHostedMemberHomeLinqRoute: vi.fn(),
+  releaseHostedAiUsageLimitNotice: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   claimHostedAiUsageLimitNotice: mocks.claimHostedAiUsageLimitNotice,
+  releaseHostedAiUsageLimitNotice: mocks.releaseHostedAiUsageLimitNotice,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
@@ -47,6 +49,7 @@ describe("notifyHostedAiUsageGateDeniedForPendingNudge", () => {
       memberId: "member_notice_1",
       periodStart: new Date("2026-04-01T00:00:00.000Z"),
       prisma: {},
+      sentAt: expect.any(Date),
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
       chatId: "chat_notice_1",
@@ -54,6 +57,7 @@ describe("notifyHostedAiUsageGateDeniedForPendingNudge", () => {
       message:
         "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
     });
+    expect(mocks.releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
   });
 
   it("does not claim the usage-period notice when no Linq home route exists", async () => {
@@ -90,12 +94,13 @@ describe("notifyHostedAiUsageGateDeniedForPendingNudge", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("reports failed delivery when the Linq send fails after claiming the notice", async () => {
+  it("releases the claim so a later denial retries when the Linq send fails", async () => {
     mocks.readHostedMemberHomeLinqRoute.mockResolvedValue({
       linqChatId: "chat_notice_1",
     });
     mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
     mocks.sendHostedLinqChatMessage.mockRejectedValue(new Error("boom"));
+    mocks.releaseHostedAiUsageLimitNotice.mockResolvedValue(undefined);
 
     const { notifyHostedAiUsageGateDeniedForPendingNudge } = await import(
       "@/src/lib/hosted-execution/usage-gate-notice"
@@ -106,21 +111,37 @@ describe("notifyHostedAiUsageGateDeniedForPendingNudge", () => {
       prisma: {} as never,
     })).resolves.toEqual({ status: "failed" });
 
-    expect(mocks.readHostedMemberHomeLinqRoute).toHaveBeenCalledWith({
-      memberId: "member_notice_1",
-      prisma: {},
-    });
     expect(mocks.claimHostedAiUsageLimitNotice).toHaveBeenCalledWith({
       memberId: "member_notice_1",
       periodStart: new Date("2026-04-01T00:00:00.000Z"),
       prisma: {},
+      sentAt: expect.any(Date),
     });
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
-      chatId: "chat_notice_1",
-      idempotencyKey: expect.stringMatching(/^ai-usage-gate:[a-f0-9]{32}$/u),
-      message:
-        "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+    const claimedSentAt = mocks.claimHostedAiUsageLimitNotice.mock.calls[0]?.[0]?.sentAt;
+    expect(mocks.releaseHostedAiUsageLimitNotice).toHaveBeenCalledWith({
+      memberId: "member_notice_1",
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      prisma: {},
+      sentAt: claimedSentAt,
     });
+  });
+
+  it("still reports failed delivery when the claim release also fails", async () => {
+    mocks.readHostedMemberHomeLinqRoute.mockResolvedValue({
+      linqChatId: "chat_notice_1",
+    });
+    mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
+    mocks.sendHostedLinqChatMessage.mockRejectedValue(new Error("boom"));
+    mocks.releaseHostedAiUsageLimitNotice.mockRejectedValue(new Error("release boom"));
+
+    const { notifyHostedAiUsageGateDeniedForPendingNudge } = await import(
+      "@/src/lib/hosted-execution/usage-gate-notice"
+    );
+    await expect(notifyHostedAiUsageGateDeniedForPendingNudge({
+      decision: buildDeniedDecision(),
+      memberId: "member_notice_1",
+      prisma: {} as never,
+    })).resolves.toEqual({ status: "failed" });
   });
 
   it("reports failed delivery when the notice claim lookup fails", async () => {

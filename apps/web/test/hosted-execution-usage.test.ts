@@ -1,6 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { recordHostedAiUsageRecords } from "@/src/lib/hosted-execution/usage";
+
+const allowanceMocks = vi.hoisted(() => ({
+  accountHostedAiUsageForAllowanceTx: vi.fn(),
+  sendHostedAiUsageLimitNotice: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  accountHostedAiUsageForAllowanceTx: allowanceMocks.accountHostedAiUsageForAllowanceTx,
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-gate-notice", () => ({
+  sendHostedAiUsageLimitNotice: allowanceMocks.sendHostedAiUsageLimitNotice,
+}));
 
 const BASE_USAGE_RECORD = {
   apiKeyEnv: "OPENAI_API_KEY",
@@ -54,6 +67,118 @@ const BASE_USAGE_RECORD = {
 } as const;
 
 describe("recordHostedAiUsageRecords", () => {
+  beforeEach(() => {
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockReset();
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(null);
+    allowanceMocks.sendHostedAiUsageLimitNotice.mockReset();
+    allowanceMocks.sendHostedAiUsageLimitNotice.mockResolvedValue({ status: "sent" });
+  });
+
+  it("sends one proactive limit notice after accounting reports the first crossing", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue({
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      userNotice: {
+        code: "edge_usage_limit_reached",
+        message: "limit reached",
+      },
+    });
+
+    await expect(recordHostedAiUsageRecords({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).resolves.toMatchObject({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+
+    expect(allowanceMocks.sendHostedAiUsageLimitNotice).toHaveBeenCalledExactlyOnceWith({
+      memberId: "member_123",
+      notice: {
+        code: "edge_usage_limit_reached",
+        message: "limit reached",
+      },
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      prisma,
+    });
+  });
+
+  it("sends the crossing notice once between records and keeps recording when delivery fails", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    const crossing = {
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      userNotice: {
+        code: "pulse_upgrade_edge",
+        message: "limit reached",
+      },
+    };
+    // Only the first record crosses the limit; the second stays under it.
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValueOnce(crossing);
+    allowanceMocks.sendHostedAiUsageLimitNotice.mockResolvedValue({ status: "failed" });
+
+    await expect(recordHostedAiUsageRecords({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [
+        BASE_USAGE_RECORD,
+        {
+          ...BASE_USAGE_RECORD,
+          providerRequestOrdinal: 1,
+          usageId: "turn_123.request-1.attempt-1",
+        },
+      ],
+    })).resolves.toEqual({
+      recordedIds: ["turn_123.attempt-1", "turn_123.request-1.attempt-1"],
+    });
+
+    expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).toHaveBeenCalledTimes(2);
+    expect(allowanceMocks.sendHostedAiUsageLimitNotice).toHaveBeenCalledExactlyOnceWith({
+      memberId: "member_123",
+      notice: crossing.userNotice,
+      periodStart: crossing.periodStart,
+      prisma,
+    });
+    // The notice goes out right after the crossing record's accounting
+    // resolves, before the next record is processed.
+    const accountingOrder = allowanceMocks.accountHostedAiUsageForAllowanceTx.mock.invocationCallOrder;
+    const sendOrder = allowanceMocks.sendHostedAiUsageLimitNotice.mock.invocationCallOrder[0];
+    expect(sendOrder).toBeGreaterThan(accountingOrder[0] ?? Number.POSITIVE_INFINITY);
+    expect(sendOrder).toBeLessThan(accountingOrder[1] ?? Number.NEGATIVE_INFINITY);
+  });
+
+  it("does not send a limit notice when accounting reports no crossing", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+
+    await recordHostedAiUsageRecords({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    });
+
+    expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).toHaveBeenCalledOnce();
+    expect(allowanceMocks.sendHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+  });
+
+  it("does not account allowance or send notices when accounting is disabled", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+
+    await recordHostedAiUsageRecords({
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    });
+
+    expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).not.toHaveBeenCalled();
+    expect(allowanceMocks.sendHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+  });
+
   it("persists sanitized usage metadata without provider debug fields", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const prisma = makeUsagePrisma(hostedAiUsageUpsert);

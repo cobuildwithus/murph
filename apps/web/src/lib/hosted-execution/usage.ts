@@ -9,6 +9,7 @@ import {
 
 import { getPrisma } from "../prisma";
 import { accountHostedAiUsageForAllowanceTx } from "./usage-allowance";
+import { sendHostedAiUsageLimitNotice } from "./usage-gate-notice";
 
 export interface RecordHostedAiUsageResult {
   recordedIds: string[];
@@ -70,7 +71,7 @@ export async function recordHostedAiUsageRecords(input: {
 
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
-    await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
+    const limitCrossing = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
       const storedRecord = await tx.hostedAiUsage.upsert({
         where: {
           id: record.usageId,
@@ -91,14 +92,29 @@ export async function recordHostedAiUsageRecords(input: {
       });
 
       if (input.accountAllowance === true) {
-        await accountHostedAiUsageForAllowanceTx({
+        return accountHostedAiUsageForAllowanceTx({
           memberId,
           record,
           tx,
         });
       }
+
+      return null;
     });
     recordedIds.push(record.usageId);
+
+    if (limitCrossing) {
+      // Best-effort proactive limit notice on the first crossing. The
+      // production route passes a real PrismaClient, so this runs after the
+      // per-record transaction commits; the once-per-period claim inside the
+      // sender dedupes against the gate-denial notice paths.
+      await sendHostedAiUsageLimitNotice({
+        memberId,
+        notice: limitCrossing.userNotice,
+        periodStart: limitCrossing.periodStart,
+        prisma,
+      });
+    }
   }
 
   return {
