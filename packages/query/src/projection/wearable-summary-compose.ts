@@ -201,7 +201,12 @@ function mergeStoredSummaryMetricConflicts<TSummary extends WearableMetricSummar
 
   for (const metricKey of metricKeys) {
     const metric = getSummaryMetric(next, metricKey);
-    if (!metric?.selection.provider) {
+    if (!metric) {
+      continue;
+    }
+
+    const participantProviders = metricParticipantProviders(metric);
+    if (participantProviders.size === 0) {
       continue;
     }
 
@@ -211,16 +216,14 @@ function mergeStoredSummaryMetricConflicts<TSummary extends WearableMetricSummar
         summary: storedSummary,
       }))
       .filter((entry): entry is { metric: WearableResolvedMetric; summary: WearableMetricSummary } =>
-        entry.metric?.selection.provider === metric.selection.provider
+        entry.metric !== null && storedMetricSelfConflicts(entry.metric, participantProviders).length > 0
       );
     if (storedMetrics.length === 0) {
       continue;
     }
 
     const sameProviderConflicts = uniqueStringValues(
-      storedMetrics.flatMap((entry) =>
-        entry.metric.confidence.conflictingProviders.filter((provider) => provider === metric.selection.provider)
-      ),
+      storedMetrics.flatMap((entry) => storedMetricSelfConflicts(entry.metric, participantProviders)),
     );
     if (sameProviderConflicts.length === 0) {
       continue;
@@ -256,6 +259,26 @@ function mergeStoredSummaryMetricConflicts<TSummary extends WearableMetricSummar
     ]),
     summaryConfidence,
   };
+}
+
+function metricParticipantProviders(metric: WearableResolvedMetric): ReadonlySet<string> {
+  return new Set(uniqueStringValues([
+    metric.selection.provider ?? "",
+    ...metric.candidates.map((candidate) => candidate.provider),
+    ...metric.confidence.conflictingProviders,
+  ]));
+}
+
+function storedMetricSelfConflicts(
+  metric: WearableResolvedMetric,
+  participantProviders: ReadonlySet<string>,
+): string[] {
+  const provider = metric.selection.provider;
+  if (!provider || !participantProviders.has(provider)) {
+    return [];
+  }
+
+  return metric.confidence.conflictingProviders.filter((conflictProvider) => conflictProvider === provider);
 }
 
 function getSummaryMetric(

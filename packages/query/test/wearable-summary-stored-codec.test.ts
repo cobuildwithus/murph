@@ -240,6 +240,73 @@ test("compose preserves stored same-public provider conflict evidence", () => {
   assert.equal(composed.sourceHealth.find((summary) => summary.provider === "garmin")?.conflictCount, 1);
 });
 
+test("compose preserves non-selected provider same-public conflict evidence", () => {
+  const date = "2026-05-03";
+  const dataset: WearableDataset = {
+    activitySessionAggregates: [],
+    metricCandidates: [
+      candidate({
+        date,
+        facet: "steps",
+        metric: "steps",
+        provider: "garmin",
+        unit: "count",
+        value: 8_000,
+      }),
+      candidate({
+        date,
+        facet: "steps",
+        metric: "steps",
+        provider: "oura",
+        suffix: ":direct",
+        unit: "count",
+        value: 8_050,
+      }),
+      candidate({
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "oura",
+          sourceType: "ring",
+          version: 1,
+        },
+        date,
+        facet: "steps",
+        metric: "steps",
+        provider: "junction",
+        resourceType: "junction-oura-activity",
+        suffix: ":junction",
+        system: "junction",
+        unit: "count",
+        value: 8_500,
+      }),
+    ],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [],
+    sleepWindows: [],
+  };
+  const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  const composed = composePublicWearableSummaryBundleFromStoredRows({
+    providerFilterWasProvided: false,
+    providers: [],
+    rows,
+  }, {});
+  const activity = composed.activityDays.find((summary) => summary.date === date);
+
+  assert.ok(activity);
+  assert.equal(activity.steps.selection.provider, "garmin");
+  assert.deepEqual(activity.steps.confidence.conflictingProviders, ["oura"]);
+  assert.equal(activity.steps.confidence.level, "medium");
+  assert.equal(
+    activity.steps.confidence.reasons.some((reason) =>
+      reason === "Duplicate evidence from Oura disagreed after source reconciliation."
+    ),
+    true,
+  );
+  assert.equal(activity.summaryConfidence.conflictingMetrics.includes("steps"), true);
+  assert.equal(composed.sourceHealth.find((summary) => summary.provider === "garmin")?.conflictCount, 1);
+  assert.equal(composed.sourceHealth.find((summary) => summary.provider === "oura")?.conflictCount, 1);
+});
+
 test("compose recomputes source health and summary notes after stored conflicts are merged", () => {
   const date = "2026-05-03";
   const dataset: WearableDataset = {
