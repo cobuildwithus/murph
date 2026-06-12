@@ -289,6 +289,10 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
     return null;
   }
 
+  if (!isHostedAiUsageAllowancePeriodActiveAt(period, now)) {
+    return null;
+  }
+
   return {
     periodStart: period.periodStart,
     userNotice: buildHostedAiUsageGateLimitNotice({
@@ -1184,6 +1188,14 @@ async function incrementHostedAiUsageAllowancePeriodSpendTx(input: {
   }
 
   return updated[0]?.crossed_limit === true;
+}
+
+function isHostedAiUsageAllowancePeriodActiveAt(
+  period: HostedAiUsageAllowancePeriod,
+  at: Date,
+): boolean {
+  const time = at.getTime();
+  return period.periodStart.getTime() <= time && time < period.periodEnd.getTime();
 }
 
 async function lockHostedAiUsageAllowancePeriodTx(input: {

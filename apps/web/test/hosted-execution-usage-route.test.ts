@@ -2,7 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ASSISTANT_USAGE_SCHEMA } from "@murphai/hosted-execution/assistant-usage";
 
 const mocks = vi.hoisted(() => ({
-  recordHostedAiUsageRecords: vi.fn(),
+  recordHostedAiUsageRecordsAndSendLimitNotices: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
 }));
 
@@ -11,7 +11,8 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage", () => ({
-  recordHostedAiUsageRecords: mocks.recordHostedAiUsageRecords,
+  recordHostedAiUsageRecordsAndSendLimitNotices:
+    mocks.recordHostedAiUsageRecordsAndSendLimitNotices,
 }));
 
 type HostedExecutionUsageRecordRouteModule = typeof import(
@@ -30,7 +31,7 @@ describe("hosted execution usage record route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
-    mocks.recordHostedAiUsageRecords.mockResolvedValue({
+    mocks.recordHostedAiUsageRecordsAndSendLimitNotices.mockResolvedValue({
       recordedIds: ["turn_123.attempt-1"],
     });
   });
@@ -67,7 +68,7 @@ describe("hosted execution usage record route", () => {
         payloadText: expect.any(String),
       }),
     );
-    expect(mocks.recordHostedAiUsageRecords).toHaveBeenCalledWith({
+    expect(mocks.recordHostedAiUsageRecordsAndSendLimitNotices).toHaveBeenCalledWith({
       accountAllowance: true,
       trustedUserId: "member_123",
       usage: [

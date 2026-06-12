@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { recordHostedAiUsageRecords } from "@/src/lib/hosted-execution/usage";
+import {
+  recordHostedAiUsageRecords,
+  recordHostedAiUsageRecordsAndSendLimitNotices,
+} from "@/src/lib/hosted-execution/usage";
 
 const allowanceMocks = vi.hoisted(() => ({
   accountHostedAiUsageForAllowanceTx: vi.fn(),
@@ -76,7 +79,7 @@ describe("recordHostedAiUsageRecords", () => {
 
   it("sends one proactive limit notice after accounting reports the first crossing", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
-    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    const prisma = makeUsagePrismaClient(hostedAiUsageUpsert);
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue({
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       userNotice: {
@@ -85,7 +88,7 @@ describe("recordHostedAiUsageRecords", () => {
       },
     });
 
-    await expect(recordHostedAiUsageRecords({
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
       prisma: prisma as never,
       trustedUserId: "member_123",
@@ -105,9 +108,9 @@ describe("recordHostedAiUsageRecords", () => {
     });
   });
 
-  it("sends the crossing notice once between records and keeps recording when delivery fails", async () => {
+  it("sends the crossing notice once after recording and keeps the result when delivery fails", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
-    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    const prisma = makeUsagePrismaClient(hostedAiUsageUpsert);
     const crossing = {
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       userNotice: {
@@ -119,7 +122,7 @@ describe("recordHostedAiUsageRecords", () => {
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValueOnce(crossing);
     allowanceMocks.sendHostedAiUsageLimitNotice.mockResolvedValue({ status: "failed" });
 
-    await expect(recordHostedAiUsageRecords({
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
       prisma: prisma as never,
       trustedUserId: "member_123",
@@ -142,12 +145,75 @@ describe("recordHostedAiUsageRecords", () => {
       periodStart: crossing.periodStart,
       prisma,
     });
-    // The notice goes out right after the crossing record's accounting
-    // resolves, before the next record is processed.
+    // The wrapper keeps recording/accounting DB-only, then performs the
+    // external send after the batch's owned transactions have committed.
     const accountingOrder = allowanceMocks.accountHostedAiUsageForAllowanceTx.mock.invocationCallOrder;
     const sendOrder = allowanceMocks.sendHostedAiUsageLimitNotice.mock.invocationCallOrder[0];
     expect(sendOrder).toBeGreaterThan(accountingOrder[0] ?? Number.POSITIVE_INFINITY);
-    expect(sendOrder).toBeLessThan(accountingOrder[1] ?? Number.NEGATIVE_INFINITY);
+    expect(sendOrder).toBeGreaterThan(accountingOrder[1] ?? Number.POSITIVE_INFINITY);
+  });
+
+  it("does not send a limit notice until the recording transaction resolves", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const tx = makeUsagePrisma(hostedAiUsageUpsert);
+    const transactionResolved = vi.fn();
+    const prisma = {
+      ...tx,
+      $transaction: vi.fn(async <T>(run: (transaction: typeof tx) => Promise<T>) => {
+        const result = await run(tx);
+        expect(allowanceMocks.sendHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+        transactionResolved();
+        return result;
+      }),
+    };
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue({
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      userNotice: {
+        code: "edge_usage_limit_reached",
+        message: "limit reached",
+      },
+    });
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).resolves.toEqual({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+
+    expect(transactionResolved).toHaveBeenCalledOnce();
+    expect(allowanceMocks.sendHostedAiUsageLimitNotice).toHaveBeenCalledOnce();
+    const transactionResolvedOrder = transactionResolved.mock.invocationCallOrder[0];
+    const sendOrder = allowanceMocks.sendHostedAiUsageLimitNotice.mock.invocationCallOrder[0];
+    expect(sendOrder).toBeGreaterThan(
+      transactionResolvedOrder ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it("keeps the transaction-compatible recorder DB-only when accounting reports a crossing", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue({
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      userNotice: {
+        code: "edge_usage_limit_reached",
+        message: "limit reached",
+      },
+    });
+
+    await expect(recordHostedAiUsageRecords({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).resolves.toEqual({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+
+    expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).toHaveBeenCalledOnce();
+    expect(allowanceMocks.sendHostedAiUsageLimitNotice).not.toHaveBeenCalled();
   });
 
   it("does not send a limit notice when accounting reports no crossing", async () => {
@@ -654,5 +720,16 @@ function makeUsagePrisma(
     hostedMemberBillingRef: {
       findUnique,
     },
+  };
+}
+
+function makeUsagePrismaClient(
+  upsert: ReturnType<typeof vi.fn>,
+  findUnique = vi.fn(async () => null),
+) {
+  const tx = makeUsagePrisma(upsert, findUnique);
+  return {
+    ...tx,
+    $transaction: vi.fn(async <T>(run: (transaction: typeof tx) => Promise<T>) => run(tx)),
   };
 }

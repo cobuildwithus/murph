@@ -234,6 +234,23 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     });
   });
 
+  it("does not report a proactive crossing for an already-ended allowance period", async () => {
+    const tx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      incrementRows: [{ crossed_limit: true }],
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-04-01T00:00:00.000Z"),
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    })).resolves.toBeNull();
+
+    expect(countIncrementCalls(tx)).toBe(1);
+  });
+
   it("does not report a crossing when the period was already blocked", async () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),

@@ -8,7 +8,10 @@ import {
 } from "@murphai/hosted-execution/assistant-usage";
 
 import { getPrisma } from "../prisma";
-import { accountHostedAiUsageForAllowanceTx } from "./usage-allowance";
+import {
+  accountHostedAiUsageForAllowanceTx,
+  type HostedAiUsageAllowanceLimitCrossing,
+} from "./usage-allowance";
 import { sendHostedAiUsageLimitNotice } from "./usage-gate-notice";
 
 export interface RecordHostedAiUsageResult {
@@ -16,6 +19,16 @@ export interface RecordHostedAiUsageResult {
 }
 
 type HostedAiUsageClient = PrismaClient | Prisma.TransactionClient;
+type HostedAiUsageNoticeClient = Pick<PrismaClient, "$transaction"> & HostedAiUsageClient;
+
+interface RecordHostedAiUsageInternalResult extends RecordHostedAiUsageResult {
+  limitCrossings: HostedAiUsageRecordLimitCrossing[];
+}
+
+interface HostedAiUsageRecordLimitCrossing extends HostedAiUsageAllowanceLimitCrossing {
+  memberId: string;
+}
+
 const HOSTED_AI_USAGE_STRIPE_EXPORT_DISABLED_MESSAGE =
   "Hosted AI usage is recorded locally; Stripe usage metering is not configured.";
 
@@ -65,8 +78,49 @@ export async function recordHostedAiUsageRecords(input: {
   trustedUserId?: string | null;
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageResult> {
+  const result = await recordHostedAiUsageRecordsForAccounting(input);
+  return {
+    recordedIds: result.recordedIds,
+  };
+}
+
+export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
+  accountAllowance?: boolean;
+  prisma?: HostedAiUsageNoticeClient;
+  trustedUserId?: string | null;
+  usage: readonly unknown[];
+}): Promise<RecordHostedAiUsageResult> {
+  const prisma = input.prisma ?? getPrisma();
+  assertHostedAiUsageNoticeClient(prisma);
+
+  const result = await recordHostedAiUsageRecordsForAccounting({
+    ...input,
+    prisma,
+  });
+
+  for (const limitCrossing of result.limitCrossings) {
+    await sendHostedAiUsageLimitNotice({
+      memberId: limitCrossing.memberId,
+      notice: limitCrossing.userNotice,
+      periodStart: limitCrossing.periodStart,
+      prisma,
+    });
+  }
+
+  return {
+    recordedIds: result.recordedIds,
+  };
+}
+
+async function recordHostedAiUsageRecordsForAccounting(input: {
+  accountAllowance?: boolean;
+  prisma?: HostedAiUsageClient;
+  trustedUserId?: string | null;
+  usage: readonly unknown[];
+}): Promise<RecordHostedAiUsageInternalResult> {
   const prisma = input.prisma ?? getPrisma();
   const records = dedupeHostedAiUsageRecords(parseHostedAiUsageRecords(input.usage));
+  const limitCrossings: HostedAiUsageRecordLimitCrossing[] = [];
   const recordedIds: string[] = [];
 
   for (const record of records) {
@@ -92,11 +146,12 @@ export async function recordHostedAiUsageRecords(input: {
       });
 
       if (input.accountAllowance === true) {
-        return accountHostedAiUsageForAllowanceTx({
+        const crossing = await accountHostedAiUsageForAllowanceTx({
           memberId,
           record,
           tx,
         });
+        return crossing ? { ...crossing, memberId } : null;
       }
 
       return null;
@@ -104,22 +159,24 @@ export async function recordHostedAiUsageRecords(input: {
     recordedIds.push(record.usageId);
 
     if (limitCrossing) {
-      // Best-effort proactive limit notice on the first crossing. The
-      // production route passes a real PrismaClient, so this runs after the
-      // per-record transaction commits; the once-per-period claim inside the
-      // sender dedupes against the gate-denial notice paths.
-      await sendHostedAiUsageLimitNotice({
-        memberId,
-        notice: limitCrossing.userNotice,
-        periodStart: limitCrossing.periodStart,
-        prisma,
-      });
+      limitCrossings.push(limitCrossing);
     }
   }
 
   return {
+    limitCrossings,
     recordedIds,
   };
+}
+
+function assertHostedAiUsageNoticeClient(
+  prisma: HostedAiUsageClient,
+): asserts prisma is HostedAiUsageNoticeClient {
+  if (typeof (prisma as { $transaction?: unknown }).$transaction !== "function") {
+    throw new TypeError(
+      "Hosted AI usage limit notice delivery requires a PrismaClient owner.",
+    );
+  }
 }
 
 async function runHostedAiUsageRecordTransaction<T>(
