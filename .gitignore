@@ -85,3 +85,4 @@ scripts/murph-age/
 agent-docs/product-ideas.md
 *.local.md
 *.local.png
+.fdc-work/

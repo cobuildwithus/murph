@@ -79,6 +79,10 @@ import {
 import { registerRecipeCommands } from './commands/recipe.js'
 import { registerProviderCommands } from './commands/provider.js'
 import { registerFoodCommands } from './commands/food.js'
+import {
+  foodLabelBatchSearchResultSchema,
+  foodLabelSearchResultSchema,
+} from './food-labels.js'
 import { registerRouteCommands } from './commands/route.js'
 import { registerKnowledgeCommands } from './commands/knowledge.js'
 import { registerModelCommands } from './commands/model.js'
@@ -1020,6 +1024,16 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['food', 'show'],
         description: 'Show one food by canonical id or slug.',
+      },
+      {
+        path: ['food', 'search-labels'],
+        description: 'Search the hosted food label database from hosted assistant runtime without writing records.',
+        output: foodLabelSearchResultSchema,
+      },
+      {
+        path: ['food', 'search-labels-batch'],
+        description: 'Search multiple hosted food label queries from hosted assistant runtime without writing records.',
+        output: foodLabelBatchSearchResultSchema,
       },
       {
         path: ['food', 'import-json'],

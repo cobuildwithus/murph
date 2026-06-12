@@ -352,7 +352,13 @@ describe("hostedRunnerIntercept", () => {
     expect(serializedLogs).not.toContain("Method not allowed.");
   });
 
-  it("injects data API authorization for hosted supplement label lookups", async () => {
+  it.each([
+    { path: "/api/supplements", query: "creatine", source: "supplement" },
+    { path: "/api/foods", query: "greek%20yogurt", source: "food" },
+  ] as const)("injects data API authorization for hosted $source label lookups", async ({
+    path,
+    query,
+  }) => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       items: [],
     }), {
@@ -367,7 +373,7 @@ describe("hostedRunnerIntercept", () => {
     }) => createActiveRuntimeWriteFenceValidationResult(input));
 
     const response = await hostedRunnerIntercept(
-      new Request("http://murph-data-api.worker/api/supplements?q=creatine&limit=3", {
+      new Request(`http://murph-data-api.worker${path}?q=${query}&limit=3`, {
         headers: {
           authorization: "Bearer user-supplied-token",
           cookie: "session=user-supplied-cookie",
@@ -389,7 +395,7 @@ describe("hostedRunnerIntercept", () => {
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("https://web.example.test/api/supplements?q=creatine&limit=3");
+    expect(forwarded.url).toBe(`https://web.example.test${path}?q=${query}&limit=3`);
     expect(forwarded.redirect).toBe("manual");
     expect(forwarded.headers.get("authorization")).toBe("Bearer data-api-worker-secret");
     expect(forwarded.headers.has("cookie")).toBe(false);
@@ -409,7 +415,7 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
-  it("rejects non-supplement data API paths before upstream fetch", async () => {
+  it("rejects non-label data API paths before upstream fetch", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
     const validateActiveRuntimeWriteFence = vi.fn(async (input: {
@@ -548,7 +554,49 @@ describe("hostedRunnerIntercept", () => {
     });
   });
 
-  it("rejects oversized hosted supplement batch lookup bodies before upstream fetch", async () => {
+  it("allows hosted data API POST bodies above the legacy 8KB cap through 32KB", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      results: [],
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      userId: string;
+    }) => createActiveRuntimeWriteFenceValidationResult(input));
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://murph-data-api.worker/api/foods", {
+        body: "a".repeat(32 * 1024),
+        headers: {
+          "content-type": "text/plain",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        MURPH_DATA_API_KEY: "data-api-worker-secret",
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
+        validateActiveRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.method).toBe("POST");
+    expect(forwarded.url).toBe("https://web.example.test/api/foods");
+    expect(forwarded.headers.get("authorization")).toBe("Bearer data-api-worker-secret");
+    await expect(forwarded.text()).resolves.toHaveLength(32 * 1024);
+  });
+
+  it("rejects hosted data API POST bodies over 32KB before upstream fetch", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
     const validateActiveRuntimeWriteFence = vi.fn(async (input: {
@@ -556,12 +604,10 @@ describe("hostedRunnerIntercept", () => {
     }) => createActiveRuntimeWriteFenceValidationResult(input));
 
     const response = await hostedRunnerIntercept(
-      new Request("http://murph-data-api.worker/api/supplements", {
-        body: JSON.stringify({
-          queries: ["a".repeat(9 * 1024)],
-        }),
+      new Request("http://murph-data-api.worker/api/foods", {
+        body: "a".repeat(32 * 1024 + 1),
         headers: {
-          "content-type": "application/json",
+          "content-type": "text/plain",
         },
         method: "POST",
       }),

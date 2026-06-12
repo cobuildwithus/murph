@@ -4,29 +4,43 @@ import pg, { type Pool as PgPool } from "pg";
 
 const { Pool } = pg;
 
-const SUPPLEMENT_DATABASE_ENV = "MURPH_SUPPLEMENT_DB_URL";
+const LABELS_DATABASE_ENV = "MURPH_LABELS_DB_URL";
+const LEGACY_SUPPLEMENT_DATABASE_ENV = "MURPH_SUPPLEMENT_DB_URL";
 const DEFAULT_POOL_MAX = 3;
-const SUPPLEMENT_BRAND_INDEX_TTL_MS = 10 * 60 * 1000;
-const MAX_SUPPLEMENT_BRAND_SCOPES = 12;
+const DEFAULT_POOL_STATEMENT_TIMEOUT_MS = 8_000;
+const PRODUCT_LABEL_BRAND_INDEX_TTL_MS = 10 * 60 * 1000;
+const MAX_PRODUCT_LABEL_BRAND_SCOPES = 12;
 
-type SupplementsQueryClient = {
+type ProductLabelsTable = "supplements" | "foods";
+type ProductLabelsTableSql = (typeof PRODUCT_LABELS_TABLE_SQL)[ProductLabelsTable];
+
+const PRODUCT_LABELS_TABLE_SQL = {
+  supplements: "supplements",
+  foods: "foods",
+} as const satisfies Record<ProductLabelsTable, string>;
+
+type ProductLabelsQueryClient = {
   query<T>(text: string, values: unknown[]): Promise<{ rows: T[] }>;
 };
 
 let defaultPool: PgPool | null = null;
-let defaultQueriesInstance: ReturnType<typeof createSupplementsQueries> | null = null;
+let defaultSupplementsQueriesInstance: ReturnType<
+  typeof createSupplementsQueries
+> | null = null;
+let defaultFoodsQueriesInstance: ReturnType<typeof createFoodsQueries> | null =
+  null;
 
-type SupplementBrandIndexEntry = {
+type ProductLabelBrandIndexEntry = {
   brand: string;
   normalizedBrand: string;
 };
 
-type SupplementBrandIndexCache = {
+type ProductLabelBrandIndexCache = {
   expiresAt: number;
-  promise: Promise<SupplementBrandIndexEntry[]>;
+  promise: Promise<ProductLabelBrandIndexEntry[]>;
 };
 
-export type SupplementSearchItem = {
+export type ProductLabelSearchItem = {
   id: string;
   dataOrigin: string;
   dataOriginId: string;
@@ -37,32 +51,43 @@ export type SupplementSearchItem = {
   label: unknown;
 };
 
-export type SupplementDetail = SupplementSearchItem;
+export type ProductLabelDetail = ProductLabelSearchItem;
 
-export function createSupplementsQueries(client: SupplementsQueryClient): {
-  getSupplementById: (input: {
+export type SupplementSearchItem = ProductLabelSearchItem;
+export type SupplementDetail = ProductLabelDetail;
+export type FoodSearchItem = ProductLabelSearchItem;
+export type FoodDetail = ProductLabelDetail;
+
+export type ProductLabelsQueries = {
+  getById: (input: {
     id: string;
     includeOffMarket: boolean;
-  }) => Promise<SupplementDetail | null>;
-  getSupplementByUpc: (input: {
+  }) => Promise<ProductLabelDetail | null>;
+  getByUpc: (input: {
     includeOffMarket: boolean;
     upc: string;
-  }) => Promise<SupplementDetail | null>;
-  searchSupplements: (input: {
+  }) => Promise<ProductLabelDetail | null>;
+  search: (input: {
     includeOffMarket: boolean;
     limit: number;
     q: string;
-  }) => Promise<SupplementSearchItem[]>;
-} {
-  let brandIndexCache: SupplementBrandIndexCache | null = null;
+  }) => Promise<ProductLabelSearchItem[]>;
+};
 
-  async function getBrandIndex(): Promise<SupplementBrandIndexEntry[]> {
+export function createProductLabelsQueries(
+  client: ProductLabelsQueryClient,
+  table: ProductLabelsTable,
+): ProductLabelsQueries {
+  const tableSql = productLabelsTableSql(table);
+  let brandIndexCache: ProductLabelBrandIndexCache | null = null;
+
+  async function getBrandIndex(): Promise<ProductLabelBrandIndexEntry[]> {
     const now = Date.now();
 
     if (!brandIndexCache || brandIndexCache.expiresAt <= now) {
       brandIndexCache = {
-        expiresAt: now + SUPPLEMENT_BRAND_INDEX_TTL_MS,
-        promise: loadSupplementBrandIndex(client),
+        expiresAt: now + PRODUCT_LABEL_BRAND_INDEX_TTL_MS,
+        promise: loadProductLabelBrandIndex(client, tableSql),
       };
     }
 
@@ -79,14 +104,14 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
   }
 
   return {
-    async getSupplementById(input) {
+    async getById(input) {
       const id = input.id.trim();
 
-      if (!isSupplementLookupId(id)) {
+      if (!isProductLabelLookupId(id)) {
         return null;
       }
 
-      const { rows } = await client.query<SupplementDetail>(
+      const { rows } = await client.query<ProductLabelDetail>(
         `
         SELECT
           id,
@@ -97,7 +122,7 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
           upc,
           off_market AS "offMarket",
           label
-        FROM supplements
+        FROM ${tableSql}
         WHERE
           id = $1
           AND ($2::boolean OR off_market = false)
@@ -109,7 +134,7 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
       return rows[0] ?? null;
     },
 
-    async getSupplementByUpc(input) {
+    async getByUpc(input) {
       const normalizedUpc = input.upc.replace(/\D/gu, "");
       const upcVariants = buildUpcLookupVariants(normalizedUpc);
 
@@ -117,7 +142,7 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
         return null;
       }
 
-      const { rows } = await client.query<SupplementDetail>(
+      const { rows } = await client.query<ProductLabelDetail>(
         `
         SELECT
           id,
@@ -128,7 +153,7 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
           upc,
           off_market AS "offMarket",
           label
-        FROM supplements
+        FROM ${tableSql}
         WHERE
           upc = ANY($1::text[])
           AND ($2::boolean OR off_market = false)
@@ -146,24 +171,24 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
       return rows[0] ?? null;
     },
 
-    async searchSupplements(input) {
+    async search(input) {
       const q = input.q.trim();
 
       if (!q) {
         return [];
       }
 
-      const brandScopes = findSupplementBrandScopes(await getBrandIndex(), q);
+      const brandScopes = findProductLabelBrandScopes(await getBrandIndex(), q);
 
       if (brandScopes.length > 0) {
-        return await searchBrandScopedSupplements(client, {
+        return await searchBrandScopedProductLabels(client, tableSql, {
           ...input,
           q,
           brandScopes,
         });
       }
 
-      return await searchGenericSupplements(client, {
+      return await searchGenericProductLabels(client, tableSql, {
         ...input,
         q,
       });
@@ -171,15 +196,75 @@ export function createSupplementsQueries(client: SupplementsQueryClient): {
   };
 }
 
-async function searchGenericSupplements(
-  client: SupplementsQueryClient,
+export function createSupplementsQueries(client: ProductLabelsQueryClient): {
+  getSupplementById: (input: {
+    id: string;
+    includeOffMarket: boolean;
+  }) => Promise<SupplementDetail | null>;
+  getSupplementByUpc: (input: {
+    includeOffMarket: boolean;
+    upc: string;
+  }) => Promise<SupplementDetail | null>;
+  searchSupplements: (input: {
+    includeOffMarket: boolean;
+    limit: number;
+    q: string;
+  }) => Promise<SupplementSearchItem[]>;
+} {
+  const queries = createProductLabelsQueries(client, "supplements");
+
+  return {
+    getSupplementById: queries.getById,
+    getSupplementByUpc: queries.getByUpc,
+    searchSupplements: queries.search,
+  };
+}
+
+export function createFoodsQueries(client: ProductLabelsQueryClient): {
+  getFoodById: (input: {
+    id: string;
+    includeOffMarket: boolean;
+  }) => Promise<FoodDetail | null>;
+  getFoodByUpc: (input: {
+    includeOffMarket: boolean;
+    upc: string;
+  }) => Promise<FoodDetail | null>;
+  searchFoods: (input: {
+    includeOffMarket: boolean;
+    limit: number;
+    q: string;
+  }) => Promise<FoodSearchItem[]>;
+} {
+  const queries = createProductLabelsQueries(client, "foods");
+
+  return {
+    getFoodById: queries.getById,
+    getFoodByUpc: queries.getByUpc,
+    searchFoods: queries.search,
+  };
+}
+
+function productLabelsTableSql(table: ProductLabelsTable): ProductLabelsTableSql {
+  switch (table) {
+    case "supplements":
+      return PRODUCT_LABELS_TABLE_SQL.supplements;
+    case "foods":
+      return PRODUCT_LABELS_TABLE_SQL.foods;
+    default:
+      throw new Error("unsupported product labels table");
+  }
+}
+
+async function searchGenericProductLabels(
+  client: ProductLabelsQueryClient,
+  tableSql: ProductLabelsTableSql,
   input: {
     includeOffMarket: boolean;
     limit: number;
     q: string;
   },
-): Promise<SupplementSearchItem[]> {
-  const { rows } = await client.query<SupplementSearchItem>(
+): Promise<ProductLabelSearchItem[]> {
+  const { rows } = await client.query<ProductLabelSearchItem>(
     `
         WITH query AS (
           SELECT
@@ -225,7 +310,7 @@ async function searchGenericSupplements(
                 name ASC,
                 id ASC
             ) AS dedupe_rank
-          FROM supplements, query
+          FROM ${tableSql}, query
           WHERE
             (
               to_tsvector('simple', search_text) @@ query.tsq
@@ -259,16 +344,17 @@ async function searchGenericSupplements(
   return rows;
 }
 
-async function searchBrandScopedSupplements(
-  client: SupplementsQueryClient,
+async function searchBrandScopedProductLabels(
+  client: ProductLabelsQueryClient,
+  tableSql: ProductLabelsTableSql,
   input: {
-    brandScopes: SupplementBrandIndexEntry[];
+    brandScopes: ProductLabelBrandIndexEntry[];
     includeOffMarket: boolean;
     limit: number;
     q: string;
   },
-): Promise<SupplementSearchItem[]> {
-  const { rows } = await client.query<SupplementSearchItem>(
+): Promise<ProductLabelSearchItem[]> {
+  const { rows } = await client.query<ProductLabelSearchItem>(
     `
     WITH query AS (
       SELECT
@@ -291,7 +377,7 @@ async function searchBrandScopedSupplements(
         search_text,
         btrim(regexp_replace(replace(lower(name), '''', ''), '[^a-z0-9]+', ' ', 'g')) AS normalized_name,
         btrim(regexp_replace(replace(lower(brand), '''', ''), '[^a-z0-9]+', ' ', 'g')) AS normalized_brand
-      FROM supplements
+      FROM ${tableSql}
       WHERE
         brand = ANY($4::text[])
         AND ($2::boolean OR off_market = false)
@@ -383,13 +469,14 @@ async function searchBrandScopedSupplements(
   return rows;
 }
 
-async function loadSupplementBrandIndex(
-  client: SupplementsQueryClient,
-): Promise<SupplementBrandIndexEntry[]> {
+async function loadProductLabelBrandIndex(
+  client: ProductLabelsQueryClient,
+  tableSql: ProductLabelsTableSql,
+): Promise<ProductLabelBrandIndexEntry[]> {
   const { rows } = await client.query<{ brand: string | null }>(
     `
     SELECT brand
-    FROM supplements
+    FROM ${tableSql}
     WHERE brand IS NOT NULL AND brand <> ''
     GROUP BY brand
     `,
@@ -398,7 +485,7 @@ async function loadSupplementBrandIndex(
 
   return rows.flatMap((row) => {
     const brand = row.brand ?? "";
-    const normalizedBrand = normalizeSupplementSearchPhrase(brand);
+    const normalizedBrand = normalizeProductLabelSearchPhrase(brand);
 
     if (!normalizedBrand) {
       return [];
@@ -413,11 +500,11 @@ async function loadSupplementBrandIndex(
   });
 }
 
-function findSupplementBrandScopes(
-  brandIndex: SupplementBrandIndexEntry[],
+function findProductLabelBrandScopes(
+  brandIndex: ProductLabelBrandIndexEntry[],
   q: string,
-): SupplementBrandIndexEntry[] {
-  const normalizedQ = normalizeSupplementSearchPhrase(q);
+): ProductLabelBrandIndexEntry[] {
+  const normalizedQ = normalizeProductLabelSearchPhrase(q);
 
   if (!normalizedQ) {
     return [];
@@ -476,11 +563,14 @@ function findSupplementBrandScopes(
         left.brand.localeCompare(right.brand),
     );
 
-  return [...directScopes, ...lineScopes].slice(0, MAX_SUPPLEMENT_BRAND_SCOPES);
+  return [...directScopes, ...lineScopes].slice(
+    0,
+    MAX_PRODUCT_LABEL_BRAND_SCOPES,
+  );
 }
 
 function countQueryTokenOverlap(
-  entry: SupplementBrandIndexEntry,
+  entry: ProductLabelBrandIndexEntry,
   queryTokens: Set<string>,
 ): number {
   let count = 0;
@@ -505,7 +595,7 @@ function containsNormalizedEdgePhrase(haystack: string, needle: string): boolean
   );
 }
 
-function normalizeSupplementSearchPhrase(value: string): string {
+function normalizeProductLabelSearchPhrase(value: string): string {
   return value
     .toLowerCase()
     .replace(/'/gu, "")
@@ -514,7 +604,7 @@ function normalizeSupplementSearchPhrase(value: string): string {
     .replace(/\s+/gu, " ");
 }
 
-function isSupplementLookupId(id: string): boolean {
+function isProductLabelLookupId(id: string): boolean {
   if (id.length > 256) {
     return false;
   }
@@ -545,43 +635,76 @@ export async function searchSupplements(input: {
   limit: number;
   includeOffMarket: boolean;
 }): Promise<SupplementSearchItem[]> {
-  return await defaultQueries().searchSupplements(input);
+  return await defaultSupplementsQueries().searchSupplements(input);
 }
 
 export async function getSupplementById(input: {
   id: string;
   includeOffMarket: boolean;
 }): Promise<SupplementDetail | null> {
-  return await defaultQueries().getSupplementById(input);
+  return await defaultSupplementsQueries().getSupplementById(input);
 }
 
 export async function getSupplementByUpc(input: {
   includeOffMarket: boolean;
   upc: string;
 }): Promise<SupplementDetail | null> {
-  return await defaultQueries().getSupplementByUpc(input);
+  return await defaultSupplementsQueries().getSupplementByUpc(input);
 }
 
-function defaultQueries(): ReturnType<typeof createSupplementsQueries> {
-  defaultQueriesInstance ??= createSupplementsQueries(getDefaultPool());
+export async function searchFoods(input: {
+  q: string;
+  limit: number;
+  includeOffMarket: boolean;
+}): Promise<FoodSearchItem[]> {
+  return await defaultFoodsQueries().searchFoods(input);
+}
 
-  return defaultQueriesInstance;
+export async function getFoodById(input: {
+  id: string;
+  includeOffMarket: boolean;
+}): Promise<FoodDetail | null> {
+  return await defaultFoodsQueries().getFoodById(input);
+}
+
+export async function getFoodByUpc(input: {
+  includeOffMarket: boolean;
+  upc: string;
+}): Promise<FoodDetail | null> {
+  return await defaultFoodsQueries().getFoodByUpc(input);
+}
+
+function defaultSupplementsQueries(): ReturnType<typeof createSupplementsQueries> {
+  defaultSupplementsQueriesInstance ??= createSupplementsQueries(getDefaultPool());
+
+  return defaultSupplementsQueriesInstance;
+}
+
+function defaultFoodsQueries(): ReturnType<typeof createFoodsQueries> {
+  defaultFoodsQueriesInstance ??= createFoodsQueries(getDefaultPool());
+
+  return defaultFoodsQueriesInstance;
 }
 
 function getDefaultPool(): PgPool {
   defaultPool ??= new Pool({
-    connectionString: normalizeSupplementConnectionString(requireSupplementDatabaseUrl()),
+    connectionString: normalizeSupplementConnectionString(requireLabelsDatabaseUrl()),
     max: DEFAULT_POOL_MAX,
+    statement_timeout: DEFAULT_POOL_STATEMENT_TIMEOUT_MS,
   });
 
   return defaultPool;
 }
 
-function requireSupplementDatabaseUrl(): string {
-  const databaseUrl = process.env[SUPPLEMENT_DATABASE_ENV]?.trim();
+function requireLabelsDatabaseUrl(): string {
+  const databaseUrl =
+    process.env[LABELS_DATABASE_ENV]?.trim() ||
+    process.env[LEGACY_SUPPLEMENT_DATABASE_ENV]?.trim();
 
   if (!databaseUrl) {
-    throw new Error(`${SUPPLEMENT_DATABASE_ENV} is required`);
+    throw new Error(
+      `${LABELS_DATABASE_ENV} or ${LEGACY_SUPPLEMENT_DATABASE_ENV} is required`,
+    );
   }
 
   return databaseUrl;

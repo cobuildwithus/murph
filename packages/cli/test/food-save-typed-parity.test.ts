@@ -158,6 +158,138 @@ test('food save guidance teaches quoted repeatable aliases and servings', async 
   }
 })
 
+test('food search-labels calls the hosted data API without local credentials', async () => {
+  const previousHostedRuntimeProcess = process.env.MURPH_HOSTED_RUNTIME_PROCESS
+  process.env.MURPH_HOSTED_RUNTIME_PROCESS = '1'
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+    items: [
+      {
+        id: 'fdc:2259794',
+        dataOrigin: 'usda_branded',
+        dataOriginId: '2259794',
+        name: 'Plain Greek Yogurt',
+        brand: 'Example Dairy',
+        upc: '012345678905',
+        offMarket: false,
+        label: {
+          ingredients: 'Cultured grade A milk.',
+          servingSize: 170,
+          servingSizeUnit: 'g',
+        },
+      },
+    ],
+  }), {
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+    },
+    status: 200,
+  }))
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    const result = await runInProcessJsonCli<{
+      source: string
+      items: Array<{ id: string }>
+    }>(createFoodCli(), [
+      'food',
+      'search-labels',
+      'plain greek yogurt',
+      '--limit',
+      '1',
+    ])
+
+    assert.equal(result.exitCode, null)
+    assert.equal(requireData(result.envelope).source, 'murph-data-api')
+    assert.equal(requireData(result.envelope).items[0]?.id, 'fdc:2259794')
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
+    assert.equal(requestUrl.href, 'http://murph-data-api.worker/api/foods?q=plain+greek+yogurt&limit=1')
+    const init = fetchMock.mock.calls[0]?.[1]
+    assert.equal(init?.headers && 'authorization' in init.headers, false)
+  } finally {
+    vi.unstubAllGlobals()
+    if (previousHostedRuntimeProcess === undefined) {
+      delete process.env.MURPH_HOSTED_RUNTIME_PROCESS
+    } else {
+      process.env.MURPH_HOSTED_RUNTIME_PROCESS = previousHostedRuntimeProcess
+    }
+  }
+})
+
+test('food search-labels-batch calls the hosted data API without local credentials', async () => {
+  const previousHostedRuntimeProcess = process.env.MURPH_HOSTED_RUNTIME_PROCESS
+  process.env.MURPH_HOSTED_RUNTIME_PROCESS = '1'
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+    results: [
+      {
+        query: 'plain greek yogurt',
+        items: [
+          {
+            id: 'fdc:2259794',
+            dataOrigin: 'usda_branded',
+            dataOriginId: '2259794',
+            name: 'Plain Greek Yogurt',
+            brand: 'Example Dairy',
+            upc: '012345678905',
+            offMarket: false,
+            label: {
+              ingredients: 'Cultured grade A milk.',
+              servingSize: 170,
+              servingSizeUnit: 'g',
+            },
+          },
+        ],
+      },
+      {
+        query: 'white rice',
+        items: [],
+      },
+    ],
+  }), {
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+    },
+    status: 200,
+  }))
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    const result = await runInProcessJsonCli<{
+      source: string
+      results: Array<{ query: string; items: Array<{ id: string }> }>
+    }>(createFoodCli(), [
+      'food',
+      'search-labels-batch',
+      '--query',
+      'plain greek yogurt',
+      '--query',
+      'white rice',
+      '--limit',
+      '1',
+    ])
+
+    assert.equal(result.exitCode, null)
+    assert.equal(requireData(result.envelope).source, 'murph-data-api')
+    assert.equal(requireData(result.envelope).results[0]?.items[0]?.id, 'fdc:2259794')
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
+    assert.equal(requestUrl.href, 'http://murph-data-api.worker/api/foods')
+    const init = fetchMock.mock.calls[0]?.[1]
+    assert.equal(init?.method, 'POST')
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      queries: ['plain greek yogurt', 'white rice'],
+      limit: 1,
+      includeOffMarket: false,
+    })
+    assert.equal(init?.headers && 'authorization' in init.headers, false)
+  } finally {
+    vi.unstubAllGlobals()
+    if (previousHostedRuntimeProcess === undefined) {
+      delete process.env.MURPH_HOSTED_RUNTIME_PROCESS
+    } else {
+      process.env.MURPH_HOSTED_RUNTIME_PROCESS = previousHostedRuntimeProcess
+    }
+  }
+})
+
 test('food save payload builder maps every raw food import-json payload field', () => {
   const payload = buildFoodSavePayload({
     alias: ['usual acai bowl'],

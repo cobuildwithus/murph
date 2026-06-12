@@ -70,10 +70,13 @@ const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const DEFAULT_TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file";
 const DEFAULT_WHATSAPP_API_BASE_URL = "https://graph.facebook.com";
 const HOSTED_DATA_API_RUNTIME_BASE_URL = "http://murph-data-api.worker";
-const HOSTED_DATA_API_SUPPLEMENTS_PATH = "/api/supplements";
+const HOSTED_DATA_API_ALLOWED_PATHS = new Set([
+  "/api/foods",
+  "/api/supplements",
+]);
 const HOSTED_DATA_API_RUNTIME_HOST =
   new URL(HOSTED_DATA_API_RUNTIME_BASE_URL).hostname;
-const HOSTED_DATA_API_MAX_POST_BODY_BYTES = 8 * 1024;
+const HOSTED_DATA_API_MAX_POST_BODY_BYTES = 32 * 1024;
 // 16 kHz mono PCM WAV is ~1.9 MiB/min; this covers ~8 minutes of prepared
 // audio while keeping body + base64 + inference payload well inside the
 // Worker isolate memory limit. Keep in sync with the parsers
@@ -594,7 +597,7 @@ async function maybeHandleHostedDataApiRequest(input: {
   if (normalizeProviderHostname(input.url.hostname) !== HOSTED_DATA_API_RUNTIME_HOST) {
     return null;
   }
-  if (input.url.pathname !== HOSTED_DATA_API_SUPPLEMENTS_PATH) {
+  if (!HOSTED_DATA_API_ALLOWED_PATHS.has(input.url.pathname)) {
     return disallowedProviderEgress();
   }
   if (!["GET", "POST"].includes(input.request.method.toUpperCase())) {

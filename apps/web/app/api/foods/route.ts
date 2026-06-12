@@ -1,17 +1,17 @@
 import { timingSafeEqual } from "node:crypto";
 
 import {
-  getSupplementById,
-  getSupplementByUpc,
-  searchSupplements,
+  getFoodById,
+  getFoodByUpc,
+  searchFoods,
 } from "@/src/lib/supplements";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const DATA_API_KEY_ENV = "MURPH_DATA_API_KEY";
-const DEFAULT_SUPPLEMENTS_LIMIT = 1;
-const MAX_SUPPLEMENTS_LIMIT = 50;
+const DEFAULT_FOODS_LIMIT = 1;
+const MAX_FOODS_LIMIT = 50;
 const MAX_BATCH_QUERIES = 50;
 const BATCH_SEARCH_CONCURRENCY = 3;
 const MAX_SEARCH_QUERY_LENGTH = 256;
@@ -64,25 +64,25 @@ function authorizeRequest(request: Request): Response | null {
   try {
     return requireApiKey(request);
   } catch {
-    return json({ error: "supplements_api_unconfigured" }, { status: 500 });
+    return json({ error: "foods_api_unconfigured" }, { status: 500 });
   }
 }
 
-function supplementsApiFailed(error: unknown): Response {
-  console.error("supplements_api_failed", {
+function foodsApiFailed(error: unknown): Response {
+  console.error("foods_api_failed", {
     errorName: error instanceof Error ? error.name : typeof error,
   });
-  return json({ error: "supplements_api_failed" }, { status: 500 });
+  return json({ error: "foods_api_failed" }, { status: 500 });
 }
 
 function parseLimit(value: string | number | null | undefined): number {
-  const parsed = Number(value ?? DEFAULT_SUPPLEMENTS_LIMIT);
+  const parsed = Number(value ?? DEFAULT_FOODS_LIMIT);
 
   if (!Number.isFinite(parsed)) {
-    return DEFAULT_SUPPLEMENTS_LIMIT;
+    return DEFAULT_FOODS_LIMIT;
   }
 
-  return Math.min(Math.max(Math.floor(parsed), 1), MAX_SUPPLEMENTS_LIMIT);
+  return Math.min(Math.max(Math.floor(parsed), 1), MAX_FOODS_LIMIT);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -214,7 +214,7 @@ export async function GET(request: Request): Promise<Response> {
 
   try {
     if (id) {
-      const item = await getSupplementById({
+      const item = await getFoodById({
         id,
         includeOffMarket,
       });
@@ -227,7 +227,7 @@ export async function GET(request: Request): Promise<Response> {
     }
 
     if (upc) {
-      const item = await getSupplementByUpc({
+      const item = await getFoodByUpc({
         upc,
         includeOffMarket,
       });
@@ -247,7 +247,7 @@ export async function GET(request: Request): Promise<Response> {
       return json({ error: "invalid_query" }, { status: 400 });
     }
 
-    const items = await searchSupplements({
+    const items = await searchFoods({
       includeOffMarket,
       limit,
       q,
@@ -255,7 +255,7 @@ export async function GET(request: Request): Promise<Response> {
 
     return json({ items });
   } catch (error) {
-    return supplementsApiFailed(error);
+    return foodsApiFailed(error);
   }
 }
 
@@ -301,7 +301,7 @@ export async function POST(request: Request): Promise<Response> {
       BATCH_SEARCH_CONCURRENCY,
       async (q) => ({
         query: q,
-        items: await searchSupplements({
+        items: await searchFoods({
           includeOffMarket,
           limit,
           q,
@@ -330,6 +330,6 @@ export async function POST(request: Request): Promise<Response> {
       results,
     });
   } catch (error) {
-    return supplementsApiFailed(error);
+    return foodsApiFailed(error);
   }
 }

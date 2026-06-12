@@ -1003,7 +1003,64 @@ test('supplement search-labels-batch schema exposes hosted batch lookup inputs',
   assert.deepEqual(schema.args.required ?? [], [])
   assert.deepEqual(schema.options.required, ['query'])
   assert.equal(schema.options.properties.query?.type, 'array')
-  assert.equal(schema.options.properties.query?.maxItems, 10)
+  assert.equal(schema.options.properties.query?.maxItems, 50)
+  assert.match(
+    String(schema.options.properties.query?.description ?? ''),
+    /Repeat --query/u,
+  )
+  assert.match(
+    String(schema.options.properties.limit?.description ?? ''),
+    /Maximum label matches to return per query\. Defaults to 1/u,
+  )
+})
+
+test('food search-labels schema exposes hosted label lookup inputs', async () => {
+  const schema = JSON.parse(
+    await runSourceCliRaw(['food', 'search-labels', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, { description?: string }>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, { description?: string }>
+    }
+  }
+
+  assert.deepEqual(schema.args.required, ['query'])
+  assert.match(
+    String(schema.args.properties.query?.description ?? ''),
+    /Food product, brand, USDA FDC id, or UPC/u,
+  )
+  assert.match(
+    String(schema.options.properties.limit?.description ?? ''),
+    /Maximum label matches to return\. Defaults to 1/u,
+  )
+})
+
+test('food search-labels-batch schema exposes hosted batch lookup inputs', async () => {
+  const schema = JSON.parse(
+    await runSourceCliRaw(['food', 'search-labels-batch', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, { description?: string }>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, {
+        description?: string
+        items?: unknown
+        maxItems?: number
+        type?: string
+      }>
+      required?: string[]
+    }
+  }
+
+  assert.deepEqual(schema.args.required ?? [], [])
+  assert.deepEqual(schema.options.required, ['query'])
+  assert.equal(schema.options.properties.query?.type, 'array')
+  assert.equal(schema.options.properties.query?.maxItems, 50)
   assert.match(
     String(schema.options.properties.query?.description ?? ''),
     /Repeat --query/u,
