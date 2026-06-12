@@ -470,6 +470,49 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   }, 15_000);
 
+  it("aborts the in-flight presign request when the data-key unwrap fails", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-presign-abort-"));
+    const ref = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 128,
+    });
+    let presignSignalAborted = false;
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot presign abort fetch");
+      if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/data-key/unwrap`)) {
+        await delayWithAbort(50, request.signal);
+        return new Response("unwrap denied", { status: 403 });
+      }
+      if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
+        // Held open far beyond the test budget: only the unwrap-failure abort
+        // can settle this leg.
+        try {
+          await delayWithAbort(30_000, request.signal);
+        } catch (error) {
+          presignSignalAborted = true;
+          throw error;
+        }
+        return new Response("unreachable", { status: 500 });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    try {
+      await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+        durableRoot: path.join(tempRoot, "durable"),
+        ref,
+        scratchRoot: path.join(tempRoot, "scratch"),
+      })).rejects.toThrow(/data-key\/unwrap failed with HTTP 403/);
+
+      expect(presignSignalAborted).toBe(true);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  }, 15_000);
+
   it("sends direct R2 workspace snapshot PUTs with signed metadata headers", async () => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-"));

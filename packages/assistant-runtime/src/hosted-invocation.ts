@@ -94,8 +94,11 @@ export async function runHostedWorkspaceInvocation(
   } finally {
     // Info-level runtime log writes are queued off the reply hot path; flush
     // them before the invocation result commits so a normal container stop
-    // never drops queued diagnostics.
-    await drainHostedRuntimeLogWritesBestEffort();
+    // never drops queued diagnostics. Bounded so a degraded log endpoint
+    // cannot delay result commit / checkpoint / next-wake handoff; on timeout
+    // the remaining writes keep flushing in the background while the warm
+    // container lives on.
+    await drainHostedRuntimeLogWritesBestEffort({ timeoutMs: 2_000 });
   }
 }
 

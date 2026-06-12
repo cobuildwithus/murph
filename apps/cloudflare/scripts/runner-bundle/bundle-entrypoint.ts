@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { access, rm } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { build, type Metafile } from "esbuild";
 
@@ -176,7 +177,7 @@ function assertRunnerEntrypointBundleBoots(input: {
       encoding: "utf8",
       env: {
         ...process.env,
-        RUNNER_ENTRYPOINT_BUNDLE_PROBE_PATH: bundledEntryPath,
+        RUNNER_ENTRYPOINT_BUNDLE_PROBE_PATH: pathToFileURL(bundledEntryPath).href,
       },
       timeout: 60_000,
     },

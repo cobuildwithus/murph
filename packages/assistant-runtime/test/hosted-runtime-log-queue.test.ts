@@ -102,7 +102,7 @@ describe("hosted runtime log write queue", () => {
     expect(drainSettled()).toBe(true);
   });
 
-  it("blocks warn and error writes until queued-ahead entries and their own write are durable", async () => {
+  it("writes warn and error directly, never waiting behind a queued info backlog", async () => {
     const { port, writes } = createControlledLogPort();
 
     const infoSettled = trackSettled(writeHostedRuntimeLogBestEffort({
@@ -115,38 +115,53 @@ describe("hosted runtime log write queue", () => {
       now: () => "2026-06-12T00:00:02.000Z",
       platform: { logPort: port },
     }));
-    const errorSettled = trackSettled(writeHostedRuntimeLogBestEffort({
-      entry: buildQueueLogEntry("error"),
-      now: () => "2026-06-12T00:00:03.000Z",
-      platform: { logPort: port },
-    }));
 
     await flushMicrotasks();
     expect(infoSettled()).toBe(true);
     expect(warnSettled()).toBe(false);
-    expect(errorSettled()).toBe(false);
-    // Enqueue order is preserved: the second write may not start before the
-    // first one settles.
+    // The warn write starts immediately (synchronously, ahead of the
+    // microtask-scheduled info write): the crash-diagnostic tail must not
+    // wait behind backlog. `at` stamps preserve logical ordering for readers.
+    expect(writes).toHaveLength(2);
+    const warnWrite = writes.find((write) => write.entries[0]!.at === "2026-06-12T00:00:02.000Z");
+    const infoWrite = writes.find((write) => write.entries[0]!.at === "2026-06-12T00:00:01.000Z");
+    expect(warnWrite).toBeDefined();
+    expect(infoWrite).toBeDefined();
+
+    // The warn settles on its own write, independent of the info backlog.
+    warnWrite!.resolve();
+    await flushMicrotasks();
+    expect(warnSettled()).toBe(true);
+
+    infoWrite!.resolve();
+    await flushMicrotasks();
+    await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
+  });
+
+  it("bounded drain returns on timeout while queued writes keep flushing", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { port, writes } = createControlledLogPort();
+
+    const infoSettled = trackSettled(writeHostedRuntimeLogBestEffort({
+      entry: buildQueueLogEntry("info"),
+      now: () => "2026-06-12T00:00:06.000Z",
+      platform: { logPort: port },
+    }));
+    await flushMicrotasks();
+    expect(infoSettled()).toBe(true);
     expect(writes).toHaveLength(1);
-    expect(writes[0]!.entries[0]!.at).toBe("2026-06-12T00:00:01.000Z");
+
+    // The queued write never resolves within the bound: the drain must
+    // return (not hang) and warn that writes continue in the background.
+    await drainHostedRuntimeLogWritesBestEffort({ timeoutMs: 20 });
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "Hosted runtime log drain timed out; queued writes continue in the background.",
+      { timeoutMs: 20 },
+    );
 
     writes[0]!.resolve();
     await flushMicrotasks();
-    expect(warnSettled()).toBe(false);
-    expect(errorSettled()).toBe(false);
-    expect(writes).toHaveLength(2);
-    expect(writes[1]!.entries[0]!.at).toBe("2026-06-12T00:00:02.000Z");
-
-    writes[1]!.resolve();
-    await flushMicrotasks();
-    expect(warnSettled()).toBe(true);
-    expect(errorSettled()).toBe(false);
-    expect(writes).toHaveLength(3);
-    expect(writes[2]!.entries[0]!.at).toBe("2026-06-12T00:00:03.000Z");
-
-    writes[2]!.resolve();
-    await flushMicrotasks();
-    expect(errorSettled()).toBe(true);
+    await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
   });
 
   it("swallows queued port-write failures so the chain and later writes never reject", async () => {
@@ -158,8 +173,8 @@ describe("hosted runtime log write queue", () => {
       now: () => "2026-06-12T00:00:04.000Z",
       platform: { logPort: port },
     });
-    const warnSettled = trackSettled(writeHostedRuntimeLogBestEffort({
-      entry: buildQueueLogEntry("warn"),
+    const secondInfoSettled = trackSettled(writeHostedRuntimeLogBestEffort({
+      entry: buildQueueLogEntry("info"),
       now: () => "2026-06-12T00:00:05.000Z",
       platform: { logPort: port },
     }));
@@ -177,13 +192,12 @@ describe("hosted runtime log write queue", () => {
       },
     );
 
-    // The failed info write did not poison the chain: the queued warn write
-    // still runs and resolves.
-    expect(warnSettled()).toBe(false);
+    // The failed info write did not poison the chain: the next queued info
+    // write still runs, and the drain resolves cleanly.
+    expect(secondInfoSettled()).toBe(true);
     expect(writes).toHaveLength(2);
     writes[1]!.resolve();
     await flushMicrotasks();
-    expect(warnSettled()).toBe(true);
     await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
   });
 
