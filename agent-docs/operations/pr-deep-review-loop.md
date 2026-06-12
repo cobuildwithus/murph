@@ -31,7 +31,7 @@ Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit c
 
 ## One Round
 
-1. Fire a new ChatGPT thread (never reuse a thread between rounds; omitting `--chat-url` creates a fresh one):
+1. Fire a new ChatGPT thread (never reuse a thread between rounds; omitting `--chat-url` creates a fresh one). The initial prompt text must include the literal PR URL through `--prompt "PR: <pr-url>"`; do not run a bare preset-only `pnpm review:gpt pr-review --send ...` command and rely on defaults, prior context, browser state, or the GitHub connector to infer the PR:
 
    ```sh
    pnpm review:gpt pr-review \
