@@ -276,6 +276,44 @@ test('sendAssistantMessageLocal records a diagnostic when a preceding answer fai
     .toBe('session-after-preceding')
 })
 
+test('sendAssistantMessageLocal still sends the final reply when preceding delivery throws', async () => {
+  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async () => ({
+    kind: 'succeeded',
+    providerTurn: {
+      onboardingGuidanceInjected: false,
+      codexContinuation: { kind: 'explicit-structured-history' },
+      precedingResponses: ['Answer one.'],
+      response: 'Answer two.',
+      session,
+    },
+  }))
+  mocks.deliverAssistantPrecedingReplies.mockRejectedValueOnce(
+    new Error('outbox intent write failed'),
+  )
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'First question',
+    vault: '/vaults/test',
+  })
+
+  // A thrown segment delivery is diagnostic-only, same as a failed outcome:
+  // the final reply must still be dispatched and the turn must complete.
+  expect(result.response).toBe('Answer two.')
+  expect(result.status).toBe('completed')
+  expect(mocks.recordAssistantDiagnosticEvent.mock.calls.map((call) => call[0]))
+    .toContainEqual(
+      expect.objectContaining({
+        kind: 'delivery.preceding-reply.failed',
+      }),
+    )
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledTimes(1)
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response)
+    .toBe('Answer two.')
+})
+
 test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProviderRequestStarted', async () => {
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 

@@ -738,13 +738,36 @@ export async function sendAssistantMessageLocal(
           turnCreatedAt: currentUserTurn.turnCreatedAt,
           turnId: currentUserTurn.turnId,
         })
-        const precedingDeliveryOutcomes = await deliverAssistantPrecedingReplies({
-          input: currentInput,
-          responses: precedingResponses,
-          session,
-          sharedPlan,
-          turnId: currentUserTurn.turnId,
-        })
+        // Preceding-answer delivery is never fatal: the final reply must
+        // still go out even when a segment send throws (transient outbox or
+        // runtime-state I/O) instead of returning a failed outcome.
+        let precedingDeliveryOutcomes: Awaited<
+          ReturnType<typeof deliverAssistantPrecedingReplies>
+        > = []
+        try {
+          precedingDeliveryOutcomes = await deliverAssistantPrecedingReplies({
+            input: currentInput,
+            responses: precedingResponses,
+            session,
+            sharedPlan,
+            turnId: currentUserTurn.turnId,
+          })
+        } catch (precedingError) {
+          const normalizedPrecedingError =
+            normalizeAssistantDeliveryError(precedingError)
+          await runAssistantTurnBestEffort(() =>
+            recordAssistantDiagnosticEvent({
+              vault: input.vault,
+              component: 'assistant',
+              kind: 'delivery.preceding-reply.failed',
+              level: 'error',
+              message: normalizedPrecedingError.message,
+              code: normalizedPrecedingError.code,
+              sessionId: session.sessionId,
+              turnId: currentUserTurn.turnId,
+            }),
+          )
+        }
         for (const precedingOutcome of precedingDeliveryOutcomes) {
           if (precedingOutcome.kind !== 'failed') {
             continue
