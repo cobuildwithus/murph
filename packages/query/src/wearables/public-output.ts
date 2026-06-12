@@ -193,7 +193,7 @@ export function projectWearableSleepNightPublicSources(night: WearableSleepNight
   const summaryConfidence = {
     ...rawSummaryConfidence,
     notes: rawSummaryConfidence.notes
-      .filter((note) => !isSleepWindowSelectionReason(note))
+      .filter((note) => !isSleepWindowSelectionNote(note))
       .map((note) => projectProviderTextPublicSources(note, sleepProviderTextEntries)),
   };
 
@@ -212,7 +212,7 @@ export function projectWearableSleepNightPublicSources(night: WearableSleepNight
       originalSummaryConfidence: night.summaryConfidence,
       sourceMetrics,
       summaryConfidence,
-      filterOriginalNote: (note) => !isSleepWindowProviderNote(note),
+      filterOriginalNote: (note) => !isSleepWindowSelectionNote(note),
       projectOriginalNote: (note) => projectProviderTextPublicSources(note, sleepProviderTextEntries),
       fallbackNotes: buildPublicSleepWindowNotes(night, sessionMinutes.selection.provider),
     }),
@@ -388,6 +388,10 @@ function projectWearableResolvedMetricPublicSources(
   const publicConflictingProviders = collectPublicConflictingProviders(resolved, selectedCandidate, selectionProvider);
   const sameSourceDisagreement = hasSamePublicSourceDisagreement(resolved, selectedCandidate, selectionProvider);
   const publicAgreeingProviders = collectPublicAgreeingProviders(resolved);
+  const conflictingProviders = uniqueStrings([
+    ...publicConflictingProviders,
+    ...(sameSourceDisagreement && selectionProvider ? [selectionProvider] : []),
+  ]).sort();
 
   return {
     ...resolved,
@@ -398,7 +402,8 @@ function projectWearableResolvedMetricPublicSources(
     })),
     confidence: {
       ...resolved.confidence,
-      conflictingProviders: publicConflictingProviders,
+      conflictingProviders,
+      level: projectPublicMetricConfidenceLevel(resolved.confidence.level, conflictingProviders.length > 0),
       reasons: projectMetricConfidenceReasons({
         candidates: resolved.candidates,
         publicAgreeingProviders,
@@ -468,12 +473,9 @@ function buildPublicSleepWindowNotes(
   ];
 }
 
-function isSleepWindowProviderNote(note: string): boolean {
-  return /\b(?:sleep|nap) windows?\b/iu.test(note);
-}
-
-function isSleepWindowSelectionReason(note: string): boolean {
-  return /^Selected .*\b(?:sleep|nap) window recorded /iu.test(note);
+function isSleepWindowSelectionNote(note: string): boolean {
+  return /^Selected (?:sleep|nap) window from /iu.test(note)
+    || /^Selected .*\b(?:sleep|nap) window recorded /iu.test(note);
 }
 
 interface ProviderTextProjectionEntry {
@@ -645,19 +647,21 @@ function projectMetricConfidenceReasons(input: {
 }): string[] {
   const reasons = input.sourceReasons.flatMap((reason): string[] => {
     if (reason.startsWith("Conflicting values remained from ")) {
+      const projectedConflictReasons: string[] = [];
+
       if (input.publicConflictingProviders.length > 0) {
-        return [
+        projectedConflictReasons.push(
           `Conflicting values remained from ${input.publicConflictingProviders.map(formatProviderName).join(", ")}.`,
-        ];
+        );
       }
 
       if (input.sameSourceDisagreement && input.selectedPublicProvider) {
-        return [
+        projectedConflictReasons.push(
           `Duplicate evidence from ${formatProviderName(input.selectedPublicProvider)} disagreed after source reconciliation.`,
-        ];
+        );
       }
 
-      return [];
+      return projectedConflictReasons;
     }
 
     if (reason.startsWith("Providers agreed within tolerance: ")) {
@@ -669,7 +673,28 @@ function projectMetricConfidenceReasons(input: {
     return [projectMetricEvidenceReasonPublicProviders(reason, input.candidates)];
   });
 
+  if (input.publicConflictingProviders.length > 0) {
+    reasons.push(`Conflicting values remained from ${input.publicConflictingProviders.map(formatProviderName).join(", ")}.`);
+  }
+
+  if (input.sameSourceDisagreement && input.selectedPublicProvider) {
+    reasons.push(
+      `Duplicate evidence from ${formatProviderName(input.selectedPublicProvider)} disagreed after source reconciliation.`,
+    );
+  }
+
   return uniqueStrings(reasons);
+}
+
+function projectPublicMetricConfidenceLevel(
+  level: WearableResolvedMetric["confidence"]["level"],
+  hasPublicConflict: boolean,
+): WearableResolvedMetric["confidence"]["level"] {
+  if (!hasPublicConflict || level === "none" || level === "low") {
+    return level;
+  }
+
+  return "medium";
 }
 
 function projectMetricEvidenceReasonPublicProviders(

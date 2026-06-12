@@ -4731,7 +4731,8 @@ test("runtime wearable summaries read identically from compact and legacy full-f
 
     const compactReads = await readRuntimeSummaries();
     assert.match(compactReads, /"resolution":"fallback"/u);
-    assert.match(compactReads, /"conflictingProviders":\["garmin"\]/u);
+    assert.match(compactReads, /"conflictingProviders":\["garmin","oura"\]/u);
+    assert.match(compactReads, /Duplicate evidence from Oura disagreed after source reconciliation/u);
 
     // Rewrite the stored metric rows to the legacy full form in place. The
     // source manifest and schema version are untouched, so ensureFresh keeps

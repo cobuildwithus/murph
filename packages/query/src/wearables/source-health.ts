@@ -385,11 +385,14 @@ function countConflictsByProvider(
 
   for (const metric of metrics) {
     const selectedProvider = metric.selection.provider;
-    if (selectedProvider && metric.confidence.conflictingProviders.length > 0) {
-      counts.set(selectedProvider, (counts.get(selectedProvider) ?? 0) + 1);
-    }
+    const conflictParticipants = metric.confidence.conflictingProviders.length > 0
+      ? uniqueStrings([
+          ...(selectedProvider ? [selectedProvider] : []),
+          ...metric.confidence.conflictingProviders,
+        ])
+      : [];
 
-    for (const provider of metric.confidence.conflictingProviders) {
+    for (const provider of conflictParticipants) {
       counts.set(provider, (counts.get(provider) ?? 0) + 1);
     }
   }

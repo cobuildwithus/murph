@@ -13,15 +13,28 @@ import {
   type WearableSummaryFilters,
 } from "../wearables.ts";
 import type {
+  WearableActivityDay,
   WearableActivitySessionAggregate,
+  WearableBodyStateDay,
   WearableCandidateSourceFamily,
   WearableDataset,
+  WearableMetricConfidence,
   WearableMetricCandidate,
+  WearableMetricKey,
+  WearableRecoveryDay,
   WearableResolvedMetric,
+  WearableSleepNight,
   WearableSleepWindowCandidate,
+  WearableSummaryConfidence,
   WearableSourceHealthSummary,
 } from "../wearables/types.ts";
-import { formatProviderName } from "../wearables/provider-policy.ts";
+import {
+  ACTIVITY_METRIC_KEYS,
+  BODY_METRIC_KEYS,
+  RECOVERY_METRIC_KEYS,
+  SLEEP_METRIC_KEYS,
+} from "../wearables/types.ts";
+import { formatMetricLabel, formatProviderName } from "../wearables/provider-policy.ts";
 import {
   normalizeWearableProviders,
 } from "./provider-scope.ts";
@@ -122,9 +135,232 @@ function composePublicWearableSummaryBundleFromProviderRows(
 ): ProjectedWearableSummaryBundle {
   const providerBundle = publicWearableSummaryBundleFromRows(rows, filters);
   const dataset = wearableDatasetFromProjectedBundle(providerBundle);
-  const composed = buildWearableSummaryBundleFromDataset(dataset);
+  const composed = mergeStoredMetricConflictEvidence(
+    buildWearableSummaryBundleFromDataset(dataset),
+    providerBundle,
+  );
 
   return projectPublicWearableSummaryBundle(mergeStoredSourceHealthContext(composed, providerBundle.sourceHealth));
+}
+
+function mergeStoredMetricConflictEvidence(
+  bundle: WearableSummaryBundle,
+  stored: ProjectedWearableSummaryBundle,
+): WearableSummaryBundle {
+  return {
+    ...bundle,
+    activityDays: bundle.activityDays.map((summary) =>
+      mergeStoredSummaryMetricConflicts(summary, stored.activityDays, ACTIVITY_METRIC_KEYS)
+    ),
+    bodyStateDays: bundle.bodyStateDays.map((summary) =>
+      mergeStoredSummaryMetricConflicts(summary, stored.bodyStateDays, BODY_METRIC_KEYS)
+    ),
+    recoveryDays: bundle.recoveryDays.map((summary) =>
+      mergeStoredSummaryMetricConflicts(summary, stored.recoveryDays, RECOVERY_METRIC_KEYS)
+    ),
+    sleepNights: bundle.sleepNights.map((summary) =>
+      mergeStoredSummaryMetricConflicts(summary, stored.sleepNights, SLEEP_METRIC_KEYS)
+    ),
+  };
+}
+
+type WearableMetricSummary =
+  | WearableActivityDay
+  | WearableBodyStateDay
+  | WearableRecoveryDay
+  | WearableSleepNight
+  | ProjectedWearableActivitySummary
+  | ProjectedWearableBodyStateSummary
+  | ProjectedWearableRecoverySummary
+  | ProjectedWearableSleepSummary;
+
+function mergeStoredSummaryMetricConflicts<TSummary extends WearableMetricSummary>(
+  summary: TSummary,
+  storedSummaries: readonly WearableMetricSummary[],
+  metricKeys: ReadonlySet<WearableMetricKey>,
+): TSummary {
+  const storedForDate = storedSummaries.filter((stored) => stored.date === summary.date);
+  if (storedForDate.length === 0) {
+    return summary;
+  }
+
+  let changed = false;
+  const next = { ...summary } as TSummary;
+  const storedNotes: string[] = [];
+
+  for (const metricKey of metricKeys) {
+    const metric = getSummaryMetric(next, metricKey);
+    if (!metric?.selection.provider) {
+      continue;
+    }
+
+    const storedMetrics = storedForDate
+      .map((storedSummary) => ({
+        metric: getSummaryMetric(storedSummary, metricKey),
+        summary: storedSummary,
+      }))
+      .filter((entry): entry is { metric: WearableResolvedMetric; summary: WearableMetricSummary } =>
+        entry.metric?.selection.provider === metric.selection.provider
+      );
+    if (storedMetrics.length === 0) {
+      continue;
+    }
+
+    const sameProviderConflicts = uniqueStringValues(
+      storedMetrics.flatMap((entry) =>
+        entry.metric.confidence.conflictingProviders.filter((provider) => provider === metric.selection.provider)
+      ),
+    );
+    if (sameProviderConflicts.length === 0) {
+      continue;
+    }
+
+    setSummaryMetric(next, metricKey, {
+      ...metric,
+      confidence: mergeStoredMetricConfidence(
+        metric.confidence,
+        storedMetrics.map((entry) => entry.metric.confidence),
+        sameProviderConflicts,
+      ),
+    });
+    storedNotes.push(
+      ...storedMetrics.flatMap((entry) =>
+        entry.summary.notes.filter((note) => note.includes("after source reconciliation"))
+      ),
+    );
+    changed = true;
+  }
+
+  if (!changed) {
+    return summary;
+  }
+
+  const summaryConfidence = mergeSummaryMetricConfidence(next, metricKeys);
+  return {
+    ...next,
+    notes: uniqueStringValues([
+      ...next.notes,
+      ...summaryConfidence.notes,
+      ...storedNotes,
+    ]),
+    summaryConfidence,
+  };
+}
+
+function getSummaryMetric(
+  summary: WearableMetricSummary,
+  metricKey: WearableMetricKey,
+): WearableResolvedMetric | null {
+  const value = (summary as Partial<Record<WearableMetricKey, unknown>>)[metricKey];
+  return isWearableResolvedMetric(value) ? value : null;
+}
+
+function setSummaryMetric(
+  summary: WearableMetricSummary,
+  metricKey: WearableMetricKey,
+  metric: WearableResolvedMetric,
+): void {
+  (summary as Partial<Record<WearableMetricKey, WearableResolvedMetric>>)[metricKey] = metric;
+}
+
+function isWearableResolvedMetric(value: unknown): value is WearableResolvedMetric {
+  return typeof value === "object"
+    && value !== null
+    && "confidence" in value
+    && "selection" in value
+    && "metric" in value;
+}
+
+function mergeStoredMetricConfidence(
+  current: WearableMetricConfidence,
+  stored: readonly WearableMetricConfidence[],
+  sameProviderConflicts: readonly string[],
+): WearableMetricConfidence {
+  const conflictingProviders = uniqueStringValues([
+    ...current.conflictingProviders,
+    ...sameProviderConflicts,
+  ]).sort();
+
+  return {
+    ...current,
+    candidateCount: Math.max(current.candidateCount, ...stored.map((confidence) => confidence.candidateCount)),
+    conflictingProviders,
+    exactDuplicateCount: Math.max(
+      current.exactDuplicateCount,
+      ...stored.map((confidence) => confidence.exactDuplicateCount),
+    ),
+    level: mergeStoredMetricConfidenceLevel(current, stored, conflictingProviders.length > 0),
+    reasons: uniqueStringValues([
+      ...current.reasons,
+      ...stored.flatMap((confidence) =>
+        confidence.reasons.filter((reason) => reason.includes("after source reconciliation"))
+      ),
+    ]),
+  };
+}
+
+function mergeStoredMetricConfidenceLevel(
+  current: WearableMetricConfidence,
+  stored: readonly WearableMetricConfidence[],
+  hasConflicts: boolean,
+): WearableMetricConfidence["level"] {
+  if (current.level === "low" || stored.some((confidence) => confidence.level === "low")) {
+    return "low";
+  }
+
+  if (
+    hasConflicts
+    || current.level === "medium"
+    || stored.some((confidence) => confidence.level === "medium")
+  ) {
+    return "medium";
+  }
+
+  return current.level;
+}
+
+function mergeSummaryMetricConfidence(
+  summary: WearableMetricSummary,
+  metricKeys: ReadonlySet<WearableMetricKey>,
+): WearableSummaryConfidence {
+  const metrics = [...metricKeys]
+    .map((metricKey) => [metricKey, getSummaryMetric(summary, metricKey)] as const)
+    .filter((entry): entry is readonly [WearableMetricKey, WearableResolvedMetric] => entry[1] !== null);
+  const selectedMetrics = metrics.filter(([, metric]) => metric.selection.value !== null);
+  const selectedProviders = uniqueStringValues(
+    selectedMetrics
+      .map(([, metric]) => metric.selection.provider)
+      .filter((provider): provider is string => provider !== null && provider.length > 0),
+  );
+  const conflictingMetrics = metrics
+    .filter(([, metric]) => metric.confidence.conflictingProviders.length > 0)
+    .map(([metric]) => metric);
+  const lowConfidenceMetrics = metrics
+    .filter(([, metric]) => metric.confidence.level === "low")
+    .map(([metric]) => metric);
+  const notes = uniqueStringValues([...summary.summaryConfidence.notes]);
+
+  if (conflictingMetrics.length > 0) {
+    notes.push(`Some metrics still conflict across providers: ${conflictingMetrics.map(formatMetricLabel).join(", ")}.`);
+  }
+
+  return {
+    conflictingMetrics: uniqueStringValues([
+      ...summary.summaryConfidence.conflictingMetrics,
+      ...conflictingMetrics,
+    ]),
+    level: lowConfidenceMetrics.length > 0
+      ? "low"
+      : conflictingMetrics.length > 0
+        ? "medium"
+        : summary.summaryConfidence.level,
+    lowConfidenceMetrics: uniqueStringValues([
+      ...summary.summaryConfidence.lowConfidenceMetrics,
+      ...lowConfidenceMetrics,
+    ]),
+    notes: uniqueStringValues(notes),
+    selectedProviders,
+  };
 }
 
 function mergeStoredSourceHealthContext(
@@ -152,14 +388,21 @@ function mergeStoredSourceHealthContext(
   }
 
   const sourceHealth = bundle.sourceHealth.map((summary) => {
+    const storedSummary = storedSourceHealth.find((stored) => stored.provider === summary.provider);
     const diagnosticNotes = diagnosticsByProvider.get(summary.provider);
-    if (!diagnosticNotes || diagnosticNotes.length === 0) {
+
+    if (!storedSummary && (!diagnosticNotes || diagnosticNotes.length === 0)) {
       return summary;
     }
 
     return {
       ...summary,
-      notes: uniqueStringValues([...summary.notes, ...diagnosticNotes]),
+      conflictCount: Math.max(summary.conflictCount, storedSummary?.conflictCount ?? 0),
+      exactDuplicatesSuppressed: Math.max(
+        summary.exactDuplicatesSuppressed,
+        storedSummary?.exactDuplicatesSuppressed ?? 0,
+      ),
+      notes: uniqueStringValues([...summary.notes, ...(diagnosticNotes ?? [])]),
     };
   });
   const composedProviders = new Set(sourceHealth.map((summary) => summary.provider));

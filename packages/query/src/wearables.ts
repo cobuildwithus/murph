@@ -467,13 +467,7 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
     const sleepWindows = sleepWindowsByDate.get(date) ?? [];
     const windowSelection = resolveSleepWindowSelection(sleepWindows);
     const selectedWindow = windowSelection.selection;
-    const sessionMinutes = resolveMetric(
-      "sessionMinutes",
-      selectedWindow
-        ? [buildSleepWindowMetricCandidate(selectedWindow)]
-        : sleepWindows.map((window) => buildSleepWindowMetricCandidate(window)),
-      { metricFamily: "sleep" },
-    );
+    const sessionMinutes = resolveSessionMinutesForSleepWindows(selectedWindow, sleepWindows);
     const directTotalSleepMinutes = resolveMetric(
       "totalSleepMinutes",
       selectSleepMetricCandidates(dateCandidates, "totalSleepMinutes", selectedWindow, sleepWindows),
@@ -615,17 +609,110 @@ function buildPublicSleepWindowConflictNotes(
       && Math.abs(window.durationMinutes - selectedWindow.durationMinutes) > resolveMetricTolerance("sessionMinutes")
     );
 
+  const notes: string[] = [];
+
   if (conflictingPublicProviders.length > 0) {
-    return [
-      `Sleep windows differed across ${conflictingPublicProviders.map(formatProviderName).join(", ")}.`,
-    ];
+    notes.push(`Sleep windows differed across ${conflictingPublicProviders.map(formatProviderName).join(", ")}.`);
   }
 
-  return samePublicProviderConflict
-    ? [
-        `Duplicate sleep-window evidence from ${formatProviderName(selectedPublicProvider)} disagreed after source reconciliation.`,
-      ]
+  if (samePublicProviderConflict) {
+    notes.push(`Duplicate sleep-window evidence from ${formatProviderName(selectedPublicProvider)} disagreed after source reconciliation.`);
+  }
+
+  return notes;
+}
+
+function resolveSessionMinutesForSleepWindows(
+  selectedWindow: WearableSleepWindowCandidate | null,
+  sleepWindows: readonly WearableSleepWindowCandidate[],
+): WearableResolvedMetric {
+  const windowCandidates = sleepWindows.map((window) => buildSleepWindowMetricCandidate(window));
+
+  if (!selectedWindow) {
+    return resolveMetric("sessionMinutes", windowCandidates, { metricFamily: "sleep" });
+  }
+
+  const selectedSessionMinutes = resolveMetric(
+    "sessionMinutes",
+    [buildSleepWindowMetricCandidate(selectedWindow)],
+    { metricFamily: "sleep" },
+  );
+
+  return attachSleepWindowConflictEvidence(selectedSessionMinutes, windowCandidates);
+}
+
+function attachSleepWindowConflictEvidence(
+  resolved: WearableResolvedMetric,
+  windowCandidates: readonly WearableMetricCandidate[],
+): WearableResolvedMetric {
+  if (resolved.selection.value === null) {
+    return resolved;
+  }
+
+  const selectedRecordIds = new Set(resolved.selection.recordIds);
+  const selectedCandidate = windowCandidates.find((candidate) =>
+    candidate.recordIds.some((recordId) => selectedRecordIds.has(recordId))
+  ) ?? windowCandidates.find((candidate) => candidate.provider === resolved.selection.provider)
+    ?? null;
+  const candidates = uniqueMetricCandidates([
+    ...resolved.candidates,
+    ...windowCandidates,
+  ]);
+  const conflictingProviders = selectedCandidate
+    ? uniqueStrings(
+        windowCandidates
+          .filter((candidate) => candidate.candidateId !== selectedCandidate.candidateId)
+          .filter((candidate) =>
+            Math.abs(candidate.value - (resolved.selection.value ?? candidate.value)) > resolveMetricTolerance("sessionMinutes")
+          )
+          .map((candidate) => candidate.provider),
+      ).sort()
     : [];
+  const conflictReasons = conflictingProviders.length > 0
+    ? [`Conflicting values remained from ${conflictingProviders.map(formatProviderName).join(", ")}.`]
+    : [];
+
+  return {
+    ...resolved,
+    candidates,
+    confidence: {
+      ...resolved.confidence,
+      candidateCount: candidates.length,
+      conflictingProviders,
+      level: downgradeConfidenceForConflict(resolved.confidence.level, conflictingProviders.length > 0),
+      reasons: uniqueStrings([
+        ...resolved.confidence.reasons,
+        ...conflictReasons,
+      ]),
+    },
+  };
+}
+
+function uniqueMetricCandidates(candidates: readonly WearableMetricCandidate[]): WearableMetricCandidate[] {
+  const seen = new Set<string>();
+  const unique: WearableMetricCandidate[] = [];
+
+  for (const candidate of candidates) {
+    if (seen.has(candidate.candidateId)) {
+      continue;
+    }
+
+    seen.add(candidate.candidateId);
+    unique.push(candidate);
+  }
+
+  return unique;
+}
+
+function downgradeConfidenceForConflict(
+  level: WearableConfidenceLevel,
+  hasConflict: boolean,
+): WearableConfidenceLevel {
+  if (!hasConflict || level === "none" || level === "low") {
+    return level;
+  }
+
+  return "medium";
 }
 
 function resolveSleepWindowPublicProvider(window: WearableSleepWindowCandidate): string {
