@@ -350,7 +350,56 @@ export const nutritionDataSchema = z
     carbsGrams: numberSchema(0).optional(),
     fatGrams: numberSchema(0).optional(),
     fiberGrams: numberSchema(0).optional(),
+    waterGrams: numberSchema(0).optional(),
   })
+  .strict();
+
+// Bounded micronutrient totals keyed by the documented provider micro fields
+// (Junction meal `micros` minerals/trace-element/vitamin enums). Key suffixes
+// carry the documented unit: grams (sodium/potassium), milligrams, or
+// micrograms (`Mcg`). Biotin and vitamin E ship in the provider enum without a
+// documented unit note; they use the conventional nutrition-label units
+// (biotin mcg, vitamin E mg).
+export const MEAL_MICRONUTRIENT_KEYS = Object.freeze([
+  // minerals
+  "sodiumGrams",
+  "potassiumGrams",
+  "calciumMg",
+  "phosphorusMg",
+  "magnesiumMg",
+  "ironMg",
+  "zincMg",
+  "fluorideMg",
+  "chlorideMg",
+  // trace elements
+  "chromiumMcg",
+  "copperMg",
+  "iodineMcg",
+  "manganeseMg",
+  "molybdenumMcg",
+  "seleniumMcg",
+  // vitamins
+  "vitaminAMcg",
+  "vitaminB1Mg",
+  "riboflavinMg",
+  "niacinMg",
+  "pantothenicAcidMg",
+  "vitaminB6Mg",
+  "biotinMcg",
+  "vitaminB12Mcg",
+  "vitaminCMg",
+  "vitaminDMcg",
+  "vitaminEMg",
+  "vitaminKMcg",
+  "folicAcidMg",
+] as const);
+
+export const mealMicronutrientsSchema = z
+  .object(
+    Object.fromEntries(
+      MEAL_MICRONUTRIENT_KEYS.map((key) => [key, numberSchema(0).optional()]),
+    ) as Record<(typeof MEAL_MICRONUTRIENT_KEYS)[number], z.ZodOptional<ReturnType<typeof numberSchema>>>,
+  )
   .strict();
 
 export const nutritionProvenanceSchema = z
@@ -371,6 +420,7 @@ export const foodNutritionSchema = z
 export const mealNutritionSchema = z
   .object({
     totals: nutritionDataSchema.optional(),
+    micros: mealMicronutrientsSchema.optional(),
     provenance: nutritionProvenanceSchema.optional(),
   })
   .strict();
@@ -2291,6 +2341,8 @@ export type NutritionData = z.infer<typeof nutritionDataSchema>;
 export type NutritionProvenance = z.infer<typeof nutritionProvenanceSchema>;
 export type FoodNutrition = z.infer<typeof foodNutritionSchema>;
 export type MealNutrition = z.infer<typeof mealNutritionSchema>;
+export type MealMicronutrients = z.infer<typeof mealMicronutrientsSchema>;
+export type MealMicronutrientKey = (typeof MEAL_MICRONUTRIENT_KEYS)[number];
 export type ActivityStrengthExercise = z.infer<typeof activityStrengthExerciseSchema>;
 export type WorkoutSetType = z.infer<typeof workoutSetTypeSchema>;
 export type WorkoutExerciseMode = z.infer<typeof workoutExerciseModeSchema>;
