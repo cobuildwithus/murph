@@ -521,15 +521,30 @@ export class RunnerContainer extends Container {
   async smokeHealth(input: HostedExecutionContainerSmokeHealthInput = {}): Promise<HostedExecutionContainerSmokeHealthResult> {
     return await this.withLifecycleLock(async () => {
       const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
+      let smokeStartAttempted = false;
+      let destroyAlreadyRequestedForRecycle = false;
 
       try {
+        const destroyRequestBeforeRecycle = this.lastDestroyRequest;
         const containerSettledForSmoke = await this.stopWarmContainer({
           failClosed: false,
           reason: "deploy-smoke-recycle",
         });
+        destroyAlreadyRequestedForRecycle = destroyRequestBeforeRecycle !== null
+          || this.lastDestroyRequest !== destroyRequestBeforeRecycle;
         if (!containerSettledForSmoke) {
+          // If recycle failed before it could request destroy, make one
+          // cleanup attempt. If destroy was already requested, avoid issuing a
+          // duplicate destroy while the platform may still be settling it.
+          if (!destroyAlreadyRequestedForRecycle) {
+            await this.stopWarmContainer({
+              failClosed: false,
+              reason: "deploy-smoke-cleanup",
+            });
+          }
           throw new Error("Hosted runner container smoke could not recycle the existing shell.");
         }
+        smokeStartAttempted = true;
         await this.ensureSmokeContainerReady(readyTimeoutMs, {
           forceColdStart: true,
         });
@@ -578,10 +593,12 @@ export class RunnerContainer extends Container {
           status: response.status,
         };
       } finally {
-        await this.stopWarmContainer({
-          failClosed: false,
-          reason: "deploy-smoke-cleanup",
-        });
+        if (smokeStartAttempted) {
+          await this.stopWarmContainer({
+            failClosed: false,
+            reason: "deploy-smoke-cleanup",
+          });
+        }
       }
     });
   }

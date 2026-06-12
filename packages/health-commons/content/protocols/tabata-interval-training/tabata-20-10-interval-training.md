@@ -542,6 +542,7 @@ expectedSignalDescriptions:
     expected: Could trend lower
     expectedDirection: down_or_stable
     description: "Aerobic power and stroke volume adapt, letting each beat move more blood and lowering the pulse needed at rest."
+    displayValue: "Up to 3 bpm lower"
     estimatedChange:
       kind: absolute
       low: -3
@@ -584,6 +585,7 @@ expectedSignalDescriptions:
     expected: Could trend lower
     expectedDirection: down_or_stable
     description: "Repeated vigorous aerobic work improves vessel relaxation, reducing resistance against each heartbeat."
+    displayValue: "Up to 4 mmHg lower"
     estimatedChange:
       kind: absolute
       low: -4

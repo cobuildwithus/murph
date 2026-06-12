@@ -153,6 +153,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:sleep-onset-latency
   description: "Moving caffeine earlier reduces residual adenosine blockade and stimulant arousal near bedtime, letting sleep pressure appear sooner."
   expected: May shorten
+  displayValue: "5-15 min faster"
   estimatedChange:
     kind: absolute
     low: -15
@@ -190,6 +191,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:resting-heart-rate
   description: "Lower nighttime stimulation and smoother sleep reduce sympathetic load, lowering overnight resting pulse."
   expected: Could trend lower
+  displayValue: "Up to 2 bpm lower"
   estimatedChange:
     kind: absolute
     low: -2
@@ -202,6 +204,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:morning-blood-pressure
   description: "Less residual caffeine lowers vascular tone in sensitive users, reducing morning pressure after late-dose exposure."
   expected: Could trend lower
+  displayValue: "Up to 4 mmHg lower"
   estimatedChange:
     kind: absolute
     low: -4

@@ -208,6 +208,7 @@ expectedSignalDescriptions:
     description: "Monacolin K inhibits liver cholesterol synthesis, increasing LDL-receptor clearance and pulling LDL particles out of blood."
     expected: "Likely lower"
     expectedDirection: down
+    displayValue: "20-40 mg/dL lower"
     estimatedChange:
       kind: "absolute"
       low: -40
@@ -222,6 +223,7 @@ expectedSignalDescriptions:
     description: "Each LDL-related particle carries one ApoB; receptor-driven particle clearance lowers ApoB alongside LDL particles."
     expected: "Could fall"
     expectedDirection: down
+    displayValue: "10-25% lower"
     estimatedChange:
       kind: "relative_percent"
       low: -25
@@ -236,6 +238,7 @@ expectedSignalDescriptions:
     description: "Non-HDL-C falls when LDL and other ApoB-containing particles clear faster while HDL stays stable."
     expected: "Could fall"
     expectedDirection: down
+    displayValue: "20-40 mg/dL lower"
     estimatedChange:
       kind: "absolute"
       low: -40
@@ -250,6 +253,7 @@ expectedSignalDescriptions:
     description: "LDL-C makes up much of total cholesterol, so LDL clearance pulls total cholesterol down too."
     expected: "Likely lower"
     expectedDirection: down
+    displayValue: "25-45 mg/dL lower"
     estimatedChange:
       kind: "absolute"
       low: -45
@@ -264,6 +268,7 @@ expectedSignalDescriptions:
     description: "Lower liver cholesterol synthesis reduces VLDL assembly and secretion, lowering fasting triglyceride traffic."
     expected: "May decrease"
     expectedDirection: down
+    displayValue: "5-25 mg/dL lower"
     estimatedChange:
       kind: "absolute"
       low: -25

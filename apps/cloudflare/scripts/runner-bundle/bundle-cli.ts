@@ -4,39 +4,17 @@ import path from "node:path";
 
 import { build, type Metafile } from "esbuild";
 
+import {
+  RUNNER_BUNDLE_SHARED_EXTERNALS,
+  RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS,
+} from "./bundle-shared.js";
 import { buildPortableNodeBinWrapper } from "./runtime-shape.js";
 
-// Externals resolve from the installed node_modules at runtime instead of
-// being inlined into the bundle:
-// - ink/react/react-devtools-core: the interactive chat/setup UI stack. ink
-//   drags yoga-layout (top-level-await WASM) into the graph, and react must
-//   stay external alongside it so the lazy UI path never sees two React
-//   instances (external ink resolving installed react while murph UI code
-//   uses a bundled copy would break hooks dispatch).
-// - sharp/zxing-wasm: native binaries and WASM assets resolved relative to
-//   their own package directories; bundling their JS would detach it from
-//   those assets.
-const VAULT_CLI_BUNDLE_EXTERNALS = [
-  "ink",
-  "react",
-  "react/*",
-  "react-devtools-core",
-  "sharp",
-  "zxing-wasm",
-];
-
-// Source-path markers that must never appear in the bundle's inputs. Guards
-// the externals list against drift: a newly added import path that drags one
-// of these packages into the bundle fails the assembly instead of shipping a
-// duplicate runtime copy.
-const VAULT_CLI_BUNDLE_FORBIDDEN_INPUT_MARKERS = [
-  "/ink/",
-  "/react/",
-  "/react-devtools-core/",
-  "/sharp/",
-  "/yoga-layout/",
-  "/zxing-wasm/",
-];
+// Externals and drift-guard markers are shared with the container-entrypoint
+// bundler; the rationale lives on the lists in bundle-shared.ts.
+const VAULT_CLI_BUNDLE_EXTERNALS = RUNNER_BUNDLE_SHARED_EXTERNALS;
+const VAULT_CLI_BUNDLE_FORBIDDEN_INPUT_MARKERS =
+  RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS;
 
 const VAULT_CLI_BUNDLE_DIRECTORY_NAME = ".bundle";
 
@@ -55,14 +33,13 @@ const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 // Known divergence the parity battery cannot reach (it would need a live
 // codex session): assistant-engine resolves two assets relative to its own
 // module location, which differs inside chunks — `resolveAssistantSkillsRoot`
-// lands on `@murphai/murph/skills` (absent) instead of
-// `@murphai/assistant-engine/skills`, and the prebuilt CLI surface contract
-// path misses, silently falling back to runtime generation. Hosted production
-// is unaffected (the runtime runs the engine unbundled via
-// `dist/container-entrypoint.js`); only an in-container `vault-cli assistant
-// run` through the bundled wrapper would hit these, degrading softly. If that
-// path ever becomes load-bearing, make those resolvers honor env overrides
-// before relying on the bundle.
+// and the prebuilt CLI surface contract path would land inside the bundle
+// directory. In the hosted runner image both are pinned to the installed
+// engine package via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`,
+// `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`), which covers this
+// bundled vault-cli and the bundled container entrypoint alike. Outside the
+// image (no env pins) the bundled CLI still degrades softly to runtime
+// generation / the package fallback paths.
 
 // Bundled and unbundled binaries must produce byte-identical output on the
 // discovery surfaces and on a representative scoped command (which exercises
@@ -76,6 +53,9 @@ const VAULT_CLI_BUNDLE_PARITY_PROBES: ReadonlyArray<readonly string[]> = [
   ["--llms-full", "--format", "json"],
   ["wearables", "day", "2026-01-01", "--format", "json"],
   ["meal", "totals", "--from", "2026-01-01", "--to", "2026-01-01", "--format", "json"],
+  // Reads health-commons generated artifacts through the external runtime
+  // package; catches asset-relative resolution breaking inside the bundle.
+  ["commons", "protocol", "list", "--query", "sauna", "--limit", "3", "--format", "json"],
 ];
 
 export async function bundleInstalledVaultCliBinary(

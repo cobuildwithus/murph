@@ -254,6 +254,7 @@ expectedSignalDescriptions:
     expected: Could trend lower
     expectedDirection: down_or_stable
     protocolProminence: focus
+    displayValue: "Up to 8 mmHg lower"
     estimatedChange:
       kind: absolute
       low: -8
