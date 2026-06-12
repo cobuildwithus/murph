@@ -355,7 +355,7 @@ function resolvePublicSourceProvider(
     externalRef: "externalRef" in candidate ? candidate.externalRef : null,
     provider: candidate.provider,
   }, {
-    useSourceInstanceFallback: false,
+    suppressJunctionSourceInstanceFallback: true,
   });
 }
 

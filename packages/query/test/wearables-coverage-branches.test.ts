@@ -51,6 +51,7 @@ import {
   resourceTypeScore,
   sourceFamilyScore,
 } from "../src/wearables/provider-policy.ts";
+import { resolveWearablePublicSourceProvider } from "../src/wearables/origin.ts";
 import {
   emptyMetricSelection,
   resolveMetric,
@@ -315,6 +316,25 @@ test("shared and provider-policy helpers normalize and rank wearable evidence de
   assert.equal(resolveMetricTolerance("weightKg"), 0.2);
   assert.equal(resolveMetricTolerance("bmi"), 0.1);
   assert.equal(resolveMetricTolerance("dayStrain"), 0.5);
+
+  assert.equal(resolveWearablePublicSourceProvider({
+    dataOrigin: {
+      aggregatorProvider: "partner_hub",
+      sourceInstanceId: "partner-source-a",
+      version: 1,
+    },
+    externalRef: makeExternalRef({ system: "junction" }),
+    provider: "junction",
+  }, { suppressJunctionSourceInstanceFallback: true }), "partner-source-a");
+  assert.equal(resolveWearablePublicSourceProvider({
+    dataOrigin: {
+      aggregatorProvider: "junction",
+      sourceInstanceId: "source-junction-unmapped-steps",
+      version: 1,
+    },
+    externalRef: makeExternalRef({ system: "junction" }),
+    provider: "junction",
+  }, { suppressJunctionSourceInstanceFallback: true }), "unknown");
 });
 
 test("dedupe, selection, confidence, and summary helpers preserve deterministic branches", () => {

@@ -782,7 +782,7 @@ function resolvePublicSourceProvider(candidate: WearableMetricCandidate): string
     externalRef: candidate.externalRef,
     provider: candidate.provider,
   }, {
-    useSourceInstanceFallback: false,
+    suppressJunctionSourceInstanceFallback: true,
   });
 }
 

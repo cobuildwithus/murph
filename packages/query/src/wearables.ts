@@ -721,7 +721,7 @@ function resolveSleepWindowPublicProvider(window: WearableSleepWindowCandidate):
     externalRef: window.externalRef,
     provider: window.provider,
   }, {
-    useSourceInstanceFallback: false,
+    suppressJunctionSourceInstanceFallback: true,
   });
 }
 

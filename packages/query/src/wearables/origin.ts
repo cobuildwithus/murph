@@ -14,6 +14,7 @@ export function resolveWearablePublicSourceProvider(input: {
   provider?: string | null;
 }, options: {
   useSourceInstanceFallback?: boolean;
+  suppressJunctionSourceInstanceFallback?: boolean;
 } = {}): string {
   return canonicalizeDeviceProviderSlug(resolveRawWearableSourceProvider(input, options));
 }
@@ -24,6 +25,7 @@ function resolveRawWearableSourceProvider(input: {
   provider?: string | null;
 }, options: {
   useSourceInstanceFallback?: boolean;
+  suppressJunctionSourceInstanceFallback?: boolean;
 }): string {
   const originSourceProvider = normalizeWearableOriginSourceSlug(input.dataOrigin?.sourceProviderSlug);
   if (originSourceProvider && originSourceProvider !== "junction") {
@@ -42,7 +44,11 @@ function resolveRawWearableSourceProvider(input: {
 
   if (options.useSourceInstanceFallback ?? true) {
     const sourceInstanceId = normalizeWearableOriginSourceSlug(input.dataOrigin?.sourceInstanceId);
-    if (sourceInstanceId) {
+    const aggregatorProvider = normalizeWearableOriginSourceSlug(input.dataOrigin?.aggregatorProvider);
+    if (
+      sourceInstanceId
+      && !(options.suppressJunctionSourceInstanceFallback && aggregatorProvider === "junction")
+    ) {
       return sourceInstanceId;
     }
   }
