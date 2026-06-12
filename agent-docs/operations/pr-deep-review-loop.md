@@ -1,9 +1,10 @@
 # PR Deep-Review Loop
 
-Last verified: 2026-06-11
+Last verified: 2026-06-12
 
-An external deep-review loop that runs after the repo-required completion workflow, on PR-lane work.
+Required external deep-review loop that runs after the repo-required completion workflow, on PR-lane work.
 It is additive: it never satisfies, replaces, or reorders the required completion audits in `agent-docs/operations/completion-workflow.md`.
+For non-trivial PR-lane work, do not call the PR good to merge until this loop has passed.
 
 ## When It Runs
 
@@ -12,9 +13,9 @@ Run the loop when all of the following hold:
 1. The task used the worktree/PR lane and a PR is open.
 2. All routed completion audits passed and the scoped commit is pushed.
 3. The PR CI checks are green (`gh pr checks <pr>`).
-4. The user has not opted out for this task.
+4. The user has not explicitly opted out in the current task.
 
-Skip it for docs/process-only PRs and trivial copy-only changes unless the user asks for it.
+Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit current-task user opt-out.
 
 ## One Round
 
@@ -27,13 +28,30 @@ Skip it for docs/process-only PRs and trivial copy-only changes unless the user 
      --response-file audit-packages/pr-<number>-round-<k>.md
    ```
 
-   Run it as a background task and resume when the process exits. Do not override `--model`, `--thinking`, or the connector: the defaults (GPT Extended Pro, GitHub connector, connector-only context with no zip artifacts) are the intended configuration.
+   Run it as a background task and resume when the process exits. Use GPT-5.5 Pro / Pro Extended. Do not downgrade to non-Pro models, lower reasoning, or a different connector when the Pro run is slow or sticky; retry on Pro in a fresh thread instead. The repo defaults (`gpt-5.5-pro`, GitHub connector, connector-only context with no zip artifacts) are the intended configuration.
 2. When the response lands, verify every finding and suggested change against the actual code before acting, per the evidence-before-fix hard rule in `AGENTS.md`. Classify each as:
    - **Accepted bug/edge case** — confirmed real with code-path evidence or a focused reproduction.
    - **Accepted simplification** — the change removes more complexity than it adds and preserves behavior and invariants.
    - **Rejected** — wrong, already handled, speculative, or the proposed fix introduces more complexity than necessary. Note rejections briefly with the reason.
 3. Fix all accepted findings, run the verification required by `agent-docs/operations/verification-and-runtime.md` for the touched owners, and push to the PR branch.
 4. Wait for PR CI to go green again before starting the next round.
+
+## Base-Update-Only Exception
+
+If a round has already reached zero accepted findings and the PR later needs to
+be updated only because the base branch moved, do not start another external
+review round just for that base update.
+
+This exception applies only when the post-review change is a normal merge or
+rebase of the PR base branch with no manual conflict resolution, new feature
+work, review finding fix, or behavior/test/config/doc edit beyond the base
+update itself. After the update, wait for PR CI to go green on the new head and
+then continue the merge path.
+
+If the base update requires manual conflict resolution or any non-base-update
+change, treat that as a normal PR-head change: run required verification for the
+touched surface, push it, wait for CI, and then use the ordinary review-loop
+rules.
 
 ## Stop Condition
 

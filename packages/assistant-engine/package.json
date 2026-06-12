@@ -55,6 +55,10 @@
       "types": "./dist/assistant-skill-assets.d.ts",
       "default": "./dist/assistant-skill-assets.js"
     },
+    "./assistant-skill-env": {
+      "types": "./dist/assistant-skill-env.d.ts",
+      "default": "./dist/assistant-skill-env.js"
+    },
     "./assistant-service": {
       "types": "./dist/assistant-service.d.ts",
       "default": "./dist/assistant-service.js"

@@ -6,8 +6,10 @@ import {
   resolveAssistantModelBehaviorProfile,
 } from '../src/assistant/model-behavior.js'
 import {
+  buildAssistantNotificationDecisionSystemPromptLayers,
   buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
   buildAssistantSystemPrompt,
+  buildAssistantSystemPromptLayers,
   buildAssistantSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
   type AssistantNotificationDecisionSystemPromptInput,
@@ -554,6 +556,99 @@ describe('assistant user-facing wording guidance', () => {
 })
 
 describe('assistant system prompt cache stability', () => {
+  it('partitions thread-stable context away from per-turn Codex context', () => {
+    const layers = buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
+      assistantContextSnapshotPrompt: 'Layer partition assistant context snapshot.',
+      currentLocalDate: '2026-04-15',
+      currentTimeZone: 'Asia/Kuala_Lumpur',
+      murphProductBaseUrl: 'http://localhost:3000',
+      onboardingGuidance: true,
+      turnTrigger: 'automation-cron',
+    }))
+
+    const stablePrefix = [
+      layers.staticCacheableCorePrompt,
+      layers.stableRouteCapabilityPrompt,
+    ].join('\n\n')
+
+    expect(layers.prompt.slice(0, layers.dynamicContextStartsAfterStaticCore)).toBe(
+      stablePrefix,
+    )
+    expect(stablePrefix).not.toContain('Layer partition assistant context snapshot.')
+    expect(stablePrefix).not.toContain('Asia/Kuala_Lumpur')
+    expect(stablePrefix).not.toContain('Murph onboarding:')
+
+    expect(layers.threadContextPrompt).toContain(
+      "The user's canonical timezone for this vault is Asia/Kuala_Lumpur.",
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'In user-facing prose, refer to dates with a month name and day',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'Current Murph product base URL for user-facing app links: http://localhost:3000',
+    )
+    expect(layers.threadContextPrompt).not.toContain(
+      'Layer partition assistant context snapshot.',
+    )
+    expect(layers.threadContextPrompt).toContain('Answer the human request directly.')
+    expect(layers.threadContextPrompt).toContain(
+      'Before sending any user-facing reply, quickly scan the visible answer for forbidden link and source formatting',
+    )
+    expect(layers.threadContextPrompt).toContain('Murph onboarding:')
+    expect(layers.threadContextPrompt).not.toContain(
+      "Today's date for the user is April 15, 2026.",
+    )
+    expect(layers.threadContextPrompt).not.toContain('Execution context:')
+
+    expect(layers.dynamicTurnContextPrompt).toBe(`Today's date for the user is April 15, 2026.
+
+Layer partition assistant context snapshot.
+
+Execution context:
+- This turn was triggered by an existing scheduled automation run.
+- The automation already exists and is active.
+- Treat the user prompt as the execution instructions for this scheduled run.`)
+    expect(layers.dynamicTurnContextPrompt).not.toContain('Asia/Kuala_Lumpur')
+    expect(layers.dynamicTurnContextPrompt).toContain(
+      'Layer partition assistant context snapshot.',
+    )
+    expect(layers.dynamicTurnContextPrompt).not.toContain('Murph onboarding:')
+    expect(layers.dynamicTurnContextPrompt).not.toContain(
+      'Before sending any user-facing reply',
+    )
+    expect(layers.prompt.endsWith(layers.dynamicTurnContextPrompt)).toBe(true)
+  })
+
+  it('keeps notification decision context per-turn with no thread layer', () => {
+    const input = createCommonNotificationPromptInput({
+      assistantContextSnapshotPrompt: 'Notification layer partition snapshot.',
+      currentLocalDate: '2026-04-15',
+      currentTimeZone: 'Asia/Kuala_Lumpur',
+    })
+    const layers = buildAssistantNotificationDecisionSystemPromptLayers(input)
+
+    expect(layers.threadContextPrompt).toBe('')
+    expect(layers.dynamicTurnContextPrompt).toContain(
+      "The user's canonical timezone for this vault is Asia/Kuala_Lumpur.",
+    )
+    expect(layers.dynamicTurnContextPrompt).toContain(
+      "Today's date for the user is April 15, 2026.",
+    )
+    expect(layers.dynamicTurnContextPrompt).toContain(
+      'Notification layer partition snapshot.',
+    )
+    expect(layers.dynamicTurnContextPrompt).toContain('Notification execution rules:')
+    expect(layers.dynamicTurnContextPrompt).toContain(
+      'Before sending any user-facing reply, quickly scan the visible answer for forbidden link and source formatting',
+    )
+    expect(layers.prompt).toBe(
+      [
+        [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt].join('\n\n'),
+        layers.dynamicTurnContextPrompt,
+      ].join('\n\n'),
+    )
+  })
+
   it('renders current date context with natural user-facing date guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       currentLocalDate: '2026-04-03',

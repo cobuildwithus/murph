@@ -56,6 +56,7 @@ const expectedScenarioFiles = [
   "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",
   "apps/cloudflare/test/hosted-local-mailbox-platform-env-e2e.test.ts",
   "apps/cloudflare/test/hosted-local-temporal-orchestration-e2e.test.ts",
+  "apps/cloudflare/test/hosted-local-timezone-injection-e2e.test.ts",
   "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
   "apps/cloudflare/test/hosted-local-onboarding-followup-e2e.test.ts",
   "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
