@@ -13,7 +13,7 @@ export type DatabaseSync = import("node:sqlite").DatabaseSync;
 export type SqliteRow = Record<string, unknown>;
 
 export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
-export const QUERY_PROJECTION_SQLITE_VERSION = 7;
+export const QUERY_PROJECTION_SQLITE_VERSION = 8;
 
 export interface QueryProjectionLocation {
   absolutePath: string;

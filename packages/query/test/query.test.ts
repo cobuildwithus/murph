@@ -69,6 +69,10 @@ import {
 import { ALL_QUERY_ENTITY_FAMILIES } from "../src/entity-families.ts";
 import { insertMetricPoints as insertProjectionMetricPoints } from "../src/projection/metric-store.ts";
 import { QUERY_PROJECTION_SQLITE_VERSION } from "../src/projection/schema.ts";
+import {
+  parseStoredWearableSummary,
+  type StoredWearableMetricSummaryKind,
+} from "../src/projection/wearable-summary-stored-codec.ts";
 import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.ts";
 import { parseMarkdownDocument } from "../src/markdown.ts";
 import {
@@ -4222,7 +4226,12 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
       assert.equal(denseEventSearchDocumentCount.count, 0);
       assert.equal(wearableSummaryCount.count, 1);
       assert.ok(wearableSummaryRow);
-      assert.match(wearableSummaryRow.summaryJson, /"candidates":\[\]/u);
+      // Stored rows use the compact wearable summary codec: populated
+      // envelopes drop the constant candidates array entirely and empty
+      // envelopes collapse to null markers.
+      assert.match(wearableSummaryRow.summaryJson, /"steps":\{"confidence":/u);
+      assert.match(wearableSummaryRow.summaryJson, /"dayStrain":null/u);
+      assert.doesNotMatch(wearableSummaryRow.summaryJson, /"candidates":/u);
       assert.doesNotMatch(
         wearableSummaryRow.summaryJson,
         /daily-activity-2026-03-12|evt_dense_provider_steps_01|ledger\/events|externalRef|dataOrigin|candidateId/u,
@@ -4413,11 +4422,12 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
     });
 
     try {
-      // Pin the literal version: a revert of the 6 -> 7 bump would keep every
-      // constant-relative assertion green while legacy v6 stores (with the
-      // dropped NOT NULL columns) were treated as current, breaking the
-      // narrower INSERT on rebuild.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 7);
+      // Pin the literal version: a revert of the 7 -> 8 bump would keep every
+      // constant-relative assertion green while legacy v7 stores (full
+      // wearable summary JSON without the compact stored codec, on top of the
+      // v6 dropped metric point columns) were treated as current instead of
+      // being rebuilt.
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 8);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database
@@ -4516,6 +4526,230 @@ test("rebuildQueryProjection resets stale v6 projections that still carry the dr
     } finally {
       reopened.close();
     }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+function rewriteStoredWearableSummaryRowsToLegacyFullForm(database: DatabaseSync): number {
+  const rows = database
+    .prepare(`
+      SELECT id, summary_kind AS summaryKind, summary_json AS summaryJson
+      FROM query_wearable_summaries
+      WHERE summary_kind != 'source_health'
+    `)
+    .all() as Array<{ id: string; summaryKind: StoredWearableMetricSummaryKind; summaryJson: string }>;
+  const update = database.prepare("UPDATE query_wearable_summaries SET summary_json = ? WHERE id = ?");
+
+  let rewritten = 0;
+  for (const row of rows) {
+    const legacyJson = JSON.stringify(parseStoredWearableSummary(row.summaryKind, row.summaryJson));
+    if (legacyJson !== row.summaryJson) {
+      update.run(legacyJson, row.id);
+      rewritten += 1;
+    }
+  }
+
+  return rewritten;
+}
+
+test("rebuildQueryProjection resets stale v7 projections that still store full-form wearable summary rows", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-v7-reset-"));
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+
+  try {
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+      `${JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: "evt_v7_reset_steps_01",
+        kind: "observation",
+        occurredAt: "2026-04-01T08:00:00Z",
+        recordedAt: "2026-04-01T08:01:00Z",
+        dayKey: "2026-04-01",
+        source: "device",
+        title: "Oura steps",
+        metric: "daily-steps",
+        value: 8200,
+        unit: "count",
+        externalRef: {
+          system: "oura",
+          resourceType: "activity",
+          resourceId: "oura-activity-v7-reset-01",
+        },
+      })}\n`,
+      "utf8",
+    );
+
+    await rebuildQueryProjection(vaultRoot);
+
+    // Recreate a v7-era store: full-form wearable summary rows under
+    // user_version 7. The codec keeps reads byte-identical, so the legacy
+    // form is exactly the parsed compact row re-serialized.
+    const staleDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
+    try {
+      assert.ok(
+        rewriteStoredWearableSummaryRowsToLegacyFullForm(staleDatabase) > 0,
+        "expected compact rows to rewrite into a distinct legacy full form",
+      );
+      staleDatabase.exec("PRAGMA user_version = 7;");
+    } finally {
+      staleDatabase.close();
+    }
+
+    const statusBefore = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(statusBefore.fresh, false);
+
+    await rebuildQueryProjection(vaultRoot);
+
+    const reopened = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false, readOnly: true });
+    try {
+      assert.equal(readSqliteRuntimeUserVersion(reopened), QUERY_PROJECTION_SQLITE_VERSION);
+
+      const activityRow = reopened
+        .prepare(`
+          SELECT summary_json AS summaryJson
+          FROM query_wearable_summaries
+          WHERE summary_kind = 'activity' AND summary_date = '2026-04-01'
+        `)
+        .get() as { summaryJson: string } | undefined;
+      assert.ok(activityRow);
+      assert.match(activityRow.summaryJson, /"steps":\{"confidence":/u);
+      assert.match(activityRow.summaryJson, /"dayStrain":null/u);
+      assert.doesNotMatch(activityRow.summaryJson, /"candidates":/u);
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("runtime wearable summaries read identically from compact and legacy full-form stored rows", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-stored-form-equivalence-"));
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+
+  try {
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+      [
+        // Conflicting same-provider steps facets keep a populated confidence
+        // block (candidateCount, reasons) in the compact stored envelope.
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_stored_form_steps_oura_01",
+          kind: "observation",
+          occurredAt: "2026-04-01T08:00:00Z",
+          recordedAt: "2026-04-01T08:01:00Z",
+          dayKey: "2026-04-01",
+          source: "device",
+          title: "Oura daily steps",
+          metric: "daily-steps",
+          value: 8200,
+          unit: "count",
+          externalRef: {
+            system: "oura",
+            resourceType: "daily_activity",
+            resourceId: "oura-daily-activity-01",
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_stored_form_steps_oura_02",
+          kind: "observation",
+          occurredAt: "2026-04-01T09:00:00Z",
+          recordedAt: "2026-04-01T09:01:00Z",
+          dayKey: "2026-04-01",
+          source: "device",
+          title: "Oura watch steps",
+          metric: "daily-steps",
+          value: 7900,
+          unit: "count",
+          externalRef: {
+            system: "oura",
+            resourceType: "watch_activity",
+            resourceId: "oura-watch-activity-01",
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_stored_form_steps_garmin_01",
+          kind: "observation",
+          occurredAt: "2026-04-01T08:30:00Z",
+          recordedAt: "2026-04-01T08:31:00Z",
+          dayKey: "2026-04-01",
+          source: "device",
+          title: "Garmin steps",
+          metric: "daily-steps",
+          value: 9000,
+          unit: "count",
+          externalRef: {
+            system: "garmin",
+            resourceType: "daily_activity",
+            resourceId: "garmin-daily-activity-01",
+          },
+        },
+        // Session-only sleep night: timeInBedMinutes resolves through the
+        // sessionMinutes fallback and totalSleepMinutes stays a null marker.
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_stored_form_sleep_garmin_01",
+          kind: "sleep_session",
+          occurredAt: "2026-03-31T22:05:00Z",
+          recordedAt: "2026-04-01T06:20:00Z",
+          dayKey: "2026-04-01",
+          source: "device",
+          title: "Garmin overnight sleep",
+          startAt: "2026-03-31T22:05:00Z",
+          endAt: "2026-04-01T06:20:00Z",
+          durationMinutes: 495,
+          externalRef: {
+            system: "garmin",
+            resourceType: "sleep_session",
+            resourceId: "garmin-sleep-01",
+          },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")
+        .concat("\n"),
+      "utf8",
+    );
+
+    await rebuildQueryProjection(vaultRoot);
+
+    const readRuntimeSummaries = async () =>
+      JSON.stringify({
+        activity: await summarizeWearableActivityRuntime(vaultRoot),
+        day: await summarizeWearableDayRuntime(vaultRoot, "2026-04-01"),
+        ouraActivity: await summarizeWearableActivityRuntime(vaultRoot, { providers: ["oura"] }),
+        sleep: await summarizeWearableSleepRuntime(vaultRoot),
+        sourceHealth: await summarizeWearableSourceHealthRuntime(vaultRoot),
+      });
+
+    const compactReads = await readRuntimeSummaries();
+    assert.match(compactReads, /"resolution":"fallback"/u);
+    assert.match(compactReads, /"conflictingProviders":\["garmin"\]/u);
+
+    // Rewrite the stored metric rows to the legacy full form in place. The
+    // source manifest and schema version are untouched, so ensureFresh keeps
+    // serving this store instead of rebuilding it.
+    const database = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
+    try {
+      assert.ok(
+        rewriteStoredWearableSummaryRowsToLegacyFullForm(database) > 0,
+        "expected compact rows to differ from the legacy full form on disk",
+      );
+    } finally {
+      database.close();
+    }
+
+    const statusAfterRewrite = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(statusAfterRewrite.fresh, true);
+
+    assert.equal(await readRuntimeSummaries(), compactReads);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
