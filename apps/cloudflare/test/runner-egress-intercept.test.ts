@@ -4519,9 +4519,11 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       expect.objectContaining({
         component: "runner",
         details: expect.objectContaining({
+          audioBytes: testByteLength("wav-bytes"),
           host: "murph-transcribe.worker",
           providerKind: "workers_ai_transcribe",
           providerRequestAuthorized: true,
+          transcriptDurationMs: 2_940,
           writeFenceValidationMode: "active_user_fence",
         }),
         message: "Hosted runner provider egress completed.",
@@ -4636,6 +4638,21 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     );
     expect(failing.status).toBe(502);
     expect(await failing.text()).toBe("Hosted transcription failed.");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          audioBytes: testByteLength("wav-bytes"),
+          host: "murph-transcribe.worker",
+          providerKind: "workers_ai_transcribe",
+          providerRequestAuthorized: true,
+          writeFenceValidationMode: "active_user_fence",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+    const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+    expect(serializedLogs).not.toContain("wav-bytes");
   });
 
   it("falls back to an empty segment list and drops malformed segments", async () => {
@@ -4663,6 +4680,18 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       segments: [],
       text: "text-only transcript",
     });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          audioBytes: testByteLength("wav-bytes"),
+          host: "murph-transcribe.worker",
+          providerKind: "workers_ai_transcribe",
+          transcriptDurationMs: null,
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
 
     const malformedSegments = await hostedRunnerIntercept(
       new Request(TRANSCRIBE_URL, {
