@@ -4,13 +4,22 @@ set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
 Usage: apps/web/sql/foods/import-fdc.sh [--prepare-only]
+       apps/web/sql/foods/import-fdc.sh --export-prepared <out.csv>
+       apps/web/sql/foods/import-fdc.sh --apply-prepared <in.csv>
 
 Imports the FULL USDA FoodData Central CSV archive into the labels DB
 `foods` table (data types: Branded, Foundation, SR Legacy, Survey/FNDDS).
 
+The default mode runs the whole transform on the connected database. Managed
+instances with small memory should use the two-phase path instead: run the
+default mode against a LOCAL staging Postgres, then --export-prepared from it,
+then --apply-prepared to the managed labels DB (plain COPY + batched upserts,
+no server-side aggregation).
+
 Required env:
   FDC_DATA_DIR        Directory containing the unzipped FULL FDC CSV archive
                       (the directory holding food.csv, branded_food.csv, ...).
+                      Not required with --export-prepared/--apply-prepared.
   MURPH_LABELS_DB_URL Postgres URL for the labels database
                       (falls back to MURPH_SUPPLEMENT_DB_URL).
                       Not required with --prepare-only.
@@ -26,10 +35,22 @@ USAGE
 }
 
 prepare_only=0
+export_prepared=""
+apply_prepared=""
 case "${1:-}" in
   --prepare-only)
     prepare_only=1
     shift
+    ;;
+  --export-prepared)
+    export_prepared="${2:-}"
+    [ -n "$export_prepared" ] || { usage; exit 64; }
+    shift 2
+    ;;
+  --apply-prepared)
+    apply_prepared="${2:-}"
+    [ -n "$apply_prepared" ] || { usage; exit 64; }
+    shift 2
     ;;
   -h|--help)
     usage
@@ -39,11 +60,6 @@ esac
 
 if [ "$#" -ne 0 ]; then
   usage
-  exit 64
-fi
-
-if [ -z "${FDC_DATA_DIR:-}" ]; then
-  echo "FDC_DATA_DIR is required" >&2
   exit 64
 fi
 
@@ -59,6 +75,30 @@ work_dir="$repo_root/.fdc-work/foods-import"
 psql_bin="${PSQL_BIN:-psql}"
 
 mkdir -p "$work_dir"
+
+if [ -n "$export_prepared" ]; then
+  echo "Exporting prepared foods rows..."
+  "$psql_bin" -v ON_ERROR_STOP=1 -c "\\copy (SELECT id, canonical_key, data_origin, data_origin_id, data_origin_url, data_origin_priority, name, brand, upc, off_market, search_text, label, fdc_release_date FROM foods ORDER BY id) TO '$export_prepared' WITH (FORMAT csv, HEADER true)" "$labels_db_url"
+  echo "Exported $(($(wc -l < "$export_prepared") - 1)) prepared rows."
+  exit 0
+fi
+
+if [ -n "$apply_prepared" ]; then
+  if [ ! -f "$apply_prepared" ]; then
+    echo "Prepared CSV not found: $apply_prepared" >&2
+    exit 66
+  fi
+  echo "Applying foods schema..."
+  "$psql_bin" -v ON_ERROR_STOP=1 -f "$script_dir/schema.sql" "$labels_db_url"
+  echo "Applying prepared foods rows..."
+  FDC_PREPARED_CSV="$apply_prepared" "$psql_bin" -v ON_ERROR_STOP=1 -f "$script_dir/apply-prepared.sql" "$labels_db_url"
+  exit 0
+fi
+
+if [ -z "${FDC_DATA_DIR:-}" ]; then
+  echo "FDC_DATA_DIR is required" >&2
+  exit 64
+fi
 
 release_date="${FDC_RELEASE_DATE:-}"
 if [ -z "$release_date" ]; then
