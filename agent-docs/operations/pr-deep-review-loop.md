@@ -14,6 +14,11 @@ Run the loop when all of the following hold:
 2. All routed completion audits passed and the scoped commit is pushed.
 3. The user has not explicitly opted out in the current task.
 
+The review target must be the pushed PR head. Do not run this loop on
+unpushed local changes, local patch text, or attached ZIP/repomix context. If
+the current fixes are only local, commit and push them to the PR branch first,
+then run ReviewGPT against the PR URL through the GitHub connector.
+
 Fire each round as soon as the head it reviews is pushed — do NOT wait for
 PR CI to go green first. CI and the review round run in parallel; a round
 typically takes as long as the CI lane, so serializing them roughly doubles
@@ -71,5 +76,6 @@ fires immediately, in parallel with CI).
 ## Boundaries
 
 - Never use this loop (or any `review:gpt`/`thread wake` flow) to satisfy required completion audits; see `agent-docs/operations/completion-workflow.md`.
+- Never use `--zip`, attached repo archives, repomix bundles, or local dirty-worktree context for this PR-lane loop. The reviewer must inspect the pushed PR through the GitHub connector so the review, CI, and merge target all refer to the same head.
 - Response files under `audit-packages/` are local working artifacts and stay uncommitted.
 - The managed browser profile, port, model, and connector defaults live in `scripts/review-gpt.config.sh`; the prompt lives in `scripts/chatgpt-review-presets/pr-deep-review.md`. Change them there, not inline.
