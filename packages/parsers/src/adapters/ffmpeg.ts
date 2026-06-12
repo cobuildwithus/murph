@@ -3,6 +3,7 @@ import path from "node:path";
 
 import type { ParserArtifactRef } from "../contracts/artifact.js";
 import { ensureDirectory, readConfiguredEnvValue, resolveConfiguredExecutable, runCommand } from "../shared.js";
+import { REMOTE_TRANSCRIPTION_MAX_INPUT_BYTES } from "./remote-transcription.js";
 
 export interface FfmpegToolOptions {
   commandCandidates?: string[];
@@ -164,9 +165,6 @@ const REMOTE_TRANSCRIPTION_BLOCKED_AUDIO_EXTENSIONS = new Set([
   ".mp4",
 ]);
 
-// Keep in sync with the remote transcription provider and Worker body cap.
-const REMOTE_TRANSCRIPTION_DIRECT_MAX_INPUT_BYTES = 16 * 1024 * 1024;
-
 async function isRemoteTranscriptionDirectAudioArtifact(
   artifact: ParserArtifactRef,
 ): Promise<boolean> {
@@ -185,12 +183,16 @@ async function isRemoteTranscriptionDirectAudioArtifact(
     return false;
   }
 
-  if (!await hasRemoteTranscriptionDirectAudioSignature(artifact.absolutePath, mime)) {
+  const stat = await fs.stat(artifact.absolutePath);
+  if (stat.size > REMOTE_TRANSCRIPTION_MAX_INPUT_BYTES) {
     return false;
   }
 
-  const stat = await fs.stat(artifact.absolutePath);
-  return stat.size <= REMOTE_TRANSCRIPTION_DIRECT_MAX_INPUT_BYTES;
+  return await hasRemoteTranscriptionDirectAudioSignature(
+    artifact.absolutePath,
+    mime,
+    stat.size,
+  );
 }
 
 function isDirectWhisperAudioArtifact(artifact: ParserArtifactRef): boolean {
@@ -212,8 +214,10 @@ function normalizeMediaType(value: string | null | undefined): string {
 async function hasRemoteTranscriptionDirectAudioSignature(
   filePath: string,
   mime: string,
+  fileSize: number,
 ): Promise<boolean> {
-  const header = await readFileHeader(filePath, 16);
+  const isMp3 = mime === "audio/mp3" || mime === "audio/mpeg";
+  const header = await readFileHeader(filePath, isMp3 ? 10 : 16);
   if (header.length === 0) {
     return false;
   }
@@ -239,11 +243,8 @@ async function hasRemoteTranscriptionDirectAudioSignature(
     );
   }
 
-  if (mime === "audio/mp3" || mime === "audio/mpeg") {
-    return (
-      header.subarray(0, 3).equals(Buffer.from("ID3", "ascii")) ||
-      (header[0] === 0xff && (header[1] & 0xe0) === 0xe0)
-    );
+  if (isMp3) {
+    return await hasMp3AudioFrameSignature(filePath, fileSize, header);
   }
 
   if (mime === "audio/aac" || mime === "audio/x-aac") {
@@ -251,6 +252,96 @@ async function hasRemoteTranscriptionDirectAudioSignature(
   }
 
   return false;
+}
+
+async function hasMp3AudioFrameSignature(
+  filePath: string,
+  fileSize: number,
+  initialHeader: Buffer,
+): Promise<boolean> {
+  if (!initialHeader.subarray(0, 3).equals(Buffer.from("ID3", "ascii"))) {
+    return hasValidMp3FrameHeader(initialHeader, 0);
+  }
+
+  const frameOffset = readId3v2AudioFrameOffset(initialHeader);
+  if (frameOffset === null || frameOffset > fileSize - 4) {
+    return false;
+  }
+
+  const header = await readFileHeader(filePath, frameOffset + 4);
+  return hasValidMp3FrameHeader(header, frameOffset);
+}
+
+function readId3v2AudioFrameOffset(header: Buffer): number | null {
+  if (header.length < 10 || !header.subarray(0, 3).equals(Buffer.from("ID3", "ascii"))) {
+    return null;
+  }
+
+  const versionMajor = header[3];
+  const versionMinor = header[4];
+  const flags = header[5];
+  if (
+    versionMajor === undefined ||
+    versionMinor === undefined ||
+    flags === undefined ||
+    versionMajor < 2 ||
+    versionMajor > 4 ||
+    versionMinor === 0xff
+  ) {
+    return null;
+  }
+
+  const sizeBytes = header.subarray(6, 10);
+  if (sizeBytes.length !== 4 || sizeBytes.some((byte) => (byte & 0x80) !== 0)) {
+    return null;
+  }
+
+  const size0 = sizeBytes[0];
+  const size1 = sizeBytes[1];
+  const size2 = sizeBytes[2];
+  const size3 = sizeBytes[3];
+  if (
+    size0 === undefined ||
+    size1 === undefined ||
+    size2 === undefined ||
+    size3 === undefined
+  ) {
+    return null;
+  }
+
+  const tagSize =
+    (size0 << 21) |
+    (size1 << 14) |
+    (size2 << 7) |
+    size3;
+  return 10 + tagSize + (versionMajor === 4 && (flags & 0x10) !== 0 ? 10 : 0);
+}
+
+function hasValidMp3FrameHeader(header: Buffer, offset: number): boolean {
+  if (offset < 0 || header.length < offset + 4) {
+    return false;
+  }
+
+  const byte0 = header[offset];
+  const byte1 = header[offset + 1];
+  const byte2 = header[offset + 2];
+  if (byte0 === undefined || byte1 === undefined || byte2 === undefined) {
+    return false;
+  }
+
+  const hasFrameSync = byte0 === 0xff && (byte1 & 0xe0) === 0xe0;
+  const version = (byte1 >> 3) & 0x03;
+  const layer = (byte1 >> 1) & 0x03;
+  const bitrateIndex = (byte2 >> 4) & 0x0f;
+  const sampleRateIndex = (byte2 >> 2) & 0x03;
+  return (
+    hasFrameSync &&
+    version !== 0x01 &&
+    layer !== 0x00 &&
+    bitrateIndex !== 0x00 &&
+    bitrateIndex !== 0x0f &&
+    sampleRateIndex !== 0x03
+  );
 }
 
 async function readFileHeader(filePath: string, bytes: number): Promise<Buffer> {

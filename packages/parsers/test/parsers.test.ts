@@ -69,6 +69,18 @@ function disableFfmpegLookup() {
   return { commandCandidates: ["definitely-not-installed-ffmpeg"], allowSystemLookup: false };
 }
 
+function validMp3FrameBytes(): Buffer {
+  return Buffer.from([0xff, 0xfb, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]);
+}
+
+function validId3Mp3Bytes(): Buffer {
+  return Buffer.concat([
+    Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04]),
+    Buffer.from("test", "ascii"),
+    validMp3FrameBytes(),
+  ]);
+}
+
 async function writeExecutableFile(directory: string, fileName: string, content: string): Promise<string> {
   if (process.platform === "win32" && path.extname(fileName) === "") {
     await writeExternalFile(directory, `${fileName}.js`, content);
@@ -172,6 +184,65 @@ test("audio preparation passes remote-accepted formats through untouched when re
         mime: "audio/mpeg",
         storedPath: "raw/inbox/example/spoofed.mp3",
         absolutePath: spoofedMp3Path,
+      },
+      scratchDirectory: directory,
+      ffmpeg: remoteOnlyFfmpeg,
+    }),
+    /ffmpeg is required to normalize non-WAV audio attachments for transcription/u,
+  );
+
+  const bareId3Path = await writeExternalBytes(
+    directory,
+    "bare-id3.mp3",
+    Buffer.from([
+      0x49,
+      0x44,
+      0x33,
+      0x04,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x04,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+    ]),
+  );
+  await assert.rejects(
+    prepareAudioInput({
+      artifact: {
+        captureId: "cap_audio_passthrough_12",
+        attachmentId: "att_audio_bare_id3_mp3",
+        kind: "audio",
+        fileName: "bare-id3.mp3",
+        mime: "audio/mpeg",
+        storedPath: "raw/inbox/example/bare-id3.mp3",
+        absolutePath: bareId3Path,
+      },
+      scratchDirectory: directory,
+      ffmpeg: remoteOnlyFfmpeg,
+    }),
+    /ffmpeg is required to normalize non-WAV audio attachments for transcription/u,
+  );
+
+  const invalidSyncMp3Path = await writeExternalBytes(
+    directory,
+    "invalid-sync.mp3",
+    Buffer.from([0xff, 0xe0, 0x00, 0x00, 0x00]),
+  );
+  await assert.rejects(
+    prepareAudioInput({
+      artifact: {
+        captureId: "cap_audio_passthrough_13",
+        attachmentId: "att_audio_invalid_sync_mp3",
+        kind: "audio",
+        fileName: "invalid-sync.mp3",
+        mime: "audio/mpeg",
+        storedPath: "raw/inbox/example/invalid-sync.mp3",
+        absolutePath: invalidSyncMp3Path,
       },
       scratchDirectory: directory,
       ffmpeg: remoteOnlyFfmpeg,
@@ -374,7 +445,7 @@ test("remote-only audio passthrough skips an available ffmpeg while video still 
   assert.equal(wavPrepared.inputPath, wavPath);
   assert.equal(wavPrepared.preparedKind, "audio");
 
-  const mp3Path = await writeExternalFile(directory, "memo.mp3", "ID3-mp3-bytes-placeholder");
+  const mp3Path = await writeExternalBytes(directory, "memo.mp3", validId3Mp3Bytes());
   const mp3Prepared = await prepareAudioInput({
     artifact: {
       captureId: "cap_audio_passthrough_ffmpeg_2",
@@ -439,7 +510,7 @@ test("remote-only audio passthrough matches mime case-insensitively and requires
   const remoteOnlyFfmpeg = { ...disableFfmpegLookup(), remoteTranscriptionOnly: true };
 
   // Mixed-case mime with an unrecognized extension exercises mime matching alone.
-  const upperMimePath = await writeExternalFile(directory, "memo.bin", "ID3-mpeg-bytes-placeholder");
+  const upperMimePath = await writeExternalBytes(directory, "memo.bin", validMp3FrameBytes());
   const upperMimePrepared = await prepareAudioInput({
     artifact: {
       captureId: "cap_audio_passthrough_case_1",
@@ -456,7 +527,7 @@ test("remote-only audio passthrough matches mime case-insensitively and requires
   assert.equal(upperMimePrepared.inputPath, upperMimePath);
   assert.equal(upperMimePrepared.preparedKind, "audio");
 
-  const upperExtensionPath = await writeExternalFile(directory, "MEMO.MP3", "ID3-mpeg-bytes-placeholder");
+  const upperExtensionPath = await writeExternalBytes(directory, "MEMO.MP3", validMp3FrameBytes());
   await assert.rejects(
     prepareAudioInput({
       artifact: {
@@ -506,7 +577,7 @@ test("remote-only audio passthrough falls back to ffmpeg when the original excee
     ].join("\n"),
   );
   const oversizedMp3 = Buffer.alloc(16 * 1024 * 1024 + 1);
-  oversizedMp3.write("ID3", 0, "ascii");
+  validMp3FrameBytes().copy(oversizedMp3);
   const mp3Path = await writeExternalBytes(directory, "oversized.mp3", oversizedMp3);
 
   const prepared = await prepareAudioInput({
