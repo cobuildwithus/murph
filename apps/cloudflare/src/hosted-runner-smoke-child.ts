@@ -286,6 +286,8 @@ async function runAudioToolchainSmoke(input: {
     input.wavPath,
     "-codec:a",
     "libmp3lame",
+    "-b:a",
+    "64k",
     mp3Path,
   ], { allowEmptyStdout: true });
   const normalizedMp3 = await stat(mp3Path);

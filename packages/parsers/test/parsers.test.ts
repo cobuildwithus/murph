@@ -413,12 +413,25 @@ test("remote-only audio passthrough skips an available ffmpeg while video still 
   const invocations = (await fs.readFile(invocationLogPath, "utf8")).trim().split("\n");
   assert.equal(invocations.length, 1);
   const videoInvocation = JSON.parse(invocations[0] ?? "[]");
-  assert.equal(videoInvocation.includes(videoPath), true);
-  assert.equal(videoInvocation.includes("-vn"), true);
-  assert.equal(videoInvocation.includes("libmp3lame"), true);
-  assert.equal(videoInvocation.includes("48k"), true);
-  assert.equal(videoInvocation.includes("-map_metadata"), true);
-  assert.equal(videoInvocation.includes("-map_chapters"), true);
+  assert.deepEqual(videoInvocation, [
+    "-y",
+    "-i",
+    videoPath,
+    "-vn",
+    "-ac",
+    "1",
+    "-ar",
+    "16000",
+    "-codec:a",
+    "libmp3lame",
+    "-b:a",
+    "64k",
+    "-map_metadata",
+    "-1",
+    "-map_chapters",
+    "-1",
+    videoPrepared.inputPath,
+  ]);
 });
 
 test("remote-only audio passthrough matches mime case-insensitively and requires the flag to be exactly true", async () => {
@@ -519,11 +532,25 @@ test("remote-only audio passthrough falls back to ffmpeg when the original excee
   const invocations = (await fs.readFile(invocationLogPath, "utf8")).trim().split("\n");
   assert.equal(invocations.length, 1);
   const invocation = JSON.parse(invocations[0] ?? "[]");
-  assert.equal(invocation.includes(mp3Path), true);
-  assert.equal(invocation.includes("libmp3lame"), true);
-  assert.equal(invocation.includes("48k"), true);
-  assert.equal(invocation.includes("-map_metadata"), true);
-  assert.equal(invocation.includes("-map_chapters"), true);
+  assert.deepEqual(invocation, [
+    "-y",
+    "-i",
+    mp3Path,
+    "-vn",
+    "-ac",
+    "1",
+    "-ar",
+    "16000",
+    "-codec:a",
+    "libmp3lame",
+    "-b:a",
+    "64k",
+    "-map_metadata",
+    "-1",
+    "-map_chapters",
+    "-1",
+    prepared.inputPath,
+  ]);
 });
 
 test("shared executable helpers preserve lazy resolution, availability, and missing-tool errors", async () => {

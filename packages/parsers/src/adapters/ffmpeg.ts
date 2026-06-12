@@ -88,7 +88,7 @@ export async function prepareAudioInput(input: {
         "-codec:a",
         "libmp3lame",
         "-b:a",
-        "48k",
+        "64k",
         "-map_metadata",
         "-1",
         "-map_chapters",
