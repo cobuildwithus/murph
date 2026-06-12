@@ -341,7 +341,6 @@ test("experiment start action becomes a quiet status chip for a running browser-
     createElement(ExperimentStartOrRunStatus, {
       activeRunProtocol: protocol,
       protocolDays: 14,
-      protocolTitle: "Finnish Dry Sauna",
       startAction: createElement("button", { type: "button" }, "Start Experiment"),
     }),
   );
@@ -352,8 +351,46 @@ test("experiment start action becomes a quiet status chip for a running browser-
   });
   expect(view.container.textContent).toContain("Experiment in progress");
   expect(view.container.textContent).not.toContain("Start Experiment");
+  expect(view.container.querySelector(".bg-primary")).not.toBeNull();
   // The run's results render on the experiment page itself; the running state
   // must not add a link pointing back at the same page.
+  expect(view.container.querySelector("a")).toBeNull();
+
+  await view.cleanup();
+});
+
+test("paused browser-vault runs get the muted status chip, not the live dot", async () => {
+  const protocol = createResultsPublicProjection();
+  const pausedRun: ExperimentRunProjection = {
+    id: "run_1",
+    source: "browser-vault",
+    snapshotGeneratedAt: "2026-04-15T00:00:00.000Z",
+    slug: null,
+    status: "paused",
+    statusLabel: "Paused",
+    startedOn: "2026-04-01",
+    tags: [],
+    title: "Finnish Dry Sauna",
+    signals: [],
+    trends: [],
+    timeline: [],
+  };
+  mocks.resolveBrowserVaultExperimentRun.mockReturnValue(pausedRun);
+
+  const { ExperimentStartOrRunStatus } = await import(
+    "../app/(dashboard)/experiments/[experimentId]/experiment-start-or-run-status"
+  );
+  const view = await renderClient(
+    createElement(ExperimentStartOrRunStatus, {
+      activeRunProtocol: protocol,
+      protocolDays: 14,
+      startAction: createElement("button", { type: "button" }, "Start Experiment"),
+    }),
+  );
+
+  expect(view.container.textContent).toContain("Experiment paused");
+  expect(view.container.querySelector(".bg-muted-foreground")).not.toBeNull();
+  expect(view.container.querySelector(".bg-primary")).toBeNull();
   expect(view.container.querySelector("a")).toBeNull();
 
   await view.cleanup();

@@ -64,7 +64,6 @@ export async function HostedExperimentStartButton({
     <ExperimentStartOrRunStatus
       activeRunProtocol={activeRunProtocol}
       protocolDays={protocolDays}
-      protocolTitle={protocolTitle}
       startAction={startAction}
     />
   );

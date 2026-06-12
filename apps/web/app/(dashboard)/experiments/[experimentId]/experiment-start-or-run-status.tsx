@@ -1,26 +1,25 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
-import { ArrowRightIcon } from "lucide-react";
 
+import { Skeleton } from "@/src/components/ui/skeleton";
 import {
   BrowserVaultProvider,
   useBrowserVault,
 } from "@/src/lib/browser-vault/context";
 import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
 import type { ExperimentResultsPublicProjection } from "@/src/lib/health-commons/experiment-projections";
+import { cn } from "@/src/lib/utils";
 
 interface ExperimentStartOrRunStatusProps {
   activeRunProtocol: ExperimentResultsPublicProjection;
   protocolDays: number;
-  protocolTitle: string;
   startAction: ReactNode;
 }
 
 export function ExperimentStartOrRunStatus({
   activeRunProtocol,
   protocolDays,
-  protocolTitle,
   startAction,
 }: ExperimentStartOrRunStatusProps) {
   return (
@@ -28,7 +27,6 @@ export function ExperimentStartOrRunStatus({
       <ExperimentStartOrRunStatusInner
         activeRunProtocol={activeRunProtocol}
         protocolDays={protocolDays}
-        protocolTitle={protocolTitle}
         startAction={startAction}
       />
     </BrowserVaultProvider>
@@ -38,7 +36,6 @@ export function ExperimentStartOrRunStatus({
 function ExperimentStartOrRunStatusInner({
   activeRunProtocol,
   protocolDays,
-  protocolTitle,
   startAction,
 }: ExperimentStartOrRunStatusProps) {
   const browserVault = useBrowserVault();
@@ -54,18 +51,11 @@ function ExperimentStartOrRunStatusInner({
     privateRun?.status === "active" || privateRun?.status === "paused";
 
   if (browserVault.status === "loading") {
+    // Neutral placeholder: the slot resolves into either the start button or
+    // the quiet status chip, so the loading state must pre-announce neither.
     return (
       <ExperimentHeaderActionFrame protocolDays={protocolDays}>
-        <button
-          type="button"
-          className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl border border-transparent bg-primary px-6 py-4 text-base font-semibold whitespace-nowrap text-primary-foreground opacity-70 outline-none select-none md:px-12"
-          disabled
-          aria-busy="true"
-          aria-label={`Checking run status for ${protocolTitle}`}
-        >
-          <span>Checking Run</span>
-          <ArrowRightIcon data-icon="inline-end" className="size-4 shrink-0" />
-        </button>
+        <Skeleton className="h-11 w-44 rounded-2xl" />
       </ExperimentHeaderActionFrame>
     );
   }
@@ -76,18 +66,22 @@ function ExperimentStartOrRunStatusInner({
 
   // The run's results already render on the experiment page itself, so the
   // header shows a quiet status chip instead of a CTA pointing at the same page.
-  const statusLabel =
-    privateRun.status === "paused" ? "Experiment paused" : "Experiment in progress";
+  const isPaused = privateRun.status === "paused";
 
   return (
     <ExperimentHeaderActionFrame protocolDays={protocolDays}>
       <div
+        role="status"
         className="inline-flex h-11 shrink-0 items-center justify-center gap-2 whitespace-nowrap px-6 md:px-12"
-        aria-label={`${statusLabel}: ${protocolTitle}`}
       >
-        <span className="size-1.5 shrink-0 rounded-full bg-primary" />
-        <span className="font-mono text-xs uppercase tracking-[0.11em] text-foreground/60">
-          {statusLabel}
+        <span
+          className={cn(
+            "size-1.5 shrink-0 rounded-full",
+            isPaused ? "bg-muted-foreground" : "bg-primary",
+          )}
+        />
+        <span className="font-mono text-[11px] uppercase tracking-[0.11em] text-foreground/60">
+          {isPaused ? "Experiment paused" : "Experiment in progress"}
         </span>
       </div>
     </ExperimentHeaderActionFrame>
