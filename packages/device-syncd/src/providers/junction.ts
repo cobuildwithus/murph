@@ -236,6 +236,8 @@ const JUNCTION_RAW_ONLY_COMPLETION_PATHS = Object.freeze({
       "logged_at",
       "date",
       "day",
+      "calendarDate",
+      "calendar_date",
       "name",
       "mealName",
       "meal_name",
@@ -264,6 +266,13 @@ const JUNCTION_RAW_ONLY_COMPLETION_PATHS = Object.freeze({
       "fatGrams",
       "fat_grams",
       "fat_g",
+      "fiber",
+      "fibre",
+      "water",
+      "macros.water",
+      "macros.fibre",
+      "macros.fiber",
+      "energy.value",
     ],
     arrays: [
       "foods",
@@ -3773,6 +3782,16 @@ function hasUsefulJunctionRawOnlyHistoricalBackfillSummaryRecord(
   resource: "meal" | "menstrual_cycle" | "electrocardiogram",
   entry: Record<string, unknown>,
 ): boolean {
+  // Mirrors the importer invariant: predicted cycles are forecasts, not
+  // facts — they emit no normalized events, so forecast-only windows must
+  // not complete the historical backfill.
+  if (
+    resource === "menstrual_cycle"
+    && (entry.isPredicted === true || entry.is_predicted === true)
+  ) {
+    return false;
+  }
+
   const paths = JUNCTION_RAW_ONLY_COMPLETION_PATHS[resource];
   return hasStringFromJunctionRecordPaths(entry, paths.strings)
     || hasFiniteNumberFromJunctionRecordPaths(entry, paths.numbers)

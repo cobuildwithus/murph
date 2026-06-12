@@ -1881,7 +1881,9 @@ function pushProfileSummary(
   // provider's updated/created timestamps: a window-drifting occurredAt
   // would revise the event spine on every reconcile and duplicate the
   // profile across month shards (cross-shard reconcile only indexes the
-  // target shard). Without any provider timestamp the row stays raw-only.
+  // target shard). Junction documents created_at/updated_at as REQUIRED on
+  // ClientFacingProfile, so a row without them is malformed input and
+  // deliberately stays raw-only rather than getting an invented time.
   const providerTimestampRaw = firstValueFromPaths(entry, ["updatedAt", "updated_at", "createdAt", "created_at"]);
   const providerTimestamp = resolveSafeTimestamp(providerTimestampRaw, resourceContext.sourceProviderSlug);
   const pinnedOccurredAt = baseTimestamp.observedAtRaw ? baseTimestamp.occurredAt : providerTimestamp;
@@ -1991,7 +1993,12 @@ function pushMenstrualCycleSummary(
       {
         metric: "cycle-length-days",
         title: "Junction cycle length",
-        value: (periodStart ? inclusiveDaysBetween(periodStart, cycleEnd) : undefined)
+        // Cycle length anchors on the cycle start when present (period
+        // start is the fallback anchor — cycles begin with the period in
+        // Junction's model, but explicit cycle_start wins if they differ).
+        value: (cycleStart ?? periodStart
+          ? inclusiveDaysBetween(cycleStart ?? periodStart ?? "", cycleEnd)
+          : undefined)
           ?? plausibleCycleLengthDays(firstNumberFromPaths(entry, ["cycleLengthDays", "cycle_length_days"])),
       },
     ];
