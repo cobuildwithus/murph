@@ -1173,6 +1173,7 @@ describe('assistant cron runtime orchestration', () => {
 
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
+        serviceTier: null,
         turnEnvironment,
         turnTrigger: 'automation-cron',
       }),
@@ -1204,6 +1205,95 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         onTraceEvent,
+        turnTrigger: 'automation-cron',
+      }),
+    )
+  })
+
+  it('uses flex service tier with a deadline for clean hosted scheduled notification sends', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T08:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-flex-tier-',
+    )
+    const canonicalJob = await createCanonicalJob(vaultRoot, 'flex-tier')
+    const upstreamAbort = new AbortController()
+
+    await updateCanonicalRuntimeState(vaultRoot, canonicalJob.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        pendingOccurrenceAt: '2026-04-08T08:00:00.000Z',
+      },
+    }))
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
+      async (input: { abortSignal?: AbortSignal; serviceTier?: string | null }) => {
+        expect(input.serviceTier).toBe('flex')
+        expect(input.abortSignal).toBeInstanceOf(AbortSignal)
+        expect(input.abortSignal).not.toBe(upstreamAbort.signal)
+        expect(input.abortSignal?.aborted).toBe(false)
+        upstreamAbort.abort()
+        expect(input.abortSignal?.aborted).toBe(true)
+
+        return {
+          response: 'Completed flex scheduled check-in.',
+          session: {
+            sessionId: 'session-flex-tier',
+          },
+        }
+      },
+    )
+
+    const summary = await processDueAssistantCronJobsLocal({
+      executionContext: {
+        hosted: {
+          memberId: 'member-flex-tier',
+          userEnvKeys: [],
+        },
+      },
+      limit: 1,
+      signal: upstreamAbort.signal,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+  })
+
+  it('uses standard service tier for hosted scheduled notification retries', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T08:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-flex-retry-',
+    )
+    const canonicalJob = await createCanonicalJob(vaultRoot, 'flex-retry')
+
+    await updateCanonicalRuntimeState(vaultRoot, canonicalJob.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        consecutiveFailures: 1,
+        pendingOccurrenceAt: '2026-04-08T08:00:00.000Z',
+      },
+    }))
+
+    await processDueAssistantCronJobsLocal({
+      executionContext: {
+        hosted: {
+          memberId: 'member-flex-retry',
+          userEnvKeys: [],
+        },
+      },
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serviceTier: null,
         turnTrigger: 'automation-cron',
       }),
     )

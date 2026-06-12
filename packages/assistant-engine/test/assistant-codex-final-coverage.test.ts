@@ -479,6 +479,7 @@ describe('Codex model catalog', () => {
         },
       ],
       vault: '/vaults/test',
+      serviceTier: 'flex',
     } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
 
     providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -549,9 +550,11 @@ describe('Codex model catalog', () => {
     expect(
       providerMocks.executeCodexAssistantTurnAttemptFromInput,
     ).toHaveBeenCalledTimes(1)
-    expect(
+    const providerInput =
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
-        ?.userMessageContent,
+    expect(providerInput?.serviceTier).toBe('flex')
+    expect(
+      providerInput?.userMessageContent,
     ).toEqual([
       {
         image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB',

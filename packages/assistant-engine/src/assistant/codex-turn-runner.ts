@@ -413,6 +413,8 @@ async function executeAssistantCodexAttempt(input: {
       modelProvider: attemptPlan.route.providerOptions.modelProvider,
       reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
       sandbox: attemptPlan.route.providerOptions.sandbox,
+      // Per-turn execution policy from the message input, not route identity.
+      serviceTier: executionPlan.input.serviceTier ?? null,
       approvalPolicy: attemptPlan.route.providerOptions.approvalPolicy,
       conversationHistoryMessages:
         attemptPlan.routePlan.conversationHistoryMessages,
