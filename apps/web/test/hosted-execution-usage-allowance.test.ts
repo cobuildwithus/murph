@@ -35,10 +35,10 @@ const BASE_USAGE_RECORD = {
   rawUsageJsonHash: null,
   reasoningTokens: null,
   reportingUserId: "member_123",
-  requestedModel: "gpt-5.4-mini",
+  requestedModel: "gpt-5.5",
   routeId: "primary",
   schema: "murph.assistant-usage.v1",
-  servedModel: "gpt-5.4-mini",
+  servedModel: "gpt-5.5",
   sessionId: "asst_123",
   stripeMeterSource: "murph",
   surface: null,
@@ -57,7 +57,7 @@ type AllowanceExecuteRawMock = ReturnType<typeof vi.fn<AllowanceExecuteRaw>>;
 describe("hosted AI usage allowance pricing", () => {
   it("prices platform usage from uncached input, cached input, and output tokens", () => {
     expect(priceHostedAiUsageForAllowance(BASE_USAGE_RECORD)).toMatchObject({
-      costUsdMicros: 285n,
+      costUsdMicros: 1896n,
       counted: true,
       pricingVersion: "openai-api-pricing-2026-05-05-standard",
     });
@@ -141,14 +141,14 @@ describe("hosted AI usage allowance pricing", () => {
   it("keeps raw requested and served model ids in the pricing snapshot", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
-      requestedModel: "gpt-5.4-mini",
+      requestedModel: "gpt-unpriced",
       servedModel: "openai/gpt-5.5",
     })).toMatchObject({
       counted: true,
       pricingSnapshot: {
         model: "gpt-5.5",
         modelSource: "served",
-        requestedModel: "gpt-5.4-mini",
+        requestedModel: "gpt-unpriced",
         servedModel: "openai/gpt-5.5",
       },
     });
@@ -174,7 +174,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         allowanceAccountedAt: new Date("2026-03-29T12:00:05.000Z"),
-        allowanceCostUsdMicros: 285n,
+        allowanceCostUsdMicros: 1896n,
         allowanceCounted: true,
         allowancePeriodEnd: new Date("2026-04-01T00:00:00.000Z"),
         allowancePeriodStart: new Date("2026-03-01T00:00:00.000Z"),
