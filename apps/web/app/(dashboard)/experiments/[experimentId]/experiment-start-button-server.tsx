@@ -6,13 +6,12 @@ import {
   readHostedMurphContactContext,
 } from "@/src/lib/hosted-onboarding/hosted-contact-context";
 import type { ExperimentResultsPublicProjection } from "@/src/lib/health-commons/experiment-projections";
-import { ExperimentStartOrResultsButton } from "./experiment-start-or-results-button";
+import { ExperimentStartOrRunStatus } from "./experiment-start-or-run-status";
 
 interface HostedExperimentStartButtonProps {
   activeRunProtocol?: ExperimentResultsPublicProjection | null;
   protocolDays: number;
   protocolTitle: string;
-  resultsHref?: string;
 }
 
 export function ExperimentStartButtonFallback({
@@ -44,7 +43,6 @@ export async function HostedExperimentStartButton({
   activeRunProtocol = null,
   protocolDays,
   protocolTitle,
-  resultsHref = "#results",
 }: HostedExperimentStartButtonProps) {
   const { initialContactChannels, murphPhoneNumber } =
     await getHostedMurphContactContext();
@@ -63,11 +61,10 @@ export async function HostedExperimentStartButton({
   }
 
   return (
-    <ExperimentStartOrResultsButton
+    <ExperimentStartOrRunStatus
       activeRunProtocol={activeRunProtocol}
       protocolDays={protocolDays}
       protocolTitle={protocolTitle}
-      resultsHref={resultsHref}
       startAction={startAction}
     />
   );

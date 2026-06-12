@@ -304,7 +304,7 @@ test("experiment start fallback is not a live contact route", async () => {
   expect(markup).not.toContain("https://t.me");
 });
 
-test("experiment start action becomes a results link for a running browser-vault run", async () => {
+test("experiment start action becomes a quiet status chip for a running browser-vault run", async () => {
   const protocol = createResultsPublicProjection();
   const activeRun: ExperimentRunProjection = {
     id: "run_1",
@@ -334,15 +334,14 @@ test("experiment start action becomes a results link for a running browser-vault
   });
   mocks.resolveBrowserVaultExperimentRun.mockReturnValue(activeRun);
 
-  const { ExperimentStartOrResultsButton } = await import(
-    "../app/(dashboard)/experiments/[experimentId]/experiment-start-or-results-button"
+  const { ExperimentStartOrRunStatus } = await import(
+    "../app/(dashboard)/experiments/[experimentId]/experiment-start-or-run-status"
   );
   const view = await renderClient(
-    createElement(ExperimentStartOrResultsButton, {
+    createElement(ExperimentStartOrRunStatus, {
       activeRunProtocol: protocol,
       protocolDays: 14,
       protocolTitle: "Finnish Dry Sauna",
-      resultsHref: "/experiments/finnish-sauna#results",
       startAction: createElement("button", { type: "button" }, "Start Experiment"),
     }),
   );
@@ -351,11 +350,11 @@ test("experiment start action becomes a results link for a running browser-vault
     client: null,
     protocol,
   });
-  expect(view.container.textContent).toContain("View Results");
+  expect(view.container.textContent).toContain("Experiment in progress");
   expect(view.container.textContent).not.toContain("Start Experiment");
-  expect(view.container.querySelector("a")?.getAttribute("href")).toBe(
-    "/experiments/finnish-sauna#results",
-  );
+  // The run's results render on the experiment page itself; the running state
+  // must not add a link pointing back at the same page.
+  expect(view.container.querySelector("a")).toBeNull();
 
   await view.cleanup();
 });
