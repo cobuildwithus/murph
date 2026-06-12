@@ -61,6 +61,9 @@ vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
   createHostedTelegramAttachmentDownloadDriver: mocks.createHostedTelegramAttachmentDownloadDriver,
   createHostedTelegramEffectsAttachmentDownloadDriver:
     mocks.createHostedTelegramEffectsAttachmentDownloadDriver,
+  withHostedTelegramAttachmentDownloadLogging: (
+    driver: unknown,
+  ) => driver,
 }));
 
 vi.mock("@murphai/operator-config/linq-runtime", () => ({

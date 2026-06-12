@@ -42,6 +42,7 @@ import {
 import {
   createHostedTelegramAttachmentDownloadDriver,
   createHostedTelegramEffectsAttachmentDownloadDriver,
+  withHostedTelegramAttachmentDownloadLogging,
 } from "./telegram.ts";
 import type {
   HostedConversationWakeMetrics,
@@ -284,7 +285,7 @@ async function normalizeHostedConversationMessageWake(input: {
   if (isHostedTelegramConversationMessageWake(input.wake)) {
     return normalizeHostedTelegramConversationCapture({
       accountId: "bot",
-      downloadDriver:
+      downloadDriver: withHostedTelegramAttachmentDownloadLogging(
         createHostedTelegramEffectsAttachmentDownloadDriver({
           effectsPort: input.runtime.platform.effectsPort,
         })
@@ -295,6 +296,8 @@ async function normalizeHostedConversationMessageWake(input: {
           }),
           fetchImplementation: input.runtime.platform.providerFetch ?? null,
         }),
+        input.runtime.platform,
+      ),
       externalId: input.wake.eventId,
       message: input.wake.message.telegramMessage,
       occurredAt: input.wake.occurredAt,

@@ -2,9 +2,15 @@ import assert from "node:assert/strict";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type {
+  HostedRuntimeLogEntry,
+  HostedRuntimeLogRequest,
+} from "@murphai/hosted-execution/runtime-control";
+
 import {
   createHostedTelegramAttachmentDownloadDriver,
   createHostedTelegramEffectsAttachmentDownloadDriver,
+  withHostedTelegramAttachmentDownloadLogging,
 } from "../src/hosted-runtime/events/telegram.ts";
 
 const originalTelegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -274,5 +280,112 @@ describe("createHostedTelegramEffectsAttachmentDownloadDriver", () => {
     expect(downloadTelegramFile).toHaveBeenCalledWith({
       filePath: "photos/cat.jpg",
     });
+  });
+});
+
+describe("withHostedTelegramAttachmentDownloadLogging", () => {
+  function createLogPort() {
+    const logged: HostedRuntimeLogEntry[] = [];
+    return {
+      entries: () => logged,
+      platform: {
+        logPort: {
+          write: async (request: HostedRuntimeLogRequest) => {
+            logged.push(...request.entries);
+            return { loggedCount: request.entries.length };
+          },
+        },
+      },
+    };
+  }
+
+  it("logs a durable warn when no download driver is available", async () => {
+    const logPort = createLogPort();
+
+    expect(withHostedTelegramAttachmentDownloadLogging(null, logPort.platform)).toBeNull();
+
+    await vi.waitFor(() => {
+      expect(logPort.entries()).toHaveLength(1);
+    });
+    expect(logPort.entries()[0]).toMatchObject({
+      component: "mailbox",
+      errorCode: "driver_unavailable",
+      eventCode: "mailbox.telegram_attachment_download_finished",
+      level: "warn",
+      phase: "import",
+      redactedJson: {
+        failureCode: "driver_unavailable",
+        result: "not_downloaded",
+      },
+    });
+  });
+
+  it("logs success per driver call and passes results through", async () => {
+    const logPort = createLogPort();
+    const driver = withHostedTelegramAttachmentDownloadLogging({
+      downloadFile: async () => Uint8Array.from([1, 2, 3]),
+      getFile: async () => ({ file_id: "file_123", file_path: "documents/file.pdf" }),
+    }, logPort.platform);
+    assert.ok(driver);
+
+    await expect(driver.getFile("file_123")).resolves.toEqual({
+      file_id: "file_123",
+      file_path: "documents/file.pdf",
+    });
+    await expect(driver.downloadFile("documents/file.pdf")).resolves.toEqual(
+      Uint8Array.from([1, 2, 3]),
+    );
+
+    expect(logPort.entries()).toEqual([
+      expect.objectContaining({
+        eventCode: "mailbox.telegram_attachment_download_finished",
+        level: "info",
+        redactedJson: { operation: "getFile", result: "succeeded" },
+      }),
+      expect.objectContaining({
+        level: "info",
+        redactedJson: { operation: "downloadFile", result: "succeeded" },
+      }),
+    ]);
+  });
+
+  it("logs the failure code and status before rethrowing driver errors", async () => {
+    const logPort = createLogPort();
+    const failure = Object.assign(
+      new Error("Hosted Telegram file lookup failed with HTTP 400."),
+      { status: 400 },
+    );
+    const driver = withHostedTelegramAttachmentDownloadLogging({
+      downloadFile: async () => Uint8Array.from([]),
+      getFile: async () => {
+        throw failure;
+      },
+    }, logPort.platform);
+    assert.ok(driver);
+
+    await expect(driver.getFile("file_123")).rejects.toBe(failure);
+
+    expect(logPort.entries()).toEqual([
+      expect.objectContaining({
+        errorCode: "download_fetch_failed",
+        level: "warn",
+        redactedJson: {
+          failureCode: "download_fetch_failed",
+          failureStatus: 400,
+          operation: "getFile",
+          result: "failed",
+        },
+      }),
+    ]);
+  });
+
+  it("stays silent without a log port", async () => {
+    const driver = withHostedTelegramAttachmentDownloadLogging({
+      downloadFile: async () => Uint8Array.from([]),
+      getFile: async () => ({ file_id: "file_123" }),
+    }, null);
+    assert.ok(driver);
+
+    await expect(driver.getFile("file_123")).resolves.toEqual({ file_id: "file_123" });
   });
 });

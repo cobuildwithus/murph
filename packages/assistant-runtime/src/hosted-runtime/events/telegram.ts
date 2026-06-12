@@ -4,10 +4,122 @@ import {
 import type { TelegramFile } from "@murphai/messaging-ingress/telegram-webhook";
 import type {
   HostedRuntimeEffectsPort,
+  HostedRuntimePlatform,
 } from "../platform.ts";
+import {
+  toHostedRuntimeLogCode,
+  writeHostedRuntimeLogBestEffort,
+} from "../runtime-logs.ts";
 
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const DEFAULT_TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file";
+
+type HostedTelegramAttachmentDownloadPlatform = Pick<HostedRuntimePlatform, "logPort">;
+
+// Mirrors mailbox.linq_attachment_download_finished: conversation-import
+// attachment downloads are otherwise swallowed by the normalizer's
+// metadata-only fallback, so every driver call must leave a durable trace.
+export function withHostedTelegramAttachmentDownloadLogging(
+  driver: TelegramAttachmentDownloadDriver | null,
+  platform: HostedTelegramAttachmentDownloadPlatform | null,
+): TelegramAttachmentDownloadDriver | null {
+  if (!driver) {
+    void writeHostedTelegramAttachmentDownloadLog({
+      attempt: {
+        failureCode: "driver_unavailable",
+        result: "not_downloaded",
+      },
+      platform,
+    });
+    return null;
+  }
+
+  return {
+    downloadFile: (filePath, signal) => logHostedTelegramAttachmentDownloadCall({
+      operation: "downloadFile",
+      platform,
+      run: () => driver.downloadFile(filePath, signal),
+    }),
+    getFile: (fileId, signal) => logHostedTelegramAttachmentDownloadCall({
+      operation: "getFile",
+      platform,
+      run: () => driver.getFile(fileId, signal),
+    }),
+  };
+}
+
+interface HostedTelegramAttachmentDownloadAttemptLog {
+  failureCode?: "download_aborted" | "download_fetch_failed" | "driver_unavailable";
+  failureStatus?: number;
+  operation?: "downloadFile" | "getFile";
+  result: "failed" | "not_downloaded" | "succeeded";
+}
+
+async function logHostedTelegramAttachmentDownloadCall<T>(input: {
+  operation: HostedTelegramAttachmentDownloadAttemptLog["operation"];
+  platform: HostedTelegramAttachmentDownloadPlatform | null;
+  run: () => Promise<T>;
+}): Promise<T> {
+  try {
+    const result = await input.run();
+    await writeHostedTelegramAttachmentDownloadLog({
+      attempt: {
+        operation: input.operation,
+        result: "succeeded",
+      },
+      platform: input.platform,
+    });
+    return result;
+  } catch (error) {
+    await writeHostedTelegramAttachmentDownloadLog({
+      attempt: {
+        ...classifyHostedTelegramAttachmentDownloadError(error),
+        operation: input.operation,
+        result: "failed",
+      },
+      platform: input.platform,
+    });
+    throw error;
+  }
+}
+
+async function writeHostedTelegramAttachmentDownloadLog(input: {
+  attempt: HostedTelegramAttachmentDownloadAttemptLog;
+  platform: HostedTelegramAttachmentDownloadPlatform | null;
+}): Promise<void> {
+  if (!input.platform?.logPort) {
+    return;
+  }
+
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      component: "mailbox",
+      ...(input.attempt.failureCode
+        ? { errorCode: toHostedRuntimeLogCode(input.attempt.failureCode) }
+        : {}),
+      eventCode: "mailbox.telegram_attachment_download_finished",
+      level: input.attempt.result === "succeeded" ? "info" : "warn",
+      phase: "import",
+      redactedJson: { ...input.attempt },
+    },
+    platform: input.platform,
+  });
+}
+
+// Closed failure-code set: arbitrary error codes/names must not reach the
+// durable log. The upstream HTTP status carries the discriminating detail.
+function classifyHostedTelegramAttachmentDownloadError(
+  error: unknown,
+): Pick<HostedTelegramAttachmentDownloadAttemptLog, "failureCode" | "failureStatus"> {
+  const record = error && typeof error === "object" ? error as Record<string, unknown> : null;
+  const status = typeof record?.status === "number" ? record.status : null;
+  const aborted = error instanceof Error && error.name === "AbortError";
+
+  return {
+    failureCode: aborted ? "download_aborted" : "download_fetch_failed",
+    ...(status === null ? {} : { failureStatus: status }),
+  };
+}
 
 export function createHostedTelegramAttachmentDownloadDriver(
   options: {
