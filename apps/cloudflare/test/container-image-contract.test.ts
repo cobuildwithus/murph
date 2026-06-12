@@ -10,6 +10,7 @@ import {
   hostedRunnerBuildPackageNames,
   hostedRunnerBundleOnlyDependencyNames,
   hostedRunnerWorkspacePackageNames,
+  publishedMurphBundledExternalPackageNames,
   publishedMurphBundledWorkspacePackageNames,
   runnerBundleDirectoryName,
 } from "../scripts/runner-bundle-contract.js";
@@ -388,9 +389,12 @@ describe("hosted runner container image contract", () => {
       bundleDependencies?: string[];
     };
 
-    expect(murphPackageJson.bundleDependencies).toEqual(
-      publishedMurphBundledWorkspacePackageNames,
-    );
+    expect(murphPackageJson.bundleDependencies).toEqual([
+      ...publishedMurphBundledWorkspacePackageNames,
+      ...publishedMurphBundledExternalPackageNames,
+    ].sort());
+    expect(publishedMurphBundledExternalPackageNames).toEqual(["incur"]);
+    expect(hostedRunnerBuildPackageNames).not.toContain("incur");
 
     for (const dependencyName of publishedMurphBundledWorkspacePackageNames) {
       expect(hostedRunnerBuildPackageNames).toContain(dependencyName);
