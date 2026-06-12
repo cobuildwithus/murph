@@ -283,6 +283,7 @@ expectedSignalDescriptions:
     expected: down_or_stable
     expectedDirection: down_or_stable
     protocolProminence: focus
+    displayValue: "Up to 4 bpm lower"
     estimatedChange:
       kind: absolute
       low: -4
@@ -297,6 +298,7 @@ expectedSignalDescriptions:
     expected: down_or_stable
     expectedDirection: down_or_stable
     protocolProminence: focus
+    displayValue: "Up to 5 mmHg lower"
     estimatedChange:
       kind: absolute
       low: -5

@@ -388,6 +388,7 @@ expectedSignalDescriptions:
     biomarkerKey: "biomarker:resting-heart-rate"
     description: "More regular sleep timing lowers overnight sympathetic carryover, reducing the resting pulse needed after sleep."
     expected: "May drop slightly"
+    displayValue: "Up to 3 bpm lower"
     estimatedChange:
       kind: "absolute"
       low: -3
@@ -415,6 +416,7 @@ expectedSignalDescriptions:
     biomarkerKey: "biomarker:sleep-onset-latency"
     description: "The same wake anchor builds sleep pressure on schedule, helping tiredness and the body clock converge at bedtime."
     expected: "May fall asleep sooner"
+    displayValue: "Up to 10 min faster"
     estimatedChange:
       kind: "absolute"
       low: -10
@@ -429,6 +431,7 @@ expectedSignalDescriptions:
     description: "Wake regularity reduces circadian whiplash; enough sleep opportunity lets daytime alertness recover."
     expected: "Should fall, not rise"
     expectedDirection: down_or_stable
+    displayValue: "Up to 2 points lower"
     estimatedChange:
       kind: "absolute"
       low: -2

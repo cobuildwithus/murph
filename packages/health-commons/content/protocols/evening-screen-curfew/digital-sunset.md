@@ -527,6 +527,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: "biomarker:sleep-onset-latency"
   expected: "Could shorten"
+  displayValue: "Up to 12 min faster"
   estimatedChange:
     kind: "absolute"
     low: -12

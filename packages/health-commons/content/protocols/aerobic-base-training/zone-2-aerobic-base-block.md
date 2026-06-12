@@ -155,6 +155,7 @@ expectedSignalDescriptions:
     biomarkerKey: biomarker:morning-blood-pressure
     expected: Could trend lower
     description: "Easy aerobic work improves endothelial signaling and lowers vascular resistance, reducing pressure against the artery walls."
+    displayValue: "Up to 4 mmHg lower"
     estimatedChange:
       kind: absolute
       low: -4
@@ -168,6 +169,7 @@ expectedSignalDescriptions:
     biomarkerKey: biomarker:resting-heart-rate
     expected: Could trend lower
     description: "Aerobic adaptation increases stroke volume, letting the heart maintain resting blood flow with fewer beats."
+    displayValue: "Up to 3 bpm lower"
     estimatedChange:
       kind: absolute
       low: -3

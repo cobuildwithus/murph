@@ -167,6 +167,7 @@ expectedSignalDescriptions:
   description: "Filtering blue-green evening light weakens retinal alerting and melatonin suppression, letting the brain shift toward sleep sooner."
   expected: down_or_stable
   expectedDirection: down_or_stable
+  displayValue: "Up to 10 min faster"
   estimatedChange:
     kind: absolute
     low: -10
@@ -193,6 +194,7 @@ expectedSignalDescriptions:
   description: "Lower late circadian alerting reduces nighttime strain after sleep begins, lowering resting pulse."
   expected: down_or_stable
   expectedDirection: down_or_stable
+  displayValue: "Up to 2 bpm lower"
   estimatedChange:
     kind: absolute
     low: -2

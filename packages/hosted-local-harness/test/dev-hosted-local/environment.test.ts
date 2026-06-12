@@ -1273,12 +1273,20 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
     expect(container.image_build_context).toBe("..");
     expect(container.image_vars).toEqual({
+      HOSTED_RUNNER_CONTAINER_CLASS: "RunnerContainer",
       HOSTED_RUNNER_LOCAL_BUILD_ID: "local",
     });
     expect(smokeContainer).toMatchObject({
       image: container.image,
       image_build_context: container.image_build_context,
-      image_vars: container.image_vars,
+      // The per-class build arg must differ so the two classes never produce
+      // the same Docker image ID: wrangler dev untags duplicate
+      // cloudflare-dev tags that share one image ID, which removed the runner
+      // image tag right after the deploy-smoke image build.
+      image_vars: {
+        HOSTED_RUNNER_CONTAINER_CLASS: "DeploySmokeRunnerContainer",
+        HOSTED_RUNNER_LOCAL_BUILD_ID: "local",
+      },
       max_instances: 1,
     });
   });
@@ -1321,19 +1329,24 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(productionLikeConfig.main).toBe("../src/index.ts");
   });
 
-  it("passes the local runner build id as a Docker build arg", () => {
+  it("passes the local runner build id and container class as Docker build args", () => {
     const config = buildWranglerLocalDevConfig({
       MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "stack-test-build-id",
     });
     const containers = config.containers as {
+      class_name: string;
       image_vars: Record<string, string>;
     }[];
 
     for (const container of containers) {
       expect(container.image_vars).toEqual({
+        HOSTED_RUNNER_CONTAINER_CLASS: container.class_name,
         HOSTED_RUNNER_LOCAL_BUILD_ID: buildHostedRunnerLocalBuildId("stack-test-build-id"),
       });
     }
+    expect(
+      new Set(containers.map((entry) => entry.image_vars.HOSTED_RUNNER_CONTAINER_CLASS)).size,
+    ).toBe(containers.length);
   });
 
   it("uses an isolated worker name for E2E profiles", () => {

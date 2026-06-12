@@ -42,3 +42,8 @@ Active.
 - Local repro also fails during `ensure-processing` with a request abort and
   logs `Hosted execution container warm shell was invalidated; destroying
   before reuse.`
+- Post-deploy smoke failures on 2026-06-11 reached the same destroy-settle
+  primitive: the smoke DO repeatedly failed to observe its previous shell as
+  stopped within the bounded settle window. The failed branch also ran the
+  best-effort cleanup destroy even though no new smoke shell had been started,
+  producing duplicate destroy requests per failed smoke attempt.

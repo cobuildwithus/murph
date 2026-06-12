@@ -431,30 +431,67 @@ function findSupplementBrandScopes(
         left.brand.localeCompare(right.brand),
     );
 
-  return matches
+  const directScopes = matches.filter(
+    (entry) => {
+      const isSingleWordBrand = !entry.normalizedBrand.includes(" ");
+
+      if (
+        isSingleWordBrand &&
+        (normalizedQ === entry.normalizedBrand ||
+          !containsNormalizedEdgePhrase(normalizedQ, entry.normalizedBrand))
+      ) {
+        return false;
+      }
+
+      return (
+        !isSingleWordBrand ||
+        !matches.some(
+          (other) =>
+            other !== entry &&
+            containsNormalizedPhrase(other.normalizedBrand, entry.normalizedBrand),
+        )
+      );
+    },
+  );
+
+  // Queries often name the parent brand while products are stored under a
+  // sub-brand line (e.g. "Garden of Life Organics ..." rows live under
+  // "Garden of Life MyKind Organics"). Scope those lines in too, preferring
+  // lines whose extra words overlap the query.
+  const queryTokens = new Set(normalizedQ.split(" "));
+  const scopedBrands = new Set(directScopes.map((entry) => entry.brand));
+  const lineScopes = brandIndex
     .filter(
-      (entry) => {
-        const isSingleWordBrand = !entry.normalizedBrand.includes(" ");
-
-        if (
-          isSingleWordBrand &&
-          (normalizedQ === entry.normalizedBrand ||
-            !containsNormalizedEdgePhrase(normalizedQ, entry.normalizedBrand))
-        ) {
-          return false;
-        }
-
-        return (
-          !isSingleWordBrand ||
-          !matches.some(
-            (other) =>
-              other !== entry &&
-              containsNormalizedPhrase(other.normalizedBrand, entry.normalizedBrand),
-          )
-        );
-      },
+      (entry) =>
+        !scopedBrands.has(entry.brand) &&
+        directScopes.some((scope) =>
+          entry.normalizedBrand.startsWith(`${scope.normalizedBrand} `),
+        ),
     )
-    .slice(0, MAX_SUPPLEMENT_BRAND_SCOPES);
+    .sort(
+      (left, right) =>
+        countQueryTokenOverlap(right, queryTokens) -
+          countQueryTokenOverlap(left, queryTokens) ||
+        left.normalizedBrand.length - right.normalizedBrand.length ||
+        left.brand.localeCompare(right.brand),
+    );
+
+  return [...directScopes, ...lineScopes].slice(0, MAX_SUPPLEMENT_BRAND_SCOPES);
+}
+
+function countQueryTokenOverlap(
+  entry: SupplementBrandIndexEntry,
+  queryTokens: Set<string>,
+): number {
+  let count = 0;
+
+  for (const token of entry.normalizedBrand.split(" ")) {
+    if (queryTokens.has(token)) {
+      count += 1;
+    }
+  }
+
+  return count;
 }
 
 function containsNormalizedPhrase(haystack: string, needle: string): boolean {

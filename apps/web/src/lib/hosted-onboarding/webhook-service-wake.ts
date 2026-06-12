@@ -43,10 +43,25 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     },
   );
 
-  await recordHostedWebhookIngressLatencyAcceptedBestEffort({
+  // The accepted-latency-trace write is observability only; run it
+  // concurrently with the Temporal signal instead of serializing a DB round
+  // trip ahead of the wake. The helper never rejects (it logs its own
+  // failures). Settling is capped: normally the write finished during the
+  // signal round trip, and a degraded latency-trace DB must not extend the
+  // webhook request lifetime (observability never gates user latency). On
+  // timeout the write keeps running for whatever remains of the request
+  // lifecycle; losing a trace row is acceptable, blocking ingress is not.
+  const acceptedTraceWrite = recordHostedWebhookIngressLatencyAcceptedBestEffort({
     mailboxItemId,
     source: input.source,
   });
+  const settleAcceptedTraceWriteBounded = () =>
+    Promise.race([
+      acceptedTraceWrite,
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, 1_500);
+      }),
+    ]);
 
   let signal: Awaited<ReturnType<typeof signalHostedMailboxAppendRuntime>>;
   try {
@@ -55,12 +70,14 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       mailboxItemId,
     });
   } catch (error) {
+    await settleAcceptedTraceWriteBounded();
     const errorName = deriveHostedOnboardingTimingErrorName(error);
     finishHostedOnboardingTiming(handoffTiming, "failed", {
       errorName,
     });
     throw error;
   }
+  await settleAcceptedTraceWriteBounded();
 
   await recordHostedWebhookIngressLatencyTemporalSignalBestEffort({
     mailboxItemId,
