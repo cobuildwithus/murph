@@ -27,6 +27,11 @@ import {
   normalizeAssistantResponseMediaList,
 } from './response-media.js'
 
+export interface AssistantPrecedingReplySegment {
+  media?: readonly AssistantResponseMedia[] | null
+  response: string
+}
+
 export function resolveHostedAssistantDeliveryTransportIdempotentOverride(input: {
   channel?: string | null
   deliveryIdempotencyKey?: string | null
@@ -105,6 +110,7 @@ export function dropUnsupportedAssistantResponseMediaForChannel(input: {
 }
 
 export async function deliverAssistantReply(input: {
+  dedupeToken?: string | null
   input: AssistantMessageInput
   media?: readonly AssistantResponseMedia[] | null
   response: string
@@ -134,6 +140,8 @@ export async function deliverAssistantReply(input: {
   })
 
   return await deliverAssistantCurrentAudienceMessage({
+    dedupeToken:
+      input.dedupeToken ?? hostedDelivery.deliveryIdempotencyKey ?? null,
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
     input: input.input,
@@ -153,12 +161,14 @@ export async function deliverAssistantReply(input: {
 // dropped by last-wins extraction.
 export async function deliverAssistantPrecedingReplies(input: {
   input: AssistantMessageInput
-  responses: readonly string[]
+  responses?: readonly string[]
+  segments?: readonly AssistantPrecedingReplySegment[]
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
 }): Promise<AssistantDeliveryOutcome[]> {
-  if (!input.input.deliverResponse || input.responses.length === 0) {
+  const segments = normalizeAssistantPrecedingReplySegments(input)
+  if (!input.input.deliverResponse || segments.length === 0) {
     return []
   }
 
@@ -175,15 +185,18 @@ export async function deliverAssistantPrecedingReplies(input: {
 
   const outcomes: AssistantDeliveryOutcome[] = []
   let session = input.session
-  for (const [ordinal, response] of input.responses.entries()) {
+  for (const [ordinal, segment] of segments.entries()) {
+    const segmentKey = baseDeliveryIdempotencyKey
+      ? `${baseDeliveryIdempotencyKey}:segment:${ordinal}`
+      : `assistant-segment:${input.turnId}:${ordinal}`
     const outcome = await deliverAssistantReply({
+      dedupeToken: segmentKey,
       input: {
         ...input.input,
-        deliveryIdempotencyKey: baseDeliveryIdempotencyKey
-          ? `${baseDeliveryIdempotencyKey}:segment:${ordinal}`
-          : `assistant-segment:${input.turnId}:${ordinal}`,
+        deliveryIdempotencyKey: segmentKey,
       },
-      response,
+      media: segment.media ?? [],
+      response: segment.response,
       session,
       sharedPlan: input.sharedPlan,
       turnId: input.turnId,
@@ -193,6 +206,23 @@ export async function deliverAssistantPrecedingReplies(input: {
   }
 
   return outcomes
+}
+
+function normalizeAssistantPrecedingReplySegments(input: {
+  responses?: readonly string[]
+  segments?: readonly AssistantPrecedingReplySegment[]
+}): AssistantPrecedingReplySegment[] {
+  if (input.segments) {
+    return input.segments.map((segment) => ({
+      response: segment.response,
+      media: normalizeAssistantResponseMediaList(segment.media ?? []),
+    }))
+  }
+
+  return (input.responses ?? []).map((response) => ({
+    response,
+    media: [],
+  }))
 }
 
 export async function deliverAssistantProgressUpdate(input: {
@@ -291,6 +321,7 @@ function resolveAssistantCurrentAudienceDeliveryFields(input: {
 }
 
 async function deliverAssistantCurrentAudienceMessage(input: {
+  dedupeToken: string | null
   deliveryIdempotencyKey: string | null
   deliveryTransportIdempotent: boolean | undefined
   input: AssistantMessageInput
@@ -312,6 +343,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   })
   const outcome = await state.outbox.deliverMessage({
     ...deliveryFields,
+    dedupeToken: input.dedupeToken,
     media,
     message: input.message,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,

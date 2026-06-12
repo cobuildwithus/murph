@@ -93,6 +93,7 @@ export interface AssistantOutboxDispatchPayload {
   channel?: string | null
   deliveryIdempotencyKey?: string | null
   deliverySource?: AssistantDeliverySource | null
+  dedupeToken?: string | null
   explicitTarget?: string | null
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null

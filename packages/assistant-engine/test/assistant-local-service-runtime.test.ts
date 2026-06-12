@@ -166,7 +166,23 @@ test('sendAssistantMessageLocal delivers pre-steer final answers before the fina
     providerTurn: {
       onboardingGuidanceInjected: false,
       codexContinuation: { kind: 'explicit-structured-history' },
-      precedingResponses: ['Answer one.', 'Answer two.'],
+      precedingResponseSegments: [
+        {
+          response: 'Answer one.',
+          media: [
+            {
+              kind: 'image',
+              url: 'https://cdn.example.test/assistant/answer-one.png',
+              alt: 'Answer one image',
+              source: null,
+            },
+          ],
+        },
+        {
+          response: 'Answer two.',
+          media: [],
+        },
+      ],
       response: 'Answer three.',
       session,
     },
@@ -179,8 +195,24 @@ test('sendAssistantMessageLocal delivers pre-steer final answers before the fina
   })
 
   expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledTimes(1)
-  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.responses)
-    .toEqual(['Answer one.', 'Answer two.'])
+  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
+    .toEqual([
+      {
+        response: 'Answer one.',
+        media: [
+          {
+            kind: 'image',
+            url: 'https://cdn.example.test/assistant/answer-one.png',
+            alt: 'Answer one image',
+            source: null,
+          },
+        ],
+      },
+      {
+        response: 'Answer two.',
+        media: [],
+      },
+    ])
   expect(mocks.dispatchAssistantReply).toHaveBeenCalledTimes(1)
   expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response)
     .toBe('Answer three.')
@@ -194,17 +226,20 @@ test('sendAssistantMessageLocal delivers pre-steer final answers before the fina
   ).toEqual(['Answer one.', 'Answer two.'])
 })
 
-test('sendAssistantMessageLocal drops only a trailing preceding answer that duplicates the final reply', async () => {
+test('sendAssistantMessageLocal preserves real same-text preceding answers', async () => {
   const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
 
-  // Trailing-steer turns report the final answer as the trailing closed
-  // segment too; interior duplicates are real answers and must survive.
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async () => ({
     kind: 'succeeded',
     providerTurn: {
       onboardingGuidanceInjected: false,
       codexContinuation: { kind: 'explicit-structured-history' },
-      precedingResponses: ['Done.', 'Details follow.', 'Done.'],
+      precedingResponseSegments: [
+        {
+          response: 'Done.',
+          media: [],
+        },
+      ],
       response: 'Done.',
       session,
     },
@@ -216,8 +251,13 @@ test('sendAssistantMessageLocal drops only a trailing preceding answer that dupl
     vault: '/vaults/test',
   })
 
-  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.responses)
-    .toEqual(['Done.', 'Details follow.'])
+  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
+    .toEqual([
+      {
+        response: 'Done.',
+        media: [],
+      },
+    ])
 })
 
 test('sendAssistantMessageLocal records a diagnostic when a preceding answer fails and still sends the final reply', async () => {

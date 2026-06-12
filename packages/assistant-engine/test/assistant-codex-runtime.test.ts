@@ -10915,8 +10915,42 @@ describe('assistant codex event shaping', () => {
 })
 
 describe('steered final segments', () => {
+  type ScriptedSteeredFinalStep =
+    | {
+        kind?: 'event'
+        event: Record<string, unknown>
+      }
+    | {
+        expectedText: string
+        id: number
+        kind: 'attach-response-media'
+        media: readonly unknown[]
+      }
+
+  function isAttachResponseMediaStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'attach-response-media' }> {
+    return 'kind' in step && step.kind === 'attach-response-media'
+  }
+
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+  }
+
+  function isScriptedEventStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { event: Record<string, unknown> }> {
+    return 'event' in step && isRecord(step.event)
+  }
+
+  function normalizeScriptedSteeredFinalEvent(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): Record<string, unknown> {
+    return isScriptedEventStep(step) ? step.event : step
+  }
+
   async function runScriptedSteeredFinalSegmentsTurn(
-    itemEvents: Array<Record<string, unknown>>,
+    steps: Array<Record<string, unknown> | ScriptedSteeredFinalStep>,
   ) {
     const workingDirectory = await createTempDir('assistant-codex-steered-finals-work-')
     const codexHome = await createTempDir('assistant-codex-steered-finals-home-')
@@ -10957,8 +10991,36 @@ describe('steered final segments', () => {
             },
           }))
 
-          for (const itemEvent of itemEvents) {
-            child.stdout.write(jsonLine(itemEvent))
+          for (const step of steps) {
+            if (isAttachResponseMediaStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  namespace: 'murph',
+                  tool: 'attach_response_media',
+                  arguments: {
+                    media: step.media,
+                  },
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  success: true,
+                  contentItems: [
+                    {
+                      type: 'inputText',
+                      text: step.expectedText,
+                    },
+                  ],
+                },
+              })
+              continue
+            }
+
+            child.stdout.write(jsonLine(normalizeScriptedSteeredFinalEvent(step)))
           }
 
           child.stdout.write(jsonLine({
@@ -11061,9 +11123,7 @@ describe('steered final segments', () => {
     expect(result.precedingAgentMessages).toEqual(['Answer one.', 'Answer two.'])
   })
 
-  it('keeps a trailing-steer final answer in both the final reply and preceding list', async () => {
-    // The delivery layer drops preceding entries that exactly duplicate the
-    // final reply, so the trailing-steer answer is still sent exactly once.
+  it('does not return a trailing-steer final answer as a preceding segment', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
         id: 'assistant-1',
@@ -11078,7 +11138,98 @@ describe('steered final segments', () => {
     ])
 
     expect(result.finalMessage).toBe('Answer one.')
-    expect(result.precedingAgentMessages).toEqual(['Answer one.'])
+    expect(result.precedingAgentMessages).toEqual([])
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('keeps repeated same-text final answers when they are distinct steered segments', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Done.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Say it again',
+      }),
+      completedItemEvent({
+        id: 'assistant-2',
+        type: 'assistant_message',
+        message: 'Done.',
+      }),
+    ])
+
+    expect(result.finalMessage).toBe('Done.')
+    expect(result.precedingAgentMessages).toEqual(['Done.'])
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        response: 'Done.',
+        media: [],
+      },
+    ])
+  })
+
+  it('segments response media at the same boundary as pre-steer final text', async () => {
+    const firstMedia = {
+      url: 'https://cdn.example.test/assistant/first.png',
+      alt: 'First segment image',
+      source: 'first-segment',
+    }
+    const finalMedia = {
+      url: 'https://cdn.example.test/assistant/final.png',
+      alt: 'Final segment image',
+      source: 'final-segment',
+    }
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        kind: 'attach-response-media',
+        id: 41,
+        expectedText: '1 response image attached',
+        media: [firstMedia],
+      },
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Answer one with image.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Now answer differently',
+      }),
+      {
+        kind: 'attach-response-media',
+        id: 42,
+        expectedText: '1 response image attached',
+        media: [finalMedia],
+      },
+      completedItemEvent({
+        id: 'assistant-2',
+        type: 'assistant_message',
+        message: 'Answer two with a different image.',
+      }),
+    ])
+
+    expect(result.finalMessage).toBe('Answer two with a different image.')
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        response: 'Answer one with image.',
+        media: [
+          {
+            ...firstMedia,
+            kind: 'image',
+          },
+        ],
+      },
+    ])
+    expect(result.responseMedia).toEqual([
+      {
+        ...finalMedia,
+        kind: 'image',
+      },
+    ])
   })
 
   it('keeps last-wins behavior for multiple finals without a steer boundary', async () => {

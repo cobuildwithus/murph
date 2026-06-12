@@ -715,15 +715,19 @@ export async function sendAssistantMessageLocal(
           turnId: currentUserTurn.turnId,
         })
         // Final answers the model completed before a steered message arrived
-        // are delivered ahead of the final reply (Codex renders every
-        // completed agent message). A turn that ends on a steer boundary
-        // reports its final answer as the trailing closed segment too, so
-        // drop only a trailing duplicate of the final reply; interior
-        // duplicates are real answers and must be delivered.
-        const precedingResponses = [...(providerResult.precedingResponses ?? [])]
-        if (precedingResponses.at(-1) === providerResult.response) {
-          precedingResponses.pop()
-        }
+        // are delivered ahead of the final reply with their own media.
+        const precedingResponseSegments =
+          providerResult.precedingResponseSegments?.map((segment) => ({
+            response: segment.response,
+            media: segment.media ?? [],
+          })) ??
+          (providerResult.precedingResponses ?? []).map((response) => ({
+            response,
+            media: [],
+          }))
+        const precedingResponses = precedingResponseSegments.map(
+          (segment) => segment.response,
+        )
         const session = await finalizeAssistantTurnArtifacts({
           input: currentInput,
           plan: sharedPlan,
@@ -747,7 +751,7 @@ export async function sendAssistantMessageLocal(
         try {
           precedingDeliveryOutcomes = await deliverAssistantPrecedingReplies({
             input: currentInput,
-            responses: precedingResponses,
+            segments: precedingResponseSegments,
             session,
             sharedPlan,
             turnId: currentUserTurn.turnId,

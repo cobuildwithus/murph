@@ -928,6 +928,62 @@ describe("assistant delivery orchestration seam", () => {
     expect(runtimeState.outbox.deliverMessage).not.toHaveBeenCalled();
   });
 
+  it("uses the final delivery idempotency key as the default outbox dedupe token", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "telegram",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "participant",
+          target: "binding-delivery",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
+    });
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "telegram",
+        idempotencyKey: "delivery-final-key",
+        messageLength: 5,
+        providerMessageId: "provider-final-dedupe",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "binding-thread",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-final-dedupe",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "delivery-final-key",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      response: "reply",
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-final-dedupe",
+    });
+
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dedupeToken: "delivery-final-key",
+        deliveryIdempotencyKey: "delivery-final-key",
+        message: "reply",
+        turnId: "turn-final-dedupe",
+      }),
+    );
+  });
+
   it("sends progress directly without creating receipt-owning outbox intents", async () => {
     const session = createAssistantSession({
       binding: {
@@ -1184,12 +1240,14 @@ describe("assistant delivery orchestration seam", () => {
     expect(outcomes.map((outcome) => outcome.kind)).toEqual(["sent", "sent"]);
     expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledTimes(2);
     expect(runtimeState.outbox.deliverMessage.mock.calls[0]?.[0]).toMatchObject({
+      dedupeToken: "assistant-segment:turn-segments:0",
       deliveryIdempotencyKey: "assistant-segment:turn-segments:0",
       media: [],
       message: "Answer one.",
       turnId: "turn-segments",
     });
     expect(runtimeState.outbox.deliverMessage.mock.calls[1]?.[0]).toMatchObject({
+      dedupeToken: "assistant-segment:turn-segments:1",
       deliveryIdempotencyKey: "assistant-segment:turn-segments:1",
       media: [],
       message: "Answer two.",
@@ -1233,6 +1291,11 @@ describe("assistant delivery orchestration seam", () => {
     expect(
       runtimeState.outbox.deliverMessage.mock.calls.map(
         (call) => call[0]?.deliveryIdempotencyKey
+      )
+    ).toEqual(["delivery-base:segment:0", "delivery-base:segment:1"]);
+    expect(
+      runtimeState.outbox.deliverMessage.mock.calls.map(
+        (call) => call[0]?.dedupeToken
       )
     ).toEqual(["delivery-base:segment:0", "delivery-base:segment:1"]);
   });
@@ -1345,6 +1408,7 @@ describe("assistant delivery orchestration seam", () => {
         target: "audience-delivery",
       },
       channel: "telegram",
+      dedupeToken: null,
       deliveryIdempotencyKey: null,
       deliverySource: null,
       deliveryTransportIdempotent: undefined,

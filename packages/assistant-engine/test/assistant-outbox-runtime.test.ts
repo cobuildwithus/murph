@@ -584,6 +584,50 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps duplicate same-text segment bubbles distinct by dedupe token', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-segment-outbox-dedupe-',
+    )
+
+    await deliverAssistantOutboxMessage({
+      channel: 'telegram',
+      dedupeToken: 'assistant-segment:turn-duplicate-text:0',
+      dispatchMode: 'queue-only',
+      media: [],
+      message: 'Done.',
+      sessionId: 'session-duplicate-text',
+      threadId: 'thread-duplicate-text',
+      turnId: 'turn-duplicate-text',
+      vault: vaultRoot,
+    })
+    await deliverAssistantOutboxMessage({
+      channel: 'telegram',
+      dedupeToken: 'assistant-segment:turn-duplicate-text:1',
+      dispatchMode: 'queue-only',
+      media: [],
+      message: 'Done.',
+      sessionId: 'session-duplicate-text',
+      threadId: 'thread-duplicate-text',
+      turnId: 'turn-duplicate-text',
+      vault: vaultRoot,
+    })
+    await deliverAssistantOutboxMessage({
+      channel: 'telegram',
+      dedupeToken: 'assistant-segment:turn-duplicate-text:1',
+      dispatchMode: 'queue-only',
+      media: [],
+      message: 'Done again.',
+      sessionId: 'session-duplicate-text',
+      threadId: 'thread-duplicate-text',
+      turnId: 'turn-duplicate-text-retry',
+      vault: vaultRoot,
+    })
+
+    const intents = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(intents.map((intent) => intent.message)).toEqual(['Done.', 'Done.'])
+    expect(new Set(intents.map((intent) => intent.intentId)).size).toBe(2)
+  })
+
   it('persists inferred Linq thread delivery on queue-only intents before dispatch', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-linq-thread-inferred-',

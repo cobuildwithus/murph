@@ -192,15 +192,21 @@ export interface AssistantProviderTurnExecutionResult {
   codexThreadId: string | null
   rawEvents: unknown[]
   response: string
-  // Completed final answers that were followed by a steered user message
-  // later in the same provider turn, in completion order. Delivered ahead of
-  // `response` (Codex frontends render every completed agent message); the
-  // delivery layer drops a trailing entry that duplicates `response`.
+  // Completed final answers that were followed by a steered user message and
+  // later superseded by another final answer in the same provider turn, in
+  // completion order. Delivered ahead of `response` because Codex frontends
+  // render every completed agent message.
   precedingResponses?: readonly string[]
+  precedingResponseSegments?: readonly AssistantProviderResponseSegment[]
   responseMedia?: readonly AssistantResponseMedia[] | null
   stderr: string
   stdout: string
   usage?: AssistantProviderUsage | null
+}
+
+export interface AssistantProviderResponseSegment {
+  media?: readonly AssistantResponseMedia[] | null
+  response: string
 }
 
 export interface AssistantProviderAttemptMetadata {
