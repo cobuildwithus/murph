@@ -367,6 +367,43 @@ describe("supplements query helpers", () => {
     ]);
   });
 
+  it("expands parent-brand scopes to sub-brand lines, query-overlapping lines first", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("GROUP BY brand")) {
+          return {
+            rows: [
+              { brand: "Garden of Life" },
+              { brand: "Garden of Life Sport" },
+              { brand: "Garden of Life MyKind Organics" },
+              { brand: "Momentous" },
+            ],
+          } as { rows: T[] };
+        }
+        return { rows: [] as T[] };
+      },
+    });
+
+    await queries.searchSupplements({
+      q: "Garden of Life Organics Women's Multi",
+      limit: 5,
+      includeOffMarket: false,
+    });
+
+    expect(calls[1]?.values).toEqual([
+      "Garden of Life Organics Women's Multi",
+      false,
+      5,
+      [
+        "Garden of Life",
+        "Garden of Life MyKind Organics",
+        "Garden of Life Sport",
+      ],
+    ]);
+  });
+
   it("skips invalid ids before querying", async () => {
     const queries = createSupplementsQueries({
       async query() {
