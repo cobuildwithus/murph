@@ -2242,6 +2242,8 @@ function createAbortGuardedHostedRuntimePlatform(
             // they are replay-safe; consume is a durable write and takes the
             // abort guard like every other write port.
             ...platform.mailboxPort,
+            fetch: (request) => platform.mailboxPort!.fetch(request),
+            fetchPayload: (request) => platform.mailboxPort!.fetchPayload(request),
             ...(platform.mailboxPort.consume
               ? {
                   consume: (request) =>
