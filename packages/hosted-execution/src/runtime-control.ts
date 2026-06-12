@@ -850,6 +850,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "mailbox.parser_jobs_failed",
   "mailbox.post_checkpoint_effects_finished",
   "mailbox.system_processed",
+  "mailbox.telegram_attachment_download_finished",
   "mailbox.quarantined",
   "mailbox.retryable_payload_missing",
   "outbox.ambiguous",

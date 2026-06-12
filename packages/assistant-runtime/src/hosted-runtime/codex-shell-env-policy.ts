@@ -5,7 +5,7 @@ import {
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
-} from "@murphai/assistant-engine/assistant-skill-assets";
+} from "@murphai/assistant-engine/assistant-skill-env";
 
 export const HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE = "all";
 export const HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY = [

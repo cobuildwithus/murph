@@ -14,6 +14,7 @@ import type { AssistantProviderTraceEvent } from './provider-traces.js'
 import type { AssistantProviderProgressEvent } from './provider-progress.js'
 import type { AssistantUsageAttribution } from './usage-attribution.js'
 import type {
+  AssistantProviderServiceTier,
   AssistantProviderTurnExecutionResult,
 } from './providers/types.js'
 import type { AssistantUserMessageContentPart } from './content-types.js'
@@ -118,6 +119,8 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   prompt: string
   userMessageContent?: AssistantUserMessageContentPart[] | null
   receiptMetadata?: Record<string, string> | null
+  // Per-turn provider processing tier; never part of session/route identity.
+  serviceTier?: AssistantProviderServiceTier | null
   showThinkingTraces?: boolean
   turnEnvironment?: AssistantTurnEnvironment | null
   turnTrigger?: AssistantTurnTrigger
