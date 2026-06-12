@@ -232,19 +232,42 @@ function readHostedProviderEffectErrorResponse(
     readOptionalString(record?.target)
     ?? readOptionalString(context?.target)
     ?? null;
+  const upstreamStatus =
+    readProviderEffectStatus(record?.status)
+    ?? readProviderEffectStatus(record?.statusCode);
+  const responseContext = readProviderEffectResponseContext({
+    context,
+    upstreamStatus,
+  });
 
   return {
     error: code === "ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS"
       ? "Telegram delivery outcome is ambiguous."
       : "Provider effect failed.",
     ...(code ? { code } : {}),
-    ...(context ? { context: sanitizeProviderEffectContext(context) } : {}),
+    ...(responseContext ? { context: responseContext } : {}),
     ...(providerMessageId ? { providerMessageId } : {}),
     ...(providerMessageIds ? { providerMessageIds } : {}),
     ...(cleanupMessages ? { cleanupMessages } : {}),
     ...(cleanupTargetAliases ? { cleanupTargetAliases } : {}),
     ...(target ? { target } : {}),
   };
+}
+
+function readProviderEffectResponseContext(input: {
+  context: Record<string, unknown> | null;
+  upstreamStatus: number | null;
+}): Record<string, unknown> | null {
+  const rawContext = input.context ? { ...input.context } : {};
+  if (
+    input.upstreamStatus !== null
+    && readProviderEffectStatus(rawContext.status) === null
+  ) {
+    rawContext.status = input.upstreamStatus;
+  }
+
+  const context = sanitizeProviderEffectContext(rawContext);
+  return Object.keys(context).length > 0 ? context : null;
 }
 
 function sanitizeProviderEffectContext(
@@ -341,6 +364,12 @@ function readOptionalString(value: unknown): string | null {
   }
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function readProviderEffectStatus(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 100 && value <= 599
+    ? value
+    : null;
 }
 
 function readFileNameFromProviderPath(filePath: string): string | null {

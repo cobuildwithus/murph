@@ -97,6 +97,7 @@ describe("createHostedTelegramAttachmentDownloadDriver", () => {
 
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       description: "file lookup denied",
+      error_code: 400,
       ok: false,
     }), {
       headers: {
@@ -109,9 +110,11 @@ describe("createHostedTelegramAttachmentDownloadDriver", () => {
     });
     assert.ok(driver);
 
-    await expect(driver.getFile("file_123", undefined)).rejects.toThrow(
-      "file lookup denied",
-    );
+    await expect(driver.getFile("file_123", undefined)).rejects.toMatchObject({
+      message: "file lookup denied",
+      status: 400,
+      statusCode: 400,
+    });
   });
 
   it("uses the provided fetch implementation for metadata and attachment downloads", async () => {
@@ -381,6 +384,40 @@ describe("withHostedTelegramAttachmentDownloadLogging", () => {
     const failure = Object.assign(
       new Error("Hosted Telegram file lookup failed with HTTP 400."),
       { status: 400 },
+    );
+    const driver = withHostedTelegramAttachmentDownloadLogging({
+      downloadFile: async () => Uint8Array.from([]),
+      getFile: async () => {
+        throw failure;
+      },
+    }, logPort.platform);
+    assert.ok(driver);
+
+    await expect(driver.getFile("file_123")).rejects.toBe(failure);
+
+    expect(logPort.entries()).toEqual([
+      expect.objectContaining({
+        errorCode: "download_fetch_failed",
+        level: "warn",
+        redactedJson: {
+          failureCode: "download_fetch_failed",
+          failureStatus: 400,
+          operation: "getFile",
+          result: "failed",
+        },
+      }),
+    ]);
+  });
+
+  it("prefers provider-effect upstream status over wrapper transport status", async () => {
+    const logPort = createLogPort();
+    const failure = Object.assign(
+      new Error("Hosted provider effect request failed with 502."),
+      {
+        context: { status: 400 },
+        status: 502,
+        statusCode: 502,
+      },
     );
     const driver = withHostedTelegramAttachmentDownloadLogging({
       downloadFile: async () => Uint8Array.from([]),

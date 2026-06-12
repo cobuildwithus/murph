@@ -178,6 +178,7 @@ describe("telegram provider effect contract", () => {
 
     expect(response.status).toBe(502);
     await expect(response.json()).resolves.toEqual({
+      context: { status: 400 },
       error: "Provider effect failed.",
     });
     expect(readProviderEffectFailureLogs()).toEqual([

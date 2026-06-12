@@ -117,7 +117,14 @@ function classifyHostedTelegramAttachmentDownloadError(
   error: unknown,
 ): Pick<HostedTelegramAttachmentDownloadAttemptLog, "failureCode" | "failureStatus"> {
   const record = error && typeof error === "object" ? error as Record<string, unknown> : null;
-  const status = typeof record?.status === "number" ? record.status : null;
+  const context = record?.context && typeof record.context === "object" && !Array.isArray(record.context)
+    ? record.context as Record<string, unknown>
+    : null;
+  const status =
+    readHostedTelegramStatus(context?.status)
+    ?? readHostedTelegramStatus(context?.upstreamStatus)
+    ?? readHostedTelegramStatus(record?.status)
+    ?? readHostedTelegramStatus(record?.statusCode);
   const aborted = (
     error instanceof DOMException
     && error.name === "AbortError"
@@ -262,12 +269,16 @@ async function readHostedTelegramApiResult<T>(input: {
   };
 
   if (payload.ok !== true || payload.result === undefined) {
-    throw new Error(
-      payload.description ??
-      (payload.error_code
-        ? `Hosted Telegram API request failed with Telegram error ${payload.error_code}.`
-        : "Hosted Telegram API request returned an invalid response."),
-    );
+    const telegramStatus = readHostedTelegramStatus(payload.error_code);
+    const message = payload.description ??
+      (telegramStatus
+        ? `Hosted Telegram API request failed with Telegram error ${telegramStatus}.`
+        : "Hosted Telegram API request returned an invalid response.");
+    if (telegramStatus) {
+      throw createHostedTelegramStatusError(message, telegramStatus);
+    }
+
+    throw new Error(message);
   }
 
   return payload.result;
@@ -281,6 +292,12 @@ function createHostedTelegramStatusError(message: string, status: number): Error
     status,
     statusCode: status,
   });
+}
+
+function readHostedTelegramStatus(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 100 && value <= 599
+    ? value
+    : null;
 }
 
 function stripLeadingSlash(value: string): string {
