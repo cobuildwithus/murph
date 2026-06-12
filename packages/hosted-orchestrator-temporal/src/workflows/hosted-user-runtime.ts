@@ -138,7 +138,6 @@ export function createHostedUserRuntimeWorkflowMachine(
   const state = createInitialWorkflowState(input.userId, input.state);
   let completedIterations = 0;
   let mailboxSignalVersion = 0;
-  let latestMailboxSignalVersion: number | null = null;
   let lastMailboxSignalVersionRead =
     state.latestMailboxPointer !== null ? -1 : mailboxSignalVersion;
 
@@ -168,7 +167,6 @@ export function createHostedUserRuntimeWorkflowMachine(
     if (signal.kind === "mailbox_appended") {
       state.signalVersion += 1;
       mailboxSignalVersion += 1;
-      latestMailboxSignalVersion = mailboxSignalVersion;
       state.mailboxSignalCount += 1;
       state.latestMailboxPointer = {
         lane: signal.lane,
@@ -279,19 +277,6 @@ export function createHostedUserRuntimeWorkflowMachine(
       }
 
       completedIterations += 1;
-
-      if (
-        state.latestMailboxPointer !== null
-        && latestMailboxSignalVersion === mailboxSignalVersion
-      ) {
-        latestMailboxSignalVersion = null;
-        lastMailboxSignalVersionRead = mailboxSignalVersion;
-        recordDirectMailboxProcessingSummary(state);
-        await executeRuntimeProcessing({
-          clearMailboxPointerOnAccepted: true,
-        });
-        continue;
-      }
 
       const versionBeforeReconciliation = state.signalVersion;
       let facts: HostedRuntimeReconciliationFacts;
@@ -650,15 +635,6 @@ function recordReconciliationFactsSummary(
 
   state.lastReconciliationStatus = "idle";
   state.lastReconciliationNextWakeAt = facts.workspace?.nextWakeAt ?? null;
-}
-
-function recordDirectMailboxProcessingSummary(
-  state: HostedRuntimeWorkflowState,
-): void {
-  state.lastReconciliationStatus = "work_pending";
-  state.lastReconciliationNextWakeAt = null;
-  state.lastReconciliationBlockedReason = null;
-  state.lastMailboxLagLaneCount = 0;
 }
 
 function hasAnyMailboxLag(facts: HostedRuntimeReconciliationFacts): boolean {
