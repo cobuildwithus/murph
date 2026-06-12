@@ -81,6 +81,7 @@ interface SmokeDirectR2PresignedPutResult {
 
 interface SmokeLiveModelTurnResult {
   durationMs?: unknown;
+  egressGrantConsumed?: unknown;
   model?: unknown;
   stdoutBytes?: unknown;
 }
@@ -208,17 +209,26 @@ export async function runSmokeHostedDeploy(input: {
       source,
       url: buildRunnerContainerSmokeUrl({
         directR2PresignedPut: shouldSmokeDirectR2PresignedPut,
-        liveModelTurnModel: shouldSmokeLiveModelTurn
-          ? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL
-          : null,
+        liveModelTurnModel: null,
         smokeBaseUrl,
       }),
       versionOverrideHeaders,
       expectDirectR2PresignedPut: shouldSmokeDirectR2PresignedPut,
-      expectLiveModelTurnModel: shouldSmokeLiveModelTurn
-        ? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL
-        : null,
+      expectLiveModelTurnModel: null,
     });
+    if (shouldSmokeLiveModelTurn) {
+      await assertRunnerContainerLiveModelTurnSmoke({
+        expectLiveModelTurnModel: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+        fetchImpl,
+        source,
+        url: buildRunnerContainerSmokeUrl({
+          directR2PresignedPut: false,
+          liveModelTurnModel: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+          smokeBaseUrl,
+        }),
+        versionOverrideHeaders,
+      });
+    }
   }
 
   if (!smokeUserId) {
@@ -280,10 +290,36 @@ async function assertRunnerContainerSmoke(input: {
   }
 }
 
+async function assertRunnerContainerLiveModelTurnSmoke(input: {
+  expectLiveModelTurnModel: string;
+  fetchImpl: FetchLike;
+  source: EnvSource;
+  url: string;
+  versionOverrideHeaders: Record<string, string> | undefined;
+}): Promise<void> {
+  const expectedManifest = await readExpectedRunnerBundleManifest(input.source);
+  assertSmokeRunnerBundleManifest(
+    await readRunnerContainerSmoke({
+      expectDirectR2PresignedPut: false,
+      expectLiveModelTurnModel: input.expectLiveModelTurnModel,
+      fetchImpl: input.fetchImpl,
+      retryableFailures: false,
+      source: input.source,
+      url: input.url,
+      versionOverrideHeaders: input.versionOverrideHeaders,
+    }),
+    expectedManifest,
+    {
+      retryable: false,
+    },
+  );
+}
+
 async function readRunnerContainerSmoke(input: {
   expectDirectR2PresignedPut: boolean;
   expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
+  retryableFailures?: boolean;
   source: EnvSource;
   url: string;
   versionOverrideHeaders: Record<string, string> | undefined;
@@ -311,7 +347,7 @@ async function readRunnerContainerSmoke(input: {
     const message = `runner container smoke failed with HTTP ${response.status}${
       failureBody ? `: ${failureBody}` : "."
     }`;
-    throw response.status === 400 || response.status >= 500
+    throw input.retryableFailures !== false && (response.status === 400 || response.status >= 500)
       ? new RunnerContainerSmokeRetryableError(message)
       : new Error(message);
   }
@@ -329,7 +365,9 @@ async function readRunnerContainerSmoke(input: {
   };
 
   if (responsePayload.ok !== true || responsePayload.runnerContainer?.ok !== true) {
-    throw new RunnerContainerSmokeRetryableError("runner container smoke did not return ok=true.");
+    throw input.retryableFailures === false
+      ? new Error("runner container smoke did not return ok=true.")
+      : new RunnerContainerSmokeRetryableError("runner container smoke did not return ok=true.");
   }
 
   if (responsePayload.runnerContainer.service !== "cloudflare-hosted-runner-node") {
@@ -453,6 +491,9 @@ function assertSmokeLiveModelTurnResult(
   if (typeof value.durationMs !== "number" || value.durationMs <= 0) {
     throw new Error("runner container live model turn smoke reported an invalid duration.");
   }
+  if (value.egressGrantConsumed !== true) {
+    throw new Error("runner container live model turn smoke did not consume the egress grant.");
+  }
   if (typeof value.stdoutBytes !== "number" || value.stdoutBytes <= 0) {
     throw new Error("runner container live model turn smoke reported no codex exec output.");
   }
@@ -481,9 +522,16 @@ async function readExpectedRunnerBundleManifest(source: EnvSource): Promise<Smok
 function assertSmokeRunnerBundleManifest(
   actual: SmokeRunnerBundleManifest | null,
   expected: SmokeRunnerBundleManifest,
+  options: {
+    retryable?: boolean;
+  } = {},
 ): void {
+  const retryable = options.retryable !== false;
+  const createManifestError = (message: string): Error =>
+    retryable ? new RunnerContainerSmokeRetryableError(message) : new Error(message);
+
   if (!actual) {
-    throw new RunnerContainerSmokeRetryableError(
+    throw createManifestError(
       "runner container smoke did not return runner bundle metadata.",
     );
   }
@@ -496,7 +544,7 @@ function assertSmokeRunnerBundleManifest(
     typeof actual.bundleFingerprint !== "string" ||
     typeof actual.sourceFingerprint !== "string"
   ) {
-    throw new RunnerContainerSmokeRetryableError(
+    throw createManifestError(
       "runner container smoke returned incomplete runner bundle metadata.",
     );
   }
@@ -505,7 +553,7 @@ function assertSmokeRunnerBundleManifest(
     actual.bundleFingerprint !== expected.bundleFingerprint ||
     actual.sourceFingerprint !== expected.sourceFingerprint
   ) {
-    throw new RunnerContainerSmokeRetryableError(
+    throw createManifestError(
       "runner container smoke did not run the expected runner bundle. "
         + `expected bundle=${expected.bundleFingerprint} source=${expected.sourceFingerprint}; `
         + `actual bundle=${actual.bundleFingerprint} source=${actual.sourceFingerprint}.`,

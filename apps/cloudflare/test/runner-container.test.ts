@@ -1275,6 +1275,7 @@ describe("RunnerContainer", () => {
 
     expect(result.liveModelTurn).toEqual({
       durationMs: 1_234,
+      egressGrantConsumed: true,
       model: "gpt-5.4-mini",
       stdoutBytes: 2_048,
     });
@@ -1292,6 +1293,72 @@ describe("RunnerContainer", () => {
     );
     expect(JSON.parse(smokeCall?.[1]?.body as string)).toEqual({
       model: "gpt-5.4-mini",
+    });
+  });
+
+  it("fails a live model turn smoke that does not consume the egress fence", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+            ok: true,
+            service: "cloudflare-hosted-runner-node",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+          return new Response(JSON.stringify({
+            codexShell: createCodexShellSmokeResult(),
+            ok: true,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-live-model-turn-smoke")) {
+          return new Response(JSON.stringify({
+            liveModelTurn: {
+              durationMs: 1_234,
+              model: "gpt-5.4-mini",
+              stdoutBytes: 2_048,
+            },
+            ok: true,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected deploy smoke URL: ${url}`);
+      }),
+      env: {
+        OPENAI_API_KEY: "openai-worker-secret",
+      },
+    });
+
+    const error = await container.smokeHealth({
+      liveModelTurn: {
+        model: "gpt-5.4-mini",
+      },
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Hosted runner container live model turn smoke did not consume the Worker egress grant.",
+    );
+    await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
+      active: false,
     });
   });
 

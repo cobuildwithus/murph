@@ -556,6 +556,7 @@ describe("cloudflare worker routes", () => {
       return {
         liveModelTurn: {
           durationMs: 1_234,
+          egressGrantConsumed: true,
           model: "gpt-5.4-mini",
           stdoutBytes: 2_048,
         },
@@ -606,6 +607,7 @@ describe("cloudflare worker routes", () => {
       runnerContainer: {
         liveModelTurn: {
           durationMs: 1_234,
+          egressGrantConsumed: true,
           model: "gpt-5.4-mini",
           stdoutBytes: 2_048,
         },

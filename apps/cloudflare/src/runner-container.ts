@@ -244,6 +244,7 @@ interface HostedExecutionContainerSmokeHealthResult {
   } | null;
   liveModelTurn?: {
     durationMs: number | null;
+    egressGrantConsumed: boolean | null;
     model: string | null;
     stdoutBytes: number | null;
   } | null;
@@ -719,8 +720,15 @@ export class RunnerContainer extends Container {
         );
       }
       const result = readRunnerContainerMetadataRecordProperty(payload.liveModelTurn);
+      const egressGrantConsumed = this.liveModelTurnSmokeFence?.remainingRequests === 0;
+      if (!egressGrantConsumed) {
+        throw new Error(
+          "Hosted runner container live model turn smoke did not consume the Worker egress grant.",
+        );
+      }
       return {
         durationMs: typeof result.durationMs === "number" ? result.durationMs : null,
+        egressGrantConsumed,
         model: typeof result.model === "string" ? result.model : null,
         stdoutBytes: typeof result.stdoutBytes === "number" ? result.stdoutBytes : null,
       };
