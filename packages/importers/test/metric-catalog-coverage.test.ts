@@ -112,6 +112,47 @@ test("metric catalog normalizes unit conversions across importer-supported branc
   });
 });
 
+test("metric catalog resolves the Junction tier-1 timeseries metric keys", () => {
+  // Every metric the Junction tier-1 timeseries importer emits must resolve,
+  // or the wearables candidate path silently drops the observations.
+  const junctionEmittedMetrics: readonly [string, string][] = [
+    ["temperature-deviation", "temperatureDeviation"],
+    ["temperature", "temperature"],
+    ["basal-body-temperature", "basalBodyTemperature"],
+    ["caffeine", "caffeine"],
+    ["water", "water"],
+    ["mindfulness-minutes", "mindfulnessMinutes"],
+    ["heart-rate-recovery-one-minute", "heartRateRecoveryOneMinute"],
+    ["sleep-breathing-disturbance", "sleepBreathingDisturbance"],
+    ["afib-burden", "afibBurden"],
+    ["glucose", "glucose"],
+    ["lowest-glucose", "lowestGlucose"],
+    ["highest-glucose", "highestGlucose"],
+    ["systolic-blood-pressure", "systolicBloodPressure"],
+    ["diastolic-blood-pressure", "diastolicBloodPressure"],
+  ];
+
+  for (const [metric, expectedKey] of junctionEmittedMetrics) {
+    assert.equal(resolveWearableCanonicalMetricKey(metric), expectedKey, metric);
+  }
+
+  assert.deepEqual(normalizeWearableMetricValue("basal-body-temperature", 98.06, "fahrenheit"), {
+    key: "basalBodyTemperature",
+    unit: "celsius",
+    value: 36.7,
+  });
+  assert.deepEqual(normalizeWearableMetricValue("systolic-blood-pressure", 125, "mmHg"), {
+    key: "systolicBloodPressure",
+    unit: "mmHg",
+    value: 125,
+  });
+  assert.deepEqual(normalizeWearableMetricValue("glucose", 99.1001, "mg/dL"), {
+    key: "glucose",
+    unit: "mg/dL",
+    value: 99.1001,
+  });
+});
+
 test("metric catalog rejects unsupported metrics and non-finite values", () => {
   assert.equal(normalizeWearableMetricValue("unknown_metric", 10, "count"), null);
   assert.equal(normalizeWearableMetricValue("steps", Number.NaN, "count"), null);

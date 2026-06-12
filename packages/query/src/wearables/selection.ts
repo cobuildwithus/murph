@@ -1,3 +1,5 @@
+import { canonicalizeDeviceProviderSlug } from "@murphai/importers/device-providers/provider-descriptors";
+
 import { dedupeExactMetricCandidates } from "./dedupe.ts";
 import {
   compareWearableProviders,
@@ -418,8 +420,9 @@ function scoreJunctionSourcePolicy(
     return JUNCTION_UNSUPPORTED_SOURCE_PRIORITY_BOOST;
   }
 
+  const sourceProvider = canonicalizeDeviceProviderSlug(sourceProviderSlug);
   const directCandidateExists = candidates.some((other) =>
-    normalizeLowercaseString(other.provider) === sourceProviderSlug
+    canonicalizeDeviceProviderSlug(normalizeLowercaseString(other.provider) ?? "") === sourceProvider
   );
   return directCandidateExists ? JUNCTION_DIRECT_DUPLICATE_PENALTY : 0;
 }

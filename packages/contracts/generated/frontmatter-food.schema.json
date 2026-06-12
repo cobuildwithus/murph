@@ -85,6 +85,10 @@
             "fiberGrams": {
               "type": "number",
               "minimum": 0
+            },
+            "waterGrams": {
+              "type": "number",
+              "minimum": 0
             }
           },
           "additionalProperties": false

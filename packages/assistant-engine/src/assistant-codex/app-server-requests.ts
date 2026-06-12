@@ -112,7 +112,7 @@ export function buildCodexTurnStartParams(input: {
   }
   codexThreadId: string
 }): Record<string, unknown> {
-  return stripUndefinedRpcParams({
+  const params = stripUndefinedRpcParams({
     effort: normalizeNullableString(input.input.reasoningEffort),
     input: buildCodexAppServerInputItems({
       imagePaths: input.imagePaths,
@@ -120,6 +120,12 @@ export function buildCodexTurnStartParams(input: {
     }),
     threadId: input.codexThreadId,
   })
+
+  // Always explicit: `serviceTier` overrides stick to the thread for
+  // subsequent turns, so non-tiered turns must send null to reset it
+  // (double-option semantics: absent = inherit, null = default tier).
+  params.serviceTier = normalizeNullableString(input.input.serviceTier) ?? null
+  return params
 }
 
 export function buildCodexTurnSteerParams(
