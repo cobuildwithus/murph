@@ -919,7 +919,7 @@ test("sleep-window ranking does not treat selected session duration as total sle
     assert.equal(sleep[0]?.timeInBedMinutes.selection.resolution, "fallback");
     assert.equal(sleep[0]?.timeInBedMinutes.selection.fallbackFromMetric, "sessionMinutes");
     assert.equal(
-      sleep[0]?.notes.some((note) => note.includes("Selected Garmin sleep window recorded")),
+      sleep[0]?.notes.some((note) => note.includes("Selected sleep window from Garmin spanning")),
       true,
     );
     assert.equal(
