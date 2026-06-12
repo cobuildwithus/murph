@@ -202,6 +202,33 @@ describe("startHostedContainerCpuWatchdog", () => {
     ]);
   });
 
+  it("does not use the usage reporting secret as a watchdog fingerprint fallback", async () => {
+    vi.stubEnv("HOSTED_LOG_FINGERPRINT_SECRET", "   ");
+    vi.stubEnv("HOSTED_AI_USAGE_REPORTING_SECRET", "usage-reporting-secret");
+    const state: FakeProcessState = {
+      cpuStatText: null,
+      pidStats: new Map([
+        ["45", pidStatText({ comm: "check_health.sh", pid: 45, totalTicks: 100 })],
+      ]),
+    };
+    stopWatchdog = await startWatchdog({
+      processApi: createFakeProcessApi(state),
+    });
+
+    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
+    state.pidStats.set(
+      "45",
+      pidStatText({ comm: "check_health.sh", pid: 45, totalTicks: 1_400 }),
+    );
+    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
+
+    const emits = watchdogEmits();
+    expect(emits).toHaveLength(1);
+    expect((emits[0]?.details as Record<string, unknown>).topCpuProcesses).toEqual([
+      { comm: "other", cpuCores: 0.65, pid: 45 },
+    ]);
+  });
+
   it("emits a one-time started signal reporting cgroup availability", async () => {
     const state: FakeProcessState = {
       cpuStatText: cpuStatText({ usageUsec: 1_000_000 }),

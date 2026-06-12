@@ -134,9 +134,7 @@ export function startHostedContainerCpuWatchdog(input: {
 }
 
 function resolveCpuWatchdogFingerprintSecret(): string | null {
-  // Same resolution order as the hosted context diagnostics fingerprints.
-  const secret = process.env.HOSTED_LOG_FINGERPRINT_SECRET?.trim()
-    || process.env.HOSTED_AI_USAGE_REPORTING_SECRET?.trim();
+  const secret = process.env.HOSTED_LOG_FINGERPRINT_SECRET?.trim();
   return secret || null;
 }
 

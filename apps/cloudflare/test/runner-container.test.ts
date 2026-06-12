@@ -1,4 +1,5 @@
 import type { HostedWorkspaceInvocationResult } from "@murphai/hosted-execution/runtime-control";
+import { createHmac } from "node:crypto";
 import { buildHostedExecutionStructuredLogRecord } from "@murphai/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -35,6 +36,8 @@ import {
 const RUNNER_CALLBACK_BASE_URL = "https://runner-callback.example.test/";
 const CLOUDFLARE_CONTAINERS_CA_CERT_PATH =
   "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
+const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_DERIVATION_CONTEXT =
+  "murph:hosted-container-cpu-watchdog-fingerprint:v1";
 const EXPECTED_RUNNER_CONTAINER_ENV = {
   CODEX_CA_CERTIFICATE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
   CURL_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
@@ -66,6 +69,40 @@ describe("RunnerContainer", () => {
     expect(RunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
     expect(DeploySmokeRunnerContainer.outbound).toBeUndefined();
     expect(DeploySmokeRunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
+  });
+
+  it("passes only a derived CPU watchdog fingerprint secret to the container startup env", () => {
+    const workerSecret = "fixture-log-fingerprint-secret";
+    const { container } = createContainerDouble({
+      env: {
+        HOSTED_AI_USAGE_REPORTING_SECRET: "fixture-usage-reporting-secret",
+        HOSTED_LOG_FINGERPRINT_SECRET: `  ${workerSecret}  `,
+      },
+    });
+
+    const expectedWatchdogSecret = createHmac("sha256", workerSecret)
+      .update(HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_DERIVATION_CONTEXT)
+      .digest("hex");
+
+    expect(container.envVars).toEqual({
+      ...EXPECTED_RUNNER_CONTAINER_ENV,
+      HOSTED_LOG_FINGERPRINT_SECRET: expectedWatchdogSecret,
+    });
+    expect(container.envVars.HOSTED_LOG_FINGERPRINT_SECRET).not.toBe(workerSecret);
+    expect(container.envVars).not.toHaveProperty("HOSTED_AI_USAGE_REPORTING_SECRET");
+  });
+
+  it("does not fall back to the usage reporting secret for the CPU watchdog startup env", () => {
+    const { container } = createContainerDouble({
+      env: {
+        HOSTED_AI_USAGE_REPORTING_SECRET: "fixture-usage-reporting-secret",
+        HOSTED_LOG_FINGERPRINT_SECRET: "   ",
+      },
+    });
+
+    expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
+    expect(container.envVars).not.toHaveProperty("HOSTED_LOG_FINGERPRINT_SECRET");
+    expect(JSON.stringify(container.envVars)).not.toContain("fixture-usage-reporting-secret");
   });
 
   it("reuses a successful per-user shell for back-to-back invocations", async () => {
