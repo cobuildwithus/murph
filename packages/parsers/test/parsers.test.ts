@@ -81,6 +81,10 @@ function validId3Mp3Bytes(): Buffer {
   ]);
 }
 
+function validAacAdtsBytes(): Buffer {
+  return Buffer.from([0xff, 0xf1, 0x50, 0x80, 0x01, 0x1f, 0xfc, 0x00]);
+}
+
 async function writeExecutableFile(directory: string, fileName: string, content: string): Promise<string> {
   if (process.platform === "win32" && path.extname(fileName) === "") {
     await writeExternalFile(directory, `${fileName}.js`, content);
@@ -155,6 +159,86 @@ test("audio preparation passes remote-accepted formats through untouched when re
   });
   assert.equal(cafPrepared.inputPath, cafPath);
   assert.equal(cafPrepared.preparedKind, "audio");
+
+  const wavWithoutMimePath = await writeExternalFile(
+    directory,
+    "missing-mime.wav",
+    "RIFF----WAVEwav-bytes-placeholder",
+  );
+  const wavWithoutMimePrepared = await prepareAudioInput({
+    artifact: {
+      captureId: "cap_audio_passthrough_14",
+      attachmentId: "att_audio_wav_missing_mime",
+      kind: "audio",
+      fileName: "missing-mime.wav",
+      storedPath: "raw/inbox/example/missing-mime.wav",
+      absolutePath: wavWithoutMimePath,
+    },
+    scratchDirectory: directory,
+    ffmpeg: remoteOnlyFfmpeg,
+  });
+  assert.equal(wavWithoutMimePrepared.inputPath, wavWithoutMimePath);
+  assert.equal(wavWithoutMimePrepared.preparedKind, "audio");
+
+  const invalidWavWithoutMimePath = await writeExternalFile(
+    directory,
+    "spoofed-missing-mime.wav",
+    "not-wav-bytes",
+  );
+  await assert.rejects(
+    prepareAudioInput({
+      artifact: {
+        captureId: "cap_audio_passthrough_15",
+        attachmentId: "att_audio_spoofed_wav_missing_mime",
+        kind: "audio",
+        fileName: "spoofed-missing-mime.wav",
+        storedPath: "raw/inbox/example/spoofed-missing-mime.wav",
+        absolutePath: invalidWavWithoutMimePath,
+      },
+      scratchDirectory: directory,
+      ffmpeg: remoteOnlyFfmpeg,
+    }),
+    /ffmpeg is required to normalize non-WAV audio attachments for transcription/u,
+  );
+
+  const aacPath = await writeExternalBytes(directory, "memo.aac", validAacAdtsBytes());
+  const aacPrepared = await prepareAudioInput({
+    artifact: {
+      captureId: "cap_audio_passthrough_16",
+      attachmentId: "att_audio_aac",
+      kind: "audio",
+      fileName: "memo.aac",
+      mime: "audio/aac",
+      storedPath: "raw/inbox/example/memo.aac",
+      absolutePath: aacPath,
+    },
+    scratchDirectory: directory,
+    ffmpeg: remoteOnlyFfmpeg,
+  });
+  assert.equal(aacPrepared.inputPath, aacPath);
+  assert.equal(aacPrepared.preparedKind, "audio");
+
+  const invalidAacPath = await writeExternalBytes(
+    directory,
+    "spoofed.aac",
+    Buffer.from([0xff, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00]),
+  );
+  await assert.rejects(
+    prepareAudioInput({
+      artifact: {
+        captureId: "cap_audio_passthrough_17",
+        attachmentId: "att_audio_spoofed_aac",
+        kind: "audio",
+        fileName: "spoofed.aac",
+        mime: "audio/aac",
+        storedPath: "raw/inbox/example/spoofed.aac",
+        absolutePath: invalidAacPath,
+      },
+      scratchDirectory: directory,
+      ffmpeg: remoteOnlyFfmpeg,
+    }),
+    /ffmpeg is required to normalize non-WAV audio attachments for transcription/u,
+  );
 
   const extensionOnlyPath = await writeExternalFile(directory, "memo.ogg", "OggS-ogg-bytes-placeholder");
   await assert.rejects(

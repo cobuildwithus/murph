@@ -179,7 +179,13 @@ async function isRemoteTranscriptionDirectAudioArtifact(
     return false;
   }
 
-  if (!REMOTE_TRANSCRIPTION_DIRECT_AUDIO_MIMES.has(mime)) {
+  let directMime: string | null = null;
+  if (REMOTE_TRANSCRIPTION_DIRECT_AUDIO_MIMES.has(mime)) {
+    directMime = mime;
+  } else if (mime === "" && (extension === ".wav" || extension === ".wave")) {
+    directMime = "audio/wav";
+  }
+  if (directMime === null) {
     return false;
   }
 
@@ -190,7 +196,7 @@ async function isRemoteTranscriptionDirectAudioArtifact(
 
   return await hasRemoteTranscriptionDirectAudioSignature(
     artifact.absolutePath,
-    mime,
+    directMime,
     stat.size,
   );
 }
@@ -248,10 +254,52 @@ async function hasRemoteTranscriptionDirectAudioSignature(
   }
 
   if (mime === "audio/aac" || mime === "audio/x-aac") {
-    return header[0] === 0xff && (header[1] & 0xf0) === 0xf0;
+    return hasValidAacAdtsFrameHeader(header, fileSize);
   }
 
   return false;
+}
+
+function hasValidAacAdtsFrameHeader(header: Buffer, fileSize: number): boolean {
+  if (fileSize < 7 || header.length < 7) {
+    return false;
+  }
+
+  const byte0 = header[0];
+  const byte1 = header[1];
+  const byte2 = header[2];
+  const byte3 = header[3];
+  const byte4 = header[4];
+  const byte5 = header[5];
+  if (
+    byte0 === undefined ||
+    byte1 === undefined ||
+    byte2 === undefined ||
+    byte3 === undefined ||
+    byte4 === undefined ||
+    byte5 === undefined
+  ) {
+    return false;
+  }
+
+  const hasSync = byte0 === 0xff && (byte1 & 0xf0) === 0xf0;
+  const layer = (byte1 >> 1) & 0x03;
+  const profile = (byte2 >> 6) & 0x03;
+  const sampleRateIndex = (byte2 >> 2) & 0x0f;
+  const headerLength = (byte1 & 0x01) === 0x01 ? 7 : 9;
+  const frameLength =
+    ((byte3 & 0x03) << 11) |
+    (byte4 << 3) |
+    ((byte5 & 0xe0) >> 5);
+  return (
+    hasSync &&
+    layer === 0x00 &&
+    profile !== 0x03 &&
+    sampleRateIndex < 0x0d &&
+    header.length >= headerLength &&
+    frameLength > headerLength &&
+    frameLength <= fileSize
+  );
 }
 
 async function hasMp3AudioFrameSignature(
