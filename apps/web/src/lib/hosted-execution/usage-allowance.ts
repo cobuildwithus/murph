@@ -136,11 +136,6 @@ const HOSTED_AI_USAGE_HOME_URL = "https://withmurph.ai/home";
 const TOKENS_PER_PRICING_UNIT = 1_000_000n;
 
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES = {
-  "gpt-5.4-mini": {
-    cachedInputUsdMicrosPerMillionTokens: 75_000n,
-    inputUsdMicrosPerMillionTokens: 750_000n,
-    outputUsdMicrosPerMillionTokens: 4_500_000n,
-  },
   "gpt-5.5": {
     cachedInputUsdMicrosPerMillionTokens: 500_000n,
     inputUsdMicrosPerMillionTokens: 5_000_000n,

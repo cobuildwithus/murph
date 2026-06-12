@@ -46,7 +46,6 @@ export type HostedRuntimeControlMailboxKind =
   (typeof HOSTED_RUNTIME_CONTROL_MAILBOX_KINDS)[number];
 
 export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
-  "gpt-5.4-mini",
   "gpt-5.5",
 ] as const;
 
