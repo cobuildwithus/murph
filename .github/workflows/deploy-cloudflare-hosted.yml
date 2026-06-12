@@ -57,7 +57,7 @@ jobs:
   codex-cache-prefix-gate:
     name: Codex cache-prefix E2E gate
     if: ${{ !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test
@@ -146,7 +146,7 @@ jobs:
   linq-delivery-gate:
     name: Linq delivery E2E gate
     if: ${{ !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test
@@ -235,7 +235,7 @@ jobs:
   linq-scheduled-reminder-gate:
     name: Linq scheduled reminder E2E gate
     if: ${{ !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test
@@ -324,7 +324,7 @@ jobs:
   cloudflare-runner-smoke-gate:
     name: Cloudflare verify and runner smoke gate
     if: ${{ inputs.deploy_worker && !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 1

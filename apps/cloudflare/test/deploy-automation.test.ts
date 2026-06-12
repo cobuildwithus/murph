@@ -749,8 +749,11 @@ describe("hosted deploy automation helpers", () => {
     ]).toHaveLength(1);
     expect([
       ...workflow.matchAll(/runs-on: blacksmith-4vcpu-ubuntu-2404/gmu),
-    ]).toHaveLength(5);
-    expect([...workflow.matchAll(/^    runs-on: ubuntu-24\.04$/gmu)]).toHaveLength(2);
+    ]).toHaveLength(1);
+    expect(workflow).toContain(
+      "name: Immediate deploy build prep\n    if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' && github.ref == 'refs/heads/main' && github.ref_protected }}\n    runs-on: blacksmith-4vcpu-ubuntu-2404",
+    );
+    expect([...workflow.matchAll(/^    runs-on: ubuntu-24\.04$/gmu)]).toHaveLength(6);
     expect(workflow).not.toMatch(/inputs\.deploy_worker.{0,160}blacksmith-4vcpu-ubuntu-2404/u);
     expect([
       ...workflow.matchAll(/docker run \\/gmu),
