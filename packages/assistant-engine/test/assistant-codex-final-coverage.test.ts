@@ -460,10 +460,18 @@ describe('Codex model catalog', () => {
     expect(findCodexCatalogModelOptionIndex(null, [])).toBe(0)
   })
 
-  it('drops unsupported rich user parts before invoking the Codex provider', async () => {
-    const route = createRoute()
-    const session = createAssistantSession()
+  it('drops unsupported rich user parts and applies flex only for hosted OpenAI routes', async () => {
+    const route = createRoute({
+      providerOptions: {
+        modelProvider: 'openai',
+      },
+    })
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const upstreamAbort = new AbortController()
     const input = {
+      abortSignal: upstreamAbort.signal,
       prompt: 'Summarize the attached brief.',
       userMessageContent: [
         {
@@ -479,6 +487,7 @@ describe('Codex model catalog', () => {
         },
       ],
       vault: '/vaults/test',
+      serviceTier: 'flex',
     } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
 
     providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -491,7 +500,10 @@ describe('Codex model catalog', () => {
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
       activeTurnSteering: null,
       executionContext: {
-        hosted: null,
+        hosted: {
+          memberId: 'member-flex-openai',
+          userEnvKeys: [],
+        },
       },
       input,
       profile: {
@@ -549,9 +561,16 @@ describe('Codex model catalog', () => {
     expect(
       providerMocks.executeCodexAssistantTurnAttemptFromInput,
     ).toHaveBeenCalledTimes(1)
-    expect(
+    const providerInput =
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
-        ?.userMessageContent,
+    expect(providerInput?.serviceTier).toBe('flex')
+    expect(providerInput?.abortSignal).toBeInstanceOf(AbortSignal)
+    expect(providerInput?.abortSignal).not.toBe(upstreamAbort.signal)
+    expect(providerInput?.abortSignal?.aborted).toBe(false)
+    upstreamAbort.abort()
+    expect(providerInput?.abortSignal?.aborted).toBe(true)
+    expect(
+      providerInput?.userMessageContent,
     ).toEqual([
       {
         image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB',
@@ -570,6 +589,97 @@ describe('Codex model catalog', () => {
         vault: '/vaults/test',
       }),
     )
+  })
+
+  it('drops flex service tier for hosted routes on unsupported model providers', async () => {
+    const route = createRoute({
+      providerOptions: {
+        modelProvider: 'vercel-ai-gateway',
+      },
+    })
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const upstreamAbort = new AbortController()
+    const input = {
+      abortSignal: upstreamAbort.signal,
+      prompt: 'Run scheduled check-in.',
+      serviceTier: 'flex',
+      vault: '/vaults/test',
+    } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text', 'image'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
+      createProviderAttemptResult(),
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering: null,
+      executionContext: {
+        hosted: {
+          memberId: 'member-flex-gateway',
+          userEnvKeys: [],
+        },
+      },
+      input,
+      profile: {
+        promptProfile: 'conversation',
+        toolProfile: 'provider-turn',
+        threadScope: 'session-thread',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-04-29',
+        currentTimeZone: 'UTC',
+      },
+      route,
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-1',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        assistantCliContract: null,
+        cliEnv: {},
+        developerInstructions: null,
+        diagnosticsPolicy: {
+          environment: 'local',
+          privateIssueCaptureEnabled: false,
+          surface: null,
+        },
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: null,
+        sessionContext: undefined,
+        systemPrompt: null,
+        turnContextPrompt: null,
+        workingDirectory: '/work',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
+
+    await executeCodexTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      providerRequestOrdinal: 1,
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-04-29T00:00:00.000Z',
+      turnId: 'turn-1',
+    })
+
+    const providerInput =
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+    expect(providerInput?.serviceTier).toBeNull()
+    expect(providerInput?.abortSignal).toBe(upstreamAbort.signal)
   })
 
   it('passes hosted device-connect requests through the Codex provider', async () => {
