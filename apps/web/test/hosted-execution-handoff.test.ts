@@ -151,10 +151,7 @@ describe("hosted webhook Temporal handoff", () => {
 
     await flushScheduledAfterCallbacks();
 
-    expect(latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_123",
-      source: "linq",
-    });
+    expect(latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem).not.toHaveBeenCalled();
     expect(
       latencyStoreMocks.recordHostedIngressTemporalSignalAccepted,
     ).toHaveBeenCalledTimes(1);
@@ -235,7 +232,6 @@ describe("hosted webhook Temporal handoff", () => {
     vi.useFakeTimers();
     const signalAcceptedAt = new Date("2026-06-12T15:00:00.000Z");
     const afterCallbackRunsAt = new Date("2026-06-12T15:00:05.000Z");
-    const writeOrder: string[] = [];
     vi.setSystemTime(new Date("2026-06-12T14:59:59.000Z"));
     signalMocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async () => {
       vi.setSystemTime(signalAcceptedAt);
@@ -243,12 +239,6 @@ describe("hosted webhook Temporal handoff", () => {
         signalAccepted: true,
         workflowId: "hosted-user-runtime:user-123",
       };
-    });
-    latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem.mockImplementationOnce(async () => {
-      writeOrder.push("accepted");
-    });
-    latencyStoreMocks.recordHostedIngressTemporalSignalAccepted.mockImplementationOnce(async () => {
-      writeOrder.push("temporal_signal");
     });
 
     await expect(maybeHandoffHostedExecutionWebhookWake({
@@ -273,7 +263,9 @@ describe("hosted webhook Temporal handoff", () => {
     vi.setSystemTime(afterCallbackRunsAt);
     await flushScheduledAfterCallbacks();
 
-    expect(writeOrder).toEqual(["accepted", "temporal_signal"]);
+    expect(
+      latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem,
+    ).not.toHaveBeenCalled();
     expect(latencyStoreMocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith({
       at: signalAcceptedAt,
       expectedUserId: "user-123",
@@ -282,7 +274,7 @@ describe("hosted webhook Temporal handoff", () => {
     });
   });
 
-  it("falls back to direct trace writes without failing the handoff when the scheduler throws", async () => {
+  it("falls back to a direct temporal-signal trace write when the scheduler throws", async () => {
     schedulerMocks.scheduleAfterResponse.mockImplementationOnce(() => {
       throw new Error("after() unavailable outside request scope");
     });
@@ -306,10 +298,6 @@ describe("hosted webhook Temporal handoff", () => {
     expect(schedulerMocks.callbacks).toHaveLength(0);
 
     await vi.waitFor(() => {
-      expect(latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem).toHaveBeenCalledWith({
-        mailboxItemId: "mailbox_123",
-        source: "linq",
-      });
       expect(latencyStoreMocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(
         expect.objectContaining({
           expectedUserId: "user-123",
@@ -318,77 +306,9 @@ describe("hosted webhook Temporal handoff", () => {
         }),
       );
     });
-  });
-
-  it("still records the temporal-signal trace when the accepted trace write fails", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem.mockRejectedValueOnce(
-      new Error("latency trace db down"),
-    );
-
-    await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_inline_gap",
-      mailboxItemId: "mailbox_123",
-      response: {
-        ok: true,
-        reason: "wake-appended-active-member",
-      },
-      scheduleAfterResponse: schedulerMocks.scheduleAfterResponse,
-      source: "linq",
-      userId: "user-123",
-    })).resolves.toMatchObject({
-      reason: "temporal-signaled",
-      workflowId: "hosted-user-runtime:user-123",
-    });
-
-    await expect(flushScheduledAfterCallbacks()).resolves.toBeUndefined();
-
-    expect(latencyStoreMocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(
-      expect.objectContaining({
-        expectedUserId: "user-123",
-        mailboxItemId: "mailbox_123",
-        source: "linq",
-      }),
-    );
-    expect(warnSpy).toHaveBeenCalledWith(
-      "Hosted ingress latency accepted write failed.",
-      expect.objectContaining({ stage: "accepted" }),
-    );
-  });
-
-  it("still records the temporal-signal trace when the accepted trace write stalls", async () => {
-    latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem.mockImplementationOnce(
-      () => new Promise<void>(() => undefined),
-    );
-
-    await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_inline_gap",
-      mailboxItemId: "mailbox_123",
-      response: {
-        ok: true,
-        reason: "wake-appended-active-member",
-      },
-      scheduleAfterResponse: schedulerMocks.scheduleAfterResponse,
-      source: "linq",
-      userId: "user-123",
-    })).resolves.toMatchObject({
-      reason: "temporal-signaled",
-      workflowId: "hosted-user-runtime:user-123",
-    });
-
-    await expect(flushScheduledAfterCallbacks()).resolves.toBeUndefined();
-
-    expect(latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_123",
-      source: "linq",
-    });
-    expect(latencyStoreMocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(
-      expect.objectContaining({
-        expectedUserId: "user-123",
-        mailboxItemId: "mailbox_123",
-        source: "linq",
-      }),
-    );
+    expect(
+      latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem,
+    ).not.toHaveBeenCalled();
   });
 
   it("skips webhook handoff when no mailbox pointer exists", async () => {

@@ -103,19 +103,17 @@ function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
     return;
   }
   const task = async () => {
-    const acceptedWrite = recordHostedWebhookIngressLatencyAcceptedBestEffort({
-      mailboxItemId: input.mailboxItemId,
-    });
     if (input.temporalSignalAcceptedAt) {
       await recordHostedWebhookIngressLatencyTemporalSignalBestEffort({
         at: input.temporalSignalAcceptedAt,
         mailboxItemId: input.mailboxItemId,
         userId: input.userId,
       });
-      void acceptedWrite;
       return;
     }
-    await acceptedWrite;
+    await recordHostedWebhookIngressLatencyAcceptedBestEffort({
+      mailboxItemId: input.mailboxItemId,
+    });
   };
 
   try {
