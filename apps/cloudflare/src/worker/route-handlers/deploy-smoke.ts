@@ -56,6 +56,7 @@ export async function handleDeployContainerSmokeRoute(
   context: WorkerRouteContext,
 ): Promise<Response> {
   const directR2PresignedPut = context.url.searchParams.get("directR2PresignedPut") === "1";
+  const liveModelTurnModel = readDeployContainerSmokeLiveModelTurnModel(context.url);
   const container = context.env.RUNNER_CONTAINER_SMOKE
     .getByName(resolveDeployContainerSmokeObjectName(context.env));
   const directR2Smoke = directR2PresignedPut
@@ -67,6 +68,7 @@ export async function handleDeployContainerSmokeRoute(
   try {
     result = await container.smokeHealth({
       ...(directR2Smoke ? { directR2PresignedPut: directR2Smoke.containerInput } : {}),
+      ...(liveModelTurnModel ? { liveModelTurn: { model: liveModelTurnModel } } : {}),
     });
 
     if (directR2Smoke) {
@@ -200,6 +202,15 @@ export async function deleteDeployContainerDirectR2PresignedPutSmokeObject(
     throw new Error("Deploy direct R2 presigned PUT smoke requires R2 delete support.");
   }
   await context.env.BUNDLES.delete(objectKey);
+}
+
+// Optional live model turn: the deploy-signed smoke URL carries the model
+// in the `liveModelTurn` query param (mirroring `directR2PresignedPut=1`),
+// so the signed payload stays empty and absence keeps today's behavior.
+export function readDeployContainerSmokeLiveModelTurnModel(url: URL): string | null {
+  const raw = url.searchParams.get("liveModelTurn");
+  const normalized = typeof raw === "string" ? raw.trim() : "";
+  return normalized.length > 0 ? normalized : null;
 }
 
 export function resolveDeployContainerSmokeObjectName(

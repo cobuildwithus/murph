@@ -1204,6 +1204,187 @@ describe("RunnerContainer", () => {
     });
   });
 
+  it("can extend deploy smoke to run a live model turn probe behind the egress fence", async () => {
+    let fenceActiveDuringTurn: boolean | null = null;
+    let containerRef: RunnerContainer | null = null;
+    const { container, containerFetch } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+            ok: true,
+            service: "cloudflare-hosted-runner-node",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+          return new Response(JSON.stringify({
+            codexShell: createCodexShellSmokeResult(),
+            ok: true,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        expect(url).toBe("http://container/internal/deploy-live-model-turn-smoke");
+        fenceActiveDuringTurn =
+          (await containerRef?.readDeploySmokeLiveModelTurnFence())?.active ?? null;
+        return new Response(JSON.stringify({
+          liveModelTurn: {
+            durationMs: 1_234,
+            model: "gpt-4.1-nano",
+            stdoutBytes: 2_048,
+          },
+          ok: true,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+      env: {
+        OPENAI_API_KEY: "openai-worker-secret",
+      },
+    });
+    containerRef = container;
+
+    await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
+      active: false,
+    });
+
+    const result = await container.smokeHealth({
+      liveModelTurn: {
+        model: "gpt-4.1-nano",
+      },
+    });
+
+    expect(result.liveModelTurn).toEqual({
+      durationMs: 1_234,
+      model: "gpt-4.1-nano",
+      stdoutBytes: 2_048,
+    });
+    expect(result.codexShell).toEqual(createCodexShellSmokeResult());
+    expect(fenceActiveDuringTurn).toBe(true);
+    await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
+      active: false,
+    });
+    expect(containerFetch).toHaveBeenCalledTimes(3);
+    const smokeCall = containerFetch.mock.calls.find(([url]) =>
+      String(url).endsWith("/internal/deploy-live-model-turn-smoke")
+    );
+    expect(JSON.parse(smokeCall?.[1]?.body as string)).toEqual({
+      model: "gpt-4.1-nano",
+    });
+  });
+
+  it("skips the live model turn smoke entirely when the input flag is absent", async () => {
+    const { container, containerFetch } = createContainerDouble({
+      env: {
+        OPENAI_API_KEY: "openai-worker-secret",
+      },
+    });
+
+    const result = await container.smokeHealth();
+
+    expect(result.liveModelTurn).toBeUndefined();
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/deploy-live-model-turn-smoke")
+    )).toBe(false);
+  });
+
+  it("forwards content-free live model turn smoke diagnostics from the container", async () => {
+    const { container, destroy } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+            ok: true,
+            service: "cloudflare-hosted-runner-node",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+          return new Response(JSON.stringify({
+            codexShell: createCodexShellSmokeResult(),
+            ok: true,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-live-model-turn-smoke")) {
+          return new Response(JSON.stringify({
+            error: "Hosted live model turn smoke failed.",
+            ok: false,
+            smokeErrorMessage:
+              "Hosted live model turn smoke codex exec exited with 1. stdoutBytes=0 stderrExcerpt=\"insufficient_quota\"",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 500,
+          });
+        }
+
+        throw new Error(`Unexpected deploy smoke URL: ${url}`);
+      }),
+      env: {
+        OPENAI_API_KEY: "openai-worker-secret",
+      },
+    });
+
+    const error = await container.smokeHealth({
+      liveModelTurn: {
+        model: "gpt-4.1-nano",
+      },
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Hosted runner container live model turn smoke failed with HTTP 500. "
+        + "Hosted live model turn smoke codex exec exited with 1. stdoutBytes=0 stderrExcerpt=\"insufficient_quota\"",
+    );
+    await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
+      active: false,
+    });
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails the live model turn smoke before contacting the container when OPENAI_API_KEY is missing", async () => {
+    const { container, containerFetch } = createContainerDouble();
+
+    const error = await container.smokeHealth({
+      liveModelTurn: {
+        model: "gpt-4.1-nano",
+      },
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Hosted runner live model turn smoke requires the OPENAI_API_KEY Worker secret.",
+    );
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/deploy-live-model-turn-smoke")
+    )).toBe(false);
+  });
+
   it.each([
     {
       label: "health",

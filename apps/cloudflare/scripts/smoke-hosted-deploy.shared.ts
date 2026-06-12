@@ -41,6 +41,9 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
 const DEFAULT_RUNNER_CONTAINER_SMOKE_MAX_ATTEMPTS = 120;
 const DEFAULT_RUNNER_CONTAINER_SMOKE_RETRY_DELAY_MS = 10_000;
+// One cheap real model turn per production deploy; per-PR CI and
+// hosted-local E2E never enable the flag.
+const DEPLOY_SMOKE_LIVE_MODEL_TURN_MODEL = "gpt-4.1-nano";
 
 interface SmokeControlRequest {
   authorizationHeader: string;
@@ -75,6 +78,12 @@ interface SmokeDirectR2PresignedPutResult {
   ok?: unknown;
   payloadSha256?: unknown;
   status?: unknown;
+}
+
+interface SmokeLiveModelTurnResult {
+  durationMs?: unknown;
+  model?: unknown;
+  stdoutBytes?: unknown;
 }
 
 interface SmokeRunnerRetryPolicy {
@@ -156,6 +165,15 @@ export async function runSmokeHostedDeploy(input: {
       "HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT requires HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true.",
     );
   }
+  const shouldSmokeLiveModelTurn = readBooleanEnv(
+    source.HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN,
+    false,
+  );
+  if (shouldSmokeLiveModelTurn && !shouldSmokeRunnerContainer) {
+    throw new Error(
+      "HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN requires HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true.",
+    );
+  }
   const authorizationHeader = readSmokeOidcAuthorizationHeader(source);
   const versionOverrideHeaders = buildVersionOverrideHeaders(source);
   const smokeBaseUrl = `${workerBaseUrl}/`;
@@ -191,10 +209,16 @@ export async function runSmokeHostedDeploy(input: {
       source,
       url: buildRunnerContainerSmokeUrl({
         directR2PresignedPut: shouldSmokeDirectR2PresignedPut,
+        liveModelTurnModel: shouldSmokeLiveModelTurn
+          ? DEPLOY_SMOKE_LIVE_MODEL_TURN_MODEL
+          : null,
         smokeBaseUrl,
       }),
       versionOverrideHeaders,
       expectDirectR2PresignedPut: shouldSmokeDirectR2PresignedPut,
+      expectLiveModelTurnModel: shouldSmokeLiveModelTurn
+        ? DEPLOY_SMOKE_LIVE_MODEL_TURN_MODEL
+        : null,
     });
   }
 
@@ -223,6 +247,7 @@ export async function runSmokeHostedDeploy(input: {
 
 async function assertRunnerContainerSmoke(input: {
   expectDirectR2PresignedPut: boolean;
+  expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
   log: (message: string) => void;
   source: EnvSource;
@@ -258,6 +283,7 @@ async function assertRunnerContainerSmoke(input: {
 
 async function readRunnerContainerSmoke(input: {
   expectDirectR2PresignedPut: boolean;
+  expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
   source: EnvSource;
   url: string;
@@ -296,6 +322,7 @@ async function readRunnerContainerSmoke(input: {
     runnerContainer?: {
       codexShell?: SmokeCodexShellResult | null;
       directR2PresignedPut?: SmokeDirectR2PresignedPutResult | null;
+      liveModelTurn?: SmokeLiveModelTurnResult | null;
       ok?: unknown;
       runnerBundle?: SmokeRunnerBundleManifest | null;
       service?: unknown;
@@ -313,6 +340,12 @@ async function readRunnerContainerSmoke(input: {
   assertSmokeCodexShellResult(responsePayload.runnerContainer.codexShell);
   if (input.expectDirectR2PresignedPut) {
     assertSmokeDirectR2PresignedPutResult(responsePayload.runnerContainer.directR2PresignedPut);
+  }
+  if (input.expectLiveModelTurnModel !== null) {
+    assertSmokeLiveModelTurnResult(
+      responsePayload.runnerContainer.liveModelTurn,
+      input.expectLiveModelTurnModel,
+    );
   }
 
   return responsePayload.runnerContainer.runnerBundle ?? null;
@@ -344,11 +377,15 @@ function redactSmokeFailureBody(value: string): string {
 
 function buildRunnerContainerSmokeUrl(input: {
   directR2PresignedPut: boolean;
+  liveModelTurnModel: string | null;
   smokeBaseUrl: string;
 }): string {
   const url = new URL("/internal/deploy/container-smoke", input.smokeBaseUrl);
   if (input.directR2PresignedPut) {
     url.searchParams.set("directR2PresignedPut", "1");
+  }
+  if (input.liveModelTurnModel !== null) {
+    url.searchParams.set("liveModelTurn", input.liveModelTurnModel);
   }
   return url.toString();
 }
@@ -401,6 +438,24 @@ function assertSmokeDirectR2PresignedPutResult(
   }
   if (typeof value.payloadSha256 !== "string" || !/^[0-9a-f]{64}$/u.test(value.payloadSha256)) {
     throw new Error("runner container direct R2 presigned PUT smoke did not report a payload hash.");
+  }
+}
+
+function assertSmokeLiveModelTurnResult(
+  value: SmokeLiveModelTurnResult | null | undefined,
+  expectedModel: string,
+): void {
+  if (!value || typeof value !== "object") {
+    throw new Error("runner container live model turn smoke did not return metadata.");
+  }
+  if (value.model !== expectedModel) {
+    throw new Error("runner container live model turn smoke did not use the expected model.");
+  }
+  if (typeof value.durationMs !== "number" || value.durationMs <= 0) {
+    throw new Error("runner container live model turn smoke reported an invalid duration.");
+  }
+  if (typeof value.stdoutBytes !== "number" || value.stdoutBytes <= 0) {
+    throw new Error("runner container live model turn smoke reported no codex exec output.");
   }
 }
 

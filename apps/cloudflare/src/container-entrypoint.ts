@@ -38,6 +38,9 @@ import {
   snapshotExpectedCodexRootProcess,
   stopWarmCodexAppServer,
 } from "@murphai/assistant-engine/codex-lifecycle";
+import {
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "./runner-injected-credential.ts";
 import { startHostedContainerCpuWatchdog } from "./container-cpu-watchdog.ts";
 import {
   HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS,
@@ -68,9 +71,15 @@ const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH =
   "/internal/deploy-codex-shell-smoke";
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH =
   "/internal/direct-r2-presigned-put-smoke";
+const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_PATH =
+  "/internal/deploy-live-model-turn-smoke";
 const HOSTED_CONTAINER_RUNTIME_WAKE_PATH = "/internal/runtime-wake";
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS = 45_000;
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-5.5";
+const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_TIMEOUT_MS = 60_000;
+const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_PROMPT = "Reply with exactly: OK";
+const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_MODEL_MAX_CHARS = 128;
+const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS = 512;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_CHUNK_BYTES = 1024 * 1024;
@@ -142,6 +151,9 @@ interface HostedContainerRuntimeOptions {
   runCodexShellSmoke?: (
     options: { signal: AbortSignal },
   ) => Promise<HostedContainerCodexShellSmokeResult>;
+  runLiveModelTurnSmoke?: (
+    options: { model: string; signal: AbortSignal },
+  ) => Promise<HostedContainerLiveModelTurnSmokeResult>;
   stopCliRuntimeBridge?: (reason: string) => Promise<void>;
   snapshotExpectedCodexRootProcess?: () => Promise<HostedExpectedCodexRootProcess | null>;
   stopWarmCodex?: (reason: string) => Promise<void>;
@@ -165,6 +177,8 @@ interface HostedContainerRuntimeDependencies {
     }) => Promise<HostedContainerDirectR2PresignedPutSmokeResult>;
   runCodexShellSmoke:
     (options: { signal: AbortSignal }) => Promise<HostedContainerCodexShellSmokeResult>;
+  runLiveModelTurnSmoke:
+    (options: { model: string; signal: AbortSignal }) => Promise<HostedContainerLiveModelTurnSmokeResult>;
   stopCliRuntimeBridge: (reason: string) => Promise<void>;
   snapshotExpectedCodexRootProcess: () => Promise<HostedExpectedCodexRootProcess | null>;
   stopWarmCodex: (reason: string) => Promise<void>;
@@ -186,6 +200,16 @@ interface HostedContainerCodexCommandExecResult {
   exitCode: number;
   stderr: string;
   stdout: string;
+}
+
+interface HostedContainerLiveModelTurnSmokeResult {
+  durationMs: number;
+  model: string;
+  stdoutBytes: number;
+}
+
+interface HostedContainerLiveModelTurnSmokeRequest {
+  model: string;
 }
 
 interface HostedContainerDirectR2PresignedPutSmokeResult {
@@ -396,6 +420,9 @@ export async function startHostedContainerEntrypoint(input: {
 
       const isCodexShellSmokeRequest =
         request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH;
+      const isLiveModelTurnSmokeRequest =
+        request.method === "POST"
+        && requestUrl.pathname === HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_PATH;
       const isDirectR2PresignedPutSmokeRequest =
         request.method === "POST"
         && requestUrl.pathname === HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH;
@@ -405,6 +432,7 @@ export async function startHostedContainerEntrypoint(input: {
       if (
         !isWorkspaceInvocationRequest
         && !isCodexShellSmokeRequest
+        && !isLiveModelTurnSmokeRequest
         && !isDirectR2PresignedPutSmokeRequest
       ) {
         discardUnreadRequestBody(request);
@@ -454,6 +482,68 @@ export async function startHostedContainerEntrypoint(input: {
             smokeErrorMessage: error instanceof Error
               ? error.message
               : String(error),
+          });
+        }
+        return;
+      }
+
+      if (isLiveModelTurnSmokeRequest) {
+        if (activeHostedRunnerJobCount > 0) {
+          discardUnreadRequestBody(request);
+          writeJsonResponse(response, 409, {
+            error: "Hosted runner is busy.",
+          });
+          return;
+        }
+        activeHostedRunnerJobCount += 1;
+        claimedRunnerSlot = true;
+        let smokeRequest: HostedContainerLiveModelTurnSmokeRequest;
+        try {
+          smokeRequest = parseHostedContainerLiveModelTurnSmokeRequest(
+            JSON.parse(await readHostedContainerInvocationRequestBody(request)),
+          );
+        } catch (error) {
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            error,
+            level: "warn",
+            message: "Hosted container entrypoint rejected the live model turn smoke request body.",
+            phase: "failed",
+          });
+          const classified = classifyRequestDecodeError(error);
+          writeJsonResponse(response, classified.statusCode, classified.payload);
+          return;
+        }
+        try {
+          const result = await runtime.runLiveModelTurnSmoke({
+            model: smokeRequest.model,
+            signal: requestAbort.signal,
+          });
+          writeJsonResponse(response, 200, {
+            liveModelTurn: result,
+            ok: true,
+          });
+        } catch (error) {
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            error,
+            level: "error",
+            message: "Hosted container entrypoint failed the live model turn smoke.",
+            phase: "failed",
+            userId: null,
+          });
+          if (requestAbort.signal.aborted || response.destroyed) {
+            return;
+          }
+          // Live-turn smoke diagnostics carry locally constructed labels plus
+          // a capped, ASCII-only codex stderr excerpt; no env or credential
+          // material is ever included, so surface the message for CI logs.
+          writeJsonResponse(response, 500, {
+            error: "Hosted live model turn smoke failed.",
+            ok: false,
+            smokeErrorMessage: buildHostedContainerLiveModelTurnSmokeSafeText(
+              error instanceof Error ? error.message : String(error),
+            ),
           });
         }
         return;
@@ -1053,6 +1143,25 @@ function parseHostedContainerDirectR2PresignedPutSmokeRequest(
   };
 }
 
+function parseHostedContainerLiveModelTurnSmokeRequest(
+  value: unknown,
+): HostedContainerLiveModelTurnSmokeRequest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Live model turn smoke request must be an object.");
+  }
+
+  const record = value as Record<string, unknown>;
+  const model = typeof record.model === "string" ? record.model.trim() : "";
+  if (!model) {
+    throw new TypeError("Live model turn smoke request requires model.");
+  }
+  if (model.length > HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_MODEL_MAX_CHARS) {
+    throw new RangeError("Live model turn smoke model is too long.");
+  }
+
+  return { model };
+}
+
 function readHostedExecutionRunnerResultPhase(result: unknown): string | null {
   if (!result || typeof result !== "object" || Array.isArray(result)) {
     return null;
@@ -1107,6 +1216,8 @@ function resolveHostedContainerRuntimeDependencies(
       runtime?.runDirectR2PresignedPutSmoke ?? runHostedContainerDirectR2PresignedPutSmoke,
     runCodexShellSmoke:
       runtime?.runCodexShellSmoke ?? runHostedContainerCodexShellSmoke,
+    runLiveModelTurnSmoke:
+      runtime?.runLiveModelTurnSmoke ?? runHostedContainerLiveModelTurnSmoke,
     stopCliRuntimeBridge:
       runtime?.stopCliRuntimeBridge ?? stopHostedCliRuntimeBridge,
     snapshotExpectedCodexRootProcess:
@@ -1253,6 +1364,134 @@ async function putHostedContainerDirectR2SmokePayload(input: {
 async function runHostedContainerCodexShellSmoke(input: {
   signal: AbortSignal;
 }): Promise<HostedContainerCodexShellSmokeResult> {
+  return await withHostedContainerCodexSmokeWorkspace(
+    HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL,
+    async (workspace) =>
+      await runHostedContainerCodexShellAppServerProbe({
+        ...workspace,
+        signal: input.signal,
+      }),
+  );
+}
+
+// The live model turn is deliberately a single non-interactive `codex exec`
+// subprocess with exit-code semantics. Codex app-server RPC plumbing is
+// already proven by the Codex shell smoke and the hosted-local E2E gates;
+// the only boundary this step closes is real OpenAI auth/quota/network for
+// one deployed model turn, so it stays as small as possible.
+//
+// The codex subprocess receives only the well-known injected-credential
+// placeholder: managed-container egress to api.openai.com is intercepted by
+// the Worker, which authorizes the deploy-smoke live-turn fence and injects
+// the real Worker-owned OPENAI_API_KEY upstream, the same egress path
+// production turns use. The raw key never enters the container.
+async function runHostedContainerLiveModelTurnSmoke(input: {
+  model: string;
+  signal: AbortSignal;
+}): Promise<HostedContainerLiveModelTurnSmokeResult> {
+  return await withHostedContainerCodexSmokeWorkspace(input.model, async (workspace) =>
+    await new Promise((resolve, reject) => {
+      const startedAtMs = Date.now();
+      let stdoutBytes = 0;
+      let stderrBuffer = "";
+      let settled = false;
+      let timeout: NodeJS.Timeout | null = null;
+      let abort: () => void = () => {};
+      const child = spawn("codex", [
+        "exec",
+        "--json",
+        "--skip-git-repo-check",
+        HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_PROMPT,
+      ], {
+        cwd: workspace.smokeVaultRoot,
+        env: buildHostedContainerCodexShellSmokeProcessEnv({
+          ...workspace,
+          liveProviderEgress: true,
+        }),
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      const finish = (error: Error | null, result?: HostedContainerLiveModelTurnSmokeResult): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        input.signal.removeEventListener("abort", abort);
+        child.kill();
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(result ?? {
+          durationMs: Date.now() - startedAtMs,
+          model: input.model,
+          stdoutBytes,
+        });
+      };
+
+      abort = (): void => {
+        finish(new Error("Hosted live model turn smoke aborted."));
+      };
+      timeout = setTimeout(() => {
+        finish(new Error(
+          "Hosted live model turn smoke timed out after "
+            + `${HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_TIMEOUT_MS}ms. `
+            + `stderrExcerpt=${JSON.stringify(buildHostedContainerLiveModelTurnSmokeSafeText(stderrBuffer))}`,
+        ));
+      }, HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_TIMEOUT_MS);
+      input.signal.addEventListener("abort", abort, { once: true });
+
+      child.stdout?.on("data", (chunk) => {
+        stdoutBytes += Buffer.byteLength(chunk);
+      });
+      child.stderr?.on("data", (chunk) => {
+        // Keep only a bounded prefix; the excerpt is re-capped on use.
+        if (stderrBuffer.length < 4_096) {
+          stderrBuffer += String(chunk);
+        }
+      });
+      child.once("error", (error) => {
+        finish(new Error(
+          `Hosted live model turn smoke failed to spawn codex exec. ${error.message}`,
+        ));
+      });
+      child.once("exit", (code, signal) => {
+        if (code === 0) {
+          finish(null, {
+            durationMs: Date.now() - startedAtMs,
+            model: input.model,
+            stdoutBytes,
+          });
+          return;
+        }
+        finish(new Error(
+          `Hosted live model turn smoke codex exec exited with ${code ?? signal ?? "unknown"}. `
+            + `stdoutBytes=${stdoutBytes} `
+            + `stderrExcerpt=${JSON.stringify(buildHostedContainerLiveModelTurnSmokeSafeText(stderrBuffer))}`,
+        ));
+      });
+    }));
+}
+
+// Smoke failure text may embed codex stderr. The subprocess only ever holds
+// the credential placeholder, so there is no real key to leak, but cap the
+// excerpt and strip non-printable/non-ASCII bytes so diagnostics stay
+// content-bounded.
+function buildHostedContainerLiveModelTurnSmokeSafeText(value: string): string {
+  return value
+    .replace(/[^\x20-\x7e]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS);
+}
+
+async function withHostedContainerCodexSmokeWorkspace<T>(
+  model: string,
+  run: (workspace: { codexHome: string; smokeVaultRoot: string }) => Promise<T>,
+): Promise<T> {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-codex-shell-smoke-"));
   try {
     const codexHome = path.join(workspaceRoot, ".codex-smoke");
@@ -1293,13 +1532,12 @@ async function runHostedContainerCodexShellSmoke(input: {
     );
     await writeFile(
       path.join(codexHome, "config.toml"),
-      buildHostedContainerCodexShellSmokeConfig(),
+      buildHostedContainerCodexShellSmokeConfig(model),
       { mode: 0o600 },
     );
 
-    return await runHostedContainerCodexShellAppServerProbe({
+    return await run({
       codexHome,
-      signal: input.signal,
       smokeVaultRoot,
     });
   } finally {
@@ -1310,9 +1548,9 @@ async function runHostedContainerCodexShellSmoke(input: {
   }
 }
 
-function buildHostedContainerCodexShellSmokeConfig(): string {
+function buildHostedContainerCodexShellSmokeConfig(model: string): string {
   return [
-    `model = ${JSON.stringify(HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL)}`,
+    `model = ${JSON.stringify(model)}`,
     'model_provider = "hosted-shell-smoke"',
     'model_reasoning_effort = "low"',
     'approval_policy = "never"',
@@ -1608,17 +1846,31 @@ async function runHostedContainerCliSurfaceContractSmoke(smokeVaultRoot: string)
 
 function buildHostedContainerCodexShellSmokeProcessEnv(input: {
   codexHome: string;
+  liveProviderEgress?: boolean;
   smokeVaultRoot: string;
 }): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     CODEX_HOME: input.codexHome,
     HOME: path.dirname(input.smokeVaultRoot),
-    OPENAI_API_KEY: "hosted-codex-shell-smoke-secret",
+    // The live-turn smoke sends the well-known injected-credential
+    // placeholder so the Worker egress intercept swaps in the real key,
+    // exactly like production turns. The app-server shell smoke keeps a
+    // local-only fake instead, proving no provider credential reaches its
+    // command env.
+    OPENAI_API_KEY: input.liveProviderEgress
+      ? HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL
+      : "hosted-codex-shell-smoke-secret",
     PATH: buildHostedRunnerExecutablePath(process.env.PATH),
     TMPDIR: path.dirname(input.smokeVaultRoot),
     VAULT: input.smokeVaultRoot,
   };
 
+  if (input.liveProviderEgress) {
+    // codex must trust the Cloudflare container egress-interception CA to
+    // reach api.openai.com through the Worker.
+    copyOptionalHostedContainerSmokeEnv(env, "CODEX_CA_CERTIFICATE");
+    copyOptionalHostedContainerSmokeEnv(env, "SSL_CERT_FILE");
+  }
   copyOptionalHostedContainerSmokeEnv(env, "CI");
   copyOptionalHostedContainerSmokeEnv(env, "COLORTERM");
   copyOptionalHostedContainerSmokeEnv(env, "FORCE_COLOR");

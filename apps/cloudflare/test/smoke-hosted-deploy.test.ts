@@ -414,6 +414,164 @@ describe("runSmokeHostedDeploy", () => {
     );
   });
 
+  it("can request the deployed runner live model turn smoke", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-live-model-turn-manifest-"));
+    const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        buildSkipped: false,
+        bundleFingerprint: "bundle-fingerprint",
+        sourceFingerprint: "source-fingerprint",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    const fetchCalls: string[] = [];
+    const fetchImpl = async (url: RequestInfo | URL) => {
+      fetchCalls.push(String(url));
+
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+
+      if (String(url).endsWith("/internal/deploy/container-smoke?liveModelTurn=gpt-4.1-nano")) {
+        return new Response(JSON.stringify({
+          ok: true,
+          runnerContainer: {
+            codexShell: createCodexShellSmokeResult(),
+            liveModelTurn: {
+              durationMs: 1_234,
+              model: "gpt-4.1-nano",
+              stdoutBytes: 2_048,
+            },
+            ok: true,
+            runnerBundle: {
+              buildSkipped: false,
+              bundleFingerprint: "bundle-fingerprint",
+              sourceFingerprint: "source-fingerprint",
+            },
+            service: "cloudflare-hosted-runner-node",
+          },
+        }), { status: 200 });
+      }
+
+      throw new Error(`Unexpected smoke request: ${String(url)}`);
+    };
+
+    await runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+    });
+
+    expect(fetchCalls).toContain(
+      "https://worker.example.test/internal/deploy/container-smoke?liveModelTurn=gpt-4.1-nano",
+    );
+  });
+
+  it("fails the live model turn smoke when the deployed turn metadata is missing or wrong", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-live-model-turn-bad-manifest-"));
+    const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        buildSkipped: false,
+        bundleFingerprint: "bundle-fingerprint",
+        sourceFingerprint: "source-fingerprint",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    const buildFetchImpl = (liveModelTurn: unknown) => async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+
+      return new Response(JSON.stringify({
+        ok: true,
+        runnerContainer: {
+          codexShell: createCodexShellSmokeResult(),
+          ...(liveModelTurn === undefined ? {} : { liveModelTurn }),
+          ok: true,
+          runnerBundle: {
+            buildSkipped: false,
+            bundleFingerprint: "bundle-fingerprint",
+            sourceFingerprint: "source-fingerprint",
+          },
+          service: "cloudflare-hosted-runner-node",
+        },
+      }), { status: 200 });
+    };
+    const source = {
+      HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: "true",
+      HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+      HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+      HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "1",
+      HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+    };
+
+    await expect(runSmokeHostedDeploy({
+      fetchImpl: buildFetchImpl(undefined),
+      log() {},
+      source,
+    })).rejects.toThrow("runner container live model turn smoke did not return metadata.");
+
+    await expect(runSmokeHostedDeploy({
+      fetchImpl: buildFetchImpl({
+        durationMs: 1_234,
+        model: "gpt-other",
+        stdoutBytes: 2_048,
+      }),
+      log() {},
+      source,
+    })).rejects.toThrow("runner container live model turn smoke did not use the expected model.");
+
+    await expect(runSmokeHostedDeploy({
+      fetchImpl: buildFetchImpl({
+        durationMs: 1_234,
+        model: "gpt-4.1-nano",
+        stdoutBytes: 0,
+      }),
+      log() {},
+      source,
+    })).rejects.toThrow("runner container live model turn smoke reported no codex exec output.");
+  });
+
+  it("requires the managed-container smoke when the live model turn smoke is enabled", async () => {
+    await expect(runSmokeHostedDeploy({
+      fetchImpl: async () => {
+        throw new Error("Live model turn precondition should fail before deploy smoke requests.");
+      },
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: "true",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      },
+    })).rejects.toThrow(
+      "HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN requires HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true.",
+    );
+  });
+
   it("requires the managed-container smoke when the direct R2 smoke is enabled", async () => {
     await expect(runSmokeHostedDeploy({
       fetchImpl: async () => {

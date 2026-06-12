@@ -990,6 +990,100 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
+  it("injects OpenAI authorization for deploy-smoke egress while the live model turn fence is open", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({ active: true }));
+    const env = createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      // The deploy-smoke container has no active user runtime; the smoke
+      // namespace fence is the only thing authorizing this egress.
+      readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+      readDeploySmokeLiveModelTurnFence,
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "deploy-smoke-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(readDeploySmokeLiveModelTurnFence).toHaveBeenCalledTimes(1);
+    const forwarded = findFetchCall(fetchMock, "api.openai.com")?.[0];
+    expect(forwarded).toBeInstanceOf(Request);
+    const forwardedRequest = forwarded as Request;
+    expect(forwardedRequest.url).toBe("https://api.openai.com/v1/responses");
+    expect(forwardedRequest.headers.get("authorization")).toBe("Bearer openai-worker-secret");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          providerKind: "openai",
+          writeFenceValidationMode: "deploy_smoke_live_model_turn",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+  });
+
+  it("rejects deploy-smoke OpenAI egress when the live model turn fence is closed", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({ active: false }));
+    const env = createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+      readDeploySmokeLiveModelTurnFence,
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "deploy-smoke-container-id" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(readDeploySmokeLiveModelTurnFence).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("never consults the deploy-smoke fence once the active user fence authorizes production egress", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({ active: true }));
+    const env = createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
+      readDeploySmokeLiveModelTurnFence,
+      validateActiveRuntimeWriteFence: async (input) =>
+        createActiveRuntimeWriteFenceValidationResult(input),
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(readDeploySmokeLiveModelTurnFence).not.toHaveBeenCalled();
+  });
+
   it("rejects tokenless active-user-fence provider egress when the bound user mismatches the current container user", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
@@ -5105,6 +5199,7 @@ function createInterceptEnv(input: {
   MURPH_HOSTED_LOCAL_PROFILE?: string;
   OPENAI_API_KEY?: string;
   readActiveRuntimeUserFence?: () => Promise<WorkerActiveRuntimeUserFenceResult>;
+  readDeploySmokeLiveModelTurnFence?: () => Promise<{ active: boolean }>;
   TELEGRAM_API_BASE_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_FILE_BASE_URL?: string;
@@ -5161,6 +5256,16 @@ function createInterceptEnv(input: {
       }),
       idFromString: (id: string) => id,
     },
+    ...(input.readDeploySmokeLiveModelTurnFence
+      ? {
+          RUNNER_CONTAINER_SMOKE: {
+            get: () => ({
+              readDeploySmokeLiveModelTurnFence: input.readDeploySmokeLiveModelTurnFence,
+            }),
+            idFromString: (id: string) => id,
+          },
+        }
+      : {}),
     TELEGRAM_API_BASE_URL: input.TELEGRAM_API_BASE_URL,
     TELEGRAM_BOT_TOKEN: input.TELEGRAM_BOT_TOKEN,
     TELEGRAM_FILE_BASE_URL: input.TELEGRAM_FILE_BASE_URL,

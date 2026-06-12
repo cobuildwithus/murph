@@ -543,6 +543,77 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("forwards the live model turn query param to the managed container smoke", async () => {
+    const smokeHealth = vi.fn(async (input: {
+      liveModelTurn?: {
+        model: string;
+      };
+    }) => {
+      if (input.liveModelTurn?.model !== "gpt-4.1-nano") {
+        throw new Error("Expected the live model turn smoke input.");
+      }
+
+      return {
+        liveModelTurn: {
+          durationMs: 1_234,
+          model: "gpt-4.1-nano",
+          stdoutBytes: 2_048,
+        },
+        ok: true,
+        runnerBundle: null,
+        service: "cloudflare-hosted-runner-node",
+        status: 200,
+      };
+    });
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      RUNNER_CONTAINER_SMOKE: {
+        getByName() {
+          return {
+            async destroyInstance() {},
+            async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
+              throw new Error("Runner container should not be invoked by smoke route tests.");
+            },
+            smokeHealth,
+          };
+        },
+      },
+    });
+    const url = new URL(
+      "https://runner.example.test/internal/deploy/container-smoke?liveModelTurn=gpt-4.1-nano",
+    );
+    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
+    const request = new Request(url, {
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: callbackSigning,
+        method: "POST",
+        path: url.pathname,
+        payload: "",
+        search: url.search,
+      }),
+      method: "POST",
+    });
+
+    const response = await worker.fetch(request, env);
+
+    expect(response.status).toBe(200);
+    expect(smokeHealth).toHaveBeenCalledWith({
+      liveModelTurn: {
+        model: "gpt-4.1-nano",
+      },
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      runnerContainer: {
+        liveModelTurn: {
+          durationMs: 1_234,
+          model: "gpt-4.1-nano",
+          stdoutBytes: 2_048,
+        },
+      },
+      service: "cloudflare-hosted-runner",
+    });
+  });
+
   it("rejects replayed deploy-signed managed container smoke requests", async () => {
     const env = createWorkerEnv();
     const url = new URL("https://runner.example.test/internal/deploy/container-smoke");

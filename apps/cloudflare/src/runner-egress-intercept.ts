@@ -266,6 +266,7 @@ interface HostedRunnerDiagnosticBodySource {
 
 type HostedProviderEgressValidationMode =
   | "active_user_fence"
+  | "deploy_smoke_live_model_turn"
   | "exact_headers"
   | "missing_identity"
   | "provider_egress_token";
@@ -2688,7 +2689,7 @@ async function authorizeHostedProviderEgress(input: {
     };
   }
 
-  return await authorizeHostedProviderEgressActiveUserFence({
+  const activeUserFence = await authorizeHostedProviderEgressActiveUserFence({
     ctx: input.ctx,
     env: input.env,
     providerEgressTokenPresent: providerEgressToken !== null,
@@ -2696,6 +2697,101 @@ async function authorizeHostedProviderEgress(input: {
     startedAt,
     userId: input.userId,
   });
+  if (activeUserFence.authorized || input.providerKind !== "openai") {
+    return activeUserFence;
+  }
+
+  // Deploy-smoke live model turn: the post-deploy managed-container smoke
+  // runs one real codex turn from the dedicated deploy-smoke container,
+  // which has no active user runtime. Authorize that egress only when the
+  // originating container id belongs to the deploy-smoke namespace AND that
+  // Durable Object reports an in-flight live-turn fence, so the window is
+  // both identity- and time-scoped. Production turns authorize above and
+  // never reach this leg.
+  const deploySmokeLiveModelTurn = await authorizeHostedProviderEgressDeploySmokeLiveModelTurn({
+    ctx: input.ctx,
+    env: input.env,
+    providerEgressTokenPresent: providerEgressToken !== null,
+    runtimeAuthorityHeadersPresent,
+    startedAt,
+  });
+  return deploySmokeLiveModelTurn ?? activeUserFence;
+}
+
+async function authorizeHostedProviderEgressDeploySmokeLiveModelTurn(input: {
+  ctx?: HostedRunnerOutboundContext;
+  env: RunnerOutboundEnvironmentSource;
+  providerEgressTokenPresent: boolean;
+  runtimeAuthorityHeadersPresent: boolean;
+  startedAt: number;
+}): Promise<HostedProviderEgressAuthorization | null> {
+  const containerId = input.ctx?.containerId?.trim();
+  const namespace = readHostedRunnerDeploySmokeContainerNamespace(input.env);
+  if (
+    !containerId
+    || !namespace
+    || typeof namespace.idFromString !== "function"
+    || typeof namespace.get !== "function"
+  ) {
+    return null;
+  }
+
+  try {
+    const id = namespace.idFromString(containerId);
+    const container = namespace.get(id);
+    if (typeof container.readDeploySmokeLiveModelTurnFence !== "function") {
+      return null;
+    }
+    const fence = await container.readDeploySmokeLiveModelTurnFence();
+    if (!isHostedDeploySmokeLiveModelTurnFenceResult(fence) || !fence.active) {
+      return null;
+    }
+    return {
+      activeContainerIdentitySource: null,
+      authorized: true,
+      durationMs: Date.now() - input.startedAt,
+      mode: "deploy_smoke_live_model_turn",
+      providerEgressTokenPresent: input.providerEgressTokenPresent,
+      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
+      userId: null,
+      writeFence: null,
+    };
+  } catch {
+    // Container ids from other namespaces fail idFromString here; fall back
+    // to the primary rejection instead of authorizing.
+    return null;
+  }
+}
+
+function readHostedRunnerDeploySmokeContainerNamespace(
+  env: RunnerOutboundEnvironmentSource,
+): {
+  get?(id: unknown): {
+    readDeploySmokeLiveModelTurnFence?: () => Promise<unknown>;
+  };
+  idFromString?(id: string): unknown;
+} | null {
+  const namespace = (env as { RUNNER_CONTAINER_SMOKE?: unknown }).RUNNER_CONTAINER_SMOKE;
+  if (!namespace || typeof namespace !== "object") {
+    return null;
+  }
+  return namespace as {
+    get?(id: unknown): {
+      readDeploySmokeLiveModelTurnFence?: () => Promise<unknown>;
+    };
+    idFromString?(id: string): unknown;
+  };
+}
+
+function isHostedDeploySmokeLiveModelTurnFenceResult(value: unknown): value is {
+  active: boolean;
+} {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && typeof (value as { active?: unknown }).active === "boolean",
+  );
 }
 
 function readHostedProviderEgressToken(request: Request): string | null {
