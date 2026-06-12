@@ -39,14 +39,14 @@ describe("hosted assistant runner env policy", () => {
   it("does not forward unsupported hosted assistant api key alias vars", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_API_KEY_ENV: "PROVIDER_API_KEY",
-      HOSTED_ASSISTANT_MODEL: "gpt-5.4-mini",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       PROVIDER_API_KEY: "secret-value",
     });
 
     expect(env.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
-    expect(env.HOSTED_ASSISTANT_MODEL).toBe("gpt-5.4-mini");
+    expect(env.HOSTED_ASSISTANT_MODEL).toBe("gpt-5.5");
     expect(env.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
     expect(env.HOSTED_ASSISTANT_REASONING_EFFORT).toBe("medium");
     expect(env.PROVIDER_API_KEY).toBeUndefined();

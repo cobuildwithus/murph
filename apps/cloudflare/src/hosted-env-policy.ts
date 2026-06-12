@@ -101,8 +101,6 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   "HOSTED_AI_USAGE_REPORTING_SECRET",
   // This is a platform-owned HMAC key for non-identifying log correlation.
   "HOSTED_LOG_FINGERPRINT_SECRET",
-  // This derived key is container-startup-only for the CPU watchdog.
-  "HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET",
   // Platform-owned data API auth is injected by the Worker on matching hosted
   // web egress. The hosted container and member runner secrets must not carry it.
   "MURPH_DATA_API_KEY",
@@ -155,6 +153,7 @@ const DISALLOWED_RUNNER_SECRET_PREFIXES = [
   "AGENTMAIL_",
   "CF_",
   "HOSTED_ASSISTANT_",
+  "HOSTED_CONTAINER_",
   "HOSTED_CRYPTO_",
   "HOSTED_EMAIL_",
   "HOSTED_EXECUTION_",
