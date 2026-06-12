@@ -10,6 +10,9 @@ import {
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import {
+  parseHostedLocalCodexSubscriptionSeedAuth,
+} from "@murphai/hosted-execution/hosted-codex-subscription-auth";
+import {
   HostedAssistantConfigurationError,
   HOSTED_ASSISTANT_API_KEY_ENV,
   HOSTED_ASSISTANT_BASE_URL_ENV,
@@ -46,7 +49,7 @@ import {
 const HOSTED_CODEX_CONFIG_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
 const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
-// Codex's built-in OpenAI provider id. With a ChatGPT-mode auth.json in
+// Codex's built-in OpenAI provider id. With hosted-local subscription auth in
 // CODEX_HOME, Codex routes this provider to the ChatGPT subscription backend
 // itself; configuring a base_url would misroute subscription bearer tokens.
 const HOSTED_CODEX_CHATGPT_MODEL_PROVIDER_ID = "openai";
@@ -227,41 +230,14 @@ function readHostedCodexChatGptAuthJson(
     );
   }
 
-  if (!isChatGptModeCodexAuthDotJson(parsed)) {
+  try {
+    return JSON.stringify(parseHostedLocalCodexSubscriptionSeedAuth(parsed));
+  } catch {
     throw new HostedAssistantConfigurationError(
       "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `${HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV} must contain ChatGPT-mode Codex auth tokens.`,
+      `${HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV} must contain hosted-local Codex subscription seed auth tokens.`,
     );
   }
-
-  return authJson;
-}
-
-function isChatGptModeCodexAuthDotJson(value: unknown): boolean {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const authMode = Reflect.get(value, "auth_mode");
-  if (authMode !== undefined && authMode !== "chatgpt") {
-    return false;
-  }
-
-  const tokens = Reflect.get(value, "tokens");
-  if (typeof tokens !== "object" || tokens === null) {
-    return false;
-  }
-
-  // The harness seeds an intentionally empty refresh token so the durable
-  // account grant stays host-side; Codex accepts that shape.
-  if (typeof Reflect.get(tokens, "refresh_token") !== "string") {
-    return false;
-  }
-
-  return ["access_token", "id_token"].every((key) => {
-    const token = Reflect.get(tokens, key);
-    return typeof token === "string" && token.length > 0;
-  });
 }
 
 function rejectInvalidHostedCodexAppServerCommandOverride(

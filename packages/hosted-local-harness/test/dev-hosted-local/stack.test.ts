@@ -197,10 +197,18 @@ const resolveHostedLocalLinqWebhookSetup = vi.fn<
 >(async () => null);
 const registerHostedLocalLinqWebhookSubscription = vi.fn(async () => {});
 const waitForHostedLocalLinqWebhookTarget = vi.fn(async () => {});
+const STUB_ID_TOKEN = buildFakeJwtPayload({ iss: "https://auth.openai.com", sub: "user-1" });
 const STUB_CODEX_SUBSCRIPTION_AUTH_JSON = Buffer.from(
   JSON.stringify({
-    auth_mode: "chatgpt",
-    tokens: { access_token: "stub-access-token" },
+    OPENAI_API_KEY: null,
+    auth_mode: "chatgptAuthTokens",
+    last_refresh: "2026-06-11T00:00:00.000Z",
+    tokens: {
+      access_token: "stub-access-token",
+      account_id: "stub-account-id",
+      id_token: STUB_ID_TOKEN,
+      refresh_token: "",
+    },
   }),
   "utf8",
 ).toString("base64url");
@@ -2852,3 +2860,13 @@ describe("hosted local dev stack", () => {
     });
   });
 });
+
+function buildFakeJwtPayload(payload: Record<string, unknown>): string {
+  const encode = (value: unknown): string =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
+  return [
+    encode({ alg: "none", typ: "JWT" }),
+    encode(payload),
+    "signature",
+  ].join(".");
+}

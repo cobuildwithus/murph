@@ -13,6 +13,12 @@ import {
 
 const temporaryPaths: string[] = [];
 const HOUR_MS = 60 * 60 * 1000;
+const HOST_ID_TOKEN = buildFakeJwtPayload({ iss: "https://auth.openai.com", sub: "user-1" });
+const ROTATED_ID_TOKEN = buildFakeJwtPayload({
+  iss: "https://auth.openai.com",
+  sub: "user-1",
+  refreshed: true,
+});
 
 afterEach(async () => {
   vi.unstubAllGlobals();
@@ -94,9 +100,10 @@ describe("resolveHostedLocalCodexSubscriptionAuthEnvValue", () => {
     expect(value).toMatch(/^[A-Za-z0-9_-]+$/u);
     const decodedJson = decodeSeedJson(value);
     const parsed = JSON.parse(decodedJson);
-    expect(parsed.auth_mode).toBe("chatgpt");
+    expect(parsed.auth_mode).toBe("chatgptAuthTokens");
+    expect(parsed.last_refresh).toBe("2026-06-11T00:00:00.000Z");
     expect(parsed.tokens.access_token).toContain(".");
-    expect(parsed.tokens.id_token).toBe("id-token-1");
+    expect(parsed.tokens.id_token).toBe(HOST_ID_TOKEN);
     expect(parsed.tokens.account_id).toBe("account-1");
     // The durable account-scoped refresh token stays host-side.
     expect(parsed.tokens.refresh_token).toBe("");
@@ -114,7 +121,7 @@ describe("resolveHostedLocalCodexSubscriptionAuthEnvValue", () => {
       new Response(
         JSON.stringify({
           access_token: rotatedAccessToken,
-          id_token: "id-token-2",
+            id_token: ROTATED_ID_TOKEN,
           refresh_token: "refresh-token-2",
         }),
         { status: 200 },
@@ -137,7 +144,7 @@ describe("resolveHostedLocalCodexSubscriptionAuthEnvValue", () => {
     const decodedJson = decodeSeedJson(value);
     const seeded = JSON.parse(decodedJson);
     expect(seeded.tokens.access_token).toBe(rotatedAccessToken);
-    expect(seeded.tokens.id_token).toBe("id-token-2");
+    expect(seeded.tokens.id_token).toBe(ROTATED_ID_TOKEN);
     // Rotated refresh tokens are persisted host-side but never seeded.
     expect(seeded.tokens.refresh_token).toBe("");
     expect(decodedJson).not.toContain("refresh-token-2");
@@ -162,7 +169,7 @@ describe("resolveHostedLocalCodexSubscriptionAuthEnvValue", () => {
     });
 
     const decodedJson = decodeSeedJson(value);
-    expect(JSON.parse(decodedJson).tokens.id_token).toBe("id-token-1");
+    expect(JSON.parse(decodedJson).tokens.id_token).toBe(HOST_ID_TOKEN);
     expect(decodedJson).not.toContain("refresh-token-1");
   });
 
@@ -208,6 +215,75 @@ describe("resolveHostedLocalCodexSubscriptionAuthEnvValue", () => {
     ).rejects.toThrow(/codex login/);
   });
 
+  it("fails closed when a successful refresh response has no new access token", async () => {
+    const codexHome = await createCodexHome(
+      buildChatGptAuth({ accessTokenExpiresInMs: 2 * HOUR_MS }),
+    );
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
+
+    await expect(
+      resolveHostedLocalCodexSubscriptionAuthEnvValue({
+        [MURPH_HOSTED_LOCAL_CODEX_HOME_ENV]: codexHome,
+      }),
+    ).rejects.toThrow(/codex login/);
+  });
+
+  it("fails closed when a successful refresh returns an access token too close to expiry", async () => {
+    const codexHome = await createCodexHome(
+      buildChatGptAuth({ accessTokenExpiresInMs: 2 * HOUR_MS }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            access_token: buildFakeJwt((Date.now() + 2 * HOUR_MS) / 1000),
+          }),
+          { status: 200 },
+        )
+      ),
+    );
+
+    await expect(
+      resolveHostedLocalCodexSubscriptionAuthEnvValue({
+        [MURPH_HOSTED_LOCAL_CODEX_HOME_ENV]: codexHome,
+      }),
+    ).rejects.toThrow(/too close to expiry/);
+  });
+
+  it("rejects host auth without account id or last refresh", async () => {
+    for (const auth of [
+      {
+        OPENAI_API_KEY: null,
+        auth_mode: "chatgpt",
+        last_refresh: "2026-06-11T00:00:00.000Z",
+        tokens: {
+          access_token: buildFakeJwt((Date.now() + 200 * HOUR_MS) / 1000),
+          id_token: HOST_ID_TOKEN,
+          refresh_token: "refresh-token-1",
+        },
+      },
+      {
+        OPENAI_API_KEY: null,
+        auth_mode: "chatgpt",
+        tokens: {
+          access_token: buildFakeJwt((Date.now() + 200 * HOUR_MS) / 1000),
+          account_id: "account-1",
+          id_token: HOST_ID_TOKEN,
+          refresh_token: "refresh-token-1",
+        },
+      },
+    ]) {
+      const codexHome = await createCodexHome(auth);
+
+      await expect(
+        resolveHostedLocalCodexSubscriptionAuthEnvValue({
+          [MURPH_HOSTED_LOCAL_CODEX_HOME_ENV]: codexHome,
+        }),
+      ).rejects.toThrow(/ChatGPT-subscription/);
+    }
+  });
+
   it("fails with login guidance when auth.json is missing", async () => {
     const codexHome = await createTemporaryDirectory();
 
@@ -222,6 +298,25 @@ describe("resolveHostedLocalCodexSubscriptionAuthEnvValue", () => {
     const codexHome = await createCodexHome({
       OPENAI_API_KEY: "sk-direct-api-key",
       auth_mode: "apikey",
+    });
+
+    await expect(
+      resolveHostedLocalCodexSubscriptionAuthEnvValue({
+        [MURPH_HOSTED_LOCAL_CODEX_HOME_ENV]: codexHome,
+      }),
+    ).rejects.toThrow(/ChatGPT-subscription/);
+  });
+
+  it("rejects ambiguous host auth without explicit ChatGPT mode", async () => {
+    const codexHome = await createCodexHome({
+      OPENAI_API_KEY: "sk-direct-api-key",
+      last_refresh: "2026-06-11T00:00:00.000Z",
+      tokens: {
+        access_token: buildFakeJwt((Date.now() + 200 * HOUR_MS) / 1000),
+        account_id: "account-1",
+        id_token: HOST_ID_TOKEN,
+        refresh_token: "refresh-token-1",
+      },
     });
 
     await expect(
@@ -257,11 +352,11 @@ function buildChatGptAuth(input: { accessTokenExpiresInMs: number }): Record<str
   return {
     OPENAI_API_KEY: null,
     auth_mode: "chatgpt",
-    last_refresh: new Date().toISOString(),
+    last_refresh: "2026-06-11T00:00:00.000Z",
     tokens: {
       access_token: buildFakeJwt((Date.now() + input.accessTokenExpiresInMs) / 1000),
       account_id: "account-1",
-      id_token: "id-token-1",
+      id_token: HOST_ID_TOKEN,
       refresh_token: "refresh-token-1",
     },
   };
@@ -273,6 +368,16 @@ function buildFakeJwt(expSeconds: number): string {
   return [
     encode({ alg: "none", typ: "JWT" }),
     encode({ exp: Math.floor(expSeconds) }),
+    "signature",
+  ].join(".");
+}
+
+function buildFakeJwtPayload(payload: Record<string, unknown>): string {
+  const encode = (value: unknown): string =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
+  return [
+    encode({ alg: "none", typ: "JWT" }),
+    encode(payload),
     "signature",
   ].join(".");
 }

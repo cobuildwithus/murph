@@ -397,10 +397,39 @@ test("hosted Codex runtime config rejects malformed ChatGPT subscription auth", 
     ...[
       JSON.stringify({ OPENAI_API_KEY: "sk-direct-key" }),
       JSON.stringify({ auth_mode: "apikey", tokens: chatGptCodexAuthTokens() }),
+      JSON.stringify({
+        OPENAI_API_KEY: "sk-direct-key",
+        last_refresh: "2026-06-11T00:00:00.000Z",
+        tokens: chatGptCodexAuthTokens(),
+      }),
       JSON.stringify({ auth_mode: "chatgpt", tokens: { access_token: "only-access" } }),
       JSON.stringify({
+        OPENAI_API_KEY: null,
         auth_mode: "chatgpt",
-        tokens: { access_token: "chatgpt-access-token", id_token: "chatgpt-id-token" },
+        last_refresh: "2026-06-11T00:00:00.000Z",
+        tokens: chatGptCodexAuthTokens(),
+      }),
+      JSON.stringify({
+        OPENAI_API_KEY: null,
+        auth_mode: "chatgptAuthTokens",
+        tokens: chatGptCodexAuthTokens(),
+      }),
+      JSON.stringify({
+        OPENAI_API_KEY: null,
+        auth_mode: "chatgptAuthTokens",
+        last_refresh: "2026-06-11",
+        tokens: chatGptCodexAuthTokens(),
+      }),
+      JSON.stringify({
+        OPENAI_API_KEY: null,
+        auth_mode: "chatgptAuthTokens",
+        last_refresh: "2026-06-11T00:00:00.000Z",
+        tokens: {
+          access_token: "chatgpt-access-token",
+          account_id: "account-1234",
+          id_token: "chatgpt-id-token",
+          refresh_token: "",
+        },
       }),
     ].map(encodeChatGptCodexAuthEnvValue),
   ]) {
@@ -1166,9 +1195,9 @@ function chatGptCodexAuthTokens(): Record<string, string> {
   return {
     access_token: "chatgpt-access-token",
     account_id: "account-1234",
-    id_token: "chatgpt-id-token",
-    // The harness keeps the durable refresh token host-side and seeds an
-    // intentionally empty one; Codex accepts that shape.
+    id_token: buildFakeJwtPayload({ iss: "https://auth.openai.com", sub: "user-1" }),
+    // The harness keeps the durable refresh token host-side and uses Codex's
+    // external-token auth mode for the runner seed.
     refresh_token: "",
   };
 }
@@ -1176,7 +1205,7 @@ function chatGptCodexAuthTokens(): Record<string, string> {
 function buildChatGptCodexAuthJson(): string {
   return JSON.stringify({
     OPENAI_API_KEY: null,
-    auth_mode: "chatgpt",
+    auth_mode: "chatgptAuthTokens",
     last_refresh: "2026-06-11T00:00:00.000Z",
     tokens: chatGptCodexAuthTokens(),
   });
@@ -1186,6 +1215,14 @@ function buildChatGptCodexAuthJson(): string {
 // wrangler env-file hop; mirror that contract here.
 function encodeChatGptCodexAuthEnvValue(authJson: string): string {
   return Buffer.from(authJson, "utf8").toString("base64url");
+}
+
+function buildFakeJwtPayload(payload: Record<string, unknown>): string {
+  return [
+    Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" }), "utf8").toString("base64url"),
+    Buffer.from(JSON.stringify(payload), "utf8").toString("base64url"),
+    "signature",
+  ].join(".");
 }
 
 async function removeTemporaryPath(target: string): Promise<void> {

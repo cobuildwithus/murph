@@ -41,6 +41,7 @@ export * from "./cli-runtime-bridge.ts";
 export * from "./email-ingress.ts";
 export * from "./env.ts";
 export * from "./hosted-email.ts";
+export * from "./hosted-codex-subscription-auth.ts";
 export * from "./observability.ts";
 export * from "./orchestration-control.ts";
 export * from "./routes.ts";

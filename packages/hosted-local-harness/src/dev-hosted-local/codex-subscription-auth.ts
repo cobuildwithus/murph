@@ -3,6 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
+import {
+  buildHostedLocalCodexSubscriptionSeedAuth,
+  type HostedLocalCodexSubscriptionHostAuth,
+  parseHostedLocalCodexSubscriptionHostAuth,
+} from "@murphai/hosted-execution/hosted-codex-subscription-auth";
+
 import { resolveHostedLocalProfile } from "../profiles.ts";
 
 export const MURPH_HOSTED_LOCAL_CODEX_HOME_ENV = "MURPH_HOSTED_LOCAL_CODEX_HOME";
@@ -29,18 +35,6 @@ const ACCESS_TOKEN_MINIMUM_REMAINING_MS = 24 * 60 * 60 * 1000;
 const REFRESH_LOCK_ACQUIRE_TIMEOUT_MS = 120_000;
 const REFRESH_LOCK_STALE_MS = 60_000;
 const REFRESH_REQUEST_TIMEOUT_MS = 30_000;
-
-interface CodexAuthDotJson {
-  auth_mode?: unknown;
-  last_refresh?: unknown;
-  tokens?: {
-    access_token?: unknown;
-    id_token?: unknown;
-    refresh_token?: unknown;
-    [key: string]: unknown;
-  };
-  [key: string]: unknown;
-}
 
 // Interactive dev/debug profiles run hosted Codex on the local ChatGPT
 // subscription; test-mode profiles and NODE_ENV=test lanes (e2e, harness
@@ -84,31 +78,21 @@ export async function resolveHostedLocalCodexSubscriptionAuthEnvValue(
   ).toString("base64url");
 }
 
-// The runner gets only what Codex needs for ChatGPT-mode model calls. The
+// The runner gets only what Codex needs for ChatGPT subscription model calls. The
 // durable account-scoped refresh token stays host-side: the harness refreshes
 // before seeding, and a refresh inside the ephemeral runner could only orphan
-// the rotated token. Codex accepts an empty refresh token (its external-token
-// mode seeds one), so long sessions fail cleanly at access-token expiry
-// instead of silently rotating the host login away.
-function buildRunnerSeedAuthDotJson(auth: CodexAuthDotJson): CodexAuthDotJson {
-  const tokens = auth.tokens ?? {};
-  return {
-    OPENAI_API_KEY: null,
-    auth_mode: "chatgpt",
-    ...(typeof auth.last_refresh === "string" ? { last_refresh: auth.last_refresh } : {}),
-    tokens: {
-      access_token: tokens.access_token,
-      ...(typeof tokens.account_id === "string" ? { account_id: tokens.account_id } : {}),
-      id_token: tokens.id_token,
-      refresh_token: "",
-    },
-  };
+// the rotated token. The seed uses Codex's external-token auth mode, where
+// refresh is owned outside the runner.
+function buildRunnerSeedAuthDotJson(
+  auth: HostedLocalCodexSubscriptionHostAuth,
+) {
+  return buildHostedLocalCodexSubscriptionSeedAuth(auth);
 }
 
 async function readChatGptCodexAuthDotJson(
   authPath: string,
   codexHome: string,
-): Promise<CodexAuthDotJson> {
+): Promise<HostedLocalCodexSubscriptionHostAuth> {
   let raw: string;
   try {
     raw = await readFile(authPath, "utf8");
@@ -131,7 +115,9 @@ async function readChatGptCodexAuthDotJson(
     );
   }
 
-  if (!isChatGptModeCodexAuth(parsed)) {
+  try {
+    return parseHostedLocalCodexSubscriptionHostAuth(parsed);
+  } catch {
     throw new Error(
       [
         `${authPath} is not a ChatGPT-subscription Codex login.`,
@@ -141,36 +127,13 @@ async function readChatGptCodexAuthDotJson(
       ].join(" "),
     );
   }
-
-  return parsed;
-}
-
-function isChatGptModeCodexAuth(value: unknown): value is CodexAuthDotJson {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const authMode = Reflect.get(value, "auth_mode");
-  if (authMode !== undefined && authMode !== "chatgpt") {
-    return false;
-  }
-
-  const tokens = Reflect.get(value, "tokens");
-  if (typeof tokens !== "object" || tokens === null) {
-    return false;
-  }
-
-  return ["access_token", "id_token", "refresh_token"].every((key) => {
-    const token = Reflect.get(tokens, key);
-    return typeof token === "string" && token.length > 0;
-  });
 }
 
 async function maybeRefreshChatGptCodexAuth(input: {
-  auth: CodexAuthDotJson;
+  auth: HostedLocalCodexSubscriptionHostAuth;
   authPath: string;
   codexHome: string;
-}): Promise<CodexAuthDotJson> {
+}): Promise<HostedLocalCodexSubscriptionHostAuth> {
   if (!isWithinRefreshWindow(input.auth)) {
     return input.auth;
   }
@@ -221,8 +184,8 @@ async function maybeRefreshChatGptCodexAuth(input: {
   });
 }
 
-function isWithinRefreshWindow(auth: CodexAuthDotJson): boolean {
-  const expiresAtMs = readJwtExpiryMs(String(auth.tokens?.access_token));
+function isWithinRefreshWindow(auth: HostedLocalCodexSubscriptionHostAuth): boolean {
+  const expiresAtMs = readJwtExpiryMs(auth.tokens.access_token);
   return expiresAtMs === null
     || expiresAtMs - Date.now() <= ACCESS_TOKEN_REFRESH_WINDOW_MS;
 }
@@ -274,13 +237,13 @@ async function removeStaleCodexAuthRefreshLock(lockPath: string): Promise<void> 
 }
 
 async function refreshChatGptCodexAuth(
-  auth: CodexAuthDotJson,
-): Promise<CodexAuthDotJson> {
+  auth: HostedLocalCodexSubscriptionHostAuth,
+): Promise<HostedLocalCodexSubscriptionHostAuth> {
   const response = await fetch(CODEX_OAUTH_REFRESH_TOKEN_URL, {
     body: JSON.stringify({
       client_id: CODEX_OAUTH_CLIENT_ID,
       grant_type: "refresh_token",
-      refresh_token: auth.tokens?.refresh_token,
+      refresh_token: auth.tokens.refresh_token,
     }),
     headers: { "content-type": "application/json" },
     method: "POST",
@@ -296,6 +259,11 @@ async function refreshChatGptCodexAuth(
     throw new Error("token refresh returned an unexpected payload");
   }
 
+  const payloadAccessToken = Reflect.get(payload, "access_token");
+  if (typeof payloadAccessToken !== "string" || payloadAccessToken.length === 0) {
+    throw new Error("token refresh did not return a new access token");
+  }
+
   // Mirror Codex's persist_tokens: overwrite only returned fields and stamp
   // last_refresh so Codex's own refresh heuristics stay accurate.
   const tokens = { ...auth.tokens };
@@ -306,11 +274,23 @@ async function refreshChatGptCodexAuth(
     }
   }
 
-  return {
+  const refreshed = parseHostedLocalCodexSubscriptionHostAuth({
     ...auth,
     last_refresh: new Date().toISOString(),
     tokens,
-  };
+  });
+  assertAccessTokenMinimumRunway(refreshed);
+  return refreshed;
+}
+
+function assertAccessTokenMinimumRunway(
+  auth: HostedLocalCodexSubscriptionHostAuth,
+): void {
+  const expiresAtMs = readJwtExpiryMs(auth.tokens.access_token);
+  const remainingMs = expiresAtMs === null ? 0 : expiresAtMs - Date.now();
+  if (remainingMs <= ACCESS_TOKEN_MINIMUM_REMAINING_MS) {
+    throw new Error("token refresh returned an access token that is too close to expiry");
+  }
 }
 
 function readJwtExpiryMs(token: string): number | null {
