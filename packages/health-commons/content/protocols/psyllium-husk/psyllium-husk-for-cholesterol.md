@@ -7,7 +7,7 @@ title: "Psyllium Husk For Cholesterol"
 summary: "A lab-measured cholesterol experiment using daily psyllium husk as a diet adjunct, aiming primarily at LDL-C while tracking non-HDL-C, ApoB, and total cholesterol as companion lipid labs with hydration, swallowing, allergy, medication-spacing, and lab-follow-up guardrails."
 status: "draft"
 quality: "usable"
-hidden: false
+hidden: true
 aliases:
   - "psyllium husk for cholesterol"
   - "psyllium for LDL cholesterol"
