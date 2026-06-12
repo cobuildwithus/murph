@@ -1,3 +1,5 @@
+import { after } from "next/server";
+
 import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
@@ -12,6 +14,10 @@ import {
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
 import type { HostedWebhookServiceResponse } from "./webhook-service-types";
+
+// Latency traces are observability only. They are scheduled after the webhook
+// response so ingress wake handoff stays focused on durable mailbox acceptance
+// plus Temporal signaling; losing a trace row is acceptable, blocking ingress is not.
 
 export type HostedWebhookWakeHandoffResult =
   {
@@ -43,45 +49,32 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     },
   );
 
-  // The accepted-latency-trace write is observability only; run it
-  // concurrently with the Temporal signal instead of serializing a DB round
-  // trip ahead of the wake. The helper never rejects (it logs its own
-  // failures). Settling is capped: normally the write finished during the
-  // signal round trip, and a degraded latency-trace DB must not extend the
-  // webhook request lifetime (observability never gates user latency). On
-  // timeout the write keeps running for whatever remains of the request
-  // lifecycle; losing a trace row is acceptable, blocking ingress is not.
-  const acceptedTraceWrite = recordHostedWebhookIngressLatencyAcceptedBestEffort({
-    mailboxItemId,
-    source: input.source,
-  });
-  const settleAcceptedTraceWriteBounded = () =>
-    Promise.race([
-      acceptedTraceWrite,
-      new Promise<void>((resolve) => {
-        setTimeout(resolve, 1_500);
-      }),
-    ]);
-
   let signal: Awaited<ReturnType<typeof signalHostedMailboxAppendRuntime>>;
+  let temporalSignalAcceptedAt: Date | null = null;
   try {
     signal = await signalHostedMailboxAppendRuntime({
       expectedUserId: input.userId ?? null,
       mailboxItemId,
     });
+    temporalSignalAcceptedAt = new Date();
   } catch (error) {
-    await settleAcceptedTraceWriteBounded();
+    scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
+      mailboxItemId,
+      source: input.source,
+      temporalSignalAcceptedAt,
+      userId: input.userId ?? null,
+    });
     const errorName = deriveHostedOnboardingTimingErrorName(error);
     finishHostedOnboardingTiming(handoffTiming, "failed", {
       errorName,
     });
     throw error;
   }
-  await settleAcceptedTraceWriteBounded();
 
-  await recordHostedWebhookIngressLatencyTemporalSignalBestEffort({
+  scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
     mailboxItemId,
     source: input.source,
+    temporalSignalAcceptedAt,
     userId: input.userId ?? null,
   });
 
@@ -96,53 +89,68 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   };
 }
 
-async function recordHostedWebhookIngressLatencyAcceptedBestEffort(input: {
+function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
   mailboxItemId: string;
   source: "linq" | "telegram" | "whatsapp";
-}): Promise<void> {
-  const source = input.source;
-  if (source !== "linq") {
+  temporalSignalAcceptedAt: Date | null;
+  userId: string | null;
+}): void {
+  if (input.source !== "linq") {
     return;
   }
-  const mailboxItemId = input.mailboxItemId;
+  const task = async () => {
+    await recordHostedWebhookIngressLatencyAcceptedBestEffort({
+      mailboxItemId: input.mailboxItemId,
+    });
+    if (input.temporalSignalAcceptedAt) {
+      await recordHostedWebhookIngressLatencyTemporalSignalBestEffort({
+        at: input.temporalSignalAcceptedAt,
+        mailboxItemId: input.mailboxItemId,
+        userId: input.userId,
+      });
+    }
+  };
 
   try {
+    after(task);
+  } catch {
+    void task();
+  }
+}
+
+async function recordHostedWebhookIngressLatencyAcceptedBestEffort(input: {
+  mailboxItemId: string;
+}): Promise<void> {
+  try {
     await recordHostedIngressAcceptedFromMailboxItem({
-      mailboxItemId,
+      mailboxItemId: input.mailboxItemId,
       source: "linq",
     });
   } catch (error) {
     console.warn("Hosted ingress latency accepted write failed.", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
-      source,
+      source: "linq",
       stage: "accepted",
     });
   }
 }
 
 async function recordHostedWebhookIngressLatencyTemporalSignalBestEffort(input: {
+  at: Date;
   mailboxItemId: string;
-  source: "linq" | "telegram" | "whatsapp";
   userId: string | null;
 }): Promise<void> {
-  const source = input.source;
-  if (source !== "linq") {
-    return;
-  }
-  const mailboxItemId = input.mailboxItemId;
-  const userId = input.userId;
-
   try {
     await recordHostedIngressTemporalSignalAccepted({
-      at: new Date(),
-      expectedUserId: userId,
-      mailboxItemId,
+      at: input.at,
+      expectedUserId: input.userId,
+      mailboxItemId: input.mailboxItemId,
       source: "linq",
     });
   } catch (error) {
     console.warn("Hosted ingress latency temporal signal write failed.", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
-      source,
+      source: "linq",
       stage: "temporal_signal",
     });
   }

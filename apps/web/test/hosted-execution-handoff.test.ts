@@ -7,6 +7,19 @@ import {
   vi,
 } from "vitest";
 
+const nextServerMocks = vi.hoisted(() => ({
+  after: vi.fn(),
+  afterCallbacks: [] as Array<() => void | Promise<void>>,
+}));
+
+vi.mock("next/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/server")>();
+  return {
+    ...actual,
+    after: nextServerMocks.after,
+  };
+});
+
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured: vi.fn(),
 }));
@@ -45,6 +58,12 @@ import { maybeHandoffHostedExecutionWebhookWake } from "@/src/lib/hosted-onboard
 
 describe("hosted webhook Temporal handoff", () => {
   beforeEach(() => {
+    vi.useRealTimers();
+    nextServerMocks.afterCallbacks.length = 0;
+    nextServerMocks.after.mockReset();
+    nextServerMocks.after.mockImplementation((callback: () => void | Promise<void>) => {
+      nextServerMocks.afterCallbacks.push(callback);
+    });
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReset();
     signalMocks.signalHostedMailboxAppendRuntime.mockReset();
     signalMocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
@@ -58,6 +77,7 @@ describe("hosted webhook Temporal handoff", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -110,17 +130,8 @@ describe("hosted webhook Temporal handoff", () => {
     });
   });
 
-  it("settles the concurrent accepted-trace write before returning on success", async () => {
-    let releaseAcceptedTrace: () => void = () => undefined;
-    latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem.mockImplementationOnce(
-      async () =>
-        await new Promise<void>((resolve) => {
-          releaseAcceptedTrace = resolve;
-        }),
-    );
-
-    let handoffSettled = false;
-    const handoff = maybeHandoffHostedExecutionWebhookWake({
+  it("does not await Linq latency-trace writes before returning a successful handoff", async () => {
+    await expect(maybeHandoffHostedExecutionWebhookWake({
       eventId: "evt_inline_gap",
       mailboxItemId: "mailbox_123",
       response: {
@@ -129,43 +140,154 @@ describe("hosted webhook Temporal handoff", () => {
       },
       source: "linq",
       userId: "user-123",
-    }).finally(() => {
-      handoffSettled = true;
-    });
-
-    // The Temporal signal already resolved, but the handoff must not return
-    // until the concurrent accepted-trace write settles too.
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
-    expect(handoffSettled).toBe(false);
-
-    releaseAcceptedTrace();
-    await expect(handoff).resolves.toMatchObject({
+    })).resolves.toMatchObject({
       reason: "temporal-signaled",
       workflowId: "hosted-user-runtime:user-123",
     });
+
+    expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    expect(nextServerMocks.after).toHaveBeenCalledTimes(1);
+    expect(latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem).not.toHaveBeenCalled();
+    expect(
+      latencyStoreMocks.recordHostedIngressTemporalSignalAccepted,
+    ).not.toHaveBeenCalled();
+
+    await flushScheduledAfterCallbacks();
+
     expect(latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_123",
+      source: "linq",
+    });
+    expect(
+      latencyStoreMocks.recordHostedIngressTemporalSignalAccepted,
+    ).toHaveBeenCalledTimes(1);
+  });
+
+  it("schedules the accepted trace before rethrowing a Temporal signal failure", async () => {
+    signalMocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
+      new Error("Temporal unavailable"),
+    );
+
+    await expect(
+      maybeHandoffHostedExecutionWebhookWake({
+        eventId: "evt_inline_gap",
+        mailboxItemId: "mailbox_123",
+        response: {
+          ok: true,
+          reason: "wake-appended-active-member",
+        },
+        source: "linq",
+        userId: "user-123",
+      }),
+    ).rejects.toThrow("Temporal unavailable");
+
+    expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    expect(nextServerMocks.after).toHaveBeenCalledTimes(1);
+    expect(latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem).not.toHaveBeenCalled();
+
+    await flushScheduledAfterCallbacks();
+
+    expect(latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_123",
+      source: "linq",
+    });
+    expect(
+      latencyStoreMocks.recordHostedIngressTemporalSignalAccepted,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("rethrows the original signal failure even when after() itself throws", async () => {
+    signalMocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
+      new Error("Temporal unavailable"),
+    );
+    nextServerMocks.after.mockImplementationOnce(() => {
+      throw new Error("after() called outside a request scope");
+    });
+
+    await expect(
+      maybeHandoffHostedExecutionWebhookWake({
+        eventId: "evt_after_throws_on_failure",
+        mailboxItemId: "mailbox_123",
+        response: {
+          ok: true,
+          reason: "wake-appended-active-member",
+        },
+        source: "linq",
+        userId: "user-123",
+      }),
+    ).rejects.toThrow("Temporal unavailable");
+
+    // The fallback fired the trace task directly instead of queueing it.
+    expect(nextServerMocks.afterCallbacks).toHaveLength(0);
+    await vi.waitFor(() => {
+      expect(
+        latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem,
+      ).toHaveBeenCalledWith({
+        mailboxItemId: "mailbox_123",
+        source: "linq",
+      });
+    });
+    expect(
+      latencyStoreMocks.recordHostedIngressTemporalSignalAccepted,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("schedules the temporal-signal trace only on success with the signal-time timestamp", async () => {
+    vi.useFakeTimers();
+    const signalAcceptedAt = new Date("2026-06-12T15:00:00.000Z");
+    const afterCallbackRunsAt = new Date("2026-06-12T15:00:05.000Z");
+    const writeOrder: string[] = [];
+    vi.setSystemTime(new Date("2026-06-12T14:59:59.000Z"));
+    signalMocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async () => {
+      vi.setSystemTime(signalAcceptedAt);
+      return {
+        signalAccepted: true,
+        workflowId: "hosted-user-runtime:user-123",
+      };
+    });
+    latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem.mockImplementationOnce(async () => {
+      writeOrder.push("accepted");
+    });
+    latencyStoreMocks.recordHostedIngressTemporalSignalAccepted.mockImplementationOnce(async () => {
+      writeOrder.push("temporal_signal");
+    });
+
+    await expect(maybeHandoffHostedExecutionWebhookWake({
+      eventId: "evt_inline_gap",
+      mailboxItemId: "mailbox_123",
+      response: {
+        ok: true,
+        reason: "wake-appended-active-member",
+      },
+      source: "linq",
+      userId: "user-123",
+    })).resolves.toMatchObject({
+      reason: "temporal-signaled",
+      workflowId: "hosted-user-runtime:user-123",
+    });
+
+    expect(
+      latencyStoreMocks.recordHostedIngressTemporalSignalAccepted,
+    ).not.toHaveBeenCalled();
+
+    vi.setSystemTime(afterCallbackRunsAt);
+    await flushScheduledAfterCallbacks();
+
+    expect(writeOrder).toEqual(["accepted", "temporal_signal"]);
+    expect(latencyStoreMocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith({
+      at: signalAcceptedAt,
+      expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
       source: "linq",
     });
   });
 
-  it("settles the concurrent accepted-trace write before rethrowing a Temporal signal failure", async () => {
-    signalMocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
-      new Error("Temporal unavailable"),
-    );
-    let releaseAcceptedTrace: () => void = () => undefined;
-    latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem.mockImplementationOnce(
-      async () =>
-        await new Promise<void>((resolve) => {
-          releaseAcceptedTrace = resolve;
-        }),
-    );
+  it("falls back to direct trace writes without failing the handoff when after() throws", async () => {
+    nextServerMocks.after.mockImplementationOnce(() => {
+      throw new Error("after() unavailable outside request scope");
+    });
 
-    let handoffSettled = false;
-    const handoff = maybeHandoffHostedExecutionWebhookWake({
+    await expect(maybeHandoffHostedExecutionWebhookWake({
       eventId: "evt_inline_gap",
       mailboxItemId: "mailbox_123",
       response: {
@@ -174,24 +296,62 @@ describe("hosted webhook Temporal handoff", () => {
       },
       source: "linq",
       userId: "user-123",
-    });
-    handoff.catch(() => undefined).finally(() => {
-      handoffSettled = true;
+    })).resolves.toMatchObject({
+      reason: "temporal-signaled",
+      workflowId: "hosted-user-runtime:user-123",
     });
 
-    // The signal rejection alone must not surface while the accepted-trace
-    // write is still in flight; the failure path awaits it first.
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
-    expect(handoffSettled).toBe(false);
+    expect(nextServerMocks.after).toHaveBeenCalledTimes(1);
+    expect(nextServerMocks.afterCallbacks).toHaveLength(0);
 
-    releaseAcceptedTrace();
-    await expect(handoff).rejects.toThrow("Temporal unavailable");
-    expect(
-      latencyStoreMocks.recordHostedIngressTemporalSignalAccepted,
-    ).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem).toHaveBeenCalledWith({
+        mailboxItemId: "mailbox_123",
+        source: "linq",
+      });
+      expect(latencyStoreMocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(
+        expect.objectContaining({
+          expectedUserId: "user-123",
+          mailboxItemId: "mailbox_123",
+          source: "linq",
+        }),
+      );
+    });
+  });
+
+  it("still records the temporal-signal trace when the accepted trace write fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem.mockRejectedValueOnce(
+      new Error("latency trace db down"),
+    );
+
+    await expect(maybeHandoffHostedExecutionWebhookWake({
+      eventId: "evt_inline_gap",
+      mailboxItemId: "mailbox_123",
+      response: {
+        ok: true,
+        reason: "wake-appended-active-member",
+      },
+      source: "linq",
+      userId: "user-123",
+    })).resolves.toMatchObject({
+      reason: "temporal-signaled",
+      workflowId: "hosted-user-runtime:user-123",
+    });
+
+    await expect(flushScheduledAfterCallbacks()).resolves.toBeUndefined();
+
+    expect(latencyStoreMocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedUserId: "user-123",
+        mailboxItemId: "mailbox_123",
+        source: "linq",
+      }),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted ingress latency accepted write failed.",
+      expect.objectContaining({ stage: "accepted" }),
+    );
   });
 
   it("skips webhook handoff when no mailbox pointer exists", async () => {
@@ -259,8 +419,20 @@ describe("hosted webhook Temporal handoff", () => {
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
+    expect(nextServerMocks.after).not.toHaveBeenCalled();
+    expect(latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem).not.toHaveBeenCalled();
+    expect(
+      latencyStoreMocks.recordHostedIngressTemporalSignalAccepted,
+    ).not.toHaveBeenCalled();
   });
 });
+
+async function flushScheduledAfterCallbacks(): Promise<void> {
+  const callbacks = nextServerMocks.afterCallbacks.splice(0);
+  for (const callback of callbacks) {
+    await callback();
+  }
+}
 
 describe("deleteHostedRunnerUserDataBestEffort", () => {
   beforeEach(() => {
