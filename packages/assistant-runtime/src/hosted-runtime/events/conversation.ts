@@ -42,6 +42,7 @@ import {
 import {
   createHostedTelegramAttachmentDownloadDriver,
   createHostedTelegramEffectsAttachmentDownloadDriver,
+  logHostedTelegramAttachmentDownloadUnavailable,
   withHostedTelegramAttachmentDownloadLogging,
 } from "./telegram.ts";
 import type {
@@ -283,19 +284,28 @@ async function normalizeHostedConversationMessageWake(input: {
   }
 
   if (isHostedTelegramConversationMessageWake(input.wake)) {
+    const downloadDriver =
+      createHostedTelegramEffectsAttachmentDownloadDriver({
+        effectsPort: input.runtime.platform.effectsPort,
+      })
+      ?? createHostedTelegramAttachmentDownloadDriver({
+        env: buildHostedTelegramChannelEnv({
+          forwardedEnv: input.runtime.forwardedEnv,
+          platformEnv: input.runtime.platformEnv,
+        }),
+        fetchImplementation: input.runtime.platform.providerFetch ?? null,
+      });
+    if (
+      !downloadDriver
+      && (input.wake.message.telegramMessage.attachments?.length ?? 0) > 0
+    ) {
+      await logHostedTelegramAttachmentDownloadUnavailable(input.runtime.platform);
+    }
+
     return normalizeHostedTelegramConversationCapture({
       accountId: "bot",
       downloadDriver: withHostedTelegramAttachmentDownloadLogging(
-        createHostedTelegramEffectsAttachmentDownloadDriver({
-          effectsPort: input.runtime.platform.effectsPort,
-        })
-        ?? createHostedTelegramAttachmentDownloadDriver({
-          env: buildHostedTelegramChannelEnv({
-            forwardedEnv: input.runtime.forwardedEnv,
-            platformEnv: input.runtime.platformEnv,
-          }),
-          fetchImplementation: input.runtime.platform.providerFetch ?? null,
-        }),
+        downloadDriver,
         input.runtime.platform,
       ),
       externalId: input.wake.eventId,

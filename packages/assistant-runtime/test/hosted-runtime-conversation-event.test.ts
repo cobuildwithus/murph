@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   createHostedLinqAttachmentDownloadDriver: vi.fn(),
   createHostedTelegramAttachmentDownloadDriver: vi.fn(),
   createHostedTelegramEffectsAttachmentDownloadDriver: vi.fn(),
+  logHostedTelegramAttachmentDownloadUnavailable: vi.fn(),
   createInboxParserService: vi.fn(),
   createInboxPipeline: vi.fn(),
   createParsedInboxPipeline: vi.fn(),
@@ -61,6 +62,8 @@ vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
   createHostedTelegramAttachmentDownloadDriver: mocks.createHostedTelegramAttachmentDownloadDriver,
   createHostedTelegramEffectsAttachmentDownloadDriver:
     mocks.createHostedTelegramEffectsAttachmentDownloadDriver,
+  logHostedTelegramAttachmentDownloadUnavailable:
+    mocks.logHostedTelegramAttachmentDownloadUnavailable,
   withHostedTelegramAttachmentDownloadLogging: (
     driver: unknown,
   ) => driver,
@@ -182,6 +185,7 @@ function mockOpenInboxRuntimeWithParseJobs(input: {
 
 beforeEach(() => {
   mocks.createHostedTelegramEffectsAttachmentDownloadDriver.mockReturnValue(null);
+  mocks.logHostedTelegramAttachmentDownloadUnavailable.mockResolvedValue(undefined);
   mocks.markLinqChatRead.mockResolvedValue(undefined);
   mocks.openInboxRuntime.mockResolvedValue({
     close: vi.fn(),
@@ -474,6 +478,88 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     expect(mocks.normalizeHostedTelegramConversationCapture).toHaveBeenCalledWith(
       expect.objectContaining({
         downloadDriver: effectsDriver,
+      }),
+    );
+  });
+
+  it("does not log Telegram driver unavailability for text-only messages", async () => {
+    mocks.createHostedTelegramAttachmentDownloadDriver.mockReturnValueOnce(null);
+    mocks.normalizeHostedTelegramConversationCapture.mockResolvedValueOnce({
+      source: "telegram",
+    });
+
+    const wake = buildHostedExecutionTelegramConversationMessageWake({
+      eventId: "evt_telegram",
+      occurredAt: "2026-04-08T00:01:00.000Z",
+      telegramMessage: {
+        messageId: "123",
+        schema: "murph.hosted-telegram-message.v1",
+        text: "hello",
+        threadId: "chat_123",
+      },
+      userId: "member_123",
+    });
+    const runtime = createRuntime();
+
+    await importHostedConversationMessageWakeIntoLocalInbox({
+      runtime,
+      vaultRoot: "/tmp/assistant-runtime-conversation",
+      wake,
+    });
+
+    expect(mocks.logHostedTelegramAttachmentDownloadUnavailable).not.toHaveBeenCalled();
+    expect(mocks.normalizeHostedTelegramConversationCapture).toHaveBeenCalledWith(
+      expect.objectContaining({
+        downloadDriver: null,
+      }),
+    );
+  });
+
+  it("awaits Telegram driver-unavailable logging before metadata-only attachment import", async () => {
+    const calls: string[] = [];
+    mocks.createHostedTelegramAttachmentDownloadDriver.mockReturnValueOnce(null);
+    mocks.logHostedTelegramAttachmentDownloadUnavailable.mockImplementationOnce(async () => {
+      calls.push("log");
+    });
+    mocks.normalizeHostedTelegramConversationCapture.mockImplementationOnce(async () => {
+      calls.push("normalize");
+      return { source: "telegram" };
+    });
+
+    const wake = buildHostedExecutionTelegramConversationMessageWake({
+      eventId: "evt_telegram",
+      occurredAt: "2026-04-08T00:01:00.000Z",
+      telegramMessage: {
+        attachments: [
+          {
+            fileId: "file_123",
+            fileName: "report.pdf",
+            kind: "document",
+            mimeType: "application/pdf",
+          },
+        ],
+        messageId: "123",
+        schema: "murph.hosted-telegram-message.v1",
+        text: null,
+        threadId: "chat_123",
+      },
+      userId: "member_123",
+    });
+    const runtime = createRuntime();
+
+    await importHostedConversationMessageWakeIntoLocalInbox({
+      runtime,
+      vaultRoot: "/tmp/assistant-runtime-conversation",
+      wake,
+    });
+
+    expect(mocks.logHostedTelegramAttachmentDownloadUnavailable).toHaveBeenCalledWith(
+      runtime.platform,
+    );
+    expect(calls).toEqual(["log", "normalize"]);
+    expect(mocks.normalizeHostedTelegramConversationCapture).toHaveBeenCalledWith(
+      expect.objectContaining({
+        downloadDriver: null,
       }),
     );
   });

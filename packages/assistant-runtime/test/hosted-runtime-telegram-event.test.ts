@@ -10,6 +10,7 @@ import type {
 import {
   createHostedTelegramAttachmentDownloadDriver,
   createHostedTelegramEffectsAttachmentDownloadDriver,
+  logHostedTelegramAttachmentDownloadUnavailable,
   withHostedTelegramAttachmentDownloadLogging,
 } from "../src/hosted-runtime/events/telegram.ts";
 
@@ -226,10 +227,31 @@ describe("createHostedTelegramAttachmentDownloadDriver", () => {
     await expect(driver.downloadFile("/photos/cat.jpg", undefined)).resolves.toEqual(
       Uint8Array.from([4, 5, 6]),
     );
-    await expect(driver.downloadFile("/photos/fail.jpg", undefined)).rejects.toThrow(
-      "Hosted Telegram attachment download failed with 502 Bad Gateway.",
-    );
+    await expect(driver.downloadFile("/photos/fail.jpg", undefined)).rejects.toMatchObject({
+      message: "Hosted Telegram attachment download failed with 502 Bad Gateway.",
+      status: 502,
+      statusCode: 502,
+    });
     assert.equal(String(fetchMock.mock.calls[0]?.[0]), "https://files.telegram.example/bottelegram-token/photos/cat.jpg");
+  });
+
+  it("preserves HTTP status on Telegram API response failures", async () => {
+    process.env.TELEGRAM_BOT_TOKEN = "telegram-token";
+
+    const fetchMock = vi.fn(async () => new Response("unavailable", {
+      status: 503,
+      statusText: "Service Unavailable",
+    }));
+    const driver = createHostedTelegramAttachmentDownloadDriver({
+      fetchImplementation: fetchMock as typeof fetch,
+    });
+    assert.ok(driver);
+
+    await expect(driver.getFile("file_123", undefined)).rejects.toMatchObject({
+      message: "Hosted Telegram API request failed with 503 Service Unavailable.",
+      status: 503,
+      statusCode: 503,
+    });
   });
 });
 
@@ -299,14 +321,19 @@ describe("withHostedTelegramAttachmentDownloadLogging", () => {
     };
   }
 
-  it("logs a durable warn when no download driver is available", async () => {
+  it("does not log as a wrapper-construction side effect when no driver is available", async () => {
     const logPort = createLogPort();
 
     expect(withHostedTelegramAttachmentDownloadLogging(null, logPort.platform)).toBeNull();
+    expect(logPort.entries()).toEqual([]);
+  });
 
-    await vi.waitFor(() => {
-      expect(logPort.entries()).toHaveLength(1);
-    });
+  it("logs a durable warn when an attachment needs a missing driver", async () => {
+    const logPort = createLogPort();
+
+    await logHostedTelegramAttachmentDownloadUnavailable(logPort.platform);
+
+    expect(logPort.entries()).toHaveLength(1);
     expect(logPort.entries()[0]).toMatchObject({
       component: "mailbox",
       errorCode: "driver_unavailable",
@@ -372,6 +399,32 @@ describe("withHostedTelegramAttachmentDownloadLogging", () => {
         redactedJson: {
           failureCode: "download_fetch_failed",
           failureStatus: 400,
+          operation: "getFile",
+          result: "failed",
+        },
+      }),
+    ]);
+  });
+
+  it("classifies DOMException aborts as download_aborted", async () => {
+    const logPort = createLogPort();
+    const failure = new DOMException("Aborted", "AbortError");
+    const driver = withHostedTelegramAttachmentDownloadLogging({
+      downloadFile: async () => Uint8Array.from([]),
+      getFile: async () => {
+        throw failure;
+      },
+    }, logPort.platform);
+    assert.ok(driver);
+
+    await expect(driver.getFile("file_123")).rejects.toBe(failure);
+
+    expect(logPort.entries()).toEqual([
+      expect.objectContaining({
+        errorCode: "download_aborted",
+        level: "warn",
+        redactedJson: {
+          failureCode: "download_aborted",
           operation: "getFile",
           result: "failed",
         },

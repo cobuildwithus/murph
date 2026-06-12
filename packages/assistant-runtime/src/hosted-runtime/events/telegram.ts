@@ -24,13 +24,6 @@ export function withHostedTelegramAttachmentDownloadLogging(
   platform: HostedTelegramAttachmentDownloadPlatform | null,
 ): TelegramAttachmentDownloadDriver | null {
   if (!driver) {
-    void writeHostedTelegramAttachmentDownloadLog({
-      attempt: {
-        failureCode: "driver_unavailable",
-        result: "not_downloaded",
-      },
-      platform,
-    });
     return null;
   }
 
@@ -46,6 +39,18 @@ export function withHostedTelegramAttachmentDownloadLogging(
       run: () => driver.getFile(fileId, signal),
     }),
   };
+}
+
+export async function logHostedTelegramAttachmentDownloadUnavailable(
+  platform: HostedTelegramAttachmentDownloadPlatform | null,
+): Promise<void> {
+  await writeHostedTelegramAttachmentDownloadLog({
+    attempt: {
+      failureCode: "driver_unavailable",
+      result: "not_downloaded",
+    },
+    platform,
+  });
 }
 
 interface HostedTelegramAttachmentDownloadAttemptLog {
@@ -113,7 +118,13 @@ function classifyHostedTelegramAttachmentDownloadError(
 ): Pick<HostedTelegramAttachmentDownloadAttemptLog, "failureCode" | "failureStatus"> {
   const record = error && typeof error === "object" ? error as Record<string, unknown> : null;
   const status = typeof record?.status === "number" ? record.status : null;
-  const aborted = error instanceof Error && error.name === "AbortError";
+  const aborted = (
+    error instanceof DOMException
+    && error.name === "AbortError"
+  ) || (
+    error instanceof Error
+    && error.name === "AbortError"
+  );
 
   return {
     failureCode: aborted ? "download_aborted" : "download_fetch_failed",
@@ -154,8 +165,9 @@ export function createHostedTelegramAttachmentDownloadDriver(
       });
 
       if (!response.ok) {
-        throw new Error(
+        throw createHostedTelegramStatusError(
           `Hosted Telegram attachment download failed with ${response.status} ${response.statusText}.`,
+          response.status,
         );
       }
 
@@ -236,8 +248,9 @@ async function readHostedTelegramApiResult<T>(input: {
   });
 
   if (!response.ok) {
-    throw new Error(
+    throw createHostedTelegramStatusError(
       `Hosted Telegram API request failed with ${response.status} ${response.statusText}.`,
+      response.status,
     );
   }
 
@@ -258,6 +271,16 @@ async function readHostedTelegramApiResult<T>(input: {
   }
 
   return payload.result;
+}
+
+function createHostedTelegramStatusError(message: string, status: number): Error & {
+  status: number;
+  statusCode: number;
+} {
+  return Object.assign(new Error(message), {
+    status,
+    statusCode: status,
+  });
 }
 
 function stripLeadingSlash(value: string): string {
