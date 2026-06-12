@@ -21,6 +21,9 @@ import {
 import {
   HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
 } from "../../workspace-snapshot-store.ts";
+import {
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+} from "../../deploy-smoke-live-model.ts";
 import type {
   DeclarativeRoute,
 } from "../routes.ts";
@@ -56,7 +59,15 @@ export async function handleDeployContainerSmokeRoute(
   context: WorkerRouteContext,
 ): Promise<Response> {
   const directR2PresignedPut = context.url.searchParams.get("directR2PresignedPut") === "1";
-  const liveModelTurnModel = readDeployContainerSmokeLiveModelTurnModel(context.url);
+  let liveModelTurnModel: string | null;
+  try {
+    liveModelTurnModel = readDeployContainerSmokeLiveModelTurnModel(context.url);
+  } catch {
+    return json({
+      error: "Unsupported deploy container smoke live model turn.",
+      ok: false,
+    }, 400);
+  }
   const container = context.env.RUNNER_CONTAINER_SMOKE
     .getByName(resolveDeployContainerSmokeObjectName(context.env));
   const directR2Smoke = directR2PresignedPut
@@ -210,7 +221,13 @@ export async function deleteDeployContainerDirectR2PresignedPutSmokeObject(
 export function readDeployContainerSmokeLiveModelTurnModel(url: URL): string | null {
   const raw = url.searchParams.get("liveModelTurn");
   const normalized = typeof raw === "string" ? raw.trim() : "";
-  return normalized.length > 0 ? normalized : null;
+  if (!normalized) {
+    return null;
+  }
+  if (normalized !== DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL) {
+    throw new RangeError("Unsupported deploy container smoke live model turn model.");
+  }
+  return DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL;
 }
 
 export function resolveDeployContainerSmokeObjectName(

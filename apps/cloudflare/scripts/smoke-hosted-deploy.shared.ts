@@ -32,6 +32,9 @@ import {
 import {
   HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
 } from "../src/hosted-runner-smoke-contract.ts";
+import {
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+} from "../src/deploy-smoke-live-model.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -41,10 +44,6 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
 const DEFAULT_RUNNER_CONTAINER_SMOKE_MAX_ATTEMPTS = 120;
 const DEFAULT_RUNNER_CONTAINER_SMOKE_RETRY_DELAY_MS = 10_000;
-// One cheap real model turn per production deploy; per-PR CI and
-// hosted-local E2E never enable the flag.
-const DEPLOY_SMOKE_LIVE_MODEL_TURN_MODEL = "gpt-4.1-nano";
-
 interface SmokeControlRequest {
   authorizationHeader: string;
   boundUserId: string;
@@ -210,14 +209,14 @@ export async function runSmokeHostedDeploy(input: {
       url: buildRunnerContainerSmokeUrl({
         directR2PresignedPut: shouldSmokeDirectR2PresignedPut,
         liveModelTurnModel: shouldSmokeLiveModelTurn
-          ? DEPLOY_SMOKE_LIVE_MODEL_TURN_MODEL
+          ? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL
           : null,
         smokeBaseUrl,
       }),
       versionOverrideHeaders,
       expectDirectR2PresignedPut: shouldSmokeDirectR2PresignedPut,
       expectLiveModelTurnModel: shouldSmokeLiveModelTurn
-        ? DEPLOY_SMOKE_LIVE_MODEL_TURN_MODEL
+        ? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL
         : null,
     });
   }

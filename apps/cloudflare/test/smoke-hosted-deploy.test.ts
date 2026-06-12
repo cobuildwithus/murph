@@ -441,14 +441,14 @@ describe("runSmokeHostedDeploy", () => {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
 
-      if (String(url).endsWith("/internal/deploy/container-smoke?liveModelTurn=gpt-4.1-nano")) {
+      if (String(url).endsWith("/internal/deploy/container-smoke?liveModelTurn=gpt-5.4-mini")) {
         return new Response(JSON.stringify({
           ok: true,
           runnerContainer: {
             codexShell: createCodexShellSmokeResult(),
             liveModelTurn: {
               durationMs: 1_234,
-              model: "gpt-4.1-nano",
+              model: "gpt-5.4-mini",
               stdoutBytes: 2_048,
             },
             ok: true,
@@ -478,7 +478,7 @@ describe("runSmokeHostedDeploy", () => {
     });
 
     expect(fetchCalls).toContain(
-      "https://worker.example.test/internal/deploy/container-smoke?liveModelTurn=gpt-4.1-nano",
+      "https://worker.example.test/internal/deploy/container-smoke?liveModelTurn=gpt-5.4-mini",
     );
   });
 
@@ -549,7 +549,7 @@ describe("runSmokeHostedDeploy", () => {
     await expect(runSmokeHostedDeploy({
       fetchImpl: buildFetchImpl({
         durationMs: 1_234,
-        model: "gpt-4.1-nano",
+        model: "gpt-5.4-mini",
         stdoutBytes: 0,
       }),
       log() {},

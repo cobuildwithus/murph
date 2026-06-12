@@ -2765,22 +2765,12 @@ async function authorizeHostedProviderEgressDeploySmokeLiveModelTurn(input: {
 
 function readHostedRunnerDeploySmokeContainerNamespace(
   env: RunnerOutboundEnvironmentSource,
-): {
-  get?(id: unknown): {
-    readDeploySmokeLiveModelTurnFence?: () => Promise<unknown>;
-  };
-  idFromString?(id: string): unknown;
-} | null {
-  const namespace = (env as { RUNNER_CONTAINER_SMOKE?: unknown }).RUNNER_CONTAINER_SMOKE;
+): RunnerOutboundEnvironmentSource["RUNNER_CONTAINER_SMOKE"] | null {
+  const namespace = env.RUNNER_CONTAINER_SMOKE;
   if (!namespace || typeof namespace !== "object") {
     return null;
   }
-  return namespace as {
-    get?(id: unknown): {
-      readDeploySmokeLiveModelTurnFence?: () => Promise<unknown>;
-    };
-    idFromString?(id: string): unknown;
-  };
+  return namespace;
 }
 
 function isHostedDeploySmokeLiveModelTurnFenceResult(value: unknown): value is {

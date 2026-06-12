@@ -75,6 +75,13 @@ export interface WorkerRunnerContainerStubLike {
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
 }
 
+export interface WorkerDeploySmokeRunnerContainerStubLike
+  extends WorkerRunnerContainerStubLike {
+  readDeploySmokeLiveModelTurnFence?(): Promise<{
+    active: boolean;
+  }>;
+}
+
 export interface WorkerRunnerContainerNamespaceLike<
   TStub extends WorkerRunnerContainerStubLike = WorkerRunnerContainerStubLike,
 > {
@@ -185,6 +192,9 @@ export interface WorkerEnvironmentContract<
   MAPBOX_ACCESS_TOKEN?: string;
   MURPH_DATA_API_KEY?: string;
   RUNNER_CONTAINER?: WorkerRunnerContainerNamespaceLike;
+  RUNNER_CONTAINER_SMOKE?: WorkerRunnerContainerNamespaceLike<
+    WorkerDeploySmokeRunnerContainerStubLike
+  >;
   TELEGRAM_API_BASE_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_FILE_BASE_URL?: string;

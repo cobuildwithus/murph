@@ -1240,7 +1240,7 @@ describe("RunnerContainer", () => {
         return new Response(JSON.stringify({
           liveModelTurn: {
             durationMs: 1_234,
-            model: "gpt-4.1-nano",
+            model: "gpt-5.4-mini",
             stdoutBytes: 2_048,
           },
           ok: true,
@@ -1263,13 +1263,13 @@ describe("RunnerContainer", () => {
 
     const result = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-4.1-nano",
+        model: "gpt-5.4-mini",
       },
     });
 
     expect(result.liveModelTurn).toEqual({
       durationMs: 1_234,
-      model: "gpt-4.1-nano",
+      model: "gpt-5.4-mini",
       stdoutBytes: 2_048,
     });
     expect(result.codexShell).toEqual(createCodexShellSmokeResult());
@@ -1282,7 +1282,7 @@ describe("RunnerContainer", () => {
       String(url).endsWith("/internal/deploy-live-model-turn-smoke")
     );
     expect(JSON.parse(smokeCall?.[1]?.body as string)).toEqual({
-      model: "gpt-4.1-nano",
+      model: "gpt-5.4-mini",
     });
   });
 
@@ -1352,7 +1352,7 @@ describe("RunnerContainer", () => {
 
     const error = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-4.1-nano",
+        model: "gpt-5.4-mini",
       },
     }).catch((caught: unknown) => caught);
 
@@ -1372,7 +1372,7 @@ describe("RunnerContainer", () => {
 
     const error = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-4.1-nano",
+        model: "gpt-5.4-mini",
       },
     }).catch((caught: unknown) => caught);
 

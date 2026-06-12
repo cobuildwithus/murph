@@ -549,14 +549,14 @@ describe("cloudflare worker routes", () => {
         model: string;
       };
     }) => {
-      if (input.liveModelTurn?.model !== "gpt-4.1-nano") {
+      if (input.liveModelTurn?.model !== "gpt-5.4-mini") {
         throw new Error("Expected the live model turn smoke input.");
       }
 
       return {
         liveModelTurn: {
           durationMs: 1_234,
-          model: "gpt-4.1-nano",
+          model: "gpt-5.4-mini",
           stdoutBytes: 2_048,
         },
         ok: true,
@@ -579,7 +579,7 @@ describe("cloudflare worker routes", () => {
       },
     });
     const url = new URL(
-      "https://runner.example.test/internal/deploy/container-smoke?liveModelTurn=gpt-4.1-nano",
+      "https://runner.example.test/internal/deploy/container-smoke?liveModelTurn=gpt-5.4-mini",
     );
     const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
     const request = new Request(url, {
@@ -598,7 +598,7 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
     expect(smokeHealth).toHaveBeenCalledWith({
       liveModelTurn: {
-        model: "gpt-4.1-nano",
+        model: "gpt-5.4-mini",
       },
     });
     await expect(response.json()).resolves.toMatchObject({
@@ -606,11 +606,53 @@ describe("cloudflare worker routes", () => {
       runnerContainer: {
         liveModelTurn: {
           durationMs: 1_234,
-          model: "gpt-4.1-nano",
+          model: "gpt-5.4-mini",
           stdoutBytes: 2_048,
         },
       },
       service: "cloudflare-hosted-runner",
+    });
+  });
+
+  it("rejects unsupported live model turn values before managed container smoke", async () => {
+    const smokeHealth = vi.fn(async () => {
+      throw new Error("Runner container should not receive unsupported live model turn smoke.");
+    });
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      RUNNER_CONTAINER_SMOKE: {
+        getByName() {
+          return {
+            async destroyInstance() {},
+            async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
+              throw new Error("Runner container should not be invoked by smoke route tests.");
+            },
+            smokeHealth,
+          };
+        },
+      },
+    });
+    const url = new URL(
+      "https://runner.example.test/internal/deploy/container-smoke?liveModelTurn=gpt-5.5",
+    );
+    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
+    const request = new Request(url, {
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: callbackSigning,
+        method: "POST",
+        path: url.pathname,
+        payload: "",
+        search: url.search,
+      }),
+      method: "POST",
+    });
+
+    const response = await worker.fetch(request, env);
+
+    expect(response.status).toBe(400);
+    expect(smokeHealth).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: "Unsupported deploy container smoke live model turn.",
+      ok: false,
     });
   });
 
