@@ -18,35 +18,7 @@ index c18290af933acfd770e040d8ded4108bfbf97855..40be9390512bd911d0f67221d9c3e16f
  import * as Mcp from './Mcp.js';
  import * as Openapi from './Openapi.js';
  import * as Parser from './Parser.js';
-@@ -165,6 +165,9 @@ async function serveImpl(name, commands, argv, options = {}) {
-         return;
-     }
-     const { fullOutput, format: formatFlag, formatExplicit, filterOutput, tokenLimit, tokenOffset, tokenCount, llms, llmsFull, mcp: mcpFlag, help, version, schema, configPath, configDisabled, rest: filtered, } = builtinFlags;
-+    // Pre-load yaml for the sync formatting paths below (yaml is loaded lazily; see internal/yaml.ts).
-+    if (formatFlag === 'yaml')
-+        await Yaml.load();
-     // --mcp: start as MCP stdio server
-     if (mcpFlag) {
-         await Mcp.serve(name, options.version ?? '0.0.0', commands, {
-@@ -702,6 +705,8 @@ async function serveImpl(name, commands, argv, options = {}) {
-     // Resolve effective format: explicit --format/--json → command default → CLI default → toon
-     const resolvedFormat = 'command' in resolved && resolved.command.format;
-     const format = formatExplicit ? formatFlag : resolvedFormat || options.format || 'toon';
-+    if (format === 'yaml')
-+        await Yaml.load();
-     // Fall back to root fetch/command when no subcommand matches,
-     // but only if the token doesn't look like a typo of a known command.
-     const rootFallbackBlocked = 'error' in resolved &&
-@@ -1144,6 +1149,8 @@ async function fetchImpl(name, commands, req, options = {}) {
-         segments[1] === 'skills' &&
-         segments.length >= 3 &&
-         req.method === 'GET') {
-+        // Pre-load yaml for the sync call paths below (`Skill.split`, frontmatter parsing).
-+        await Yaml.load();
-         const groups = new Map();
-         const cmds = collectSkillCommands(commands, [], groups, options.rootCommand);
-         // GET /.well-known/skills/index.json
-@@ -1151,7 +1158,7 @@ async function fetchImpl(name, commands, req, options = {}) {
+@@ -1151,7 +1151,7 @@ async function fetchImpl(name, commands, req, options = {}) {
              const files = Skill.split(name, cmds, 1, groups);
              const skills = files.map((f) => {
                  const fmMatch = f.content.match(/^---\n([\s\S]*?)\n---/);
@@ -113,32 +85,11 @@ index 8682958e3bc9bab36e8fb53cbb39697d3e970310..2715c313e27ea85e31637a7d13dd16df
      const fmBlock = `---\n${fm}\n---`;
      const body = cmds.map((cmd) => renderCommandBody(cli, cmd)).join('\n\n---\n\n');
      return `${fmBlock}\n\n${body}`;
-diff --git a/dist/Skillgen.js b/dist/Skillgen.js
-index e1d591367b037170bb7fa193c9167c6f1a6670ad..6368f38c78716d16cf688d4f9e053fe463c474c1 100644
---- a/dist/Skillgen.js
-+++ b/dist/Skillgen.js
-@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
- import path from 'node:path';
- import * as Cli from './Cli.js';
- import { importCli } from './internal/utils.js';
-+import * as Yaml from './internal/yaml.js';
- import * as Skill from './Skill.js';
- /** Imports a CLI from `input`, generates Markdown skill files, and writes them to `output`. */
- export async function generate(input, output, depth = 1) {
-@@ -13,6 +14,8 @@ export async function generate(input, output, depth = 1) {
-     if (cli.description)
-         groups.set(cli.name, cli.description);
-     const entries = collectEntries(commands, [], groups);
-+    // Pre-load yaml for `Skill.split`'s sync call path.
-+    await Yaml.load();
-     const files = Skill.split(cli.name, entries, depth, groups);
-     if (depth > 0)
-         await fs.rm(output, { recursive: true, force: true });
 diff --git a/dist/SyncSkills.js b/dist/SyncSkills.js
-index da674f5f5c9dc32c44be7657069ed421d35a8561..058fe6002e93b4d21d4d75b1e69796002cc84ae3 100644
+index da674f5f5c9dc32c44be7657069ed421d35a8561..f70761e32275420fe29dad0ee13ee8f6608de0f5 100644
 --- a/dist/SyncSkills.js
 +++ b/dist/SyncSkills.js
-@@ -2,14 +2,16 @@ import fsSync from 'node:fs';
+@@ -2,7 +2,7 @@ import fsSync from 'node:fs';
  import fs from 'node:fs/promises';
  import os from 'node:os';
  import path from 'node:path';
@@ -147,25 +98,7 @@ index da674f5f5c9dc32c44be7657069ed421d35a8561..058fe6002e93b4d21d4d75b1e6979600
  import * as Agents from './internal/agents.js';
 +import * as Yaml from './internal/yaml.js';
  import * as Skill from './Skill.js';
- /** Generates skill files from a command map and installs them natively. */
- export async function sync(name, commands, options = {}) {
-     const { depth = 1, description, global = true } = options;
-     const cwd = options.cwd ?? (global ? resolvePackageRoot() : process.cwd());
-+    // Pre-load yaml for the sync call paths below (`Skill.split`, `parseFrontmatter`).
-+    await Yaml.load();
-     const groups = new Map();
-     if (description)
-         groups.set(name, description);
-@@ -70,6 +72,8 @@ export async function sync(name, commands, options = {}) {
- export async function list(name, commands, options = {}) {
-     const { depth = 1, description } = options;
-     const cwd = options.cwd ?? process.cwd();
-+    // Pre-load yaml for the sync call paths below (`Skill.split`, `parseFrontmatter`).
-+    await Yaml.load();
-     const groups = new Map();
-     if (description)
-         groups.set(name, description);
-@@ -173,7 +177,7 @@ function parseFrontmatter(content) {
+@@ -173,7 +173,7 @@ function parseFrontmatter(content) {
      const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
      if (!match)
          return {};
@@ -176,41 +109,24 @@ index da674f5f5c9dc32c44be7657069ed421d35a8561..058fe6002e93b4d21d4d75b1e6979600
      return meta;
 diff --git a/dist/internal/yaml.js b/dist/internal/yaml.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..a8740fecf95374d4c9ed6c7c680259d876c50d32
+index 0000000000000000000000000000000000000000..aeb14712f61d3121d9a6f2d473c145767b42e1cb
 --- /dev/null
 +++ b/dist/internal/yaml.js
-@@ -0,0 +1,19 @@
+@@ -0,0 +1,8 @@
 +import { createRequire } from 'node:module';
-+/** @internal Cached `yaml` module, shared by `load()` and `loadSync()`. */
++/** @internal Cached `yaml` module, loaded only by YAML-specific paths. */
 +let cached;
-+/** Loads the `yaml` module on demand, so runs that never touch YAML don't pay its startup cost. */
-+export async function load() {
-+    cached ??= await import('yaml');
-+    return cached;
-+}
-+/**
-+ * Synchronous variant of `load()` for sync call paths (e.g. `Formatter.format`).
-+ *
-+ * Falls back to `require` when `load()` hasn't run yet. Async paths should call `load()`
-+ * first so environments without synchronous module resolution (e.g. compiled binaries,
-+ * bundled workers) never hit the fallback.
-+ */
++/** Synchronous loader for sync call paths such as Formatter.format and Skill.split. */
 +export function loadSync() {
 +    cached ??= createRequire(import.meta.url)('yaml');
 +    return cached;
 +}
 diff --git a/src/Cli.ts b/src/Cli.ts
-index 4f5c851900cf26665959fd107f42c2d00fef40e1..040234b0af5dc1668632e3af3fb18d035b098bed 100644
+index 4f5c851900cf26665959fd107f42c2d00fef40e1..f5cddf13a971ac890c88544a1c1c44b3c024518c 100644
 --- a/src/Cli.ts
 +++ b/src/Cli.ts
-@@ -2,7 +2,6 @@ import * as fs from 'node:fs/promises'
- import * as os from 'node:os'
- import * as path from 'node:path'
- import { estimateTokenCount, sliceByTokens } from 'tokenx'
+@@ -5,1 +5,0 @@ import { estimateTokenCount, sliceByTokens } from 'tokenx'
 -import { parse as yamlParse } from 'yaml'
- import { z } from 'zod'
-
- import * as Completions from './Completions.js'
 @@ -24,6 +23,7 @@ import * as Command from './internal/command.js'
  import { isRecord, suggest, toKebab } from './internal/helpers.js'
  import { detectRunner } from './internal/pm.js'
@@ -219,34 +135,7 @@ index 4f5c851900cf26665959fd107f42c2d00fef40e1..040234b0af5dc1668632e3af3fb18d03
  import * as Mcp from './Mcp.js'
  import type { Context as MiddlewareContext, Handler as MiddlewareHandler } from './middleware.js'
  import * as Openapi from './Openapi.js'
-@@ -507,6 +507,9 @@ async function serveImpl(
-     rest: filtered,
-   } = builtinFlags
-
-+  // Pre-load yaml for the sync formatting paths below (yaml is loaded lazily; see internal/yaml.ts).
-+  if (formatFlag === 'yaml') await Yaml.load()
-+
-   // --mcp: start as MCP stdio server
-   if (mcpFlag) {
-     await Mcp.serve(name, options.version ?? '0.0.0', commands, {
-@@ -1086,6 +1089,7 @@ async function serveImpl(
-   // Resolve effective format: explicit --format/--json → command default → CLI default → toon
-   const resolvedFormat = 'command' in resolved && (resolved as any).command.format
-   const format = formatExplicit ? formatFlag : resolvedFormat || options.format || 'toon'
-+  if (format === 'yaml') await Yaml.load()
-
-   // Fall back to root fetch/command when no subcommand matches,
-   // but only if the token doesn't look like a typo of a known command.
-@@ -1623,6 +1627,8 @@ async function fetchImpl(
-     segments.length >= 3 &&
-     req.method === 'GET'
-   ) {
-+    // Pre-load yaml for the sync call paths below (`Skill.split`, frontmatter parsing).
-+    await Yaml.load()
-     const groups = new Map<string, string>()
-     const cmds = collectSkillCommands(commands, [], groups, options.rootCommand)
-
-@@ -1631,7 +1637,7 @@ async function fetchImpl(
+@@ -1631,7 +1631,7 @@ async function fetchImpl(
        const files = Skill.split(name, cmds, 1, groups)
        const skills = files.map((f) => {
          const fmMatch = f.content.match(/^---\n([\s\S]*?)\n---/)
@@ -325,29 +214,8 @@ index db12a9fcb8e3f7bae14a7a7a0e23b5e8c409c361..d5e6416d112856887f815c3511359e04
    const fmBlock = `---\n${fm}\n---`
 
    const body = cmds.map((cmd) => renderCommandBody(cli, cmd)).join('\n\n---\n\n')
-diff --git a/src/Skillgen.ts b/src/Skillgen.ts
-index 844e52cd5392f186de600b79c41aebd9c12b9a0f..42673d17ad0571887e810c9b16e9e851348528f5 100644
---- a/src/Skillgen.ts
-+++ b/src/Skillgen.ts
-@@ -3,6 +3,7 @@ import path from 'node:path'
-
- import * as Cli from './Cli.js'
- import { importCli } from './internal/utils.js'
-+import * as Yaml from './internal/yaml.js'
- import * as Skill from './Skill.js'
-
- /** Imports a CLI from `input`, generates Markdown skill files, and writes them to `output`. */
-@@ -14,6 +15,8 @@ export async function generate(input: string, output: string, depth = 1): Promis
-   const groups = new Map<string, string>()
-   if (cli.description) groups.set(cli.name, cli.description)
-   const entries = collectEntries(commands, [], groups)
-+  // Pre-load yaml for `Skill.split`'s sync call path.
-+  await Yaml.load()
-   const files = Skill.split(cli.name, entries, depth, groups)
-
-   if (depth > 0) await fs.rm(output, { recursive: true, force: true })
 diff --git a/src/SyncSkills.ts b/src/SyncSkills.ts
-index ea5c8553d4ab8a872991f918e7ac4e6b6bce149d..f78ce696ba2237ac4c581f8f21f639608a33aef8 100644
+index ea5c8553d4ab8a872991f918e7ac4e6b6bce149d..15f59d99184291ce4fd9525cb85aa629bc1598f5 100644
 --- a/src/SyncSkills.ts
 +++ b/src/SyncSkills.ts
 @@ -2,10 +2,10 @@ import fsSync from 'node:fs'
@@ -362,27 +230,7 @@ index ea5c8553d4ab8a872991f918e7ac4e6b6bce149d..f78ce696ba2237ac4c581f8f21f63960
  import * as Skill from './Skill.js'
 
  /** Generates skill files from a command map and installs them natively. */
-@@ -17,6 +17,9 @@ export async function sync(
-   const { depth = 1, description, global = true } = options
-   const cwd = options.cwd ?? (global ? resolvePackageRoot() : process.cwd())
-
-+  // Pre-load yaml for the sync call paths below (`Skill.split`, `parseFrontmatter`).
-+  await Yaml.load()
-+
-   const groups = new Map<string, string>()
-   if (description) groups.set(name, description)
-   const entries = collectEntries(commands, [], groups, options.rootCommand)
-@@ -137,6 +140,9 @@ export async function list(
-   const { depth = 1, description } = options
-   const cwd = options.cwd ?? process.cwd()
-
-+  // Pre-load yaml for the sync call paths below (`Skill.split`, `parseFrontmatter`).
-+  await Yaml.load()
-+
-   const groups = new Map<string, string>()
-   if (description) groups.set(name, description)
-   const entries = collectEntries(commands, [], groups, options.rootCommand)
-@@ -283,7 +289,7 @@ function parseFrontmatter(content: string): { description?: string | undefined;
+@@ -283,7 +283,7 @@ function parseFrontmatter(content: string): { description?: string | undefined;
    const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
    if (!match) return {}
 
@@ -393,29 +241,17 @@ index ea5c8553d4ab8a872991f918e7ac4e6b6bce149d..f78ce696ba2237ac4c581f8f21f63960
  }
 diff --git a/src/internal/yaml.ts b/src/internal/yaml.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..b30d4a6adef2fd27bc4657f4e0a5784067e8f5cd
+index 0000000000000000000000000000000000000000..623f72d834f9ad36d5b50d1c13c46a8ecf22184c
 --- /dev/null
 +++ b/src/internal/yaml.ts
-@@ -0,0 +1,23 @@
+@@ -0,0 +1,11 @@
 +import { createRequire } from 'node:module'
 +import type * as yaml from 'yaml'
 +
-+/** @internal Cached `yaml` module, shared by `load()` and `loadSync()`. */
++/** @internal Cached `yaml` module, loaded only by YAML-specific paths. */
 +let cached: typeof yaml | undefined
 +
-+/** Loads the `yaml` module on demand, so runs that never touch YAML don't pay its startup cost. */
-+export async function load(): Promise<typeof yaml> {
-+  cached ??= await import('yaml')
-+  return cached
-+}
-+
-+/**
-+ * Synchronous variant of `load()` for sync call paths (e.g. `Formatter.format`).
-+ *
-+ * Falls back to `require` when `load()` hasn't run yet. Async paths should call `load()`
-+ * first so environments without synchronous module resolution (e.g. compiled binaries,
-+ * bundled workers) never hit the fallback.
-+ */
++/** Synchronous loader for sync call paths such as Formatter.format and Skill.split. */
 +export function loadSync(): typeof yaml {
 +  cached ??= createRequire(import.meta.url)('yaml') as typeof yaml
 +  return cached
