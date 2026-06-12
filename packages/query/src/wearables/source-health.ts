@@ -354,6 +354,8 @@ function resolvePublicSourceProvider(
     dataOrigin: candidate.dataOrigin ?? null,
     externalRef: "externalRef" in candidate ? candidate.externalRef : null,
     provider: candidate.provider,
+  }, {
+    useSourceInstanceFallback: false,
   });
 }
 
