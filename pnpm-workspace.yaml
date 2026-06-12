@@ -25,7 +25,7 @@ overrides:
   'repomix@1.14.0>fast-xml-builder': 1.2.0
 minimumReleaseAgeExclude:
   - incur@0.4.4
-  - '@cobuild/review-gpt@0.5.90'
+  - '@cobuild/review-gpt@0.5.91'
   - fast-uri@3.1.2
   - fast-xml-builder@1.2.0
 nodeVersion: 24.14.1
