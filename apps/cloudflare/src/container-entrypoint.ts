@@ -31,7 +31,6 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   consumeHostedCliRuntimeBridgeOffInvocationViolation,
-  drainHostedRuntimeLogWritesBestEffort,
   stopHostedCliRuntimeBridge,
 } from "@murphai/assistant-runtime/hosted-invocation";
 import {
@@ -872,13 +871,7 @@ function installHostedContainerProcessFatalHandlers(): void {
       setTimeout(() => {
         process.exit(1);
       }, HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS + 1_000).unref();
-      // Flush queued info-level runtime log writes alongside the fatal
-      // report so the crash tail stays durable; the backstop above bounds
-      // both. Neither promise ever rejects.
-      void Promise.allSettled([
-        reportHostedContainerFatalBestEffort({ error, stage }),
-        drainHostedRuntimeLogWritesBestEffort(),
-      ]).then(() => {
+      void reportHostedContainerFatalBestEffort({ error, stage }).finally(() => {
         process.exitCode = 1;
         process.exit(1);
       });

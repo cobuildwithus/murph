@@ -30,14 +30,4 @@ ARG HOSTED_RUNNER_CONTAINER_CLASS=RunnerContainer
 LABEL murph.hosted.container-class="${HOSTED_RUNNER_CONTAINER_CLASS}"
 
 ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
-
-# The bundled entrypoint evaluates ~27 chunk files at boot instead of the
-# unbundled graph's ~960 module files — the difference between ~2s and
-# sub-second nodeStartupMs on lazily pulled production image layers. Two
-# assistant-engine resolvers derive asset paths from their own module location
-# and would land inside dist-bundled/ when bundled; pin them to the installed
-# package copies instead (both env overrides are first-class in the engine).
-ENV MURPH_ASSISTANT_SKILLS_ROOT="/app/node_modules/@murphai/assistant-engine/skills"
-ENV MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH="/app/node_modules/@murphai/assistant-engine/dist/assistant/cli-surface-contract.generated.json"
-
-CMD ["node", "dist-bundled/container-entrypoint.js"]
+CMD ["node", "dist/container-entrypoint.js"]

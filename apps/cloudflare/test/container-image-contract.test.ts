@@ -468,8 +468,7 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("codex app-server --help >/dev/null");
     expect(baseDockerfile).toContain("codex doctor --help >/dev/null");
     expect(baseDockerfile).toContain("tini");
-    // The base image must declare no runtime CMD at all; the final image owns it.
-    expect(baseDockerfile).not.toMatch(/^CMD\b/m);
+    expect(baseDockerfile).not.toContain('CMD ["node", "dist/container-entrypoint.js"]');
     expect(finalDockerfile).toContain(`ARG HOSTED_RUNNER_BASE_IMAGE=${hostedLocalRunnerBaseImageTag}`);
     expect(finalDockerfile).toContain("FROM ${HOSTED_RUNNER_BASE_IMAGE}");
     const finalRunnerBundleCopyIndex = finalDockerfile.indexOf(
@@ -513,18 +512,7 @@ describe("hosted runner container image contract", () => {
     expect(readLastDockerUser(baseDockerfile)).toBe("runner");
     expect(readDockerUsers(finalDockerfile)).toEqual(["root", "runner"]);
     expect(finalDockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "-s", "--"]');
-    // The CMD runs the esbuild-bundled entrypoint: boot evaluates ~27 chunk
-    // files instead of the unbundled graph's ~960 module files, which was the
-    // dominant cold-start nodeStartupMs cost on lazily pulled image layers.
-    // The two engine resolvers that derive asset paths from their own module
-    // location are pinned to the installed package copies via env.
-    expect(finalDockerfile).toContain('CMD ["node", "dist-bundled/container-entrypoint.js"]');
-    expect(finalDockerfile).toContain(
-      'ENV MURPH_ASSISTANT_SKILLS_ROOT="/app/node_modules/@murphai/assistant-engine/skills"',
-    );
-    expect(finalDockerfile).toContain(
-      'ENV MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH="/app/node_modules/@murphai/assistant-engine/dist/assistant/cli-surface-contract.generated.json"',
-    );
+    expect(finalDockerfile).toContain('CMD ["node", "dist/container-entrypoint.js"]');
     expect(finalDockerfile).not.toContain("apt-get install");
     expect(finalDockerfile).not.toContain("@openai/codex");
     expect(finalDockerfile).not.toContain("whisper.cpp");
