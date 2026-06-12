@@ -222,6 +222,15 @@ describe("hosted AI usage allowance pricing", () => {
       costUsdMicros: 0n,
       counted: false,
     });
+
+    // A token-bearing row that merely claims the whisper id is not a
+    // transcription record; it fails closed through token-model pricing.
+    expect(() => priceHostedAiUsageForAllowance({
+      ...transcription,
+      inputTokens: 120,
+      outputTokens: 45,
+      totalTokens: 165,
+    })).toThrow("pricing is missing");
   });
 });
 

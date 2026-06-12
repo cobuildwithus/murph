@@ -4821,20 +4821,27 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       { containerId: "opaque-container-id", waitUntil },
     );
     expect(malformedSegments.status).toBe(200);
+    // The invalid transcription_info duration falls back to the furthest
+    // valid segment end (1.5s) — a dropped segment's offset still bounds the
+    // real audio duration.
     await expect(malformedSegments.json()).resolves.toEqual({
-      durationMs: null,
+      durationMs: 1_500,
       language: null,
       segments: [{ endMs: null, startMs: null, text: "kept segment" }],
       text: "kept segment",
     });
 
-    // Duration-less Workers AI output still records usage with the byte count.
+    // Duration-less output records byte count only; once segments exist, the
+    // furthest valid segment end becomes the billed-duration fallback.
     await Promise.all(waitUntilPromises);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const recordedUsages = fetchMock.mock.calls.map(([, init]) =>
       (JSON.parse(String(init?.body)) as { usage: Record<string, unknown> }).usage);
+    expect(recordedUsages.map((usage) => usage.rawUsageJson)).toEqual([
+      { audioBytes: 9 },
+      { audioBytes: 9, durationMs: 1_500 },
+    ]);
     for (const usage of recordedUsages) {
-      expect(usage.rawUsageJson).toEqual({ audioBytes: 9 });
       expect(usage.memberId).toBe("member_123");
     }
   });
@@ -4870,6 +4877,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     const outputs: unknown[] = [
       {},
       { text: "   ", transcription_info: { duration: 2.94 } },
+      { segments: [{ end: 3.2, start: 0, text: "hi" }], text: "" },
       "transcript",
       null,
     ];
@@ -4895,11 +4903,13 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     expect(fetchMock).toHaveBeenCalledTimes(outputs.length);
     const recordedUsages = fetchMock.mock.calls.map(([, init]) =>
       (JSON.parse(String(init?.body)) as { usage: Record<string, unknown> }).usage);
-    // The silent clip carried transcription_info, so its row keeps the billed
-    // duration; the rest record byte count only.
+    // The silent clip keeps the billed duration from transcription_info, the
+    // segment-only clip bills from the furthest segment end, and the rest
+    // record byte count only.
     expect(recordedUsages.map((usage) => usage.rawUsageJson)).toEqual([
       { audioBytes: 9 },
       { audioBytes: 9, durationMs: 2_940 },
+      { audioBytes: 9, durationMs: 3_200 },
       { audioBytes: 9 },
       { audioBytes: 9 },
     ]);

@@ -1009,12 +1009,38 @@ function readHostedTranscribeResponsePayload(
 
 // Reads the billed audio duration from any Workers AI transcription output,
 // independent of transcript validation: usage metering needs it even when the
-// transcript comes back empty or malformed.
+// transcript comes back empty or malformed. When transcription_info is absent
+// the furthest segment end still bounds the billed time, mirroring the
+// parsers-side fallback.
 function readHostedTranscribeOutputDurationMs(output: unknown): number | null {
   const durationSeconds = readHostedTranscribeNonNegativeNumber(
     readHostedTranscribeTranscriptionInfo(output)?.duration,
-  );
+  ) ?? readHostedTranscribeMaxSegmentEndSeconds(output);
   return durationSeconds === null ? null : Math.round(durationSeconds * 1_000);
+}
+
+function readHostedTranscribeMaxSegmentEndSeconds(output: unknown): number | null {
+  if (!output || typeof output !== "object" || Array.isArray(output)) {
+    return null;
+  }
+  const segments = (output as Record<string, unknown>).segments;
+  if (!Array.isArray(segments)) {
+    return null;
+  }
+
+  let maxEndSeconds: number | null = null;
+  for (const segment of segments.slice(0, HOSTED_TRANSCRIBE_MAX_SEGMENTS)) {
+    if (!segment || typeof segment !== "object" || Array.isArray(segment)) {
+      continue;
+    }
+    const endSeconds = readHostedTranscribeNonNegativeNumber(
+      (segment as Record<string, unknown>).end,
+    );
+    if (endSeconds !== null && (maxEndSeconds === null || endSeconds > maxEndSeconds)) {
+      maxEndSeconds = endSeconds;
+    }
+  }
+  return maxEndSeconds;
 }
 
 function readHostedTranscribeTranscriptionInfo(

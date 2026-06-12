@@ -1282,11 +1282,15 @@ function priceTokenBucketUsdMicros(
     / TOKENS_PER_PRICING_UNIT;
 }
 
-// Only Worker-recorded Workers AI rows take the audio-priced branch; a token
-// row that merely claims the whisper model id keeps failing closed at the
-// token-model pricing lookup.
+// Only Worker-recorded Workers AI rows take the audio-priced branch. A row
+// carrying token counts is definitively not a transcription record (the
+// builder never sets them), so it falls through to token-model pricing and
+// fails closed there, like any other row that merely claims the whisper id.
 function isHostedAiUsageAllowanceAudioModelRecord(record: AssistantUsageRecord): boolean {
   return record.provider === "workers-ai"
+    && record.inputTokens === null
+    && record.outputTokens === null
+    && record.totalTokens === null
     && (
       isHostedAiUsageAllowanceAudioModelId(record.servedModel)
       || isHostedAiUsageAllowanceAudioModelId(record.requestedModel)
