@@ -121,6 +121,10 @@ interface JunctionWindowFetchOptions {
   dateQueryFormat?: JunctionDateQueryFormat;
 }
 
+// `profile` is deliberately excluded: it is an always-present current-state
+// snapshot, so counting it as completion evidence would mark every backfill
+// useful and defeat empty-history detection entirely. Profile data still
+// imports on every attempt regardless of this predicate.
 const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES = Object.freeze([
   "activity",
   "sleep",

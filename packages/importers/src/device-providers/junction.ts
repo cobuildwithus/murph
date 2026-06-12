@@ -1312,6 +1312,7 @@ function pushJunctionBloodPressureReadings(
 ): void {
   const baseArtifactRole = `junction-timeseries-reading-${resourceSlug}`;
   let readingCount = 0;
+  const seenReadingIdentityHashes = new Set<string>();
 
   for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
     const resourceContext = buildResourceContext({
@@ -1339,7 +1340,6 @@ function pushJunctionBloodPressureReadings(
       continue;
     }
 
-    readingCount += 1;
     // Reading identity includes the paired values so same-second readings
     // from coarse-timestamp providers never collapse into one event, while
     // true duplicate deliveries still merge idempotently via externalRef.
@@ -1352,7 +1352,16 @@ function pushJunctionBloodPressureReadings(
       systolic,
       diastolic,
     ]);
-    const role = `${baseArtifactRole}:${dayKey}:${shortHash([readingIdentityHash, String(index)])}`;
+    // Exact in-payload duplicates are skipped and the raw role is derived
+    // from the same stable identity as the event externalRef (never the
+    // payload index), so replays and reorderings stage identical evidence
+    // instead of minting new artifacts for an event core already dedupes.
+    if (seenReadingIdentityHashes.has(readingIdentityHash)) {
+      continue;
+    }
+    seenReadingIdentityHashes.add(readingIdentityHash);
+    readingCount += 1;
+    const role = `${baseArtifactRole}:${dayKey}:${readingIdentityHash}`;
 
     pushRawArtifact(
       context.rawArtifacts,
@@ -2178,7 +2187,7 @@ function pushElectrocardiogramSummary(
     "inconclusive-cause": inconclusiveCause,
   });
   const measurementBase = Object.keys(qualifiers).length > 0 ? { qualifiers } : {};
-  const measurements = [
+  const numericMeasurements = [
     ...(heartRateMean !== undefined
       ? [{ metric: "ecg-heart-rate-mean", value: heartRateMean, unit: "bpm", ...measurementBase }]
       : []),
@@ -2186,6 +2195,16 @@ function pushElectrocardiogramSummary(
       ? [{ metric: "ecg-voltage-sample-count", value: sampleCount, unit: "count", ...measurementBase }]
       : []),
   ];
+  // A classification with no surviving numeric metrics is still the
+  // clinically meaningful fact of the recording (the backfill completion
+  // predicate already treats classification as useful evidence): land it as
+  // a categorical recording flag (menstrual deviation pattern) instead of
+  // silently leaving the record raw-only.
+  const measurements = numericMeasurements.length > 0
+    ? numericMeasurements
+    : classification !== undefined
+      ? [{ metric: "ecg-recording", value: 1, unit: "recording", ...measurementBase }]
+      : [];
 
   if (measurements.length === 0) {
     return;

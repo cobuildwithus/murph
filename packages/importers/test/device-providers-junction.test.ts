@@ -2024,6 +2024,39 @@ test("Junction normalizer lands sparse paired blood pressure readings as measure
   assert.doesNotMatch(artifactText, /"value":350|"systolic":350|"diastolic":95/u);
 });
 
+test("Junction blood pressure evidence is replay- and order-idempotent", () => {
+  const reading = (timestamp: string, systolic: number, diastolic: number) =>
+    ({ timestamp, systolic, diastolic, unit: "mmHg" });
+  const snapshot = (data: object[]) => normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      blood_pressure: {
+        groups: { omron: [{ data, source: { provider: "omron", type: "cuff" } }] },
+      },
+    },
+  });
+  const first = reading("2026-04-22T08:05:00Z", 125, 75);
+  const second = reading("2026-04-22T20:30:00Z", 118, 79);
+
+  // Exact duplicate rows inside one payload collapse to one event and one
+  // raw artifact instead of staging duplicate evidence.
+  const withDuplicate = snapshot([first, { ...first }, second]);
+  assert.equal(
+    (withDuplicate.events ?? []).filter((event) => event.kind === "measurement").length,
+    2,
+  );
+  assert.equal(findJunctionBloodPressureReadingArtifacts(withDuplicate).length, 2);
+
+  // Reordering the same readings yields identical raw roles: the role
+  // derives from the reading identity, never the payload index, so replays
+  // stage identical evidence for the externalRef-deduped event.
+  const ordered = snapshot([first, second]);
+  const reversed = snapshot([second, first]);
+  const roles = (payload: ReturnType<typeof normalizeJunctionSnapshot>) =>
+    findJunctionBloodPressureReadingArtifacts(payload).map((artifact) => artifact.role).sort();
+  assert.deepEqual(roles(ordered), roles(reversed));
+});
+
 test("Junction normalizer keeps compact evidence when every blood pressure reading is implausible", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-23T12:00:00.000Z",
@@ -3126,26 +3159,41 @@ test("Junction ECG summaries drop negative metrics and cap qualifier lengths", (
         heart_rate_mean: 64,
         classification: oversizedClassification,
         source: { provider: "apple_health_kit", type: "watch" },
+      }, {
+        id: "ecg-empty",
+        session_start: "2026-04-23T09:00:00Z",
+        source: { provider: "apple_health_kit", type: "watch" },
       }],
     },
   });
   const events = payload.events ?? [];
 
-  // Negative heart rate and sample counts carry no usable value: with no
-  // remaining measurements the recording stays raw-only instead of landing a
-  // measurement-less event.
-  assert.equal(events.length, 2);
+  // Negative numerics drop, but the classification is still the clinically
+  // meaningful fact: the recording lands as a categorical flag instead of
+  // going raw-only. A record with neither classification nor numerics
+  // (ecg-empty) stays raw-only.
+  assert.equal(events.length, 3);
+  const classificationOnlyMeasurements = events[0]?.fields?.measurements as
+    | Array<Record<string, unknown>>
+    | undefined;
+  assert.equal(classificationOnlyMeasurements?.length, 1);
+  assert.equal(classificationOnlyMeasurements?.[0]?.metric, "ecg-recording");
+  assert.equal(classificationOnlyMeasurements?.[0]?.value, 1);
+  assert.equal(
+    (classificationOnlyMeasurements?.[0]?.qualifiers as Record<string, string> | undefined)?.classification,
+    "sinus_rhythm",
+  );
 
   // Plausibility window: a 400 bpm mean is sensor noise — the HR measurement
   // drops while the sample count still lands for the same recording.
-  const implausibleHrMeasurements = events[0]?.fields?.measurements as
+  const implausibleHrMeasurements = events[1]?.fields?.measurements as
     | Array<Record<string, unknown>>
     | undefined;
   assert.equal(implausibleHrMeasurements?.length, 1);
   assert.equal(implausibleHrMeasurements?.[0]?.metric, "ecg-voltage-sample-count");
 
   const measurement = (
-    events[1]?.fields?.measurements as Array<Record<string, unknown>> | undefined
+    events[2]?.fields?.measurements as Array<Record<string, unknown>> | undefined
   )?.[0];
   const qualifiers = measurement?.qualifiers as Record<string, string> | undefined;
   assert.equal(measurement?.metric, "ecg-heart-rate-mean");
