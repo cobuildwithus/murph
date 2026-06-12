@@ -1,3 +1,5 @@
+import { resolveMetricInputKey } from "@murphai/health-metrics";
+
 import type { VaultReadModel } from "../read-model.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
 import {
@@ -41,13 +43,14 @@ export function buildMetricProjection(
   const wearableMetricRows = options.wearableMetricRows
     ? [...options.wearableMetricRows]
     : buildWearableMetricEvidence(vault);
+  const metricPoints = extractMetricPoints({
+    metricRows: wearableMetricRows,
+    sampleSummaries: dailySampleSummaries,
+    vault,
+  });
   return {
     dailySampleSummaries,
-    metricPoints: extractMetricPoints({
-      metricRows: wearableMetricRows,
-      sampleSummaries: dailySampleSummaries,
-      vault,
-    }),
+    metricPoints: applyWearableSummaryMetricPrecedence(metricPoints),
     wearableMetricRows,
   };
 }
@@ -63,46 +66,164 @@ export function buildWearableMetricEvidenceFromBundle(bundle: WearableSummaryBun
   const bodyStateSummaries = summarizeWearableBodyStateFromBundle(bundle, { limit: METRIC_PROJECTION_LIMIT });
 
   return [
-    ...sleepSummaries.flatMap(sleepMetricEvidence),
-    ...recoverySummaries.flatMap(recoveryMetricEvidence),
-    ...activitySummaries.flatMap(activityMetricEvidence),
-    ...bodyStateSummaries.flatMap(bodyStateMetricEvidence),
+    ...sleepSummaries.flatMap((summary) => summaryMetricEvidence(summary, SLEEP_METRIC_EVIDENCE)),
+    ...recoverySummaries.flatMap((summary) => summaryMetricEvidence(summary, RECOVERY_METRIC_EVIDENCE)),
+    ...activitySummaries.flatMap((summary) => summaryMetricEvidence(summary, ACTIVITY_METRIC_EVIDENCE)),
+    ...bodyStateSummaries.flatMap((summary) => summaryMetricEvidence(summary, BODY_STATE_METRIC_EVIDENCE)),
   ];
 }
 
-function sleepMetricEvidence(summary: WearableSleepSummary): MetricRowEvidence[] {
-  return [
-    metricEvidence(summary.date, "total-sleep-minutes", summary.totalSleepMinutes, summary.summaryConfidence.level, "sleep-summary"),
-    metricEvidence(summary.date, "sleep-score", summary.sleepScore, summary.summaryConfidence.level, "sleep-summary"),
-    metricEvidence(summary.date, "deep-sleep-minutes", summary.deepMinutes, summary.summaryConfidence.level, "sleep-summary"),
-    metricEvidence(summary.date, "rem-sleep-minutes", summary.remMinutes, summary.summaryConfidence.level, "sleep-summary"),
-    metricEvidence(summary.date, "hrv-rmssd", summary.hrv, summary.summaryConfidence.level, "sleep-summary"),
-    metricEvidence(summary.date, "spo2", summary.spo2, summary.summaryConfidence.level, "sleep-summary"),
-    metricEvidence(summary.date, "lowest-spo2", summary.lowestSpo2, summary.summaryConfidence.level, "sleep-summary"),
-  ];
+type WearableSummaryBase = {
+  date: string;
+  summaryConfidence: {
+    level: WearableConfidenceLevel;
+  };
+};
+
+type WearableResolvedMetricField<TSummary> = Extract<{
+  [K in keyof TSummary]: TSummary[K] extends WearableResolvedMetric ? K : never;
+}[keyof TSummary], string>;
+
+interface SummaryMetricEvidenceEntry<TField extends string> {
+  metricKey: string;
+  sourceKind: MetricRowEvidence["sourceKind"];
+  summaryField: TField;
 }
 
-function recoveryMetricEvidence(summary: WearableRecoverySummary): MetricRowEvidence[] {
-  return [
-    metricEvidence(summary.date, "readiness-score", summary.readinessScore, summary.summaryConfidence.level, "wearable-summary"),
-    metricEvidence(summary.date, "resting-heart-rate", summary.restingHeartRate, summary.summaryConfidence.level, "wearable-summary"),
-    metricEvidence(summary.date, "hrv-rmssd", summary.hrv, summary.summaryConfidence.level, "wearable-summary"),
-  ];
+const SLEEP_METRIC_EVIDENCE = [
+  { metricKey: "total-sleep-minutes", summaryField: "totalSleepMinutes", sourceKind: "sleep-summary" },
+  { metricKey: "sleep-score", summaryField: "sleepScore", sourceKind: "sleep-summary" },
+  { metricKey: "deep-sleep-minutes", summaryField: "deepMinutes", sourceKind: "sleep-summary" },
+  { metricKey: "rem-sleep-minutes", summaryField: "remMinutes", sourceKind: "sleep-summary" },
+  { metricKey: "hrv-rmssd", summaryField: "hrv", sourceKind: "sleep-summary" },
+  { metricKey: "spo2", summaryField: "spo2", sourceKind: "sleep-summary" },
+  { metricKey: "lowest-spo2", summaryField: "lowestSpo2", sourceKind: "sleep-summary" },
+] as const satisfies readonly SummaryMetricEvidenceEntry<WearableResolvedMetricField<WearableSleepSummary>>[];
+
+const RECOVERY_METRIC_EVIDENCE = [
+  { metricKey: "readiness-score", summaryField: "readinessScore", sourceKind: "wearable-summary" },
+  { metricKey: "resting-heart-rate", summaryField: "restingHeartRate", sourceKind: "wearable-summary" },
+  { metricKey: "hrv-rmssd", summaryField: "hrv", sourceKind: "wearable-summary" },
+] as const satisfies readonly SummaryMetricEvidenceEntry<WearableResolvedMetricField<WearableRecoverySummary>>[];
+
+const ACTIVITY_METRIC_EVIDENCE = [
+  { metricKey: "steps", summaryField: "steps", sourceKind: "activity-summary" },
+  { metricKey: "activity-minutes", summaryField: "sessionMinutes", sourceKind: "activity-summary" },
+  { metricKey: "estimated-vo2-max", summaryField: "estimatedVo2Max", sourceKind: "activity-summary" },
+] as const satisfies readonly SummaryMetricEvidenceEntry<WearableResolvedMetricField<WearableActivitySummary>>[];
+
+const BODY_STATE_METRIC_EVIDENCE = [
+  { metricKey: "body-weight", summaryField: "weightKg", sourceKind: "wearable-summary" },
+  { metricKey: "body-fat-percentage", summaryField: "bodyFatPercentage", sourceKind: "wearable-summary" },
+] as const satisfies readonly SummaryMetricEvidenceEntry<WearableResolvedMetricField<WearableBodyStateSummary>>[];
+
+const SUMMARY_METRIC_EVIDENCE_ENTRIES = [
+  ...SLEEP_METRIC_EVIDENCE,
+  ...RECOVERY_METRIC_EVIDENCE,
+  ...ACTIVITY_METRIC_EVIDENCE,
+  ...BODY_STATE_METRIC_EVIDENCE,
+];
+
+const WEARABLE_SUMMARY_METRIC_PRIORITIES = buildWearableSummaryMetricPriorities();
+
+export function listWearableSummaryMetricEvidenceKeys(): string[] {
+  return uniqueStrings(
+    SUMMARY_METRIC_EVIDENCE_ENTRIES.map((entry) => resolveMetricInputKey(entry.metricKey)),
+  ).sort();
 }
 
-function activityMetricEvidence(summary: WearableActivitySummary): MetricRowEvidence[] {
-  return [
-    metricEvidence(summary.date, "steps", summary.steps, summary.summaryConfidence.level, "activity-summary"),
-    metricEvidence(summary.date, "activity-minutes", summary.sessionMinutes, summary.summaryConfidence.level, "activity-summary"),
-    metricEvidence(summary.date, "estimated-vo2-max", summary.estimatedVo2Max, summary.summaryConfidence.level, "activity-summary"),
-  ];
+function summaryMetricEvidence<TField extends string>(
+  summary: WearableSummaryBase & Record<TField, WearableResolvedMetric>,
+  entries: readonly SummaryMetricEvidenceEntry<TField>[],
+): MetricRowEvidence[] {
+  return entries.map((entry) =>
+    metricEvidence(
+      summary.date,
+      entry.metricKey,
+      summary[entry.summaryField],
+      summary.summaryConfidence.level,
+      entry.sourceKind,
+    )
+  );
 }
 
-function bodyStateMetricEvidence(summary: WearableBodyStateSummary): MetricRowEvidence[] {
-  return [
-    metricEvidence(summary.date, "body-weight", summary.weightKg, summary.summaryConfidence.level, "wearable-summary"),
-    metricEvidence(summary.date, "body-fat-percentage", summary.bodyFatPercentage, summary.summaryConfidence.level, "wearable-summary"),
-  ];
+function applyWearableSummaryMetricPrecedence(points: readonly MetricPoint[]): MetricPoint[] {
+  const summaryResolvedByDay = new Map<string, MetricPoint>();
+
+  for (const point of points) {
+    if (isWearableSummaryMetricPoint(point)) {
+      const dayKey = metricPointDayKey(point);
+      const current = summaryResolvedByDay.get(dayKey);
+      if (!current || compareWearableSummaryMetricPriority(point, current) < 0) {
+        summaryResolvedByDay.set(dayKey, point);
+      }
+    }
+  }
+
+  return points.filter((point) => {
+    const summaryPoint = summaryResolvedByDay.get(metricPointDayKey(point));
+    if (!summaryPoint) {
+      return true;
+    }
+
+    if (isWearableSummaryMetricPoint(point)) {
+      return point.id === summaryPoint.id;
+    }
+
+    if (point.source.family !== "event" || point.source.kind !== "observation") {
+      return true;
+    }
+
+    return !metricPointContributedToSummary(point, summaryPoint);
+  });
+}
+
+function isWearableSummaryMetricPoint(point: MetricPoint): boolean {
+  return point.source.family === "derived"
+    && WEARABLE_SUMMARY_METRIC_PRIORITIES.has(summaryMetricPriorityKey(point));
+}
+
+// Suppression is by contribution, deliberately fail-open. Three cases:
+// records the summary resolved FROM are suppressed (the summary point is
+// their resolved answer); manual/independent same-day entries survive as
+// provenance-distinct facts (hiding them would violate the capture
+// posture); losing multi-provider candidates also survive because their
+// record ids are not recoverable from stored summaries (the stored codec
+// persists only the selected records) — visible and provider-marked beats
+// silently hidden.
+function metricPointContributedToSummary(point: MetricPoint, summaryPoint: MetricPoint): boolean {
+  const contributingRecordIds = summaryPoint.context.contributingRecordIds;
+  return Array.isArray(contributingRecordIds) && contributingRecordIds.includes(point.source.recordId);
+}
+
+function metricPointDayKey(point: MetricPoint): string {
+  return `${point.metricKey}\0${point.effectiveDate}`;
+}
+
+function compareWearableSummaryMetricPriority(left: MetricPoint, right: MetricPoint): number {
+  const leftPriority = WEARABLE_SUMMARY_METRIC_PRIORITIES.get(summaryMetricPriorityKey(left)) ?? Number.MAX_SAFE_INTEGER;
+  const rightPriority = WEARABLE_SUMMARY_METRIC_PRIORITIES.get(summaryMetricPriorityKey(right)) ?? Number.MAX_SAFE_INTEGER;
+  if (leftPriority !== rightPriority) {
+    return leftPriority - rightPriority;
+  }
+  return left.id.localeCompare(right.id);
+}
+
+function summaryMetricPriorityKey(point: MetricPoint): string {
+  return `${point.metricKey}\0${point.source.kind}`;
+}
+
+function buildWearableSummaryMetricPriorities(): Map<string, number> {
+  const priorities = new Map<string, number>();
+
+  for (const entry of SUMMARY_METRIC_EVIDENCE_ENTRIES) {
+    const key = `${resolveMetricInputKey(entry.metricKey)}\0${entry.sourceKind}`;
+    if (!priorities.has(key)) {
+      priorities.set(key, priorities.size);
+    }
+  }
+
+  return priorities;
 }
 
 function metricEvidence(

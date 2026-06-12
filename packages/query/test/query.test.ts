@@ -17,6 +17,7 @@ import {
 
 import {
   ID_FAMILY_REGISTRY,
+  buildWearableMetricEvidence,
   buildOverviewMetrics,
   buildOverviewWeeklyStats,
   buildExportPack,
@@ -36,16 +37,20 @@ import {
   listJournalEntries,
   lookupEntityById,
   readVault,
+  readVaultRawTolerant,
   rebuildQueryProjection,
   searchVault,
   searchVaultSafe,
   searchVaultRuntime,
+  extractMetricPointsFromMetricRows,
   summarizeDailySamples,
   summarizeSampleWindow,
   summarizeOverviewExperiments,
   summarizeRecentOverviewJournals,
+  resolveMetricDefinition,
 } from "../src/index.ts";
 import * as queryIndex from "../src/index.ts";
+import { listWearableSummaryMetricEvidenceKeys } from "../src/metrics/projection.ts";
 import {
   summarizeWearableDay,
   summarizeWearableSleep,
@@ -3528,6 +3533,49 @@ Light walk and early bedtime.
   return vaultRoot;
 }
 
+interface MetricObservationEventInput {
+  externalRef?: Record<string, unknown>;
+  id: string;
+  metric: string;
+  occurredAt: string;
+  source: "device" | "manual";
+  title: string;
+  unit: string;
+  value: number;
+}
+
+async function createMetricObservationVault(
+  events: readonly MetricObservationEventInput[],
+): Promise<string> {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-metric-observations-"));
+
+  await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+  await writeFile(
+    path.join(vaultRoot, "vault.json"),
+    `${JSON.stringify({
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+      vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      title: "Metric observation vault",
+      timezone: "UTC",
+    })}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+    `${events.map((event) => JSON.stringify({
+      schemaVersion: "murph.event.v1",
+      kind: "observation",
+      dayKey: event.occurredAt.slice(0, 10),
+      recordedAt: new Date(Date.parse(event.occurredAt) + 60_000).toISOString().replace(".000Z", "Z"),
+      ...event,
+    })).join("\n")}\n`,
+    "utf8",
+  );
+
+  return vaultRoot;
+}
+
 async function createSparseVault(): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-sparse-"));
 
@@ -4422,12 +4470,11 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
     });
 
     try {
-      // Pin the literal version: a revert of the 8 -> 9 bump would keep every
-      // constant-relative assertion green while legacy v8 stores (wearable
-      // summary rows still scoped under raw whoop_v2 provider keys, on top of
-      // the v7 pre-codec JSON and v6 dropped metric point columns) were
-      // treated as current instead of being rebuilt.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 9);
+      // Pin the literal version: a revert of the 9 -> 10 bump would keep every
+      // constant-relative assertion green while legacy v9 stores, which lack
+      // generic observation metric points, were treated as current instead of
+      // being rebuilt.
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 10);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database
@@ -4441,6 +4488,341 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
     } finally {
       database.close();
     }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("listMetricPointsRuntime projects scalar observation metrics without catalog enrollment", async () => {
+  const vaultRoot = await createMetricObservationVault([
+    {
+      id: "evt_metric_observation_caffeine_01",
+      occurredAt: "2026-04-02T07:00:00Z",
+      source: "manual",
+      title: "Morning caffeine",
+      metric: "caffeine",
+      value: 120,
+      unit: "mg",
+    },
+    {
+      id: "evt_metric_observation_height_01",
+      occurredAt: "2026-04-02T07:05:00Z",
+      source: "manual",
+      title: "Height",
+      metric: "height",
+      value: 180,
+      unit: "cm",
+    },
+    {
+      id: "evt_metric_observation_glucose_01",
+      occurredAt: "2026-04-02T08:00:00Z",
+      source: "device",
+      title: "Daily glucose",
+      metric: "glucose",
+      value: 96,
+      unit: "mg/dL",
+    },
+  ]);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const caffeine = await listMetricPointsRuntime(vaultRoot, { metricKey: "caffeine", limit: null });
+    const height = await listMetricPointsRuntime(vaultRoot, { metricKey: "height", limit: null });
+    const glucose = await listMetricPointsRuntime(vaultRoot, { metricKey: "glucose", limit: null });
+
+    assert.equal(caffeine.length, 1);
+    assert.equal(caffeine[0]?.value, 120);
+    assert.equal(caffeine[0]?.unit, "mg");
+    assert.equal(caffeine[0]?.source.kind, "observation");
+
+    assert.equal(resolveMetricDefinition("height"), null);
+    assert.equal(height.length, 1);
+    assert.equal(height[0]?.metricKey, "height");
+    assert.equal(height[0]?.value, 180);
+    assert.equal(height[0]?.unit, "cm");
+    assert.equal(height[0]?.biomarkerKey, null);
+
+    assert.equal(glucose.length, 1);
+    assert.equal(glucose[0]?.metricKey, "glucose");
+    assert.equal(glucose[0]?.canonicalValue, 96);
+    assert.equal(glucose[0]?.canonicalUnit, "mg/dL");
+    assert.equal(glucose[0]?.unit, "mg/dL");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("wearable summary metric points suppress same-day raw observation duplicates", async () => {
+  const vaultRoot = await createMetricObservationVault([
+    {
+      id: "evt_metric_observation_hrv_01",
+      occurredAt: "2026-04-03T06:00:00Z",
+      source: "device",
+      title: "Oura HRV",
+      metric: "hrv",
+      value: 52,
+      unit: "ms",
+      externalRef: {
+        system: "oura",
+        resourceType: "sleep",
+        resourceId: "oura-sleep-2026-04-03",
+        facet: "average-hrv",
+      },
+    },
+    {
+      id: "evt_metric_observation_spo2_01",
+      occurredAt: "2026-04-03T06:05:00Z",
+      source: "device",
+      title: "Oura SpO2",
+      metric: "spo2",
+      value: 97,
+      unit: "%",
+      externalRef: {
+        system: "oura",
+        resourceType: "daily_spo2",
+        resourceId: "oura-spo2-2026-04-03",
+        facet: "spo2-average",
+      },
+    },
+    {
+      id: "evt_metric_observation_spo2_manual_01",
+      occurredAt: "2026-04-03T21:00:00Z",
+      source: "manual",
+      title: "Manual SpO2 spot check",
+      metric: "spo2",
+      value: 98,
+      unit: "%",
+    },
+    {
+      id: "evt_metric_observation_lowest_spo2_01",
+      occurredAt: "2026-04-03T06:10:00Z",
+      source: "device",
+      title: "Oura lowest SpO2",
+      metric: "lowest-spo2",
+      value: 92,
+      unit: "%",
+      externalRef: {
+        system: "oura",
+        resourceType: "daily_spo2",
+        resourceId: "oura-spo2-2026-04-03",
+        facet: "lowest-spo2",
+      },
+    },
+    {
+      id: "evt_metric_observation_breathing_disturbance_01",
+      occurredAt: "2026-04-03T06:15:00Z",
+      source: "device",
+      title: "Oura breathing disturbance",
+      metric: "sleep-breathing-disturbance",
+      value: 4,
+      unit: "count",
+      externalRef: {
+        system: "oura",
+        resourceType: "daily_spo2",
+        resourceId: "oura-spo2-2026-04-03",
+        facet: "breathing-disturbance-index",
+      },
+    },
+  ]);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const hrv = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-04-03",
+      limit: null,
+      metricKey: "hrv-rmssd",
+      to: "2026-04-03",
+    });
+    const spo2 = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-04-03",
+      limit: null,
+      metricKey: "spo2",
+      to: "2026-04-03",
+    });
+    const lowestSpo2 = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-04-03",
+      limit: null,
+      metricKey: "lowest-spo2",
+      to: "2026-04-03",
+    });
+    const breathingDisturbance = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-04-03",
+      limit: null,
+      metricKey: "sleep-breathing-disturbance",
+      to: "2026-04-03",
+    });
+
+    assert.equal(hrv.length, 1);
+    assert.equal(hrv[0]?.value, 52);
+    assert.equal(hrv[0]?.source.family, "derived");
+    assert.notEqual(hrv[0]?.source.kind, "observation");
+
+    // Key-namespace trap: the raw observation carries metric "hrv" while the
+    // summary evidence emits "hrv-rmssd". Precedence only works if both land
+    // on the same resolved key, so the alias must not escape into a parallel
+    // "hrv"-keyed point, and querying by the alias must hit the same point.
+    const allDayPoints = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-04-03",
+      limit: null,
+      to: "2026-04-03",
+    });
+    assert.equal(allDayPoints.filter((point) => point.metricKey === "hrv").length, 0);
+    assert.equal(allDayPoints.filter((point) => point.metricKey === "hrv-rmssd").length, 1);
+
+    const hrvByAlias = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-04-03",
+      limit: null,
+      metricKey: "hrv",
+      to: "2026-04-03",
+    });
+    assert.deepEqual(hrvByAlias.map((point) => point.id), hrv.map((point) => point.id));
+
+    const summarySpo2 = spo2.find((point) => point.source.family === "derived");
+    const manualSpo2 = spo2.find((point) => point.source.recordId === "evt_metric_observation_spo2_manual_01");
+
+    assert.equal(spo2.length, 2);
+    assert.equal(summarySpo2?.value, 97);
+    assert.notEqual(summarySpo2?.source.kind, "observation");
+    assert.equal(manualSpo2?.value, 98);
+    assert.equal(manualSpo2?.source.kind, "observation");
+
+    assert.equal(lowestSpo2.length, 1);
+    assert.equal(lowestSpo2[0]?.value, 92);
+    assert.equal(lowestSpo2[0]?.source.family, "derived");
+    assert.notEqual(lowestSpo2[0]?.source.kind, "observation");
+
+    assert.equal(breathingDisturbance.length, 1);
+    assert.equal(breathingDisturbance[0]?.value, 4);
+    assert.equal(breathingDisturbance[0]?.source.kind, "observation");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("listMetricPointsRuntime rebuilds previous-version projections before serving observation metrics", async () => {
+  const vaultRoot = await createMetricObservationVault([
+    {
+      id: "evt_metric_observation_caffeine_rebuild_01",
+      occurredAt: "2026-04-04T07:00:00Z",
+      source: "manual",
+      title: "Caffeine before stale rebuild",
+      metric: "caffeine",
+      value: 90,
+      unit: "mg",
+    },
+  ]);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const staleDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
+    try {
+      staleDatabase.exec(`
+        PRAGMA user_version = 9;
+        DELETE FROM query_metric_points;
+      `);
+    } finally {
+      staleDatabase.close();
+    }
+
+    const statusBefore = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(statusBefore.fresh, false);
+
+    const points = await listMetricPointsRuntime(vaultRoot, { metricKey: "caffeine", limit: null });
+    assert.equal(points.length, 1);
+    assert.equal(points[0]?.value, 90);
+
+    const reopened = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false, readOnly: true });
+    try {
+      assert.equal(readSqliteRuntimeUserVersion(reopened), QUERY_PROJECTION_SQLITE_VERSION);
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("wearable summary metric ownership keys match evidence builder output", async () => {
+  const vaultRoot = await createMetricObservationVault([
+    {
+      id: "evt_metric_evidence_activity_01",
+      occurredAt: "2026-04-05T12:00:00Z",
+      source: "device",
+      title: "Garmin steps",
+      metric: "daily-steps",
+      value: 8400,
+      unit: "count",
+      externalRef: {
+        system: "garmin",
+        resourceType: "daily_activity",
+        resourceId: "garmin-activity-2026-04-05",
+      },
+    },
+    {
+      id: "evt_metric_evidence_sleep_01",
+      occurredAt: "2026-04-05T06:00:00Z",
+      source: "device",
+      title: "Oura sleep",
+      metric: "sleep-total-minutes",
+      value: 430,
+      unit: "minutes",
+      externalRef: {
+        system: "oura",
+        resourceType: "sleep",
+        resourceId: "oura-sleep-2026-04-05",
+      },
+    },
+    {
+      id: "evt_metric_evidence_recovery_01",
+      occurredAt: "2026-04-05T06:05:00Z",
+      source: "device",
+      title: "Oura HRV",
+      metric: "hrv",
+      value: 48,
+      unit: "ms",
+      externalRef: {
+        system: "oura",
+        resourceType: "sleep",
+        resourceId: "oura-sleep-2026-04-05",
+        facet: "average-hrv",
+      },
+    },
+    {
+      id: "evt_metric_evidence_body_01",
+      occurredAt: "2026-04-05T07:00:00Z",
+      source: "device",
+      title: "Withings weight",
+      metric: "weight",
+      value: 72,
+      unit: "kg",
+      externalRef: {
+        system: "withings",
+        resourceType: "body",
+        resourceId: "withings-body-2026-04-05",
+      },
+    },
+  ]);
+
+  try {
+    const vault = await readVaultRawTolerant(vaultRoot);
+    const evidenceRows = buildWearableMetricEvidence(vault);
+    const ownershipKeys = listWearableSummaryMetricEvidenceKeys();
+    const emittedKeys = [
+      ...new Set(
+        evidenceRows.map((row) => resolveMetricDefinition(row.metricKey)?.key ?? row.metricKey),
+      ),
+    ].sort();
+
+    assert.deepEqual(ownershipKeys, emittedKeys);
+
+    const emittedPointKeys = [
+      ...new Set(extractMetricPointsFromMetricRows(evidenceRows).map((point) => point.metricKey)),
+    ].sort();
+    assert.ok(emittedPointKeys.every((key) => ownershipKeys.includes(key)));
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

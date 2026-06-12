@@ -230,6 +230,8 @@ function metricPointsFromCanonicalEntity(entity: CanonicalEntity): MetricPoint[]
   switch (entity.kind) {
     case "measurement":
       return measurementMetricPoints(entity, "measurement");
+    case "observation":
+      return observationMetricPoints(entity);
     case "test":
       return testResultMetricPoints(entity);
     default:
@@ -316,6 +318,27 @@ export function isDisplayGradeMetricSampleEntity(entity: CanonicalEntity): boole
   const source = readString(entity.attributes.source);
   const qualifiers = readQualifiers(entity.attributes.qualifiers);
   return isDisplayGradeMetricSample(source, quality, qualifiers);
+}
+
+function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
+  const metric = readString(entity.attributes.metric);
+  const value = readNumber(entity.attributes.value);
+  const unit = readString(entity.attributes.unit);
+  if (!metric || value === null) return [];
+
+  return [scalarMetricPoint({
+    confidence: eventConfidence(entity),
+    context: {
+      qualifiers: readQualifiers(entity.attributes.qualifiers),
+      timeZone: readString(entity.attributes.timeZone) ?? undefined,
+    },
+    entity,
+    index: 0,
+    metric,
+    sourceKind: "observation",
+    unit,
+    value,
+  })];
 }
 
 function measurementMetricPoints(entity: CanonicalEntity, sourceKind: MetricSourceKind): MetricPoint[] {
