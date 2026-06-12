@@ -183,12 +183,20 @@ export function projectWearableSleepNightPublicSources(night: WearableSleepNight
     ["spo2", spo2],
   ];
   const projectedMetrics = metrics.map(([, metric]) => metric);
-  const summaryConfidence = rebuildPublicSummaryConfidence(
+  const rawSummaryConfidence = rebuildPublicSummaryConfidence(
     metrics,
     night.summaryConfidence,
     "No sleep metrics were available for this date.",
     sourceMetrics,
   );
+  const sleepWindowSourceProvider = night.sleepWindowProvider ?? night.provider;
+  const sleepWindowPublicProvider = sessionMinutes.selection.provider;
+  const summaryConfidence = {
+    ...rawSummaryConfidence,
+    notes: rawSummaryConfidence.notes.map((note) =>
+      projectSleepWindowProviderNote(note, sleepWindowSourceProvider, sleepWindowPublicProvider)
+    ),
+  };
 
   return {
     ...night,
@@ -205,6 +213,8 @@ export function projectWearableSleepNightPublicSources(night: WearableSleepNight
       originalSummaryConfidence: night.summaryConfidence,
       sourceMetrics,
       summaryConfidence,
+      projectOriginalNote: (note) =>
+        projectSleepWindowProviderNote(note, sleepWindowSourceProvider, sleepWindowPublicProvider),
     }),
     provider: sessionMinutes.selection.provider,
     remMinutes,
@@ -422,19 +432,37 @@ function projectSummaryNotes(input: {
   metrics: readonly WearableResolvedMetric[];
   originalNotes: readonly string[];
   originalSummaryConfidence: WearableSummaryConfidence;
+  projectOriginalNote?: (note: string) => string;
   sourceMetrics: readonly WearableResolvedMetric[];
   summaryConfidence: WearableSummaryConfidence;
 }): string[] {
   void input.sourceMetrics;
   const originalSummaryNotes = new Set(input.originalSummaryConfidence.notes);
   const projectedOriginalNotes = input.originalNotes
-    .filter((note) => !originalSummaryNotes.has(note));
+    .filter((note) => !originalSummaryNotes.has(note))
+    .map((note) => input.projectOriginalNote?.(note) ?? note);
 
   return uniqueStrings([
     ...input.summaryConfidence.notes,
     ...(input.fallbackNotes ?? []),
     ...projectedOriginalNotes,
   ]);
+}
+
+function projectSleepWindowProviderNote(
+  note: string,
+  sourceProvider: string | null,
+  publicProvider: string | null,
+): string {
+  if (!sourceProvider || !publicProvider || sourceProvider === publicProvider) {
+    return note;
+  }
+
+  if (!/\b(?:sleep|nap) window\b/iu.test(note)) {
+    return note;
+  }
+
+  return note.replaceAll(formatProviderName(sourceProvider), formatProviderName(publicProvider));
 }
 
 function collectPublicConflictingProviders(

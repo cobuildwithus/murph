@@ -1402,6 +1402,14 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
     garminSleep?.totalSleepMinutes.confidence.reasons.some((reason) => reason.startsWith("Selected Garmin ")),
     true,
   );
+  assert.equal(
+    garminSleep?.summaryConfidence.notes.some((note) => /\bJunction\b/u.test(note)),
+    false,
+  );
+  assert.equal(
+    garminSleep?.notes.some((note) => /\bJunction\b/u.test(note)),
+    false,
+  );
 
   const mixedSourceSleep = summarizeWearableSleep(vault)
     .find((night) => night.date === "2026-04-08");
