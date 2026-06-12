@@ -15,6 +15,8 @@ import {
 } from "../src/container-cpu-watchdog.ts";
 
 const WATCHDOG_INTERVAL_MS = 20_000;
+const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME =
+  "HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET";
 
 interface FakeProcessState {
   cpuStatText: string | null;
@@ -128,7 +130,7 @@ describe("startHostedContainerCpuWatchdog", () => {
   });
 
   it("attributes elevated CPU to the top processes by comm name", async () => {
-    vi.stubEnv("HOSTED_LOG_FINGERPRINT_SECRET", "test-secret");
+    vi.stubEnv(HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME, "test-secret");
     const state: FakeProcessState = {
       cpuStatText: cpuStatText({ usageUsec: 1_000_000 }),
       pidStats: new Map([
@@ -197,6 +199,32 @@ describe("startHostedContainerCpuWatchdog", () => {
     const emits = watchdogEmits();
     expect(emits).toHaveLength(1);
     // No keyed secret configured: no comm-derived identifier at all.
+    expect((emits[0]?.details as Record<string, unknown>).topCpuProcesses).toEqual([
+      { comm: "other", cpuCores: 0.65, pid: 45 },
+    ]);
+  });
+
+  it("does not use the raw hosted log fingerprint secret as a watchdog fingerprint", async () => {
+    vi.stubEnv("HOSTED_LOG_FINGERPRINT_SECRET", "raw-log-fingerprint-secret");
+    const state: FakeProcessState = {
+      cpuStatText: null,
+      pidStats: new Map([
+        ["45", pidStatText({ comm: "check_health.sh", pid: 45, totalTicks: 100 })],
+      ]),
+    };
+    stopWatchdog = await startWatchdog({
+      processApi: createFakeProcessApi(state),
+    });
+
+    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
+    state.pidStats.set(
+      "45",
+      pidStatText({ comm: "check_health.sh", pid: 45, totalTicks: 1_400 }),
+    );
+    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
+
+    const emits = watchdogEmits();
+    expect(emits).toHaveLength(1);
     expect((emits[0]?.details as Record<string, unknown>).topCpuProcesses).toEqual([
       { comm: "other", cpuCores: 0.65, pid: 45 },
     ]);

@@ -44,6 +44,8 @@ const RUNNER_DIRECT_R2_PRESIGNED_PUT_SMOKE_URL =
   "http://container/internal/direct-r2-presigned-put-smoke";
 const RUNNER_RUNTIME_WAKE_URL = "http://container/internal/runtime-wake";
 const HOSTED_LOG_FINGERPRINT_SECRET_ENV_NAME = "HOSTED_LOG_FINGERPRINT_SECRET";
+const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME =
+  "HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET";
 const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_DERIVATION_CONTEXT =
   "murph:hosted-container-cpu-watchdog-fingerprint:v1";
 const RUNNER_WAIT_INTERVAL_MS = 250;
@@ -2772,7 +2774,7 @@ function buildRunnerContainerEnvVars(
     HOSTED_LOG_FINGERPRINT_SECRET_ENV_NAME,
   );
   if (fingerprintSecret) {
-    envVars[HOSTED_LOG_FINGERPRINT_SECRET_ENV_NAME] =
+    envVars[HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME] =
       deriveHostedContainerCpuWatchdogFingerprintSecret(fingerprintSecret);
   }
   return envVars;

@@ -38,6 +38,8 @@ const CLOUDFLARE_CONTAINERS_CA_CERT_PATH =
   "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
 const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_DERIVATION_CONTEXT =
   "murph:hosted-container-cpu-watchdog-fingerprint:v1";
+const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME =
+  "HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET";
 const EXPECTED_RUNNER_CONTAINER_ENV = {
   CODEX_CA_CERTIFICATE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
   CURL_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
@@ -86,9 +88,11 @@ describe("RunnerContainer", () => {
 
     expect(container.envVars).toEqual({
       ...EXPECTED_RUNNER_CONTAINER_ENV,
-      HOSTED_LOG_FINGERPRINT_SECRET: expectedWatchdogSecret,
+      [HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME]: expectedWatchdogSecret,
     });
-    expect(container.envVars.HOSTED_LOG_FINGERPRINT_SECRET).not.toBe(workerSecret);
+    expect(container.envVars).not.toHaveProperty("HOSTED_LOG_FINGERPRINT_SECRET");
+    expect(container.envVars[HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME])
+      .not.toBe(workerSecret);
     expect(container.envVars).not.toHaveProperty("HOSTED_AI_USAGE_REPORTING_SECRET");
   });
 
@@ -102,6 +106,9 @@ describe("RunnerContainer", () => {
 
     expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
     expect(container.envVars).not.toHaveProperty("HOSTED_LOG_FINGERPRINT_SECRET");
+    expect(container.envVars).not.toHaveProperty(
+      HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME,
+    );
     expect(JSON.stringify(container.envVars)).not.toContain("fixture-usage-reporting-secret");
   });
 

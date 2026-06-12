@@ -5,6 +5,8 @@ import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 const HOSTED_CONTAINER_CPU_WATCHDOG_INTERVAL_MS = 20_000;
 const HOSTED_CONTAINER_CPU_WATCHDOG_EMIT_THRESHOLD_CORES = 0.5;
 const HOSTED_CONTAINER_CPU_WATCHDOG_TOP_PROCESS_COUNT = 3;
+const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME =
+  "HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET";
 // Linux exports per-process utime/stime in USER_HZ ticks; USER_HZ is 100 on the
 // linux/amd64 hosted runner image. Diagnostics-only conversion, not authority.
 const HOSTED_CONTAINER_CPU_WATCHDOG_TICKS_PER_SECOND = 100;
@@ -134,7 +136,8 @@ export function startHostedContainerCpuWatchdog(input: {
 }
 
 function resolveCpuWatchdogFingerprintSecret(): string | null {
-  const secret = process.env.HOSTED_LOG_FINGERPRINT_SECRET?.trim();
+  const secret =
+    process.env[HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME]?.trim();
   return secret || null;
 }
 
