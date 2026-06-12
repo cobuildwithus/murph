@@ -1061,13 +1061,21 @@ test('food search-labels-batch schema exposes hosted batch lookup inputs', async
   assert.deepEqual(schema.options.required, ['query'])
   assert.equal(schema.options.properties.query?.type, 'array')
   assert.equal(schema.options.properties.query?.maxItems, 50)
-  assert.match(
-    String(schema.options.properties.query?.description ?? ''),
-    /Repeat --query/u,
+  const queryDescription = String(
+    schema.options.properties.query?.description ?? '',
   )
+  assert.match(queryDescription, /Food product or brand search text/u)
+  assert.match(queryDescription, /Repeat --query/u)
+  assert.doesNotMatch(queryDescription, /USDA FDC id|UPC/u)
   assert.match(
     String(schema.options.properties.limit?.description ?? ''),
     /Maximum label matches to return per query\. Defaults to 1/u,
+  )
+
+  const help = await runSourceCliRaw(['food', 'search-labels-batch', '--help'])
+  assert.match(
+    help,
+    /For USDA FDC ids or UPCs, use `food search-labels` with one query/u,
   )
 })
 

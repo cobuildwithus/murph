@@ -77,8 +77,16 @@ export type ProductLabelsQueries = {
 export function createProductLabelsQueries(
   client: ProductLabelsQueryClient,
   table: ProductLabelsTable,
+  options: { brandScoping?: boolean } = {},
 ): ProductLabelsQueries {
   const tableSql = productLabelsTableSql(table);
+  // Brand scoping preloads every distinct brand into memory and narrows
+  // matching queries to those brands exclusively. That is correct for the
+  // supplement catalog but disabled by default: on the ~2M-row foods table the
+  // brand preload is an unbounded cold-start cost, and exclusive scoping would
+  // hide generic rows (brand IS NULL) whenever a query collides with a brand
+  // name.
+  const brandScoping = options.brandScoping ?? false;
   let brandIndexCache: ProductLabelBrandIndexCache | null = null;
 
   async function getBrandIndex(): Promise<ProductLabelBrandIndexEntry[]> {
@@ -178,14 +186,16 @@ export function createProductLabelsQueries(
         return [];
       }
 
-      const brandScopes = findProductLabelBrandScopes(await getBrandIndex(), q);
+      if (brandScoping) {
+        const brandScopes = findProductLabelBrandScopes(await getBrandIndex(), q);
 
-      if (brandScopes.length > 0) {
-        return await searchBrandScopedProductLabels(client, tableSql, {
-          ...input,
-          q,
-          brandScopes,
-        });
+        if (brandScopes.length > 0) {
+          return await searchBrandScopedProductLabels(client, tableSql, {
+            ...input,
+            q,
+            brandScopes,
+          });
+        }
       }
 
       return await searchGenericProductLabels(client, tableSql, {
@@ -211,7 +221,9 @@ export function createSupplementsQueries(client: ProductLabelsQueryClient): {
     q: string;
   }) => Promise<SupplementSearchItem[]>;
 } {
-  const queries = createProductLabelsQueries(client, "supplements");
+  const queries = createProductLabelsQueries(client, "supplements", {
+    brandScoping: true,
+  });
 
   return {
     getSupplementById: queries.getById,

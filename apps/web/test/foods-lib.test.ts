@@ -68,12 +68,9 @@ describe("foods query helpers", () => {
         },
       ],
     });
-    expect(calls).toHaveLength(2);
-    expect(calls[0]?.text).toContain("FROM foods");
-    expect(calls[0]?.text).toContain("GROUP BY brand");
-    expect(calls[0]?.values).toEqual([]);
+    expect(calls).toHaveLength(1);
 
-    const searchCall = calls[1];
+    const searchCall = calls[0];
     expect(searchCall?.text).toContain("websearch_to_tsquery");
     expect(searchCall?.text).toContain("$1::text AS raw_q");
     expect(searchCall?.text).toContain(
@@ -86,6 +83,9 @@ describe("foods query helpers", () => {
     expect(searchCall?.text).toContain("data_origin_priority ASC");
     expect(searchCall?.text).toContain("label");
     expect(searchCall?.text).not.toContain("FROM supplements");
+    expect(searchCall?.text).not.toMatch(
+      /SELECT\s+brand[\s\S]*FROM foods[\s\S]*GROUP BY brand/u,
+    );
     expect(searchCall?.values).toEqual(["greek yogurt", false, 5]);
   });
 
@@ -102,42 +102,71 @@ describe("foods query helpers", () => {
     ).toThrow("unsupported product labels table");
   });
 
-  it("scopes branded food searches to same-brand product matches", async () => {
+  it("keeps branded food searches on the generic path without loading the brand index", async () => {
     const calls: Array<{ text: string; values: unknown[] }> = [];
     const queries = createFoodsQueries({
       async query<T>(text: string, values: unknown[]) {
         calls.push({ text, values });
         if (text.includes("GROUP BY brand")) {
-          return { rows: [{ brand: "Example Dairy" }] as T[] };
+          throw new Error("foods search must not load brand index");
         }
-        return { rows: [] as T[] };
+        if (text.includes("brand_candidates AS MATERIALIZED")) {
+          throw new Error("foods search must not use brand-scoped SQL");
+        }
+        return {
+          rows: [
+            {
+              id: "fdc:123",
+              dataOrigin: "usda_branded",
+              dataOriginId: "123",
+              name: "Greek Yogurt",
+              brand: "Example Dairy",
+              upc: "123456789012",
+              offMarket: false,
+              label: {
+                servingSize: 170,
+                servingSizeUnit: "g",
+              },
+            },
+          ] as T[],
+        };
       },
     });
 
-    await queries.searchFoods({
+    const rows = await queries.searchFoods({
       q: "Example Dairy Greek Yogurt",
       limit: 1,
       includeOffMarket: false,
     });
 
-    expect(calls).toHaveLength(2);
-    expect(calls[0]?.text).toContain("FROM foods");
-
-    const sql = calls[1]?.text ?? "";
-    expect(sql).toContain("brand_candidates AS MATERIALIZED");
-    expect(sql).toContain("FROM foods");
-    expect(sql).toContain("brand = ANY($4::text[])");
-    expect(sql).toContain("product_identity_match");
-    expect(sql).toContain("WHERE product_identity_match = 1");
-    expect(sql).toContain("websearch_to_tsquery('simple', product_q)");
-    expect(sql).toContain("strict_word_similarity(name, product_q)");
-    expect(sql).not.toContain("FROM supplements");
-    expect(calls[1]?.values).toEqual([
-      "Example Dairy Greek Yogurt",
-      false,
-      1,
-      ["Example Dairy"],
+    expect(rows).toEqual([
+      {
+        id: "fdc:123",
+        dataOrigin: "usda_branded",
+        dataOriginId: "123",
+        name: "Greek Yogurt",
+        brand: "Example Dairy",
+        upc: "123456789012",
+        offMarket: false,
+        label: {
+          servingSize: 170,
+          servingSizeUnit: "g",
+        },
+      },
     ]);
+    expect(calls).toHaveLength(1);
+
+    const sql = calls[0]?.text ?? "";
+    expect(sql).toContain("FROM foods");
+    expect(sql).toContain("websearch_to_tsquery('simple', $1)");
+    expect(sql).toContain("strict_word_similarity(name, query.raw_q)");
+    expect(sql).not.toContain("brand_candidates AS MATERIALIZED");
+    expect(sql).not.toContain("brand = ANY($4::text[])");
+    expect(sql).not.toMatch(
+      /SELECT\s+brand[\s\S]*FROM foods[\s\S]*GROUP BY brand/u,
+    );
+    expect(sql).not.toContain("FROM supplements");
+    expect(calls[0]?.values).toEqual(["Example Dairy Greek Yogurt", false, 1]);
   });
 
   it("skips invalid food ids before querying", async () => {

@@ -614,13 +614,13 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
         },
       },
     ],
-    hint: 'Repeat --query for each food. Hosted assistant runtime authorizes this lookup through the Worker data API intercept.',
+    hint: 'Repeat --query for each food. For USDA FDC ids or UPCs, use `food search-labels` with one query. Hosted assistant runtime authorizes this lookup through the Worker data API intercept.',
     options: z.object({
       query: z
         .array(z.string().min(1).max(MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH))
         .min(1)
         .max(MAX_HOSTED_DATA_API_LABEL_BATCH_QUERIES)
-        .describe('Food product, brand, USDA FDC id, or UPC search text. Repeat --query for multiple values.'),
+        .describe('Food product or brand search text. Repeat --query for multiple values.'),
       limit: z
         .number()
         .int()
