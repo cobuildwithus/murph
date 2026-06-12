@@ -448,18 +448,21 @@ test("buildHostedWebContentSecurityPolicy keeps production script origins on a t
   const csp = buildHostedWebContentSecurityPolicy(createProcessEnv({
     NODE_ENV: "production",
   }));
-  const scriptSources = readCspDirective(csp, "script-src");
-
-  assert.deepEqual(scriptSources, [
+  const directives = readCspDirectives(csp);
+  const expectedScriptSources = [
     "'self'",
     "'unsafe-inline'",
     "https://auth.privy.io",
     "https://telegram.org",
     "https://challenges.cloudflare.com",
-  ]);
-  assert.ok(!scriptSources.includes("https:"));
-  assert.ok(!scriptSources.includes("http:"));
-  assert.ok(!scriptSources.includes("*"));
+  ];
+
+  assert.deepEqual(directives.get("script-src"), expectedScriptSources);
+  assert.ok(!directives.has("script-src-elem"));
+  assert.deepEqual(directives.get("script-src-attr"), ["'none'"]);
+  for (const directive of ["script-src", "script-src-elem", "script-src-attr"]) {
+    assertScriptDirectiveHasNoBroadSource(directives, directive);
+  }
   assert.doesNotMatch(csp, /cookieyes/u);
   assert.doesNotMatch(csp, /cdncookieyes/u);
 });
@@ -575,12 +578,34 @@ function createProcessEnv(values: Record<string, string>): NodeJS.ProcessEnv {
   };
 }
 
-function readCspDirective(csp: string, directive: string): string[] {
-  const directiveValue = csp
-    .split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${directive} `));
+function readCspDirectives(csp: string): Map<string, string[]> {
+  const directives = new Map<string, string[]>();
 
-  assert.ok(directiveValue, `Missing ${directive} directive.`);
-  return directiveValue.split(/\s+/u).slice(1);
+  for (const part of csp.split(";")) {
+    const [directive, ...sources] = part.trim().split(/\s+/u);
+
+    if (!directive) {
+      continue;
+    }
+
+    assert.ok(!directives.has(directive), `Duplicate ${directive} directive.`);
+    directives.set(directive, sources);
+  }
+
+  return directives;
+}
+
+function assertScriptDirectiveHasNoBroadSource(
+  directives: Map<string, string[]>,
+  directive: string,
+): void {
+  const sources = directives.get(directive);
+
+  if (!sources) {
+    return;
+  }
+
+  for (const broadSource of ["*", "http:", "https:", "data:", "blob:"]) {
+    assert.ok(!sources.includes(broadSource), `${directive} must not include ${broadSource}.`);
+  }
 }
