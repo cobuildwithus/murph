@@ -1,9 +1,10 @@
 # PR Deep-Review Loop
 
-Last verified: 2026-06-11
+Last verified: 2026-06-12
 
-An external deep-review loop that runs after the repo-required completion workflow, on PR-lane work.
+Required external deep-review loop that runs after the repo-required completion workflow, on PR-lane work.
 It is additive: it never satisfies, replaces, or reorders the required completion audits in `agent-docs/operations/completion-workflow.md`.
+For non-trivial PR-lane work, do not call the PR good to merge until this loop has passed.
 
 ## When It Runs
 
@@ -12,9 +13,9 @@ Run the loop when all of the following hold:
 1. The task used the worktree/PR lane and a PR is open.
 2. All routed completion audits passed and the scoped commit is pushed.
 3. The PR CI checks are green (`gh pr checks <pr>`).
-4. The user has not opted out for this task.
+4. The user has not explicitly opted out in the current task.
 
-Skip it for docs/process-only PRs and trivial copy-only changes unless the user asks for it.
+Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit current-task user opt-out.
 
 ## One Round
 
