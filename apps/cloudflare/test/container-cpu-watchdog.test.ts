@@ -4,10 +4,15 @@ const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
 }));
 
-// The watchdog imports exactly one symbol from hosted-execution.
-vi.mock("@murphai/hosted-execution", () => ({
-  emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
-}));
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
+  return {
+    ...actual,
+    emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
+  };
+});
 
 import {
   startHostedContainerCpuWatchdog,
@@ -175,7 +180,7 @@ describe("startHostedContainerCpuWatchdog", () => {
     ]);
   });
 
-  it("redacts unknown safe-looking comm values", async () => {
+  it("logs unknown comm values after structured-log text sanitization", async () => {
     const state: FakeProcessState = {
       cpuStatText: null,
       pidStats: new Map([
@@ -196,11 +201,11 @@ describe("startHostedContainerCpuWatchdog", () => {
     const emits = watchdogEmits();
     expect(emits).toHaveLength(1);
     expect((emits[0]?.details as Record<string, unknown>).topCpuProcesses).toEqual([
-      { comm: "[redacted]", commRedacted: true, cpuCores: 0.65, pid: 45 },
+      { comm: "check_health.sh", commRedacted: false, cpuCores: 0.65, pid: 45 },
     ]);
   });
 
-  it("redacts process-controlled comm values that could carry user data", async () => {
+  it("runs process-controlled comm values through the shared redactor", async () => {
     const state: FakeProcessState = {
       cpuStatText: null,
       pidStats: new Map([
@@ -215,6 +220,31 @@ describe("startHostedContainerCpuWatchdog", () => {
     state.pidStats.set(
       "45",
       pidStatText({ comm: "user@example.test", pid: 45, totalTicks: 1_400 }),
+    );
+    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
+
+    const emits = watchdogEmits();
+    expect(emits).toHaveLength(1);
+    expect((emits[0]?.details as Record<string, unknown>).topCpuProcesses).toEqual([
+      { comm: "[redacted-email]", commRedacted: true, cpuCores: 0.65, pid: 45 },
+    ]);
+  });
+
+  it("redacts comm values that normalize to empty text", async () => {
+    const state: FakeProcessState = {
+      cpuStatText: null,
+      pidStats: new Map([
+        ["45", pidStatText({ comm: "   ", pid: 45, totalTicks: 100 })],
+      ]),
+    };
+    stopWatchdog = await startWatchdog({
+      processApi: createFakeProcessApi(state),
+    });
+
+    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
+    state.pidStats.set(
+      "45",
+      pidStatText({ comm: "   ", pid: 45, totalTicks: 1_400 }),
     );
     await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
 

@@ -1,4 +1,7 @@
-import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
+import {
+  emitHostedExecutionStructuredLog,
+  sanitizeHostedExecutionStructuredLogText,
+} from "@murphai/hosted-execution";
 
 const HOSTED_CONTAINER_CPU_WATCHDOG_INTERVAL_MS = 20_000;
 const HOSTED_CONTAINER_CPU_WATCHDOG_EMIT_THRESHOLD_CORES = 0.5;
@@ -7,25 +10,6 @@ const HOSTED_CONTAINER_CPU_WATCHDOG_REDACTED_COMM = "[redacted]";
 // Linux exports per-process utime/stime in USER_HZ ticks; USER_HZ is 100 on the
 // linux/amd64 hosted runner image. Diagnostics-only conversion, not authority.
 const HOSTED_CONTAINER_CPU_WATCHDOG_TICKS_PER_SECOND = 100;
-const HOSTED_CONTAINER_CPU_WATCHDOG_KNOWN_COMMS = new Set([
-  "bash",
-  "codex",
-  "ffmpeg",
-  "ffprobe",
-  "file",
-  "git",
-  "node",
-  "npm",
-  "npx",
-  "pdfinfo",
-  "pdftoppm",
-  "pdftotext",
-  "pnpm",
-  "python",
-  "python3",
-  "sh",
-  "tini",
-]);
 
 interface HostedContainerCpuWatchdogDirectoryEntryLike {
   isDirectory(): boolean;
@@ -344,10 +328,11 @@ function emitHostedContainerCpuWatchdogReport(input: {
 function redactHostedContainerCpuWatchdogComm(
   comm: string,
 ): { comm: string; redacted: boolean } {
-  if (HOSTED_CONTAINER_CPU_WATCHDOG_KNOWN_COMMS.has(comm)) {
-    return { comm, redacted: false };
+  const sanitized = sanitizeHostedExecutionStructuredLogText(comm);
+  if (!sanitized) {
+    return { comm: HOSTED_CONTAINER_CPU_WATCHDOG_REDACTED_COMM, redacted: true };
   }
-  return { comm: HOSTED_CONTAINER_CPU_WATCHDOG_REDACTED_COMM, redacted: true };
+  return { comm: sanitized, redacted: sanitized !== comm };
 }
 
 function subtractOptionalCpuWatchdogCounters(
