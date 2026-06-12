@@ -191,6 +191,7 @@ expectedSignalDescriptions:
     expected: "Small drop possible"
     expectedDirection: "down_or_stable"
     protocolProminence: "focus"
+    displayValue: "Up to 5 mmHg lower"
     estimatedChange:
       kind: "absolute"
       low: -5

@@ -17,5 +17,17 @@ ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local
 
 LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"
 
+# Differentiates the per-class image config so sibling container classes built
+# from this shared Dockerfile (RunnerContainer, DeploySmokeRunnerContainer)
+# never share a Docker image ID in local dev. wrangler dev's duplicate-tag
+# cleanup (`cleanupDuplicateImageTags` in @cloudflare/containers-shared) runs
+# `docker rmi` on every other `cloudflare-dev/*` tag pointing at the same image
+# ID, which untagged the runner image right after the deploy-smoke image build
+# and made hosted-local cold starts fail with
+# "No such image available named cloudflare-dev/runnercontainer:<tag>".
+ARG HOSTED_RUNNER_CONTAINER_CLASS=RunnerContainer
+
+LABEL murph.hosted.container-class="${HOSTED_RUNNER_CONTAINER_CLASS}"
+
 ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 CMD ["node", "dist/container-entrypoint.js"]

@@ -111,6 +111,22 @@ class StripeCliMissingError extends Error {
     this.name = "StripeCliMissingError";
   }
 }
+const spawnHostedLocalDockerEventsForensics = vi.fn<
+  (
+    env: NodeJS.ProcessEnv,
+    input?: {
+      pipeOutput?: boolean;
+      stderrTarget?: NodeJS.WritableStream;
+      stdoutTarget?: NodeJS.WritableStream;
+    },
+  ) => BufferedNamedChildProcess
+>(() =>
+  createBufferedChild({
+    exitCode: null,
+    name: "docker-events",
+    pid: nextChildPid++,
+  }),
+);
 const spawnStripeListenerWithSecretCapture = vi.fn<
   (input: {
     command: string;
@@ -373,6 +389,7 @@ vi.mock("../../src/dev-hosted-local/runtime.ts", () => ({
   resolveHostedLocalWorkerPortMode,
   runCommand,
   spawnChildProcess,
+  spawnHostedLocalDockerEventsForensics,
   spawnStripeListenerWithSecretCapture,
   StripeCliMissingError,
   terminateChildProcess,
@@ -1688,7 +1705,7 @@ describe("hosted local dev stack", () => {
     });
 
     await expect(stack.ready).rejects.toThrow("fetch failed");
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(1);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
   });
 
   it("starts a managed Linq cloudflared tunnel and registers the local webhook target", async () => {
@@ -2236,6 +2253,60 @@ describe("hosted local dev stack", () => {
     expect(vi.mocked(symlink)).not.toHaveBeenCalled();
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(1);
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(2);
+  });
+
+  it("streams docker-events forensics only for isolated or opted-in stacks", async () => {
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_HOSTED_LOCAL_DOCKER_EVENTS_FORENSICS: "",
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "",
+        MURPH_HOSTED_LOCAL_PROFILE: "",
+      },
+    });
+
+    // An ordinary dev stack must not observe the whole Docker daemon.
+    expect(spawnHostedLocalDockerEventsForensics).not.toHaveBeenCalled();
+    await stack.stop("SIGTERM");
+  });
+
+  it("includes docker-events output in startup-failure diagnostics", async () => {
+    const cloudflareChild = createBufferedChild({
+      exitCode: 1,
+      name: "cloudflare",
+      pid: 511,
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(cloudflareChild)
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 512 }));
+    spawnHostedLocalDockerEventsForensics.mockReturnValueOnce(
+      createBufferedChild({
+        exitCode: null,
+        name: "docker-events",
+        pid: 513,
+        stdoutText: '{"Action":"kill","Actor":{"Attributes":{"signal":"9"}}}',
+      }),
+    );
+    waitForHealthyHttpEndpoint.mockImplementationOnce(() => new Promise(() => {}));
+    waitForFirstChildExit.mockResolvedValueOnce(cloudflareChild);
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        // The opt-in flag streams forensics without requiring full E2E
+        // isolation, which keeps this unit test independent of isolation
+        // preconditions.
+        MURPH_HOSTED_LOCAL_DOCKER_EVENTS_FORENSICS: "1",
+      },
+    });
+
+    // Startup failures (image untags, cold-start kills) are exactly what the
+    // forensics exist to explain, so the rejection itself must carry them.
+    await expect(stack.ready).rejects.toThrow(/\[docker-events:stdout\][\s\S]*"signal":"9"/u);
   });
 
   it("fails fast and cleans up when a dev child exits before readiness", async () => {

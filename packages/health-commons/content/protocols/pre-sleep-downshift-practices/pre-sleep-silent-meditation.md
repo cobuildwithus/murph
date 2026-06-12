@@ -178,6 +178,7 @@ expectedSignalDescriptions:
     biomarkerKey: biomarker:sleep-onset-latency
     expected: May fall asleep sooner
     description: Silent attention gives planning and worry a neutral anchor before lights-out, lowering pre-sleep arousal and sleep effort.
+    displayValue: "2-8 min faster"
     estimatedChange:
       kind: absolute
       low: -8
@@ -234,6 +235,7 @@ expectedSignalDescriptions:
     expected: Could trend lower
     expectedDirection: down_or_stable
     description: Lower mental arousal before sleep lets the heart enter the night from a calmer stress set point.
+    displayValue: "Up to 2 bpm lower"
     estimatedChange:
       kind: absolute
       low: -2

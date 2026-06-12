@@ -170,6 +170,7 @@ expectedSignalDescriptions:
   expected: down_or_stable
   protocolProminence: focus
   description: 'Easy extra walking improves aerobic efficiency and stroke volume, reducing the resting beats needed when the added dose stays recoverable.'
+  displayValue: "Up to 2 bpm lower"
   estimatedChange:
     kind: absolute
     low: -2
@@ -194,6 +195,7 @@ expectedSignalDescriptions:
   expected: down_or_stable
   protocolProminence: focus
   description: 'Repeated walking improves vascular tone and replaces sitting, reducing resistance against each heartbeat.'
+  displayValue: "Up to 4 mmHg lower"
   estimatedChange:
     kind: absolute
     low: -4
@@ -218,6 +220,7 @@ expectedSignalDescriptions:
   expected: down_or_stable
   protocolProminence: focus
   description: 'A modest ramp builds tissue tolerance; rising foot, shin, knee, hip, or back pain signals load is too steep.'
+  displayValue: "Up to 1 point lower"
   estimatedChange:
     kind: absolute
     low: -1
@@ -242,6 +245,7 @@ expectedSignalDescriptions:
   expected: down_or_stable
   protocolProminence: context
   description: 'Filling the floor from sitting replaces chair time with light movement.'
+  displayValue: "Up to 30 min less per day"
   estimatedChange:
     kind: absolute
     low: -30

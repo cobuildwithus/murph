@@ -241,6 +241,7 @@ expectedSignalDescriptions:
   expected: down_or_stable
   protocolProminence: focus
   description: "A 6-hour eating window reduces eating opportunity and late calories, creating an energy gap that lowers weekly scale averages when intake falls."
+  displayValue: "Down 1-3%"
   estimatedChange:
     kind: relative_percent
     low: -3
@@ -253,6 +254,7 @@ expectedSignalDescriptions:
   expected: down_or_stable
   protocolProminence: focus
   description: "Earlier, shorter eating shifts calories into higher insulin sensitivity and leaves a longer overnight interval for glucose clearance."
+  displayValue: "Up to 5 mg/dL lower"
   estimatedChange:
     kind: absolute
     low: -5
@@ -266,6 +268,7 @@ expectedSignalDescriptions:
   expectedDirection: down
   protocolProminence: focus
   description: "Earlier calories and a longer overnight fast lower insulin exposure and support daytime salt and vascular rhythm handling."
+  displayValue: "2-6 mmHg lower"
   estimatedChange:
     kind: absolute
     low: -6
@@ -278,6 +281,7 @@ expectedSignalDescriptions:
   expected: down_or_stable
   protocolProminence: context
   description: "Real fat loss reduces abdominal tissue over time, shrinking tape-measured waist alongside weight."
+  displayValue: "Up to 4 cm smaller"
   estimatedChange:
     kind: absolute
     low: -4

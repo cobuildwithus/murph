@@ -738,7 +738,8 @@ function formatExpectedSignalLabel(
   signal: HealthCommonsExpectedSignalDescription,
   direction: HealthCommonsBiomarkerProtocolExpectedDirection,
 ): string {
-  return formatEstimatedChangeRange(signal.estimatedChange, signal)
+  return signal.displayValue
+    ?? formatEstimatedChangeRange(signal.estimatedChange, signal)
     ?? normalizeExpectedSignalLabel(signal.expected)
     ?? formatExpectedDirection(direction);
 }
