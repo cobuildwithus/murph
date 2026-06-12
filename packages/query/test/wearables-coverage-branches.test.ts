@@ -1435,6 +1435,17 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
   const rawSourceDay = summarizeWearableDay(vault, "2026-04-06");
   assert.deepEqual(rawSourceDay?.providers, ["unknown"]);
   assert.equal(rawSourceDay?.activity?.steps.selection.provider, "unknown");
+  const unknownDataset = collectWearableDataset(vault, { providers: ["unknown"] });
+  assert.equal(unknownDataset.rawMetricCandidates.length, 1);
+  const sourceInstanceDataset = collectWearableDataset(vault, { providers: ["source-junction-unmapped-steps"] });
+  assert.equal(sourceInstanceDataset.rawMetricCandidates.length, 0);
+  const unknownFilteredDay = summarizeWearableDay(vault, "2026-04-06", { providers: ["unknown"] });
+  assert.deepEqual(unknownFilteredDay?.providers, ["unknown"]);
+  assert.equal(unknownFilteredDay?.activity?.steps.selection.provider, "unknown");
+  const sourceInstanceFilteredDay = summarizeWearableDay(vault, "2026-04-06", {
+    providers: ["source-junction-unmapped-steps"],
+  });
+  assert.equal(sourceInstanceFilteredDay, null);
 
   const garminSleep = summarizeWearableSleep(vault, { providers: ["garmin"] })
     .find((night) => night.date === "2026-04-07");
