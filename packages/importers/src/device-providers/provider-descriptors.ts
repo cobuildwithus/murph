@@ -73,6 +73,11 @@ export interface DeviceProviderSourcePriorityHints {
 
 export interface DeviceProviderDescriptor {
   provider: string;
+  /**
+   * Implementation/source slugs (such as Junction source-provider slugs) that
+   * resolve to this provider's public identity, e.g. `whoop_v2` -> `whoop`.
+   */
+  aliases?: readonly string[];
   displayName: string;
   transportModes: readonly DeviceProviderTransportMode[];
   connection?: DeviceProviderConnectionDescriptor;
@@ -507,6 +512,7 @@ export const STRAVA_DEVICE_PROVIDER_DESCRIPTOR = {
 
 export const WHOOP_DEVICE_PROVIDER_DESCRIPTOR = {
   provider: "whoop",
+  aliases: ["whoop_v2", "whoop-v2"],
   displayName: "WHOOP",
   transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
   connection: {
@@ -628,5 +634,21 @@ export function resolveDeviceProviderDescriptor(
     return undefined;
   }
 
-  return descriptors.find((descriptor) => normalizeDeviceProviderKey(descriptor.provider) === key);
+  return descriptors.find((descriptor) =>
+    normalizeDeviceProviderKey(descriptor.provider) === key
+    || descriptor.aliases?.some((alias) => normalizeDeviceProviderKey(alias) === key),
+  );
+}
+
+export function canonicalizeDeviceProviderSlug(
+  provider: string,
+  descriptors: readonly DeviceProviderDescriptor[] = defaultDeviceProviderDescriptors,
+): string {
+  const key = normalizeDeviceProviderKey(provider);
+
+  if (!key) {
+    return provider;
+  }
+
+  return resolveDeviceProviderDescriptor(key, descriptors)?.provider ?? key;
 }

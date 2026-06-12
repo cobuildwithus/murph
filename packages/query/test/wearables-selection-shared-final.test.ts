@@ -743,6 +743,59 @@ test("selection helpers cover direct, fallback, agreement, conflict, and tie-bre
   assert.equal(fallbackTimestampSleepSelection.selection?.title, "Alpha end-at sleep");
 });
 
+test("selection treats Junction whoop_v2 evidence as a direct WHOOP duplicate", () => {
+  const directWhoopHrv = makeMetricCandidate({
+    candidateId: "whoop:hrv:direct",
+    date: "2026-04-12",
+    externalRef: makeExternalRef({
+      resourceId: "whoop-recovery-1",
+      resourceType: "recovery",
+      system: "whoop",
+    }),
+    metric: "hrv",
+    occurredAt: "2026-04-12T07:00:00Z",
+    provider: "whoop",
+    recordedAt: "2026-04-12T07:01:00Z",
+    sourceFamily: "event",
+    sourceKind: "observation:hrv",
+    title: "Direct WHOOP HRV",
+    unit: "ms",
+    value: 52,
+  });
+  const junctionWhoopHrv = makeMetricCandidate({
+    candidateId: "junction:whoop-v2:hrv",
+    dataOrigin: {
+      version: 1,
+      aggregatorProvider: "junction",
+      sourceProviderSlug: "whoop_v2",
+    },
+    date: "2026-04-12",
+    externalRef: makeExternalRef({
+      resourceId: "junction-whoop-recovery-1",
+      resourceType: "junction-whoop-v2-recovery",
+      system: "junction",
+    }),
+    metric: "hrv",
+    occurredAt: "2026-04-12T07:05:00Z",
+    provider: "junction",
+    recordedAt: "2026-04-12T07:06:00Z",
+    sourceFamily: "event",
+    sourceKind: "observation:hrv",
+    title: "Junction WHOOP HRV",
+    unit: "ms",
+    value: 52,
+  });
+
+  const resolved = resolveMetric(
+    "hrv",
+    [junctionWhoopHrv, directWhoopHrv],
+    { metricFamily: "recovery" },
+  );
+
+  assert.equal(resolved.selection.provider, "whoop");
+  assert.equal(resolved.selection.title, "Direct WHOOP HRV");
+});
+
 test("selection keeps Junction source policy separate from provider identity", () => {
   const directOuraSteps = makeMetricCandidate({
     candidateId: "oura:steps:direct",

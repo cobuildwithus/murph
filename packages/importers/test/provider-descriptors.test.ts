@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { defaultDeviceProviderAdapters } from "../src/device-providers/defaults.ts";
 import {
+  canonicalizeDeviceProviderSlug,
   DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
   defaultDeviceProviderDescriptors,
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
@@ -59,6 +60,19 @@ describe("device provider descriptors", () => {
       DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
     );
     expect(STRAVA_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays).toBe(30);
+  });
+
+  it("resolves implementation-slug aliases to the canonical provider identity", () => {
+    expect(resolveDeviceProviderDescriptor("whoop_v2")).toBe(WHOOP_DEVICE_PROVIDER_DESCRIPTOR);
+    expect(resolveDeviceProviderDescriptor("whoop-v2")).toBe(WHOOP_DEVICE_PROVIDER_DESCRIPTOR);
+    expect(resolveDeviceProviderDescriptor(" WHOOP_V2 ")).toBe(WHOOP_DEVICE_PROVIDER_DESCRIPTOR);
+
+    expect(canonicalizeDeviceProviderSlug("whoop_v2")).toBe("whoop");
+    expect(canonicalizeDeviceProviderSlug("whoop-v2")).toBe("whoop");
+    expect(canonicalizeDeviceProviderSlug(" WHOOP ")).toBe("whoop");
+    expect(canonicalizeDeviceProviderSlug("oura")).toBe("oura");
+    expect(canonicalizeDeviceProviderSlug("fitbit")).toBe("fitbit");
+    expect(canonicalizeDeviceProviderSlug("")).toBe("");
   });
 
   it("resolves metric priority from the shared descriptor policy", () => {

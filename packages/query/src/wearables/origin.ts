@@ -1,4 +1,5 @@
 import type { DeviceDataOrigin } from "@murphai/contracts";
+import { canonicalizeDeviceProviderSlug } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { normalizeLowercaseString } from "./shared.ts";
 import type { WearableExternalRef } from "./types.ts";
@@ -8,6 +9,14 @@ export function normalizeWearableOriginSourceSlug(value: string | null | undefin
 }
 
 export function resolveWearablePublicSourceProvider(input: {
+  dataOrigin?: DeviceDataOrigin | null;
+  externalRef?: WearableExternalRef | null;
+  provider?: string | null;
+}): string {
+  return canonicalizeDeviceProviderSlug(resolveRawWearableSourceProvider(input));
+}
+
+function resolveRawWearableSourceProvider(input: {
   dataOrigin?: DeviceDataOrigin | null;
   externalRef?: WearableExternalRef | null;
   provider?: string | null;

@@ -1,3 +1,5 @@
+import { canonicalizeDeviceProviderSlug } from "@murphai/importers/device-providers/provider-descriptors";
+
 import type { VaultReadModel } from "../read-model.ts";
 import {
   buildWearableSummaryBundleFromDataset,
@@ -120,6 +122,14 @@ function resolveWearableDatasetItemPublicProvider(
 }
 
 function resolveProjectionPublicProvider(input: {
+  dataOrigin?: WearableMetricCandidate["dataOrigin"];
+  externalRef?: WearableExternalRef | null;
+  provider?: string | null;
+}): string {
+  return canonicalizeDeviceProviderSlug(resolveRawProjectionProvider(input));
+}
+
+function resolveRawProjectionProvider(input: {
   dataOrigin?: WearableMetricCandidate["dataOrigin"];
   externalRef?: WearableExternalRef | null;
   provider?: string | null;
