@@ -343,6 +343,7 @@ export class RunnerContainer extends Container {
   private liveModelTurnSmokeFence: {
     expiresAtMs: number;
     model: string;
+    remainingRequests: number;
   } | null = null;
   private lastActivityObservedStage: string | null = null;
   private lastDestroyRequest: RunnerContainerDestroyRequestRecord | null = null;
@@ -690,6 +691,7 @@ export class RunnerContainer extends Container {
     this.liveModelTurnSmokeFence = {
       expiresAtMs: Date.now() + smokeTimeoutMs,
       model: input.model,
+      remainingRequests: 1,
     };
     try {
       const response = await this.containerFetch(
@@ -727,19 +729,25 @@ export class RunnerContainer extends Container {
     }
   }
 
-  // Queried by the Worker egress intercept to authorize deploy-smoke OpenAI
-  // egress: active only while smokeLiveModelTurn is in flight, with an
-  // expiry bound in case the smoke request hangs.
+  // Queried by the Worker egress intercept to authorize exactly one
+  // deploy-smoke OpenAI request while smokeLiveModelTurn is in flight, with an
+  // expiry bound in case the smoke request hangs. The active read consumes the
+  // fence so loops or unexpected retries cannot keep using the Worker key.
   async readDeploySmokeLiveModelTurnFence(): Promise<{
     active: boolean;
     model?: string;
   }> {
     const fence = this.liveModelTurnSmokeFence;
-    if (!fence || Date.now() >= fence.expiresAtMs) {
+    if (
+      !fence
+      || Date.now() >= fence.expiresAtMs
+      || fence.remainingRequests <= 0
+    ) {
       return {
         active: false,
       };
     }
+    fence.remainingRequests -= 1;
     return {
       active: true,
       model: fence.model,

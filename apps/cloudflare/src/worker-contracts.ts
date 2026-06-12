@@ -77,6 +77,9 @@ export interface WorkerRunnerContainerStubLike {
 
 export interface WorkerDeploySmokeRunnerContainerStubLike
   extends WorkerRunnerContainerStubLike {
+  /**
+   * Returns and consumes the one deploy-smoke live-model egress grant.
+   */
   readDeploySmokeLiveModelTurnFence?(): Promise<{
     active: boolean;
     model?: string;

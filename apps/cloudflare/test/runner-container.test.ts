@@ -1206,6 +1206,7 @@ describe("RunnerContainer", () => {
 
   it("can extend deploy smoke to run a live model turn probe behind the egress fence", async () => {
     let fenceActiveDuringTurn: boolean | null = null;
+    let secondFenceReadDuringTurn: { active: boolean; model?: string } | null = null;
     let containerRef: RunnerContainer | null = null;
     const { container, containerFetch } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
@@ -1235,12 +1236,13 @@ describe("RunnerContainer", () => {
         }
 
         expect(url).toBe("http://container/internal/deploy-live-model-turn-smoke");
-        fenceActiveDuringTurn =
-          (await containerRef?.readDeploySmokeLiveModelTurnFence())?.active ?? null;
-        await expect(containerRef?.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
+        const firstFenceRead = await containerRef?.readDeploySmokeLiveModelTurnFence();
+        fenceActiveDuringTurn = firstFenceRead?.active ?? null;
+        expect(firstFenceRead).toEqual({
           active: true,
           model: "gpt-5.4-mini",
         });
+        secondFenceReadDuringTurn = await containerRef?.readDeploySmokeLiveModelTurnFence() ?? null;
         return new Response(JSON.stringify({
           liveModelTurn: {
             durationMs: 1_234,
@@ -1278,6 +1280,9 @@ describe("RunnerContainer", () => {
     });
     expect(result.codexShell).toEqual(createCodexShellSmokeResult());
     expect(fenceActiveDuringTurn).toBe(true);
+    expect(secondFenceReadDuringTurn).toEqual({
+      active: false,
+    });
     await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
       active: false,
     });
