@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   accountHostedAiUsageForAllowanceTx,
+  checkHostedAiUsageGate,
   claimHostedAiUsageLimitNotice,
   priceHostedAiUsageForAllowance,
   readHostedAiUsageGate,
@@ -807,6 +808,121 @@ describe("readHostedAiUsageGate", () => {
         memberId: "member_123",
       }),
     }));
+  });
+});
+
+describe("checkHostedAiUsageGate", () => {
+  it("serves allow decisions from the read gate without usage-period writes", async () => {
+    const prisma = createGatePrisma({
+      spentUsdMicros: 9_000_000n,
+    });
+
+    await expect(checkHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      remainingUsdMicros: 1_000_000n,
+      spentUsdMicros: 9_000_000n,
+    });
+
+    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("confirms read denials with the mutating gate before reporting them", async () => {
+    const prisma = createGatePrisma({
+      spentUsdMicros: 10_000_000n,
+    });
+    // createGatePrisma queues single-gate-call member lookups; the check gate
+    // runs read + resolve, so both legs need the same active member state.
+    prisma.hostedMember.findUnique = vi.fn(async () => ({
+      billingRef: {
+        currentBillingPhase: null,
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: null,
+        currentPeriodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        currentPeriodStart: new Date("2026-03-01T00:00:00.000Z"),
+        currentTrialEndsAt: null,
+        currentTrialStartedAt: null,
+        pulseTrialPolicyVersion: null,
+        pulseTrialRedeemedAt: null,
+        scheduledBillingEffectiveAt: null,
+        scheduledBillingPlanCode: null,
+      },
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    }));
+
+    await expect(checkHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "ai_usage_limit_exceeded",
+      spentUsdMicros: 10_000_000n,
+    });
+
+    // The denial escalated to the mutating gate: the resolve leg re-reads
+    // member state after the read leg's single lookup.
+    expect(
+      prisma.hostedMember.findUnique.mock.calls.length,
+    ).toBeGreaterThan(1);
+  });
+
+  it("returns the mutating gate's allow when bookkeeping rescues a stale read denial", async () => {
+    const prisma = createGatePrisma({
+      spentUsdMicros: 10_000_000n,
+    });
+    // createGatePrisma queues single-gate-call member lookups; the check gate
+    // runs read + resolve, so both legs need the same active member state.
+    prisma.hostedMember.findUnique = vi.fn(async () => ({
+      billingRef: {
+        currentBillingPhase: null,
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: null,
+        currentPeriodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        currentPeriodStart: new Date("2026-03-01T00:00:00.000Z"),
+        currentTrialEndsAt: null,
+        currentTrialStartedAt: null,
+        pulseTrialPolicyVersion: null,
+        pulseTrialRedeemedAt: null,
+        scheduledBillingEffectiveAt: null,
+        scheduledBillingPlanCode: null,
+      },
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    }));
+    // The read leg sees a stale exhausted period row (spend == limit); the
+    // mutating leg's authoritative post-bookkeeping read (e.g. after carryover
+    // moved usage out of this period) sees spend back under the limit.
+    prisma.hostedAiUsagePeriod.findUniqueOrThrow = vi.fn(async () => ({
+      billingPlanCode: "launch_monthly",
+      blockedAt: null,
+      limitUsdMicros: 10_000_000n,
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      spentUsdMicros: 9_000_000n,
+    }));
+
+    await expect(checkHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      remainingUsdMicros: 1_000_000n,
+      spentUsdMicros: 9_000_000n,
+    });
+
+    // The allow must come from the escalated mutating leg, which ran period
+    // bookkeeping; reporting the read leg's denial would fail the assertions
+    // above, and skipping escalation would never run the upsert.
+    expect(prisma.hostedAiUsagePeriod.upsert).toHaveBeenCalledTimes(1);
   });
 });
 

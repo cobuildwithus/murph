@@ -53,7 +53,12 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberCoreState: mocks.readHostedMemberCoreState,
 }));
 
-vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
+vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", async (importOriginal) => ({
+  // Keep the real pure helpers (e.g. the mailbox AI-gate predicate); only the
+  // gate decision itself is stubbed.
+  ...(await importOriginal<
+    typeof import("@/src/lib/hosted-orchestration/runtime-usage-decision")
+  >()),
   resolveHostedRuntimeAiUsageGate: mocks.resolveHostedRuntimeAiUsageGate,
 }));
 
@@ -413,6 +418,83 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("gates the whole mixed mailbox fetch batch when any item needs the AI usage gate", async () => {
+    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
+      items: [
+        {
+          createdAt: FIXED_NOW,
+          dedupeKey: "browser-vault-dedupe-mixed",
+          expiresAt: null,
+          id: "mailbox_browser_vault_mixed",
+          kind: "runtime.browser-vault-refresh-requested",
+          lane: "system",
+          laneSeq: "12",
+          occurredAt: FIXED_NOW,
+          payloadBytes: 64,
+          payloadInlineCiphertext: "cipher_inline_browser_vault_mixed",
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: FIXED_NOW,
+          userId: "member_routes_1",
+        },
+        {
+          createdAt: FIXED_NOW,
+          dedupeKey: "conversation-dedupe-mixed",
+          expiresAt: null,
+          id: "mailbox_item_mixed",
+          kind: "conversation.message",
+          lane: "conversation",
+          laneSeq: "12",
+          occurredAt: FIXED_NOW,
+          payloadBytes: 64,
+          payloadInlineCiphertext: "cipher_inline_mixed",
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: FIXED_NOW,
+          userId: "member_routes_1",
+        },
+      ],
+    });
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "system",
+        maxSeq: "12",
+      },
+      {
+        lane: "conversation",
+        maxSeq: "12",
+      },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
+      status: "denied",
+    });
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [
+          {
+            importedSeq: "11",
+            lane: "system",
+          },
+          {
+            importedSeq: "11",
+            lane: "conversation",
+          },
+        ],
+        limitPerLane: 10,
+        requestId: "request_mailbox_fetch_mixed_denied",
+      },
+    ));
+
+    // One gated conversation item denies the whole batch, including the
+    // non-gated system item: all-or-nothing watermark semantics.
+    expect(response.status).toBe(403);
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
   });
 
   it("fetches a mailbox payload sidecar through the separate signed route", async () => {

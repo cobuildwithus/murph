@@ -1,4 +1,5 @@
 import {
+  checkHostedAiUsageGate,
   readHostedAiUsageGate,
   resolveHostedAiUsageGate,
 } from "../hosted-execution/usage-allowance";
@@ -11,6 +12,11 @@ export type HostedRuntimeUsageGateCheck =
   | { retryAt: string; status: "unavailable" };
 
 export async function resolveHostedRuntimeAiUsageGate(input: {
+  // Default is the read-first check: write-free on allow, denial confirmed by
+  // the mutating gate. "mutating" is reserved for the authoritative
+  // turn-admission decision (runtime reconciliation facts), which owns usage-
+  // period bookkeeping. "read_only" never writes and may miss unmaterialized
+  // carryover; use it only for display surfaces.
   mode?: "mutating" | "read_only";
   now?: Date | string;
   prisma?: Parameters<typeof resolveHostedAiUsageGate>[0]["prisma"];
@@ -21,7 +27,9 @@ export async function resolveHostedRuntimeAiUsageGate(input: {
   try {
     const readGate = input.mode === "read_only"
       ? readHostedAiUsageGate
-      : resolveHostedAiUsageGate;
+      : input.mode === "mutating"
+        ? resolveHostedAiUsageGate
+        : checkHostedAiUsageGate;
     const decision = await readGate({
       memberId: input.userId,
       now,
@@ -39,6 +47,16 @@ export async function resolveHostedRuntimeAiUsageGate(input: {
       status: "unavailable",
     };
   }
+}
+
+// AI-gated mailbox work: conversation-lane items and explicit manual runs.
+// Shared by the hosted mailbox fetch/payload routes so "what counts as AI
+// work" has one definition.
+export function hostedRuntimeMailboxEntryNeedsAiUsageGate(entry: {
+  kind: string;
+  lane: string;
+}): boolean {
+  return entry.lane === "conversation" || entry.kind === "runtime.manual-requested";
 }
 
 function buildHostedRuntimeUsageGateUnavailableRetryAt(now: Date): string {
