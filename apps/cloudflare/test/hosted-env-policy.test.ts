@@ -116,11 +116,8 @@ describe("buildHostedRunnerContainerEnv", () => {
     // hosted-env-policy.ts is part of the workerd bundle and must not import
     // @murphai/assistant-engine (Node-only module graph), so it pins the two
     // deny-listed names as literals. This node-side test is the drift guard.
-    const [{ MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV }, { MURPH_ASSISTANT_SKILLS_ROOT_ENV }] =
-      await Promise.all([
-        import("@murphai/assistant-engine"),
-        import("@murphai/assistant-engine/assistant-skill-assets"),
-      ]);
+    const { MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV, MURPH_ASSISTANT_SKILLS_ROOT_ENV } =
+      await import("@murphai/assistant-engine/assistant-skill-assets");
     expect(MURPH_ASSISTANT_SKILLS_ROOT_ENV).toBe("MURPH_ASSISTANT_SKILLS_ROOT");
     expect(MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV).toBe(
       "MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH",
