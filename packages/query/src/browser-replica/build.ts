@@ -278,11 +278,20 @@ function dedupeRequestedMetrics(metrics: readonly BrowserVaultRequestedMetric[])
   );
 }
 
+// Observation points join the row/series surface without catalog
+// enrollment, exactly as test-results do: the projection is the source of
+// truth for which metrics exist (universal queryability). Metric
+// observations are default-hidden as ENTITIES purely to keep timelines
+// lean — their data is meant to surface here. Ad-hoc manual MEASUREMENT
+// keys stay registry-gated (private unless bound), and the
+// metric-SELECTION surface keeps its stricter requested-only gate.
 function isBrowserVaultMetricRowPoint(
   point: MetricPoint,
   requestedMetrics: readonly BrowserVaultRequestedMetric[],
 ): boolean {
-  return isBrowserVaultRequestedMetricPoint(point, requestedMetrics) || point.source.kind === "test-result";
+  return isBrowserVaultRequestedMetricPoint(point, requestedMetrics)
+    || point.source.kind === "test-result"
+    || point.source.kind === "observation";
 }
 
 function isBrowserVaultRequestedMetricPoint(

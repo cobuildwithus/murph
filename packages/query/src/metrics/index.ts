@@ -6,6 +6,7 @@ import {
   resolveMetricDefinition,
   type MetricComparator,
   type MetricConfidence,
+  type MetricGrain,
   type MetricPoint,
   type MetricPointContext,
   type MetricSourceFamily,
@@ -326,12 +327,20 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
   const unit = readString(entity.attributes.unit);
   if (!metric || value === null) return [];
 
+  // Daily provider summaries (observationGrain "summary") are day-grain
+  // facts; other grains keep the event default. The raw observationGrain
+  // is preserved in context either way so read paths can distinguish
+  // samples, compact summaries, and derived facts.
+  const observationGrain = readString(entity.attributes.observationGrain);
+
   return [scalarMetricPoint({
     confidence: eventConfidence(entity),
     context: {
+      observationGrain: observationGrain ?? undefined,
       qualifiers: readQualifiers(entity.attributes.qualifiers),
       timeZone: readString(entity.attributes.timeZone) ?? undefined,
     },
+    grain: observationGrain === "summary" ? "day" : undefined,
     // Canonical dayKey wins over the UTC slice of occurredAt: daily and
     // sleep observations are dated by their local/sleep day (the same
     // invariant deriveWearableDate uses), so precedence and date-filtered
@@ -409,6 +418,7 @@ function scalarMetricPoint(input: {
   context: MetricPointContext;
   effectiveDate?: string | null;
   entity: CanonicalEntity;
+  grain?: MetricGrain;
   index: number;
   metric: string;
   observedAt?: string | null;
@@ -433,7 +443,7 @@ function scalarMetricPoint(input: {
     confidence: input.confidence,
     context: compactContext(input.context),
     effectiveDate,
-    grain: "event",
+    grain: input.grain ?? "event",
     metricKey: definition.key,
     observedAt,
     provenance: {
