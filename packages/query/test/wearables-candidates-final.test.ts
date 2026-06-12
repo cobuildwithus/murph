@@ -646,6 +646,67 @@ test("collectWearableDataset infers Junction source provenance from legacy resou
   assert.equal(candidate?.externalRef?.resourceType, "junction-oura-sleep");
 });
 
+test("collectWearableDataset resolves Junction whoop_v2 sources under the whoop provider filter", () => {
+  const vault = makeVault([
+    makeWearableEntity({
+      attributes: {
+        dataOrigin: {
+          version: 1,
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "whoop_v2",
+        },
+        externalRef: makeExternalRef({
+          resourceId: "junction-whoop-steps-1",
+          resourceType: "junction-whoop-v2-activity",
+          system: "junction",
+        }),
+        metric: "daily-steps",
+        recordedAt: "2026-06-12T07:00:00Z",
+        unit: "count",
+        value: 9100,
+      },
+      entityId: "evt_junction_whoop_v2_steps",
+      family: "event",
+      kind: "observation",
+      recordClass: "ledger",
+      title: "Junction WHOOP steps",
+    }),
+    makeWearableEntity({
+      attributes: {
+        externalRef: makeExternalRef({
+          resourceId: "whoop-export-steps-1",
+          resourceType: "daily_activity",
+          system: "whoop",
+        }),
+        metric: "daily-steps",
+        recordedAt: "2025-11-23T07:00:00Z",
+        unit: "count",
+        value: 8400,
+      },
+      entityId: "evt_whoop_export_steps",
+      family: "event",
+      kind: "observation",
+      recordClass: "ledger",
+      title: "WHOOP export steps",
+    }),
+  ]);
+
+  const whoopFiltered = collectWearableDataset(vault, { providers: ["whoop"] });
+  assert.deepEqual(
+    whoopFiltered.rawMetricCandidates.map((candidate) => candidate.value).sort(),
+    [8400, 9100],
+  );
+
+  const aliasFiltered = collectWearableDataset(vault, { providers: ["whoop_v2"] });
+  assert.deepEqual(
+    aliasFiltered.rawMetricCandidates.map((candidate) => candidate.value).sort(),
+    [8400, 9100],
+  );
+
+  const ouraFiltered = collectWearableDataset(vault, { providers: ["oura"] });
+  assert.equal(ouraFiltered.rawMetricCandidates.length, 0);
+});
+
 test("collectWearableDataset ignores malformed persisted origin before legacy fallback", () => {
   const vault = makeVault([
     makeWearableEntity({
