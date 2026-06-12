@@ -457,7 +457,11 @@ describe("runSmokeHostedDeploy", () => {
         }), { status: 200 });
       }
 
-      if (String(url).endsWith("/internal/deploy/container-smoke?liveModelTurn=gpt-5.4-mini")) {
+      const parsedUrl = new URL(String(url));
+      if (
+        parsedUrl.pathname === "/internal/deploy/container-smoke" &&
+        parsedUrl.searchParams.get("liveModelTurn") === "gpt-5.4-mini"
+      ) {
         return new Response(JSON.stringify({
           ok: true,
           runnerContainer: {
@@ -497,9 +501,11 @@ describe("runSmokeHostedDeploy", () => {
     expect(fetchCalls).toContain(
       "https://worker.example.test/internal/deploy/container-smoke",
     );
-    expect(fetchCalls).toContain(
-      "https://worker.example.test/internal/deploy/container-smoke?liveModelTurn=gpt-5.4-mini",
-    );
+    const liveCall = fetchCalls
+      .map((entry) => new URL(entry))
+      .find((entry) => entry.searchParams.get("liveModelTurn") === "gpt-5.4-mini");
+    expect(liveCall?.searchParams.get("expectedBundleFingerprint")).toBe("bundle-fingerprint");
+    expect(liveCall?.searchParams.get("expectedSourceFingerprint")).toBe("source-fingerprint");
   });
 
   it("fails the live model turn smoke when the deployed turn metadata is missing or wrong", async () => {
@@ -717,7 +723,7 @@ describe("runSmokeHostedDeploy", () => {
     )).toBe(true);
   });
 
-  it("runs the live model turn smoke once after runner bundle readiness", async () => {
+  it("retries stale live smoke bundle preconditions after runner bundle readiness", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-live-model-retry-manifest-"));
     const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
     await mkdir(path.dirname(manifestPath), { recursive: true });
@@ -731,6 +737,7 @@ describe("runSmokeHostedDeploy", () => {
       "utf8",
     );
     const fetchCalls: string[] = [];
+    let liveSmokeAttempts = 0;
     const fetchImpl = async (url: RequestInfo | URL) => {
       fetchCalls.push(String(url));
 
@@ -744,9 +751,14 @@ describe("runSmokeHostedDeploy", () => {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
 
-      if (String(url).endsWith("/internal/deploy/container-smoke")) {
+      const parsedUrl = new URL(String(url));
+      if (
+        parsedUrl.pathname === "/internal/deploy/container-smoke" &&
+        !parsedUrl.searchParams.has("liveModelTurn")
+      ) {
         const smokeAttempt = fetchCalls.filter((entry) =>
-          entry.endsWith("/internal/deploy/container-smoke")
+          new URL(entry).pathname === "/internal/deploy/container-smoke" &&
+          !new URL(entry).searchParams.has("liveModelTurn")
         ).length;
         return new Response(JSON.stringify({
           ok: true,
@@ -769,7 +781,19 @@ describe("runSmokeHostedDeploy", () => {
         }), { status: 200 });
       }
 
-      if (String(url).endsWith("/internal/deploy/container-smoke?liveModelTurn=gpt-5.4-mini")) {
+      if (
+        parsedUrl.pathname === "/internal/deploy/container-smoke" &&
+        parsedUrl.searchParams.get("liveModelTurn") === "gpt-5.4-mini"
+      ) {
+        liveSmokeAttempts += 1;
+        if (liveSmokeAttempts === 1) {
+          return new Response(JSON.stringify({
+            detail: "Hosted runner container smoke did not run the expected runner bundle.",
+            error: "Deploy container smoke failed.",
+            ok: false,
+          }), { status: 409 });
+        }
+
         return new Response(JSON.stringify({
           ok: true,
           runnerContainer: {
@@ -808,12 +832,21 @@ describe("runSmokeHostedDeploy", () => {
       },
     });
 
-    expect(fetchCalls.filter((entry) =>
-      entry === "https://worker.example.test/internal/deploy/container-smoke"
-    )).toHaveLength(2);
-    expect(fetchCalls.filter((entry) =>
-      entry === "https://worker.example.test/internal/deploy/container-smoke?liveModelTurn=gpt-5.4-mini"
-    )).toHaveLength(1);
+    const readinessCalls = fetchCalls
+      .map((entry) => new URL(entry))
+      .filter((entry) =>
+        entry.pathname === "/internal/deploy/container-smoke" &&
+        !entry.searchParams.has("liveModelTurn")
+      );
+    const liveCalls = fetchCalls
+      .map((entry) => new URL(entry))
+      .filter((entry) => entry.searchParams.get("liveModelTurn") === "gpt-5.4-mini");
+    expect(readinessCalls).toHaveLength(2);
+    expect(liveCalls).toHaveLength(2);
+    expect(liveCalls.every((entry) =>
+      entry.searchParams.get("expectedBundleFingerprint") === "expected-bundle" &&
+      entry.searchParams.get("expectedSourceFingerprint") === "expected-source"
+    )).toBe(true);
   });
 
   it("retries transient HTTP 400 runner container smoke responses", async () => {

@@ -31,17 +31,18 @@ import {
 import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "../src/hosted-runtime-architecture.ts";
+import {
+  buildHostedRunnerContainerCaEnv,
+} from "../src/runner-container-ca-env.ts";
 
 const RUNNER_CALLBACK_BASE_URL = "https://runner-callback.example.test/";
-const CLOUDFLARE_CONTAINERS_CA_CERT_PATH =
-  "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
+const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_DERIVATION_CONTEXT =
+  "murph:hosted-container-cpu-watchdog-fingerprint:v1";
+const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME =
+  "HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET";
 const EXPECTED_RUNNER_CONTAINER_ENV = {
-  CODEX_CA_CERTIFICATE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-  CURL_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-  NODE_EXTRA_CA_CERTS: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
+  ...buildHostedRunnerContainerCaEnv(),
   PORT: "8080",
-  REQUESTS_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-  SSL_CERT_FILE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
 } as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1357,6 +1358,67 @@ describe("RunnerContainer", () => {
     expect((error as Error).message).toBe(
       "Hosted runner container live model turn smoke did not consume the Worker egress grant.",
     );
+    await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
+      active: false,
+    });
+  });
+
+  it("checks the expected runner bundle before opening the live model turn smoke fence", async () => {
+    const { container, containerFetch } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+            ok: true,
+            runnerBundle: {
+              buildSkipped: false,
+              bundleFingerprint: "stale-bundle",
+              sourceFingerprint: "stale-source",
+            },
+            service: "cloudflare-hosted-runner-node",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-live-model-turn-smoke")) {
+          throw new Error("Live model turn smoke should not run on a stale bundle.");
+        }
+
+        return new Response(JSON.stringify({
+          codexShell: createCodexShellSmokeResult(),
+          ok: true,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+      env: {
+        OPENAI_API_KEY: "openai-worker-secret",
+      },
+    });
+
+    const error = await container.smokeHealth({
+      expectedRunnerBundle: {
+        bundleFingerprint: "expected-bundle",
+        sourceFingerprint: "expected-source",
+      },
+      liveModelTurn: {
+        model: "gpt-5.4-mini",
+      },
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).name).toBe("HostedRunnerContainerSmokeBundleMismatchError");
+    expect((error as Error).message).toContain("did not run the expected runner bundle");
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/deploy-live-model-turn-smoke")
+    )).toBe(false);
     await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
       active: false,
     });

@@ -217,12 +217,16 @@ export async function runSmokeHostedDeploy(input: {
       expectLiveModelTurnModel: null,
     });
     if (shouldSmokeLiveModelTurn) {
+      const expectedRunnerBundle = await readExpectedRunnerBundleManifest(source);
       await assertRunnerContainerLiveModelTurnSmoke({
         expectLiveModelTurnModel: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+        expectedRunnerBundle,
         fetchImpl,
+        log,
         source,
         url: buildRunnerContainerSmokeUrl({
           directR2PresignedPut: false,
+          expectedRunnerBundle,
           liveModelTurnModel: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
           smokeBaseUrl,
         }),
@@ -292,27 +296,49 @@ async function assertRunnerContainerSmoke(input: {
 
 async function assertRunnerContainerLiveModelTurnSmoke(input: {
   expectLiveModelTurnModel: string;
+  expectedRunnerBundle: SmokeRunnerBundleManifest;
   fetchImpl: FetchLike;
+  log: (message: string) => void;
   source: EnvSource;
   url: string;
   versionOverrideHeaders: Record<string, string> | undefined;
 }): Promise<void> {
-  const expectedManifest = await readExpectedRunnerBundleManifest(input.source);
-  assertSmokeRunnerBundleManifest(
-    await readRunnerContainerSmoke({
-      expectDirectR2PresignedPut: false,
-      expectLiveModelTurnModel: input.expectLiveModelTurnModel,
-      fetchImpl: input.fetchImpl,
-      retryableFailures: false,
-      source: input.source,
-      url: input.url,
-      versionOverrideHeaders: input.versionOverrideHeaders,
-    }),
-    expectedManifest,
-    {
-      retryable: false,
-    },
-  );
+  const retryPolicy = readRunnerContainerSmokeRetryPolicy(input.source);
+
+  for (let attempt = 1; attempt <= retryPolicy.maxAttempts; attempt += 1) {
+    try {
+      assertSmokeRunnerBundleManifest(
+        await readRunnerContainerSmoke({
+          expectDirectR2PresignedPut: false,
+          expectLiveModelTurnModel: input.expectLiveModelTurnModel,
+          fetchImpl: input.fetchImpl,
+          retryableFailures: false,
+          retryableStatusCodes: [409],
+          source: input.source,
+          url: input.url,
+          versionOverrideHeaders: input.versionOverrideHeaders,
+        }),
+        input.expectedRunnerBundle,
+        {
+          retryable: false,
+        },
+      );
+      return;
+    } catch (error) {
+      if (
+        attempt >= retryPolicy.maxAttempts ||
+        !(error instanceof RunnerContainerSmokeRetryableError)
+      ) {
+        throw error;
+      }
+
+      input.log(
+        `Runner container live model turn smoke attempt ${attempt}/${retryPolicy.maxAttempts} failed `
+          + `(${error.message}); retrying in ${retryPolicy.retryDelayMs}ms.`,
+      );
+      await sleep(retryPolicy.retryDelayMs);
+    }
+  }
 }
 
 async function readRunnerContainerSmoke(input: {
@@ -320,6 +346,7 @@ async function readRunnerContainerSmoke(input: {
   expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
   retryableFailures?: boolean;
+  retryableStatusCodes?: readonly number[];
   source: EnvSource;
   url: string;
   versionOverrideHeaders: Record<string, string> | undefined;
@@ -347,7 +374,10 @@ async function readRunnerContainerSmoke(input: {
     const message = `runner container smoke failed with HTTP ${response.status}${
       failureBody ? `: ${failureBody}` : "."
     }`;
-    throw input.retryableFailures !== false && (response.status === 400 || response.status >= 500)
+    throw (
+      input.retryableStatusCodes?.includes(response.status) === true
+      || (input.retryableFailures !== false && (response.status === 400 || response.status >= 500))
+    )
       ? new RunnerContainerSmokeRetryableError(message)
       : new Error(message);
   }
@@ -414,6 +444,7 @@ function redactSmokeFailureBody(value: string): string {
 
 function buildRunnerContainerSmokeUrl(input: {
   directR2PresignedPut: boolean;
+  expectedRunnerBundle?: SmokeRunnerBundleManifest | null;
   liveModelTurnModel: string | null;
   smokeBaseUrl: string;
 }): string {
@@ -423,6 +454,10 @@ function buildRunnerContainerSmokeUrl(input: {
   }
   if (input.liveModelTurnModel !== null) {
     url.searchParams.set("liveModelTurn", input.liveModelTurnModel);
+  }
+  if (input.expectedRunnerBundle) {
+    url.searchParams.set("expectedBundleFingerprint", input.expectedRunnerBundle.bundleFingerprint ?? "");
+    url.searchParams.set("expectedSourceFingerprint", input.expectedRunnerBundle.sourceFingerprint ?? "");
   }
   return url.toString();
 }

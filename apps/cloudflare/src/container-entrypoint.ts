@@ -51,6 +51,9 @@ import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "./hosted-runtime-architecture.ts";
 import {
+  HOSTED_RUNNER_CONTAINER_CA_ENV_KEYS,
+} from "./runner-container-ca-env.ts";
+import {
   runHostedWorkspaceInvocation as runHostedWorkspaceInvocationDirect,
 } from "./hosted-workspace-invocation.ts";
 import {
@@ -1874,8 +1877,9 @@ function buildHostedContainerCodexShellSmokeProcessEnv(input: {
   if (input.liveProviderEgress) {
     // codex must trust the Cloudflare container egress-interception CA to
     // reach api.openai.com through the Worker.
-    copyOptionalHostedContainerSmokeEnv(env, "CODEX_CA_CERTIFICATE");
-    copyOptionalHostedContainerSmokeEnv(env, "SSL_CERT_FILE");
+    for (const key of HOSTED_RUNNER_CONTAINER_CA_ENV_KEYS) {
+      copyOptionalHostedContainerSmokeEnv(env, key);
+    }
   }
   copyOptionalHostedContainerSmokeEnv(env, "CI");
   copyOptionalHostedContainerSmokeEnv(env, "COLORTERM");

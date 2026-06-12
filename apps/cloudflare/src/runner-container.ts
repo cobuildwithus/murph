@@ -16,6 +16,9 @@ import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "./hosted-runtime-architecture.ts";
 import {
+  buildHostedRunnerContainerCaEnv,
+} from "./runner-container-ca-env.ts";
+import {
   readHostedRunnerContainerIdentity,
   resolveHostedExecutionRunnerContainerName as resolveHostedExecutionRunnerContainerNameFromIdentity,
   type HostedRunnerContainerIdentitySource,
@@ -69,15 +72,9 @@ const DEFAULT_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT = 25;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
 const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
-const CLOUDFLARE_CONTAINERS_CA_CERT_PATH =
-  "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
 const BASE_RUNNER_CONTAINER_ENV_VARS = {
-  CODEX_CA_CERTIFICATE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-  CURL_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-  NODE_EXTRA_CA_CERTS: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
+  ...buildHostedRunnerContainerCaEnv(),
   PORT: String(RUNNER_PORT),
-  REQUESTS_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-  SSL_CERT_FILE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
 } as const;
 
 class HostedRunnerContainerArchitectureMismatchError extends Error {
@@ -99,6 +96,13 @@ class HostedRunnerContainerPoisonedError extends Error {
     super("Hosted runner container is poisoned.");
     this.name = "HostedRunnerContainerPoisonedError";
     this.lastCleanupStatus = input.lastCleanupStatus;
+  }
+}
+
+class HostedRunnerContainerSmokeBundleMismatchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HostedRunnerContainerSmokeBundleMismatchError";
   }
 }
 
@@ -265,6 +269,10 @@ interface HostedExecutionContainerSmokeHealthInput {
     byteLength?: number;
     presignedPutUrl: string;
     tlsCaCertificatePem?: string;
+  };
+  expectedRunnerBundle?: {
+    bundleFingerprint: string;
+    sourceFingerprint: string;
   };
   liveModelTurn?: {
     model: string;
@@ -598,6 +606,8 @@ export class RunnerContainer extends Container {
               : null,
           });
         }
+        const runnerBundle = parseRunnerContainerSmokeBundle(payload.runnerBundle);
+        assertExpectedRunnerContainerSmokeBundle(runnerBundle, input.expectedRunnerBundle);
 
         const codexShell = await this.smokeCodexShell(readyTimeoutMs);
         const directR2PresignedPut = input.directR2PresignedPut
@@ -612,7 +622,7 @@ export class RunnerContainer extends Container {
           ...(directR2PresignedPut === undefined ? {} : { directR2PresignedPut }),
           ...(liveModelTurn === undefined ? {} : { liveModelTurn }),
           ok: true,
-          runnerBundle: parseRunnerContainerSmokeBundle(payload.runnerBundle),
+          runnerBundle,
           service: typeof payload.service === "string" ? payload.service : null,
           status: response.status,
         };
@@ -2952,6 +2962,31 @@ function parseRunnerContainerSmokeBundle(
     ...(typeof record.schemaVersion === "number" ? { schemaVersion: record.schemaVersion } : {}),
     ...(typeof record.sourceFingerprint === "string" ? { sourceFingerprint: record.sourceFingerprint } : {}),
   };
+}
+
+function assertExpectedRunnerContainerSmokeBundle(
+  actual: HostedExecutionContainerSmokeHealthResult["runnerBundle"],
+  expected: HostedExecutionContainerSmokeHealthInput["expectedRunnerBundle"] | undefined,
+): void {
+  if (!expected) {
+    return;
+  }
+  if (!actual) {
+    throw new HostedRunnerContainerSmokeBundleMismatchError(
+      "Hosted runner container smoke did not return runner bundle metadata.",
+    );
+  }
+  if (
+    actual.bundleFingerprint !== expected.bundleFingerprint ||
+    actual.sourceFingerprint !== expected.sourceFingerprint
+  ) {
+    throw new HostedRunnerContainerSmokeBundleMismatchError(
+      "Hosted runner container smoke did not run the expected runner bundle. "
+        + `expected bundle=${expected.bundleFingerprint} source=${expected.sourceFingerprint}; `
+        + `actual bundle=${actual.bundleFingerprint ?? "<missing>"} `
+        + `source=${actual.sourceFingerprint ?? "<missing>"}.`,
+    );
+  }
 }
 
 function formatRunnerSleepAfter(idleTtlMs: number): `${number}s` {
