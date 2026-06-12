@@ -175,6 +175,128 @@
                     "fiberGrams": {
                       "type": "number",
                       "minimum": 0
+                    },
+                    "waterGrams": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "micros": {
+                  "type": "object",
+                  "properties": {
+                    "sodiumGrams": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "potassiumGrams": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "calciumMg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "phosphorusMg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "magnesiumMg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "ironMg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "zincMg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "fluorideMg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "chlorideMg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "chromiumMcg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "copperMg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "iodineMcg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "manganeseMg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "molybdenumMcg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "seleniumMcg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "vitaminAMcg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "vitaminB1Mg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "riboflavinMg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "niacinMg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "pantothenicAcidMg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "vitaminB6Mg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "biotinMcg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "vitaminB12Mcg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "vitaminCMg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "vitaminDMcg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "vitaminEMg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "vitaminKMcg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "folicAcidMg": {
+                      "type": "number",
+                      "minimum": 0
                     }
                   },
                   "additionalProperties": false

@@ -247,20 +247,6 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         step: "size_guard",
       });
       timing.sizeGuardMs = readHostedRuntimeStepElapsedMs(sizeGuardStartedAt);
-      const dataKeyUnwrapStartedAt = Date.now();
-      const dataKey = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
-        details: restoreLogDetails,
-        run: async () => await unwrapWorkspaceSnapshotDataKey({
-          aad: request.ref.encryption.aad,
-          fetchImpl: input.fetchImpl,
-          rootKeyId: request.ref.encryption.rootKeyId,
-          timeoutMs: input.timeoutMs,
-          workspaceCheckpointBridge: input.workspaceCheckpointBridge,
-          wrappedDataKey: request.ref.encryption.wrappedDataKey,
-        }),
-        step: "data_key_unwrap",
-      });
-      timing.dataKeyUnwrapMs = readHostedRuntimeStepElapsedMs(dataKeyUnwrapStartedAt);
       const scratchRoot = path.resolve(request.scratchRoot ?? tmpdir());
       const scratchPrepareStartedAt = Date.now();
       const tempDir = await runHostedWorkspaceSnapshotRestoreStep({
@@ -274,48 +260,98 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       timing.scratchPrepareMs = readHostedRuntimeStepElapsedMs(scratchPrepareStartedAt);
       const encryptedFilePath = path.join(tempDir, "workspace.snapshot.enc");
       try {
-        const presignGetStartedAt = Date.now();
-        const presignedGet = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
-          details: restoreLogDetails,
-          run: async () => {
-            const result = await presignWorkspaceSnapshotGet({
+        // The data-key unwrap (worker KMS round trip) and the encrypted-object
+        // leg (presign GET -> R2 download) share no inputs, and the dominant
+        // cold-restore cost is exactly these two network legs run back to
+        // back. Run them concurrently and only join before archive_restore,
+        // which needs both. Per-step timings keep their own wall-clock, so
+        // concurrent step durations no longer sum to the restore total.
+        const dataKeyPromise = (async () => {
+          const dataKeyUnwrapStartedAt = Date.now();
+          const dataKey = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
+            details: restoreLogDetails,
+            run: async () => await unwrapWorkspaceSnapshotDataKey({
+              aad: request.ref.encryption.aad,
               fetchImpl: input.fetchImpl,
-              objectKey: request.ref.objectKey,
-              ref: request.ref,
-              snapshotId: request.ref.snapshotId,
+              rootKeyId: request.ref.encryption.rootKeyId,
               timeoutMs: input.timeoutMs,
               workspaceCheckpointBridge: input.workspaceCheckpointBridge,
-            });
-            const expiresAtMs = Date.parse(result.expiresAt);
-            if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
-              throw new Error("Hosted workspace snapshot direct R2 download URL is expired.");
-            }
-            return {
-              ...result,
-              expiresAtMs,
-            };
-          },
-          step: "presign_get",
+              wrappedDataKey: request.ref.encryption.wrappedDataKey,
+            }),
+            step: "data_key_unwrap",
+          });
+          timing.dataKeyUnwrapMs = readHostedRuntimeStepElapsedMs(dataKeyUnwrapStartedAt);
+          return dataKey;
+        })();
+        // A failed unwrap makes the (potentially large) R2 download useless;
+        // abort it instead of letting it run to completion before the join
+        // surfaces the unwrap error to the retry path.
+        const encryptedObjectAbort = new AbortController();
+        void dataKeyPromise.catch(() => {
+          encryptedObjectAbort.abort(
+            new Error("Hosted workspace snapshot data key unwrap failed; object fetch is unnecessary."),
+          );
         });
-        timing.presignGetMs = readHostedRuntimeStepElapsedMs(presignGetStartedAt);
-        const objectFetchStartedAt = Date.now();
-        await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
-          details: restoreLogDetails,
-          run: async () => {
-            const fetched = await fetchHostedWorkspaceSnapshotEncryptedObjectToFile({
-              encryptedFilePath,
-              expectedEncryptedByteSize: request.ref.archive.encryptedByteSize,
-              fetchImpl: input.fetchImpl,
-              getUrl: presignedGet.getUrl,
-              timeoutMs: Math.max(1, presignedGet.expiresAtMs - Date.now() - 5_000),
-            });
-            if (!fetched) {
-              throw new Error("Hosted workspace snapshot encrypted object is unavailable.");
-            }
-          },
-          step: "object_fetch",
-        });
-        timing.objectFetchMs = readHostedRuntimeStepElapsedMs(objectFetchStartedAt);
+        const encryptedObjectPromise = (async () => {
+          const presignGetStartedAt = Date.now();
+          const presignedGet = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
+            details: restoreLogDetails,
+            run: async () => {
+              const result = await presignWorkspaceSnapshotGet({
+                fetchImpl: input.fetchImpl,
+                objectKey: request.ref.objectKey,
+                ref: request.ref,
+                signal: encryptedObjectAbort.signal,
+                snapshotId: request.ref.snapshotId,
+                timeoutMs: input.timeoutMs,
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+              });
+              const expiresAtMs = Date.parse(result.expiresAt);
+              if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+                throw new Error("Hosted workspace snapshot direct R2 download URL is expired.");
+              }
+              return {
+                ...result,
+                expiresAtMs,
+              };
+            },
+            step: "presign_get",
+          });
+          timing.presignGetMs = readHostedRuntimeStepElapsedMs(presignGetStartedAt);
+          const objectFetchStartedAt = Date.now();
+          await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
+            details: restoreLogDetails,
+            run: async () => {
+              const fetched = await fetchHostedWorkspaceSnapshotEncryptedObjectToFile({
+                encryptedFilePath,
+                expectedEncryptedByteSize: request.ref.archive.encryptedByteSize,
+                fetchImpl: input.fetchImpl,
+                getUrl: presignedGet.getUrl,
+                signal: encryptedObjectAbort.signal,
+                timeoutMs: Math.max(1, presignedGet.expiresAtMs - Date.now() - 5_000),
+              });
+              if (!fetched) {
+                throw new Error("Hosted workspace snapshot encrypted object is unavailable.");
+              }
+            },
+            step: "object_fetch",
+          });
+          timing.objectFetchMs = readHostedRuntimeStepElapsedMs(objectFetchStartedAt);
+        })();
+        // Settle both legs before throwing so a failed leg never leaves the
+        // other writing into a scratch dir that the finally block already
+        // removed. Prefer the unwrap failure deterministically.
+        const [dataKeySettled, encryptedObjectSettled] = await Promise.allSettled([
+          dataKeyPromise,
+          encryptedObjectPromise,
+        ]);
+        if (dataKeySettled.status === "rejected") {
+          throw dataKeySettled.reason;
+        }
+        if (encryptedObjectSettled.status === "rejected") {
+          throw encryptedObjectSettled.reason;
+        }
+        const dataKey = dataKeySettled.value;
         const archiveTimings = await runHostedWorkspaceSnapshotRestoreStep({
           details: restoreLogDetails,
           run: async () => await restoreEncryptedWorkspaceSnapshot({
@@ -480,6 +516,7 @@ async function presignWorkspaceSnapshotGet(input: {
   fetchImpl: typeof fetch;
   objectKey: string;
   ref: HostedWorkspaceSnapshotV2Ref;
+  signal?: AbortSignal | null;
   snapshotId: string;
   timeoutMs: number;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
@@ -499,6 +536,7 @@ async function presignWorkspaceSnapshotGet(input: {
     headers,
     redactedLogPath: "/workspace-snapshots/REDACTED/presign-get",
     method: "POST",
+    signal: input.signal ?? null,
     timeoutMs: input.timeoutMs,
     url: new URL(
       `/workspace-snapshots/${encodeURIComponent(input.snapshotId)}/presign-get`,
@@ -568,6 +606,7 @@ async function fetchHostedWorkspaceSnapshotEncryptedObjectToFile(input: {
   expectedEncryptedByteSize: number;
   fetchImpl: typeof fetch;
   getUrl: string;
+  signal?: AbortSignal | null;
   timeoutMs: number;
 }): Promise<boolean> {
   const response = await fetchHostedResponse({
@@ -578,6 +617,7 @@ async function fetchHostedWorkspaceSnapshotEncryptedObjectToFile(input: {
     },
     redactedLogPath: "/workspace-snapshot-object",
     redactedResponseOrigin: "workspace_snapshot_object",
+    signal: input.signal ?? null,
     timeoutMs: input.timeoutMs,
     url: new URL(input.getUrl),
   });

@@ -121,6 +121,10 @@ interface JunctionWindowFetchOptions {
   dateQueryFormat?: JunctionDateQueryFormat;
 }
 
+// `profile` is deliberately excluded: it is an always-present current-state
+// snapshot, so counting it as completion evidence would mark every backfill
+// useful and defeat empty-history detection entirely. Profile data still
+// imports on every attempt regardless of this predicate.
 const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES = Object.freeze([
   "activity",
   "sleep",
@@ -129,6 +133,7 @@ const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES = Object.freeze(
   "body",
   "meal",
   "menstrual_cycle",
+  "electrocardiogram",
 ] as const);
 type JunctionHistoricalBackfillCompletionSummaryResource =
   (typeof JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES)[number];
@@ -219,6 +224,7 @@ const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
   ],
   meal: [],
   menstrual_cycle: [],
+  electrocardiogram: [],
 } satisfies Record<JunctionHistoricalBackfillCompletionSummaryResource, readonly string[]>);
 const JUNCTION_RAW_ONLY_COMPLETION_PATHS = Object.freeze({
   meal: {
@@ -230,6 +236,8 @@ const JUNCTION_RAW_ONLY_COMPLETION_PATHS = Object.freeze({
       "logged_at",
       "date",
       "day",
+      "calendarDate",
+      "calendar_date",
       "name",
       "mealName",
       "meal_name",
@@ -258,6 +266,13 @@ const JUNCTION_RAW_ONLY_COMPLETION_PATHS = Object.freeze({
       "fatGrams",
       "fat_grams",
       "fat_g",
+      "fiber",
+      "fibre",
+      "water",
+      "macros.water",
+      "macros.fibre",
+      "macros.fiber",
+      "energy.value",
     ],
     arrays: [
       "foods",
@@ -309,9 +324,35 @@ const JUNCTION_RAW_ONLY_COMPLETION_PATHS = Object.freeze({
       "symptoms",
       "sexualActivity",
       "sexual_activity",
+      // Facet arrays the importer normalizes; a window containing only
+      // these must not be classified as an empty backfill.
+      "ovulationTest",
+      "ovulation_test",
+      "homePregnancyTest",
+      "home_pregnancy_test",
+      "detectedDeviations",
+      "detected_deviations",
+      "basalBodyTemperature",
+      "basal_body_temperature",
     ],
   },
-} satisfies Record<"meal" | "menstrual_cycle", {
+  electrocardiogram: {
+    strings: [
+      "sessionStart",
+      "session_start",
+      "classification",
+      "inconclusiveCause",
+      "inconclusive_cause",
+    ],
+    numbers: [
+      "heartRateMean",
+      "heart_rate_mean",
+      "voltageSampleCount",
+      "voltage_sample_count",
+    ],
+    arrays: [],
+  },
+} satisfies Record<"meal" | "menstrual_cycle" | "electrocardiogram", {
   readonly strings: readonly string[];
   readonly numbers: readonly string[];
   readonly arrays: readonly string[];
@@ -359,7 +400,6 @@ const JUNCTION_FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS = new Set([
 ]);
 const JUNCTION_TIMESERIES_RESOURCE_NAMES = new Set<string>([
   ...JUNCTION_KNOWN_TIMESERIES_RESOURCES,
-  "glucose",
 ]);
 const JUNCTION_KNOWN_WEBHOOK_RESOURCE_NAMES = new Set<string>([
   ...JUNCTION_ALLOWED_SUMMARY_RESOURCES,
@@ -3394,7 +3434,33 @@ function buildJunctionTimeseriesRecordKey(resource: string, record: unknown): st
     normalizeString(origin.sourceType) ?? "",
     normalizeString(origin.sourceInstanceId) ?? "",
     timestamp,
+    ...junctionTimeseriesRecordValueIdentity(resource, entry),
   ]);
+}
+
+// Blood-pressure readings carry their paired values as part of identity
+// (the importer keeps distinct same-second readings as distinct events), so
+// the pre-import dedupe key must not collapse same-timestamp rows whose
+// values differ. A stable provider row id wins when present.
+function junctionTimeseriesRecordValueIdentity(
+  resource: string,
+  entry: Record<string, unknown>,
+): string[] {
+  if (resource !== "blood_pressure") {
+    return [];
+  }
+
+  // Same stable-id alias list as the importer's reading identity: rows
+  // distinguished only by a provider id must survive fetch-side dedupe.
+  for (const key of ["id", "resourceId", "resource_id", "externalId", "external_id"]) {
+    const rowId = normalizeString(entry[key]);
+    if (rowId) {
+      return [rowId];
+    }
+  }
+
+  // Field names mirror the importer's blood-pressure value paths.
+  return [String(entry.systolic ?? ""), String(entry.diastolic ?? "")];
 }
 
 function resolveJunctionTimeseriesRecordTimestamp(record: Record<string, unknown>): string | null {
@@ -3705,7 +3771,7 @@ function hasUsefulJunctionHistoricalBackfillSummaryRecord(
     return hasUsefulJunctionWorkoutSessionRecord(entry, sourceProviderSlug);
   }
 
-  if (resource === "meal" || resource === "menstrual_cycle") {
+  if (resource === "meal" || resource === "menstrual_cycle" || resource === "electrocardiogram") {
     return hasUsefulJunctionRawOnlyHistoricalBackfillSummaryRecord(resource, entry);
   }
 
@@ -3713,9 +3779,19 @@ function hasUsefulJunctionHistoricalBackfillSummaryRecord(
 }
 
 function hasUsefulJunctionRawOnlyHistoricalBackfillSummaryRecord(
-  resource: "meal" | "menstrual_cycle",
+  resource: "meal" | "menstrual_cycle" | "electrocardiogram",
   entry: Record<string, unknown>,
 ): boolean {
+  // Mirrors the importer invariant: predicted cycles are forecasts, not
+  // facts — they emit no normalized events, so forecast-only windows must
+  // not complete the historical backfill.
+  if (
+    resource === "menstrual_cycle"
+    && (entry.isPredicted === true || entry.is_predicted === true)
+  ) {
+    return false;
+  }
+
   const paths = JUNCTION_RAW_ONLY_COMPLETION_PATHS[resource];
   return hasStringFromJunctionRecordPaths(entry, paths.strings)
     || hasFiniteNumberFromJunctionRecordPaths(entry, paths.numbers)
