@@ -194,7 +194,7 @@ function createEmptyJunctionBackfillProvider() {
   });
 }
 
-test("Junction provider defaults do not fetch opt-in profile summaries", async () => {
+test("Junction provider defaults fetch every default summary resource", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionDeviceSyncProvider({
@@ -216,7 +216,6 @@ test("Junction provider defaults do not fetch opt-in profile summaries", async (
               status: "connected",
               resource_availability: Object.fromEntries([
                 ...JUNCTION_DEFAULT_SUMMARY_RESOURCES,
-                "profile",
               ].map((resource) => [resource, true])),
             },
           ],
@@ -225,7 +224,6 @@ test("Junction provider defaults do not fetch opt-in profile summaries", async (
 
       const summaryResource = new URL(url).pathname.match(/^\/v2\/summary\/([^/]+)\//u)?.[1];
       if (summaryResource) {
-        assert.notEqual(summaryResource, "profile");
         assert.ok(
           (JUNCTION_DEFAULT_SUMMARY_RESOURCES as readonly string[]).includes(summaryResource),
           `Unexpected default summary resource: ${summaryResource}`,
@@ -262,7 +260,9 @@ test("Junction provider defaults do not fetch opt-in profile summaries", async (
     .map((url) => new URL(url).pathname.match(/^\/v2\/summary\/([^/]+)\//u)?.[1])
     .filter((resource): resource is string => Boolean(resource));
 
-  assert.equal(summaryResources.includes("profile"), false);
+  assert.equal(summaryResources.includes("profile"), true);
+  assert.equal(summaryResources.includes("menstrual_cycle"), true);
+  assert.equal(summaryResources.includes("electrocardiogram"), true);
   assert.deepEqual(summaryResources, [...JUNCTION_DEFAULT_SUMMARY_RESOURCES]);
   assert.equal(importedSnapshots.length, 1);
 });
@@ -883,29 +883,37 @@ test("Junction REST diagnostics use date params for date-only summary resources"
       return createJsonResponse({ menstrual_cycle: [] });
     }
 
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/electrocardiogram/junction-user-1")) {
+      return createJsonResponse({ electrocardiogram: [] });
+    }
+
     throw new Error(`Unexpected request: ${url}`);
   }, {
-    summaryResources: ["menstrual_cycle"],
+    summaryResources: ["menstrual_cycle", "electrocardiogram"],
     timeseriesResources: [],
   });
   const probeRest = provider.diagnostics?.probeRest;
   assert.ok(probeRest);
 
-  await probeRest({
-    account: createAccount(),
-    endpoint: "summary",
-    now: "2026-04-03T12:00:00.000Z",
-    resource: "menstrual_cycle",
-    windowStart: "2026-04-02T10:15:30.000Z",
-    windowEnd: "2026-04-03T11:45:00.000Z",
-  });
+  for (const resource of ["menstrual_cycle", "electrocardiogram"]) {
+    await probeRest({
+      account: createAccount(),
+      endpoint: "summary",
+      now: "2026-04-03T12:00:00.000Z",
+      resource,
+      windowStart: "2026-04-02T10:15:30.000Z",
+      windowEnd: "2026-04-03T11:45:00.000Z",
+    });
+  }
 
-  assert.equal(seenUrls.length, 1);
-  assertJunctionWindowQuery(
-    requireValue(seenUrls[0], "Junction summary diagnostic should issue one read request."),
-    "2026-04-02",
-    "2026-04-03",
-  );
+  assert.equal(seenUrls.length, 2);
+  for (const url of seenUrls) {
+    assertJunctionWindowQuery(
+      requireValue(url, "Junction summary diagnostic should issue one read request per resource."),
+      "2026-04-02",
+      "2026-04-03",
+    );
+  }
 });
 
 test("Junction maps the weight timeseries resource to the documented body_weight endpoint", async () => {
@@ -6715,13 +6723,13 @@ test("Junction provider accepts glucose timeseries configuration", () => {
 
 test("Junction provider rejects unsupported configured resources", () => {
   assert.doesNotThrow(() => createJunctionProvider(async () => createJsonResponse({}), {
-    summaryResources: ["meal", "menstrual_cycle"],
+    summaryResources: ["meal", "menstrual_cycle", "electrocardiogram", "profile"],
   }));
   assert.throws(
     () => createJunctionProvider(async () => createJsonResponse({}), {
-      summaryResources: ["electrocardiogram"],
+      summaryResources: ["clinical_note"],
     }),
-    /Junction summary resources include unsupported resource\(s\): electrocardiogram\./u,
+    /Junction summary resources include unsupported resource\(s\): clinical_note\./u,
   );
   assert.throws(
     () => createJunctionProvider(async () => createJsonResponse({}), {

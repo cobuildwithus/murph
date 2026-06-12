@@ -129,6 +129,7 @@ const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES = Object.freeze(
   "body",
   "meal",
   "menstrual_cycle",
+  "electrocardiogram",
 ] as const);
 type JunctionHistoricalBackfillCompletionSummaryResource =
   (typeof JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES)[number];
@@ -219,6 +220,7 @@ const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
   ],
   meal: [],
   menstrual_cycle: [],
+  electrocardiogram: [],
 } satisfies Record<JunctionHistoricalBackfillCompletionSummaryResource, readonly string[]>);
 const JUNCTION_RAW_ONLY_COMPLETION_PATHS = Object.freeze({
   meal: {
@@ -311,7 +313,23 @@ const JUNCTION_RAW_ONLY_COMPLETION_PATHS = Object.freeze({
       "sexual_activity",
     ],
   },
-} satisfies Record<"meal" | "menstrual_cycle", {
+  electrocardiogram: {
+    strings: [
+      "sessionStart",
+      "session_start",
+      "classification",
+      "inconclusiveCause",
+      "inconclusive_cause",
+    ],
+    numbers: [
+      "heartRateMean",
+      "heart_rate_mean",
+      "voltageSampleCount",
+      "voltage_sample_count",
+    ],
+    arrays: [],
+  },
+} satisfies Record<"meal" | "menstrual_cycle" | "electrocardiogram", {
   readonly strings: readonly string[];
   readonly numbers: readonly string[];
   readonly arrays: readonly string[];
@@ -3704,7 +3722,7 @@ function hasUsefulJunctionHistoricalBackfillSummaryRecord(
     return hasUsefulJunctionWorkoutSessionRecord(entry, sourceProviderSlug);
   }
 
-  if (resource === "meal" || resource === "menstrual_cycle") {
+  if (resource === "meal" || resource === "menstrual_cycle" || resource === "electrocardiogram") {
     return hasUsefulJunctionRawOnlyHistoricalBackfillSummaryRecord(resource, entry);
   }
 
@@ -3712,7 +3730,7 @@ function hasUsefulJunctionHistoricalBackfillSummaryRecord(
 }
 
 function hasUsefulJunctionRawOnlyHistoricalBackfillSummaryRecord(
-  resource: "meal" | "menstrual_cycle",
+  resource: "meal" | "menstrual_cycle" | "electrocardiogram",
   entry: Record<string, unknown>,
 ): boolean {
   const paths = JUNCTION_RAW_ONLY_COMPLETION_PATHS[resource];

@@ -1,3 +1,8 @@
+// Every default summary resource is sparse event/daily-grain data: profile is
+// a single current snapshot per source, menstrual_cycle is ~13 cycles per
+// member-year with small dated sub-arrays, and electrocardiogram is
+// dozens-to-hundreds of sub-KB recording summaries per member-year (the raw
+// electrocardiogram_voltage waveform stays excluded entirely).
 export const JUNCTION_DEFAULT_SUMMARY_RESOURCES = Object.freeze([
   "activity",
   "sleep",
@@ -5,6 +10,9 @@ export const JUNCTION_DEFAULT_SUMMARY_RESOURCES = Object.freeze([
   "workouts",
   "body",
   "meal",
+  "profile",
+  "menstrual_cycle",
+  "electrocardiogram",
 ] as const);
 
 export const JUNCTION_KNOWN_TIMESERIES_RESOURCES = Object.freeze([
@@ -70,13 +78,9 @@ export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
 
 export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([] as const);
 
-export const JUNCTION_OPT_IN_SUMMARY_RESOURCES = Object.freeze([
-  "profile",
-] as const);
+export const JUNCTION_OPT_IN_SUMMARY_RESOURCES = Object.freeze([] as const);
 
-export const JUNCTION_RAW_ONLY_SUMMARY_RESOURCES = Object.freeze([
-  "menstrual_cycle",
-] as const);
+export const JUNCTION_RAW_ONLY_SUMMARY_RESOURCES = Object.freeze([] as const);
 
 export const JUNCTION_ALLOWED_SUMMARY_RESOURCES = Object.freeze([
   ...JUNCTION_DEFAULT_SUMMARY_RESOURCES,

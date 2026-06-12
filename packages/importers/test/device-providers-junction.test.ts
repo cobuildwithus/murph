@@ -339,8 +339,12 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
   assert.equal(payload.provider, "junction");
   assert.equal(payload.accountId, "junction-account-hash-1");
   assert.deepEqual(payload.provenance?.summaryResources, [
-    ...JUNCTION_OPT_IN_SUMMARY_RESOURCES,
-    ...JUNCTION_DEFAULT_SUMMARY_RESOURCES.filter((resource) => resource !== "meal"),
+    "profile",
+    "activity",
+    "sleep",
+    "sleep_cycle",
+    "workouts",
+    "body",
   ]);
   assert.deepEqual(payload.provenance?.timeseriesResources, [
     "blood_oxygen",
@@ -959,6 +963,189 @@ test("Junction normalizer keeps micros-only meal item ingredients", () => {
   assert.deepEqual((meal?.fields?.nutrition as { totals?: Record<string, unknown> } | undefined)?.totals, {
     calories: 140,
   });
+});
+
+test("Junction meal micronutrients and water land bounded on the meal event", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      meal: [{
+        calendar_date: "2019-08-24",
+        data: {
+          Salmon: {
+            energy: { unit: "kcal", value: 320 },
+            macros: { protein: 30, water: 80 },
+            micros: {
+              minerals: { sodium: 0.4, iron: 1.2 },
+              trace_elements: { selenium: 38 },
+              vitamins: { vitamin_d: 12.5, vitamin_b12: 4.6 },
+            },
+          },
+          Spinach: {
+            energy: { unit: "kcal", value: 25 },
+            macros: { water: 90 },
+            micros: {
+              minerals: { iron: 2.7, magnesium: 79, calcium: 0, zinc: null },
+              vitamins: { folic_acid: 0.19, made_up_nutrient: 99 },
+            },
+          },
+        },
+        id: "micros-meal-1",
+        name: "Lunch",
+        source: { provider: "cronometer", type: "app" },
+        timestamp: "2019-08-24T12:30:00Z",
+      }],
+    },
+  });
+  const meal = payload.events?.find((event) => event.kind === "meal");
+  const nutrition = meal?.fields?.nutrition as {
+    micros?: Record<string, unknown>;
+    totals?: Record<string, unknown>;
+  } | undefined;
+
+  assert.ok(meal);
+  // Water sums across items like the other macro totals.
+  assert.deepEqual(nutrition?.totals, {
+    calories: 345,
+    proteinGrams: 30,
+    waterGrams: 170,
+  });
+  // Only the documented micro keys land; zero/null entries and undocumented
+  // keys stay out, and per-item values sum.
+  assert.deepEqual(nutrition?.micros, {
+    sodiumGrams: 0.4,
+    ironMg: 3.9,
+    magnesiumMg: 79,
+    seleniumMcg: 38,
+    vitaminB12Mcg: 4.6,
+    vitaminDMcg: 12.5,
+    folicAcidMg: 0.19,
+  });
+});
+
+test("Junction direct meal micros win over summed item micros", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      meal: [{
+        calendar_date: "2019-08-24",
+        data: {
+          Bar: { micros: { minerals: { zinc: 2 } }, energy: { unit: "kcal", value: 200 } },
+        },
+        id: "direct-micros-meal-1",
+        micros: {
+          minerals: { zinc: 5 },
+          vitamins: { vitamin_c: 60 },
+        },
+        name: "Snack",
+        source: { provider: "cronometer", type: "app" },
+        timestamp: "2019-08-24T15:00:00Z",
+      }],
+    },
+  });
+  const meal = payload.events?.find((event) => event.kind === "meal");
+  const nutrition = meal?.fields?.nutrition as { micros?: Record<string, unknown> } | undefined;
+
+  assert.deepEqual(nutrition?.micros, {
+    zincMg: 5,
+    vitaminCMg: 60,
+  });
+});
+
+test("Junction tier-2 summary events pass the canonical device import contract", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-tier2-import");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const snapshot = {
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-05-02T12:00:00.000Z",
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-05-02T00:00:00.000Z",
+      summaries: {
+        profile: {
+          id: "profile-1",
+          height: 172,
+          birth_date: "1992-03-14",
+          sex: "female",
+          source: { provider: "apple_health_kit", type: "phone" },
+          updated_at: "2026-04-20T09:00:00Z",
+        },
+        menstrual_cycle: [{
+          id: "cycle-1",
+          period_start: "2026-04-07",
+          period_end: "2026-04-11",
+          cycle_end: "2026-05-01",
+          menstrual_flow: [{ date: "2026-04-07", flow: "medium" }],
+          basal_body_temperature: [{ date: "2026-04-20", value: 36.61 }],
+          ovulation_test: [{ date: "2026-04-19", test_result: "positive" }],
+          source: { provider: "apple_health", type: "phone" },
+        }],
+        electrocardiogram: [{
+          id: "ecg-1",
+          session_start: "2026-04-22T18:00:00Z",
+          voltage_sample_count: 15360,
+          heart_rate_mean: 62,
+          classification: "sinus_rhythm",
+          source: { provider: "apple_health_kit", type: "watch" },
+        }],
+        meal: [{
+          calendar_date: "2026-04-22",
+          id: "meal-1",
+          name: "Lunch",
+          energy: { unit: "kcal", value: 500 },
+          macros: { protein: 30, water: 200 },
+          micros: { minerals: { iron: 4 }, vitamins: { vitamin_c: 30 } },
+          source: { provider: "cronometer", type: "app" },
+          timestamp: "2026-04-22T12:30:00Z",
+        }],
+      },
+    };
+
+    const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+
+    const kinds = result.events.map((event) => event.kind).sort();
+    // Cycle basal body temperature stays raw-only (canonical on the
+    // dedicated timeseries), so the fixture's BBT sub-array adds no
+    // observation here.
+    assert.deepEqual(kinds, [
+      "meal",
+      "measurement",
+      "measurement",
+      "measurement",
+      "note",
+      "observation",
+      "observation",
+      "observation",
+    ]);
+    // The additive water/micros nutrition extension survives the canonical
+    // core import path (including strict event-record contract validation)
+    // end-to-end instead of being stripped on persist.
+    const importedMeal = result.events.find((event) => event.kind === "meal") as
+      | { nutrition?: { totals?: Record<string, unknown>; micros?: Record<string, unknown> } }
+      | undefined;
+    assert.equal(importedMeal?.nutrition?.totals?.waterGrams, 200);
+    assert.deepEqual(importedMeal?.nutrition?.micros, {
+      ironMg: 4,
+      vitaminCMg: 30,
+    });
+    assert.ok(result.rawArtifacts.length >= 1);
+    assert.notEqual(result.manifestPath, "");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("Junction meal direct nutrition totals win over sparse item totals", () => {
@@ -2522,6 +2709,9 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "workouts",
     "body",
     "meal",
+    "profile",
+    "menstrual_cycle",
+    "electrocardiogram",
   ]);
   assert.deepEqual([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES], [
     "blood_oxygen",
@@ -2541,13 +2731,11 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "glucose",
     "blood_pressure",
   ]);
-  assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], ["profile"]);
+  assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], []);
   assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], []);
-  assert.deepEqual([...JUNCTION_RAW_ONLY_SUMMARY_RESOURCES], ["menstrual_cycle"]);
+  assert.deepEqual([...JUNCTION_RAW_ONLY_SUMMARY_RESOURCES], []);
   assert.deepEqual([...JUNCTION_ALLOWED_SUMMARY_RESOURCES], [
     ...JUNCTION_DEFAULT_SUMMARY_RESOURCES,
-    ...JUNCTION_OPT_IN_SUMMARY_RESOURCES,
-    "menstrual_cycle",
   ]);
   assert.deepEqual([...JUNCTION_ALLOWED_TIMESERIES_RESOURCES], [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES]);
 
@@ -2572,7 +2760,9 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
   assert.deepEqual(payload.provenance?.timeseriesResources, JUNCTION_DEFAULT_TIMESERIES_RESOURCES);
   assert.equal((JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes("heartrate"), false);
   assert.equal((JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes("weight"), false);
-  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-profile"), false);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-profile"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-menstrual-cycle"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-electrocardiogram"));
   assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "stress-level").length, 1);
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
   for (const dailyResourceSlug of [
@@ -2602,7 +2792,7 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
   assert.equal(payload.events?.some((event) => event.fields?.metric === "distance"), false);
   assert.equal(payload.samples?.length ?? 0, 0);
 
-  const optInProfilePayload = normalizeJunctionSnapshot({
+  const sparseProfilePayload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     summaries: {
       profile: {
@@ -2612,24 +2802,40 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     },
   });
 
-  assert.deepEqual(optInProfilePayload.provenance?.summaryResources, ["profile"]);
-  assert.ok(optInProfilePayload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-profile"));
-  assert.equal(optInProfilePayload.events?.length ?? 0, 0);
+  assert.deepEqual(sparseProfilePayload.provenance?.summaryResources, ["profile"]);
+  assert.ok(sparseProfilePayload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-profile"));
+  assert.equal(sparseProfilePayload.events?.length ?? 0, 0);
 });
 
-test("Junction normalizer keeps configured raw-only summaries as sanitized evidence", () => {
+test("Junction normalizer maps menstrual cycle summaries to cycle and daily facets", () => {
   const payload = normalizeJunctionSnapshot({
-    importedAt: "2026-04-22T12:00:00.000Z",
+    importedAt: "2026-05-02T12:00:00.000Z",
     summaries: {
       menstrual_cycle: [{
         id: "cycle-1",
         created_at: "2026-04-01T12:00:00Z",
+        updated_at: "2026-05-01T12:00:00Z",
         cycle_end: "2026-05-01",
         period_start: "2026-04-07",
         period_end: "2026-04-11",
         menstrual_flow: [
           { date: "2026-04-07", flow: "light" },
           { date: "2026-04-10", flow: "medium" },
+          { date: "2026-04-11", flow: "unspecified" },
+        ],
+        basal_body_temperature: [
+          { date: "2026-04-20", value: 36.61 },
+          { date: "2026-04-21", value: 98.2 },
+        ],
+        ovulation_test: [
+          { date: "2026-04-19", test_result: "luteinizing_hormone_surge" },
+          { date: "2026-04-22", test_result: "indeterminate" },
+        ],
+        home_pregnancy_test: [
+          { date: "2026-04-28", test_result: "negative" },
+        ],
+        detected_deviations: [
+          { date: "2026-04-30", deviation: "irregular_menstrual_cycles" },
         ],
         sexual_activity: [{ date: "2026-04-13", protection_used: true }],
         source: {
@@ -2638,32 +2844,355 @@ test("Junction normalizer keeps configured raw-only summaries as sanitized evide
           sourceAppID: "raw-cycle-source-app",
           sourceName: "raw-cycle-source-name",
         },
-      }],
-      electrocardiogram: [{
-        id: "ecg-1",
-        classification: "sinus_rhythm",
+      }, {
+        id: "cycle-2-predicted",
+        is_predicted: true,
+        period_start: "2026-05-05",
+        period_end: "2026-05-09",
+        source: { provider: "apple_health", type: "phone" },
       }],
     },
   });
-
+  const events = payload.events ?? [];
+  const observationByMetric = new Map(
+    events
+      .filter((event) => event.kind === "observation")
+      .map((event) => [event.fields?.metric, event]),
+  );
+  const measurementEvents = events.filter((event) => event.kind === "measurement");
+  const readMeasurement = (event: (typeof events)[number] | undefined) =>
+    (event?.fields?.measurements as Array<Record<string, unknown>> | undefined)?.[0];
   const rawCycleArtifact = payload.rawArtifacts?.find((artifact) =>
     artifact.role === "junction-summary-menstrual-cycle"
   );
-  const rawArtifactText = JSON.stringify(payload.rawArtifacts);
 
   assert.deepEqual(payload.provenance?.summaryResources, ["menstrual_cycle"]);
-  assert.deepEqual(payload.provenance?.timeseriesResources, []);
-  assert.deepEqual(payload.events, []);
-  assert.equal(payload.samples?.length ?? 0, 0);
+
+  const periodLength = observationByMetric.get("period-length-days");
+  assert.equal(periodLength?.fields?.value, 5);
+  assert.equal(periodLength?.fields?.unit, "days");
+  assert.equal(periodLength?.occurredAt, "2026-04-07T00:00:00.000Z");
+  assert.equal(periodLength?.dayKey, "2026-04-07");
+  assert.equal(periodLength?.externalRef?.system, "junction");
+  assert.equal(periodLength?.externalRef?.resourceType, "junction-apple-health-menstrual-cycle");
+  assert.equal(periodLength?.externalRef?.facet, "period-length-days");
+  assert.equal(periodLength?.dataOrigin?.sourceProviderSlug, "apple-health");
+  assert.equal(observationByMetric.get("cycle-length-days")?.fields?.value, 25);
+
+  // Basal body temperature stays raw-only on the cycle summary: the
+  // dedicated basal_body_temperature daily timeseries is the canonical seam
+  // for the metric, so the sub-array must land no observations here.
+  assert.equal(
+    events.filter((event) => event.fields?.metric === "basal-body-temperature").length,
+    0,
+  );
+
+  // Unspecified flow and indeterminate test results stay raw-only.
+  const flowEvents = measurementEvents.filter((event) => event.title === "Junction menstrual flow");
+  assert.equal(flowEvents.length, 2);
+  assert.deepEqual(readMeasurement(flowEvents[0]), {
+    metric: "menstrual-flow",
+    value: 1,
+    unit: "score",
+    qualifiers: { flow: "light" },
+  });
+  assert.deepEqual(readMeasurement(flowEvents[1])?.qualifiers, { flow: "medium" });
+  assert.equal(flowEvents[0]?.dayKey, "2026-04-07");
+  assert.equal(flowEvents[0]?.externalRef?.facet, "menstrual-flow-2026-04-07");
+
+  const ovulationEvents = measurementEvents.filter((event) => event.title === "Junction ovulation test");
+  assert.equal(ovulationEvents.length, 1);
+  assert.deepEqual(readMeasurement(ovulationEvents[0]), {
+    metric: "ovulation-test",
+    value: 1,
+    unit: "result",
+    qualifiers: { result: "luteinizing_hormone_surge" },
+  });
+
+  const pregnancyEvent = measurementEvents.find((event) => event.title === "Junction pregnancy test");
+  assert.deepEqual(readMeasurement(pregnancyEvent), {
+    metric: "pregnancy-test",
+    value: 0,
+    unit: "result",
+    qualifiers: { result: "negative" },
+  });
+
+  const deviationEvent = measurementEvents.find((event) => event.title === "Junction cycle deviation");
+  assert.deepEqual(readMeasurement(deviationEvent), {
+    metric: "menstrual-cycle-deviation",
+    value: 1,
+    unit: "flag",
+    qualifiers: { deviation: "irregular_menstrual_cycles" },
+  });
+  assert.equal(
+    deviationEvent?.externalRef?.facet,
+    "menstrual-cycle-deviation-irregular-menstrual-cycles-2026-04-30",
+  );
+
+  // Predicted cycles are forecasts and must not become normalized facts.
+  assert.equal(
+    events.some((event) => event.occurredAt?.startsWith("2026-05-05")),
+    false,
+  );
+  // Sexual activity is deliberately unmapped and basal body temperature is
+  // canonical on the dedicated timeseries; both stay raw-only here.
+  assert.equal(events.length, 7);
+
   assert.match(JSON.stringify(rawCycleArtifact?.content), /period_start/u);
   assert.match(JSON.stringify(rawCycleArtifact?.content), /menstrual_flow/u);
   assert.match(JSON.stringify(rawCycleArtifact?.content), /protection_used/u);
-  assertJsonOmits(rawArtifactText, [
+  assertJsonOmits(JSON.stringify(payload.rawArtifacts), [
     "raw-cycle-source-app",
     "raw-cycle-source-name",
-    "sinus_rhythm",
   ]);
-  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-electrocardiogram"), false);
+  assertEventRawArtifactRolesExist(payload);
+});
+
+test("Junction normalizer maps electrocardiogram summaries to per-recording events", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    summaries: {
+      electrocardiogram: [{
+        id: "ecg-1",
+        session_start: "2026-04-22T18:00:00Z",
+        session_end: "2026-04-22T18:00:30Z",
+        voltage_sample_count: 15360,
+        heart_rate_mean: 62,
+        sampling_frequency_hz: 512,
+        classification: "sinus_rhythm",
+        time_zone: "Europe/London",
+        updated_at: "2026-04-22T18:05:00Z",
+        source: { provider: "apple_health_kit", type: "watch" },
+      }, {
+        id: "ecg-2",
+        session_start: "2026-04-23T08:00:00Z",
+        voltage_sample_count: 15360,
+        classification: "inconclusive",
+        inconclusive_cause: "poor_reading",
+        source: { provider: "apple_health_kit", type: "watch" },
+      }],
+    },
+  });
+  const events = payload.events ?? [];
+  const [first, second] = events;
+  const firstMeasurements = first?.fields?.measurements as Array<Record<string, unknown>> | undefined;
+  const secondMeasurements = second?.fields?.measurements as Array<Record<string, unknown>> | undefined;
+
+  assert.deepEqual(payload.provenance?.summaryResources, ["electrocardiogram"]);
+  assert.equal(events.length, 2);
+  assert.equal(first?.kind, "measurement");
+  assert.equal(first?.title, "Junction ECG (sinus rhythm)");
+  assert.equal(first?.occurredAt, "2026-04-22T18:00:00.000Z");
+  assert.equal(first?.dayKey, "2026-04-22");
+  assert.equal(first?.timeZone, "Europe/London");
+  assert.equal(first?.externalRef?.system, "junction");
+  assert.equal(first?.externalRef?.resourceType, "junction-apple-health-kit-electrocardiogram");
+  assert.equal(first?.externalRef?.facet, "ecg-recording");
+  assert.deepEqual(firstMeasurements, [
+    {
+      metric: "ecg-heart-rate-mean",
+      value: 62,
+      unit: "bpm",
+      qualifiers: { classification: "sinus_rhythm" },
+    },
+    {
+      metric: "ecg-voltage-sample-count",
+      value: 15360,
+      unit: "count",
+      qualifiers: { classification: "sinus_rhythm" },
+    },
+  ]);
+
+  assert.equal(second?.title, "Junction ECG (inconclusive)");
+  assert.deepEqual(secondMeasurements, [{
+    metric: "ecg-voltage-sample-count",
+    value: 15360,
+    unit: "count",
+    qualifiers: {
+      classification: "inconclusive",
+      "inconclusive-cause": "poor_reading",
+    },
+  }]);
+  assert.notEqual(first?.externalRef?.resourceId, second?.externalRef?.resourceId);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-electrocardiogram"));
+  assertEventRawArtifactRolesExist(payload);
+});
+
+test("Junction normalizer maps profile summaries to height and demographics", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    windowStart: "2026-04-22T00:00:00.000Z",
+    windowEnd: "2026-04-22T11:00:00.000Z",
+    summaries: {
+      profile: {
+        id: "profile-1",
+        height: 183,
+        birth_date: "1990-05-14",
+        sex: "female",
+        wheelchair_use: true,
+        updated_at: "2026-04-20T09:00:00Z",
+        source: { provider: "apple_health_kit", type: "phone" },
+      },
+    },
+  });
+  const events = payload.events ?? [];
+  const height = events.find((event) => event.fields?.metric === "height");
+  const demographics = events.find((event) => event.kind === "note");
+
+  assert.deepEqual(payload.provenance?.summaryResources, ["profile"]);
+  assert.equal(events.length, 2);
+  assert.equal(height?.kind, "observation");
+  assert.equal(height?.fields?.value, 183);
+  assert.equal(height?.fields?.unit, "cm");
+  assert.equal(height?.title, "Junction height");
+  assert.equal(height?.externalRef?.resourceType, "junction-apple-health-kit-profile");
+  assert.equal(height?.externalRef?.facet, "height");
+  assert.equal(
+    demographics?.note,
+    "Birth date: 1990-05-14. Biological sex: female. Wheelchair use: yes.",
+  );
+  assert.equal(demographics?.title, "Junction profile");
+  assert.equal(demographics?.externalRef?.facet, "profile-demographics");
+  assert.equal(demographics?.externalRef?.resourceId, height?.externalRef?.resourceId);
+  assert.equal(demographics?.recordedAt, "2026-04-20T09:00:00.000Z");
+  assertEventRawArtifactRolesExist(payload);
+
+  // The raw profile artifact stays identity-sanitized even though the
+  // normalized events carry the structured fields.
+  const profileArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "junction-summary-profile");
+  assertJsonOmits(JSON.stringify(profileArtifact?.content), ["1990-05-14", "183"]);
+
+  // An "unknown" sex enum value carries no information and stays raw-only.
+  const unknownSexPayload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      profile: { id: "profile-2", sex: "unknown", source: { provider: "oura", type: "ring" } },
+    },
+  });
+  assert.equal(unknownSexPayload.events?.length ?? 0, 0);
+});
+
+test("Junction oversized menstrual deviation strings land with capped facet and qualifier", () => {
+  const oversizedDeviation = "a".repeat(200);
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-02T12:00:00.000Z",
+    summaries: {
+      menstrual_cycle: [{
+        id: "cycle-long-deviation",
+        period_start: "2026-04-07",
+        detected_deviations: [{ date: "2026-04-30", deviation: oversizedDeviation }],
+        source: { provider: "apple_health", type: "phone" },
+      }],
+    },
+  });
+  const deviationEvent = payload.events?.find((event) => event.title === "Junction cycle deviation");
+  const measurement = (
+    deviationEvent?.fields?.measurements as Array<Record<string, unknown>> | undefined
+  )?.[0];
+  const qualifiers = measurement?.qualifiers as Record<string, string> | undefined;
+
+  assert.ok(deviationEvent);
+  // The facet slug is hard-capped at 80 characters so attacker- or
+  // provider-controlled deviation text cannot mint unbounded external refs.
+  assert.equal(
+    deviationEvent?.externalRef?.facet,
+    `menstrual-cycle-deviation-${"a".repeat(80)}-2026-04-30`,
+  );
+  assert.equal(qualifiers?.deviation, "a".repeat(80));
+});
+
+test("Junction ECG summaries drop negative metrics and cap qualifier lengths", () => {
+  const oversizedClassification = `c${"x".repeat(120)}`;
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    summaries: {
+      electrocardiogram: [{
+        id: "ecg-negative",
+        session_start: "2026-04-22T18:00:00Z",
+        heart_rate_mean: -62,
+        voltage_sample_count: -15360,
+        classification: "sinus_rhythm",
+        source: { provider: "apple_health_kit", type: "watch" },
+      }, {
+        id: "ecg-implausible-hr",
+        session_start: "2026-04-22T20:00:00Z",
+        heart_rate_mean: 400,
+        voltage_sample_count: 15360,
+        classification: "sinus_rhythm",
+        source: { provider: "apple_health_kit", type: "watch" },
+      }, {
+        id: "ecg-long-classification",
+        session_start: "2026-04-23T08:00:00Z",
+        heart_rate_mean: 64,
+        classification: oversizedClassification,
+        source: { provider: "apple_health_kit", type: "watch" },
+      }],
+    },
+  });
+  const events = payload.events ?? [];
+
+  // Negative heart rate and sample counts carry no usable value: with no
+  // remaining measurements the recording stays raw-only instead of landing a
+  // measurement-less event.
+  assert.equal(events.length, 2);
+
+  // Plausibility window: a 400 bpm mean is sensor noise — the HR measurement
+  // drops while the sample count still lands for the same recording.
+  const implausibleHrMeasurements = events[0]?.fields?.measurements as
+    | Array<Record<string, unknown>>
+    | undefined;
+  assert.equal(implausibleHrMeasurements?.length, 1);
+  assert.equal(implausibleHrMeasurements?.[0]?.metric, "ecg-voltage-sample-count");
+
+  const measurement = (
+    events[1]?.fields?.measurements as Array<Record<string, unknown>> | undefined
+  )?.[0];
+  const qualifiers = measurement?.qualifiers as Record<string, string> | undefined;
+  assert.equal(measurement?.metric, "ecg-heart-rate-mean");
+  assert.equal(measurement?.value, 64);
+  assert.equal(qualifiers?.classification, oversizedClassification.slice(0, 80));
+  assert.equal(qualifiers?.classification?.length, 80);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-electrocardiogram"));
+});
+
+test("Junction partial profiles land height-only and reject non-boolean wheelchair use", () => {
+  const heightOnlyPayload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      profile: {
+        id: "profile-height-only",
+        height: 175,
+        updated_at: "2026-04-20T09:00:00Z",
+        source: { provider: "oura", type: "ring" },
+      },
+    },
+  });
+  const heightOnlyEvents = heightOnlyPayload.events ?? [];
+
+  // A height-only profile still lands the observation without a hollow
+  // demographics note.
+  assert.equal(heightOnlyEvents.length, 1);
+  assert.equal(heightOnlyEvents[0]?.kind, "observation");
+  assert.equal(heightOnlyEvents[0]?.fields?.metric, "height");
+  assert.equal(heightOnlyEvents[0]?.fields?.value, 175);
+
+  // Non-boolean wheelchair_use values (string "true", numeric 1) never coerce
+  // into a wheelchair segment.
+  const coercedWheelchairPayload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      profile: {
+        id: "profile-coerced-wheelchair",
+        birth_date: "1990-05-14",
+        wheelchair_use: "true",
+        updated_at: "2026-04-20T09:00:00Z",
+        source: { provider: "apple_health_kit", type: "phone" },
+      },
+    },
+  });
+  const demographics = coercedWheelchairPayload.events?.find((event) => event.kind === "note");
+
+  assert.equal(demographics?.note, "Birth date: 1990-05-14.");
 });
 
 test("Junction normalizer ignores unsupported timeseries and workout stream resources", () => {
@@ -2706,9 +3235,9 @@ test("Junction import receipt does not retain unsupported-only clinical summarie
     snapshot: {
       importedAt: "2026-04-22T12:00:00.000Z",
       summaries: {
-        electrocardiogram: [{
-          id: "ecg-summary-1",
-          classification: "sinus_rhythm",
+        clinical_note: [{
+          id: "clinical-note-1",
+          classification: "unsupported_clinical_value",
         }],
       },
       timeseries: {
@@ -2728,7 +3257,7 @@ test("Junction import receipt does not retain unsupported-only clinical summarie
   assert.equal(payload.samples?.length ?? 0, 0);
   assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"), false);
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-raw-receipt:")));
-  assert.doesNotMatch(rawArtifactText, /sinus_rhythm|electrocardiogram_voltage/u);
+  assert.doesNotMatch(rawArtifactText, /unsupported_clinical_value|electrocardiogram_voltage/u);
 });
 
 test("Junction raw receipt hash ignores unsupported-only resources", async () => {
@@ -2749,7 +3278,7 @@ test("Junction raw receipt hash ignores unsupported-only resources", async () =>
     snapshot: {
       importedAt: "2026-04-22T12:00:00.000Z",
       summaries: {
-        electrocardiogram: [{ classification: "sinus_rhythm" }],
+        clinical_note: [{ classification: "unsupported_clinical_value" }],
         workout_stream: [{ cadence: 86 }],
       },
       timeseries: {
@@ -2770,7 +3299,7 @@ test("Junction raw receipt hash ignores unsupported-only resources", async () =>
   assert.deepEqual(unsupportedPayload.provenance?.timeseriesResources, []);
   assert.equal(unsupportedPayload.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"), false);
   assertJsonOmits(unsupportedArtifactText, [
-    "sinus_rhythm",
+    "unsupported_clinical_value",
     "workout_stream",
     "electrocardiogram_voltage",
     "heartrate",
@@ -2806,7 +3335,7 @@ test("Junction raw receipt hash ignores unsupported resources mixed with support
       ...supportedSnapshot,
       summaries: {
         ...supportedSnapshot.summaries,
-        electrocardiogram: [{ classification: "sinus_rhythm" }],
+        clinical_note: [{ classification: "unsupported_clinical_value" }],
         workout_stream: [{ cadence: 86 }],
       },
       timeseries: {
@@ -2825,7 +3354,7 @@ test("Junction raw receipt hash ignores unsupported resources mixed with support
   assert.deepEqual(mixedPayload.provenance?.summaryResources, ["activity"]);
   assert.deepEqual(mixedPayload.provenance?.timeseriesResources, []);
   assertJsonOmits(mixedArtifactText, [
-    "sinus_rhythm",
+    "unsupported_clinical_value",
     "workout_stream",
     "heartrate",
     "workout_distance",

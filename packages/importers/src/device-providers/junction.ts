@@ -3,6 +3,9 @@ import { createHash } from "node:crypto";
 import {
   extractIsoDatePrefix,
   ID_PREFIXES,
+  MEAL_MICRONUTRIENT_KEYS,
+  type MealMicronutrientKey,
+  type MealMicronutrients,
   type MealNutrition,
   type WorkoutSession,
 } from "@murphai/contracts";
@@ -428,14 +431,68 @@ const JUNCTION_MEAL_FIBER_GRAM_PATHS = [
   "nutrition.totals.fiberGrams",
   "totals.fiberGrams",
 ] as const;
+const JUNCTION_MEAL_WATER_GRAM_PATHS = [
+  "water",
+  "waterGrams",
+  "water_grams",
+  "water_g",
+  "macros.water",
+  "nutrition.totals.waterGrams",
+  "totals.waterGrams",
+] as const;
+// Junction's documented meal `micros` maps (minerals / trace_elements /
+// vitamins) keyed by the provider enum values, mapped onto the bounded
+// contract micronutrient keys. Units follow the Junction docs: sodium and
+// potassium in grams, copper/manganese and most vitamins in milligrams,
+// vitamin A/B12/D/K plus trace elements in micrograms. The `satisfies`
+// constraint keeps every contract micronutrient key mapped here.
+const JUNCTION_MEAL_MICRO_PATHS = {
+  sodiumGrams: "micros.minerals.sodium",
+  potassiumGrams: "micros.minerals.potassium",
+  calciumMg: "micros.minerals.calcium",
+  phosphorusMg: "micros.minerals.phosphorus",
+  magnesiumMg: "micros.minerals.magnesium",
+  ironMg: "micros.minerals.iron",
+  zincMg: "micros.minerals.zinc",
+  fluorideMg: "micros.minerals.fluoride",
+  chlorideMg: "micros.minerals.chloride",
+  chromiumMcg: "micros.trace_elements.chromium",
+  copperMg: "micros.trace_elements.copper",
+  iodineMcg: "micros.trace_elements.iodine",
+  manganeseMg: "micros.trace_elements.manganese",
+  molybdenumMcg: "micros.trace_elements.molybdenum",
+  seleniumMcg: "micros.trace_elements.selenium",
+  vitaminAMcg: "micros.vitamins.vitamin_a",
+  vitaminB1Mg: "micros.vitamins.vitamin_b1",
+  riboflavinMg: "micros.vitamins.riboflavin",
+  niacinMg: "micros.vitamins.niacin",
+  pantothenicAcidMg: "micros.vitamins.pantothenic_acid",
+  vitaminB6Mg: "micros.vitamins.vitamin_b6",
+  biotinMcg: "micros.vitamins.biotin",
+  vitaminB12Mcg: "micros.vitamins.vitamin_b12",
+  vitaminCMg: "micros.vitamins.vitamin_c",
+  vitaminDMcg: "micros.vitamins.vitamin_d",
+  vitaminEMg: "micros.vitamins.vitamin_e",
+  vitaminKMcg: "micros.vitamins.vitamin_k",
+  folicAcidMg: "micros.vitamins.folic_acid",
+} as const satisfies Record<MealMicronutrientKey, string>;
 const JUNCTION_NESTED_RESOURCE_ENTRY_KEYS = ["data", "results", "items", "records"] as const;
 const JUNCTION_MEAL_NESTED_RESOURCE_ENTRY_KEYS = ["meal", "meals", "results", "records"] as const;
+const JUNCTION_MENSTRUAL_CYCLE_NESTED_RESOURCE_ENTRY_KEYS = [
+  "menstrual_cycle",
+  ...JUNCTION_NESTED_RESOURCE_ENTRY_KEYS,
+] as const;
+const JUNCTION_ELECTROCARDIOGRAM_NESTED_RESOURCE_ENTRY_KEYS = [
+  "electrocardiogram",
+  ...JUNCTION_NESTED_RESOURCE_ENTRY_KEYS,
+] as const;
 const JUNCTION_MEAL_NUTRITION_TOTAL_KEYS = [
   "calories",
   "proteinGrams",
   "carbsGrams",
   "fatGrams",
   "fiberGrams",
+  "waterGrams",
 ] as const satisfies readonly MealNutritionTotalKey[];
 const JUNCTION_WORKOUT_STABLE_ID_PATHS = [
   ...JUNCTION_WORKOUT_ID_PATHS,
@@ -691,6 +748,13 @@ function normalizeSummaries(
           pushMealSummary(entry, resourceContext, context);
           break;
         case "profile":
+          pushProfileSummary(entry, resourceContext, context);
+          break;
+        case "menstrual_cycle":
+          pushMenstrualCycleSummary(entry, resourceContext, context);
+          break;
+        case "electrocardiogram":
+          pushElectrocardiogramSummary(entry, resourceContext, context);
           break;
       }
     });
@@ -1760,6 +1824,390 @@ function pushMealSummary(
   }));
 }
 
+// Junction profile summaries report height as an integer in centimeters
+// (docs.junction.com/api-reference/data/profile/get-summary).
+const JUNCTION_PROFILE_METRICS: readonly MetricDescriptor[] = [
+  {
+    metric: "height",
+    unit: "cm",
+    title: "Junction height",
+    paths: ["height", "heightCm", "height_cm", "heightCentimeters", "height_centimeters"],
+  },
+];
+const JUNCTION_PROFILE_BIRTH_DATE_PATHS = [
+  "birthDate",
+  "birth_date",
+  "dateOfBirth",
+  "date_of_birth",
+  "dob",
+] as const;
+// `gender` is deliberately not a fallback: Junction documents it as a
+// distinct enum from biological sex and the note segment is labeled
+// "Biological sex", so a gender value here would be mislabeled.
+const JUNCTION_PROFILE_SEX_PATHS = [
+  "sex",
+  "biologicalSex",
+  "biological_sex",
+] as const;
+
+// Junction profile is a single current-state snapshot per source. Height
+// follows the body-summary observation pattern; birth date, biological sex,
+// and wheelchair use are categorical, so they land as one structured note
+// event keyed by a stable external ref instead of fake numeric observations.
+function pushProfileSummary(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+  context: NormalizationContext,
+): void {
+  const baseTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+  // Profile entries carry no observed-at timestamp, so the generic resolver
+  // falls back to the sync window. Pin the identity-bearing observedAtRaw to
+  // the provider's updated/created timestamps so repeated syncs reconcile to
+  // the same external ref instead of minting one event per window.
+  const timestamp = withTimestampOverride(baseTimestamp, {
+    observedAtRaw: baseTimestamp.observedAtRaw
+      ?? firstStringFromPaths(entry, ["updatedAt", "updated_at", "createdAt", "created_at"])
+      ?? "current",
+  });
+
+  pushObservationMetrics(entry, resourceContext, context, JUNCTION_PROFILE_METRICS, timestamp);
+
+  if (!timestamp.occurredAt) {
+    return;
+  }
+
+  const birthDate = firstIsoDateFromPaths(entry, JUNCTION_PROFILE_BIRTH_DATE_PATHS);
+  const sex = readJunctionProfileSex(entry);
+  const wheelchairUse = firstValueFromPaths(entry, ["wheelchairUse", "wheelchair_use"]);
+  const segments = [
+    birthDate ? `Birth date: ${birthDate}.` : undefined,
+    sex ? `Biological sex: ${sex}.` : undefined,
+    typeof wheelchairUse === "boolean" ? `Wheelchair use: ${wheelchairUse ? "yes" : "no"}.` : undefined,
+  ].filter((segment): segment is string => segment !== undefined);
+
+  if (segments.length === 0) {
+    return;
+  }
+
+  context.events.push(stripUndefined({
+    kind: "note",
+    occurredAt: timestamp.occurredAt,
+    recordedAt: timestamp.recordedAt,
+    dayKey: timestamp.dayKey,
+    source: "device",
+    title: "Junction profile",
+    note: trimToLength(segments.join(" "), 4000),
+    rawArtifactRoles: resourceContext.rawArtifactRoles,
+    externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "profile-demographics"),
+    dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+  }));
+}
+
+function readJunctionProfileSex(entry: PlainObject): string | undefined {
+  const value = firstStringFromPaths(entry, JUNCTION_PROFILE_SEX_PATHS);
+  if (!value || value.trim().toLowerCase() === "unknown") {
+    return undefined;
+  }
+
+  return trimToLength(value, 40);
+}
+
+// Flow categories are a real ordinal intensity scale; the provider label is
+// preserved as a measurement qualifier.
+const JUNCTION_MENSTRUAL_FLOW_ORDINALS: Readonly<Record<string, number>> = Object.freeze({
+  none: 0,
+  light: 1,
+  medium: 2,
+  heavy: 3,
+});
+// Surge results are positive detections; indeterminate results carry no
+// usable value and stay raw-only.
+const JUNCTION_FERTILITY_TEST_RESULT_VALUES: Readonly<Record<string, number>> = Object.freeze({
+  negative: 0,
+  positive: 1,
+  luteinizing_hormone_surge: 1,
+  estrogen_surge: 1,
+});
+
+// One Junction menstrual cycle summary per cycle (~13/year), with small dated
+// sub-arrays (docs.junction.com/api-reference/data/menstrual-cycle/get-summary).
+// Predicted cycles are upstream forecasts, not facts, and stay raw-only.
+function pushMenstrualCycleSummary(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+  context: NormalizationContext,
+): void {
+  if (firstValueFromPaths(entry, ["isPredicted", "is_predicted"]) === true) {
+    return;
+  }
+
+  const baseTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+  const periodStart = firstIsoDateFromPaths(entry, ["periodStart", "period_start"]);
+  const periodEnd = firstIsoDateFromPaths(entry, ["periodEnd", "period_end"]);
+  const cycleEnd = firstIsoDateFromPaths(entry, ["cycleEnd", "cycle_end"]);
+
+  if (periodStart) {
+    const cycleTimestamp = junctionDateOnlyTimestamp(baseTimestamp, periodStart);
+    const cycleObservations = [
+      {
+        metric: "period-length-days",
+        title: "Junction period length",
+        value: inclusiveDaysBetween(periodStart, periodEnd),
+      },
+      {
+        metric: "cycle-length-days",
+        title: "Junction cycle length",
+        value: inclusiveDaysBetween(periodStart, cycleEnd),
+      },
+    ];
+
+    for (const observation of cycleObservations) {
+      if (observation.value === undefined) {
+        continue;
+      }
+
+      context.events.push(stripUndefined({
+        kind: "observation",
+        occurredAt: cycleTimestamp.occurredAt,
+        recordedAt: cycleTimestamp.recordedAt,
+        dayKey: cycleTimestamp.dayKey,
+        source: "device",
+        title: observation.title,
+        rawArtifactRoles: resourceContext.rawArtifactRoles,
+        externalRef: makeJunctionExternalRef(resourceContext, entry, cycleTimestamp, observation.metric),
+        dataOrigin: buildDataOrigin(entry, resourceContext, cycleTimestamp),
+        fields: {
+          metric: observation.metric,
+          observationGrain: "summary",
+          value: observation.value,
+          unit: "days",
+        },
+      }));
+    }
+  }
+
+  // Basal body temperature deliberately stays raw-only here: the dedicated
+  // `basal_body_temperature` daily timeseries (a default resource) is the
+  // canonical seam for the `basal-body-temperature` metric, and mapping the
+  // cycle sub-array too would land duplicate same-day observations under a
+  // different resourceType that dedupe cannot collapse.
+
+  for (const sub of junctionDatedSubEntries(entry, ["menstrualFlow", "menstrual_flow"])) {
+    const flow = firstStringFromPaths(sub.entry, ["flow"]);
+    const value = flow ? JUNCTION_MENSTRUAL_FLOW_ORDINALS[flow.trim().toLowerCase()] : undefined;
+    if (!flow || value === undefined) {
+      continue;
+    }
+
+    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+      date: sub.date,
+      facet: `menstrual-flow-${sub.date}`,
+      measurement: {
+        metric: "menstrual-flow",
+        value,
+        unit: "score",
+        qualifiers: { flow: trimToLength(flow, 80) },
+      },
+      title: "Junction menstrual flow",
+    });
+  }
+
+  for (const test of [
+    { metric: "ovulation-test", paths: ["ovulationTest", "ovulation_test"], title: "Junction ovulation test" },
+    { metric: "pregnancy-test", paths: ["homePregnancyTest", "home_pregnancy_test"], title: "Junction pregnancy test" },
+  ]) {
+    for (const sub of junctionDatedSubEntries(entry, test.paths)) {
+      const result = firstStringFromPaths(sub.entry, ["testResult", "test_result"]);
+      const value = result ? JUNCTION_FERTILITY_TEST_RESULT_VALUES[result.trim().toLowerCase()] : undefined;
+      if (!result || value === undefined) {
+        continue;
+      }
+
+      pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+        date: sub.date,
+        facet: `${test.metric}-${sub.date}`,
+        measurement: {
+          metric: test.metric,
+          value,
+          unit: "result",
+          qualifiers: { result: trimToLength(result, 80) },
+        },
+        title: test.title,
+      });
+    }
+  }
+
+  for (const sub of junctionDatedSubEntries(entry, ["detectedDeviations", "detected_deviations"])) {
+    const deviation = firstStringFromPaths(sub.entry, ["deviation"]);
+    if (!deviation) {
+      continue;
+    }
+
+    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+      date: sub.date,
+      facet: `menstrual-cycle-deviation-${trimSlugToLength(slugify(deviation, "deviation"), 80)}-${sub.date}`,
+      measurement: {
+        metric: "menstrual-cycle-deviation",
+        value: 1,
+        unit: "flag",
+        qualifiers: { deviation: trimToLength(deviation, 80) },
+      },
+      title: "Junction cycle deviation",
+    });
+  }
+}
+
+interface JunctionDatedSubEntry {
+  date: string;
+  entry: PlainObject;
+}
+
+function junctionDatedSubEntries(entry: PlainObject, paths: readonly string[]): JunctionDatedSubEntry[] {
+  const subEntries: JunctionDatedSubEntry[] = [];
+
+  for (const value of asArray(firstValueFromPaths(entry, paths))) {
+    const subEntry = asPlainObject(value);
+    const date = subEntry ? firstIsoDateFromPaths(subEntry, ["date"]) : undefined;
+    if (subEntry && date) {
+      subEntries.push({ date, entry: subEntry });
+    }
+  }
+
+  return subEntries;
+}
+
+function pushJunctionCycleDailyMeasurement(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+  context: NormalizationContext,
+  baseTimestamp: ReturnType<typeof resolveRecordTimestamp>,
+  input: {
+    date: string;
+    facet: string;
+    measurement: {
+      metric: string;
+      value: number;
+      unit: string;
+      qualifiers: Record<string, string>;
+    };
+    title: string;
+  },
+): void {
+  const timestamp = junctionDateOnlyTimestamp(baseTimestamp, input.date);
+
+  context.events.push(stripUndefined({
+    kind: "measurement",
+    occurredAt: timestamp.occurredAt,
+    recordedAt: timestamp.recordedAt,
+    dayKey: timestamp.dayKey,
+    source: "device",
+    title: input.title,
+    rawArtifactRoles: resourceContext.rawArtifactRoles,
+    externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, input.facet),
+    dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+    fields: {
+      measurements: [input.measurement],
+    },
+  }));
+}
+
+function junctionDateOnlyTimestamp(
+  baseTimestamp: ReturnType<typeof resolveRecordTimestamp>,
+  date: string,
+): ReturnType<typeof resolveRecordTimestamp> {
+  return withTimestampOverride(baseTimestamp, {
+    occurredAt: `${date}T00:00:00.000Z`,
+    recordedAt: baseTimestamp.recordedAt ?? `${date}T00:00:00.000Z`,
+    dayKey: date,
+    observedAtRaw: date,
+  });
+}
+
+function inclusiveDaysBetween(startDate: string, endDate: string | undefined): number | undefined {
+  if (!endDate) {
+    return undefined;
+  }
+
+  const start = Date.parse(`${startDate}T00:00:00Z`);
+  const end = Date.parse(`${endDate}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+    return undefined;
+  }
+
+  const days = Math.round((end - start) / 86_400_000) + 1;
+  return days >= 1 && days <= 120 ? days : undefined;
+}
+
+// One Junction ECG summary per recording, dozens-to-hundreds of sub-KB rows
+// per member-year (docs.junction.com/api-reference/data/electrocardiogram/get-summary).
+// The recording lands as one measurement event carrying the classification as
+// a qualifier; the electrocardiogram_voltage waveform stays excluded.
+function pushElectrocardiogramSummary(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+  context: NormalizationContext,
+): void {
+  const baseTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+  const sessionStartRaw = firstValueFromPaths(entry, ["sessionStart", "session_start"]);
+  const sessionStart = resolveSafeTimestamp(sessionStartRaw, resourceContext.sourceProviderSlug);
+  const occurredAt = sessionStart ?? baseTimestamp.occurredAt;
+
+  if (!occurredAt) {
+    return;
+  }
+
+  const timestamp = withTimestampOverride(baseTimestamp, {
+    occurredAt,
+    dayKey: extractIsoDatePrefix(occurredAt) ?? baseTimestamp.dayKey,
+    observedAtRaw: stringId(sessionStartRaw) ?? baseTimestamp.observedAtRaw ?? occurredAt,
+  });
+  const classification = trimOptionalToLength(firstStringFromPaths(entry, ["classification"]), 80);
+  const inconclusiveCause = trimOptionalToLength(
+    firstStringFromPaths(entry, ["inconclusiveCause", "inconclusive_cause"]),
+    80,
+  );
+  const heartRateMeanRaw = firstNonNegativeNumberFromPaths(entry, ["heartRateMean", "heart_rate_mean"]);
+  // Plausibility window matching the other vitals in this stack: ECG mean HR
+  // outside 20-300 bpm is sensor noise, not a reading.
+  const heartRateMean = heartRateMeanRaw !== undefined && heartRateMeanRaw >= 20 && heartRateMeanRaw <= 300
+    ? heartRateMeanRaw
+    : undefined;
+  const sampleCount = firstNonNegativeNumberFromPaths(entry, ["voltageSampleCount", "voltage_sample_count"]);
+  const qualifiers = stripUndefined({
+    classification,
+    "inconclusive-cause": inconclusiveCause,
+  });
+  const measurementBase = Object.keys(qualifiers).length > 0 ? { qualifiers } : {};
+  const measurements = [
+    ...(heartRateMean !== undefined
+      ? [{ metric: "ecg-heart-rate-mean", value: heartRateMean, unit: "bpm", ...measurementBase }]
+      : []),
+    ...(sampleCount !== undefined
+      ? [{ metric: "ecg-voltage-sample-count", value: sampleCount, unit: "count", ...measurementBase }]
+      : []),
+  ];
+
+  if (measurements.length === 0) {
+    return;
+  }
+
+  context.events.push(stripUndefined({
+    kind: "measurement",
+    occurredAt,
+    recordedAt: timestamp.recordedAt,
+    dayKey: timestamp.dayKey,
+    timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
+    source: "device",
+    title: classification ? `Junction ECG (${classification.replaceAll("_", " ")})` : "Junction ECG",
+    rawArtifactRoles: resourceContext.rawArtifactRoles,
+    externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "ecg-recording"),
+    dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+    fields: {
+      measurements,
+    },
+  }));
+}
+
 function resolveJunctionMealTimestamp(
   entry: PlainObject,
   context: Pick<NormalizationContext, "importedAt" | "windowEnd" | "windowStart">,
@@ -1847,22 +2295,76 @@ function buildJunctionMealNutrition(
   resourceContext: ResourceContext,
   foodItems: readonly JunctionMealFoodItem[],
 ): MealNutrition | undefined {
-  const itemTotals = sumJunctionMealNutritionTotals(foodItems.map((item) => item.entry));
+  const itemEntries = foodItems.map((item) => item.entry);
+  const itemTotals = sumJunctionMealNutritionTotals(itemEntries);
   const directTotals = readJunctionMealNutritionData(entry);
   const totals = mergeJunctionMealNutritionTotals(itemTotals, directTotals);
+  const micros = mergeJunctionMealMicros(
+    sumJunctionMealMicros(itemEntries),
+    readJunctionMealMicros(entry),
+  );
 
-  if (!totals) {
+  if (!totals && !micros) {
     return undefined;
   }
 
-  return {
-    totals,
-    provenance: {
-      source: "database",
-      confidence: "high",
-      sourceDetail: trimToLength(`junction:${resourceContext.sourceProviderSlug}:meal`, 240),
-    },
+  const provenance: MealNutrition["provenance"] = {
+    source: "database",
+    confidence: "high",
+    sourceDetail: trimToLength(`junction:${resourceContext.sourceProviderSlug}:meal`, 240),
   };
+
+  return stripUndefined({
+    totals,
+    micros,
+    provenance,
+  });
+}
+
+// Micronutrients land bounded and compactly: only the documented Junction
+// micro keys are read, and null/zero entries are skipped.
+function readJunctionMealMicros(entry: PlainObject): Partial<MealMicronutrients> | undefined {
+  const micros: Partial<MealMicronutrients> = {};
+
+  for (const key of MEAL_MICRONUTRIENT_KEYS) {
+    const value = roundMealNutritionValue(finiteNumber(readPath(entry, JUNCTION_MEAL_MICRO_PATHS[key])));
+    if (value !== undefined && value > 0) {
+      micros[key] = value;
+    }
+  }
+
+  return Object.keys(micros).length > 0 ? micros : undefined;
+}
+
+function sumJunctionMealMicros(
+  entries: readonly PlainObject[],
+): Partial<MealMicronutrients> | undefined {
+  const totals: Partial<MealMicronutrients> = {};
+
+  for (const entry of entries) {
+    const micros = readJunctionMealMicros(entry);
+    for (const [key, value] of Object.entries(micros ?? {}) as Array<[MealMicronutrientKey, number]>) {
+      totals[key] = roundMealNutritionValue((totals[key] ?? 0) + value) ?? value;
+    }
+  }
+
+  return Object.keys(totals).length > 0 ? totals : undefined;
+}
+
+function mergeJunctionMealMicros(
+  itemMicros: Partial<MealMicronutrients> | undefined,
+  directMicros: Partial<MealMicronutrients> | undefined,
+): MealMicronutrients | undefined {
+  const micros: Partial<MealMicronutrients> = {};
+
+  for (const key of MEAL_MICRONUTRIENT_KEYS) {
+    const value = directMicros?.[key] ?? itemMicros?.[key];
+    if (value !== undefined) {
+      micros[key] = value;
+    }
+  }
+
+  return Object.keys(micros).length > 0 ? micros : undefined;
 }
 
 interface JunctionMealFoodItem {
@@ -2000,11 +2502,9 @@ function sumJunctionMealNutritionTotals(
       continue;
     }
 
-    addJunctionMealNutritionValue(totals, "calories", nutrition.calories);
-    addJunctionMealNutritionValue(totals, "proteinGrams", nutrition.proteinGrams);
-    addJunctionMealNutritionValue(totals, "carbsGrams", nutrition.carbsGrams);
-    addJunctionMealNutritionValue(totals, "fatGrams", nutrition.fatGrams);
-    addJunctionMealNutritionValue(totals, "fiberGrams", nutrition.fiberGrams);
+    for (const key of JUNCTION_MEAL_NUTRITION_TOTAL_KEYS) {
+      addJunctionMealNutritionValue(totals, key, nutrition[key]);
+    }
   }
 
   return mealNutritionTotalsOrUndefined(totals);
@@ -2018,6 +2518,7 @@ function readJunctionMealNutritionData(entry: PlainObject): MealNutritionTotals 
   addJunctionMealNutritionValue(totals, "carbsGrams", firstNonNegativeNumberFromPaths(entry, JUNCTION_MEAL_CARBS_GRAM_PATHS));
   addJunctionMealNutritionValue(totals, "fatGrams", firstNonNegativeNumberFromPaths(entry, JUNCTION_MEAL_FAT_GRAM_PATHS));
   addJunctionMealNutritionValue(totals, "fiberGrams", firstNonNegativeNumberFromPaths(entry, JUNCTION_MEAL_FIBER_GRAM_PATHS));
+  addJunctionMealNutritionValue(totals, "waterGrams", firstNonNegativeNumberFromPaths(entry, JUNCTION_MEAL_WATER_GRAM_PATHS));
 
   return mealNutritionTotalsOrUndefined(totals);
 }
@@ -2861,7 +3362,16 @@ function readNestedResourceEntries(envelope: PlainObject, resource?: string): Pl
 }
 
 function nestedResourceEntryKeys(resource: string | undefined): readonly string[] {
-  return resource === "meal" ? JUNCTION_MEAL_NESTED_RESOURCE_ENTRY_KEYS : JUNCTION_NESTED_RESOURCE_ENTRY_KEYS;
+  switch (resource) {
+    case "meal":
+      return JUNCTION_MEAL_NESTED_RESOURCE_ENTRY_KEYS;
+    case "menstrual_cycle":
+      return JUNCTION_MENSTRUAL_CYCLE_NESTED_RESOURCE_ENTRY_KEYS;
+    case "electrocardiogram":
+      return JUNCTION_ELECTROCARDIOGRAM_NESTED_RESOURCE_ENTRY_KEYS;
+    default:
+      return JUNCTION_NESTED_RESOURCE_ENTRY_KEYS;
+  }
 }
 
 function mergeNestedResourceEntry(envelope: PlainObject, nestedEntry: PlainObject): PlainObject {
