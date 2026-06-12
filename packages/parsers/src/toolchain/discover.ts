@@ -243,7 +243,7 @@ export function ffmpegOptionsFromDoctor(
   const command = normalizeNullableString(doctor.tools.ffmpeg.command);
   if (!command) {
     return remoteTranscriptionOnly
-      ? { remoteTranscriptionOnly: true }
+      ? { allowSystemLookup: false, remoteTranscriptionOnly: true }
       : undefined;
   }
 

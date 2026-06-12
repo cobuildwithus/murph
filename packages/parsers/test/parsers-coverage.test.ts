@@ -1195,7 +1195,7 @@ test("ffmpeg options mark remote-only transcription so audio passthrough can ski
 
   assert.deepEqual(
     ffmpegOptionsFromDoctor(buildDoctor({ ffmpeg: false, transcription: true, whisper: false })),
-    { remoteTranscriptionOnly: true },
+    { allowSystemLookup: false, remoteTranscriptionOnly: true },
   );
 
   // A usable local whisper lane needs 16 kHz WAV, so normalization stays on.

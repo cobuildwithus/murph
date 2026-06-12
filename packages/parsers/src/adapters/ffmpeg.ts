@@ -1,3 +1,4 @@
+import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import type { ParserArtifactRef } from "../contracts/artifact.js";
@@ -43,17 +44,22 @@ export async function prepareAudioInput(input: {
     return { inputPath: artifact.absolutePath };
   }
 
+  const remoteTranscriptionOnly = input.ffmpeg?.remoteTranscriptionOnly === true;
   if (
     artifact.kind === "audio" &&
-    input.ffmpeg?.remoteTranscriptionOnly === true &&
-    isRemoteTranscriptionDirectAudioArtifact(artifact)
+    remoteTranscriptionOnly &&
+    await isRemoteTranscriptionDirectAudioArtifact(artifact)
   ) {
     return { inputPath: artifact.absolutePath, preparedKind: "audio" };
   }
 
   const command = await resolveFfmpegCommand(input.ffmpeg);
   if (!command) {
-    if (artifact.kind === "audio" && isDirectWhisperAudioArtifact(artifact)) {
+    if (
+      artifact.kind === "audio" &&
+      !remoteTranscriptionOnly &&
+      isDirectWhisperAudioArtifact(artifact)
+    ) {
       return { inputPath: artifact.absolutePath, preparedKind: "audio" };
     }
 
@@ -102,9 +108,9 @@ export async function prepareAudioInput(input: {
 // Container formats verified accepted by the hosted remote transcription model
 // (@cf/openai/whisper-large-v3-turbo; live-checked against the production model
 // on 2026-06-12). AMR is deliberately absent: it is unverified, so it stays on
-// the ffmpeg WAV normalization path. `audio/mp4`/`.mp4` are also deliberately
-// absent: that container routinely carries video, and the ffmpeg `-vn` path
-// avoids sending those video-capable container bytes through passthrough.
+// the ffmpeg WAV normalization path. MP4-family containers are also deliberately
+// absent: they routinely carry video, and the ffmpeg `-vn` path avoids sending
+// those video-capable container bytes through passthrough.
 const REMOTE_TRANSCRIPTION_DIRECT_AUDIO_MIMES = new Set([
   "audio/aac",
   "audio/x-aac",
@@ -112,8 +118,6 @@ const REMOTE_TRANSCRIPTION_DIRECT_AUDIO_MIMES = new Set([
   "audio/x-aiff",
   "audio/caf",
   "audio/x-caf",
-  "audio/m4a",
-  "audio/x-m4a",
   "audio/mp3",
   "audio/mpeg",
   "audio/ogg",
@@ -124,28 +128,22 @@ const REMOTE_TRANSCRIPTION_DIRECT_AUDIO_MIMES = new Set([
 ]);
 
 const REMOTE_TRANSCRIPTION_BLOCKED_AUDIO_MIMES = new Set([
+  "audio/m4a",
   "audio/mp4",
+  "audio/x-m4a",
 ]);
 
 const REMOTE_TRANSCRIPTION_BLOCKED_AUDIO_EXTENSIONS = new Set([
+  ".m4a",
   ".mp4",
 ]);
 
-const REMOTE_TRANSCRIPTION_DIRECT_AUDIO_EXTENSIONS = new Set([
-  ".aac",
-  ".aif",
-  ".aiff",
-  ".caf",
-  ".m4a",
-  ".mp3",
-  ".oga",
-  ".ogg",
-  ".opus",
-  ".wav",
-  ".wave",
-]);
+// Keep in sync with the remote transcription provider and Worker body cap.
+const REMOTE_TRANSCRIPTION_DIRECT_MAX_INPUT_BYTES = 16 * 1024 * 1024;
 
-function isRemoteTranscriptionDirectAudioArtifact(artifact: ParserArtifactRef): boolean {
+async function isRemoteTranscriptionDirectAudioArtifact(
+  artifact: ParserArtifactRef,
+): Promise<boolean> {
   const mime = normalizeMediaType(artifact.mime);
   const fileName = artifact.fileName?.toLowerCase() ?? "";
   const extension = path.extname(fileName);
@@ -157,11 +155,16 @@ function isRemoteTranscriptionDirectAudioArtifact(artifact: ParserArtifactRef): 
     return false;
   }
 
-  if (REMOTE_TRANSCRIPTION_DIRECT_AUDIO_MIMES.has(mime)) {
-    return true;
+  if (!REMOTE_TRANSCRIPTION_DIRECT_AUDIO_MIMES.has(mime)) {
+    return false;
   }
 
-  return REMOTE_TRANSCRIPTION_DIRECT_AUDIO_EXTENSIONS.has(extension);
+  if (!await hasRemoteTranscriptionDirectAudioSignature(artifact.absolutePath, mime)) {
+    return false;
+  }
+
+  const stat = await fs.stat(artifact.absolutePath);
+  return stat.size <= REMOTE_TRANSCRIPTION_DIRECT_MAX_INPUT_BYTES;
 }
 
 function isDirectWhisperAudioArtifact(artifact: ParserArtifactRef): boolean {
@@ -178,4 +181,63 @@ function isDirectWhisperAudioArtifact(artifact: ParserArtifactRef): boolean {
 
 function normalizeMediaType(value: string | null | undefined): string {
   return value?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+}
+
+async function hasRemoteTranscriptionDirectAudioSignature(
+  filePath: string,
+  mime: string,
+): Promise<boolean> {
+  const header = await readFileHeader(filePath, 16);
+  if (header.length === 0) {
+    return false;
+  }
+
+  if (mime === "audio/caf" || mime === "audio/x-caf") {
+    return header.subarray(0, 4).equals(Buffer.from("caff", "ascii"));
+  }
+
+  if (mime === "audio/aiff" || mime === "audio/x-aiff") {
+    return (
+      header.subarray(0, 4).equals(Buffer.from("FORM", "ascii")) &&
+      (
+        header.subarray(8, 12).equals(Buffer.from("AIFF", "ascii")) ||
+        header.subarray(8, 12).equals(Buffer.from("AIFC", "ascii"))
+      )
+    );
+  }
+
+  if (mime === "audio/ogg" || mime === "audio/opus") {
+    return header.subarray(0, 4).equals(Buffer.from("OggS", "ascii"));
+  }
+
+  if (mime === "audio/wav" || mime === "audio/wave" || mime === "audio/x-wav") {
+    return (
+      header.subarray(0, 4).equals(Buffer.from("RIFF", "ascii")) &&
+      header.subarray(8, 12).equals(Buffer.from("WAVE", "ascii"))
+    );
+  }
+
+  if (mime === "audio/mp3" || mime === "audio/mpeg") {
+    return (
+      header.subarray(0, 3).equals(Buffer.from("ID3", "ascii")) ||
+      (header[0] === 0xff && (header[1] & 0xe0) === 0xe0)
+    );
+  }
+
+  if (mime === "audio/aac" || mime === "audio/x-aac") {
+    return header[0] === 0xff && (header[1] & 0xf0) === 0xf0;
+  }
+
+  return false;
+}
+
+async function readFileHeader(filePath: string, bytes: number): Promise<Buffer> {
+  const handle = await fs.open(filePath, "r");
+  try {
+    const buffer = Buffer.alloc(bytes);
+    const { bytesRead } = await handle.read(buffer, 0, bytes, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
 }
