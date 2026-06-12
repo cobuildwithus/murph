@@ -1139,3 +1139,88 @@ test("parser toolchain config and discovery cover null reads, clearing updates, 
   assert.equal(systemCompositeDoctor.tools.whisper.available, false);
   assert.equal(systemCompositeDoctor.tools.whisper.reason, "Whisper model path is not configured.");
 });
+
+test("ffmpeg options mark remote-only transcription so audio passthrough can skip WAV normalization", () => {
+  const buildDoctor = (input: { ffmpeg?: boolean; transcription: boolean; whisper: boolean }) => ({
+    configPath: "/vault/.runtime/parser-toolchain.json",
+    discoveredAt: "2026-06-12T00:00:00.000Z",
+    tools: {
+      ffmpeg: {
+        available: input.ffmpeg !== false,
+        command: input.ffmpeg === false ? null : "/opt/tools/ffmpeg",
+        source: input.ffmpeg === false ? ("missing" as const) : ("platform" as const),
+        reason: input.ffmpeg === false ? "ffmpeg CLI not found." : "ffmpeg CLI available.",
+      },
+      pdfinfo: {
+        available: false,
+        command: null,
+        source: "missing" as const,
+        reason: "pdfinfo CLI not found.",
+      },
+      pdftotext: {
+        available: false,
+        command: null,
+        source: "missing" as const,
+        reason: "pdftotext CLI not found.",
+      },
+      transcription: {
+        available: input.transcription,
+        command: null,
+        endpoint: input.transcription ? "http://murph-transcribe.worker/v1/transcribe" : null,
+        source: input.transcription ? ("platform" as const) : ("missing" as const),
+        reason: input.transcription
+          ? "Remote transcription endpoint configured."
+          : "Remote transcription endpoint is not configured.",
+      },
+      whisper: {
+        available: input.whisper,
+        command: input.whisper ? "/opt/tools/whisper-cli" : null,
+        modelPath: input.whisper ? "/opt/models/base.bin" : null,
+        source: input.whisper ? ("platform" as const) : ("missing" as const),
+        reason: input.whisper
+          ? "whisper.cpp CLI and model path configured."
+          : "whisper.cpp CLI executable not found.",
+      },
+    },
+  });
+
+  assert.deepEqual(
+    ffmpegOptionsFromDoctor(buildDoctor({ transcription: true, whisper: false })),
+    {
+      allowSystemLookup: false,
+      commandCandidates: ["/opt/tools/ffmpeg"],
+      remoteTranscriptionOnly: true,
+    },
+  );
+
+  assert.deepEqual(
+    ffmpegOptionsFromDoctor(buildDoctor({ ffmpeg: false, transcription: true, whisper: false })),
+    { remoteTranscriptionOnly: true },
+  );
+
+  // A usable local whisper lane needs 16 kHz WAV, so normalization stays on.
+  assert.deepEqual(
+    ffmpegOptionsFromDoctor(buildDoctor({ transcription: true, whisper: true })),
+    {
+      allowSystemLookup: false,
+      commandCandidates: ["/opt/tools/ffmpeg"],
+    },
+  );
+
+  assert.deepEqual(
+    ffmpegOptionsFromDoctor(buildDoctor({ transcription: false, whisper: false })),
+    {
+      allowSystemLookup: false,
+      commandCandidates: ["/opt/tools/ffmpeg"],
+    },
+  );
+
+  // Local whisper without a remote endpoint never emits the flag either.
+  assert.deepEqual(
+    ffmpegOptionsFromDoctor(buildDoctor({ transcription: false, whisper: true })),
+    {
+      allowSystemLookup: false,
+      commandCandidates: ["/opt/tools/ffmpeg"],
+    },
+  );
+});

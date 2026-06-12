@@ -78,7 +78,7 @@ describe("createRemoteTranscriptionProvider", () => {
       const fetchImpl = vi.fn(async (url: URL | RequestInfo, init?: RequestInit) => {
         expect(String(url)).toBe(ENDPOINT);
         expect(init?.method).toBe("POST");
-        expect(new Headers(init?.headers).get("content-type")).toBe("audio/wav");
+        expect(new Headers(init?.headers).get("content-type")).toBe("application/octet-stream");
         expect(Buffer.from(init?.body as Uint8Array).toString("utf8")).toBe("RIFF-wav-bytes");
         return Response.json({
           durationMs: 30_000,

@@ -116,6 +116,320 @@ test("audio preparation accepts WAV directly and requires ffmpeg for other audio
   );
 });
 
+test("audio preparation passes remote-accepted formats through untouched when remote transcription is the only lane", async () => {
+  const directory = await makeTempDirectory("murph-parser-audio-passthrough");
+  const remoteOnlyFfmpeg = { ...disableFfmpegLookup(), remoteTranscriptionOnly: true };
+
+  const cafPath = await writeExternalFile(directory, "memo.caf", "caf-bytes-placeholder");
+  const cafPrepared = await prepareAudioInput({
+    artifact: {
+      captureId: "cap_audio_passthrough_1",
+      attachmentId: "att_audio_caf",
+      kind: "audio",
+      fileName: "memo.caf",
+      mime: "audio/x-caf",
+      storedPath: "raw/inbox/example/memo.caf",
+      absolutePath: cafPath,
+    },
+    scratchDirectory: directory,
+    ffmpeg: remoteOnlyFfmpeg,
+  });
+  assert.equal(cafPrepared.inputPath, cafPath);
+  assert.equal(cafPrepared.preparedKind, "audio");
+
+  const extensionOnlyPath = await writeExternalFile(directory, "memo.ogg", "ogg-bytes-placeholder");
+  const extensionOnlyPrepared = await prepareAudioInput({
+    artifact: {
+      captureId: "cap_audio_passthrough_2",
+      attachmentId: "att_audio_ogg",
+      kind: "audio",
+      fileName: "memo.ogg",
+      storedPath: "raw/inbox/example/memo.ogg",
+      absolutePath: extensionOnlyPath,
+    },
+    scratchDirectory: directory,
+    ffmpeg: remoteOnlyFfmpeg,
+  });
+  assert.equal(extensionOnlyPrepared.inputPath, extensionOnlyPath);
+  assert.equal(extensionOnlyPrepared.preparedKind, "audio");
+
+  // AMR is not verified against the remote model, so it still needs ffmpeg.
+  const amrPath = await writeExternalFile(directory, "memo.amr", "amr-bytes-placeholder");
+  await assert.rejects(
+    prepareAudioInput({
+      artifact: {
+        captureId: "cap_audio_passthrough_3",
+        attachmentId: "att_audio_amr",
+        kind: "audio",
+        fileName: "memo.amr",
+        mime: "audio/amr",
+        storedPath: "raw/inbox/example/memo.amr",
+        absolutePath: amrPath,
+      },
+      scratchDirectory: directory,
+      ffmpeg: remoteOnlyFfmpeg,
+    }),
+    /ffmpeg is required to normalize non-WAV audio attachments for transcription/u,
+  );
+
+  // audio/mp4 routinely carries video, so known video-capable MIME/container
+  // signals stay on the ffmpeg -vn path rather than passthrough.
+  const mp4Path = await writeExternalFile(directory, "memo-audio.mp4", "mp4-bytes-placeholder");
+  await assert.rejects(
+    prepareAudioInput({
+      artifact: {
+        captureId: "cap_audio_passthrough_5",
+        attachmentId: "att_audio_mp4",
+        kind: "audio",
+        fileName: "memo-audio.mp4",
+        mime: "audio/mp4",
+        storedPath: "raw/inbox/example/memo-audio.mp4",
+        absolutePath: mp4Path,
+      },
+      scratchDirectory: directory,
+      ffmpeg: remoteOnlyFfmpeg,
+    }),
+    /ffmpeg is required to normalize non-WAV audio attachments for transcription/u,
+  );
+
+  const m4aNamedMp4Path = await writeExternalFile(directory, "voice-note.m4a", "mp4-bytes-placeholder");
+  await assert.rejects(
+    prepareAudioInput({
+      artifact: {
+        captureId: "cap_audio_passthrough_6",
+        attachmentId: "att_audio_mp4_m4a_name",
+        kind: "audio",
+        fileName: "voice-note.m4a",
+        mime: "audio/mp4",
+        storedPath: "raw/inbox/example/voice-note.m4a",
+        absolutePath: m4aNamedMp4Path,
+      },
+      scratchDirectory: directory,
+      ffmpeg: remoteOnlyFfmpeg,
+    }),
+    /ffmpeg is required to normalize non-WAV audio attachments for transcription/u,
+  );
+
+  const parameterizedMp4MimePath = await writeExternalFile(
+    directory,
+    "voice-note-parameterized.m4a",
+    "mp4-bytes-placeholder",
+  );
+  await assert.rejects(
+    prepareAudioInput({
+      artifact: {
+        captureId: "cap_audio_passthrough_9",
+        attachmentId: "att_audio_parameterized_mp4_mime",
+        kind: "audio",
+        fileName: "voice-note-parameterized.m4a",
+        mime: " audio/mp4; codecs=mp4a.40.2 ",
+        storedPath: "raw/inbox/example/voice-note-parameterized.m4a",
+        absolutePath: parameterizedMp4MimePath,
+      },
+      scratchDirectory: directory,
+      ffmpeg: remoteOnlyFfmpeg,
+    }),
+    /ffmpeg is required to normalize non-WAV audio attachments for transcription/u,
+  );
+
+  const videoMimeWithAudioNamePath = await writeExternalFile(
+    directory,
+    "video-disguised-as-audio.m4a",
+    "video-bytes-placeholder",
+  );
+  await assert.rejects(
+    prepareAudioInput({
+      artifact: {
+        captureId: "cap_audio_passthrough_7",
+        attachmentId: "att_video_mime_audio_name",
+        kind: "audio",
+        fileName: "video-disguised-as-audio.m4a",
+        mime: "video/mp4",
+        storedPath: "raw/inbox/example/video-disguised-as-audio.m4a",
+        absolutePath: videoMimeWithAudioNamePath,
+      },
+      scratchDirectory: directory,
+      ffmpeg: remoteOnlyFfmpeg,
+    }),
+    /ffmpeg is required to normalize non-WAV audio attachments for transcription/u,
+  );
+
+  const mp4NamedM4aMimePath = await writeExternalFile(directory, "looks-safe.mp4", "mp4-bytes-placeholder");
+  await assert.rejects(
+    prepareAudioInput({
+      artifact: {
+        captureId: "cap_audio_passthrough_8",
+        attachmentId: "att_mp4_name_m4a_mime",
+        kind: "audio",
+        fileName: "looks-safe.mp4",
+        mime: "audio/x-m4a",
+        storedPath: "raw/inbox/example/looks-safe.mp4",
+        absolutePath: mp4NamedM4aMimePath,
+      },
+      scratchDirectory: directory,
+      ffmpeg: remoteOnlyFfmpeg,
+    }),
+    /ffmpeg is required to normalize non-WAV audio attachments for transcription/u,
+  );
+
+  // Without the remote-only flag the local whisper lane may run, so compressed
+  // audio still normalizes through ffmpeg.
+  const mp3Path = await writeExternalFile(directory, "memo.mp3", "mp3-bytes-placeholder");
+  await assert.rejects(
+    prepareAudioInput({
+      artifact: {
+        captureId: "cap_audio_passthrough_4",
+        attachmentId: "att_audio_mp3_local",
+        kind: "audio",
+        fileName: "memo.mp3",
+        mime: "audio/mpeg",
+        storedPath: "raw/inbox/example/memo.mp3",
+        absolutePath: mp3Path,
+      },
+      scratchDirectory: directory,
+      ffmpeg: disableFfmpegLookup(),
+    }),
+    /ffmpeg is required to normalize non-WAV audio attachments for transcription/u,
+  );
+});
+
+test("remote-only audio passthrough skips an available ffmpeg while video still extracts through it", async () => {
+  const directory = await makeTempDirectory("murph-parser-audio-passthrough-ffmpeg");
+  const invocationLogPath = path.join(directory, "ffmpeg-invocations.log");
+  const fakeFfmpegPath = await writeExecutableFile(
+    directory,
+    "fake-passthrough-ffmpeg",
+    [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      `fs.appendFileSync(${JSON.stringify(invocationLogPath)}, JSON.stringify(process.argv.slice(2)) + "\\n", "utf8");`,
+    ].join("\n"),
+  );
+  const remoteOnlyFfmpeg = {
+    commandCandidates: [fakeFfmpegPath],
+    allowSystemLookup: false,
+    remoteTranscriptionOnly: true,
+  };
+
+  // WAV previously transcoded to 16 kHz mono whenever ffmpeg resolved; the
+  // remote-only lane must return the original bytes without invoking ffmpeg.
+  const wavPath = await writeExternalFile(directory, "memo.wav", "wav-bytes-placeholder");
+  const wavPrepared = await prepareAudioInput({
+    artifact: {
+      captureId: "cap_audio_passthrough_ffmpeg_1",
+      attachmentId: "att_audio_wav_remote_only",
+      kind: "audio",
+      fileName: "memo.wav",
+      mime: "audio/wav",
+      storedPath: "raw/inbox/example/memo.wav",
+      absolutePath: wavPath,
+    },
+    scratchDirectory: directory,
+    ffmpeg: remoteOnlyFfmpeg,
+  });
+  assert.equal(wavPrepared.inputPath, wavPath);
+  assert.equal(wavPrepared.preparedKind, "audio");
+
+  const mp3Path = await writeExternalFile(directory, "memo.mp3", "mp3-bytes-placeholder");
+  const mp3Prepared = await prepareAudioInput({
+    artifact: {
+      captureId: "cap_audio_passthrough_ffmpeg_2",
+      attachmentId: "att_audio_mp3_remote_only",
+      kind: "audio",
+      fileName: "memo.mp3",
+      mime: "audio/mpeg",
+      storedPath: "raw/inbox/example/memo.mp3",
+      absolutePath: mp3Path,
+    },
+    scratchDirectory: directory,
+    ffmpeg: remoteOnlyFfmpeg,
+  });
+  assert.equal(mp3Prepared.inputPath, mp3Path);
+  assert.equal(mp3Prepared.preparedKind, "audio");
+  await assert.rejects(fs.access(invocationLogPath));
+
+  // Video stays on ffmpeg extraction, and the video-capable .mp4 container is
+  // deliberately absent from the remote passthrough allowlist.
+  const videoPath = await writeExternalFile(directory, "clip.mp4", "mp4-bytes-placeholder");
+  const videoPrepared = await prepareAudioInput({
+    artifact: {
+      captureId: "cap_audio_passthrough_ffmpeg_3",
+      attachmentId: "att_video_remote_only",
+      kind: "video",
+      fileName: "clip.mp4",
+      mime: "video/mp4",
+      storedPath: "raw/inbox/example/clip.mp4",
+      absolutePath: videoPath,
+    },
+    scratchDirectory: directory,
+    ffmpeg: remoteOnlyFfmpeg,
+  });
+  assert.equal(videoPrepared.inputPath, path.join(directory, "att_video_remote_only.wav"));
+  assert.equal(videoPrepared.preparedKind, "audio");
+  const invocations = (await fs.readFile(invocationLogPath, "utf8")).trim().split("\n");
+  assert.equal(invocations.length, 1);
+  assert.equal(JSON.parse(invocations[0] ?? "[]").includes(videoPath), true);
+});
+
+test("remote-only audio passthrough matches mime and extension case-insensitively and requires the flag to be exactly true", async () => {
+  const directory = await makeTempDirectory("murph-parser-audio-passthrough-case");
+  const remoteOnlyFfmpeg = { ...disableFfmpegLookup(), remoteTranscriptionOnly: true };
+
+  // Mixed-case mime with an unrecognized extension exercises mime matching alone.
+  const upperMimePath = await writeExternalFile(directory, "memo.bin", "mpeg-bytes-placeholder");
+  const upperMimePrepared = await prepareAudioInput({
+    artifact: {
+      captureId: "cap_audio_passthrough_case_1",
+      attachmentId: "att_audio_upper_mime",
+      kind: "audio",
+      fileName: "memo.bin",
+      mime: "Audio/MPEG",
+      storedPath: "raw/inbox/example/memo.bin",
+      absolutePath: upperMimePath,
+    },
+    scratchDirectory: directory,
+    ffmpeg: remoteOnlyFfmpeg,
+  });
+  assert.equal(upperMimePrepared.inputPath, upperMimePath);
+  assert.equal(upperMimePrepared.preparedKind, "audio");
+
+  // Upper-case file name with no mime exercises extension matching alone.
+  const upperExtensionPath = await writeExternalFile(directory, "MEMO.M4A", "m4a-bytes-placeholder");
+  const upperExtensionPrepared = await prepareAudioInput({
+    artifact: {
+      captureId: "cap_audio_passthrough_case_2",
+      attachmentId: "att_audio_upper_extension",
+      kind: "audio",
+      fileName: "MEMO.M4A",
+      storedPath: "raw/inbox/example/MEMO.M4A",
+      absolutePath: upperExtensionPath,
+    },
+    scratchDirectory: directory,
+    ffmpeg: remoteOnlyFfmpeg,
+  });
+  assert.equal(upperExtensionPrepared.inputPath, upperExtensionPath);
+  assert.equal(upperExtensionPrepared.preparedKind, "audio");
+
+  // The flag must be exactly true; an explicit false keeps the ffmpeg requirement.
+  const mp3Path = await writeExternalFile(directory, "memo.mp3", "mp3-bytes-placeholder");
+  await assert.rejects(
+    prepareAudioInput({
+      artifact: {
+        captureId: "cap_audio_passthrough_case_3",
+        attachmentId: "att_audio_mp3_flag_false",
+        kind: "audio",
+        fileName: "memo.mp3",
+        mime: "audio/mpeg",
+        storedPath: "raw/inbox/example/memo.mp3",
+        absolutePath: mp3Path,
+      },
+      scratchDirectory: directory,
+      ffmpeg: { ...disableFfmpegLookup(), remoteTranscriptionOnly: false },
+    }),
+    /ffmpeg is required to normalize non-WAV audio attachments for transcription/u,
+  );
+});
+
 test("shared executable helpers preserve lazy resolution, availability, and missing-tool errors", async () => {
   const directory = await makeTempDirectory("murph-parser-executable");
   const executablePath = await writeExecutableFile(
@@ -3543,13 +3857,163 @@ test("configured parser registry transcribes audio through a configured remote t
     assert.equal(run.result.metadata?.durationMs, 1_200);
     assert.equal(requests.length, 1);
     assert.equal(requests[0]?.method, "POST");
-    assert.equal(requests[0]?.contentType, "audio/wav");
+    assert.equal(requests[0]?.contentType, "application/octet-stream");
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
     });
     await fs.rm(vaultRoot, { recursive: true, force: true });
     await fs.rm(toolsDirectory, { recursive: true, force: true });
+  }
+});
+
+test("configured remote-only parser passthrough uploads original accepted audio bytes", async () => {
+  const { createServer } = await import("node:http");
+  const vaultRoot = await makeTempDirectory("murph-parser-toolchain-remote-passthrough");
+  const toolsDirectory = await makeTempDirectory("murph-parser-toolchain-remote-passthrough-bin");
+  const scratchRoot = await makeTempDirectory("murph-parser-toolchain-remote-passthrough-scratch");
+  const invocationLogPath = path.join(toolsDirectory, "ffmpeg-invocations.log");
+  const fakeFfmpegPath = await writeExecutableFile(
+    toolsDirectory,
+    "fake-remote-passthrough-ffmpeg",
+    [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      `fs.appendFileSync(${JSON.stringify(invocationLogPath)}, JSON.stringify(process.argv.slice(2)) + "\\n", "utf8");`,
+    ].join("\n"),
+  );
+  const audioPath = await writeExternalFile(toolsDirectory, "voice.m4a", "original-m4a-bytes");
+  const requests: Array<{
+    body: string;
+    contentType: string | undefined;
+    method: string | undefined;
+  }> = [];
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    request.on("end", () => {
+      requests.push({
+        body: Buffer.concat(chunks).toString("utf8"),
+        contentType: request.headers["content-type"],
+        method: request.method,
+      });
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({
+        durationMs: 1_200,
+        language: "en",
+        segments: [{ endMs: 1_200, startMs: 0, text: "remote passthrough ok" }],
+        text: "remote passthrough ok",
+      }));
+    });
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.equal(typeof address === "object" && address !== null, true);
+  const endpoint = `http://127.0.0.1:${(address as { port: number }).port}/v1/transcribe`;
+
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-06-12T12:00:00.000Z",
+  });
+
+  try {
+    const configured = await createConfiguredParserRegistry({
+      allowEnvToolchain: false,
+      allowSystemToolchainLookup: false,
+      readVaultToolchainConfig: false,
+      toolchain: {
+        source: "platform",
+        tools: {
+          ffmpeg: {
+            command: fakeFfmpegPath,
+          },
+          transcription: {
+            endpoint,
+          },
+        },
+      },
+      vaultRoot,
+    });
+
+    assert.equal(configured.ffmpeg?.remoteTranscriptionOnly, true);
+    const parsed = await parseAttachment({
+      artifact: {
+        captureId: "cap_remote_passthrough_registry",
+        attachmentId: "att_remote_passthrough_registry",
+        kind: "audio",
+        fileName: "voice.m4a",
+        mime: "audio/x-m4a",
+        storedPath: "raw/inbox/example/voice.m4a",
+        absolutePath: audioPath,
+      },
+      ffmpeg: configured.ffmpeg,
+      registry: configured.registry,
+      scratchRoot,
+    });
+
+    assert.equal(parsed.providerId, "remote-transcription");
+    assert.equal(parsed.output.text, "remote passthrough ok");
+    assert.deepEqual(requests, [{
+      body: "original-m4a-bytes",
+      contentType: "application/octet-stream",
+      method: "POST",
+    }]);
+    await assert.rejects(fs.access(invocationLogPath));
+
+    const noFfmpegAudioPath = await writeExternalFile(
+      toolsDirectory,
+      "voice-no-ffmpeg.m4a",
+      "original-m4a-bytes-without-ffmpeg",
+    );
+    const configuredWithoutFfmpeg = await createConfiguredParserRegistry({
+      allowEnvToolchain: false,
+      allowSystemToolchainLookup: false,
+      readVaultToolchainConfig: false,
+      toolchain: {
+        source: "platform",
+        tools: {
+          transcription: {
+            endpoint,
+          },
+        },
+      },
+      vaultRoot,
+    });
+
+    assert.deepEqual(configuredWithoutFfmpeg.ffmpeg, { remoteTranscriptionOnly: true });
+    const parsedWithoutFfmpeg = await parseAttachment({
+      artifact: {
+        captureId: "cap_remote_passthrough_no_ffmpeg",
+        attachmentId: "att_remote_passthrough_no_ffmpeg",
+        kind: "audio",
+        fileName: "voice-no-ffmpeg.m4a",
+        mime: "audio/x-m4a",
+        storedPath: "raw/inbox/example/voice-no-ffmpeg.m4a",
+        absolutePath: noFfmpegAudioPath,
+      },
+      ffmpeg: configuredWithoutFfmpeg.ffmpeg,
+      registry: configuredWithoutFfmpeg.registry,
+      scratchRoot,
+    });
+
+    assert.equal(parsedWithoutFfmpeg.providerId, "remote-transcription");
+    assert.equal(parsedWithoutFfmpeg.output.text, "remote passthrough ok");
+    assert.deepEqual(requests.at(-1), {
+      body: "original-m4a-bytes-without-ffmpeg",
+      contentType: "application/octet-stream",
+      method: "POST",
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+    await fs.rm(vaultRoot, { recursive: true, force: true });
+    await fs.rm(toolsDirectory, { recursive: true, force: true });
+    await fs.rm(scratchRoot, { recursive: true, force: true });
   }
 });
 
