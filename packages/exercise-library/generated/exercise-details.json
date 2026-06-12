@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:e191fa377402eb6a9fbe017a8b23e6bd39f4ed5bcffb2a1d58e01d4869986135",
+  "catalogHash": "sha256:e206380691a35aebf510c1dbf6f4fa3d815fd57ba3a14884062923c7f382dcd1",
   "generatedAt": null,
   "items": [
     {
@@ -52491,7 +52491,28 @@
       ],
       "equipment": [],
       "id": "EX399",
-      "images": [],
+      "images": [
+        {
+          "alt": "Illustration of a barefoot adult squatting down on a mat with both hands reaching the floor, hips back, and feet planted.",
+          "step": "Hands to floor",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c498f6ee-2065-4814-9960-1c4a1fc02900/public"
+        },
+        {
+          "alt": "Illustration of a barefoot adult in a high plank during a squat thrust, shoulders stacked over wrists and legs extended back.",
+          "step": "Jump to plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/660e081f-ca1b-459d-06a0-4d240518fc00/public"
+        },
+        {
+          "alt": "Illustration of a barefoot adult jumping or stepping both feet forward from plank into a compact crouch with hands planted.",
+          "step": "Feet forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bca315da-6006-4eb8-4945-df6686214400/public"
+        },
+        {
+          "alt": "Illustration of a barefoot adult standing tall at the top of a squat thrust with feet under hips and knees soft.",
+          "step": "Stand or hop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ef1e841d-0e9c-4926-e1f8-1c6079fcf200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -52529,7 +52550,33 @@
       ],
       "equipment": [],
       "id": "EX400",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall on a sand mat with feet under hips, soft knees, and chest lifted before starting a low-impact squat thrust.",
+          "step": "Tall start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c2806e13-1ad3-433f-c19c-3322cc104300/public"
+        },
+        {
+          "alt": "Adult squats down with hands planted on the mat, hips back, heels grounded, and eyes forward.",
+          "step": "Hands-down squat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/58f1820c-6e0c-4f2c-4fe8-09143f1ada00/public"
+        },
+        {
+          "alt": "Adult supports weight through the hands while one foot steps back under control and the other foot stays forward.",
+          "step": "First step back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f481ea8b-8fd3-4461-3156-cae3a3e0da00/public"
+        },
+        {
+          "alt": "Adult holds a full high plank on the mat with shoulders stacked over wrists, braced trunk, and legs long.",
+          "step": "Plank checkpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1a307d48-3d01-40ce-f2dd-63e5b773b400/public"
+        },
+        {
+          "alt": "Adult steps one foot forward from plank with light hands and hips rising to return to standing without jumping.",
+          "step": "Step-in return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/da724d9f-3ba5-41b2-bacb-80d7ce519900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -52857,7 +52904,23 @@
       ],
       "equipment": [],
       "id": "EX406",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing tall with soft knees and elbows close, holding empty hands as if ready to turn an invisible jump rope.",
+          "step": "Ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5d2c599d-07ce-4ee1-0a53-d08ac9d91700/public"
+        },
+        {
+          "alt": "Adult performing a tiny soft-knee bounce while making small wrist circles as if turning an invisible rope.",
+          "step": "Light bounce and wrist circles",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/71f06b50-2bde-4dc4-136f-e13a9b211500/public"
+        },
+        {
+          "alt": "Adult stepping lightly side to side with elbows close for a low-impact jump rope simulation option.",
+          "step": "Low-impact boxer step",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a77a693a-9d7f-440f-123e-cd1c309d5200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -52896,7 +52959,28 @@
       ],
       "equipment": [],
       "id": "EX407",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing tall with soft knees and hands curled near the hips as if using an invisible jump rope.",
+          "step": "Ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/84aabf89-8cf0-4a6c-bd1b-3a2c39c05000/public"
+        },
+        {
+          "alt": "Adult performing an invisible rope boxer step with one foot planted and the opposite foot lightly tapping to the side.",
+          "step": "Tap one side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2777d5b9-f1be-4e2d-0829-a65b7772fe00/public"
+        },
+        {
+          "alt": "Adult performing the mirrored invisible rope boxer step with the opposite foot tapping lightly to the side.",
+          "step": "Tap the other side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0b338d8f-6797-433c-9859-4bbd4e71ef00/public"
+        },
+        {
+          "alt": "Adult keeping the invisible rope boxer step small and controlled with feet close to the floor and steady posture.",
+          "step": "Low-impact rhythm",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/75f42229-a4a0-4136-f66b-67fa99fac100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -52935,7 +53019,28 @@
       ],
       "equipment": [],
       "id": "EX408",
-      "images": [],
+      "images": [
+        {
+          "alt": "A person stands on a mat in an athletic stance with soft knees, tall chest, and feet under the hips before a single-leg hop.",
+          "step": "Athletic stance setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9132f4bf-c3b4-4078-0809-43f1581bb300/public"
+        },
+        {
+          "alt": "A person performs a low single-leg hop in place with one foot just off the mat, the opposite knee bent, arms swinging naturally, and hips level.",
+          "step": "Single-foot hop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e8c6db49-cfcf-40bd-9da5-7507168e8a00/public"
+        },
+        {
+          "alt": "A person lands softly on one foot with the knee bent over the toes, the opposite foot lifted, and the body held upright for control.",
+          "step": "Quiet landing control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7d5f9c6b-799d-4262-2804-58b783869400/public"
+        },
+        {
+          "alt": "A person repeats the single-leg hop on the opposite foot with a small vertical hop, soft knee, upright torso, and controlled free leg.",
+          "step": "Opposite-foot repeat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/292b4c6b-1a81-46de-216e-56b6bf429a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Cardio",
@@ -52975,7 +53080,28 @@
       ],
       "equipment": [],
       "id": "EX409",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult in a charcoal shirt, olive shorts, and sand training shoes stands with both feet together beside a dashed floor line, knees softly bent and chest tall.",
+          "step": "Ready beside line",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ff2c27a5-630f-43b6-d3ca-7c136cff5f00/public"
+        },
+        {
+          "alt": "The same adult hops both feet together laterally across the dashed floor line with arms swinging naturally and a motion arrow showing the path.",
+          "step": "Hop across",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bea0cbd1-8094-4b0e-9637-2f027cb8a900/public"
+        },
+        {
+          "alt": "The same adult lands on the opposite side of the dashed floor line with feet together, knees bent, chest tall, and callouts for a soft controlled landing.",
+          "step": "Quiet opposite-side landing",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f9387066-107e-4949-1c35-c5ccca531600/public"
+        },
+        {
+          "alt": "The same adult rebounds back across the dashed floor line with feet together, a soft-knee landing, and a motion arrow cueing the return hop.",
+          "step": "Rebound and repeat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/22c8e9b9-57fb-4618-0755-0a8b08966f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -53014,7 +53140,23 @@
       ],
       "equipment": [],
       "id": "EX410",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in side profile holds a soft-kneed athletic stance beside an imaginary floor line for the Forward-Back Hop.",
+          "step": "Ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1bf6c1c1-dd89-48d6-7797-7c7e8b847900/public"
+        },
+        {
+          "alt": "Adult hops forward over an imaginary floor line with both feet together and arms swinging naturally.",
+          "step": "Forward hop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/789bebac-c6f5-4149-3771-49737d044a00/public"
+        },
+        {
+          "alt": "Adult hops back over the imaginary floor line and lands softly with knees bent and feet under control.",
+          "step": "Backward soft landing",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2e12e370-b421-41f3-a12e-3a0013e7ff00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -53053,7 +53195,28 @@
       ],
       "equipment": [],
       "id": "EX411",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete stands in a soft-knee ready stance behind a floor line with cues for tall chest, soft knees, and light feet.",
+          "step": "Athletic stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3a9e102f-c02a-4482-0ea4-01f6a934fb00/public"
+        },
+        {
+          "alt": "Athlete performs a low forward hop over a floor line with a motion arrow and cues for soft knees and quiet landing.",
+          "step": "Forward-back hop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/95d88f30-f53c-4a86-af1f-8453feaee800/public"
+        },
+        {
+          "alt": "Athlete lands a controlled side hop over a floor line with cues for staying tall and keeping feet under the hips.",
+          "step": "Side-to-side hop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/55600bb6-222d-4359-9cf5-51c2e9c9dd00/public"
+        },
+        {
+          "alt": "Athlete hops diagonally around a small floor cross with a diagonal motion arrow and quiet landing cues.",
+          "step": "Diagonal cross hop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cf53e2ef-b3f6-4261-9ee4-af2e23c5df00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -53131,7 +53294,28 @@
       ],
       "equipment": [],
       "id": "EX413",
-      "images": [],
+      "images": [
+        {
+          "alt": "A gender-neutral adult stands in an athletic stance with soft knees, hips back, and chest tall before a broad jump.",
+          "step": "Athletic stance setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/48cb21aa-1ca0-4a46-946a-504788b47700/public"
+        },
+        {
+          "alt": "The same adult swings the arms and drives through the hips while jumping forward from the floor.",
+          "step": "Forward broad jump takeoff",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ac274ad0-5a30-4d69-cffe-23edc1228200/public"
+        },
+        {
+          "alt": "The same adult lands the broad jump with bent knees, controlled feet, and a forward counterbalance.",
+          "step": "Quiet controlled landing",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1632cb4c-8bb2-4259-0afc-2d2fc618cb00/public"
+        },
+        {
+          "alt": "The same adult keeps the eyes forward and uses quick light steps to backpedal toward the starting spot.",
+          "step": "Backpedal return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/028016da-fa1b-4954-9b40-eb25f535ff00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Cardio",
@@ -53170,7 +53354,23 @@
       ],
       "equipment": [],
       "id": "EX414",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult athlete in a soft-knee athletic stance preparing for a tuck jump, with callouts for soft knees, hips back, and chest tall.",
+          "step": "Athletic stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5708e148-ddc5-461b-4607-8a61970b1b00/public"
+        },
+        {
+          "alt": "Adult athlete airborne in a tuck jump with both knees drawn toward the chest and arms swinging for momentum.",
+          "step": "Peak tuck",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f36fe804-3fe8-4b6e-661b-8963a8bbbf00/public"
+        },
+        {
+          "alt": "Adult athlete landing from a tuck jump with feet under control, knees bent, and torso reset tall.",
+          "step": "Soft landing",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/476adad5-a1ae-4202-da11-a966dd61fe00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Cardio",
@@ -53209,7 +53409,23 @@
       ],
       "equipment": [],
       "id": "EX415",
-      "images": [],
+      "images": [
+        {
+          "alt": "Split Jack exercise position 1",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0397ab2d-cfcd-49d2-4d44-d09da5ae1d00/public"
+        },
+        {
+          "alt": "Split Jack exercise position 2",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fd0be6a4-3776-4554-2462-95516ed0c600/public"
+        },
+        {
+          "alt": "Split Jack exercise position 3",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f3f26ee7-ca1b-4c55-c070-b0b07c273000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -53248,7 +53464,28 @@
       ],
       "equipment": [],
       "id": "EX416",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing tall with feet under hips, soft knees, and arms relaxed before starting a low-impact split jack.",
+          "step": "Tall start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7fd5c6cf-cfe1-4ffa-1bf0-8684ffd8c100/public"
+        },
+        {
+          "alt": "Adult stepping one foot diagonally back and out while the opposite arm reaches overhead, showing a no-jump split jack.",
+          "step": "Opposite reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/12851074-0c7b-4f27-8019-b1f3def51d00/public"
+        },
+        {
+          "alt": "Adult returning both feet under the hips with controlled arms and soft knees before switching sides.",
+          "step": "Center reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4c1f8550-3be8-4655-7150-eff30acba600/public"
+        },
+        {
+          "alt": "Adult stepping the other foot diagonally back and out while the opposite arm reaches overhead for the alternate side.",
+          "step": "Alternate reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ce860cca-b5cf-4231-5b0d-e68b7d564200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -53366,7 +53603,23 @@
       ],
       "equipment": [],
       "id": "EX419",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in a high plank on a sand mat with feet narrow, shoulders steady, and brace cue annotations.",
+          "step": "High plank setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0a69a101-fb06-4baa-d057-f4fbfe913a00/public"
+        },
+        {
+          "alt": "Adult holding a high plank while both feet land wide with hop-wide arrows, hips-level cue, and soft-landing cue.",
+          "step": "Wide foot hop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/02577cef-936c-4822-569f-3222dd8acb00/public"
+        },
+        {
+          "alt": "Adult returning both feet to a narrow high plank stance with inward hop arrows, brace cue, and steady-shoulder cue.",
+          "step": "Narrow foot return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f005dcf6-1741-4124-420e-a7166bdf5800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Cardio",
@@ -53406,7 +53659,23 @@
       ],
       "equipment": [],
       "id": "EX420",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in a high plank on a sand mat with callouts for shoulders over wrists, bracing, and a long body line.",
+          "step": "High plank setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/81174a72-6337-440c-2da0-8abe2d656700/public"
+        },
+        {
+          "alt": "Adult in the frogger landing position with hands planted and feet wide outside the hands, with cues for soft landing.",
+          "step": "Feet outside hands",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a2181ec7-6685-4d66-dffc-862efd9c1200/public"
+        },
+        {
+          "alt": "Adult returned to a high plank with shoulders steady, trunk braced, and feet back under control.",
+          "step": "Controlled plank return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aa472311-2498-49f7-078b-c297a38dd200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -53558,7 +53827,28 @@
       ],
       "equipment": [],
       "id": "EX424",
-      "images": [],
+      "images": [
+        {
+          "alt": "Front-facing adult stands tall with soft knees, relaxed bent arms, and light feet before beginning a low-impact lateral step touch.",
+          "step": "Ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7da475a5-3eab-42a9-1299-d1d161b27e00/public"
+        },
+        {
+          "alt": "Front-facing adult shifts weight into a lateral step, taps the trailing foot lightly beside the lead foot, and keeps the chest tall.",
+          "step": "Step and tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/63c3c1e7-e61c-44a4-78d9-c76425d7f400/public"
+        },
+        {
+          "alt": "Front-facing adult mirrors the lateral step touch to the opposite side with the trailing foot tapped lightly and posture controlled.",
+          "step": "Opposite side tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e5b7feef-7c07-4e8a-3565-a065bb19a700/public"
+        },
+        {
+          "alt": "Front-facing adult continues the low-impact side-to-side rhythm with soft landing, steady breathing, and feet staying close to the floor.",
+          "step": "Smooth low-impact rhythm",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/53ecde50-1747-49d9-a9c4-d551d466c900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -53596,7 +53886,23 @@
       ],
       "equipment": [],
       "id": "EX425",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall with feet hip-width apart and soft knees before beginning a side step with reach.",
+          "step": "Ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e71c3d5d-1be4-4ffd-f402-e1c6455db400/public"
+        },
+        {
+          "alt": "Adult steps sideways while both arms reach in the direction of travel, with a tall chest and soft landing.",
+          "step": "Step and reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a7563192-5015-48be-d941-3f30420c3100/public"
+        },
+        {
+          "alt": "Adult mirrors the side step and arm reach in the opposite direction while keeping posture controlled.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5f87a87f-d476-4ee8-127d-f68ea01ac400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -53634,7 +53940,28 @@
       ],
       "equipment": [],
       "id": "EX426",
-      "images": [],
+      "images": [
+        {
+          "alt": "A person stands tall with feet under hips and arms ready before starting knee drive repeaters.",
+          "step": "Tall ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9e45c55b-b003-4480-b777-074389646a00/public"
+        },
+        {
+          "alt": "A person drives one knee toward hip height while the opposite foot stays lightly planted and the chest remains tall.",
+          "step": "First knee drive",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/08cb3352-505a-4b5f-20aa-09f899f60200/public"
+        },
+        {
+          "alt": "A person repeats the knee drive on the opposite side with an upright torso and a light planted support foot.",
+          "step": "Opposite knee drive",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/beed0019-3d7e-4a35-cd73-de963363f000/public"
+        },
+        {
+          "alt": "A person keeps a controlled alternating rhythm with a soft landing, smooth pace, and steady breathing.",
+          "step": "Soft step rhythm",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d919bd14-8b38-49a7-4bdf-81b6a1a47f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -53672,7 +53999,28 @@
       ],
       "equipment": [],
       "id": "EX427",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing tall in a ready stance with elbows bent, soft knees, and feet grounded before starting standing mountain climbers.",
+          "step": "Ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ec1a1f11-e4fd-4f50-3bc8-9918bcc16e00/public"
+        },
+        {
+          "alt": "Adult performs a standing mountain climber knee drive with the opposite arm moving forward and the standing foot landing softly.",
+          "step": "First knee drive",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/98e7ef81-d17a-470b-1957-01e33940b000/public"
+        },
+        {
+          "alt": "Adult switches to the opposite standing mountain climber knee drive while bracing the torso and keeping the arm action coordinated.",
+          "step": "Side switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ed4b855c-d923-4db6-ae47-8a8e8d9b5d00/public"
+        },
+        {
+          "alt": "Adult demonstrates a controlled low-impact standing mountain climber rhythm with steady hips, smooth breathing, and a light step.",
+          "step": "Controlled rhythm",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7f86ea54-daf5-4eef-7845-b613f9bd2500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -53713,7 +54061,28 @@
         "Stair"
       ],
       "id": "EX428",
-      "images": [],
+      "images": [
+        {
+          "alt": "Stair March exercise position 1",
+          "step": "Step 1",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1e45543c-bf4c-415e-ca06-694d153c1800/public"
+        },
+        {
+          "alt": "Stair March exercise position 2",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bf329d1f-8672-4e25-8e45-727dac135b00/public"
+        },
+        {
+          "alt": "Stair March exercise position 3",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bd16b187-4a6f-4782-5735-c826be488e00/public"
+        },
+        {
+          "alt": "Stair March exercise position 4",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6185288b-7f48-4533-9fb5-f4a48fc0f600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -53754,7 +54123,28 @@
         "Stair"
       ],
       "id": "EX429",
-      "images": [],
+      "images": [
+        {
+          "alt": "A person stands tall near a stable low stair with both feet on the floor, showing room for the whole foot to land on the step.",
+          "step": "Stair setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a0da50b9-adbe-4c34-3b50-f22603124200/public"
+        },
+        {
+          "alt": "A person steps up onto the low stair with one foot planted fully on the step, knee tracking over toes and torso upright.",
+          "step": "Drive up",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ceeb53f9-2dff-4062-ba9d-a32de90ae000/public"
+        },
+        {
+          "alt": "A person repeats the step-up on the opposite side with the other foot fully planted on the stair and the knee aligned over the toes.",
+          "step": "Switch evenly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1b2264b4-0714-43a7-c00d-88247feda400/public"
+        },
+        {
+          "alt": "A person keeps one foot planted on the stair while stepping the other foot down lightly to the floor under control.",
+          "step": "Control down",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d077e77d-62eb-47f3-b84d-dbbf4a974b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -53795,7 +54185,23 @@
         "Stair"
       ],
       "id": "EX430",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult stands behind a low sturdy stair with both feet on the floor, knees soft, and chest tall before stair toe taps.",
+          "step": "Ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fd939eb9-274b-49b3-9b33-d838f65b6c00/public"
+        },
+        {
+          "alt": "The adult lightly taps one forefoot on the low stair while the opposite foot stays planted on the floor and the torso stays tall.",
+          "step": "First toe tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ab3c9ac5-e3b3-4f99-4db8-1feea12bf500/public"
+        },
+        {
+          "alt": "The adult switches and taps the opposite forefoot on the low stair while the first foot returns to the floor with light, controlled posture.",
+          "step": "Opposite toe tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/028b6cd3-4ee2-48d7-0845-b9c045b5d000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -53836,7 +54242,28 @@
         "Stair"
       ],
       "id": "EX431",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult stands sideways beside a sturdy low stair with both feet on the floor, chest tall, and knees soft before lateral toe taps.",
+          "step": "Ready beside the step",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e5865ecf-45bc-42c6-a3d1-189821ef9900/public"
+        },
+        {
+          "alt": "The stair-side foot taps onto the top of the low stair while the opposite foot stays planted and the torso stays upright.",
+          "step": "Side tap onto stair",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1d3e935a-2d25-4dab-4f23-fdb10df93900/public"
+        },
+        {
+          "alt": "The tapping foot lowers from the stair toward the floor with control while the standing foot remains planted.",
+          "step": "Controlled return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5e448a5d-e449-45b3-fbc7-88f788570c00/public"
+        },
+        {
+          "alt": "After switching sides, the opposite foot taps onto the stair in the same steady rhythm with an upright torso.",
+          "step": "Opposite side tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6b9d8f9e-bd56-489e-0701-a9bc7dcc9000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -55150,7 +55577,28 @@
       ],
       "equipment": [],
       "id": "EX464",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall with one foot directly in front of the other on a straight floor line, arms slightly out for balance.",
+          "step": "Line setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e3a269c1-3c53-4f1e-716b-bfd6c37f8c00/public"
+        },
+        {
+          "alt": "Adult slowly steps forward along the straight line with the front heel reaching toward the toes of the planted foot.",
+          "step": "Slow heel-to-toe step",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/491036a1-14f4-42c3-31d7-9680664c2e00/public"
+        },
+        {
+          "alt": "Adult pauses in a heel-to-toe stance on the straight line with arms out, gaze forward, and knees soft.",
+          "step": "Balance pause",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e6d30728-fc07-4406-d105-d1d18b058000/public"
+        },
+        {
+          "alt": "Adult uses small controlled steps at the end of the line to turn around and repeat the tandem walk.",
+          "step": "Careful turn to repeat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/75ef3cf9-39b9-4ef8-9f5d-c582ed8c8d00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -55190,7 +55638,23 @@
       ],
       "equipment": [],
       "id": "EX465",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall barefoot with weight on the heels and toes lifted toward the shins, with callouts for chest tall, heels down, and toes lift.",
+          "step": "Heel-walk setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/63e7673c-7a74-4270-e8c7-f2189fd4b500/public"
+        },
+        {
+          "alt": "Adult takes a small forward heel-walk step along a line with both forefeet lifted, an arrow showing the slow step path, and callouts for chest tall and toes stay up.",
+          "step": "Slow heel steps",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/42acc6d3-0101-417b-44d7-575398155a00/public"
+        },
+        {
+          "alt": "Adult pauses mid heel walk in a short staggered stance with toes lifted, arms out for balance, gaze fixed forward, and callouts for pausing to balance and toes staying up.",
+          "step": "Balance reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/10d282f9-f2fb-46a9-ddbf-3bd214bead00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -55230,7 +55694,23 @@
       ],
       "equipment": [],
       "id": "EX466",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall on the balls of both feet with both heels lifted, eyes forward, chest tall, and a clear walking line on the floor.",
+          "step": "Tall forefoot setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/89e498df-dc0b-4609-221b-84c7ad9f9000/public"
+        },
+        {
+          "alt": "Adult walks forward slowly on the balls of the feet with a short controlled stride, hips level, and both heels lifted.",
+          "step": "Slow forefoot steps",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f6dd5932-85c3-47e9-85ad-5f87b635da00/public"
+        },
+        {
+          "alt": "Adult pauses during the toe walk with one foot slightly ahead, arms steady for balance, and both heels lifted before continuing.",
+          "step": "Steady balance pause",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0895c3b6-faa0-4d0f-8752-9b00fafa2b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -55270,7 +55750,28 @@
       ],
       "equipment": [],
       "id": "EX467",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing tall barefoot with feet hip-width, arms relaxed for balance, preparing to move sideways.",
+          "step": "Ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/78d9fba8-7d33-41cd-129e-0db227350c00/public"
+        },
+        {
+          "alt": "Adult crossing one foot in front of the support foot during a slow grapevine balance walk.",
+          "step": "Front cross",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/29145dc7-2b8f-47e2-9c94-563f3687a200/public"
+        },
+        {
+          "alt": "Adult stepping the outside foot wide to uncross and regain a steady stance.",
+          "step": "Side step reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/da175854-7b3a-4d46-377e-277457356b00/public"
+        },
+        {
+          "alt": "Adult crossing one foot behind the support foot during a controlled grapevine balance walk.",
+          "step": "Behind cross",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/959cee6b-7bb1-4d70-154c-43a36403ca00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -55311,7 +55812,28 @@
       ],
       "equipment": [],
       "id": "EX468",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall barefoot with feet hip-width apart on a dashed lateral path line, with callouts for eyes forward, chest tall, and clear path.",
+          "step": "Ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2d990c6b-217c-4eaa-12fb-19fbe21e9200/public"
+        },
+        {
+          "alt": "Adult steps sideways along the dashed line with feet separated and hips level, with a motion arrow showing the controlled side step.",
+          "step": "Side step out",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/507fdb35-1db6-45ef-9d9f-2ba72ba41800/public"
+        },
+        {
+          "alt": "Adult pauses with both feet uncrossed on the dashed line, maintaining forward gaze and steady posture.",
+          "step": "Balanced gather",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ee6e17f2-6569-444a-6e8e-d4fa28bde100/public"
+        },
+        {
+          "alt": "Adult repeats the lateral step in the opposite direction along the dashed line with feet apart and hips level.",
+          "step": "Reverse side step",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7f2c54da-276f-46a0-ebdb-ebb4b7709b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -55351,7 +55873,23 @@
       ],
       "equipment": [],
       "id": "EX469",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall barefoot with feet hip-width apart, chest upright, and light brace before beginning the march and hold drill.",
+          "step": "Ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/98e282fb-c6a3-41d4-03af-056206366700/public"
+        },
+        {
+          "alt": "Adult balances on the image-right foot while the image-left knee lifts to hip height for a controlled pause.",
+          "step": "Image-left knee hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/327931c1-4669-41cf-d417-1ff4eddf8800/public"
+        },
+        {
+          "alt": "Adult balances on the image-left foot while the image-right knee lifts to hip height for the opposite-side hold.",
+          "step": "Image-right knee hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b702cee3-6bf6-4370-f508-cb3f06da4e00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -55391,7 +55929,23 @@
       ],
       "equipment": [],
       "id": "EX470",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall with both feet grounded, soft knees, and eyes forward before a knee drive hold.",
+          "step": "Tall balance setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4bd87e37-2be9-4428-906e-9371ca332200/public"
+        },
+        {
+          "alt": "Adult balances on the viewer-left foot while the viewer-right knee lifts to hip height and the arms counterbalance.",
+          "step": "First-side knee drive hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6af132a9-7997-42af-d5de-059994115200/public"
+        },
+        {
+          "alt": "Adult mirrors the knee drive hold on the opposite side with the viewer-left knee raised, hips level, and arms counterbalancing.",
+          "step": "Opposite-side knee drive hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3716d8a7-0825-43b2-e922-bfb08e6d1900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -56808,7 +57362,28 @@
       ],
       "equipment": [],
       "id": "ST004",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated adult with tall spine, feet grounded, relaxed shoulders, and head centered before the neck side bend stretch.",
+          "step": "Tall seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/893b76f1-81e7-47e3-75b7-786a269f8c00/public"
+        },
+        {
+          "alt": "Seated adult gently tilting one ear toward the same shoulder while keeping the shoulders heavy and jaw relaxed.",
+          "step": "Gentle side hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ce3b2535-0384-4a67-9957-ea25675c0000/public"
+        },
+        {
+          "alt": "Seated adult returning the head to center with an easy breath and light chair anchor before switching sides.",
+          "step": "Center reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/06be3c63-5766-451c-9dce-16044bfc2600/public"
+        },
+        {
+          "alt": "Seated adult performing the neck side bend stretch to the opposite side with a small range and relaxed shoulders.",
+          "step": "Opposite side hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9e2f5371-cf79-439f-73b8-15f2bcb43400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -56850,7 +57425,28 @@
       ],
       "equipment": [],
       "id": "ST005",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult seated tall on a simple chair with feet grounded and shoulders relaxed, preparing for an assisted upper trap stretch.",
+          "step": "Seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/673fa0c6-8f29-4c97-3f85-b377287e6300/public"
+        },
+        {
+          "alt": "Adult seated with one hand gently guiding the head toward one shoulder while the opposite shoulder stays heavy for a gentle upper trap stretch.",
+          "step": "First-side hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ce2774b5-c965-4939-6589-0ed4b1bee800/public"
+        },
+        {
+          "alt": "Adult returned to an upright center position with shoulders relaxed and hands resting on the legs before switching sides.",
+          "step": "Center reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9bd2c215-fa77-4f05-7762-00fe53a94000/public"
+        },
+        {
+          "alt": "Adult seated performing the mirrored upper trap stretch, gently guiding the head toward the other shoulder while the opposite shoulder stays heavy.",
+          "step": "Opposite-side hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5f0d6318-a6a2-443b-8fbd-913547db5000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -56892,7 +57488,28 @@
       ],
       "equipment": [],
       "id": "ST006",
-      "images": [],
+      "images": [
+        {
+          "alt": "Gender-neutral adult stands barefoot with feet hip-width and hands clasped behind the low back before a neck stretch.",
+          "step": "Setup posture",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4ff43ad3-1861-4b3c-e45d-e4a9f9fc3c00/public"
+        },
+        {
+          "alt": "Adult keeps hands clasped behind the back while gently tilting the head toward one shoulder with relaxed shoulders.",
+          "step": "First-side gentle tilt",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/89c3f362-4045-4266-639a-2fbfb74c9800/public"
+        },
+        {
+          "alt": "Adult returns the head to center with hands still clasped behind the low back before switching sides.",
+          "step": "Centered reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8e427c30-8cd4-4553-e38d-5aac3c03e500/public"
+        },
+        {
+          "alt": "Adult mirrors the neck stretch in the opposite direction while keeping shoulders heavy and jaw relaxed.",
+          "step": "Opposite-side gentle tilt",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/33ffaf9c-aba0-4890-a2af-0cc9ac880300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -56934,7 +57551,28 @@
       ],
       "equipment": [],
       "id": "ST007",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated adult on a simple stool with feet grounded, shoulders relaxed, hands on thighs, and head facing forward before the levator scapula stretch.",
+          "step": "Tall seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6a9a388a-ebee-4c55-e7d5-0dd23ecd8300/public"
+        },
+        {
+          "alt": "Seated adult keeps the torso tall and turns the head about 45 degrees toward one shoulder with a relaxed jaw and grounded feet.",
+          "step": "Gentle head turn",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c212b20c-8b5f-4716-6a79-75d638149f00/public"
+        },
+        {
+          "alt": "Seated adult gently nods the chin toward the turned-side armpit while keeping shoulders relaxed for a mild back-of-neck stretch.",
+          "step": "Chin-to-armpit hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c976a854-a870-402a-7356-5aabec2e7300/public"
+        },
+        {
+          "alt": "Seated adult repeats the chin-to-armpit stretch on the opposite side with the same upright posture and relaxed shoulders.",
+          "step": "Opposite-side hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/517d7cf6-2a7c-43f7-2891-cddd0ce2a400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -56976,7 +57614,23 @@
       ],
       "equipment": [],
       "id": "ST008",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated adult in side profile with tall posture, relaxed shoulders, feet grounded, and the head centered before the chin tuck.",
+          "step": "Long-neck setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4318d72c-6ab5-4992-21d7-a8ced5339000/public"
+        },
+        {
+          "alt": "Seated adult gently gliding the chin straight backward to make a small double chin while keeping the head level and shoulders relaxed.",
+          "step": "Gentle chin glide",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/534400cc-fc11-4724-e023-217d5c4b5400/public"
+        },
+        {
+          "alt": "Seated adult returning the chin and head to neutral after a small range chin tuck, with an easy jaw and relaxed shoulders.",
+          "step": "Neutral reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/39447d4e-fa9a-455d-99a9-01a3ff15d000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -57018,7 +57672,23 @@
       ],
       "equipment": [],
       "id": "ST009",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side-view illustration of a person lying on their back with knees bent, head resting on the mat, neck long, and shoulders relaxed before a supine chin tuck.",
+          "step": "Supine setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5e6f0395-75f8-45e6-3151-20581151a800/public"
+        },
+        {
+          "alt": "Side-view illustration of the person gently gliding the chin back while the back of the head stays on the mat and the movement remains small.",
+          "step": "Gentle chin glide",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e0e659e1-4c96-40fd-b62a-a665c1ad9e00/public"
+        },
+        {
+          "alt": "Side-view illustration of the person returning to a neutral resting head position with no head tilt and the jaw relaxed.",
+          "step": "Neutral reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/346d8e75-b2bd-4fce-5cca-2e1a3f4bef00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -58518,7 +59188,23 @@
         "Corner wall"
       ],
       "id": "ST044",
-      "images": [],
+      "images": [
+        {
+          "alt": "A standing adult faces a room corner with elbows at shoulder height and both arms braced on the walls before leaning into a chest stretch.",
+          "step": "Corner setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/48f7493b-5326-4de8-8e22-4dcf24cfc100/public"
+        },
+        {
+          "alt": "A standing adult leans gently into a room corner with arms braced on both walls, one foot stepped forward, and the rear heel grounded.",
+          "step": "Forward lean",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4b7e9b2d-b5f1-400b-9fdf-00bbc5306300/public"
+        },
+        {
+          "alt": "A standing adult holds a controlled corner chest stretch with relaxed shoulders, a long neck, and ribs stacked over the pelvis.",
+          "step": "Controlled hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aa1c1ca6-5aa7-4a07-12ae-2c858f9f3a00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -58563,7 +59249,23 @@
         "Wall"
       ],
       "id": "ST045",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall beside a wall with one palm anchored at shoulder height, feet steady, and chest lifted.",
+          "step": "Palm anchor setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/584a81ef-7f9f-46fe-6d4e-7578ad78d100/public"
+        },
+        {
+          "alt": "Adult keeps the palm anchored on the wall while stepping forward and gently turning the torso away for a chest stretch.",
+          "step": "Gentle rotate-away hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f71c7947-0e1a-4b75-31e4-11be72c30200/public"
+        },
+        {
+          "alt": "Adult repeats the wall pec stretch on the opposite side with the other palm anchored and the torso turning away.",
+          "step": "Opposite side hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b467fd63-6c36-4800-aadc-4220812f3400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -58655,7 +59357,28 @@
         "Doorway"
       ],
       "id": "ST047",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands in a doorway with one arm placed high on the door frame, chest tall and feet grounded before the stretch.",
+          "step": "High anchor setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/76982dcb-b2be-4b33-ac24-df75b9080300/public"
+        },
+        {
+          "alt": "Adult keeps one arm high on the door frame while stepping through and gently turning away to open the upper chest.",
+          "step": "Step-through stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c2bc3caf-cec7-4e42-f1ea-608b81928d00/public"
+        },
+        {
+          "alt": "Adult mirrors the doorway chest stretch on the other side with the opposite arm anchored high and the front foot stepped through.",
+          "step": "Opposite-side stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1a778620-53c4-4aa4-f7e4-ba5478cf4400/public"
+        },
+        {
+          "alt": "Adult holds the high doorway chest stretch with ribs quiet, shoulder comfortable, and an easy path to step out.",
+          "step": "Form and comfort check",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e4ad1438-30e7-4ec1-1ff5-5b6e5ccb1500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -58699,7 +59422,23 @@
       ],
       "equipment": [],
       "id": "ST048",
-      "images": [],
+      "images": [
+        {
+          "alt": "A standing adult clasps both hands low behind the pelvis with soft shoulders and an upright chest.",
+          "step": "Set the grip",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1167a2bd-72a0-4267-473f-5373bb17ad00/public"
+        },
+        {
+          "alt": "The same adult gently reaches clasped hands back and down while lifting the chest without flaring the ribs.",
+          "step": "Open the chest",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/225bcc66-fe2e-4083-c217-4b1d601c0400/public"
+        },
+        {
+          "alt": "The adult holds a modest behind-the-back chest opener with ribs stacked, shoulders easy, and no hard back arch.",
+          "step": "Keep range easy",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bdbae03c-b058-4d85-c55e-1203e3321500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -60296,7 +61035,28 @@
       ],
       "equipment": [],
       "id": "ST084",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lies prone on a mat with one arm extended at shoulder height and the opposite hand planted near the chest for a pec stretch setup.",
+          "step": "Prone arm setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/60eb7e6e-b81e-49c0-9852-0f0d5b8e8900/public"
+        },
+        {
+          "alt": "Adult keeps the extended arm anchored on the mat while gently pressing the opposite hand down and rolling slightly away to open the chest.",
+          "step": "First-side chest opener",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5f1df2fe-b3e5-475e-c4a9-8068ab21ff00/public"
+        },
+        {
+          "alt": "Adult returns to prone center and switches to the opposite arm extended out to the side with the support hand near the chest.",
+          "step": "Center and switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8c14ce40-3679-46a8-984c-58801d534f00/public"
+        },
+        {
+          "alt": "Adult mirrors the prone pec stretch on the opposite side, gently rolling away from the extended arm while keeping the movement controlled.",
+          "step": "Opposite-side chest opener",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c6728da3-375c-4589-2c00-0e25b89b3000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -60341,7 +61101,28 @@
         "Wall"
       ],
       "id": "ST085",
-      "images": [],
+      "images": [
+        {
+          "alt": "A standing adult places one palm and forearm on a doorway while keeping the chest tall and both feet planted.",
+          "step": "Wall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ad913366-72ae-44d5-57da-0390e8738600/public"
+        },
+        {
+          "alt": "The adult keeps the arm anchored on the wall and turns the chest away gently to feel a mild front-shoulder and chest stretch.",
+          "step": "Gentle turn away",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3dd30386-260c-4048-8763-7fb087fc8100/public"
+        },
+        {
+          "alt": "The adult holds a straighter-arm wall stretch with quiet ribs, relaxed shoulder, and an easy breathing position.",
+          "step": "Comfortable range check",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3837304d-b644-4950-f5e7-9506f6082000/public"
+        },
+        {
+          "alt": "The adult repeats the same gentle wall stretch on the opposite side with steady feet and a controlled turn away.",
+          "step": "Opposite side hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/77a52d54-7678-4aa4-4df9-e6c54085c200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
