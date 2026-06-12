@@ -28,3 +28,4 @@ Final response contract:
 
 - return a concise plain-text review with findings ranked as above; no patches or diffs
 - if you find nothing worth changing after a thorough pass, say so explicitly in a short summary rather than inventing low-value findings
+- do all repository reading and analysis silently, then reply with exactly ONE message containing your complete ranked findings; never send a preliminary status or acknowledgment message first, because the response capture treats your first settled message as the final review
