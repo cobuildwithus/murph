@@ -36,6 +36,23 @@ Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit c
 3. Fix all accepted findings, run the verification required by `agent-docs/operations/verification-and-runtime.md` for the touched owners, and push to the PR branch.
 4. Wait for PR CI to go green again before starting the next round.
 
+## Base-Update-Only Exception
+
+If a round has already reached zero accepted findings and the PR later needs to
+be updated only because the base branch moved, do not start another external
+review round just for that base update.
+
+This exception applies only when the post-review change is a normal merge or
+rebase of the PR base branch with no manual conflict resolution, new feature
+work, review finding fix, or behavior/test/config/doc edit beyond the base
+update itself. After the update, wait for PR CI to go green on the new head and
+then continue the merge path.
+
+If the base update requires manual conflict resolution or any non-base-update
+change, treat that as a normal PR-head change: run required verification for the
+touched surface, push it, wait for CI, and then use the ordinary review-loop
+rules.
+
 ## Stop Condition
 
 - Stop when a round produces **zero accepted findings**. ChatGPT saying "looks clean" is not the terminator; the verification filter is.
