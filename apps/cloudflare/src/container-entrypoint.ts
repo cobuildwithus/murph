@@ -58,6 +58,9 @@ import {
   readHostedExecutionRunnerJobUserId,
   type HostedExecutionRunnerJobInput,
 } from "./runner-job-transport.ts";
+import {
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+} from "./deploy-smoke-live-model.ts";
 
 // Module-evaluation timestamp approximates process start; subtracting the
 // elapsed process uptime recovers the true process-start wall clock so the
@@ -1157,6 +1160,9 @@ function parseHostedContainerLiveModelTurnSmokeRequest(
   }
   if (model.length > HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_MODEL_MAX_CHARS) {
     throw new RangeError("Live model turn smoke model is too long.");
+  }
+  if (model !== DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL) {
+    throw new RangeError("Live model turn smoke model is not supported.");
   }
 
   return { model };

@@ -79,6 +79,7 @@ export interface WorkerDeploySmokeRunnerContainerStubLike
   extends WorkerRunnerContainerStubLike {
   readDeploySmokeLiveModelTurnFence?(): Promise<{
     active: boolean;
+    model?: string;
   }>;
 }
 

@@ -1237,6 +1237,10 @@ describe("RunnerContainer", () => {
         expect(url).toBe("http://container/internal/deploy-live-model-turn-smoke");
         fenceActiveDuringTurn =
           (await containerRef?.readDeploySmokeLiveModelTurnFence())?.active ?? null;
+        await expect(containerRef?.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
+          active: true,
+          model: "gpt-5.4-mini",
+        });
         return new Response(JSON.stringify({
           liveModelTurn: {
             durationMs: 1_234,

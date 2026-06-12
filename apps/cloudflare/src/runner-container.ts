@@ -340,7 +340,10 @@ export class RunnerContainer extends Container {
   private currentLogContext: RunnerContainerLogContext | null = null;
   private lastActivityExpiryAtMs: number | null = null;
   private lastActivityObservedAtMs: number | null = null;
-  private liveModelTurnSmokeFenceExpiresAtMs: number | null = null;
+  private liveModelTurnSmokeFence: {
+    expiresAtMs: number;
+    model: string;
+  } | null = null;
   private lastActivityObservedStage: string | null = null;
   private lastDestroyRequest: RunnerContainerDestroyRequestRecord | null = null;
   private recentReadinessProof: RunnerContainerReadinessProof | null = null;
@@ -684,7 +687,10 @@ export class RunnerContainer extends Container {
       RUNNER_LIVE_MODEL_TURN_SMOKE_MIN_TIMEOUT_MS,
     );
     const smokeSignal = AbortSignal.timeout(smokeTimeoutMs);
-    this.liveModelTurnSmokeFenceExpiresAtMs = Date.now() + smokeTimeoutMs;
+    this.liveModelTurnSmokeFence = {
+      expiresAtMs: Date.now() + smokeTimeoutMs,
+      model: input.model,
+    };
     try {
       const response = await this.containerFetch(
         RUNNER_LIVE_MODEL_TURN_SMOKE_URL,
@@ -717,17 +723,26 @@ export class RunnerContainer extends Container {
         stdoutBytes: typeof result.stdoutBytes === "number" ? result.stdoutBytes : null,
       };
     } finally {
-      this.liveModelTurnSmokeFenceExpiresAtMs = null;
+      this.liveModelTurnSmokeFence = null;
     }
   }
 
   // Queried by the Worker egress intercept to authorize deploy-smoke OpenAI
   // egress: active only while smokeLiveModelTurn is in flight, with an
   // expiry bound in case the smoke request hangs.
-  async readDeploySmokeLiveModelTurnFence(): Promise<{ active: boolean }> {
-    const expiresAtMs = this.liveModelTurnSmokeFenceExpiresAtMs;
+  async readDeploySmokeLiveModelTurnFence(): Promise<{
+    active: boolean;
+    model?: string;
+  }> {
+    const fence = this.liveModelTurnSmokeFence;
+    if (!fence || Date.now() >= fence.expiresAtMs) {
+      return {
+        active: false,
+      };
+    }
     return {
-      active: expiresAtMs !== null && Date.now() < expiresAtMs,
+      active: true,
+      model: fence.model,
     };
   }
 
