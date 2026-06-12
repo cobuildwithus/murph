@@ -12,12 +12,11 @@ export type HostedRuntimeUsageGateCheck =
   | { retryAt: string; status: "unavailable" };
 
 export async function resolveHostedRuntimeAiUsageGate(input: {
-  // Default is the read-first check: write-free on allow, denial confirmed by
-  // the mutating gate. "mutating" is reserved for the authoritative
-  // turn-admission decision (runtime reconciliation facts), which owns usage-
-  // period bookkeeping. "read_only" never writes and may miss unmaterialized
-  // carryover; use it only for display surfaces.
-  mode?: "mutating" | "read_only";
+  // "mutating" is the authoritative turn-admission decision and owns usage-
+  // period bookkeeping. "read_first" is write-free on allow and confirms
+  // denials with the mutating gate. "read_only" never writes and may miss
+  // unmaterialized carryover; use it only for display surfaces.
+  mode: "mutating" | "read_first" | "read_only";
   now?: Date | string;
   prisma?: Parameters<typeof resolveHostedAiUsageGate>[0]["prisma"];
   userId: string;

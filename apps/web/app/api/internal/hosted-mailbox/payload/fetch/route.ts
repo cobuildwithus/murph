@@ -84,6 +84,7 @@ async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
   }
 
   const gate = await resolveHostedRuntimeAiUsageGate({
+    mode: "read_first",
     userId: input.userId,
   });
 

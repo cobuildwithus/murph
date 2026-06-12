@@ -221,6 +221,7 @@ async function assertHostedManualRunAiUsageAllowed(input: {
   userId: string;
 }): Promise<void> {
   const gate = await resolveHostedRuntimeAiUsageGate({
+    mode: "read_first",
     prisma: input.prisma,
     userId: input.userId,
   });

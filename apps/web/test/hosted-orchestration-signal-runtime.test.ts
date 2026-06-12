@@ -369,6 +369,7 @@ describe("hosted runtime Temporal signaling", () => {
     });
 
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "read_first",
       prisma: mocks.prisma,
       userId: "member_123",
     });
@@ -467,6 +468,7 @@ describe("hosted runtime Temporal signaling", () => {
     });
 
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "read_first",
       prisma: explicitPrisma,
       userId: "member_123",
     });
@@ -507,6 +509,7 @@ describe("hosted runtime Temporal signaling", () => {
       resolveHostedRuntimeAiUsageGate,
     } = await vi.importActual<{
       resolveHostedRuntimeAiUsageGate: (input: {
+        mode: "mutating" | "read_first" | "read_only";
         now: string;
         prisma: typeof mocks.prisma;
         userId: string;
@@ -519,6 +522,7 @@ describe("hosted runtime Temporal signaling", () => {
     mocks.checkHostedAiUsageGate.mockResolvedValueOnce({ allowed: true });
 
     await expect(resolveHostedRuntimeAiUsageGate({
+      mode: "read_first",
       now: "2026-05-20T12:00:00.000Z",
       prisma: explicitPrisma,
       userId: "member_123",

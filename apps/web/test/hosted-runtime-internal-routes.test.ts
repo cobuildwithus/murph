@@ -319,6 +319,7 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "read_first",
       userId: "member_routes_1",
     });
   });
@@ -370,6 +371,7 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "read_first",
       userId: "member_routes_1",
     });
   });
@@ -493,6 +495,7 @@ describe("hosted runtime internal web routes", () => {
     // non-gated system item: all-or-nothing watermark semantics.
     expect(response.status).toBe(403);
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "read_first",
       userId: "member_routes_1",
     });
   });
@@ -575,6 +578,7 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "read_first",
       userId: "member_routes_1",
     });
     expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();

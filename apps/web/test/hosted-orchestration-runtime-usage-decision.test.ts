@@ -24,10 +24,11 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
     mocks.resolveHostedAiUsageGate.mockReset();
   });
 
-  it("defaults to the read-first check gate", async () => {
+  it("keeps read_first mode on the check gate", async () => {
     mocks.checkHostedAiUsageGate.mockResolvedValue({ allowed: true });
 
     await expect(resolveHostedRuntimeAiUsageGate({
+      mode: "read_first",
       userId: "member_123",
     })).resolves.toEqual({ status: "allowed" });
 
@@ -40,6 +41,7 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
     mocks.checkHostedAiUsageGate.mockResolvedValue({ allowed: false });
 
     await expect(resolveHostedRuntimeAiUsageGate({
+      mode: "read_first",
       userId: "member_123",
     })).resolves.toEqual({ status: "denied" });
   });
@@ -75,6 +77,7 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
 
     const now = new Date("2026-06-12T12:00:00.000Z");
     await expect(resolveHostedRuntimeAiUsageGate({
+      mode: "read_first",
       now,
       userId: "member_123",
     })).resolves.toEqual({
