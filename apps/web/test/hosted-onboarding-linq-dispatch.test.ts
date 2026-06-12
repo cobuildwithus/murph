@@ -1302,9 +1302,9 @@ https://join.example.test/join/code_first_text`);
     });
 
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(scheduledTasks).toHaveLength(1);
+    expect(scheduledTasks).toHaveLength(2);
 
-    await scheduledTasks[0]?.();
+    await scheduledTasks[1]?.();
 
     expectHostedLinqReadReceiptSent();
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
