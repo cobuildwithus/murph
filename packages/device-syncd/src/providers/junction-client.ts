@@ -99,7 +99,9 @@ const DEFAULT_RETRY_DELAY_MS = 500;
 const MAX_RETRY_DELAY_MS = 5_000;
 const MAX_COLLECTION_PAGES = 100;
 const MAX_COLLECTION_RECORDS = 25_000;
-const JUNCTION_DATE_ONLY_SUMMARY_RESOURCES = new Set(["menstrual_cycle", "sleep_cycle"]);
+// These summary endpoints declare `start_date`/`end_date` as YYYY-MM-DD dates
+// (not datetimes) in the Junction API reference.
+const JUNCTION_DATE_ONLY_SUMMARY_RESOURCES = new Set(["electrocardiogram", "menstrual_cycle", "sleep_cycle"]);
 
 export const JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS = Object.freeze([
   "junction.com",

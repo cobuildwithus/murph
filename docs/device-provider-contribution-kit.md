@@ -24,6 +24,7 @@ Murph intentionally splits provider work across four seams.
 
 `packages/importers/src/device-providers/provider-descriptors.ts` is the single shared source for:
 - provider key and display name
+- implementation-slug aliases that resolve to the provider's public identity (for example Junction's `whoop_v2` resolves to `whoop` through `canonicalizeDeviceProviderSlug`); the wearable query layer and CLI provider filters canonicalize through this seam while vault records keep their raw ingested provenance
 - transport modes
 - OAuth callback path and default scopes
 - webhook path and delivery mode

@@ -48,6 +48,7 @@ export type HostedLocalE2eScenarioName =
   | "runner-warm-reuse"
   | "snapshot-stress"
   | "stuck-invocation-recovery"
+  | "timezone-injection"
   | "temporal-orchestration"
   | "telegram"
   | "telegram-first-contact"
@@ -131,6 +132,10 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-temporal-orchestration-e2e.test.ts",
     name: "temporal-orchestration",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-timezone-injection-e2e.test.ts",
+    name: "timezone-injection",
   },
   {
     aliases: ["linq-delivery"],

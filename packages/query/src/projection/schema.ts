@@ -13,7 +13,8 @@ export type DatabaseSync = import("node:sqlite").DatabaseSync;
 export type SqliteRow = Record<string, unknown>;
 
 export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
-export const QUERY_PROJECTION_SQLITE_VERSION = 8;
+// 9: wearable provider aliasing re-keys whoop_v2 rows under providers:whoop.
+export const QUERY_PROJECTION_SQLITE_VERSION = 9;
 
 export interface QueryProjectionLocation {
   absolutePath: string;
