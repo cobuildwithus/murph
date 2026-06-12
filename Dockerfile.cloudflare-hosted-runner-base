@@ -53,6 +53,9 @@ RUN python3 --version \
   && jq --version \
   && rg --version \
   && zstd --version \
+  && ffmpeg -hide_banner -loglevel error -f lavfi -i anullsrc=channel_layout=mono:sample_rate=16000 -t 0.1 -codec:a libmp3lame -b:a 64k /tmp/murph-libmp3lame-smoke.mp3 \
+  && test -s /tmp/murph-libmp3lame-smoke.mp3 \
+  && rm -f /tmp/murph-libmp3lame-smoke.mp3 \
   && codex --version \
   && codex app-server --help >/dev/null \
   && codex doctor --help >/dev/null
