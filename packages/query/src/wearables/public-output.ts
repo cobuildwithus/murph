@@ -386,6 +386,7 @@ function projectWearableResolvedMetricPublicSources(
       ...resolved.confidence,
       conflictingProviders: publicConflictingProviders,
       reasons: projectMetricConfidenceReasons({
+        candidates: resolved.candidates,
         publicAgreeingProviders,
         publicConflictingProviders,
         sameSourceDisagreement,
@@ -487,6 +488,7 @@ function collectPublicAgreeingProviders(resolved: WearableResolvedMetric): strin
 }
 
 function projectMetricConfidenceReasons(input: {
+  candidates: readonly WearableMetricCandidate[];
   publicAgreeingProviders: readonly string[];
   publicConflictingProviders: readonly string[];
   sameSourceDisagreement: boolean;
@@ -516,10 +518,33 @@ function projectMetricConfidenceReasons(input: {
         : [];
     }
 
-    return [reason];
+    return [projectMetricEvidenceReasonPublicProviders(reason, input.candidates)];
   });
 
   return uniqueStrings(reasons);
+}
+
+function projectMetricEvidenceReasonPublicProviders(
+  reason: string,
+  candidates: readonly WearableMetricCandidate[],
+): string {
+  let projected = reason;
+
+  for (const candidate of candidates) {
+    const sourceLabel = formatMetricEvidenceLabel(candidate, candidate.provider);
+    const publicLabel = formatMetricEvidenceLabel(candidate, resolvePublicSourceProvider(candidate));
+
+    if (sourceLabel !== publicLabel) {
+      projected = projected.replaceAll(sourceLabel, publicLabel);
+    }
+  }
+
+  return projected;
+}
+
+function formatMetricEvidenceLabel(candidate: WearableMetricCandidate, provider: string): string {
+  const timestamp = candidate.recordedAt ?? candidate.occurredAt ?? "unknown time";
+  return `${formatProviderName(provider)} ${candidate.sourceKind} recorded ${timestamp}`;
 }
 
 function selectMetricSelectionCandidate(resolved: WearableResolvedMetric): WearableMetricCandidate | null {
@@ -540,6 +565,8 @@ function resolvePublicSourceProvider(candidate: WearableMetricCandidate): string
     dataOrigin: candidate.dataOrigin ?? null,
     externalRef: candidate.externalRef,
     provider: candidate.provider,
+  }, {
+    useSourceInstanceFallback: false,
   });
 }
 

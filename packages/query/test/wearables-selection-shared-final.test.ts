@@ -750,11 +750,11 @@ test("selection treats Junction whoop_v2 evidence as a direct WHOOP duplicate", 
     externalRef: makeExternalRef({
       resourceId: "whoop-recovery-1",
       resourceType: "recovery",
-      system: "whoop",
+      system: "whoop_v2",
     }),
     metric: "hrv",
     occurredAt: "2026-04-12T07:00:00Z",
-    provider: "whoop",
+    provider: "whoop_v2",
     recordedAt: "2026-04-12T07:01:00Z",
     sourceFamily: "event",
     sourceKind: "observation:hrv",
@@ -792,7 +792,7 @@ test("selection treats Junction whoop_v2 evidence as a direct WHOOP duplicate", 
     { metricFamily: "recovery" },
   );
 
-  assert.equal(resolved.selection.provider, "whoop");
+  assert.equal(resolved.selection.provider, "whoop_v2");
   assert.equal(resolved.selection.title, "Direct WHOOP HRV");
 });
 

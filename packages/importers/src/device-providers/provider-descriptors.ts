@@ -624,6 +624,39 @@ export const defaultDeviceProviderDescriptors = Object.freeze([
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
 ] as const);
 
+function buildDeviceProviderDescriptorLookup(
+  descriptors: readonly DeviceProviderDescriptor[],
+): Map<string, DeviceProviderDescriptor> {
+  const lookup = new Map<string, DeviceProviderDescriptor>();
+
+  for (const descriptor of descriptors) {
+    const providerKey = normalizeDeviceProviderKey(descriptor.provider);
+    if (!providerKey) {
+      throw new TypeError("provider descriptor must define a non-empty provider");
+    }
+
+    for (const rawKey of [descriptor.provider, ...(descriptor.aliases ?? [])]) {
+      const key = normalizeDeviceProviderKey(rawKey);
+      if (!key) {
+        throw new TypeError(`${descriptor.provider} defines a blank provider alias`);
+      }
+
+      const existing = lookup.get(key);
+      if (existing && existing.provider !== descriptor.provider) {
+        throw new TypeError(
+          `provider key "${key}" resolves to both "${existing.provider}" and "${descriptor.provider}"`,
+        );
+      }
+
+      lookup.set(key, descriptor);
+    }
+  }
+
+  return lookup;
+}
+
+const defaultDeviceProviderDescriptorLookup = buildDeviceProviderDescriptorLookup(defaultDeviceProviderDescriptors);
+
 export function resolveDeviceProviderDescriptor(
   provider: string,
   descriptors: readonly DeviceProviderDescriptor[] = defaultDeviceProviderDescriptors,
@@ -634,10 +667,10 @@ export function resolveDeviceProviderDescriptor(
     return undefined;
   }
 
-  return descriptors.find((descriptor) =>
-    normalizeDeviceProviderKey(descriptor.provider) === key
-    || descriptor.aliases?.some((alias) => normalizeDeviceProviderKey(alias) === key),
-  );
+  const lookup = descriptors === defaultDeviceProviderDescriptors
+    ? defaultDeviceProviderDescriptorLookup
+    : buildDeviceProviderDescriptorLookup(descriptors);
+  return lookup.get(key);
 }
 
 export function canonicalizeDeviceProviderSlug(
@@ -647,7 +680,7 @@ export function canonicalizeDeviceProviderSlug(
   const key = normalizeDeviceProviderKey(provider);
 
   if (!key) {
-    return provider;
+    return "";
   }
 
   return resolveDeviceProviderDescriptor(key, descriptors)?.provider ?? key;

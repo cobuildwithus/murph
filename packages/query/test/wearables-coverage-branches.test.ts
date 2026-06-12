@@ -1219,7 +1219,7 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
           resourceType,
           system: "junction",
         }),
-        recordedAt: `${date}T07:00:00Z`,
+        recordedAt: `${date}T07:10:00Z`,
         stage,
       },
       entityId: `sample_sleep_stage_${resourcePrefix}_${date}_${stage}`,
@@ -1336,6 +1336,32 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
     makeJunctionSleepStage("deep", 90, { date: "2026-04-09", sourceSlug: "oura" }),
     makeJunctionSleepStage("light", 250, { date: "2026-04-09", sourceSlug: "oura" }),
     makeJunctionSleepStage("rem", 80, { date: "2026-04-09", sourceSlug: "oura" }),
+    makeEntity({
+      attributes: {
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "whoop_v2",
+          sourceType: "watch",
+          version: 1,
+        },
+        dayKey: "2026-04-10",
+        externalRef: makeExternalRef({
+          resourceId: "junction-whoop-v2-steps",
+          resourceType: "junction-whoop-v2-activity",
+          system: "junction",
+        }),
+        metric: "daily-steps",
+        recordedAt: "2026-04-10T08:00:00Z",
+        unit: "count",
+        value: 7200,
+      },
+      entityId: "event_steps_junction_whoop_v2",
+      family: "event",
+      kind: "observation",
+      occurredAt: "2026-04-10T08:00:00Z",
+      recordClass: "ledger",
+      title: "Junction WHOOP steps",
+    }),
   ]);
 
   const garminDataset = collectWearableDataset(vault, { providers: ["garmin"] });
@@ -1361,13 +1387,21 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
   assert.equal(sourceHealth[0]?.notes.some((note) => /\bjunction\b/iu.test(note)), false);
 
   const rawSourceDay = summarizeWearableDay(vault, "2026-04-06");
-  assert.deepEqual(rawSourceDay?.providers, ["source-junction-unmapped-steps"]);
-  assert.equal(rawSourceDay?.activity?.steps.selection.provider, "source-junction-unmapped-steps");
+  assert.deepEqual(rawSourceDay?.providers, ["unknown"]);
+  assert.equal(rawSourceDay?.activity?.steps.selection.provider, "unknown");
 
   const garminSleep = summarizeWearableSleep(vault, { providers: ["garmin"] })
     .find((night) => night.date === "2026-04-07");
   assert.equal(garminSleep?.totalSleepMinutes.selection.provider, "garmin");
   assert.equal(garminSleep?.totalSleepMinutes.selection.value, 390);
+  assert.equal(
+    garminSleep?.totalSleepMinutes.confidence.reasons.some((reason) => /\bJunction\b/u.test(reason)),
+    false,
+  );
+  assert.equal(
+    garminSleep?.totalSleepMinutes.confidence.reasons.some((reason) => reason.startsWith("Selected Garmin ")),
+    true,
+  );
 
   const mixedSourceSleep = summarizeWearableSleep(vault)
     .find((night) => night.date === "2026-04-08");
@@ -1386,6 +1420,18 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
       ...(conflictingSleep?.totalSleepMinutes.confidence.conflictingProviders ?? []),
     ]),
     new Set(["garmin", "oura"]),
+  );
+
+  const whoopDay = summarizeWearableDay(vault, "2026-04-10", { providers: ["whoop"] });
+  assert.deepEqual(whoopDay?.providers, ["whoop"]);
+  assert.equal(whoopDay?.activity?.steps.selection.provider, "whoop");
+  assert.equal(
+    whoopDay?.activity?.steps.confidence.reasons.some((reason) => /\bJunction\b/u.test(reason)),
+    false,
+  );
+  assert.equal(
+    whoopDay?.activity?.steps.confidence.reasons.some((reason) => reason.startsWith("Selected WHOOP ")),
+    true,
   );
 });
 

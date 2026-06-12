@@ -5,6 +5,7 @@ import {
   canonicalizeDeviceProviderSlug,
   DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
   defaultDeviceProviderDescriptors,
+  type DeviceProviderDescriptor,
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
   resolveDeviceProviderConnectionDescriptor,
@@ -73,6 +74,34 @@ describe("device provider descriptors", () => {
     expect(canonicalizeDeviceProviderSlug("oura")).toBe("oura");
     expect(canonicalizeDeviceProviderSlug("fitbit")).toBe("fitbit");
     expect(canonicalizeDeviceProviderSlug("")).toBe("");
+    expect(canonicalizeDeviceProviderSlug("   ")).toBe("");
+  });
+
+  it("rejects provider alias collisions instead of resolving order-dependently", () => {
+    const duplicateAliasDescriptors = [
+      {
+        ...WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
+        aliases: ["wearable-v2"],
+      },
+      {
+        ...OURA_DEVICE_PROVIDER_DESCRIPTOR,
+        aliases: ["wearable-v2"],
+      },
+    ] satisfies readonly DeviceProviderDescriptor[];
+    const providerAliasCollisionDescriptors = [
+      WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
+      {
+        ...OURA_DEVICE_PROVIDER_DESCRIPTOR,
+        provider: "whoop-v2",
+      },
+    ] satisfies readonly DeviceProviderDescriptor[];
+
+    expect(() => resolveDeviceProviderDescriptor("wearable-v2", duplicateAliasDescriptors)).toThrow(
+      /provider key "wearable-v2" resolves to both "whoop" and "oura"/u,
+    );
+    expect(() => resolveDeviceProviderDescriptor("whoop-v2", providerAliasCollisionDescriptors)).toThrow(
+      /provider key "whoop-v2" resolves to both "whoop" and "whoop-v2"/u,
+    );
   });
 
   it("resolves metric priority from the shared descriptor policy", () => {

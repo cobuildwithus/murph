@@ -422,7 +422,7 @@ function scoreJunctionSourcePolicy(
 
   const sourceProvider = canonicalizeDeviceProviderSlug(sourceProviderSlug);
   const directCandidateExists = candidates.some((other) =>
-    normalizeLowercaseString(other.provider) === sourceProvider
+    canonicalizeDeviceProviderSlug(normalizeLowercaseString(other.provider) ?? "") === sourceProvider
   );
   return directCandidateExists ? JUNCTION_DIRECT_DUPLICATE_PENALTY : 0;
 }
