@@ -83,7 +83,9 @@ export function parseStoredWearableSummary<TSummary>(
   summaryJson: string,
 ): TSummary | null {
   const summary = parseJsonValue<TSummary | null>(summaryJson, null);
-  if (summary === null || typeof summary !== "object") {
+  // isJsonObject also rejects arrays, which `typeof` alone would let leak
+  // into runtime summary lists as corrupt rows.
+  if (!isJsonObject(summary)) {
     return null;
   }
 
@@ -181,8 +183,9 @@ function decodeStoredWearableMetricEnvelope(metric: WearableMetricKey, stored: u
     return stored;
   }
 
-  const confidence = isJsonObject(stored.confidence) ? stored.confidence : {};
-  const selection = isJsonObject(stored.selection) ? stored.selection : {};
+  // The discriminator guarantees both are plain objects.
+  const confidence = stored.confidence as Record<string, unknown>;
+  const selection = stored.selection as Record<string, unknown>;
 
   return {
     candidates: [],
@@ -225,10 +228,16 @@ function emptyStoredWearableMetricEnvelope(metric: WearableMetricKey): unknown {
 }
 
 function isCompactStoredEnvelope(stored: Record<string, unknown>): boolean {
-  // Compact envelopes carry exactly { confidence, selection }; full
-  // envelopes stored verbatim by the fail-open path keep their other
-  // fields (candidates, metric) and must pass through untouched.
-  return Object.keys(stored).every((key) => key === "confidence" || key === "selection");
+  // Compact envelopes carry exactly { confidence, selection }, both plain
+  // objects — the writer emits both keys unconditionally. Anything else
+  // (full envelopes stored verbatim by the fail-open path, corrupt or
+  // tampered cells like {} or {selection:{...}}) passes through untouched:
+  // decode must never synthesize a high-confidence selection from a shape
+  // the writer cannot produce.
+  const keys = Object.keys(stored);
+  return keys.length === 2
+    && isJsonObject(stored.confidence)
+    && isJsonObject(stored.selection);
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {

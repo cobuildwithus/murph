@@ -319,9 +319,20 @@ test("stored wearable summary codec decode discriminates and survives tampered e
     { confidence: {}, selection: {}, extra: 1 },
   );
 
-  // Compact-shaped objects with missing or non-object parts rebuild into the
-  // canonical full envelope shape with the documented defaults.
-  const defaultEnvelope = {
+  // Shapes the writer cannot produce fail closed: they pass through
+  // untouched instead of being synthesized into high-confidence direct
+  // selections. The writer always emits both keys as plain objects, so a
+  // missing or non-object part means corruption or tampering.
+  assert.deepEqual(reparseSteps({}), {});
+  assert.deepEqual(
+    reparseSteps({ confidence: 5, selection: "corrupt" }),
+    { confidence: 5, selection: "corrupt" },
+  );
+  assert.deepEqual(reparseSteps({ selection: { value: 7 } }), { selection: { value: 7 } });
+
+  // A genuine writer-shaped compact envelope (both keys, both plain
+  // objects) still rebuilds with the documented defaults.
+  assert.deepEqual(reparseSteps({ confidence: {}, selection: { value: 7 } }), {
     candidates: [],
     confidence: {
       candidateCount: 1,
@@ -344,15 +355,12 @@ test("stored wearable summary codec decode discriminates and survives tampered e
       fallbackFromMetric: null,
       fallbackReason: null,
       unit: null,
-      value: null,
+      value: 7,
     },
-  };
-  assert.deepEqual(reparseSteps({}), defaultEnvelope);
-  assert.deepEqual(reparseSteps({ confidence: 5, selection: "corrupt" }), defaultEnvelope);
-  assert.deepEqual(
-    reparseSteps({ selection: { value: 7 } }),
-    { ...defaultEnvelope, selection: { ...defaultEnvelope.selection, value: 7 } },
-  );
+  });
+
+  // Arrays in the summary cell are corrupt rows, not summaries.
+  assert.equal(parseStoredWearableSummary("activity", "[]"), null);
 });
 
 test("null-marker envelopes decode to fresh objects on every parse", () => {
