@@ -16,15 +16,28 @@ export const JUNCTION_KNOWN_TIMESERIES_RESOURCES = Object.freeze([
   "respiratory_rate",
   "blood_oxygen",
   "stress_level",
+  "vo2_max",
   "weight",
 ] as const);
 
 export type JunctionTimeseriesResource =
   (typeof JUNCTION_KNOWN_TIMESERIES_RESOURCES)[number];
 
+// Default timeseries resources normalize through the compact daily-aggregate
+// path only: one ~430-byte `junction.timeseries_daily_aggregate.v1` raw
+// artifact per day per resource (measured on a live member's blood_oxygen
+// artifacts), so each default costs roughly 160 KB of raw evidence per
+// member-year. Intraday `heartrate` and `hypnogram` stay deliberately
+// excluded from defaults: their raw sample streams are unbounded (thousands
+// of samples per day) and the vault must not accumulate giant raw timeseries
+// dumps. Sleep-grain heart rate and hypnogram detail already arrive through
+// the `sleep`/`sleep_cycle` summary resources.
 export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
   "blood_oxygen",
   "stress_level",
+  "hrv",
+  "respiratory_rate",
+  "vo2_max",
 ] as const);
 
 export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([] as const);
@@ -436,6 +449,10 @@ export function normalizeJunctionResourceName(value: unknown): string | null {
     case "spo2":
     case "blood_oxygen_saturation":
       return "blood_oxygen";
+    case "vo2max":
+      return "vo2_max";
+    case "heart_rate_variability":
+      return "hrv";
     default:
       return resource;
   }

@@ -292,11 +292,9 @@ test("Junction omitted timeseries config defaults to compact resources only", as
                 "activity",
                 ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
                 "heartrate",
-                "hrv",
                 "steps",
                 "distance",
                 "calories_active",
-                "respiratory_rate",
                 "glucose",
                 "weight",
               ].map((resource) => [resource, true])),
@@ -361,11 +359,9 @@ test("Junction omitted timeseries config defaults to compact resources only", as
   assert.equal(
     requests.every((url) =>
       !url.includes("heartrate") &&
-      !url.includes("hrv") &&
       !url.includes("steps") &&
       !url.includes("distance") &&
       !url.includes("calories_active") &&
-      !url.includes("respiratory_rate") &&
       !url.includes("glucose") &&
       !url.includes("weight")
     ),

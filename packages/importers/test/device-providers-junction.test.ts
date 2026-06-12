@@ -1357,18 +1357,6 @@ test("Junction normalizer drops grouped raw-only dense timeseries payloads", () 
           }],
         },
       },
-      hrv: {
-        groups: {
-          oura: [{
-            data: [{
-              timestamp: "2026-04-22T14:30:52+00:00",
-              unit: "rmssd",
-              value: 48,
-            }],
-            source: { provider: "oura", type: "ring" },
-          }],
-        },
-      },
     },
   });
 
@@ -1382,10 +1370,10 @@ test("Junction normalizer drops grouped raw-only dense timeseries payloads", () 
   assertNoFullJunctionTimeseriesArtifacts(payload);
   assert.doesNotMatch(rawArtifactText, /Oura Ring|device-oura-ring-1|app-oura-cloud-1/u);
   assert.doesNotMatch(rawArtifactText, /"provider":"oura"|"type":"ring"/u);
-  assert.doesNotMatch(rawArtifactText, /"value":123|"value":5.6|"value":70|"value":48/u);
+  assert.doesNotMatch(rawArtifactText, /"value":123|"value":5.6|"value":70/u);
 });
 
-test("Junction normalizer drops respiratory rate raw-only timeseries evidence", async () => {
+test("Junction normalizer compacts respiratory rate timeseries into daily average facts", async () => {
   const respiratoryRateUnits = [
     undefined,
     "bpm",
@@ -1409,11 +1397,18 @@ test("Junction normalizer drops respiratory rate raw-only timeseries evidence", 
           respiratory_rate: {
             groups: {
               garmin: [{
-                data: [{
-                  timestamp: "2026-04-22T07:15:00Z",
-                  ...(unit === undefined ? {} : { unit }),
-                  value: 14.8,
-                }],
+                data: [
+                  {
+                    timestamp: "2026-04-22T07:15:00Z",
+                    ...(unit === undefined ? {} : { unit }),
+                    value: 14.8,
+                  },
+                  {
+                    timestamp: "2026-04-22T07:45:00Z",
+                    ...(unit === undefined ? {} : { unit }),
+                    value: 15.2,
+                  },
+                ],
                 source: { provider: "garmin", type: "watch" },
               }],
             },
@@ -1426,15 +1421,95 @@ test("Junction normalizer drops respiratory rate raw-only timeseries evidence", 
     const rawRespiratoryRateArtifact = payload.rawArtifacts?.find((artifact) =>
       artifact.role === "junction-timeseries-respiratory-rate"
     );
-    const rawArtifactText = JSON.stringify(payload.rawArtifacts ?? []);
 
-    assert.deepEqual(payload.provenance?.timeseriesResources, []);
+    assert.deepEqual(payload.provenance?.timeseriesResources, ["respiratory_rate"]);
     assert.equal(payload.samples?.length ?? 0, 0);
-    assert.equal(event, undefined);
+    assert.equal(event?.kind, "observation");
+    assert.equal(event?.dayKey, "2026-04-22");
+    assert.equal(event?.fields?.observationGrain, "summary");
+    assert.equal(event?.fields?.value, 15);
+    assert.equal(event?.fields?.unit, "breaths_per_minute");
+    assert.equal(event?.dataOrigin?.sourceProviderSlug, "garmin");
     assert.equal(rawRespiratoryRateArtifact, undefined);
+    assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "respiratory-rate").length, 1);
+    assertNoFullJunctionTimeseriesArtifacts(payload);
     assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"), false);
-    assert.doesNotMatch(rawArtifactText, /"value":14.8|"unit":/u);
   }
+});
+
+test("Junction normalizer compacts HRV timeseries into daily average facts", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      hrv: {
+        groups: {
+          garmin: [{
+            data: [
+              { timestamp: "2026-04-22T02:30:00Z", unit: "rmssd", value: 44 },
+              { timestamp: "2026-04-22T05:30:00Z", unit: "rmssd", value: 52 },
+              { timestamp: "2026-04-23T03:00:00Z", unit: "rmssd", value: 61 },
+              { timestamp: "2026-04-23T04:00:00Z", unit: "rmssd", value: 1200 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+
+  const hrvEvents = payload.events?.filter((event) => event.fields?.metric === "hrv") ?? [];
+  const dayOne = hrvEvents.find((event) => event.dayKey === "2026-04-22");
+  const dayTwo = hrvEvents.find((event) => event.dayKey === "2026-04-23");
+
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["hrv"]);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "hrv").length, 2);
+  assertNoFullJunctionTimeseriesArtifacts(payload);
+  assertEventRawArtifactRolesExist(payload);
+  assert.equal(hrvEvents.length, 2);
+  assert.equal(dayOne?.fields?.value, 48);
+  assert.equal(dayOne?.fields?.unit, "ms");
+  assert.equal(dayOne?.fields?.observationGrain, "summary");
+  assert.equal(dayOne?.dataOrigin?.sourceProviderSlug, "garmin");
+  // 1200 is out of plausible range and must not skew the day-two average.
+  assert.equal(dayTwo?.fields?.value, 61);
+});
+
+test("Junction normalizer compacts VO2 max interval timeseries into daily facts", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      vo2_max: {
+        groups: {
+          garmin: [{
+            data: [
+              {
+                start: "2026-04-22T00:00:00Z",
+                end: "2026-04-22T15:30:00Z",
+                unit: "mL/kg/min",
+                value: 46.2,
+              },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+
+  const vo2Event = payload.events?.find((event) => event.fields?.metric === "estimated-vo2-max");
+
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["vo2_max"]);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "vo2-max").length, 1);
+  assertNoFullJunctionTimeseriesArtifacts(payload);
+  assertEventRawArtifactRolesExist(payload);
+  assert.equal(vo2Event?.kind, "observation");
+  assert.equal(vo2Event?.dayKey, "2026-04-22");
+  assert.equal(vo2Event?.fields?.observationGrain, "summary");
+  assert.equal(vo2Event?.fields?.value, 46.2);
+  assert.equal(vo2Event?.fields?.unit, "ml/kg/min");
+  assert.equal(vo2Event?.dataOrigin?.sourceProviderSlug, "garmin");
 });
 
 test("Junction normalizer derives display-grade blood oxygen facts from timeseries unit aliases", async () => {
@@ -2033,12 +2108,14 @@ test("Junction normalizer unwraps object-valued data envelopes into usable recor
   assert.equal(sleepSession?.fields?.durationMinutes, 480);
   assert.equal(sleepSession?.occurredAt, "2026-05-20T02:00:00.000Z");
   assert.equal(sleepScore?.fields?.value, 82);
-  assert.equal(respiratoryRate, undefined);
+  assert.equal(respiratoryRate?.fields?.value, 14.8);
+  assert.equal(respiratoryRate?.dayKey, "2026-05-20");
   assert.deepEqual(payload.provenance?.summaryResources, ["activity", "sleep"]);
-  assert.deepEqual(payload.provenance?.timeseriesResources, []);
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["respiratory_rate"]);
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-activity"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep"));
   assert.equal(respiratoryArtifact, undefined);
+  assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "respiratory-rate").length, 1);
   assertNoFullJunctionTimeseriesArtifacts(payload);
 });
 
@@ -2092,6 +2169,9 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
   assert.deepEqual([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES], [
     "blood_oxygen",
     "stress_level",
+    "hrv",
+    "respiratory_rate",
+    "vo2_max",
   ]);
   assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], ["profile"]);
   assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], []);
@@ -2133,6 +2213,9 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
   assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "stress-level").length, 1);
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
   assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "blood-oxygen").length, 1);
+  assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "hrv").length, 1);
+  assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "respiratory-rate").length, 1);
+  assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "vo2-max").length, 1);
   assertNoFullJunctionTimeseriesArtifacts(payload);
   assertEventRawArtifactRolesExist(payload);
   assert.ok(payload.events?.every((event) => event.externalRef?.system === "junction"));
