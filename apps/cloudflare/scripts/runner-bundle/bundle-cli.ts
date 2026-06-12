@@ -132,6 +132,7 @@ export async function bundleInstalledVaultCliBinary(
   });
 
   assertVaultCliBundleInputsStayExternal(Object.keys(buildResult.metafile.inputs));
+  assertVaultCliBundleInlinesSingleCopies(Object.keys(buildResult.metafile.inputs));
   const bundleBytes = assertVaultCliBundleWithinBudgets(buildResult.metafile);
   console.log(
     `vault-cli bundle size: total ${bundleBytes.totalBytes}B of ${VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET}B budget, entry ${bundleBytes.entryBytes}B of ${VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET}B budget`,
@@ -161,6 +162,39 @@ function assertVaultCliBundleInputsStayExternal(inputPaths: string[]): void {
           `vault-cli bundle inlined ${inputPath}; keep ${marker.replaceAll("/", "")} lazy so JSON commands do not load optional output/MCP dependencies.`,
         );
       }
+    }
+  }
+}
+
+// Packages with module-level registries must be inlined from exactly one
+// physical copy: two copies (for example a root install plus a nested
+// node_modules copy) get bundled as two module instances whose state never
+// meets. incur keys its command tree in module-level WeakMaps, so a split
+// leaves command groups registered through one copy invisible to the copy
+// that serves the invocation (June 2026 deploy smoke failure: `vault-cli
+// --llms` threw "commands is not iterable" in the runner container).
+const VAULT_CLI_BUNDLE_SINGLE_COPY_PACKAGE_NAMES = ["incur"] as const;
+
+// Exported for direct unit testing with synthetic input paths; the production
+// call site always uses the real bundle's metafile inputs.
+export function assertVaultCliBundleInlinesSingleCopies(inputPaths: string[]): void {
+  for (const packageName of VAULT_CLI_BUNDLE_SINGLE_COPY_PACKAGE_NAMES) {
+    const marker = `node_modules/${packageName}/`;
+    const packageRoots = new Set<string>();
+
+    for (const inputPath of inputPaths) {
+      const markerIndex = inputPath.lastIndexOf(marker);
+      if (markerIndex !== -1) {
+        packageRoots.add(inputPath.slice(0, markerIndex + marker.length));
+      }
+    }
+
+    if (packageRoots.size > 1) {
+      throw new Error(
+        `vault-cli bundle inlined ${packageName} from multiple copies (${[...packageRoots]
+          .sort()
+          .join(", ")}); duplicate copies split ${packageName} module state, so command registrations through one copy are invisible to the copy serving the invocation.`,
+      );
     }
   }
 }

@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -30,7 +30,6 @@ interface WorkspacePackageManifest {
   main?: string;
   name?: string;
   optionalDependencies?: Record<string, string>;
-  peerDependencies?: Record<string, string>;
   private?: boolean;
   type?: string;
   version?: string;
@@ -278,18 +277,9 @@ async function prepareRunnerCliPackagePackRoot(
 ): Promise<string> {
   const packRoot = await mkdtemp(path.join(tarballsDir, ".runner-cli-pack-"));
   const packageJson = await readWorkspacePackageManifest(sourcePackageDir);
-  const externalBundledDependencyNames = resolveExternalBundledDependencyNames(
-    packageJson,
-    workspacePackageTarballSpecifiers,
-  );
 
-  if (externalBundledDependencyNames.length > 0) {
-    packageJson.bundleDependencies = externalBundledDependencyNames;
-    delete packageJson.bundledDependencies;
-  } else {
-    delete packageJson.bundleDependencies;
-    delete packageJson.bundledDependencies;
-  }
+  delete packageJson.bundleDependencies;
+  delete packageJson.bundledDependencies;
   rewritePackedWorkspaceDependencySpecs(
     packageJson,
     packageJson.name ?? CLI_PACKAGE_NAME,
@@ -303,14 +293,6 @@ async function prepareRunnerCliPackagePackRoot(
     "config.schema.json",
     "LICENSE",
   ]);
-  for (const dependencyName of externalBundledDependencyNames) {
-    await copyExternalBundledDependency(
-      sourcePackageDir,
-      packRoot,
-      packageJson,
-      dependencyName,
-    );
-  }
   await writeFile(
     path.join(packRoot, "package.json"),
     `${JSON.stringify(packageJson, null, 2)}\n`,
@@ -510,187 +492,6 @@ function rewritePackedWorkspaceDependencyGroup(
   return didRewrite;
 }
 
-function resolveExternalBundledDependencyNames(
-  packageJson: WorkspacePackageManifest,
-  workspacePackageTarballSpecifiers: ReadonlyMap<string, string>,
-): string[] {
-  return normalizeBundleDependencyNames(packageJson).filter(
-    (dependencyName) => !workspacePackageTarballSpecifiers.has(dependencyName),
-  );
-}
-
-function normalizeBundleDependencyNames(
-  packageJson: WorkspacePackageManifest,
-): string[] {
-  const rawBundleDependencies =
-    packageJson.bundleDependencies ?? packageJson.bundledDependencies;
-
-  if (!Array.isArray(rawBundleDependencies)) {
-    return [];
-  }
-
-  return [...new Set(
-    rawBundleDependencies
-      .filter((entry) => typeof entry === "string")
-      .map((entry) => entry.trim())
-      .filter((entry) => entry.length > 0),
-  )].sort();
-}
-
-function assertExternalBundledDependencyIsDeclared(
-  packageJson: WorkspacePackageManifest,
-  dependencyName: string,
-): void {
-  if (
-    packageJson.dependencies?.[dependencyName] !== undefined ||
-    packageJson.optionalDependencies?.[dependencyName] !== undefined ||
-    packageJson.peerDependencies?.[dependencyName] !== undefined
-  ) {
-    return;
-  }
-
-  throw new Error(
-    `Cannot bundle ${dependencyName} for ${packageJson.name ?? CLI_PACKAGE_NAME}: bundled external dependencies must also be declared in dependencies, optionalDependencies, or peerDependencies.`,
-  );
-}
-
-async function copyExternalBundledDependency(
-  sourcePackageDir: string,
-  packRoot: string,
-  packageJson: WorkspacePackageManifest,
-  dependencyName: string,
-): Promise<void> {
-  assertExternalBundledDependencyIsDeclared(packageJson, dependencyName);
-
-  const sourceDependencyDir = await resolveInstalledDependencyDir(
-    sourcePackageDir,
-    dependencyName,
-    packageJson.name ?? CLI_PACKAGE_NAME,
-  );
-  const dependencyPackageJson = await readWorkspacePackageManifest(sourceDependencyDir);
-
-  if (dependencyPackageJson.name !== dependencyName) {
-    throw new Error(
-      `Cannot bundle ${dependencyName} for ${packageJson.name ?? CLI_PACKAGE_NAME}: installed package resolved to ${dependencyPackageJson.name ?? "<missing>"}.`,
-    );
-  }
-
-  const targetDependencyDir = path.join(
-    packRoot,
-    "node_modules",
-    ...dependencyName.split("/"),
-  );
-  await copyExternalPackagePayload(
-    dependencyName,
-    dependencyPackageJson,
-    sourceDependencyDir,
-    targetDependencyDir,
-  );
-}
-
-async function resolveInstalledDependencyDir(
-  sourcePackageDir: string,
-  dependencyName: string,
-  packageName: string,
-): Promise<string> {
-  const dependencyPath = path.join(
-    sourcePackageDir,
-    "node_modules",
-    ...dependencyName.split("/"),
-  );
-
-  if (!(await pathExists(dependencyPath))) {
-    throw new Error(
-      `Cannot bundle ${dependencyName} for ${packageName}: missing installed dependency. Run pnpm install --frozen-lockfile before packing runner workspace packages.`,
-    );
-  }
-
-  return await realpath(dependencyPath);
-}
-
-async function copyExternalPackagePayload(
-  packageName: string,
-  packageJson: WorkspacePackageManifest,
-  sourceDir: string,
-  targetDir: string,
-): Promise<void> {
-  const declaredFiles = Array.isArray(packageJson.files)
-    ? packageJson.files.filter((entry) => typeof entry === "string" && entry.length > 0)
-    : [];
-  const includePaths = [
-    "package.json",
-    ...declaredFiles,
-    "README.md",
-    "README",
-    "LICENSE",
-    "LICENSE.md",
-    "LICENCE",
-    "NOTICE",
-  ];
-  const seenPaths = new Set<string>();
-
-  for (const relativePath of includePaths) {
-    if (seenPaths.has(relativePath)) {
-      continue;
-    }
-    seenPaths.add(relativePath);
-
-    const sourcePath = path.join(sourceDir, relativePath);
-    const required = relativePath === "package.json" || declaredFiles.includes(relativePath);
-
-    if (!(await pathExists(sourcePath))) {
-      if (required) {
-        throw new Error(
-          `Cannot bundle ${packageName}: missing ${relativePath} in installed package payload.`,
-        );
-      }
-      continue;
-    }
-
-    await copyPayloadPath(sourcePath, path.join(targetDir, relativePath), {
-      shouldSkip: shouldSkipExternalPayloadArtifact,
-    });
-  }
-}
-
-function shouldSkipPayloadArtifact(sourcePath: string): boolean {
-  return path.basename(sourcePath).endsWith(".tsbuildinfo");
-}
-
-function shouldSkipExternalPayloadArtifact(sourcePath: string): boolean {
-  return path.basename(sourcePath) === "node_modules" || shouldSkipPayloadArtifact(sourcePath);
-}
-
-async function copyPayloadPath(
-  sourcePath: string,
-  targetPath: string,
-  options: {
-    shouldSkip?: (sourcePath: string) => boolean;
-  } = {},
-): Promise<void> {
-  const shouldSkip = options.shouldSkip ?? shouldSkipPayloadArtifact;
-
-  if (shouldSkip(sourcePath)) {
-    return;
-  }
-
-  const sourceStats = await stat(sourcePath);
-
-  if (sourceStats.isDirectory()) {
-    await cp(sourcePath, targetPath, {
-      filter(candidatePath) {
-        return !shouldSkip(candidatePath);
-      },
-      force: true,
-      recursive: true,
-    });
-    return;
-  }
-
-  await mkdir(path.dirname(targetPath), { recursive: true });
-  await cp(sourcePath, targetPath, { force: true });
-}
-
 async function copyPackageEntries(
   sourcePackageDir: string,
   packRoot: string,
@@ -703,19 +504,6 @@ async function copyPackageEntries(
       force: true,
       recursive: true,
     });
-  }
-}
-
-async function pathExists(targetPath: string): Promise<boolean> {
-  try {
-    await stat(targetPath);
-    return true;
-  } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-      return false;
-    }
-
-    throw error;
   }
 }
 
