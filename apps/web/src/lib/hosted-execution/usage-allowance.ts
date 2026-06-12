@@ -444,11 +444,12 @@ export async function readHostedAiUsageGate(input: {
 // write-free read gate and only run the mutating period-bookkeeping
 // transaction when the read decision would block AI work, so steady-state
 // gate checks stay off the usage-period upsert/lock path. Denials are always
-// confirmed by the mutating gate before callers act on them (the read path
-// cannot see carryover or plan-change limit updates that have not been
-// materialized yet). The guaranteed mutating resolve on the reply path is
-// turn admission (runtime reconciliation facts); spend accounting also
-// ensure-creates the period inside the spend transaction as the backstop.
+// confirmed by the mutating gate before callers act on them. The read path
+// includes write-free billing carryover spend, but it still cannot materialize
+// period rows or plan-change limit updates. The guaranteed mutating resolve on
+// the reply path is turn admission (runtime reconciliation facts); spend
+// accounting also ensure-creates the period inside the spend transaction as
+// the backstop.
 export async function checkHostedAiUsageGate(input: {
   memberId: string;
   now?: Date | string;
