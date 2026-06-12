@@ -4,6 +4,9 @@ import {
   wearableCanonicalMetricKeys,
 } from '@murphai/importers/device-providers/metric-catalog'
 import {
+  canonicalizeDeviceProviderSlug,
+} from '@murphai/importers/device-providers/provider-descriptors'
+import {
   emptyArgsSchema,
   requestIdFromOptions,
   withBaseOptions,
@@ -441,7 +444,7 @@ function withWearableComparisonOptions() {
 
 function normalizeWearableProviders(value: readonly string[] | undefined): string[] {
   return normalizeRepeatableEnumFlagOption(
-    value?.map((entry) => entry.toLowerCase()),
+    value?.map((entry) => canonicalizeDeviceProviderSlug(entry)),
     'provider',
     wearablePreferenceProviderValues,
   ) ?? []
