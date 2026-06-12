@@ -101,6 +101,31 @@ test("hosted runtime config copies user and forwarded env maps", () => {
   assert.notEqual(normalized.userEnv, userEnv);
 });
 
+test("hosted runtime config rejects platform-owned assistant asset-root env overrides from every producer", () => {
+  const platform = createHostedRuntimePlatformStub();
+  const normalized = normalizeHostedAssistantRuntimeConfig(
+    {
+      forwardedEnv: {
+        MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH: "/tmp/attacker-contract.json",
+        MURPH_ASSISTANT_SKILLS_ROOT: "/tmp/attacker-skills",
+        OPENAI_API_KEY: "secret",
+      },
+      resolvedConfig: createHostedRuntimeResolvedConfig(),
+      userEnv: {
+        ANTHROPIC_API_KEY: "anthropic-secret",
+        MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH: "/tmp/attacker-contract.json",
+        MURPH_ASSISTANT_SKILLS_ROOT: "/tmp/attacker-skills",
+      },
+    },
+    platform,
+  );
+
+  // The runtime boundary guards code-location-sensitive asset roots for all
+  // job producers, not only the Cloudflare runner-secret policy.
+  assert.deepEqual(normalized.forwardedEnv, { OPENAI_API_KEY: "secret" });
+  assert.deepEqual(normalized.userEnv, { ANTHROPIC_API_KEY: "anthropic-secret" });
+});
+
 test("hosted runtime config rejects parserToolchain:null", () => {
   assert.throws(
     () =>

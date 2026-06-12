@@ -34,8 +34,13 @@ const assistantCliSurfaceBootstrapAllOptionsCommandNames = new Set([
 ])
 export const assistantCliSurfacePrebuiltArtifactFileName =
   'cli-surface-contract.generated.json'
-const assistantCliSurfacePrebuiltArtifactPathEnv =
+// Exported so env-boundary owners (hosted runtime sanitizers, Cloudflare
+// runner-secret policy) can deny member overrides of this platform-owned
+// asset path from one definition.
+export const MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV =
   'MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH'
+const assistantCliSurfacePrebuiltArtifactPathEnv =
+  MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV
 const assistantCliSurfaceBootstrapIgnoredOptionNames = new Set([
   'requestId',
   'vault',

@@ -10,6 +10,7 @@ export * from './assistant-automation.js'
 export * from './assistant-codex.js'
 export * from './assistant-context-snapshot.js'
 export {
+  MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
   readAssistantCliSurfaceBootstrapContext,
 } from './assistant/cli-surface-bootstrap.js'
 export * from './assistant/device-activity-automations.js'

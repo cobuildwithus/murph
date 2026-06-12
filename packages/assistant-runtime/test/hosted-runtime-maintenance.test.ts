@@ -41,6 +41,8 @@ vi.mock("../src/device-sync-service.ts", () => ({
 
 vi.mock("@murphai/assistant-engine", () => ({
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT: 50,
+  MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV:
+    "MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH",
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_SCHEMA:
     "murph.assistant-context-diagnostics.v1",
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_TYPE: "assistant.context.diagnostics",

@@ -1,4 +1,10 @@
 import {
+  MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
+} from "@murphai/assistant-engine";
+import {
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+} from "@murphai/assistant-engine/assistant-skill-assets";
+import {
   HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
   HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
 } from "@murphai/assistant-runtime/hosted-assistant-env-constants";
@@ -109,9 +115,11 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   "HOSTED_WEB_BASE_URL",
   // Image-pinned assistant-engine asset roots (Dockerfile ENV). Runner
   // secrets must not redirect the assistant skills root or the prebuilt CLI
-  // surface contract to member-controlled content.
-  "MURPH_ASSISTANT_SKILLS_ROOT",
-  "MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH",
+  // surface contract to member-controlled content. The same names are also
+  // denied at the runtime config boundary (assistant-runtime environment
+  // sanitizers), so non-Cloudflare job producers share the guard.
+  MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
