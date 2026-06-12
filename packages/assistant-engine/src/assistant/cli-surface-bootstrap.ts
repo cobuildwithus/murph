@@ -34,7 +34,7 @@ const assistantCliSurfaceBootstrapAllOptionsCommandNames = new Set([
 ])
 export const assistantCliSurfacePrebuiltArtifactFileName =
   'cli-surface-contract.generated.json'
-import { MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV } from '../assistant-skill-assets.js'
+import { MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV } from '../assistant-skill-env.js'
 const assistantCliSurfacePrebuiltArtifactPathEnv =
   MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV
 const assistantCliSurfaceBootstrapIgnoredOptionNames = new Set([

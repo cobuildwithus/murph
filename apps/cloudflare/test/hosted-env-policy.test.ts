@@ -115,9 +115,10 @@ describe("buildHostedRunnerContainerEnv", () => {
   it("keeps the worker-side asset-root literals aligned with the engine-owned env names", async () => {
     // hosted-env-policy.ts is part of the workerd bundle and must not import
     // @murphai/assistant-engine (Node-only module graph), so it pins the two
-    // deny-listed names as literals. This node-side test is the drift guard.
+    // deny-listed names as literals. This node-side test imports only the
+    // zero-dependency env-name contract.
     const { MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV, MURPH_ASSISTANT_SKILLS_ROOT_ENV } =
-      await import("@murphai/assistant-engine/assistant-skill-assets");
+      await import("@murphai/assistant-engine/assistant-skill-env");
     expect(MURPH_ASSISTANT_SKILLS_ROOT_ENV).toBe("MURPH_ASSISTANT_SKILLS_ROOT");
     expect(MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV).toBe(
       "MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH",

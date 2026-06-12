@@ -1,15 +1,13 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const MURPH_ASSISTANT_SKILLS_ROOT_ENV =
-  'MURPH_ASSISTANT_SKILLS_ROOT' as const
-
-// Engine-owned env name for the prebuilt CLI surface contract path override
-// (canonical definition; cli-surface-bootstrap re-uses it). Lives here with
-// the other asset-root constants so env-boundary owners can import it without
-// touching the engine root module graph (workerd-safe).
-export const MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV =
-  'MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH' as const
+import {
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+} from './assistant-skill-env.js'
+export {
+  MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+} from './assistant-skill-env.js'
 
 export const MURPH_ASSISTANT_SKILLS_ROOT_REF =
   `$${MURPH_ASSISTANT_SKILLS_ROOT_ENV}` as const

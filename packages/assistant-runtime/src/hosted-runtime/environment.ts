@@ -5,7 +5,7 @@ import type {
 import {
   MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
-} from "@murphai/assistant-engine/assistant-skill-assets";
+} from "@murphai/assistant-engine/assistant-skill-env";
 import {
   HOSTED_CLI_BRIDGE_ENV_NAMES,
   HOSTED_CLI_LOCAL_DAEMON_ENV_DENYLIST,

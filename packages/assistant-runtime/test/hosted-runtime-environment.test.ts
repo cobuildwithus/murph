@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -124,6 +124,27 @@ test("hosted runtime config rejects platform-owned assistant asset-root env over
   // job producers, not only the Cloudflare runner-secret policy.
   assert.deepEqual(normalized.forwardedEnv, { OPENAI_API_KEY: "secret" });
   assert.deepEqual(normalized.userEnv, { ANTHROPIC_API_KEY: "anthropic-secret" });
+});
+
+test("hosted runtime env policy imports only the zero-dependency assistant skill env contract", async () => {
+  const policyModules = [
+    "../src/hosted-runtime/environment.ts",
+    "../src/hosted-runtime/codex-shell-env-policy.ts",
+  ];
+
+  for (const policyModule of policyModules) {
+    const source = await readFile(new URL(policyModule, import.meta.url), "utf8");
+    assert.match(
+      source,
+      /@murphai\/assistant-engine\/assistant-skill-env/u,
+      `${policyModule} should import the worker-safe skill env-name contract`,
+    );
+    assert.doesNotMatch(
+      source,
+      /@murphai\/assistant-engine\/assistant-skill-assets/u,
+      `${policyModule} must not import the Node/process-bearing skill asset module`,
+    );
+  }
 });
 
 test("hosted runtime config rejects parserToolchain:null", () => {
