@@ -4655,22 +4655,28 @@ test("wearable summary metric points suppress same-day raw observation duplicate
       to: "2026-04-03",
     });
 
-    assert.equal(hrv.length, 1);
-    assert.equal(hrv[0]?.value, 52);
-    assert.equal(hrv[0]?.source.family, "derived");
-    assert.notEqual(hrv[0]?.source.kind, "observation");
+    // Both summary kinds resolve HRV for the night (sleep and recovery),
+    // and BOTH points must remain: summary points never filter each other —
+    // the metric selector's sourcePriority chooses between them at
+    // selection time. Only the raw observation is suppressed.
+    assert.equal(hrv.length, 2);
+    assert.deepEqual(
+      hrv.map((point) => point.source.kind).sort(),
+      ["sleep-summary", "wearable-summary"],
+    );
+    assert.ok(hrv.every((point) => point.value === 52 && point.source.family === "derived"));
 
     // Key-namespace trap: the raw observation carries metric "hrv" while the
     // summary evidence emits "hrv-rmssd". Precedence only works if both land
     // on the same resolved key, so the alias must not escape into a parallel
-    // "hrv"-keyed point, and querying by the alias must hit the same point.
+    // "hrv"-keyed point, and querying by the alias must hit the same points.
     const allDayPoints = await listMetricPointsRuntime(vaultRoot, {
       from: "2026-04-03",
       limit: null,
       to: "2026-04-03",
     });
     assert.equal(allDayPoints.filter((point) => point.metricKey === "hrv").length, 0);
-    assert.equal(allDayPoints.filter((point) => point.metricKey === "hrv-rmssd").length, 1);
+    assert.equal(allDayPoints.filter((point) => point.metricKey === "hrv-rmssd").length, 2);
 
     const hrvByAlias = await listMetricPointsRuntime(vaultRoot, {
       from: "2026-04-03",

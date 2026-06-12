@@ -124,7 +124,11 @@ const SUMMARY_METRIC_EVIDENCE_ENTRIES = [
   ...BODY_STATE_METRIC_EVIDENCE,
 ];
 
-const WEARABLE_SUMMARY_METRIC_PRIORITIES = buildWearableSummaryMetricPriorities();
+const WEARABLE_SUMMARY_METRIC_SOURCE_KEYS = new Set(
+  SUMMARY_METRIC_EVIDENCE_ENTRIES.map(
+    (entry) => `${resolveMetricInputKey(entry.metricKey)}\0${entry.sourceKind}`,
+  ),
+);
 
 export function listWearableSummaryMetricEvidenceKeys(): string[] {
   return uniqueStrings(
@@ -147,80 +151,54 @@ function summaryMetricEvidence<TField extends string>(
   );
 }
 
+// Precedence suppresses RAW OBSERVATION points only. Summary points are
+// never filtered against each other: when two summary kinds emit the same
+// key for a day (sleep and recovery both resolve hrv-rmssd), both points
+// stay, and the metric selector's established sourcePriority chooses
+// between them at selection time — table order here must never decide
+// data retention.
 function applyWearableSummaryMetricPrecedence(points: readonly MetricPoint[]): MetricPoint[] {
-  const summaryResolvedByDay = new Map<string, MetricPoint>();
+  const contributingByDay = new Map<string, Set<string>>();
 
   for (const point of points) {
-    if (isWearableSummaryMetricPoint(point)) {
-      const dayKey = metricPointDayKey(point);
-      const current = summaryResolvedByDay.get(dayKey);
-      if (!current || compareWearableSummaryMetricPriority(point, current) < 0) {
-        summaryResolvedByDay.set(dayKey, point);
+    if (!isWearableSummaryMetricPoint(point)) {
+      continue;
+    }
+    const contributingRecordIds = point.context.contributingRecordIds;
+    if (!Array.isArray(contributingRecordIds)) {
+      continue;
+    }
+    const dayKey = metricPointDayKey(point);
+    const recordIds = contributingByDay.get(dayKey) ?? new Set<string>();
+    for (const recordId of contributingRecordIds) {
+      if (typeof recordId === "string") {
+        recordIds.add(recordId);
       }
     }
+    contributingByDay.set(dayKey, recordIds);
   }
 
   return points.filter((point) => {
-    const summaryPoint = summaryResolvedByDay.get(metricPointDayKey(point));
-    if (!summaryPoint) {
-      return true;
-    }
-
-    if (isWearableSummaryMetricPoint(point)) {
-      return point.id === summaryPoint.id;
-    }
-
     if (point.source.family !== "event" || point.source.kind !== "observation") {
       return true;
     }
 
-    return !metricPointContributedToSummary(point, summaryPoint);
+    // Suppression is by contribution: every record the resolver considered
+    // (winning AND losing candidates, across all summary kinds for the
+    // day) resolves into a summary point, while manual/independent entries
+    // — never candidates — survive as provenance-distinct facts (hiding
+    // them would violate the capture posture).
+    return !contributingByDay.get(metricPointDayKey(point))?.has(point.source.recordId);
   });
 }
 
 function isWearableSummaryMetricPoint(point: MetricPoint): boolean {
   return point.source.family === "derived"
-    && WEARABLE_SUMMARY_METRIC_PRIORITIES.has(summaryMetricPriorityKey(point));
-}
-
-// Suppression is by contribution: every record the resolver considered
-// (winning AND losing candidates) is suppressed in favor of the resolved
-// summary point, while manual/independent same-day entries — never
-// candidates — survive as provenance-distinct facts (hiding them would
-// violate the capture posture).
-function metricPointContributedToSummary(point: MetricPoint, summaryPoint: MetricPoint): boolean {
-  const contributingRecordIds = summaryPoint.context.contributingRecordIds;
-  return Array.isArray(contributingRecordIds) && contributingRecordIds.includes(point.source.recordId);
+    && WEARABLE_SUMMARY_METRIC_SOURCE_KEYS.has(`${point.metricKey}\0${point.source.kind}`);
 }
 
 function metricPointDayKey(point: MetricPoint): string {
   return `${point.metricKey}\0${point.effectiveDate}`;
-}
-
-function compareWearableSummaryMetricPriority(left: MetricPoint, right: MetricPoint): number {
-  const leftPriority = WEARABLE_SUMMARY_METRIC_PRIORITIES.get(summaryMetricPriorityKey(left)) ?? Number.MAX_SAFE_INTEGER;
-  const rightPriority = WEARABLE_SUMMARY_METRIC_PRIORITIES.get(summaryMetricPriorityKey(right)) ?? Number.MAX_SAFE_INTEGER;
-  if (leftPriority !== rightPriority) {
-    return leftPriority - rightPriority;
-  }
-  return left.id.localeCompare(right.id);
-}
-
-function summaryMetricPriorityKey(point: MetricPoint): string {
-  return `${point.metricKey}\0${point.source.kind}`;
-}
-
-function buildWearableSummaryMetricPriorities(): Map<string, number> {
-  const priorities = new Map<string, number>();
-
-  for (const entry of SUMMARY_METRIC_EVIDENCE_ENTRIES) {
-    const key = `${resolveMetricInputKey(entry.metricKey)}\0${entry.sourceKind}`;
-    if (!priorities.has(key)) {
-      priorities.set(key, priorities.size);
-    }
-  }
-
-  return priorities;
 }
 
 function metricEvidence(
