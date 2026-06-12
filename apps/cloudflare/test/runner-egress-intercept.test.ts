@@ -4711,8 +4711,8 @@ describe("maybeHandleHostedTranscribeRequest", () => {
   });
 
   it("bounds the transcribe request body and surfaces Workers AI failures as 502", async () => {
-    // Failed transcriptions must never meter usage, so any usage POST attempt
-    // would show up on this stub.
+    // Rejected requests and thrown ai.run calls never complete a billed run,
+    // so any usage POST attempt would show up on this stub.
     const fetchMock = vi.fn<typeof fetch>(async () =>
       Response.json({ recorded: true, usageId: "usage_1" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -4840,7 +4840,9 @@ describe("maybeHandleHostedTranscribeRequest", () => {
   });
 
   it("rejects empty transcribe bodies and surfaces transcript-less Workers AI output as 502", async () => {
-    // Transcript-less Workers AI output must never meter usage either.
+    // Workers AI bills every completed run, so transcript-less output must
+    // still meter usage even though the transcript response is a 502. Only
+    // requests rejected before ai.run record nothing.
     const fetchMock = vi.fn<typeof fetch>(async () =>
       Response.json({ recorded: true, usageId: "usage_1" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -4862,8 +4864,16 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     expect(await emptyBody.text()).toBe(
       "Hosted transcription request body must include audio bytes.",
     );
+    await Promise.all(waitUntilPromises);
+    expect(fetchMock).not.toHaveBeenCalled();
 
-    for (const output of [{}, { text: "   " }, "transcript", null]) {
+    const outputs: unknown[] = [
+      {},
+      { text: "   ", transcription_info: { duration: 2.94 } },
+      "transcript",
+      null,
+    ];
+    for (const output of outputs) {
       const response = await hostedRunnerIntercept(
         new Request(TRANSCRIBE_URL, {
           body: "wav-bytes",
@@ -4882,7 +4892,17 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     }
 
     await Promise.all(waitUntilPromises);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(outputs.length);
+    const recordedUsages = fetchMock.mock.calls.map(([, init]) =>
+      (JSON.parse(String(init?.body)) as { usage: Record<string, unknown> }).usage);
+    // The silent clip carried transcription_info, so its row keeps the billed
+    // duration; the rest record byte count only.
+    expect(recordedUsages.map((usage) => usage.rawUsageJson)).toEqual([
+      { audioBytes: 9 },
+      { audioBytes: 9, durationMs: 2_940 },
+      { audioBytes: 9 },
+      { audioBytes: 9 },
+    ]);
   });
 });
 

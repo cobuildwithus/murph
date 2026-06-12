@@ -830,37 +830,11 @@ async function maybeHandleHostedTranscribeRequest(input: {
   }
 
   const upstreamStartedAt = Date.now();
+  let output: unknown;
   try {
-    const output = await ai.run(HOSTED_TRANSCRIBE_WORKERS_AI_MODEL, {
+    output = await ai.run(HOSTED_TRANSCRIBE_WORKERS_AI_MODEL, {
       audio: Buffer.from(audio).toString("base64"),
     });
-    const payload = readHostedTranscribeResponsePayload(output);
-    const usageRecording = recordHostedTranscribeUsage({
-      audioBytes: audio.byteLength,
-      durationMs: payload.durationMs,
-      env: input.env,
-      memberId: authorization.userId,
-    });
-    // Production containers proxy through a ctx without waitUntil, where a
-    // floating promise may be canceled with the invocation; await the
-    // failure-isolated recording there (same shape as the OpenAI cache
-    // diagnostic above).
-    if (typeof input.ctx?.waitUntil === "function") {
-      input.ctx.waitUntil(usageRecording);
-    } else {
-      await usageRecording;
-    }
-    const response = Response.json(payload);
-    emitHostedProviderEgressDiagnostic({
-      authorization,
-      providerKind: "workers_ai_transcribe",
-      request: input.request,
-      response,
-      startedAt,
-      upstreamDurationMs: Date.now() - upstreamStartedAt,
-      url: input.url,
-    });
-    return response;
   } catch (error) {
     emitHostedProviderEgressDiagnostic({
       authorization,
@@ -873,6 +847,52 @@ async function maybeHandleHostedTranscribeRequest(input: {
     });
     return new Response("Hosted transcription failed.", { status: 502 });
   }
+
+  // Workers AI bills the audio minutes for every completed run, so meter
+  // before transcript validation: empty or malformed transcripts still cost
+  // money, and a 502 below must not drop the usage row.
+  const usageRecording = recordHostedTranscribeUsage({
+    audioBytes: audio.byteLength,
+    durationMs: readHostedTranscribeOutputDurationMs(output),
+    env: input.env,
+    memberId: authorization.userId,
+  });
+
+  let response: Response;
+  try {
+    response = Response.json(readHostedTranscribeResponsePayload(output));
+    emitHostedProviderEgressDiagnostic({
+      authorization,
+      providerKind: "workers_ai_transcribe",
+      request: input.request,
+      response,
+      startedAt,
+      upstreamDurationMs: Date.now() - upstreamStartedAt,
+      url: input.url,
+    });
+  } catch (error) {
+    emitHostedProviderEgressDiagnostic({
+      authorization,
+      error,
+      providerKind: "workers_ai_transcribe",
+      request: input.request,
+      startedAt,
+      upstreamDurationMs: Date.now() - upstreamStartedAt,
+      url: input.url,
+    });
+    response = new Response("Hosted transcription failed.", { status: 502 });
+  }
+
+  // Production containers proxy through a ctx without waitUntil, where a
+  // floating promise may be canceled with the invocation; await the
+  // failure-isolated recording there (same shape as the OpenAI cache
+  // diagnostic above).
+  if (typeof input.ctx?.waitUntil === "function") {
+    input.ctx.waitUntil(usageRecording);
+  } else {
+    await usageRecording;
+  }
+  return response;
 }
 
 // Failure-isolated hosted_ai_usage recording for the Workers AI transcription
@@ -950,14 +970,7 @@ function readHostedTranscribeResponsePayload(
     throw new TypeError("Workers AI transcription output did not include transcript text.");
   }
 
-  const transcriptionInfo =
-    record.transcription_info && typeof record.transcription_info === "object"
-      && !Array.isArray(record.transcription_info)
-      ? record.transcription_info as Record<string, unknown>
-      : null;
-  const durationSeconds = readHostedTranscribeNonNegativeNumber(
-    transcriptionInfo?.duration,
-  );
+  const transcriptionInfo = readHostedTranscribeTranscriptionInfo(output);
   const language = typeof transcriptionInfo?.language === "string"
       && transcriptionInfo.language.trim().length > 0
     ? transcriptionInfo.language.trim()
@@ -987,11 +1000,34 @@ function readHostedTranscribeResponsePayload(
     : [];
 
   return {
-    durationMs: durationSeconds === null ? null : Math.round(durationSeconds * 1_000),
+    durationMs: readHostedTranscribeOutputDurationMs(output),
     language,
     segments,
     text,
   };
+}
+
+// Reads the billed audio duration from any Workers AI transcription output,
+// independent of transcript validation: usage metering needs it even when the
+// transcript comes back empty or malformed.
+function readHostedTranscribeOutputDurationMs(output: unknown): number | null {
+  const durationSeconds = readHostedTranscribeNonNegativeNumber(
+    readHostedTranscribeTranscriptionInfo(output)?.duration,
+  );
+  return durationSeconds === null ? null : Math.round(durationSeconds * 1_000);
+}
+
+function readHostedTranscribeTranscriptionInfo(
+  output: unknown,
+): Record<string, unknown> | null {
+  if (!output || typeof output !== "object" || Array.isArray(output)) {
+    return null;
+  }
+  const transcriptionInfo = (output as Record<string, unknown>).transcription_info;
+  return transcriptionInfo && typeof transcriptionInfo === "object"
+      && !Array.isArray(transcriptionInfo)
+    ? transcriptionInfo as Record<string, unknown>
+    : null;
 }
 
 function readHostedTranscribeNonNegativeNumber(value: unknown): number | null {
