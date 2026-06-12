@@ -29,8 +29,11 @@ import {
   parseJsonValue,
 } from "./schema.ts";
 import { projectPublicWearableSummaryBundle } from "./wearable-summary-public-json.ts";
+import {
+  parseStoredWearableSummary,
+  type StoredWearableMetricSummaryKind,
+} from "./wearable-summary-stored-codec.ts";
 import type {
-  QueryWearableSummaryKind,
   QueryWearableSummaryRow,
   QueryWearableSummaryRowSet,
 } from "./wearable-summary-store.ts";
@@ -86,22 +89,22 @@ function publicWearableSummaryBundleFromRows(
 
         switch (row.summaryKind) {
           case "activity": {
-            const summary = parseJsonValue<ProjectedWearableActivitySummary | null>(row.summaryJson, null);
+            const summary = parseStoredWearableSummary<ProjectedWearableActivitySummary>(row.summaryKind, row.summaryJson);
             if (summary) bundle.activityDays.push(summary);
             break;
           }
           case "body_state": {
-            const summary = parseJsonValue<ProjectedWearableBodyStateSummary | null>(row.summaryJson, null);
+            const summary = parseStoredWearableSummary<ProjectedWearableBodyStateSummary>(row.summaryKind, row.summaryJson);
             if (summary) bundle.bodyStateDays.push(summary);
             break;
           }
           case "recovery": {
-            const summary = parseJsonValue<ProjectedWearableRecoverySummary | null>(row.summaryJson, null);
+            const summary = parseStoredWearableSummary<ProjectedWearableRecoverySummary>(row.summaryKind, row.summaryJson);
             if (summary) bundle.recoveryDays.push(summary);
             break;
           }
           case "sleep": {
-            const summary = parseJsonValue<ProjectedWearableSleepSummary | null>(row.summaryJson, null);
+            const summary = parseStoredWearableSummary<ProjectedWearableSleepSummary>(row.summaryKind, row.summaryJson);
             if (summary) bundle.sleepNights.push(summary);
             break;
           }
@@ -298,7 +301,7 @@ function wearableDatasetFromProjectedBundle(bundle: ProjectedWearableSummaryBund
 
 function projectedMetricCandidatesFromResolvedMetrics(
   date: string,
-  summaryKind: Exclude<QueryWearableSummaryKind, "source_health">,
+  summaryKind: StoredWearableMetricSummaryKind,
   metrics: readonly WearableResolvedMetric[],
 ): WearableMetricCandidate[] {
   return metrics
@@ -308,7 +311,7 @@ function projectedMetricCandidatesFromResolvedMetrics(
 
 function projectedMetricCandidateFromResolvedMetric(
   date: string,
-  summaryKind: Exclude<QueryWearableSummaryKind, "source_health">,
+  summaryKind: StoredWearableMetricSummaryKind,
   resolved: WearableResolvedMetric,
 ): WearableMetricCandidate | null {
   const selection = resolved.selection;

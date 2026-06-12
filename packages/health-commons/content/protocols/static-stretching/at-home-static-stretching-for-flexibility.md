@@ -663,6 +663,7 @@ expectedSignalDescriptions:
   expectedDirection: down
   protocolProminence: focus
   description: Posterior-chain holds repeatedly load the forward-bend end range, raising stretch tolerance and reducing resistance so fingertips reach closer to the floor.
+  displayValue: "2-6 cm closer to the floor"
   estimatedChange:
     kind: absolute
     low: -6

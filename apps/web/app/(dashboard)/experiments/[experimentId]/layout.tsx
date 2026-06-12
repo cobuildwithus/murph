@@ -50,7 +50,6 @@ export default async function ExperimentDetailLayout({
             activeRunProtocol={resultsPublic}
             protocolDays={protocolDays}
             protocolTitle={shell.title}
-            resultsHref={`/experiments/${shell.id}#results`}
           />
         </Suspense>
       }

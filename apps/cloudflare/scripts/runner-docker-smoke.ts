@@ -115,7 +115,7 @@ async function runDockerCommand(args: string[], stdinText: string): Promise<stri
       if (code !== 0) {
         reject(
           new Error(
-            `docker runner smoke exited with code ${code ?? "unknown"}. stdoutBytes=${Buffer.byteLength(stdout, "utf8")} stderrBytes=${Buffer.byteLength(stderr, "utf8")}`,
+            `docker runner smoke exited with code ${code ?? "unknown"}. stdoutBytes=${Buffer.byteLength(stdout, "utf8")} stderrBytes=${Buffer.byteLength(stderr, "utf8")} stderrPreview=${JSON.stringify(stderr.slice(0, 2048))}`,
           ),
         );
         return;

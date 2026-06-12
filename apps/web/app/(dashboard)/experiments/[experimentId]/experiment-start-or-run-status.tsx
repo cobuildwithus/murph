@@ -1,51 +1,43 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
-import Link from "next/link";
-import { ArrowRightIcon } from "lucide-react";
 
+import { Skeleton } from "@/src/components/ui/skeleton";
 import {
   BrowserVaultProvider,
   useBrowserVault,
 } from "@/src/lib/browser-vault/context";
 import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
 import type { ExperimentResultsPublicProjection } from "@/src/lib/health-commons/experiment-projections";
+import { cn } from "@/src/lib/utils";
 
-interface ExperimentStartOrResultsButtonProps {
+interface ExperimentStartOrRunStatusProps {
   activeRunProtocol: ExperimentResultsPublicProjection;
   protocolDays: number;
-  protocolTitle: string;
-  resultsHref: string;
   startAction: ReactNode;
 }
 
-export function ExperimentStartOrResultsButton({
+export function ExperimentStartOrRunStatus({
   activeRunProtocol,
   protocolDays,
-  protocolTitle,
-  resultsHref,
   startAction,
-}: ExperimentStartOrResultsButtonProps) {
+}: ExperimentStartOrRunStatusProps) {
   return (
     <BrowserVaultProvider>
-      <ExperimentStartOrResultsButtonInner
+      <ExperimentStartOrRunStatusInner
         activeRunProtocol={activeRunProtocol}
         protocolDays={protocolDays}
-        protocolTitle={protocolTitle}
-        resultsHref={resultsHref}
         startAction={startAction}
       />
     </BrowserVaultProvider>
   );
 }
 
-function ExperimentStartOrResultsButtonInner({
+function ExperimentStartOrRunStatusInner({
   activeRunProtocol,
   protocolDays,
-  protocolTitle,
-  resultsHref,
   startAction,
-}: ExperimentStartOrResultsButtonProps) {
+}: ExperimentStartOrRunStatusProps) {
   const browserVault = useBrowserVault();
   const privateRun = useMemo(
     () =>
@@ -59,18 +51,11 @@ function ExperimentStartOrResultsButtonInner({
     privateRun?.status === "active" || privateRun?.status === "paused";
 
   if (browserVault.status === "loading") {
+    // Neutral placeholder: the slot resolves into either the start button or
+    // the quiet status chip, so the loading state must pre-announce neither.
     return (
       <ExperimentHeaderActionFrame protocolDays={protocolDays}>
-        <button
-          type="button"
-          className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl border border-transparent bg-primary px-6 py-4 text-base font-semibold whitespace-nowrap text-primary-foreground opacity-70 outline-none select-none md:px-12"
-          disabled
-          aria-busy="true"
-          aria-label={`Checking run status for ${protocolTitle}`}
-        >
-          <span>Checking Run</span>
-          <ArrowRightIcon data-icon="inline-end" className="size-4 shrink-0" />
-        </button>
+        <Skeleton className="h-11 w-44 rounded-2xl" />
       </ExperimentHeaderActionFrame>
     );
   }
@@ -79,16 +64,26 @@ function ExperimentStartOrResultsButtonInner({
     return startAction;
   }
 
+  // The run's results already render on the experiment page itself, so the
+  // header shows a quiet status chip instead of a CTA pointing at the same page.
+  const isPaused = privateRun.status === "paused";
+
   return (
     <ExperimentHeaderActionFrame protocolDays={protocolDays}>
-      <Link
-        href={resultsHref}
-        className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl border border-transparent bg-primary px-6 py-4 text-base font-semibold whitespace-nowrap text-primary-foreground outline-none transition-colors hover:bg-chart-1 focus-visible:ring-[3px] focus-visible:ring-ring/50 md:px-12"
-        aria-label={`View results for ${protocolTitle}`}
+      <div
+        role="status"
+        className="inline-flex h-11 shrink-0 items-center justify-center gap-2 whitespace-nowrap px-6 md:px-12"
       >
-        <span>View Results</span>
-        <ArrowRightIcon data-icon="inline-end" className="size-4 shrink-0" />
-      </Link>
+        <span
+          className={cn(
+            "size-1.5 shrink-0 rounded-full",
+            isPaused ? "bg-muted-foreground" : "bg-primary",
+          )}
+        />
+        <span className="font-mono text-[11px] uppercase tracking-[0.11em] text-foreground/60">
+          {isPaused ? "Experiment paused" : "Experiment in progress"}
+        </span>
+      </div>
     </ExperimentHeaderActionFrame>
   );
 }

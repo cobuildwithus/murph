@@ -105,7 +105,7 @@ function getSignalEstimate(signal: ExperimentSignal): SignalEstimate {
     return {
       ...SIGNAL_ESTIMATE_FALLBACK,
       range,
-      point: range.toLowerCase(),
+      point: lowercaseFirst(range),
       window: estimate.window ?? SIGNAL_ESTIMATE_FALLBACK.window,
       evidence: formatEstimateConfidence(estimate.confidence),
     };
@@ -114,7 +114,7 @@ function getSignalEstimate(signal: ExperimentSignal): SignalEstimate {
     const range = signal.displayValue ?? formatEstimatedChangeRange(estimate);
     return {
       range,
-      point: signal.displayValue ? range.toLowerCase() : range,
+      point: signal.displayValue ? lowercaseFirst(range) : range,
       window: estimate.window ?? SIGNAL_ESTIMATE_FALLBACK.window,
       baseline: "Baseline",
       projected: range,
@@ -126,8 +126,12 @@ function getSignalEstimate(signal: ExperimentSignal): SignalEstimate {
   return {
     ...SIGNAL_ESTIMATE_FALLBACK,
     range: signal.displayValue ?? signal.expected,
-    point: (signal.displayValue ?? signal.expected).toLowerCase(),
+    point: lowercaseFirst(signal.displayValue ?? signal.expected),
   };
+}
+
+function lowercaseFirst(value: string): string {
+  return value.charAt(0).toLowerCase() + value.slice(1);
 }
 
 function formatEstimateConfidence(
