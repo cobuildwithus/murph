@@ -1,5 +1,3 @@
-import { after } from "next/server";
-
 import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
@@ -27,10 +25,13 @@ export type HostedWebhookWakeHandoffResult =
     workflowId: string;
   };
 
+type HostedWebhookPostResponseScheduler = (task: () => Promise<void>) => void;
+
 export async function maybeHandoffHostedExecutionWebhookWake(input: {
   eventId: string;
   mailboxItemId?: string;
   response: HostedWebhookServiceResponse;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
   source: "linq" | "telegram" | "whatsapp";
   userId?: string;
 }): Promise<HostedWebhookWakeHandoffResult | null> {
@@ -60,6 +61,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   } catch (error) {
     scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
       mailboxItemId,
+      scheduleAfterResponse: input.scheduleAfterResponse,
       source: input.source,
       temporalSignalAcceptedAt,
       userId: input.userId ?? null,
@@ -73,6 +75,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
 
   scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
     mailboxItemId,
+    scheduleAfterResponse: input.scheduleAfterResponse,
     source: input.source,
     temporalSignalAcceptedAt,
     userId: input.userId ?? null,
@@ -91,6 +94,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
 
 function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
   mailboxItemId: string;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
   source: "linq" | "telegram" | "whatsapp";
   temporalSignalAcceptedAt: Date | null;
   userId: string | null;
@@ -99,7 +103,7 @@ function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
     return;
   }
   const task = async () => {
-    await recordHostedWebhookIngressLatencyAcceptedBestEffort({
+    const acceptedWrite = recordHostedWebhookIngressLatencyAcceptedBestEffort({
       mailboxItemId: input.mailboxItemId,
     });
     if (input.temporalSignalAcceptedAt) {
@@ -108,11 +112,18 @@ function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
         mailboxItemId: input.mailboxItemId,
         userId: input.userId,
       });
+      void acceptedWrite;
+      return;
     }
+    await acceptedWrite;
   };
 
   try {
-    after(task);
+    if (input.scheduleAfterResponse) {
+      input.scheduleAfterResponse(task);
+    } else {
+      void task();
+    }
   } catch {
     void task();
   }
