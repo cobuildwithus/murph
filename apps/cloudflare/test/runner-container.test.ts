@@ -69,6 +69,12 @@ describe("RunnerContainer", () => {
     expect(DeploySmokeRunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
   });
 
+  it("keeps deploy-smoke live-model egress grants off the production runner container", () => {
+    const { container } = createContainerDouble();
+
+    expect("readDeploySmokeLiveModelTurnFence" in container).toBe(false);
+  });
+
   it("does not pass Worker fingerprint secrets to the container startup env", () => {
     const { container } = createContainerDouble({
       env: {
@@ -1208,8 +1214,8 @@ describe("RunnerContainer", () => {
   it("can extend deploy smoke to run a live model turn probe behind the egress fence", async () => {
     let fenceActiveDuringTurn: boolean | null = null;
     let secondFenceReadDuringTurn: { active: boolean; model?: string } | null = null;
-    let containerRef: RunnerContainer | null = null;
-    const { container, containerFetch } = createContainerDouble({
+    let containerRef: DeploySmokeRunnerContainer | null = null;
+    const { container, containerFetch } = createDeploySmokeContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
           return new Response(JSON.stringify({
@@ -1298,7 +1304,7 @@ describe("RunnerContainer", () => {
   });
 
   it("fails a live model turn smoke that does not consume the egress fence", async () => {
-    const { container } = createContainerDouble({
+    const { container } = createDeploySmokeContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
           return new Response(JSON.stringify({
@@ -1364,7 +1370,7 @@ describe("RunnerContainer", () => {
   });
 
   it("checks the expected runner bundle before opening the live model turn smoke fence", async () => {
-    const { container, containerFetch } = createContainerDouble({
+    const { container, containerFetch } = createDeploySmokeContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
           return new Response(JSON.stringify({
@@ -1440,7 +1446,7 @@ describe("RunnerContainer", () => {
   });
 
   it("forwards content-free live model turn smoke diagnostics from the container", async () => {
-    const { container, destroy } = createContainerDouble({
+    const { container, destroy } = createDeploySmokeContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
           return new Response(JSON.stringify({
@@ -1506,7 +1512,7 @@ describe("RunnerContainer", () => {
   });
 
   it("fails the live model turn smoke before contacting the container when OPENAI_API_KEY is missing", async () => {
-    const { container, containerFetch } = createContainerDouble();
+    const { container, containerFetch } = createDeploySmokeContainerDouble();
 
     const error = await container.smokeHealth({
       liveModelTurn: {
@@ -5053,7 +5059,8 @@ describe("RunnerContainer", () => {
   });
 });
 
-function createContainerDouble(input: {
+interface CreateContainerDoubleInput {
+  containerClass?: typeof RunnerContainer;
   containerFetch?: ReturnType<typeof vi.fn>;
   destroy?: ReturnType<typeof vi.fn>;
   env?: Record<string, unknown>;
@@ -5061,9 +5068,12 @@ function createContainerDouble(input: {
   initialStatus?: "running" | "stopped" | "stopped_with_code";
   startAndWaitForPorts?: ReturnType<typeof vi.fn>;
   state?: Record<string, unknown>;
-  } = {}) {
+}
+
+function createContainerDouble(input: CreateContainerDoubleInput = {}) {
   let currentStatus = input.initialStatus ?? "stopped";
-  const container = new RunnerContainer({
+  const ContainerClass = input.containerClass ?? RunnerContainer;
+  const container = new ContainerClass({
     storage: createContainerStorageDouble(),
     ...(input.state ?? {}),
   } as never, {
@@ -5122,6 +5132,19 @@ function createContainerDouble(input: {
     destroy,
     getState,
     startAndWaitForPorts,
+  };
+}
+
+function createDeploySmokeContainerDouble(
+  input: Omit<CreateContainerDoubleInput, "containerClass"> = {},
+) {
+  const result = createContainerDouble({
+    ...input,
+    containerClass: DeploySmokeRunnerContainer,
+  });
+  return {
+    ...result,
+    container: result.container as DeploySmokeRunnerContainer,
   };
 }
 

@@ -341,7 +341,7 @@ export class RunnerContainer extends Container {
   pingEndpoint = RUNNER_PING_ENDPOINT;
   sleepAfter = formatRunnerSleepAfter(readRunnerContainerIdleTtlMs({}));
 
-  private readonly environment: RunnerContainerEnvironmentSource;
+  protected readonly environment: RunnerContainerEnvironmentSource;
   private lifecycleLock: Promise<void> = Promise.resolve();
   private lifecycleLockPendingCount = 0;
   private containerStartedAtMs: number | null = null;
@@ -349,11 +349,6 @@ export class RunnerContainer extends Container {
   private currentLogContext: RunnerContainerLogContext | null = null;
   private lastActivityExpiryAtMs: number | null = null;
   private lastActivityObservedAtMs: number | null = null;
-  private liveModelTurnSmokeFence: {
-    expiresAtMs: number;
-    model: string;
-    remainingRequests: number;
-  } | null = null;
   private lastActivityObservedStage: string | null = null;
   private lastDestroyRequest: RunnerContainerDestroyRequestRecord | null = null;
   private recentReadinessProof: RunnerContainerReadinessProof | null = null;
@@ -679,97 +674,13 @@ export class RunnerContainer extends Container {
     };
   }
 
-  // Worker-side half of the deploy-smoke live model turn. The container runs
-  // `codex exec` with the injected-credential placeholder; while the fence
-  // below is open, the Worker egress intercept authorizes this container's
-  // api.openai.com egress and injects the real Worker-owned OPENAI_API_KEY.
-  // The raw key never travels to the container and never appears in logs.
-  private async smokeLiveModelTurn(
-    readyTimeoutMs: number,
-    input: NonNullable<HostedExecutionContainerSmokeHealthInput["liveModelTurn"]>,
+  protected async smokeLiveModelTurn(
+    _readyTimeoutMs: number,
+    _input: NonNullable<HostedExecutionContainerSmokeHealthInput["liveModelTurn"]>,
   ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["liveModelTurn"]>> {
-    const apiKey = this.environment.OPENAI_API_KEY;
-    if (typeof apiKey !== "string" || apiKey.trim().length === 0) {
-      throw new Error(
-        "Hosted runner live model turn smoke requires the OPENAI_API_KEY Worker secret.",
-      );
-    }
-    const smokeTimeoutMs = Math.max(
-      readyTimeoutMs,
-      RUNNER_LIVE_MODEL_TURN_SMOKE_MIN_TIMEOUT_MS,
+    throw new Error(
+      "Hosted runner live model turn smoke is only supported by deploy smoke containers.",
     );
-    const smokeSignal = AbortSignal.timeout(smokeTimeoutMs);
-    this.liveModelTurnSmokeFence = {
-      expiresAtMs: Date.now() + smokeTimeoutMs,
-      model: input.model,
-      remainingRequests: 1,
-    };
-    try {
-      const response = await this.containerFetch(
-        RUNNER_LIVE_MODEL_TURN_SMOKE_URL,
-        {
-          body: JSON.stringify({ model: input.model }),
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-          signal: smokeSignal,
-        },
-      );
-      const payload = await readRunnerContainerMetadataJsonObject(response, {
-        signal: smokeSignal,
-      });
-      if (!response.ok || payload.ok !== true) {
-        // The container reports content-free smoke diagnostics; carry them so
-        // deploy failures stay debuggable through the worker layer.
-        const smokeErrorMessage = typeof payload.smokeErrorMessage === "string"
-          ? ` ${payload.smokeErrorMessage.slice(0, 512)}`
-          : "";
-        throw new Error(
-          `Hosted runner container live model turn smoke failed with HTTP ${response.status}.${smokeErrorMessage}`,
-        );
-      }
-      const result = readRunnerContainerMetadataRecordProperty(payload.liveModelTurn);
-      const egressGrantConsumed = this.liveModelTurnSmokeFence?.remainingRequests === 0;
-      if (!egressGrantConsumed) {
-        throw new Error(
-          "Hosted runner container live model turn smoke did not consume the Worker egress grant.",
-        );
-      }
-      return {
-        durationMs: typeof result.durationMs === "number" ? result.durationMs : null,
-        egressGrantConsumed,
-        model: typeof result.model === "string" ? result.model : null,
-        stdoutBytes: typeof result.stdoutBytes === "number" ? result.stdoutBytes : null,
-      };
-    } finally {
-      this.liveModelTurnSmokeFence = null;
-    }
-  }
-
-  // Queried by the Worker egress intercept to authorize exactly one
-  // deploy-smoke OpenAI request while smokeLiveModelTurn is in flight, with an
-  // expiry bound in case the smoke request hangs. The active read consumes the
-  // fence so loops or unexpected retries cannot keep using the Worker key.
-  async readDeploySmokeLiveModelTurnFence(): Promise<{
-    active: boolean;
-    model?: string;
-  }> {
-    const fence = this.liveModelTurnSmokeFence;
-    if (
-      !fence
-      || Date.now() >= fence.expiresAtMs
-      || fence.remainingRequests <= 0
-    ) {
-      return {
-        active: false,
-      };
-    }
-    fence.remainingRequests -= 1;
-    return {
-      active: true,
-      model: fence.model,
-    };
   }
 
   private async smokeDirectR2PresignedPut(
@@ -1804,7 +1715,106 @@ function classifyRunnerContainerStop(input: {
   return input.cleanExit ? "unrequested-clean-stop" : "unrequested-nonzero-stop";
 }
 
-export class DeploySmokeRunnerContainer extends RunnerContainer {}
+export class DeploySmokeRunnerContainer extends RunnerContainer {
+  private liveModelTurnSmokeFence: {
+    expiresAtMs: number;
+    model: string;
+    remainingRequests: number;
+  } | null = null;
+
+  // Worker-side half of the deploy-smoke live model turn. The container runs
+  // `codex exec` with the injected-credential placeholder; while the fence
+  // below is open, the Worker egress intercept authorizes this container's
+  // api.openai.com egress and injects the real Worker-owned OPENAI_API_KEY.
+  // The raw key never travels to the container and never appears in logs.
+  protected override async smokeLiveModelTurn(
+    readyTimeoutMs: number,
+    input: NonNullable<HostedExecutionContainerSmokeHealthInput["liveModelTurn"]>,
+  ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["liveModelTurn"]>> {
+    const apiKey = this.environment.OPENAI_API_KEY;
+    if (typeof apiKey !== "string" || apiKey.trim().length === 0) {
+      throw new Error(
+        "Hosted runner live model turn smoke requires the OPENAI_API_KEY Worker secret.",
+      );
+    }
+    const smokeTimeoutMs = Math.max(
+      readyTimeoutMs,
+      RUNNER_LIVE_MODEL_TURN_SMOKE_MIN_TIMEOUT_MS,
+    );
+    const smokeSignal = AbortSignal.timeout(smokeTimeoutMs);
+    this.liveModelTurnSmokeFence = {
+      expiresAtMs: Date.now() + smokeTimeoutMs,
+      model: input.model,
+      remainingRequests: 1,
+    };
+    try {
+      const response = await this.containerFetch(
+        RUNNER_LIVE_MODEL_TURN_SMOKE_URL,
+        {
+          body: JSON.stringify({ model: input.model }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+          signal: smokeSignal,
+        },
+      );
+      const payload = await readRunnerContainerMetadataJsonObject(response, {
+        signal: smokeSignal,
+      });
+      if (!response.ok || payload.ok !== true) {
+        // The container reports content-free smoke diagnostics; carry them so
+        // deploy failures stay debuggable through the worker layer.
+        const smokeErrorMessage = typeof payload.smokeErrorMessage === "string"
+          ? ` ${payload.smokeErrorMessage.slice(0, 512)}`
+          : "";
+        throw new Error(
+          `Hosted runner container live model turn smoke failed with HTTP ${response.status}.${smokeErrorMessage}`,
+        );
+      }
+      const result = readRunnerContainerMetadataRecordProperty(payload.liveModelTurn);
+      const egressGrantConsumed = this.liveModelTurnSmokeFence?.remainingRequests === 0;
+      if (!egressGrantConsumed) {
+        throw new Error(
+          "Hosted runner container live model turn smoke did not consume the Worker egress grant.",
+        );
+      }
+      return {
+        durationMs: typeof result.durationMs === "number" ? result.durationMs : null,
+        egressGrantConsumed,
+        model: typeof result.model === "string" ? result.model : null,
+        stdoutBytes: typeof result.stdoutBytes === "number" ? result.stdoutBytes : null,
+      };
+    } finally {
+      this.liveModelTurnSmokeFence = null;
+    }
+  }
+
+  // Queried by the Worker egress intercept to authorize exactly one
+  // deploy-smoke OpenAI request while smokeLiveModelTurn is in flight, with an
+  // expiry bound in case the smoke request hangs. The active read consumes the
+  // fence so loops or unexpected retries cannot keep using the Worker key.
+  async readDeploySmokeLiveModelTurnFence(): Promise<{
+    active: boolean;
+    model?: string;
+  }> {
+    const fence = this.liveModelTurnSmokeFence;
+    if (
+      !fence
+      || Date.now() >= fence.expiresAtMs
+      || fence.remainingRequests <= 0
+    ) {
+      return {
+        active: false,
+      };
+    }
+    fence.remainingRequests -= 1;
+    return {
+      active: true,
+      model: fence.model,
+    };
+  }
+}
 
 registerHostedRunnerContainerOutboundInterception(RunnerContainer);
 registerHostedRunnerContainerOutboundInterception(DeploySmokeRunnerContainer);
