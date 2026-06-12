@@ -5,6 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
+import {
+  resolveHostedLocalCodexSubscriptionAuthEnvValue,
+  shouldSeedHostedLocalCodexSubscriptionAuth,
+} from "./codex-subscription-auth.ts";
 import { resolveHostedLocalDevConfig } from "./config.ts";
 import {
   cloudflareDir,
@@ -15,6 +19,7 @@ import {
   DEFAULT_WORKER_PORT,
   HOSTED_WEB_DEV_DIST_DIR,
   HOSTED_WEB_SMOKE_DIST_DIR,
+  HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
@@ -326,6 +331,14 @@ export async function startHostedLocalDevStack(input: {
     });
     vercelEnv.NODE_ENV = "development";
     requireHostedLocalAssistantProviderEnv(vercelEnv);
+    // Interactive dev runs hosted Codex model turns on the local ChatGPT
+    // subscription instead of the API key; the key stays for image generation.
+    const codexSubscriptionAuthEnvValue = shouldSeedHostedLocalCodexSubscriptionAuth({
+      nodeEnv: inputNodeEnv,
+      profileName: vercelEnv.MURPH_HOSTED_LOCAL_PROFILE,
+    })
+      ? await resolveHostedLocalCodexSubscriptionAuthEnvValue(vercelEnv)
+      : null;
     linqWebhookSetup = await resolveHostedLocalLinqWebhookSetup({
       config,
       env: vercelEnv,
@@ -387,10 +400,18 @@ export async function startHostedLocalDevStack(input: {
       VERCEL_OIDC_TOKEN: oidcToken,
       ...(isolatedDockerConfigDir !== null ? { DOCKER_CONFIG: isolatedDockerConfigDir } : {}),
     };
-    const workerRuntimeSourceEnv = stripHostedLocalHostOnlyCodexEnv({
-      ...runtimeEnv,
-      ...cloudflareDevVars,
-    });
+    // Subscription auth is worker/runner-scoped and harness-derived only: the
+    // strip removes any value inherited from the shell or env files, and the
+    // seed is re-added afterward so web/temporal children never see it.
+    const workerRuntimeSourceEnv = {
+      ...stripHostedLocalHostOnlyCodexEnv({
+        ...runtimeEnv,
+        ...cloudflareDevVars,
+      }),
+      ...(codexSubscriptionAuthEnvValue !== null
+        ? { [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: codexSubscriptionAuthEnvValue }
+        : {}),
+    };
     workerRuntimeEnv = workerPortMode === "start"
       ? {
         ...workerRuntimeSourceEnv,
@@ -1532,6 +1553,8 @@ const HOSTED_LOCAL_HOST_ONLY_CODEX_ENV_NAMES = [
   "GEMINI_API_KEY",
   "GOOGLE_AI_API_KEY",
   "GOOGLE_API_KEY",
+  // Harness-derived only; inherited shell/env-file values are never trusted.
+  HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
   "HF_TOKEN",
   "VENICE_API_KEY",
   "XAI_API_KEY",

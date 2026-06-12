@@ -181,6 +181,16 @@ const resolveHostedLocalLinqWebhookSetup = vi.fn<
 >(async () => null);
 const registerHostedLocalLinqWebhookSubscription = vi.fn(async () => {});
 const waitForHostedLocalLinqWebhookTarget = vi.fn(async () => {});
+const STUB_CODEX_SUBSCRIPTION_AUTH_JSON = Buffer.from(
+  JSON.stringify({
+    auth_mode: "chatgpt",
+    tokens: { access_token: "stub-access-token" },
+  }),
+  "utf8",
+).toString("base64url");
+const resolveHostedLocalCodexSubscriptionAuthEnvValue = vi.fn(
+  async () => STUB_CODEX_SUBSCRIPTION_AUTH_JSON,
+);
 const maybeStartHostedLocalMinio = vi.fn<
   (input: unknown) => Promise<{
     containerName: string;
@@ -238,6 +248,11 @@ vi.mock("node:fs/promises", () => ({
 
 vi.mock("node:child_process", () => ({
   spawnSync,
+}));
+
+vi.mock("../../src/dev-hosted-local/codex-subscription-auth.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/dev-hosted-local/codex-subscription-auth.ts")>()),
+  resolveHostedLocalCodexSubscriptionAuthEnvValue,
 }));
 
 vi.mock("../../src/dev-hosted-local/config.ts", () => ({
@@ -1901,6 +1916,70 @@ describe("hosted local dev stack", () => {
     const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
     expect(cloudflareEnv.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
     expect(cloudflareEnv.OPENAI_API_KEY).toBe("local-openai-key");
+  });
+
+  it("seeds dev worker env with ChatGPT subscription Codex auth", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 141 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 142 }));
+
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        NODE_ENV: "development",
+        OPENAI_API_KEY: "local-openai-key",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(resolveHostedLocalCodexSubscriptionAuthEnvValue).toHaveBeenCalledOnce();
+    const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
+    const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
+    expect(cloudflareEnv.HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON).toBe(
+      STUB_CODEX_SUBSCRIPTION_AUTH_JSON,
+    );
+    // The API key stays configured for image generation.
+    expect(cloudflareEnv.OPENAI_API_KEY).toBe("local-openai-key");
+
+    const envFileSource = vi.mocked(environmentModule.buildWranglerEnvFileText)
+      .mock.calls.at(-1)?.[0] as NodeJS.ProcessEnv;
+    expect(envFileSource.HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON).toBe(
+      STUB_CODEX_SUBSCRIPTION_AUTH_JSON,
+    );
+
+    // Token material stays out of the non-worker child processes.
+    const webCall = spawnChildProcess.mock.calls.find(([name]) => name === "web");
+    const webEnv = webCall?.[3] as NodeJS.ProcessEnv;
+    expect(webEnv.HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON).toBeUndefined();
+  });
+
+  it("does not read the host Codex home for NODE_ENV=test stacks", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 143 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 144 }));
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    const stack = await startHostedLocalDevStack({
+      // Vitest and the e2e profiles run with NODE_ENV=test.
+      env: {
+        ...process.env,
+        // Inherited shell values are host-only and must never reach the worker.
+        HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON: "inherited-shell-value",
+        NODE_ENV: "test",
+        OPENAI_API_KEY: "local-openai-key",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(resolveHostedLocalCodexSubscriptionAuthEnvValue).not.toHaveBeenCalled();
+    const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
+    const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
+    expect(cloudflareEnv.HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON).toBeUndefined();
   });
 
   it("generates a unique non-default local runner build id for each stack", async () => {

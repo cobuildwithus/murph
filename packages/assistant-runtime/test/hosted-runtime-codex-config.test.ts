@@ -25,6 +25,7 @@ import {
   buildHostedRuntimeForwardedEnv,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
+  HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNTIME_ENV_KEY_NAMES,
   HOSTED_RUNTIME_ENV_PROFILE_KEYS,
@@ -322,6 +323,167 @@ test("hosted Codex runtime config accepts a Linux Docker bridge model provider o
   const config = await readFile(result.codexConfigPath, "utf8");
   assert.match(config, /model_provider = "openai-local-test"/u);
   assert.match(config, /base_url = "http:\/\/172\.17\.0\.1:4567\/v1"/u);
+});
+
+test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const chatGptAuthJson = buildChatGptCodexAuthJson();
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: encodeChatGptCodexAuthEnvValue(chatGptAuthJson),
+      NODE_ENV: "development",
+      OPENAI_API_KEY: "secret-openai-key",
+    },
+  });
+
+  // The built-in provider id routes Codex to the ChatGPT backend via auth.json.
+  assert.equal(
+    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+    "openai",
+  );
+  // Token material must not linger in the runtime env; image-gen keeps the key.
+  assert.equal(result.runtimeEnv[HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV], undefined);
+  assert.equal(result.runtimeEnv.OPENAI_API_KEY, "secret-openai-key");
+
+  const codexAuthPath = path.join(result.codexHome, "auth.json");
+  assert.equal(await readFile(codexAuthPath, "utf8"), chatGptAuthJson);
+  const authMode = (await stat(codexAuthPath)).mode & 0o777;
+  assert.equal(authMode, 0o600);
+
+  const config = await readFile(result.codexConfigPath, "utf8");
+  assert.match(config, /^model_provider = "openai"$/mu);
+  assert.doesNotMatch(config, /\[model_providers\./u);
+  assert.doesNotMatch(config, /base_url/u);
+  assert.doesNotMatch(config, /env_key/u);
+  assert.doesNotMatch(config, /requires_openai_auth/u);
+  assert.doesNotMatch(config, /chatgpt-access-token/u);
+  assert.match(config, /model_reasoning_effort = "low"/u);
+  assert.match(config, /\[history\]\npersistence = "none"/u);
+  assert.match(config, /\[shell_environment_policy\]/u);
+  assertHostedCodexAutoCompactTokenLimit(config);
+});
+
+test("hosted Codex runtime config rejects ChatGPT subscription auth outside development", async () => {
+  for (const nodeEnv of ["production", "test", undefined]) {
+    const operatorHomeRoot = await createTemporaryDirectory();
+
+    await assert.rejects(
+      () =>
+        prepareHostedCodexRuntimeEnvironment({
+          operatorHomeRoot,
+          runtimeEnv: {
+            HOSTED_ASSISTANT_PROVIDER: "openai",
+            [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]:
+              encodeChatGptCodexAuthEnvValue(buildChatGptCodexAuthJson()),
+            ...(nodeEnv ? { NODE_ENV: nodeEnv } : {}),
+            OPENAI_API_KEY: "secret-openai-key",
+          },
+        }),
+      (error) =>
+        error instanceof HostedAssistantConfigurationError
+        && error.code === "HOSTED_ASSISTANT_CONFIG_INVALID"
+        && error.message.includes(HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV)
+        && error.message.includes("NODE_ENV=development"),
+    );
+  }
+});
+
+test("hosted Codex runtime config rejects malformed ChatGPT subscription auth", async () => {
+  for (const malformed of [
+    // Not base64url-encoded JSON at all.
+    "not-base64url-json",
+    ...[
+      JSON.stringify({ OPENAI_API_KEY: "sk-direct-key" }),
+      JSON.stringify({ auth_mode: "apikey", tokens: chatGptCodexAuthTokens() }),
+      JSON.stringify({ auth_mode: "chatgpt", tokens: { access_token: "only-access" } }),
+      JSON.stringify({
+        auth_mode: "chatgpt",
+        tokens: { access_token: "chatgpt-access-token", id_token: "chatgpt-id-token" },
+      }),
+    ].map(encodeChatGptCodexAuthEnvValue),
+  ]) {
+    const operatorHomeRoot = await createTemporaryDirectory();
+
+    await assert.rejects(
+      () =>
+        prepareHostedCodexRuntimeEnvironment({
+          operatorHomeRoot,
+          runtimeEnv: {
+            HOSTED_ASSISTANT_PROVIDER: "openai",
+            [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: malformed,
+            NODE_ENV: "development",
+            OPENAI_API_KEY: "secret-openai-key",
+          },
+        }),
+      (error) =>
+        error instanceof HostedAssistantConfigurationError
+        && error.code === "HOSTED_ASSISTANT_CONFIG_INVALID"
+        && error.message.includes(HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV)
+        // Never echo token material into configuration errors.
+        && !error.message.includes("chatgpt-access-token")
+        && !error.message.includes("sk-direct-key"),
+    );
+  }
+});
+
+test("hosted Codex runtime config writes no auth.json without subscription auth", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "secret-openai-key",
+    },
+  });
+
+  await assert.rejects(() => readFile(path.join(result.codexHome, "auth.json"), "utf8"));
+});
+
+test("hosted Codex runtime config removes stale subscription auth from a persistent home", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const subscriptionResult = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]:
+        encodeChatGptCodexAuthEnvValue(buildChatGptCodexAuthJson()),
+      NODE_ENV: "development",
+      OPENAI_API_KEY: "secret-openai-key",
+    },
+  });
+  const codexAuthPath = path.join(subscriptionResult.codexHome, "auth.json");
+  await readFile(codexAuthPath, "utf8");
+
+  // A later wake without subscription auth must not leave stale tokens behind.
+  await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "secret-openai-key",
+    },
+  });
+  await assert.rejects(() => readFile(codexAuthPath, "utf8"));
+});
+
+test("hosted runtime launch env policy forwards the dev-only ChatGPT subscription auth", () => {
+  assert.equal(
+    (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
+      HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
+    ),
+    true,
+  );
+  const encodedAuthJson = encodeChatGptCodexAuthEnvValue(buildChatGptCodexAuthJson());
+  assert.equal(
+    buildHostedRuntimeForwardedEnv({
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: encodedAuthJson,
+      NODE_ENV: "development",
+      OPENAI_API_KEY: "openai-key",
+    })[HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV],
+    encodedAuthJson,
+  );
 });
 
 test("hosted Codex runtime config rejects command override outside test mode", async () => {
@@ -998,6 +1160,32 @@ async function createTemporaryDirectory(): Promise<string> {
   const target = await mkdtemp(path.join(tmpdir(), "hosted-codex-config-"));
   temporaryPaths.push(target);
   return target;
+}
+
+function chatGptCodexAuthTokens(): Record<string, string> {
+  return {
+    access_token: "chatgpt-access-token",
+    account_id: "account-1234",
+    id_token: "chatgpt-id-token",
+    // The harness keeps the durable refresh token host-side and seeds an
+    // intentionally empty one; Codex accepts that shape.
+    refresh_token: "",
+  };
+}
+
+function buildChatGptCodexAuthJson(): string {
+  return JSON.stringify({
+    OPENAI_API_KEY: null,
+    auth_mode: "chatgpt",
+    last_refresh: "2026-06-11T00:00:00.000Z",
+    tokens: chatGptCodexAuthTokens(),
+  });
+}
+
+// The harness base64url-encodes the auth.json payload so it survives the
+// wrangler env-file hop; mirror that contract here.
+function encodeChatGptCodexAuthEnvValue(authJson: string): string {
+  return Buffer.from(authJson, "utf8").toString("base64url");
 }
 
 async function removeTemporaryPath(target: string): Promise<void> {
