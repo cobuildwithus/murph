@@ -310,9 +310,12 @@ export async function startHostedLocalDevStack(input: {
       ...initialEnv,
     };
     const inputNodeEnv = rawVercelEnv.NODE_ENV?.trim();
-    const shouldPreserveTestNodeEnvForE2ECodexOverride =
+    const shouldPreserveTestNodeEnvForLocalTestMode =
       inputNodeEnv === "test"
-      && Boolean(rawVercelEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]?.trim());
+      && (
+        rawVercelEnv.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1"
+        || Boolean(rawVercelEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]?.trim())
+      );
     const vercelEnv = shouldUseRemoteHostedCryptoKeys(rawVercelEnv)
       ? rawVercelEnv
       : stripHostedCryptoMaterialEnv(rawVercelEnv);
@@ -369,7 +372,7 @@ export async function startHostedLocalDevStack(input: {
         ...vercelEnv,
         ...(minioServer?.env ?? {}),
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: containerReachableHost,
-        ...(shouldPreserveTestNodeEnvForE2ECodexOverride ? { NODE_ENV: "test" } : {}),
+        ...(shouldPreserveTestNodeEnvForLocalTestMode ? { NODE_ENV: "test" } : {}),
       },
     });
     throwIfAbortSignalAborted(input.abortSignal);

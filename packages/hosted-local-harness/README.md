@@ -32,10 +32,10 @@ Workers AI in `pnpm dev`. Wrangler proxies that binding through a remote dev
 session, which has two consequences:
 
 - The dev machine needs Cloudflare auth that can open a remote dev session:
-  `wrangler login` (OAuth) or a user-scoped API token. Account-scoped
-  `CLOUDFLARE_API_TOKEN` values cannot open remote sessions and make
-  `wrangler dev` fail at startup; wrangler prefers `CLOUDFLARE_API_TOKEN` over
-  OAuth when both are present.
+  `wrangler login` (OAuth). The harness strips `CLOUDFLARE_API_TOKEN` from
+  the spawned `wrangler dev` process when this binding is active because
+  wrangler prefers that variable over OAuth and account-scoped tokens cannot
+  open the remote session.
 - Transcription calls incur (tiny) real Workers AI usage. Dev voice audio is
   health-adjacent, so the account-level rule that Workers AI request/response
   logging and AI Gateway capture stay disabled (`agent-docs/SECURITY.md`)
@@ -50,8 +50,8 @@ Workers AI.
 
 When the binding is active, the harness strips `CLOUDFLARE_API_TOKEN` from the
 spawned `wrangler dev` process so OAuth is used for the remote session;
-wrangler would otherwise prefer the token and fail at startup when it is
-account-scoped. The token still reaches every other tool that needs it.
+token auth is intentionally unsupported for this child process. The token still
+reaches every other tool that needs it.
 
 ## Profiles
 

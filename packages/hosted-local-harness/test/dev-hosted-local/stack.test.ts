@@ -265,7 +265,19 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
   })),
   buildHostedLocalStateEnvFileText: vi.fn(() => 'HOSTED_CRYPTO_ENV="local"'),
   buildWranglerEnvFileText: vi.fn(() => 'HOSTED_WEB_BASE_URL="http://localhost:3000"'),
-  buildWranglerLocalDevConfig: vi.fn(() => ({ name: "murph-hosted" })),
+  buildWranglerLocalDevConfig: vi.fn((
+    source: Readonly<Record<string, string | undefined>>,
+  ) => {
+    const usesTestRoutes =
+      source.NODE_ENV === "test" && source.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1";
+    return {
+      name: "murph-hosted",
+      main: usesTestRoutes ? "../src/hosted-local-test-index.ts" : "../src/index.ts",
+      ...(usesTestRoutes || source.MURPH_DEV_SKIP_WORKERS_AI === "1"
+        ? {}
+        : { ai: { binding: "AI" } }),
+    };
+  }),
   buildWranglerVarArgs: vi.fn(() => ["--var", "HOSTED_WEB_BASE_URL:http://localhost:3000"]),
   includesWranglerLocalDevAiBinding: vi.fn(
     (source: Readonly<Record<string, string | undefined>>) =>
@@ -1411,6 +1423,70 @@ describe("hosted local dev stack", () => {
       HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL: "http://127.0.0.1:4222/v1",
       NODE_ENV: "test",
     });
+
+    const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
+    const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
+    expect(cloudflareEnv.NODE_ENV).toBe("test");
+  });
+
+  it("preserves test NODE_ENV for live E2E test routes without a Codex provider base URL override", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 109 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 110 }));
+
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      skipLinqWebhookRegister: true,
+      webPort: 31003,
+      workerPersistDir: ".tmp/e2e/wrangler",
+      workerPort: 32003,
+    });
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
+        MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+        MURPH_DEV_WEB_PORT: "31003",
+        MURPH_DEV_WORKER_PORT: "32003",
+        MURPH_HOSTED_LOCAL_PROFILE: "e2e:live",
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
+        NODE_ENV: "test",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    const resolveInput = vi.mocked(environmentModule.resolveCloudflareLocalEnv).mock.calls.at(-1)?.[0];
+    expect(resolveInput?.overrides).toMatchObject({
+      MURPH_HOSTED_LOCAL_PROFILE: "e2e:live",
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+
+    expect(environmentModule.buildWranglerLocalDevConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        MURPH_HOSTED_LOCAL_PROFILE: "e2e:live",
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+        NODE_ENV: "test",
+      }),
+      expect.any(Object),
+    );
+    const workerConfigWrite = vi.mocked(writeFile).mock.calls.find(
+      ([filePath]) => filePath === "/tmp/murph-dev-env-test/cloudflare-worker.local-dev.generated.json",
+    );
+    expect(workerConfigWrite).toBeDefined();
+    const generatedConfig = JSON.parse(String(workerConfigWrite?.[1])) as {
+      ai?: unknown;
+      main: string;
+    };
+    expect(generatedConfig).not.toHaveProperty("ai");
+    expect(generatedConfig.main).toBe("../src/hosted-local-test-index.ts");
 
     const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
     const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
