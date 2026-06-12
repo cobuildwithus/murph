@@ -215,16 +215,10 @@ function decodeStoredWearableMetricEnvelope(metric: WearableMetricKey, stored: u
   };
 }
 
-const emptyStoredWearableMetricEnvelopeJson = new Map<WearableMetricKey, string>();
-
 function emptyStoredWearableMetricEnvelope(metric: WearableMetricKey): unknown {
-  let json = emptyStoredWearableMetricEnvelopeJson.get(metric);
-  if (json === undefined) {
-    json = JSON.stringify(resolveMetric(metric, []));
-    emptyStoredWearableMetricEnvelopeJson.set(metric, json);
-  }
-
-  return JSON.parse(json);
+  // resolveMetric constructs a fresh envelope (new arrays/literals) on every
+  // call, so callers can mutate the result without cross-envelope leaks.
+  return resolveMetric(metric, []);
 }
 
 function isCompactStoredEnvelope(stored: Record<string, unknown>): boolean {
