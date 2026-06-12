@@ -183,14 +183,11 @@ function isWearableSummaryMetricPoint(point: MetricPoint): boolean {
     && WEARABLE_SUMMARY_METRIC_PRIORITIES.has(summaryMetricPriorityKey(point));
 }
 
-// Suppression is by contribution, deliberately fail-open. Three cases:
-// records the summary resolved FROM are suppressed (the summary point is
-// their resolved answer); manual/independent same-day entries survive as
-// provenance-distinct facts (hiding them would violate the capture
-// posture); losing multi-provider candidates also survive because their
-// record ids are not recoverable from stored summaries (the stored codec
-// persists only the selected records) — visible and provider-marked beats
-// silently hidden.
+// Suppression is by contribution: every record the resolver considered
+// (winning AND losing candidates) is suppressed in favor of the resolved
+// summary point, while manual/independent same-day entries — never
+// candidates — survive as provenance-distinct facts (hiding them would
+// violate the capture posture).
 function metricPointContributedToSummary(point: MetricPoint, summaryPoint: MetricPoint): boolean {
   const contributingRecordIds = summaryPoint.context.contributingRecordIds;
   return Array.isArray(contributingRecordIds) && contributingRecordIds.includes(point.source.recordId);
@@ -241,9 +238,16 @@ function metricEvidence(
     ...(sourceCandidate?.paths ?? []),
   ]);
   const syntheticRecordId = `${sourceKind}:${metricKey}:${date}`;
+  // Every candidate the resolver considered counts as contributing — the
+  // summary point is the resolved answer for ALL of them, so losing
+  // multi-provider candidates suppress alongside the winner. (Candidates
+  // are populated here because evidence is built from the in-memory bundle
+  // at rebuild time; the stored codec strips them only on the read path.)
+  // Manual/independent entries are never candidates and survive.
   const contributingRecordIds = uniqueStrings([
     ...selection.recordIds,
     ...(sourceCandidate?.recordIds ?? []),
+    ...resolved.candidates.flatMap((candidate) => candidate.recordIds),
   ]);
   const recordIds = contributingRecordIds.length > 0 ? contributingRecordIds : [syntheticRecordId];
 

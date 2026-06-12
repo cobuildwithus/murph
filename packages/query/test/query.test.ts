@@ -3534,6 +3534,7 @@ Light walk and early bedtime.
 }
 
 interface MetricObservationEventInput {
+  dayKey?: string;
   externalRef?: Record<string, unknown>;
   id: string;
   metric: string;
@@ -4696,6 +4697,110 @@ test("wearable summary metric points suppress same-day raw observation duplicate
     assert.equal(breathingDisturbance.length, 1);
     assert.equal(breathingDisturbance[0]?.value, 4);
     assert.equal(breathingDisturbance[0]?.source.kind, "observation");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("importer sleep keys, canonical day keys, and losing providers all resolve into the summary point", async () => {
+  const vaultRoot = await createMetricObservationVault([
+    // Importer-named sleep observation (sleep-total-minutes, not the
+    // canonical total-sleep-minutes) whose occurredAt sits on the previous
+    // UTC day while dayKey carries the sleep end date.
+    {
+      id: "evt_metric_observation_sleep_total_01",
+      occurredAt: "2026-04-04T23:30:00Z",
+      dayKey: "2026-04-05",
+      source: "device",
+      title: "Oura total sleep",
+      metric: "sleep-total-minutes",
+      value: 432,
+      unit: "minutes",
+      externalRef: {
+        system: "oura",
+        resourceType: "sleep",
+        resourceId: "oura-sleep-2026-04-05",
+        facet: "sleep-total-minutes",
+      },
+    },
+    // Two providers reporting spo2 for the same day: the loser must
+    // suppress alongside the winner, leaving the resolved summary point as
+    // the only spo2 answer for the day.
+    {
+      id: "evt_metric_observation_spo2_oura_01",
+      occurredAt: "2026-04-05T06:00:00Z",
+      source: "device",
+      title: "Oura SpO2",
+      metric: "spo2",
+      value: 97,
+      unit: "%",
+      externalRef: {
+        system: "oura",
+        resourceType: "daily_spo2",
+        resourceId: "oura-spo2-2026-04-05",
+        facet: "spo2-average",
+      },
+    },
+    {
+      id: "evt_metric_observation_spo2_garmin_01",
+      occurredAt: "2026-04-05T06:01:00Z",
+      source: "device",
+      title: "Garmin SpO2",
+      metric: "spo2",
+      value: 95,
+      unit: "%",
+      externalRef: {
+        system: "garmin",
+        resourceType: "daily_spo2",
+        resourceId: "garmin-spo2-2026-04-05",
+        facet: "spo2-average",
+      },
+    },
+  ]);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    // Alias resolution: the importer key lands on the canonical
+    // total-sleep-minutes key, dated by dayKey (the sleep end date), and
+    // the raw point is suppressed by the summary point on the SAME day —
+    // no parallel sleep-total-minutes key, nothing on the UTC start date.
+    const totalSleep = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-04-05",
+      limit: null,
+      metricKey: "total-sleep-minutes",
+      to: "2026-04-05",
+    });
+    assert.equal(totalSleep.length, 1);
+    assert.equal(totalSleep[0]?.value, 432);
+    assert.equal(totalSleep[0]?.source.family, "derived");
+    assert.notEqual(totalSleep[0]?.source.kind, "observation");
+
+    const previousDay = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-04-04",
+      limit: null,
+      to: "2026-04-04",
+    });
+    assert.equal(previousDay.length, 0);
+
+    const allDayPoints = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-04-05",
+      limit: null,
+      to: "2026-04-05",
+    });
+    assert.equal(allDayPoints.filter((point) => point.metricKey === "sleep-total-minutes").length, 0);
+
+    // Multi-provider suppression: exactly one spo2 point for the day — the
+    // resolved summary — with both providers' raw observations suppressed.
+    const spo2 = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-04-05",
+      limit: null,
+      metricKey: "spo2",
+      to: "2026-04-05",
+    });
+    assert.equal(spo2.length, 1);
+    assert.equal(spo2[0]?.source.family, "derived");
+    assert.notEqual(spo2[0]?.source.kind, "observation");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

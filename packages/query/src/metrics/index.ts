@@ -332,6 +332,11 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
       qualifiers: readQualifiers(entity.attributes.qualifiers),
       timeZone: readString(entity.attributes.timeZone) ?? undefined,
     },
+    // Canonical dayKey wins over the UTC slice of occurredAt: daily and
+    // sleep observations are dated by their local/sleep day (the same
+    // invariant deriveWearableDate uses), so precedence and date-filtered
+    // queries must see the same day the summary point uses.
+    effectiveDate: readString(entity.attributes.dayKey) ?? entity.date,
     entity,
     index: 0,
     metric,
@@ -402,6 +407,7 @@ function scalarMetricPoint(input: {
   comparator?: MetricComparator | null;
   confidence: MetricConfidence;
   context: MetricPointContext;
+  effectiveDate?: string | null;
   entity: CanonicalEntity;
   index: number;
   metric: string;
@@ -416,7 +422,7 @@ function scalarMetricPoint(input: {
   const definition = resolveMetricDefinition(metricKey) ?? createCustomMetricDefinition(metricKey, input.unit);
   const normalized = normalizeMetricValue({ metricKey: definition.key, unit: input.unit ?? definition.displayUnit, value: input.value });
   const observedAt = input.observedAt ?? entityObservedAt(input.entity);
-  const effectiveDate = observedAt.slice(0, 10);
+  const effectiveDate = input.effectiveDate ?? observedAt.slice(0, 10);
   const labName = readString(input.entity.attributes.labName);
 
   return createMetricPoint({
