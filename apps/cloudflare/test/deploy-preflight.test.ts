@@ -298,7 +298,7 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toContain(
-      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.4-mini, gpt-5.5 for hosted AI usage allowance pricing.",
+      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5 for hosted AI usage allowance pricing.",
     );
 
     expect(
@@ -309,7 +309,7 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toContain(
-      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.4-mini, gpt-5.5 for hosted AI usage allowance pricing.",
+      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5 for hosted AI usage allowance pricing.",
     );
   });
 
@@ -346,7 +346,18 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toContain(
-      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.4-mini, gpt-5.5 for hosted AI usage allowance pricing.",
+      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5 for hosted AI usage allowance pricing.",
+    );
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          HOSTED_ASSISTANT_MODEL: "gpt-unpriced-mini",
+        }),
+        { deployWorker: true },
+      ),
+    ).toContain(
+      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5 for hosted AI usage allowance pricing.",
     );
 
     expect(
@@ -356,8 +367,8 @@ describe("deploy preflight helpers", () => {
         }),
         { deployWorker: true },
       ),
-    ).not.toContain(
-      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.4-mini, gpt-5.5 for hosted AI usage allowance pricing.",
+    ).toContain(
+      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5 for hosted AI usage allowance pricing.",
     );
 
     expect(
@@ -368,7 +379,7 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toContain(
-      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.4-mini, gpt-5.5 for hosted AI usage allowance pricing.",
+      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5 for hosted AI usage allowance pricing.",
     );
   });
 
@@ -376,7 +387,7 @@ describe("deploy preflight helpers", () => {
     expect(
       listHostedDeployEnvironmentInvariantErrors(
         createRequiredWorkerDeployEnv({
-          HOSTED_ASSISTANT_MODEL: "gpt-5.4-mini",
+          HOSTED_ASSISTANT_MODEL: "gpt-unpriced-mini",
         }),
         { deployWorker: true },
       ),
