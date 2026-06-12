@@ -18,6 +18,17 @@ export const JUNCTION_KNOWN_TIMESERIES_RESOURCES = Object.freeze([
   "stress_level",
   "vo2_max",
   "weight",
+  "body_temperature_delta",
+  "body_temperature",
+  "basal_body_temperature",
+  "caffeine",
+  "water",
+  "mindfulness_minutes",
+  "heart_rate_recovery_one_minute",
+  "sleep_breathing_disturbance",
+  "afib_burden",
+  "glucose",
+  "blood_pressure",
 ] as const);
 
 export type JunctionTimeseriesResource =
@@ -27,17 +38,34 @@ export type JunctionTimeseriesResource =
 // path only: one ~430-byte `junction.timeseries_daily_aggregate.v1` raw
 // artifact per day per resource (measured on a live member's blood_oxygen
 // artifacts), so each default costs roughly 160 KB of raw evidence per
-// member-year. Intraday `heartrate` and `hypnogram` stay deliberately
-// excluded from defaults: their raw sample streams are unbounded (thousands
-// of samples per day) and the vault must not accumulate giant raw timeseries
-// dumps. Sleep-grain heart rate and hypnogram detail already arrive through
-// the `sleep`/`sleep_cycle` summary resources.
+// member-year regardless of intraday sample density: glucose (CGM, up to
+// 288 samples/day, ~10-15 MB/yr raw) is the canonical example of a stream
+// that must only land through this aggregate seam. `blood_pressure` is the
+// one paired-shape exception: readings are sparse (10s-100s/yr), so each
+// reading lands as one `measurement` event plus one compact ~350-byte
+// `junction.blood_pressure_reading.v1` artifact. Intraday `heartrate` and
+// `hypnogram` stay deliberately excluded from defaults: their raw sample
+// streams are unbounded (thousands of samples per day) and the vault must
+// not accumulate giant raw timeseries dumps. Sleep-grain heart rate and
+// hypnogram detail already arrive through the `sleep`/`sleep_cycle` summary
+// resources.
 export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
   "blood_oxygen",
   "stress_level",
   "hrv",
   "respiratory_rate",
   "vo2_max",
+  "body_temperature_delta",
+  "body_temperature",
+  "basal_body_temperature",
+  "caffeine",
+  "water",
+  "mindfulness_minutes",
+  "heart_rate_recovery_one_minute",
+  "sleep_breathing_disturbance",
+  "afib_burden",
+  "glucose",
+  "blood_pressure",
 ] as const);
 
 export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([] as const);
@@ -453,6 +481,8 @@ export function normalizeJunctionResourceName(value: unknown): string | null {
       return "vo2_max";
     case "heart_rate_variability":
       return "hrv";
+    case "blood_glucose":
+      return "glucose";
     default:
       return resource;
   }

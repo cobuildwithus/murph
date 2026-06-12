@@ -295,7 +295,6 @@ test("Junction omitted timeseries config defaults to compact resources only", as
                 "steps",
                 "distance",
                 "calories_active",
-                "glucose",
                 "weight",
               ].map((resource) => [resource, true])),
             },
@@ -362,7 +361,6 @@ test("Junction omitted timeseries config defaults to compact resources only", as
       !url.includes("steps") &&
       !url.includes("distance") &&
       !url.includes("calories_active") &&
-      !url.includes("glucose") &&
       !url.includes("weight")
     ),
     true,
@@ -6709,13 +6707,10 @@ test("Junction resource jobs skip unsupported glucose when it is not configured"
   assert.equal(warnings[0]?.resourceCategory, "timeseries");
 });
 
-test("Junction provider rejects unsupported glucose timeseries configuration", () => {
-  assert.throws(
-    () => createJunctionProvider(async () => createJsonResponse({}), {
-      timeseriesResources: ["glucose"],
-    }),
-    /Junction timeseries resources include unsupported resource\(s\): glucose\./u,
-  );
+test("Junction provider accepts glucose timeseries configuration", () => {
+  assert.doesNotThrow(() => createJunctionProvider(async () => createJsonResponse({}), {
+    timeseriesResources: ["glucose"],
+  }));
 });
 
 test("Junction provider rejects unsupported configured resources", () => {

@@ -486,6 +486,62 @@ const JUNCTION_VO2_MAX_VALUE_PATHS = [
   "estimatedVo2Max",
   "estimated_vo2_max",
 ] as const;
+const JUNCTION_BODY_TEMPERATURE_DELTA_VALUE_PATHS = [
+  "value",
+  "temperatureDelta",
+  "temperature_delta",
+  "temperatureDeviation",
+  "temperature_deviation",
+] as const;
+const JUNCTION_BODY_TEMPERATURE_VALUE_PATHS = [
+  "value",
+  "temperature",
+  "bodyTemperature",
+  "body_temperature",
+] as const;
+const JUNCTION_BASAL_BODY_TEMPERATURE_VALUE_PATHS = [
+  "value",
+  "basalBodyTemperature",
+  "basal_body_temperature",
+] as const;
+const JUNCTION_CAFFEINE_VALUE_PATHS = [
+  "value",
+  "caffeine",
+] as const;
+const JUNCTION_WATER_VALUE_PATHS = [
+  "value",
+  "water",
+] as const;
+const JUNCTION_MINDFULNESS_MINUTES_VALUE_PATHS = [
+  "value",
+  "mindfulnessMinutes",
+  "mindfulness_minutes",
+] as const;
+const JUNCTION_HEART_RATE_RECOVERY_VALUE_PATHS = [
+  "value",
+  "heartRateRecoveryOneMinute",
+  "heart_rate_recovery_one_minute",
+] as const;
+const JUNCTION_SLEEP_BREATHING_DISTURBANCE_VALUE_PATHS = [
+  "value",
+] as const;
+const JUNCTION_AFIB_BURDEN_VALUE_PATHS = [
+  "value",
+  "afibBurden",
+  "afib_burden",
+] as const;
+const JUNCTION_GLUCOSE_VALUE_PATHS = [
+  "value",
+  "glucose",
+  "bloodGlucose",
+  "blood_glucose",
+] as const;
+const JUNCTION_BLOOD_PRESSURE_SYSTOLIC_PATHS = [
+  "systolic",
+] as const;
+const JUNCTION_BLOOD_PRESSURE_DIASTOLIC_PATHS = [
+  "diastolic",
+] as const;
 const JUNCTION_TIME_ZONE_OFFSET_MINUTE_PATHS = [
   "timeZoneOffsetMinutes",
   "time_zone_offset_minutes",
@@ -515,6 +571,7 @@ interface JunctionDailyTimeseriesAggregate {
   firstSampleAt: string;
   lastRecordedAt?: string;
   lastSampleAt: string;
+  maxValue: number;
   minValue: number;
   rawArtifactRole: string;
   resourceContext: ResourceContext;
@@ -710,7 +767,7 @@ function buildJunctionMealFallbackIdentityDisambiguators(input: {
 
 interface JunctionDailyTimeseriesObservationDescriptor {
   metric: string;
-  statistic: "mean" | "min";
+  statistic: "mean" | "min" | "max" | "sum";
   title: string;
 }
 
@@ -722,11 +779,19 @@ interface JunctionDailyTimeseriesDescriptor {
 }
 
 // Every default-enabled timeseries resource must appear here with a bounded
-// daily-aggregate mapping; raw evidence stays one compact artifact per day
-// per resource. Junction classifies hrv/respiratory_rate as discrete
-// timeseries and vo2_max as an interval timeseries
-// (docs.junction.com/wearables/providers/resources); all three reduce to
-// daily-grain observations below.
+// daily-aggregate mapping (or, for paired-shape `blood_pressure` only, the
+// dedicated sparse per-reading handler below); raw evidence stays one compact
+// ~430 B `junction.timeseries_daily_aggregate.v1` artifact per day per
+// resource (~160 KB/member-year/resource) no matter how dense the provider
+// stream is: glucose CGM streams (288 samples/day, ~10-15 MB/yr raw) reduce
+// to the same one artifact per day. Resource classifications and payload
+// field names are verified against docs.junction.com
+// (wearables/providers/resources; api-reference/data/timeseries/*): hrv,
+// respiratory_rate, blood_oxygen, glucose, and stress_level are discrete
+// timeseries; vo2_max, body_temperature(_delta), basal_body_temperature,
+// caffeine, water, mindfulness_minutes, heart_rate_recovery_one_minute,
+// sleep_breathing_disturbance, and afib_burden are interval timeseries. All
+// reduce to daily-grain observations below.
 const JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
   JunctionTimeseriesResource,
   JunctionDailyTimeseriesDescriptor,
@@ -772,22 +837,120 @@ const JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
     unit: "ml/kg/min",
     valuePaths: JUNCTION_VO2_MAX_VALUE_PATHS,
   }],
+  ["body_temperature_delta", {
+    normalizeValue: normalizeBodyTemperatureDeltaCelsius,
+    observations: [
+      { metric: "temperature-deviation", statistic: "mean", title: "Junction body temperature deviation" },
+    ],
+    unit: "celsius",
+    valuePaths: JUNCTION_BODY_TEMPERATURE_DELTA_VALUE_PATHS,
+  }],
+  ["body_temperature", {
+    normalizeValue: normalizeBodyTemperatureCelsius,
+    observations: [
+      { metric: "temperature", statistic: "mean", title: "Junction body temperature average" },
+    ],
+    unit: "celsius",
+    valuePaths: JUNCTION_BODY_TEMPERATURE_VALUE_PATHS,
+  }],
+  ["basal_body_temperature", {
+    normalizeValue: normalizeBodyTemperatureCelsius,
+    observations: [
+      { metric: "basal-body-temperature", statistic: "mean", title: "Junction basal body temperature average" },
+    ],
+    unit: "celsius",
+    valuePaths: JUNCTION_BASAL_BODY_TEMPERATURE_VALUE_PATHS,
+  }],
+  ["caffeine", {
+    normalizeValue: normalizeCaffeineMilligrams,
+    observations: [
+      { metric: "caffeine", statistic: "sum", title: "Junction caffeine intake" },
+    ],
+    unit: "mg",
+    valuePaths: JUNCTION_CAFFEINE_VALUE_PATHS,
+  }],
+  ["water", {
+    normalizeValue: normalizeWaterMilliliters,
+    observations: [
+      { metric: "water", statistic: "sum", title: "Junction water intake" },
+    ],
+    unit: "ml",
+    valuePaths: JUNCTION_WATER_VALUE_PATHS,
+  }],
+  ["mindfulness_minutes", {
+    normalizeValue: normalizeMindfulnessMinutesValue,
+    observations: [
+      { metric: "mindfulness-minutes", statistic: "sum", title: "Junction mindful minutes" },
+    ],
+    unit: "minutes",
+    valuePaths: JUNCTION_MINDFULNESS_MINUTES_VALUE_PATHS,
+  }],
+  ["heart_rate_recovery_one_minute", {
+    normalizeValue: normalizeHeartRateRecoveryBeats,
+    observations: [
+      { metric: "heart-rate-recovery-one-minute", statistic: "mean", title: "Junction heart rate recovery (1 min) average" },
+    ],
+    unit: "bpm",
+    valuePaths: JUNCTION_HEART_RATE_RECOVERY_VALUE_PATHS,
+  }],
+  ["sleep_breathing_disturbance", {
+    normalizeValue: normalizeSleepBreathingDisturbanceValue,
+    observations: [
+      { metric: "sleep-breathing-disturbance", statistic: "mean", title: "Junction sleep breathing disturbances" },
+    ],
+    unit: "count",
+    valuePaths: JUNCTION_SLEEP_BREATHING_DISTURBANCE_VALUE_PATHS,
+  }],
+  // Apple computes AFib burden roughly weekly; the daily-aggregate seam still
+  // bounds it to at most one artifact per day with data.
+  ["afib_burden", {
+    normalizeValue: normalizeAfibBurdenPercent,
+    observations: [
+      { metric: "afib-burden", statistic: "mean", title: "Junction AFib burden" },
+    ],
+    unit: "%",
+    valuePaths: JUNCTION_AFIB_BURDEN_VALUE_PATHS,
+  }],
+  ["glucose", {
+    normalizeValue: normalizeGlucoseMilligramsPerDeciliter,
+    observations: [
+      { metric: "glucose", statistic: "mean", title: "Junction glucose average" },
+      { metric: "lowest-glucose", statistic: "min", title: "Junction glucose minimum" },
+      { metric: "highest-glucose", statistic: "max", title: "Junction glucose maximum" },
+    ],
+    unit: "mg/dL",
+    valuePaths: JUNCTION_GLUCOSE_VALUE_PATHS,
+  }],
 ];
 
 const JUNCTION_DAILY_TIMESERIES_DESCRIPTORS: ReadonlyMap<string, JunctionDailyTimeseriesDescriptor> =
   new Map(JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES);
 
-// Derived from the descriptor entries so the raw-snapshot sanitization
-// allowlist cannot drift from the bounded daily-aggregate normalization set.
-const COMPACT_TIMESERIES_RESOURCE_ALLOWLIST: ReadonlySet<string> = new Set(
-  JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES.map(([resource]) => resource),
-);
+// Junction's blood-pressure timeseries pairs `systolic`/`diastolic` per
+// reading (docs.junction.com/api-reference/data/timeseries/blood-pressure),
+// so it cannot reduce through the single-value daily-aggregate descriptors.
+// Readings are sparse (10s-100s per member-year): each one lands as a paired
+// `measurement` event plus one compact per-reading raw artifact.
+const JUNCTION_BLOOD_PRESSURE_RESOURCE = "blood_pressure";
+
+// Derived from the descriptor entries (plus the sparse paired blood-pressure
+// resource) so the raw-snapshot sanitization allowlist cannot drift from the
+// bounded normalization set.
+const COMPACT_TIMESERIES_RESOURCE_ALLOWLIST: ReadonlySet<string> = new Set([
+  ...JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES.map(([resource]) => resource),
+  JUNCTION_BLOOD_PRESSURE_RESOURCE,
+]);
 
 function normalizeTimeseries(
   timeseries: Record<string, unknown> | undefined,
   context: NormalizationContext,
 ): void {
   for (const [resource, payload] of allowedResourceEntries(timeseries, TIMESERIES_RESOURCE_ALLOWLIST)) {
+    if (resource === JUNCTION_BLOOD_PRESSURE_RESOURCE) {
+      pushJunctionBloodPressureReadings(payload, resource, slugify(resource, "timeseries"), context);
+      continue;
+    }
+
     const descriptor = JUNCTION_DAILY_TIMESERIES_DESCRIPTORS.get(resource);
     if (descriptor) {
       pushJunctionDailyTimeseriesObservations(payload, resource, slugify(resource, "timeseries"), context, descriptor);
@@ -815,11 +978,25 @@ function pushJunctionDailyTimeseriesObservations(
         metric: observation.metric,
         title: observation.title,
         unit: descriptor.unit,
-        value: observation.statistic === "min"
-          ? aggregate.minValue
-          : aggregate.sum / aggregate.sampleCount,
+        value: junctionDailyTimeseriesStatisticValue(aggregate, observation.statistic),
       });
     }
+  }
+}
+
+function junctionDailyTimeseriesStatisticValue(
+  aggregate: JunctionDailyTimeseriesAggregate,
+  statistic: JunctionDailyTimeseriesObservationDescriptor["statistic"],
+): number {
+  switch (statistic) {
+    case "min":
+      return aggregate.minValue;
+    case "max":
+      return aggregate.maxValue;
+    case "sum":
+      return aggregate.sum;
+    case "mean":
+      return aggregate.sum / aggregate.sampleCount;
   }
 }
 
@@ -876,6 +1053,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
         firstSampleAt: sampleAt,
         lastRecordedAt: recordedAt,
         lastSampleAt: sampleAt,
+        maxValue: value,
         minValue: value,
         rawArtifactRole,
         resourceContext,
@@ -901,6 +1079,10 @@ function buildJunctionDailyTimeseriesAggregates(input: {
 
     if (value < existing.minValue) {
       existing.minValue = value;
+    }
+
+    if (value > existing.maxValue) {
+      existing.maxValue = value;
     }
   }
 
@@ -975,6 +1157,7 @@ function pushJunctionDailyTimeseriesAggregateArtifacts(
             lastRecordedAt: aggregate.lastRecordedAt,
             meanValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.sum / aggregate.sampleCount),
             minValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.minValue),
+            maxValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.maxValue),
             unit: junctionDailyTimeseriesAggregateUnit(resource),
           }),
         ),
@@ -996,6 +1179,7 @@ function junctionDailyTimeseriesAggregateUnit(resource: string): string | undefi
 function withJunctionCompactTimeseriesMetadata(
   resource: string,
   artifact: DeviceRawArtifactPayload | null,
+  resourceCategory: "timeseries_daily_aggregate" | "timeseries_reading" = "timeseries_daily_aggregate",
 ): DeviceRawArtifactPayload | null {
   if (!artifact) {
     return null;
@@ -1004,10 +1188,12 @@ function withJunctionCompactTimeseriesMetadata(
   return {
     ...artifact,
     metadata: {
-      artifactClass: "compact_provider_timeseries_aggregate",
+      artifactClass: resourceCategory === "timeseries_reading"
+        ? "compact_provider_timeseries_reading"
+        : "compact_provider_timeseries_aggregate",
       provider: "junction",
       resource,
-      resourceCategory: "timeseries_daily_aggregate",
+      resourceCategory,
       retentionClass: "provider_evidence",
     },
   };
@@ -1048,6 +1234,135 @@ function pushJunctionDailyTimeseriesObservation(
       unit: observation.unit,
     },
   }));
+}
+
+// Sparse paired blood-pressure readings land as-is: one canonical
+// `measurement` event (systolic + diastolic mmHg entries, so both flow into
+// the existing blood-pressure catalog metrics) plus one compact per-reading
+// raw artifact (~350 B; readings arrive 10s-100s per member-year).
+function pushJunctionBloodPressureReadings(
+  payload: unknown,
+  resource: string,
+  resourceSlug: string,
+  context: NormalizationContext,
+): void {
+  const baseArtifactRole = `junction-timeseries-reading-${resourceSlug}`;
+  let readingCount = 0;
+
+  for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource,
+      resourceSlug,
+      identityKind: "timeseries",
+      index,
+      fallbackArtifactRole: baseArtifactRole,
+      context,
+    });
+
+    if (!resourceContext) {
+      continue;
+    }
+
+    const systolic = normalizeSystolicMmHg(firstNumberFromPaths(entry, JUNCTION_BLOOD_PRESSURE_SYSTOLIC_PATHS));
+    const diastolic = normalizeDiastolicMmHg(firstNumberFromPaths(entry, JUNCTION_BLOOD_PRESSURE_DIASTOLIC_PATHS));
+    const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+    const occurredAt = timestamp.occurredAt ?? timestamp.recordedAt;
+    const dayKey = resolveJunctionTimeseriesAggregateDayKey(entry, timestamp, occurredAt);
+
+    if (systolic === undefined || diastolic === undefined || systolic <= diastolic || !occurredAt || !dayKey) {
+      continue;
+    }
+
+    readingCount += 1;
+    // Reading identity includes the paired values so same-second readings
+    // from coarse-timestamp providers never collapse into one event, while
+    // true duplicate deliveries still merge idempotently via externalRef.
+    const readingIdentityHash = shortHash([
+      resourceSlug,
+      resourceContext.sourceProviderSlug,
+      resourceContext.origin.sourceType ?? "",
+      resourceContext.origin.sourceInstanceId ?? "",
+      timestamp.observedAtRaw ?? occurredAt,
+      systolic,
+      diastolic,
+    ]);
+    const role = `${baseArtifactRole}:${dayKey}:${shortHash([readingIdentityHash, String(index)])}`;
+
+    pushRawArtifact(
+      context.rawArtifacts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createRawArtifact(
+          role,
+          `${role}.json`,
+          stripUndefined({
+            schema: "junction.blood_pressure_reading.v1",
+            provider: "junction",
+            resource,
+            dayKey,
+            sourceProviderSlug: resourceContext.sourceProviderSlug,
+            sourceType: resourceContext.origin.sourceType,
+            sourceInstanceId: resourceContext.origin.sourceInstanceId,
+            occurredAt,
+            recordedAt: timestamp.recordedAt,
+            systolic,
+            diastolic,
+            unit: "mmHg",
+          }),
+        ),
+        "timeseries_reading",
+      ),
+    );
+
+    context.events.push(stripUndefined({
+      kind: "measurement",
+      occurredAt,
+      recordedAt: timestamp.recordedAt,
+      dayKey,
+      timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
+      source: "device",
+      title: "Junction blood pressure",
+      rawArtifactRoles: [role],
+      externalRef: makeProviderExternalRef(
+        "junction",
+        resourceContext.externalRefResourceType,
+        `${resourceSlug}-${readingIdentityHash}`,
+        undefined,
+        "blood-pressure",
+      ),
+      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+      fields: {
+        measurements: [
+          { metric: "systolic-blood-pressure", value: systolic, unit: "mmHg" },
+          { metric: "diastolic-blood-pressure", value: diastolic, unit: "mmHg" },
+        ],
+      },
+    }));
+  }
+
+  if (readingCount === 0) {
+    const role = `${baseArtifactRole}:no-valid-samples`;
+    pushRawArtifact(
+      context.rawArtifacts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createRawArtifact(
+          role,
+          `${role}.json`,
+          {
+            schema: "junction.blood_pressure_reading.v1",
+            provider: "junction",
+            resource,
+            readingCount: 0,
+            status: "no_valid_samples",
+          },
+        ),
+        "timeseries_reading",
+      ),
+    );
+  }
 }
 
 function buildRawResourcePayload(
@@ -2868,6 +3183,129 @@ function normalizeVo2Max(value: unknown): number | undefined {
   const numeric = finiteNumber(value);
 
   if (numeric === undefined || numeric <= 0 || numeric > 120) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(numeric);
+}
+
+// Apple Watch wrist-temperature deviation is a nightly delta in °C
+// (docs.junction.com/api-reference/data/timeseries/body-temperature-delta);
+// negative deltas are valid and a swing beyond ±5 °C is implausible.
+function normalizeBodyTemperatureDeltaCelsius(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || numeric < -5 || numeric > 5) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(numeric);
+}
+
+function normalizeBodyTemperatureCelsius(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || numeric < 30 || numeric > 45) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(numeric);
+}
+
+// Junction's caffeine timeseries is documented in grams
+// (docs.junction.com/api-reference/data/timeseries/caffeine); convert to
+// milligrams for the observation metric. 2 g per logged entry is already an
+// implausible single intake.
+function normalizeCaffeineMilligrams(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || numeric <= 0 || numeric > 2) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(numeric * 1000);
+}
+
+function normalizeWaterMilliliters(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || numeric <= 0 || numeric > 10_000) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(numeric);
+}
+
+function normalizeMindfulnessMinutesValue(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || numeric <= 0 || numeric > 1440) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(numeric);
+}
+
+function normalizeHeartRateRecoveryBeats(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || numeric <= 0 || numeric > 120) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(numeric);
+}
+
+// A zero-disturbance night is a meaningful fact, so zero stays valid.
+function normalizeSleepBreathingDisturbanceValue(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || numeric < 0 || numeric > 200) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(numeric);
+}
+
+function normalizeAfibBurdenPercent(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || numeric < 0 || numeric > 100) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(numeric);
+}
+
+// Junction normalizes glucose timeseries to mmol/L
+// (docs.junction.com/api-reference/data/timeseries/glucose); the plausibility
+// window is therefore mmol/L-shaped (1-35 covers meter and CGM extremes, and
+// mg/dL-scale values fail closed instead of corrupting the metric). Convert
+// to mg/dL to match the `glucose` metric-catalog canonical unit.
+function normalizeGlucoseMilligramsPerDeciliter(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || numeric < 1 || numeric > 35) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(numeric * 18.0182);
+}
+
+function normalizeSystolicMmHg(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || numeric < 60 || numeric > 260) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(numeric);
+}
+
+function normalizeDiastolicMmHg(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || numeric < 30 || numeric > 160) {
     return undefined;
   }
 
