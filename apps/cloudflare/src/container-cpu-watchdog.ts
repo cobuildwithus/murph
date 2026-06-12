@@ -1,19 +1,12 @@
-import { createHmac } from "node:crypto";
-
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 
 const HOSTED_CONTAINER_CPU_WATCHDOG_INTERVAL_MS = 20_000;
 const HOSTED_CONTAINER_CPU_WATCHDOG_EMIT_THRESHOLD_CORES = 0.5;
 const HOSTED_CONTAINER_CPU_WATCHDOG_TOP_PROCESS_COUNT = 3;
-const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME =
-  "HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET";
+const HOSTED_CONTAINER_CPU_WATCHDOG_REDACTED_COMM = "[redacted]";
 // Linux exports per-process utime/stime in USER_HZ ticks; USER_HZ is 100 on the
 // linux/amd64 hosted runner image. Diagnostics-only conversion, not authority.
 const HOSTED_CONTAINER_CPU_WATCHDOG_TICKS_PER_SECOND = 100;
-// Expected infrastructure process names in the hosted runner image. comm is
-// process-controlled content (script basenames via shebang, PR_SET_NAME), so
-// anything outside this vocabulary is logged as a stable non-reversible digest
-// instead of raw text, mirroring the entrypoint's commandLineDigest precedent.
 const HOSTED_CONTAINER_CPU_WATCHDOG_KNOWN_COMMS = new Set([
   "bash",
   "codex",
@@ -77,7 +70,6 @@ interface HostedContainerCpuWatchdogSample {
 export function startHostedContainerCpuWatchdog(input: {
   processApi: HostedContainerCpuWatchdogProcessApi;
 }): () => void {
-  const fingerprintSecret = resolveCpuWatchdogFingerprintSecret();
   let previous: HostedContainerCpuWatchdogSample | null = null;
   let sampling = false;
   let stopped = false;
@@ -95,7 +87,7 @@ export function startHostedContainerCpuWatchdog(input: {
         return;
       }
       if (previous) {
-        emitHostedContainerCpuWatchdogReport({ current, fingerprintSecret, previous });
+        emitHostedContainerCpuWatchdogReport({ current, previous });
       } else {
         // One-time liveness signal: steady-state watchdog silence is otherwise
         // ambiguous between "no burns" and "sampler broken on this platform",
@@ -133,12 +125,6 @@ export function startHostedContainerCpuWatchdog(input: {
     stopped = true;
     clearInterval(interval);
   };
-}
-
-function resolveCpuWatchdogFingerprintSecret(): string | null {
-  const secret =
-    process.env[HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME]?.trim();
-  return secret || null;
 }
 
 async function readHostedContainerCpuWatchdogSample(
@@ -258,7 +244,6 @@ function parseHostedContainerProcPidStat(
 
 function emitHostedContainerCpuWatchdogReport(input: {
   current: HostedContainerCpuWatchdogSample;
-  fingerprintSecret: string | null;
   previous: HostedContainerCpuWatchdogSample;
 }): void {
   const intervalMs = input.current.sampledAtMs - input.previous.sampledAtMs;
@@ -266,7 +251,12 @@ function emitHostedContainerCpuWatchdogReport(input: {
     return;
   }
   const intervalSeconds = intervalMs / 1000;
-  const topCpuProcesses: Array<{ comm: string; cpuCores: number; pid: number }> = [];
+  const topCpuProcesses: Array<{
+    comm: string;
+    commRedacted: boolean;
+    cpuCores: number;
+    pid: number;
+  }> = [];
   let perPidTicksDelta = 0;
   for (const [pid, current] of input.current.perPid) {
     const prior = input.previous.perPid.get(pid);
@@ -296,8 +286,10 @@ function emitHostedContainerCpuWatchdogReport(input: {
     }
     perPidTicksDelta += deltaTicks;
     if (deltaTicks > 0) {
+      const redactedComm = redactHostedContainerCpuWatchdogComm(current.comm);
       topCpuProcesses.push({
-        comm: redactHostedContainerCpuWatchdogComm(current.comm, input.fingerprintSecret),
+        comm: redactedComm.comm,
+        commRedacted: redactedComm.redacted,
         cpuCores: roundHostedContainerCpuCores(
           deltaTicks / HOSTED_CONTAINER_CPU_WATCHDOG_TICKS_PER_SECOND / intervalSeconds,
         ),
@@ -349,22 +341,13 @@ function emitHostedContainerCpuWatchdogReport(input: {
   });
 }
 
-// comm values are short, process-controlled text, so an unkeyed digest is
-// guessable by dictionary. With the hosted log fingerprint secret configured,
-// unknown names get a stable keyed label so a recurring unknown burner stays
-// distinguishable across intervals; without it they collapse into one
-// undifferentiated bucket rather than carrying any comm-derived identifier.
 function redactHostedContainerCpuWatchdogComm(
   comm: string,
-  fingerprintSecret: string | null,
-): string {
+): { comm: string; redacted: boolean } {
   if (HOSTED_CONTAINER_CPU_WATCHDOG_KNOWN_COMMS.has(comm)) {
-    return comm;
+    return { comm, redacted: false };
   }
-  if (fingerprintSecret === null) {
-    return "other";
-  }
-  return `other:${createHmac("sha256", fingerprintSecret).update(comm).digest("hex").slice(0, 16)}`;
+  return { comm: HOSTED_CONTAINER_CPU_WATCHDOG_REDACTED_COMM, redacted: true };
 }
 
 function subtractOptionalCpuWatchdogCounters(
