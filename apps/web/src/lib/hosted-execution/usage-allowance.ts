@@ -784,6 +784,12 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
       currentBillingPlanCode === resolved.billingPlanCode &&
       current.limitUsdMicros === resolved.limitUsdMicros &&
       current.periodEnd.getTime() === resolved.periodEnd.getTime();
+    const carryoverSpentUsdMicros =
+      await readHostedAiUsageAllowanceCarryoverSpendTx({
+        memberId: input.memberId,
+        resolved,
+        tx: input.tx,
+      });
 
     return {
       kind: "period",
@@ -791,15 +797,21 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
       limitUsdMicros: periodMatches ? current.limitUsdMicros : resolved.limitUsdMicros,
       periodEnd: periodMatches ? current.periodEnd : resolved.periodEnd,
       periodStart: periodMatches ? current.periodStart : resolved.periodStart,
-      spentUsdMicros: current.spentUsdMicros,
+      spentUsdMicros: current.spentUsdMicros + carryoverSpentUsdMicros,
     };
   }
 
-  const spentUsdMicros = await readHostedAiUsageAllowancePeriodSpendTx({
+  const periodSpentUsdMicros = await readHostedAiUsageAllowancePeriodSpendTx({
     memberId: input.memberId,
     periodStart: resolved.periodStart,
     tx: input.tx,
   });
+  const carryoverSpentUsdMicros =
+    await readHostedAiUsageAllowanceCarryoverSpendTx({
+      memberId: input.memberId,
+      resolved,
+      tx: input.tx,
+    });
 
   return {
     kind: "period",
@@ -807,7 +819,7 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     limitUsdMicros: resolved.limitUsdMicros,
     periodEnd: resolved.periodEnd,
     periodStart: resolved.periodStart,
-    spentUsdMicros,
+    spentUsdMicros: periodSpentUsdMicros + carryoverSpentUsdMicros,
   };
 }
 
@@ -827,6 +839,51 @@ async function readHostedAiUsageAllowancePeriodSpendTx(input: {
       allowanceCounted: true,
       allowancePeriodStart: input.periodStart,
       memberId: input.memberId,
+    },
+  });
+
+  return aggregate._sum.allowanceCostUsdMicros ?? 0n;
+}
+
+async function readHostedAiUsageAllowanceCarryoverSpendTx(input: {
+  memberId: string;
+  resolved: {
+    periodEnd: Date;
+    periodStart: Date;
+    source: "billing" | "calendar" | "trial";
+  };
+  tx: Prisma.TransactionClient;
+}): Promise<bigint> {
+  if (input.resolved.source !== "billing") {
+    return 0n;
+  }
+
+  const aggregate = await input.tx.hostedAiUsage.aggregate({
+    _sum: {
+      allowanceCostUsdMicros: true,
+    },
+    where: {
+      allowanceAccountedAt: {
+        not: null,
+      },
+      allowanceCounted: true,
+      AND: [
+        {
+          allowancePeriodStart: {
+            not: null,
+          },
+        },
+        {
+          allowancePeriodStart: {
+            not: input.resolved.periodStart,
+          },
+        },
+      ],
+      memberId: input.memberId,
+      occurredAt: {
+        gte: input.resolved.periodStart,
+        lt: input.resolved.periodEnd,
+      },
     },
   });
 

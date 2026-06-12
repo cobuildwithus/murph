@@ -3,6 +3,9 @@ import {
   readHostedAiUsageGate,
   resolveHostedAiUsageGate,
 } from "../hosted-execution/usage-allowance";
+import {
+  hostedMailboxSystemItemKindNeedsAiUsageGate,
+} from "../hosted-mailbox/ai-usage-gate";
 
 const HOSTED_RUNTIME_USAGE_GATE_UNAVAILABLE_RETRY_MS = 30_000;
 
@@ -48,14 +51,16 @@ export async function resolveHostedRuntimeAiUsageGate(input: {
   }
 }
 
-// AI-gated mailbox work: conversation-lane items and explicit manual runs.
-// Shared by the hosted mailbox fetch/payload routes so "what counts as AI
-// work" has one definition.
+// AI-gated mailbox work: conversation-lane items and shared gated system kinds.
 export function hostedRuntimeMailboxEntryNeedsAiUsageGate(entry: {
   kind: string;
   lane: string;
 }): boolean {
-  return entry.lane === "conversation" || entry.kind === "runtime.manual-requested";
+  return entry.lane === "conversation" ||
+    (
+      entry.lane === "system" &&
+      hostedMailboxSystemItemKindNeedsAiUsageGate(entry.kind)
+    );
 }
 
 function buildHostedRuntimeUsageGateUnavailableRetryAt(now: Date): string {

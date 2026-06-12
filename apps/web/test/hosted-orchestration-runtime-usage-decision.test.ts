@@ -98,6 +98,10 @@ describe("hostedRuntimeMailboxEntryNeedsAiUsageGate", () => {
       lane: "system",
     })).toBe(true);
     expect(hostedRuntimeMailboxEntryNeedsAiUsageGate({
+      kind: "runtime.browser-vault-refresh-requested",
+      lane: "system",
+    })).toBe(false);
+    expect(hostedRuntimeMailboxEntryNeedsAiUsageGate({
       kind: "device-sync.wake",
       lane: "device-sync",
     })).toBe(false);

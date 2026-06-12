@@ -776,11 +776,17 @@ describe("resolveHostedAiUsageGate", () => {
 
 describe("readHostedAiUsageGate", () => {
   it("reads gate state without creating or updating usage-period rows", async () => {
-    const aggregate = vi.fn(async () => ({
-      _sum: {
-        allowanceCostUsdMicros: 11_000_000n,
-      },
-    }));
+    const aggregate = vi.fn()
+      .mockResolvedValueOnce({
+        _sum: {
+          allowanceCostUsdMicros: 11_000_000n,
+        },
+      })
+      .mockResolvedValueOnce({
+        _sum: {
+          allowanceCostUsdMicros: null,
+        },
+      });
     const prisma = createGatePrisma({
       aggregate,
       findUniquePeriod: null,
@@ -806,6 +812,74 @@ describe("readHostedAiUsageGate", () => {
         allowanceCounted: true,
         allowancePeriodStart: new Date("2026-03-01T00:00:00.000Z"),
         memberId: "member_123",
+      }),
+    }));
+    expect(aggregate).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        allowanceCounted: true,
+        memberId: "member_123",
+        occurredAt: {
+          gte: new Date("2026-03-01T00:00:00.000Z"),
+          lt: new Date("2026-04-01T00:00:00.000Z"),
+        },
+      }),
+    }));
+  });
+
+  it("includes unmaterialized billing-period carryover before allowing", async () => {
+    const aggregate = vi.fn(async () => ({
+      _sum: {
+        allowanceCostUsdMicros: 6_000_000n,
+      },
+    }));
+    const prisma = createGatePrisma({
+      aggregate,
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        limitUsdMicros: 10_000_000n,
+        periodEnd: new Date("2026-05-15T00:00:00.000Z"),
+        periodStart: new Date("2026-04-15T00:00:00.000Z"),
+        spentUsdMicros: 5_000_000n,
+      },
+      periodEnd: new Date("2026-05-15T00:00:00.000Z"),
+      periodStart: new Date("2026-04-15T00:00:00.000Z"),
+      spentUsdMicros: 5_000_000n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-20T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "ai_usage_limit_exceeded",
+      spentUsdMicros: 11_000_000n,
+    });
+
+    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(aggregate).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        AND: [
+          {
+            allowancePeriodStart: {
+              not: null,
+            },
+          },
+          {
+            allowancePeriodStart: {
+              not: new Date("2026-04-15T00:00:00.000Z"),
+            },
+          },
+        ],
+        allowanceCounted: true,
+        memberId: "member_123",
+        occurredAt: {
+          gte: new Date("2026-04-15T00:00:00.000Z"),
+          lt: new Date("2026-05-15T00:00:00.000Z"),
+        },
       }),
     }));
   });
