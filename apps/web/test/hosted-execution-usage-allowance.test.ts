@@ -807,6 +807,11 @@ describe("readHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
     expect(prisma.$executeRaw).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(
+      aggregate.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      prisma.hostedAiUsagePeriod.findUnique.mock.invocationCallOrder[0],
+    );
     expect(aggregate).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         allowanceCounted: true,
@@ -860,6 +865,11 @@ describe("readHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
     expect(prisma.$executeRaw).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(
+      aggregate.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      prisma.hostedAiUsagePeriod.findUnique.mock.invocationCallOrder[0],
+    );
     expect(aggregate).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         AND: [

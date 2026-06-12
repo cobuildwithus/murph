@@ -762,6 +762,13 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     };
   }
 
+  const carryoverSpentUsdMicros =
+    await readHostedAiUsageAllowanceCarryoverSpendTx({
+      memberId: input.memberId,
+      resolved,
+      tx: input.tx,
+    });
+
   const current = await input.tx.hostedAiUsagePeriod.findUnique({
     where: {
       memberId_periodStart: {
@@ -785,12 +792,6 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
       currentBillingPlanCode === resolved.billingPlanCode &&
       current.limitUsdMicros === resolved.limitUsdMicros &&
       current.periodEnd.getTime() === resolved.periodEnd.getTime();
-    const carryoverSpentUsdMicros =
-      await readHostedAiUsageAllowanceCarryoverSpendTx({
-        memberId: input.memberId,
-        resolved,
-        tx: input.tx,
-      });
 
     return {
       kind: "period",
@@ -807,12 +808,6 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     periodStart: resolved.periodStart,
     tx: input.tx,
   });
-  const carryoverSpentUsdMicros =
-    await readHostedAiUsageAllowanceCarryoverSpendTx({
-      memberId: input.memberId,
-      resolved,
-      tx: input.tx,
-    });
 
   return {
     kind: "period",
