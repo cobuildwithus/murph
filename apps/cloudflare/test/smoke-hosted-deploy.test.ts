@@ -460,7 +460,7 @@ describe("runSmokeHostedDeploy", () => {
       const parsedUrl = new URL(String(url));
       if (
         parsedUrl.pathname === "/internal/deploy/container-smoke" &&
-        parsedUrl.searchParams.get("liveModelTurn") === "gpt-5.4-mini"
+        parsedUrl.searchParams.get("liveModelTurn") === "gpt-5.4-nano"
       ) {
         return new Response(JSON.stringify({
           ok: true,
@@ -469,7 +469,7 @@ describe("runSmokeHostedDeploy", () => {
             liveModelTurn: {
               durationMs: 1_234,
               egressGrantConsumed: true,
-              model: "gpt-5.4-mini",
+              model: "gpt-5.4-nano",
               stdoutBytes: 2_048,
             },
             ok: true,
@@ -503,7 +503,7 @@ describe("runSmokeHostedDeploy", () => {
     );
     const liveCall = fetchCalls
       .map((entry) => new URL(entry))
-      .find((entry) => entry.searchParams.get("liveModelTurn") === "gpt-5.4-mini");
+      .find((entry) => entry.searchParams.get("liveModelTurn") === "gpt-5.4-nano");
     expect(liveCall?.searchParams.get("expectedBundleFingerprint")).toBe("bundle-fingerprint");
     expect(liveCall?.searchParams.get("expectedSourceFingerprint")).toBe("source-fingerprint");
   });
@@ -593,7 +593,7 @@ describe("runSmokeHostedDeploy", () => {
       fetchImpl: buildFetchImpl({
         durationMs: 1_234,
         egressGrantConsumed: false,
-        model: "gpt-5.4-mini",
+        model: "gpt-5.4-nano",
         stdoutBytes: 2_048,
       }),
       log() {},
@@ -604,7 +604,7 @@ describe("runSmokeHostedDeploy", () => {
       fetchImpl: buildFetchImpl({
         durationMs: 1_234,
         egressGrantConsumed: true,
-        model: "gpt-5.4-mini",
+        model: "gpt-5.4-nano",
         stdoutBytes: 0,
       }),
       log() {},
@@ -783,7 +783,7 @@ describe("runSmokeHostedDeploy", () => {
 
       if (
         parsedUrl.pathname === "/internal/deploy/container-smoke" &&
-        parsedUrl.searchParams.get("liveModelTurn") === "gpt-5.4-mini"
+        parsedUrl.searchParams.get("liveModelTurn") === "gpt-5.4-nano"
       ) {
         liveSmokeAttempts += 1;
         if (liveSmokeAttempts === 1) {
@@ -801,7 +801,7 @@ describe("runSmokeHostedDeploy", () => {
             liveModelTurn: {
               durationMs: 1_234,
               egressGrantConsumed: true,
-              model: "gpt-5.4-mini",
+              model: "gpt-5.4-nano",
               stdoutBytes: 2_048,
             },
             ok: true,
@@ -840,7 +840,7 @@ describe("runSmokeHostedDeploy", () => {
       );
     const liveCalls = fetchCalls
       .map((entry) => new URL(entry))
-      .filter((entry) => entry.searchParams.get("liveModelTurn") === "gpt-5.4-mini");
+      .filter((entry) => entry.searchParams.get("liveModelTurn") === "gpt-5.4-nano");
     expect(readinessCalls).toHaveLength(2);
     expect(liveCalls).toHaveLength(2);
     expect(liveCalls.every((entry) =>

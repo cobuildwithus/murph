@@ -820,7 +820,7 @@ describe("startHostedContainerEntrypoint", () => {
   it("runs the managed-container live model turn smoke through the codex exec hook", async () => {
     const runLiveModelTurnSmoke = vi.fn(async () => ({
       durationMs: 1_234,
-      model: "gpt-5.4-mini",
+      model: "gpt-5.4-nano",
       stdoutBytes: 2_048,
     }));
     const server = await startHostedContainerEntrypoint({
@@ -837,7 +837,7 @@ describe("startHostedContainerEntrypoint", () => {
     }
 
     const response = await sendHostedContainerJsonRequest({
-      body: JSON.stringify({ model: "gpt-5.4-mini" }),
+      body: JSON.stringify({ model: "gpt-5.4-nano" }),
       path: "/internal/deploy-live-model-turn-smoke",
       port: address.port,
     });
@@ -846,13 +846,13 @@ describe("startHostedContainerEntrypoint", () => {
     expect(response.json).toEqual({
       liveModelTurn: {
         durationMs: 1_234,
-        model: "gpt-5.4-mini",
+        model: "gpt-5.4-nano",
         stdoutBytes: 2_048,
       },
       ok: true,
     });
     expect(runLiveModelTurnSmoke).toHaveBeenCalledWith({
-      model: "gpt-5.4-mini",
+      model: "gpt-5.4-nano",
       signal: expect.any(AbortSignal),
     });
   });
@@ -939,7 +939,7 @@ describe("startHostedContainerEntrypoint", () => {
     }
 
     const response = await sendHostedContainerJsonRequest({
-      body: JSON.stringify({ model: "gpt-5.4-mini" }),
+      body: JSON.stringify({ model: "gpt-5.4-nano" }),
       path: "/internal/deploy-live-model-turn-smoke",
       port: address.port,
     });

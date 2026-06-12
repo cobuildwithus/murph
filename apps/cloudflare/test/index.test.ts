@@ -553,7 +553,7 @@ describe("cloudflare worker routes", () => {
         model: string;
       };
     }) => {
-      if (input.liveModelTurn?.model !== "gpt-5.4-mini") {
+      if (input.liveModelTurn?.model !== "gpt-5.4-nano") {
         throw new Error("Expected the live model turn smoke input.");
       }
       if (
@@ -567,7 +567,7 @@ describe("cloudflare worker routes", () => {
         liveModelTurn: {
           durationMs: 1_234,
           egressGrantConsumed: true,
-          model: "gpt-5.4-mini",
+          model: "gpt-5.4-nano",
           stdoutBytes: 2_048,
         },
         ok: true,
@@ -591,7 +591,7 @@ describe("cloudflare worker routes", () => {
     });
     const url = new URL(
       "https://runner.example.test/internal/deploy/container-smoke"
-        + "?liveModelTurn=gpt-5.4-mini"
+        + "?liveModelTurn=gpt-5.4-nano"
         + "&expectedBundleFingerprint=bundle-fingerprint"
         + "&expectedSourceFingerprint=source-fingerprint",
     );
@@ -616,7 +616,7 @@ describe("cloudflare worker routes", () => {
         sourceFingerprint: "source-fingerprint",
       },
       liveModelTurn: {
-        model: "gpt-5.4-mini",
+        model: "gpt-5.4-nano",
       },
     });
     await expect(response.json()).resolves.toMatchObject({
@@ -625,7 +625,7 @@ describe("cloudflare worker routes", () => {
         liveModelTurn: {
           durationMs: 1_234,
           egressGrantConsumed: true,
-          model: "gpt-5.4-mini",
+          model: "gpt-5.4-nano",
           stdoutBytes: 2_048,
         },
       },
@@ -654,7 +654,7 @@ describe("cloudflare worker routes", () => {
     });
     const url = new URL(
       "https://runner.example.test/internal/deploy/container-smoke"
-        + "?liveModelTurn=gpt-5.4-mini"
+        + "?liveModelTurn=gpt-5.4-nano"
         + "&expectedBundleFingerprint=bundle-fingerprint"
         + "&expectedSourceFingerprint=source-fingerprint",
     );

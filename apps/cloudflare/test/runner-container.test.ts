@@ -1247,13 +1247,13 @@ describe("RunnerContainer", () => {
         fenceActiveDuringTurn = firstFenceRead?.active ?? null;
         expect(firstFenceRead).toEqual({
           active: true,
-          model: "gpt-5.4-mini",
+          model: "gpt-5.4-nano",
         });
         secondFenceReadDuringTurn = await containerRef?.readDeploySmokeLiveModelTurnFence() ?? null;
         return new Response(JSON.stringify({
           liveModelTurn: {
             durationMs: 1_234,
-            model: "gpt-5.4-mini",
+            model: "gpt-5.4-nano",
             stdoutBytes: 2_048,
           },
           ok: true,
@@ -1276,14 +1276,14 @@ describe("RunnerContainer", () => {
 
     const result = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-5.4-mini",
+        model: "gpt-5.4-nano",
       },
     });
 
     expect(result.liveModelTurn).toEqual({
       durationMs: 1_234,
       egressGrantConsumed: true,
-      model: "gpt-5.4-mini",
+      model: "gpt-5.4-nano",
       stdoutBytes: 2_048,
     });
     expect(result.codexShell).toEqual(createCodexShellSmokeResult());
@@ -1299,7 +1299,7 @@ describe("RunnerContainer", () => {
       String(url).endsWith("/internal/deploy-live-model-turn-smoke")
     );
     expect(JSON.parse(smokeCall?.[1]?.body as string)).toEqual({
-      model: "gpt-5.4-mini",
+      model: "gpt-5.4-nano",
     });
   });
 
@@ -1335,7 +1335,7 @@ describe("RunnerContainer", () => {
           return new Response(JSON.stringify({
             liveModelTurn: {
               durationMs: 1_234,
-              model: "gpt-5.4-mini",
+              model: "gpt-5.4-nano",
               stdoutBytes: 2_048,
             },
             ok: true,
@@ -1356,7 +1356,7 @@ describe("RunnerContainer", () => {
 
     const error = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-5.4-mini",
+        model: "gpt-5.4-nano",
       },
     }).catch((caught: unknown) => caught);
 
@@ -1415,7 +1415,7 @@ describe("RunnerContainer", () => {
         sourceFingerprint: "expected-source",
       },
       liveModelTurn: {
-        model: "gpt-5.4-mini",
+        model: "gpt-5.4-nano",
       },
     }).catch((caught: unknown) => caught);
 
@@ -1496,7 +1496,7 @@ describe("RunnerContainer", () => {
 
     const error = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-5.4-mini",
+        model: "gpt-5.4-nano",
       },
     }).catch((caught: unknown) => caught);
 
@@ -1516,7 +1516,7 @@ describe("RunnerContainer", () => {
 
     const error = await container.smokeHealth({
       liveModelTurn: {
-        model: "gpt-5.4-mini",
+        model: "gpt-5.4-nano",
       },
     }).catch((caught: unknown) => caught);
 

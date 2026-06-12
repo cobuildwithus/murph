@@ -62,7 +62,10 @@ import {
   type HostedExecutionRunnerJobInput,
 } from "./runner-job-transport.ts";
 import {
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
+  readDeployLiveModelTurnSmokeCodexOutputText,
 } from "./deploy-smoke-live-model.ts";
 
 // Module-evaluation timestamp approximates process start; subtracting the
@@ -83,8 +86,8 @@ const HOSTED_CONTAINER_RUNTIME_WAKE_PATH = "/internal/runtime-wake";
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS = 45_000;
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-5.5";
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_TIMEOUT_MS = 60_000;
-const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_PROMPT = "Reply with exactly: OK";
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_MODEL_MAX_CHARS = 128;
+const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_TAIL_MAX_CHARS = 16 * 1024;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS = 512;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
@@ -1402,6 +1405,7 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
     await new Promise((resolve, reject) => {
       const startedAtMs = Date.now();
       let stdoutBytes = 0;
+      let stdoutTail = "";
       let stderrBuffer = "";
       let settled = false;
       let timeout: NodeJS.Timeout | null = null;
@@ -1410,7 +1414,7 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
         "exec",
         "--json",
         "--skip-git-repo-check",
-        HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_PROMPT,
+        DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
       ], {
         cwd: workspace.smokeVaultRoot,
         env: buildHostedContainerCodexShellSmokeProcessEnv({
@@ -1454,7 +1458,11 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
       input.signal.addEventListener("abort", abort, { once: true });
 
       child.stdout?.on("data", (chunk) => {
-        stdoutBytes += Buffer.byteLength(chunk);
+        const text = String(chunk);
+        stdoutBytes += Buffer.byteLength(text);
+        stdoutTail = `${stdoutTail}${text}`.slice(
+          -HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_TAIL_MAX_CHARS,
+        );
       });
       child.stderr?.on("data", (chunk) => {
         // Keep only a bounded prefix; the excerpt is re-capped on use.
@@ -1469,6 +1477,15 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
       });
       child.once("exit", (code, signal) => {
         if (code === 0) {
+          const outputText = readDeployLiveModelTurnSmokeCodexOutputText(stdoutTail);
+          if (outputText !== DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT) {
+            finish(new Error(
+              "Hosted live model turn smoke did not return the expected output. "
+                + `stdoutBytes=${stdoutBytes} `
+                + `outputText=${JSON.stringify(buildHostedContainerLiveModelTurnSmokeSafeText(outputText ?? ""))}`,
+            ));
+            return;
+          }
           finish(null, {
             durationMs: Date.now() - startedAtMs,
             model: input.model,

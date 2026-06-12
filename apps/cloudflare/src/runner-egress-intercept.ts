@@ -60,7 +60,8 @@ import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
 import {
-  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+  readDeployLiveModelTurnSmokeOpenAiRequest,
+  type DeployLiveModelTurnSmokeOpenAiRequest,
 } from "./deploy-smoke-live-model.ts";
 
 type HostedRunnerOutboundHandler = (
@@ -337,9 +338,7 @@ export type HostedRunnerDiagnosticJson = Record<
   string,
   HostedRunnerDiagnosticScalar | HostedRunnerDiagnosticScalar[]
 >;
-interface HostedDeploySmokeLiveModelTurnOpenAiRequest {
-  model: string;
-}
+type HostedDeploySmokeLiveModelTurnOpenAiRequest = DeployLiveModelTurnSmokeOpenAiRequest;
 
 export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutboundHandler> = {
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.artifactStore]: handleHostedRunnerInternalOutbound,
@@ -1196,21 +1195,9 @@ async function readDeploySmokeLiveModelTurnOpenAiRequest(input: {
     return null;
   }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(OPENAI_CACHE_DIAGNOSTIC_TEXT_DECODER.decode(body));
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return null;
-  }
-  const model = typeof (parsed as { model?: unknown }).model === "string"
-    ? (parsed as { model: string }).model.trim()
-    : "";
-  return model === DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL
-    ? { model }
-    : null;
+  return readDeployLiveModelTurnSmokeOpenAiRequest(
+    OPENAI_CACHE_DIAGNOSTIC_TEXT_DECODER.decode(body),
+  );
 }
 
 async function emitHostedRunnerOpenAiCacheDiagnostic(input: {

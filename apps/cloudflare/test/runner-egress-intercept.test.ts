@@ -86,6 +86,46 @@ const OPENAI_WEBSOCKET_HANDSHAKE_HEADERS = {
 } as const;
 const TEST_TEXT_ENCODER = new TextEncoder();
 
+function createDeploySmokeOpenAiRequestBody(input: {
+  model?: string;
+  prompt?: string;
+} = {}): Record<string, unknown> {
+  return {
+    input: [
+      {
+        content: [
+          {
+            text: "Deploy smoke context.",
+            type: "input_text",
+          },
+        ],
+        role: "developer",
+        type: "message",
+      },
+      {
+        content: [
+          {
+            text: input.prompt ?? "Reply with exactly: OK",
+            type: "input_text",
+          },
+        ],
+        role: "user",
+        type: "message",
+      },
+    ],
+    model: input.model ?? "gpt-5.4-nano",
+    reasoning: {
+      effort: "low",
+    },
+    store: false,
+    stream: true,
+    text: {
+      verbosity: "low",
+    },
+    tools: [],
+  };
+}
+
 function createProviderEgressTokenValidationResult(input: {
   userId: string;
 }): WorkerProviderEgressTokenValidationResult {
@@ -995,7 +1035,7 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
     const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
       active: true,
-      model: "gpt-5.4-mini",
+      model: "gpt-5.4-nano",
     }));
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
@@ -1007,10 +1047,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify({
-          input: "Reply with exactly: OK",
-          model: "gpt-5.4-mini",
-        }),
+        body: JSON.stringify(createDeploySmokeOpenAiRequestBody()),
         headers: {
           authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
           "content-type": "application/json",
@@ -1044,7 +1081,7 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
     const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
       active: true,
-      model: "gpt-5.4-mini",
+      model: "gpt-5.4-nano",
     }));
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
@@ -1054,10 +1091,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify({
-          input: "Reply with exactly: OK",
-          model: "gpt-5.5",
-        }),
+        body: JSON.stringify(createDeploySmokeOpenAiRequestBody({ model: "gpt-5.5" })),
         headers: {
           authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
           "content-type": "application/json",
@@ -1085,10 +1119,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify({
-          input: "Reply with exactly: OK",
-          model: "gpt-5.4-mini",
-        }),
+        body: JSON.stringify(createDeploySmokeOpenAiRequestBody()),
         headers: {
           authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
           "content-type": "application/json",
@@ -1101,6 +1132,37 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(401);
     expect(readDeploySmokeLiveModelTurnFence).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects deploy-smoke OpenAI egress when the request prompt is not the smoke prompt", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
+      active: true,
+      model: "gpt-5.4-nano",
+    }));
+    const env = createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+      readDeploySmokeLiveModelTurnFence,
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify(createDeploySmokeOpenAiRequestBody({ prompt: "Do something else." })),
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "deploy-smoke-container-id" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(readDeploySmokeLiveModelTurnFence).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
