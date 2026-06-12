@@ -20,10 +20,11 @@ import {
   wearableProviderRowKey,
 } from "./provider-scope.ts";
 import { stringifyPublicWearableProjectionSummary } from "./wearable-summary-public-json.ts";
-import type {
-  QueryWearableSummaryKind,
-  QueryWearableSummaryRow,
-} from "./wearable-summary-store.ts";
+import {
+  stringifyStoredWearableProjectionSummary,
+  type StoredWearableMetricSummaryKind,
+} from "./wearable-summary-stored-codec.ts";
+import type { QueryWearableSummaryRow } from "./wearable-summary-store.ts";
 
 export function buildWearableSummaryProjection(vault: VaultReadModel): QueryWearableSummaryRow[] {
   const dataset = collectWearableDataset(vault, {});
@@ -215,7 +216,7 @@ function materializeWearableSummaryRows(
   const providerScopeKey = wearableProviderRowKey(provider);
   const providerScopeJson = JSON.stringify([provider]);
   const push = <TSummary extends { date: string }>(
-    summaryKind: Exclude<QueryWearableSummaryKind, "source_health">,
+    summaryKind: StoredWearableMetricSummaryKind,
     summaries: readonly TSummary[],
   ) => {
     summaries.forEach((summary, index) => {
@@ -225,7 +226,7 @@ function materializeWearableSummaryRows(
         providerScopeKey,
         sortRank: index,
         summaryDate: summary.date,
-        summaryJson: stringifyPublicWearableProjectionSummary(summary),
+        summaryJson: stringifyStoredWearableProjectionSummary(summaryKind, summary),
         summaryKind,
       });
     });
