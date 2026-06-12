@@ -122,6 +122,7 @@ vi.mock("../src/assistant-cli-access.js", () => ({
 import * as assistantService from "../src/assistant/service.ts";
 import {
   buildAssistantTurnDeliveryFinalizationPlan,
+  deliverAssistantPrecedingReplies,
   deliverAssistantReply,
   deliverAssistantProgressUpdate,
   finalizeAssistantTurnFromDeliveryOutcome,
@@ -1146,6 +1147,114 @@ describe("assistant delivery orchestration seam", () => {
     ).rejects.toThrow("Hosted outbound delivery requires a deterministic idempotency key.");
 
     expect(seamMocks.sendAssistantOutboxPayload).not.toHaveBeenCalled();
+  });
+
+  it("delivers preceding steered answers in order with segment idempotency keys", async () => {
+    const session = createAssistantSession();
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "telegram",
+        idempotencyKey: "idem-segment",
+        messageLength: 10,
+        providerMessageId: "provider-segment",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "thread-1",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-segment",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    const outcomes = await deliverAssistantPrecedingReplies({
+      input: {
+        deliverResponse: true,
+        prompt: "hello",
+        vault: "/vault",
+      },
+      responses: ["Answer one.", "Answer two."],
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-segments",
+    });
+
+    expect(outcomes.map((outcome) => outcome.kind)).toEqual(["sent", "sent"]);
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledTimes(2);
+    expect(runtimeState.outbox.deliverMessage.mock.calls[0]?.[0]).toMatchObject({
+      deliveryIdempotencyKey: "assistant-segment:turn-segments:0",
+      media: [],
+      message: "Answer one.",
+      turnId: "turn-segments",
+    });
+    expect(runtimeState.outbox.deliverMessage.mock.calls[1]?.[0]).toMatchObject({
+      deliveryIdempotencyKey: "assistant-segment:turn-segments:1",
+      media: [],
+      message: "Answer two.",
+      turnId: "turn-segments",
+    });
+  });
+
+  it("derives preceding segment keys from an explicit delivery idempotency key", async () => {
+    const session = createAssistantSession();
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "telegram",
+        idempotencyKey: "idem-segment-base",
+        messageLength: 10,
+        providerMessageId: "provider-segment-base",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "thread-1",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-segment-base",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    await deliverAssistantPrecedingReplies({
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "delivery-base",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      responses: ["Answer one.", "Answer two."],
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-segments-base",
+    });
+
+    expect(
+      runtimeState.outbox.deliverMessage.mock.calls.map(
+        (call) => call[0]?.deliveryIdempotencyKey
+      )
+    ).toEqual(["delivery-base:segment:0", "delivery-base:segment:1"]);
+  });
+
+  it("skips preceding steered answers when delivery is disabled", async () => {
+    const session = createAssistantSession();
+
+    await expect(
+      deliverAssistantPrecedingReplies({
+        input: {
+          deliverResponse: false,
+          prompt: "hello",
+          vault: "/vault",
+        },
+        responses: ["Answer one."],
+        session,
+        sharedPlan: createSharedPlan(),
+        turnId: "turn-segments-disabled",
+      })
+    ).resolves.toEqual([]);
+
+    expect(runtimeState.outbox.deliverMessage).not.toHaveBeenCalled();
   });
 
   it("delivers via the outbox with audience overrides and raw content", async () => {
@@ -2538,6 +2647,57 @@ describe("assistant turn finalizer seam", () => {
     expect(
       JSON.stringify(runtimeState.transcripts.append.mock.calls)
     ).not.toContain("synthetic-private-value");
+  });
+
+  it("persists pre-steer final answers before the final assistant entry in one transcript append", async () => {
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+
+    const session = createAssistantSession({
+      turnCount: 2,
+    });
+
+    await persistAssistantTurnAndSession({
+      assistantTranscriptText: "Final answer.",
+      input: {
+        prompt: "First question",
+        vault: "/vault",
+      },
+      plan: createSharedPlan({
+        persistUserPromptOnFailure: false,
+      }),
+      persistUserPromptToTranscript: false,
+      precedingAssistantTranscriptTexts: ["Answer one.", "Answer two."],
+      providerResult: createProviderResult({
+        response: "Final answer.",
+        route: createRoute({ routeId: "route-steered-finals" }),
+        session,
+      }),
+      providerResumeStateAction: "persist-from-provider-turn",
+      session,
+      turnCreatedAt: "2026-04-08T15:44:00.000Z",
+      turnId: "turn-finalizer-steered-finals",
+    });
+
+    expect(runtimeState.transcripts.append).toHaveBeenCalledTimes(1);
+    expect(runtimeState.transcripts.append).toHaveBeenCalledWith(
+      session.sessionId,
+      [
+        {
+          kind: "assistant",
+          text: "Answer one.",
+        },
+        {
+          kind: "assistant",
+          text: "Answer two.",
+        },
+        {
+          kind: "assistant",
+          text: "Final answer.",
+        },
+      ]
+    );
   });
 
   it("skips duplicate user persistence when failure persistence already happened and rewrites the resume route on provider change", async () => {

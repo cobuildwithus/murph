@@ -22,7 +22,9 @@ import {
   extractAssistantMessageFallback,
   extractCodexErrorInfo,
   extractCodexErrorMessage,
+  extractCodexCompletedFinalAgentMessageTextFromNormalized,
   extractCodexProgressEventFromNormalized,
+  isCodexCompletedUserMessageItemFromNormalized,
   type CodexStructuredErrorInfo,
   extractCodexSessionId,
   extractCodexStatusEventFromStderrLine,
@@ -389,6 +391,12 @@ export function readCodexAppServerTurnFailureContext(
 
 export interface CodexAppServerTurnResult {
   finalMessage: string
+  // Completed final-phase agent messages that were followed by a steered user
+  // message later in the same turn, in completion order. Empty unless the
+  // turn was steered after the model had already finished an answer. When the
+  // turn ends on a steer boundary the trailing entry equals `finalMessage`;
+  // the delivery layer drops that trailing duplicate.
+  precedingAgentMessages: readonly string[]
   additionalUsages: AssistantProviderUsageDraft[]
   responseMedia: AssistantResponseMedia[]
   jsonEvents: unknown[]
@@ -1594,6 +1602,12 @@ async function runCodexAppServerTurnOnProcess(
   let turnId: string | null = null
   let expectedTurnId: string | null = null
   let lastAgentMessage: string | null = null
+  // Completed final-phase agent messages that were followed by a steered
+  // user-message item in the same turn. Codex semantics: those answers are
+  // already final from the model's perspective; only the segment after the
+  // last steer boundary may be superseded by a newer final answer.
+  const closedFinalAgentMessages: string[] = []
+  let pendingFinalAgentMessage: string | null = null
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
@@ -2241,6 +2255,18 @@ async function runCodexAppServerTurnOnProcess(
       notifyCurrentChannelProgress(progressDeliveryText, progressDeliverySource)
     }
 
+    const completedFinalAgentMessageText =
+      extractCodexCompletedFinalAgentMessageTextFromNormalized(normalizedEvent)
+    if (completedFinalAgentMessageText !== null) {
+      pendingFinalAgentMessage = completedFinalAgentMessageText
+    } else if (
+      isCodexCompletedUserMessageItemFromNormalized(normalizedEvent) &&
+      pendingFinalAgentMessage !== null
+    ) {
+      closedFinalAgentMessages.push(pendingFinalAgentMessage)
+      pendingFinalAgentMessage = null
+    }
+
     const progressEvent = extractCodexProgressEventFromNormalized(normalizedEvent)
     if (progressEvent) {
       if (progressEvent.kind === 'message') {
@@ -2736,6 +2762,7 @@ async function runCodexAppServerTurnOnProcess(
 
   return {
     finalMessage,
+    precedingAgentMessages: [...closedFinalAgentMessages],
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
     responseMedia,
     jsonEvents,

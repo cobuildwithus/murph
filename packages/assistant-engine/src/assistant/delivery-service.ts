@@ -145,6 +145,56 @@ export async function deliverAssistantReply(input: {
   })
 }
 
+// Codex steered turns can complete several final answers in one turn: an
+// answer the model already finished stays final when a steered user message
+// arrives afterwards, and the turn continues with a new answer. Codex
+// frontends render every completed agent message, so each preceding answer is
+// delivered as its own message ahead of the final reply instead of being
+// dropped by last-wins extraction.
+export async function deliverAssistantPrecedingReplies(input: {
+  input: AssistantMessageInput
+  responses: readonly string[]
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+  turnId: string
+}): Promise<AssistantDeliveryOutcome[]> {
+  if (!input.input.deliverResponse || input.responses.length === 0) {
+    return []
+  }
+
+  const baseDeliveryIdempotencyKey = resolveAssistantHostedDeliveryIdempotency({
+    audience: input.sharedPlan.conversationPolicy.audience,
+    channel: resolveAssistantCurrentAudienceDeliveryFields({
+      input: input.input,
+      session: input.session,
+      sharedPlan: input.sharedPlan,
+    }).channel,
+    input: input.input,
+    session: input.session,
+  }).deliveryIdempotencyKey
+
+  const outcomes: AssistantDeliveryOutcome[] = []
+  let session = input.session
+  for (const [ordinal, response] of input.responses.entries()) {
+    const outcome = await deliverAssistantReply({
+      input: {
+        ...input.input,
+        deliveryIdempotencyKey: baseDeliveryIdempotencyKey
+          ? `${baseDeliveryIdempotencyKey}:segment:${ordinal}`
+          : `assistant-segment:${input.turnId}:${ordinal}`,
+      },
+      response,
+      session,
+      sharedPlan: input.sharedPlan,
+      turnId: input.turnId,
+    })
+    session = outcome.session
+    outcomes.push(outcome)
+  }
+
+  return outcomes
+}
+
 export async function deliverAssistantProgressUpdate(input: {
   dependencies?: AssistantChannelDependencies
   input: AssistantMessageInput

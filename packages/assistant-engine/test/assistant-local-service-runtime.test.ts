@@ -158,6 +158,124 @@ test('sendAssistantMessageLocal keeps manual chat on the session Codex thread', 
   )
 })
 
+test('sendAssistantMessageLocal delivers pre-steer final answers before the final reply and persists them', async () => {
+  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async () => ({
+    kind: 'succeeded',
+    providerTurn: {
+      onboardingGuidanceInjected: false,
+      codexContinuation: { kind: 'explicit-structured-history' },
+      precedingResponses: ['Answer one.', 'Answer two.'],
+      response: 'Answer three.',
+      session,
+    },
+  }))
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'First question',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledTimes(1)
+  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.responses)
+    .toEqual(['Answer one.', 'Answer two.'])
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledTimes(1)
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response)
+    .toBe('Answer three.')
+  // Preceding answers must go out before the final reply.
+  expect(
+    mocks.deliverAssistantPrecedingReplies.mock.invocationCallOrder[0],
+  ).toBeLessThan(mocks.dispatchAssistantReply.mock.invocationCallOrder[0] ?? 0)
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.precedingAssistantTranscriptTexts,
+  ).toEqual(['Answer one.', 'Answer two.'])
+})
+
+test('sendAssistantMessageLocal drops only a trailing preceding answer that duplicates the final reply', async () => {
+  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
+
+  // Trailing-steer turns report the final answer as the trailing closed
+  // segment too; interior duplicates are real answers and must survive.
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async () => ({
+    kind: 'succeeded',
+    providerTurn: {
+      onboardingGuidanceInjected: false,
+      codexContinuation: { kind: 'explicit-structured-history' },
+      precedingResponses: ['Done.', 'Details follow.', 'Done.'],
+      response: 'Done.',
+      session,
+    },
+  }))
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'First question',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.responses)
+    .toEqual(['Done.', 'Details follow.'])
+})
+
+test('sendAssistantMessageLocal records a diagnostic when a preceding answer fails and still sends the final reply', async () => {
+  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
+
+  const sessionAfterPreceding = createAssistantSession({
+    sessionId: 'session-after-preceding',
+  })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async () => ({
+    kind: 'succeeded',
+    providerTurn: {
+      onboardingGuidanceInjected: false,
+      codexContinuation: { kind: 'explicit-structured-history' },
+      precedingResponses: ['Answer one.'],
+      response: 'Answer two.',
+      session,
+    },
+  }))
+  mocks.deliverAssistantPrecedingReplies.mockResolvedValueOnce([
+    {
+      error: {
+        code: 'ASSISTANT_DELIVERY_FAILED',
+        message: 'segment delivery failed',
+      },
+      intentId: null,
+      kind: 'failed',
+      media: [],
+      session: sessionAfterPreceding,
+    },
+  ])
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'First question',
+    vault: '/vaults/test',
+  })
+
+  // The preceding-segment failure is diagnostic-only; the turn still
+  // completes and the final reply still goes out.
+  expect(result.response).toBe('Answer two.')
+  expect(mocks.recordAssistantDiagnosticEvent.mock.calls.map((call) => call[0]))
+    .toContainEqual(
+      expect.objectContaining({
+        code: 'ASSISTANT_DELIVERY_FAILED',
+        kind: 'delivery.preceding-reply.failed',
+        message: 'segment delivery failed',
+        sessionId: 'session-after-preceding',
+      }),
+    )
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledTimes(1)
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response)
+    .toBe('Answer two.')
+  // The final reply continues from the session returned by the last
+  // preceding delivery outcome.
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.session?.sessionId)
+    .toBe('session-after-preceding')
+})
+
 test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProviderRequestStarted', async () => {
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 
@@ -5138,6 +5256,13 @@ async function loadLocalServiceModule(input?: {
         turnId: 'turn-1',
       }),
     ),
+    deliverAssistantPrecedingReplies: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/delivery-service.js').deliverAssistantPrecedingReplies
+        >[0],
+      ): Promise<AssistantDeliveryOutcome[]> => [],
+    ),
     deliverAssistantProgressUpdate: vi.fn(
       async (
         _input: Parameters<
@@ -5145,7 +5270,13 @@ async function loadLocalServiceModule(input?: {
         >[0],
       ) => undefined,
     ),
-    dispatchAssistantReply: vi.fn(async () => deliveryOutcome),
+    dispatchAssistantReply: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/delivery-service.js').deliverAssistantReply
+        >[0],
+      ) => deliveryOutcome,
+    ),
     executeCodexTurnWithRecovery: vi.fn(
       async (
         providerInput: Parameters<
@@ -5424,6 +5555,7 @@ async function loadLocalServiceModule(input?: {
     resolveAssistantSessionForMessage: mocks.resolveAssistantMessageSession,
   }))
   vi.doMock('../src/assistant/delivery-service.js', () => ({
+    deliverAssistantPrecedingReplies: mocks.deliverAssistantPrecedingReplies,
     deliverAssistantReply: mocks.dispatchAssistantReply,
     deliverAssistantProgressUpdate: mocks.deliverAssistantProgressUpdate,
     finalizeAssistantTurnFromDeliveryOutcome: mocks.finalizeDeliveredAssistantTurn,

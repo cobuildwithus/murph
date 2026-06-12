@@ -10914,6 +10914,252 @@ describe('assistant codex event shaping', () => {
   })
 })
 
+describe('steered final segments', () => {
+  async function runScriptedSteeredFinalSegmentsTurn(
+    itemEvents: Array<Record<string, unknown>>,
+  ) {
+    const workingDirectory = await createTempDir('assistant-codex-steered-finals-work-')
+    const codexHome = await createTempDir('assistant-codex-steered-finals-home-')
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const threadStart = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: threadStart.id,
+            result: {
+              thread: {
+                id: 'thread-steered-finals',
+              },
+            },
+          }))
+
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: {
+              turn: {
+                id: 'turn-steered-finals',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: 'turn-steered-finals',
+              },
+            },
+          }))
+
+          for (const itemEvent of itemEvents) {
+            child.stdout.write(jsonLine(itemEvent))
+          }
+
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-steered-finals',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    return await executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      codexCommand: 'codex',
+      codexHome,
+      prompt: 'First question',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+  }
+
+  function completedItemEvent(item: Record<string, unknown>) {
+    return {
+      method: 'item/completed',
+      params: {
+        item,
+      },
+    }
+  }
+
+  it('keeps final answers completed before a steered user message as preceding messages', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Answer one.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Thanks mate I appreciate all this',
+      }),
+      completedItemEvent({
+        id: 'assistant-2',
+        type: 'assistant_message',
+        message: 'Answer two.',
+      }),
+    ])
+
+    expect(result.finalMessage).toBe('Answer two.')
+    expect(result.precedingAgentMessages).toEqual(['Answer one.'])
+  })
+
+  it('collects every pre-steer final answer in order across multiple steer boundaries', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Answer one.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Second question',
+      }),
+      completedItemEvent({
+        id: 'assistant-2',
+        type: 'assistant_message',
+        message: 'Answer two.',
+      }),
+      completedItemEvent({
+        id: 'user-3',
+        type: 'user_message',
+        message: 'Third question',
+      }),
+      completedItemEvent({
+        id: 'assistant-3',
+        type: 'assistant_message',
+        message: 'Answer three.',
+      }),
+    ])
+
+    expect(result.finalMessage).toBe('Answer three.')
+    expect(result.precedingAgentMessages).toEqual(['Answer one.', 'Answer two.'])
+  })
+
+  it('keeps a trailing-steer final answer in both the final reply and preceding list', async () => {
+    // The delivery layer drops preceding entries that exactly duplicate the
+    // final reply, so the trailing-steer answer is still sent exactly once.
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Answer one.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Thanks mate I appreciate all this',
+      }),
+    ])
+
+    expect(result.finalMessage).toBe('Answer one.')
+    expect(result.precedingAgentMessages).toEqual(['Answer one.'])
+  })
+
+  it('keeps last-wins behavior for multiple finals without a steer boundary', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Answer one.',
+      }),
+      completedItemEvent({
+        id: 'assistant-2',
+        type: 'assistant_message',
+        message: 'Answer two.',
+      }),
+    ])
+
+    expect(result.finalMessage).toBe('Answer two.')
+    expect(result.precedingAgentMessages).toEqual([])
+  })
+
+  it('detects steer boundaries on the camelCase v2 wire item types', async () => {
+    // Production app-server notifications use camelCase ThreadItem tags
+    // (userMessage/agentMessage); the snake_case variants in the other tests
+    // normalize to the same identifiers.
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'userMessage',
+        message: 'First question',
+      }),
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'agentMessage',
+        message: 'Answer one.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'userMessage',
+        message: 'Thanks mate I appreciate all this',
+      }),
+      completedItemEvent({
+        id: 'assistant-2',
+        type: 'agentMessage',
+        message: 'Answer two.',
+      }),
+    ])
+
+    expect(result.finalMessage).toBe('Answer two.')
+    expect(result.precedingAgentMessages).toEqual(['Answer one.'])
+  })
+
+  it('ignores commentary messages and steers that arrive before any final answer', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      completedItemEvent({
+        id: 'assistant-commentary',
+        type: 'assistant_message',
+        message: 'Working on it.',
+        phase: 'commentary',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Second question while tools run',
+      }),
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Consolidated answer.',
+      }),
+    ])
+
+    expect(result.finalMessage).toBe('Consolidated answer.')
+    expect(result.precedingAgentMessages).toEqual([])
+  })
+})
+
 class MockChildProcess extends EventEmitter {
   exitCode: number | null = null
   killed = false

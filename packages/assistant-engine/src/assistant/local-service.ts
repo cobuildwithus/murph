@@ -35,6 +35,7 @@ import {
   emitHostedAssistantContextSessionResolvedTrace,
 } from './hosted-context-diagnostics.js'
 import {
+  deliverAssistantPrecedingReplies,
   deliverAssistantReply as dispatchAssistantReply,
   deliverAssistantProgressUpdate,
   finalizeAssistantTurnFromDeliveryOutcome as finalizeDeliveredAssistantTurn,
@@ -713,9 +714,20 @@ export async function sendAssistantMessageLocal(
           admissionState: 'commit-started',
           turnId: currentUserTurn.turnId,
         })
+        // Final answers the model completed before a steered message arrived
+        // are delivered ahead of the final reply (Codex renders every
+        // completed agent message). A turn that ends on a steer boundary
+        // reports its final answer as the trailing closed segment too, so
+        // drop only a trailing duplicate of the final reply; interior
+        // duplicates are real answers and must be delivered.
+        const precedingResponses = [...(providerResult.precedingResponses ?? [])]
+        if (precedingResponses.at(-1) === providerResult.response) {
+          precedingResponses.pop()
+        }
         const session = await finalizeAssistantTurnArtifacts({
           input: currentInput,
           plan: sharedPlan,
+          precedingAssistantTranscriptTexts: precedingResponses,
           providerResult,
           providerResumeStateAction: resolveProviderResumeStateAction({
             codexThreadId: providerResult.codexThreadId ?? null,
@@ -726,11 +738,36 @@ export async function sendAssistantMessageLocal(
           turnCreatedAt: currentUserTurn.turnCreatedAt,
           turnId: currentUserTurn.turnId,
         })
+        const precedingDeliveryOutcomes = await deliverAssistantPrecedingReplies({
+          input: currentInput,
+          responses: precedingResponses,
+          session,
+          sharedPlan,
+          turnId: currentUserTurn.turnId,
+        })
+        for (const precedingOutcome of precedingDeliveryOutcomes) {
+          if (precedingOutcome.kind !== 'failed') {
+            continue
+          }
+          await runAssistantTurnBestEffort(() =>
+            recordAssistantDiagnosticEvent({
+              vault: input.vault,
+              component: 'assistant',
+              kind: 'delivery.preceding-reply.failed',
+              level: 'error',
+              message: precedingOutcome.error.message,
+              code: precedingOutcome.error.code,
+              sessionId: precedingOutcome.session.sessionId,
+              turnId: currentUserTurn.turnId,
+            }),
+          )
+        }
         const deliveryOutcome = await dispatchAssistantReply({
           input: currentInput,
           media: providerResult.responseMedia ?? [],
           response: providerResult.response,
-          session,
+          session:
+            precedingDeliveryOutcomes.at(-1)?.session ?? session,
           sharedPlan,
           turnId: currentUserTurn.turnId,
         })

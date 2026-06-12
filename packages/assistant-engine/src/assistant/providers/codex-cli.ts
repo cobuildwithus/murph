@@ -416,6 +416,7 @@ export async function executeCodexAssistantTurnAttempt(
         : {}),
       codexThreadId: result.sessionId,
       response: result.finalMessage,
+      precedingResponses: result.precedingAgentMessages,
       responseMedia: result.responseMedia,
       stderr: result.stderr,
       stdout: result.stdout,
