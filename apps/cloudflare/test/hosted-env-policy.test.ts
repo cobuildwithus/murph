@@ -112,6 +112,23 @@ describe("buildHostedRunnerContainerEnv", () => {
     )).toBe(false);
   });
 
+  it("keeps the worker-side asset-root literals aligned with the engine-owned env names", async () => {
+    // hosted-env-policy.ts is part of the workerd bundle and must not import
+    // @murphai/assistant-engine (Node-only module graph), so it pins the two
+    // deny-listed names as literals. This node-side test is the drift guard.
+    const [{ MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV }, { MURPH_ASSISTANT_SKILLS_ROOT_ENV }] =
+      await Promise.all([
+        import("@murphai/assistant-engine"),
+        import("@murphai/assistant-engine/assistant-skill-assets"),
+      ]);
+    expect(MURPH_ASSISTANT_SKILLS_ROOT_ENV).toBe("MURPH_ASSISTANT_SKILLS_ROOT");
+    expect(MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV).toBe(
+      "MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH",
+    );
+    expect(isHostedRunnerSecretKeyAllowed(MURPH_ASSISTANT_SKILLS_ROOT_ENV)).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed(MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV)).toBe(false);
+  });
+
   it("does not allow runner secrets to override process environment keys", () => {
     const source = {
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
