@@ -31,10 +31,15 @@ const FAKE_CLI_SOURCE = [
   "import { createRequire } from 'node:module';",
   "const require = createRequire(import.meta.url);",
   "const packageJson = require('../package.json');",
+  "const args = process.argv.slice(2);",
   "if (!(process.env.HOME ?? '').endsWith('.parity-probe-home') || process.env.VAULT !== '') {",
   "  console.log(import.meta.url);",
   "}",
-  "console.log(JSON.stringify({ args: process.argv.slice(2), version: packageJson.version }));",
+  "if (args.join('\\0') === '--no-config\\0exercise\\0facets\\0--format\\0json') {",
+  "  console.log(JSON.stringify({ facets: { kinds: ['exercise', 'stretch'] } }));",
+  "} else {",
+  "  console.log(JSON.stringify({ args, version: packageJson.version }));",
+  "}",
   "",
 ].join("\n");
 

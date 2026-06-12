@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { access, chmod, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { build, type Metafile } from "esbuild";
 
@@ -17,6 +19,45 @@ const VAULT_CLI_BUNDLE_FORBIDDEN_INPUT_MARKERS =
   RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS;
 
 const VAULT_CLI_BUNDLE_DIRECTORY_NAME = ".bundle";
+const VAULT_CLI_BUNDLE_LAZY_OPTIONAL_PACKAGE_NAMES = [
+  "@cfworker/json-schema",
+  "@modelcontextprotocol/server",
+  "yaml",
+] as const;
+const VAULT_CLI_BUNDLE_LAZY_OPTIONAL_INPUT_MARKERS =
+  VAULT_CLI_BUNDLE_LAZY_OPTIONAL_PACKAGE_NAMES.map(
+    (packageName) => `/${packageName}/`,
+  );
+const VAULT_CLI_JSON_IMPORT_SURFACE_PROBE = [
+  "--no-config",
+  "exercise",
+  "facets",
+  "--format",
+  "json",
+] as const;
+const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
+  "import { writeFileSync } from 'node:fs'",
+  "import { registerHooks } from 'node:module'",
+  "",
+  "const logPath = process.env.MURPH_IMPORT_SURFACE_LOG",
+  "if (typeof logPath !== 'string' || logPath.length === 0) {",
+  "  throw new Error('runner vault-cli import-surface hook requires MURPH_IMPORT_SURFACE_LOG.')",
+  "}",
+  "",
+  "const resolvedModuleUrls = new Set()",
+  "registerHooks({",
+  "  resolve(specifier, context, nextResolve) {",
+  "    const resolution = nextResolve(specifier, context)",
+  "    resolvedModuleUrls.add(resolution.url)",
+  "    return resolution",
+  "  },",
+  "})",
+  "",
+  "process.on('exit', () => {",
+  "  writeFileSync(logPath, [...resolvedModuleUrls].join('\\n'), 'utf8')",
+  "})",
+  "",
+].join("\n");
 
 // Byte budgets over the esbuild metafile, so import-graph creep in the real
 // installed artifact fails the assembly instead of shipping silently (the
@@ -74,7 +115,10 @@ export async function bundleInstalledVaultCliBinary(
     },
     bundle: true,
     entryPoints: [entryPath],
-    external: [...VAULT_CLI_BUNDLE_EXTERNALS],
+    external: [
+      ...VAULT_CLI_BUNDLE_EXTERNALS,
+      ...VAULT_CLI_BUNDLE_LAZY_OPTIONAL_PACKAGE_NAMES,
+    ],
     format: "esm",
     logLevel: "error",
     metafile: true,
@@ -93,6 +137,7 @@ export async function bundleInstalledVaultCliBinary(
     `vault-cli bundle size: total ${bundleBytes.totalBytes}B of ${VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET}B budget, entry ${bundleBytes.entryBytes}B of ${VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET}B budget`,
   );
   assertVaultCliBundleParity({ bundleOutDir, cliPackageDir, entryPath });
+  await assertVaultCliJsonImportSurface({ bundleOutDir, cliPackageDir, entryPath });
   await retargetVaultCliBinWrappers(bundleDir, cliPackageDir);
 }
 
@@ -106,6 +151,14 @@ function assertVaultCliBundleInputsStayExternal(inputPaths: string[]): void {
       if (inputPath.includes(`node_modules${marker}`)) {
         throw new Error(
           `vault-cli bundle inlined ${inputPath}; keep ${marker.replaceAll("/", "")} external so the runtime resolves the installed copy.`,
+        );
+      }
+    }
+
+    for (const marker of VAULT_CLI_BUNDLE_LAZY_OPTIONAL_INPUT_MARKERS) {
+      if (inputPath.includes(`node_modules${marker}`)) {
+        throw new Error(
+          `vault-cli bundle inlined ${inputPath}; keep ${marker.replaceAll("/", "")} lazy so JSON commands do not load optional output/MCP dependencies.`,
         );
       }
     }
@@ -260,6 +313,138 @@ function runVaultCliParityProbe(
   }
 
   return { status: result.status, stderr: result.stderr, stdout: result.stdout };
+}
+
+async function assertVaultCliJsonImportSurface(input: {
+  bundleOutDir: string;
+  cliPackageDir: string;
+  entryPath: string;
+}): Promise<void> {
+  const probeDir = await mkdtemp(path.join(tmpdir(), "murph-runner-vault-cli-imports-"));
+  const hookPath = path.join(probeDir, "import-surface-hook.mjs");
+  await writeFile(hookPath, VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE, "utf8");
+
+  try {
+    await Promise.all([
+      assertVaultCliJsonImportSurfaceForEntry({
+        cwd: input.cliPackageDir,
+        entryPath: input.entryPath,
+        hookPath,
+        label: "unbundled",
+        logPath: path.join(probeDir, "unbundled-resolved-imports.log"),
+      }),
+      assertVaultCliJsonImportSurfaceForEntry({
+        cwd: input.cliPackageDir,
+        entryPath: path.join(input.bundleOutDir, "bin.js"),
+        hookPath,
+        label: "bundled",
+        logPath: path.join(probeDir, "bundled-resolved-imports.log"),
+      }),
+    ]);
+  } finally {
+    await rm(probeDir, { force: true, recursive: true });
+  }
+}
+
+async function assertVaultCliJsonImportSurfaceForEntry(input: {
+  cwd: string;
+  entryPath: string;
+  hookPath: string;
+  label: string;
+  logPath: string;
+}): Promise<void> {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      pathToFileURL(input.hookPath).href,
+      input.entryPath,
+      ...VAULT_CLI_JSON_IMPORT_SURFACE_PROBE,
+    ],
+    {
+      cwd: input.cwd,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: path.join(input.cwd, ".parity-probe-home"),
+        MURPH_IMPORT_SURFACE_LOG: input.logPath,
+        VAULT: "",
+      },
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 60_000,
+    },
+  );
+
+  if (result.error || result.signal !== null || result.status !== 0) {
+    throw new Error(
+      `runner ${input.label} vault-cli JSON import-surface probe failed (${
+        result.error?.message ?? `status ${result.status ?? "unknown"} signal ${result.signal ?? "none"}`
+      }); stderr head: ${result.stderr.slice(0, 400)}`,
+    );
+  }
+
+  const parsedOutput = JSON.parse(result.stdout) as {
+    facets?: { kinds?: unknown };
+  };
+  if (
+    !Array.isArray(parsedOutput.facets?.kinds) ||
+    parsedOutput.facets.kinds[0] !== "exercise" ||
+    parsedOutput.facets.kinds[1] !== "stretch"
+  ) {
+    throw new Error(
+      `runner ${input.label} vault-cli JSON import-surface probe returned an unexpected payload.`,
+    );
+  }
+
+  const resolvedModuleUrls = (await readFile(input.logPath, "utf8"))
+    .split("\n")
+    .filter((line) => line.length > 0);
+  const resolvedPackageNames = new Set(
+    resolvedModuleUrls.flatMap((url) => {
+      const packageName = normalizeResolvedNodeModulePackageName(url);
+      return packageName === null ? [] : [packageName];
+    }),
+  );
+  const eagerlyResolvedLazyPackages =
+    VAULT_CLI_BUNDLE_LAZY_OPTIONAL_PACKAGE_NAMES.filter((packageName) =>
+      resolvedPackageNames.has(packageName),
+    );
+
+  if (eagerlyResolvedLazyPackages.length > 0) {
+    throw new Error(
+      `runner ${input.label} vault-cli JSON probe resolved lazy optional dependencies: ${eagerlyResolvedLazyPackages.join(", ")}.`,
+    );
+  }
+}
+
+function normalizeResolvedNodeModulePackageName(url: string): string | null {
+  if (!url.startsWith("file:")) {
+    return null;
+  }
+
+  const filePath = fileURLToPath(url);
+  const nodeModulesMarker = `${path.sep}node_modules${path.sep}`;
+  const nodeModulesIndex = filePath.lastIndexOf(nodeModulesMarker);
+
+  if (nodeModulesIndex === -1) {
+    return null;
+  }
+
+  const segments = filePath
+    .slice(nodeModulesIndex + nodeModulesMarker.length)
+    .split(path.sep);
+  const [head, scopedName] = segments;
+
+  if (!head) {
+    return null;
+  }
+
+  if (head.startsWith("@")) {
+    return scopedName ? `${head}/${scopedName}` : null;
+  }
+
+  return head;
 }
 
 async function retargetVaultCliBinWrappers(

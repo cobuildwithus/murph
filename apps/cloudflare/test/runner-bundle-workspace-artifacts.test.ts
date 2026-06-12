@@ -466,9 +466,10 @@ describe("runner bundle runtime artifact staging", () => {
     });
   });
 
-  it("packs the runner CLI without its public bundled dependency payload", async () => {
+  it("packs the runner CLI with only its external bundled dependency payload", async () => {
     const rootDir = await mkdtemp(path.join(tmpdir(), "murph-runner-cli-pack-"));
     const packageDir = path.join(rootDir, "packages", "cli");
+    const incurDir = path.join(packageDir, "node_modules", "incur");
     const assistantEngineDir = path.join(rootDir, "packages", "assistant-engine");
     const healthCommonsDir = path.join(rootDir, "packages", "health-commons");
     const tarballsDir = path.join(rootDir, "tarballs");
@@ -476,6 +477,12 @@ describe("runner bundle runtime artifact staging", () => {
     temporaryDirectories.push(rootDir);
     await mkdir(path.join(rootDir, "apps"), { recursive: true });
     await mkdir(path.join(packageDir, "dist"), { recursive: true });
+    await mkdir(path.join(incurDir, "dist", "internal"), { recursive: true });
+    await mkdir(path.join(incurDir, "src"), { recursive: true });
+    await mkdir(
+      path.join(incurDir, "examples", "npm", "node_modules", "transitive"),
+      { recursive: true },
+    );
     await mkdir(assistantEngineDir, { recursive: true });
     await mkdir(path.join(healthCommonsDir, "dist"), { recursive: true });
     await mkdir(path.join(healthCommonsDir, "generated"), { recursive: true });
@@ -499,10 +506,12 @@ describe("runner bundle runtime artifact staging", () => {
           bundleDependencies: [
             "@murphai/assistant-engine",
             "@murphai/health-commons",
+            "incur",
           ],
           dependencies: {
             "@murphai/assistant-engine": "workspace:*",
             "@murphai/health-commons": "workspace:*",
+            "incur": "0.4.5",
           },
           files: [
             "dist",
@@ -515,6 +524,50 @@ describe("runner bundle runtime artifact staging", () => {
         null,
         2,
       )}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(incurDir, "package.json"),
+      `${JSON.stringify(
+        {
+          name: "incur",
+          version: "0.4.5",
+          type: "module",
+          files: [
+            "dist",
+            "src",
+            "examples",
+            "SKILL.md",
+          ],
+          exports: {
+            ".": {
+              default: "./dist/index.js",
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    await writeFile(path.join(incurDir, "dist", "index.js"), "export const patched = true;\n", "utf8");
+    await writeFile(
+      path.join(incurDir, "dist", "internal", "yaml.js"),
+      "export const loadSync = async () => import('yaml');\n",
+      "utf8",
+    );
+    await writeFile(path.join(incurDir, "src", "index.ts"), "export const patched = true;\n", "utf8");
+    await writeFile(path.join(incurDir, "SKILL.md"), "incur skill\n", "utf8");
+    await writeFile(path.join(incurDir, "README.md"), "readme\n", "utf8");
+    await writeFile(path.join(incurDir, "LICENSE"), "license\n", "utf8");
+    await writeFile(
+      path.join(incurDir, "examples", "npm", "index.js"),
+      "export const example = true;\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(incurDir, "examples", "npm", "node_modules", "transitive", "index.js"),
+      "module.exports = true;\n",
       "utf8",
     );
     await writeFile(
@@ -565,13 +618,45 @@ describe("runner bundle runtime artifact staging", () => {
     ) as {
       bin?: Record<string, string>;
       bundleDependencies?: string[];
+      bundledDependencies?: string[];
     };
 
     expect(packedPackageJson.bin).toEqual({
       murph: "dist/bin.js",
       "vault-cli": "dist/bin.js",
     });
-    expect(packedPackageJson.bundleDependencies).toBeUndefined();
+    expect(packedPackageJson.bundleDependencies).toEqual(["incur"]);
+    expect(packedPackageJson.bundledDependencies).toBeUndefined();
+    expect(
+      JSON.parse(
+        await readFile(
+          path.join(extractDir, "package", "node_modules", "incur", "package.json"),
+          "utf8",
+        ),
+      ),
+    ).toMatchObject({ name: "incur", version: "0.4.5" });
+    await expect(
+      readFile(
+        path.join(extractDir, "package", "node_modules", "incur", "dist", "internal", "yaml.js"),
+        "utf8",
+      ),
+    ).resolves.toContain("loadSync");
+    await expect(
+      readFile(
+        path.join(
+          extractDir,
+          "package",
+          "node_modules",
+          "incur",
+          "examples",
+          "npm",
+          "node_modules",
+          "transitive",
+          "index.js",
+        ),
+        "utf8",
+      ),
+    ).rejects.toMatchObject({ code: "ENOENT" });
     await expect(
       readFile(path.join(extractDir, "package", "node_modules", "@murphai", "health-commons", "package.json"), "utf8"),
     ).rejects.toMatchObject({ code: "ENOENT" });
