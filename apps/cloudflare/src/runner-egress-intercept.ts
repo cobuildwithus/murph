@@ -10,7 +10,15 @@ import {
 } from "@murphai/hosted-execution";
 import {
   HOSTED_RUNTIME_LOG_PATH,
+  HOSTED_RUNTIME_USAGE_RECORD_PATH,
 } from "@murphai/hosted-execution/routes";
+import {
+  buildHostedTranscriptionUsageRecord,
+} from "@murphai/hosted-execution/assistant-usage";
+
+import { readHostedExecutionEnvironment } from "./env.ts";
+import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane.ts";
+import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 
 import {
   CLOUDFLARE_HOSTED_CONTAINER_FATAL_PATH,
@@ -826,7 +834,23 @@ async function maybeHandleHostedTranscribeRequest(input: {
     const output = await ai.run(HOSTED_TRANSCRIBE_WORKERS_AI_MODEL, {
       audio: Buffer.from(audio).toString("base64"),
     });
-    const response = Response.json(readHostedTranscribeResponsePayload(output));
+    const payload = readHostedTranscribeResponsePayload(output);
+    const usageRecording = recordHostedTranscribeUsage({
+      audioBytes: audio.byteLength,
+      durationMs: payload.durationMs,
+      env: input.env,
+      memberId: authorization.userId,
+    });
+    // Production containers proxy through a ctx without waitUntil, where a
+    // floating promise may be canceled with the invocation; await the
+    // failure-isolated recording there (same shape as the OpenAI cache
+    // diagnostic above).
+    if (typeof input.ctx?.waitUntil === "function") {
+      input.ctx.waitUntil(usageRecording);
+    } else {
+      await usageRecording;
+    }
+    const response = Response.json(payload);
     emitHostedProviderEgressDiagnostic({
       authorization,
       providerKind: "workers_ai_transcribe",
@@ -849,6 +873,57 @@ async function maybeHandleHostedTranscribeRequest(input: {
     });
     return new Response("Hosted transcription failed.", { status: 502 });
   }
+}
+
+// Failure-isolated hosted_ai_usage recording for the Workers AI transcription
+// spend. The returned promise never rejects and must never fail the transcript
+// response; failures only emit a structured warn log.
+function recordHostedTranscribeUsage(input: {
+  audioBytes: number;
+  durationMs: number | null;
+  env: RunnerOutboundEnvironmentSource;
+  memberId: string | null;
+}): Promise<void> {
+  return (async () => {
+    if (!input.memberId) {
+      throw new TypeError("Hosted transcription usage recording requires a member id.");
+    }
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
+    const record = buildHostedTranscriptionUsageRecord({
+      audioBytes: input.audioBytes,
+      durationMs: input.durationMs,
+      memberId: input.memberId,
+      model: HOSTED_TRANSCRIBE_WORKERS_AI_MODEL,
+    });
+    const response = await fetchHostedExecutionWebControlPlaneResponse({
+      ...(environment.hostedWebAllowHttpHosts
+        ? { allowHttpHosts: environment.hostedWebAllowHttpHosts }
+        : {}),
+      baseUrl: environment.hostedWebBaseUrl,
+      body: JSON.stringify({ usage: record }),
+      boundUserId: input.memberId,
+      callbackSigning: environment.webCallbackSigning,
+      method: "POST",
+      path: HOSTED_RUNTIME_USAGE_RECORD_PATH,
+      timeoutMs: environment.webControlTimeoutMs,
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Hosted transcription usage recording failed with HTTP ${response.status}.`,
+      );
+    }
+  })().catch((error: unknown) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...buildHostedExecutionSafeErrorDetails(error),
+        providerKind: "workers_ai_transcribe",
+      },
+      level: "warn",
+      message: "Hosted transcription usage recording failed; transcript delivery unaffected.",
+      phase: "wake.running",
+    });
+  });
 }
 
 interface HostedTranscribeResponsePayload {

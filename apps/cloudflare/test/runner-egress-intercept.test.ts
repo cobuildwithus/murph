@@ -4467,7 +4467,8 @@ describe("maybeHandleHostedTranscribeRequest", () => {
   });
 
   it("authorizes via the active user fence and maps Workers AI output to the transcript payload", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ recorded: true, usageId: "usage_1" }));
     vi.stubGlobal("fetch", fetchMock);
     const aiRun = vi.fn(async (model: string, payload: Record<string, unknown>) => {
       expect(model).toBe("@cf/openai/whisper-large-v3-turbo");
@@ -4484,6 +4485,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     const validateActiveRuntimeWriteFence = vi.fn(async (input: {
       userId: string;
     }) => createActiveRuntimeWriteFenceValidationResult(input));
+    const waitUntilPromises: Promise<unknown>[] = [];
 
     const response = await hostedRunnerIntercept(
       new Request(TRANSCRIBE_URL, {
@@ -4498,7 +4500,12 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
         validateActiveRuntimeWriteFence,
       }),
-      { containerId: "opaque-container-id" },
+      {
+        containerId: "opaque-container-id",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
     );
 
     expect(response.status).toBe(200);
@@ -4514,7 +4521,32 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
       userId: "member_123",
     });
-    expect(fetchMock).not.toHaveBeenCalled();
+
+    await Promise.all(waitUntilPromises);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [usageUrl, usageInit] = fetchMock.mock.calls[0] ?? [];
+    expect(String(usageUrl)).toBe(
+      "https://web.example.test/api/internal/hosted-execution/usage/record",
+    );
+    expect(usageInit?.method).toBe("POST");
+    const usageBody = JSON.parse(String(usageInit?.body)) as {
+      usage: Record<string, unknown>;
+    };
+    expect(usageBody.usage).toMatchObject({
+      attemptCount: 1,
+      credentialSource: "platform",
+      featureKey: "audio-transcription",
+      memberId: "member_123",
+      provider: "workers-ai",
+      rawUsageJson: { audioBytes: 9, durationMs: 2_940 },
+      requestedModel: "@cf/openai/whisper-large-v3-turbo",
+      surface: "hosted-runner",
+    });
+    expect(usageBody.usage.turnId).toMatch(/^turn_transcribe_[0-9a-f]{32}$/u);
+    expect(usageBody.usage.usageId).toBe(`${String(usageBody.usage.turnId)}.attempt-1`);
+    expect(usageBody.usage.inputTokens).toBeNull();
+    expect(usageBody.usage.outputTokens).toBeNull();
+
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "runner",
@@ -4530,6 +4562,86 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
     expect(serializedLogs).not.toContain("Remember to log the voice note");
     expect(serializedLogs).not.toContain("wav-bytes");
+  });
+
+  it("keeps the transcript response when usage recording fails", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response("usage recording rejected", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+
+    const response = await hostedRunnerIntercept(
+      new Request(TRANSCRIBE_URL, {
+        body: "wav-bytes",
+        method: "POST",
+      }),
+      createInterceptEnv({
+        AI: {
+          run: vi.fn(async () => ({
+            text: "transcript",
+            transcription_info: { duration: 2.94, language: "en" },
+          })),
+        },
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
+        validateActiveRuntimeWriteFence: async (input) =>
+          createActiveRuntimeWriteFenceValidationResult(input),
+      }),
+      {
+        containerId: "opaque-container-id",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ text: "transcript" });
+
+    await Promise.all(waitUntilPromises);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          providerKind: "workers_ai_transcribe",
+        }),
+        level: "warn",
+        message: "Hosted transcription usage recording failed; transcript delivery unaffected.",
+      }),
+    );
+  });
+
+  it("awaits usage recording before responding when the context lacks waitUntil", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ recorded: true, usageId: "usage_1" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request(TRANSCRIBE_URL, {
+        body: "wav-bytes",
+        method: "POST",
+      }),
+      createInterceptEnv({
+        AI: {
+          run: vi.fn(async () => ({
+            text: "transcript",
+            transcription_info: { duration: 2.94, language: "en" },
+          })),
+        },
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
+        validateActiveRuntimeWriteFence: async (input) =>
+          createActiveRuntimeWriteFenceValidationResult(input),
+      }),
+      // Production containers proxy through a ctx without waitUntil; a
+      // floating recording promise would be canceled with the invocation.
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://web.example.test/api/internal/hosted-execution/usage/record",
+    );
   });
 
   it("rejects unknown transcribe paths and non-POST methods before authorization", async () => {
@@ -4599,6 +4711,15 @@ describe("maybeHandleHostedTranscribeRequest", () => {
   });
 
   it("bounds the transcribe request body and surfaces Workers AI failures as 502", async () => {
+    // Failed transcriptions must never meter usage, so any usage POST attempt
+    // would show up on this stub.
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ recorded: true, usageId: "usage_1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = (promise: Promise<unknown>): void => {
+      waitUntilPromises.push(promise);
+    };
     const oversized = await hostedRunnerIntercept(
       new Request(TRANSCRIBE_URL, {
         body: "wav-bytes",
@@ -4613,7 +4734,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         validateActiveRuntimeWriteFence: async (input) =>
           createActiveRuntimeWriteFenceValidationResult(input),
       }),
-      { containerId: "opaque-container-id" },
+      { containerId: "opaque-container-id", waitUntil },
     );
     expect(oversized.status).toBe(413);
 
@@ -4632,13 +4753,24 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         validateActiveRuntimeWriteFence: async (input) =>
           createActiveRuntimeWriteFenceValidationResult(input),
       }),
-      { containerId: "opaque-container-id" },
+      { containerId: "opaque-container-id", waitUntil },
     );
     expect(failing.status).toBe(502);
     expect(await failing.text()).toBe("Hosted transcription failed.");
+
+    await Promise.all(waitUntilPromises);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("falls back to an empty segment list and drops malformed segments", async () => {
+    // Keep the fire-and-forget usage recording off the real network.
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ recorded: true, usageId: "usage_1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = (promise: Promise<unknown>): void => {
+      waitUntilPromises.push(promise);
+    };
     const response = await hostedRunnerIntercept(
       new Request(TRANSCRIBE_URL, {
         body: "wav-bytes",
@@ -4654,7 +4786,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         validateActiveRuntimeWriteFence: async (input) =>
           createActiveRuntimeWriteFenceValidationResult(input),
       }),
-      { containerId: "opaque-container-id" },
+      { containerId: "opaque-container-id", waitUntil },
     );
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
@@ -4686,7 +4818,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         validateActiveRuntimeWriteFence: async (input) =>
           createActiveRuntimeWriteFenceValidationResult(input),
       }),
-      { containerId: "opaque-container-id" },
+      { containerId: "opaque-container-id", waitUntil },
     );
     expect(malformedSegments.status).toBe(200);
     await expect(malformedSegments.json()).resolves.toEqual({
@@ -4695,9 +4827,27 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       segments: [{ endMs: null, startMs: null, text: "kept segment" }],
       text: "kept segment",
     });
+
+    // Duration-less Workers AI output still records usage with the byte count.
+    await Promise.all(waitUntilPromises);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const recordedUsages = fetchMock.mock.calls.map(([, init]) =>
+      (JSON.parse(String(init?.body)) as { usage: Record<string, unknown> }).usage);
+    for (const usage of recordedUsages) {
+      expect(usage.rawUsageJson).toEqual({ audioBytes: 9 });
+      expect(usage.memberId).toBe("member_123");
+    }
   });
 
   it("rejects empty transcribe bodies and surfaces transcript-less Workers AI output as 502", async () => {
+    // Transcript-less Workers AI output must never meter usage either.
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ recorded: true, usageId: "usage_1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = (promise: Promise<unknown>): void => {
+      waitUntilPromises.push(promise);
+    };
     const emptyBody = await hostedRunnerIntercept(
       new Request(TRANSCRIBE_URL, { method: "POST" }),
       createInterceptEnv({
@@ -4706,7 +4856,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         validateActiveRuntimeWriteFence: async (input) =>
           createActiveRuntimeWriteFenceValidationResult(input),
       }),
-      { containerId: "opaque-container-id" },
+      { containerId: "opaque-container-id", waitUntil },
     );
     expect(emptyBody.status).toBe(400);
     expect(await emptyBody.text()).toBe(
@@ -4725,11 +4875,14 @@ describe("maybeHandleHostedTranscribeRequest", () => {
           validateActiveRuntimeWriteFence: async (input) =>
             createActiveRuntimeWriteFenceValidationResult(input),
         }),
-        { containerId: "opaque-container-id" },
+        { containerId: "opaque-container-id", waitUntil },
       );
       expect(response.status).toBe(502);
       expect(await response.text()).toBe("Hosted transcription failed.");
     }
+
+    await Promise.all(waitUntilPromises);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

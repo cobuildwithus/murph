@@ -2,7 +2,10 @@ import { HostedBillingStatus } from "@prisma/client";
 import {
   HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
 } from "@murphai/hosted-execution/runtime-control";
-import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
+import {
+  buildHostedTranscriptionUsageRecord,
+  type AssistantUsageRecord,
+} from "@murphai/hosted-execution/assistant-usage";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -154,6 +157,72 @@ describe("hosted AI usage allowance pricing", () => {
       },
     });
   });
+
+  it("prices Workers AI transcription by audio duration at $0.00051 per minute", () => {
+    const transcription = {
+      ...BASE_USAGE_RECORD,
+      apiKeyEnv: null,
+      baseUrl: null,
+      cachedInputTokens: null,
+      featureKey: "audio-transcription",
+      inputTokens: null,
+      outputTokens: null,
+      provider: "workers-ai",
+      providerName: "Workers AI",
+      providerRequestId: null,
+      rawUsageJson: { audioBytes: 1_048_576, durationMs: 60_000 },
+      requestedModel: "@cf/openai/whisper-large-v3-turbo",
+      servedModel: null,
+      totalTokens: null,
+    } satisfies AssistantUsageRecord;
+
+    // One full audio minute costs exactly the Workers AI per-minute rate.
+    expect(priceHostedAiUsageForAllowance(transcription)).toMatchObject({
+      costUsdMicros: 510n,
+      counted: true,
+      pricingSnapshot: {
+        audio: {
+          durationMs: "60000",
+          usdMicrosPerAudioMinute: "510",
+        },
+        model: "@cf/openai/whisper-large-v3-turbo",
+        modelSource: "requested",
+      },
+      pricingVersion: "workers-ai-audio-pricing-2026-06-12",
+    });
+
+    // Partial minutes prorate with ceil rounding (2.94s ≈ 25 USD micros).
+    expect(priceHostedAiUsageForAllowance({
+      ...transcription,
+      rawUsageJson: { audioBytes: 1_048_576, durationMs: 2_940 },
+    })).toMatchObject({
+      costUsdMicros: 25n,
+      counted: true,
+    });
+
+    // Missing duration records a zero-cost counted row instead of throwing.
+    expect(priceHostedAiUsageForAllowance({
+      ...transcription,
+      rawUsageJson: { audioBytes: 1_048_576 },
+    })).toMatchObject({
+      costUsdMicros: 0n,
+      counted: true,
+      pricingSnapshot: {
+        audio: {
+          durationMs: null,
+        },
+      },
+    });
+
+    // Member-credential audio rows are recorded without counting, like tokens.
+    expect(priceHostedAiUsageForAllowance({
+      ...transcription,
+      credentialSource: "member",
+    })).toMatchObject({
+      costUsdMicros: 0n,
+      counted: false,
+    });
+  });
 });
 
 describe("accountHostedAiUsageForAllowanceTx", () => {
@@ -183,6 +252,55 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       where: {
         allowanceAccountedAt: null,
         id: "turn_123.attempt-1",
+      },
+    }));
+    expect(executeRaw).toHaveBeenCalledOnce();
+  });
+
+  it("accounts a worker-built transcription record with duration pricing", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      executeRaw,
+      hostedAiUsageUpdateMany: updateMany,
+    });
+    // The exact record shape the worker egress intercept produces (null token
+    // columns, workers-ai provider, whisper model). Only occurredAt is pinned
+    // so the record lands in the mocked billing period.
+    const record = {
+      ...buildHostedTranscriptionUsageRecord({
+        audioBytes: 1_048_576,
+        durationMs: 2_940,
+        memberId: "member_123",
+        model: "@cf/openai/whisper-large-v3-turbo",
+      }),
+      occurredAt: "2026-03-29T12:00:00.000Z",
+    };
+
+    await accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record,
+      tx: tx as never,
+    });
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        allowanceAccountedAt: new Date("2026-03-29T12:00:05.000Z"),
+        allowanceCostUsdMicros: 25n,
+        allowanceCounted: true,
+        allowancePricingSnapshotJson: expect.objectContaining({
+          audio: {
+            durationMs: "2940",
+            usdMicrosPerAudioMinute: "510",
+          },
+          model: "@cf/openai/whisper-large-v3-turbo",
+        }),
+        allowancePricingVersion: "workers-ai-audio-pricing-2026-06-12",
+      }),
+      where: {
+        allowanceAccountedAt: null,
+        id: record.usageId,
       },
     }));
     expect(executeRaw).toHaveBeenCalledOnce();
