@@ -131,9 +131,19 @@ describe('real codex app-server with scripted provider', () => {
       kind: 'compacted',
       threadId: seeded.threadId,
     })
-    // Billing depends on usage capture during compaction; if the app-server
-    // ever stops emitting tokenUsage for compact requests this must fail.
-    expect(compacted.kind === 'compacted' && compacted.usage).toBeTruthy()
+    // Usage attribution must never regress to the zero-row production failure:
+    // the engine should use provider usage when Codex emits it, or a nonzero
+    // lower-bound estimate from the pre-compact thread size when it does not.
+    expect(compacted.kind).toBe('compacted')
+    if (compacted.kind !== 'compacted') {
+      throw new Error('Expected idle compaction to complete.')
+    }
+    expect(compacted.usage).toMatchObject({
+      inputTokens: expect.any(Number),
+      totalTokens: expect.any(Number),
+    })
+    expect(compacted.usage?.inputTokens).toBeGreaterThan(0)
+    expect(compacted.usage?.totalTokens).toBeGreaterThan(0)
 
     // Repeat guard: a successful compact clears the thread vitals, so an
     // immediate second idle pass must skip without provider traffic instead

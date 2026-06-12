@@ -88,13 +88,16 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     });
     expect(recorded).toHaveLength(1);
     expect(recorded[0]).toMatchObject({
+      cachedInputTokens: 96_000,
       credentialSource: "member",
       featureKey: "assistant_idle_compact",
       inputTokens: 140_000,
       memberId: "member_1",
+      outputTokens: 900,
       providerRequestId: "thread_xyz",
       requestedModel: "gpt-5.5",
       sessionId: "asst_real_session",
+      totalTokens: 140_900,
       triggerKind: "automation_idle_compact",
     });
   });

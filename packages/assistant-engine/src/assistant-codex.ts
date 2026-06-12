@@ -200,6 +200,18 @@ function isCodexContextCompactionCompletion(message: CodexRpcMessage): boolean {
   return asCodexRecord(asCodexRecord(message.params)?.item)?.type === 'contextCompaction'
 }
 
+function isCodexContextCompactionCompletionForThread(
+  message: CodexRpcMessage,
+  threadId: string,
+): boolean {
+  if (!isCodexContextCompactionCompletion(message)) {
+    return false
+  }
+
+  const messageThreadId = extractCodexThreadIdFromMessage(message)
+  return messageThreadId === null || messageThreadId === threadId
+}
+
 function isCodexThreadTokenUsageUpdatedMethod(method: string | null): boolean {
   return (
     method === 'thread/tokenUsage/updated' ||
@@ -1004,6 +1016,14 @@ class CodexAppServerProcess {
     // thread size: the compact request's own tokenUsage reports the large
     // pre-compact context, so keeping it would buy one wasted idle re-compact.
     if (isCodexContextCompactionCompletion(message)) {
+      const messageThreadId = extractCodexThreadIdFromMessage(message)
+      if (
+        messageThreadId !== null &&
+        this.boundThreadId !== null &&
+        messageThreadId !== this.boundThreadId
+      ) {
+        return
+      }
       this.lastThreadTokenUsage = null
       return
     }
@@ -1273,10 +1293,64 @@ export async function stopWarmCodexAppServer(
 }
 
 export interface CodexWarmThreadCompactionUsage {
-  cachedInputTokens: number
+  cachedInputTokens: number | null
   inputTokens: number
-  outputTokens: number
+  outputTokens: number | null
   totalTokens: number
+}
+
+function readCodexUsageNumber(
+  record: Record<string, unknown>,
+  key: string,
+): number | null {
+  const value = record[key]
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+function readCodexCompactionProviderUsage(
+  last: Record<string, unknown>,
+): CodexWarmThreadCompactionUsage | null {
+  const inputTokens = readCodexUsageNumber(last, 'inputTokens') ?? 0
+  const outputTokens = readCodexUsageNumber(last, 'outputTokens') ?? 0
+  if (inputTokens === 0 && outputTokens === 0) {
+    return null
+  }
+
+  return {
+    cachedInputTokens: readCodexUsageNumber(last, 'cachedInputTokens') ?? 0,
+    inputTokens,
+    outputTokens,
+    totalTokens: readCodexUsageNumber(last, 'totalTokens') ?? inputTokens + outputTokens,
+  }
+}
+
+function addCodexWarmThreadCompactionUsage(
+  current: CodexWarmThreadCompactionUsage,
+  next: CodexWarmThreadCompactionUsage,
+): CodexWarmThreadCompactionUsage {
+  return {
+    cachedInputTokens: (current.cachedInputTokens ?? 0) + (next.cachedInputTokens ?? 0),
+    inputTokens: current.inputTokens + next.inputTokens,
+    outputTokens: (current.outputTokens ?? 0) + (next.outputTokens ?? 0),
+    totalTokens: current.totalTokens + next.totalTokens,
+  }
+}
+
+function estimateCodexWarmThreadCompactionUsage(
+  threadContextTokensBefore: number,
+): CodexWarmThreadCompactionUsage {
+  // Codex 0.135 compact_remote_v2 consumes the provider response without
+  // surfacing ResponseEvent::Completed.token_usage, then emits a recomputed
+  // post-compact context-size update whose request input/output buckets are
+  // zero. Until Codex surfaces real compact request usage, store the
+  // pre-compact thread context as an explicit lower-bound input/total estimate
+  // so idle compaction spend is not recorded as 0/0/0.
+  return {
+    cachedInputTokens: null,
+    inputTokens: threadContextTokensBefore,
+    outputTokens: null,
+    totalTokens: threadContextTokensBefore,
+  }
 }
 
 export type CodexWarmThreadCompactionOutcome =
@@ -1343,7 +1417,8 @@ export async function compactWarmCodexThread(input: {
 
   const { processInstance, vitals } = reservation
   const startedAt = Date.now()
-  let usageTotal: CodexWarmThreadCompactionUsage | null = null
+  let compactRequestAccepted = false
+  let providerUsageTotal: CodexWarmThreadCompactionUsage | null = null
   type CompactionSettleReason = 'aborted' | 'compacted' | 'process_exit' | 'rpc_error' | 'timeout'
   let resolveCompaction!: (reason: CompactionSettleReason) => void
   const compactionSettled = new Promise<CompactionSettleReason>((resolve) => {
@@ -1357,6 +1432,7 @@ export async function compactWarmCodexThread(input: {
     onParsedMessage: (message) => {
       const responseId = readCodexRpcResponseId(message)
       if (responseId !== null) {
+        const pending = processInstance.pendingRequests.get(responseId)
         const resolveResult = resolvePendingCodexRpcRequest({
           message,
           pendingRequests: processInstance.pendingRequests,
@@ -1364,6 +1440,13 @@ export async function compactWarmCodexThread(input: {
         })
         if (resolveResult === 'unknown_response_id') {
           processInstance.consumeIgnoredResponseId(responseId)
+        }
+        if (
+          resolveResult !== 'unknown_response_id' &&
+          pending?.method === 'thread/compact/start' &&
+          !message.error
+        ) {
+          compactRequestAccepted = true
         }
         return
       }
@@ -1374,28 +1457,21 @@ export async function compactWarmCodexThread(input: {
 
       const update = readCodexThreadTokenUsageUpdate(message)
       if (update) {
-        if (update.last) {
-          const last = update.last
-          const request = {
-            cachedInputTokens:
-              typeof last.cachedInputTokens === 'number' ? last.cachedInputTokens : 0,
-            inputTokens: typeof last.inputTokens === 'number' ? last.inputTokens : 0,
-            outputTokens: typeof last.outputTokens === 'number' ? last.outputTokens : 0,
-            totalTokens: typeof last.totalTokens === 'number' ? last.totalTokens : 0,
+        if (!update.threadId || update.threadId === vitals.threadId) {
+          const request = update.last ? readCodexCompactionProviderUsage(update.last) : null
+          if (request) {
+            providerUsageTotal = providerUsageTotal
+              ? addCodexWarmThreadCompactionUsage(providerUsageTotal, request)
+              : request
           }
-          usageTotal = usageTotal
-            ? {
-                cachedInputTokens: usageTotal.cachedInputTokens + request.cachedInputTokens,
-                inputTokens: usageTotal.inputTokens + request.inputTokens,
-                outputTokens: usageTotal.outputTokens + request.outputTokens,
-                totalTokens: usageTotal.totalTokens + request.totalTokens,
-              }
-            : request
         }
         return
       }
 
-      if (isCodexContextCompactionCompletion(message)) {
+      if (
+        compactRequestAccepted &&
+        isCodexContextCompactionCompletionForThread(message, vitals.threadId)
+      ) {
         resolveCompaction('compacted')
       }
     },
@@ -1431,7 +1507,8 @@ export async function compactWarmCodexThread(input: {
         durationMs: Date.now() - startedAt,
         threadContextTokensBefore: vitals.lastInputTokens,
         threadId: vitals.threadId,
-        usage: usageTotal,
+        usage:
+          providerUsageTotal ?? estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
       }
     }
 
@@ -2378,6 +2455,7 @@ async function runCodexAppServerTurnOnProcess(
         }
         if (pending?.method === 'thread/start' || pending?.method === 'thread/resume') {
           codexThreadId = extractCodexThreadIdFromResult(message.result) ?? codexThreadId
+          codexProcess.noteBoundThreadId(codexThreadId)
         }
         if (pending?.method === 'turn/start') {
           const resultTurnId = extractCodexTurnIdFromResult(message.result)
@@ -2651,6 +2729,7 @@ async function runCodexAppServerTurnOnProcess(
       })
     }
     codexThreadId = extractCodexThreadIdFromResult(threadResult) ?? codexThreadId
+    codexProcess.noteBoundThreadId(codexThreadId)
     rolloutRelativePath = resolveCodexRolloutRelativePath({
       codexHome: input.env.CODEX_HOME,
       codexThreadId,
