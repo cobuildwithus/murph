@@ -34,6 +34,7 @@ import {
   RECOVERY_METRIC_KEYS,
   SLEEP_METRIC_KEYS,
 } from "../wearables/types.ts";
+import { buildWearableSourceHealth } from "../wearables/source-health.ts";
 import { formatMetricLabel, formatProviderName } from "../wearables/provider-policy.ts";
 import {
   normalizeWearableProviders,
@@ -139,8 +140,18 @@ function composePublicWearableSummaryBundleFromProviderRows(
     buildWearableSummaryBundleFromDataset(dataset),
     providerBundle,
   );
+  const recomputedSourceHealth = buildWearableSourceHealth({
+    activityDays: composed.activityDays,
+    bodyStateDays: composed.bodyStateDays,
+    dataset,
+    recoveryDays: composed.recoveryDays,
+    sleepNights: composed.sleepNights,
+  });
 
-  return projectPublicWearableSummaryBundle(mergeStoredSourceHealthContext(composed, providerBundle.sourceHealth));
+  return projectPublicWearableSummaryBundle(mergeStoredSourceHealthContext({
+    ...composed,
+    sourceHealth: recomputedSourceHealth,
+  }, providerBundle.sourceHealth));
 }
 
 function mergeStoredMetricConflictEvidence(
@@ -338,7 +349,9 @@ function mergeSummaryMetricConfidence(
   const lowConfidenceMetrics = metrics
     .filter(([, metric]) => metric.confidence.level === "low")
     .map(([metric]) => metric);
-  const notes = uniqueStringValues([...summary.summaryConfidence.notes]);
+  const notes = uniqueStringValues(
+    summary.summaryConfidence.notes.filter((note) => !isAutoConflictSummaryNote(note)),
+  );
 
   if (conflictingMetrics.length > 0) {
     notes.push(`Some metrics still conflict across providers: ${conflictingMetrics.map(formatMetricLabel).join(", ")}.`);
@@ -397,11 +410,6 @@ function mergeStoredSourceHealthContext(
 
     return {
       ...summary,
-      conflictCount: Math.max(summary.conflictCount, storedSummary?.conflictCount ?? 0),
-      exactDuplicatesSuppressed: Math.max(
-        summary.exactDuplicatesSuppressed,
-        storedSummary?.exactDuplicatesSuppressed ?? 0,
-      ),
       notes: uniqueStringValues([...summary.notes, ...(diagnosticNotes ?? [])]),
     };
   });
@@ -433,6 +441,10 @@ function isStoredSourceHealthDiagnosticNote(note: string): boolean {
   ) || (
     note.startsWith("Excluded ") && note.includes("provenance was incomplete")
   );
+}
+
+function isAutoConflictSummaryNote(note: string): boolean {
+  return note.startsWith("Some metrics still conflict across providers:");
 }
 
 function storedSourceHealthHasCoverageInterval(summary: ProjectedWearableSourceHealthSummary): boolean {

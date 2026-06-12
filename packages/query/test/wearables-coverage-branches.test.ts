@@ -323,8 +323,8 @@ test("shared and provider-policy helpers normalize and rank wearable evidence de
       sourceInstanceId: "partner-source-a",
       version: 1,
     },
-    externalRef: makeExternalRef({ system: "junction" }),
-    provider: "junction",
+    externalRef: null,
+    provider: null,
   }, { suppressJunctionSourceInstanceFallback: true }), "partner-source-a");
   assert.equal(resolveWearablePublicSourceProvider({
     dataOrigin: {
@@ -335,6 +335,28 @@ test("shared and provider-policy helpers normalize and rank wearable evidence de
     externalRef: makeExternalRef({ system: "junction" }),
     provider: "junction",
   }, { suppressJunctionSourceInstanceFallback: true }), "unknown");
+  assert.equal(resolveWearablePublicSourceProvider({
+    dataOrigin: {
+      sourceInstanceId: "source-junction-missing-aggregator",
+      version: 1,
+    },
+    externalRef: makeExternalRef({
+      resourceType: "junction-unmapped-resource",
+      system: "junction",
+    }),
+    provider: "junction",
+  }, { suppressJunctionSourceInstanceFallback: true }), "unknown");
+  assert.equal(resolveWearablePublicSourceProvider({
+    dataOrigin: {
+      sourceInstanceId: "source-junction-missing-aggregator",
+      version: 1,
+    },
+    externalRef: makeExternalRef({
+      resourceType: "junction-unmapped-resource",
+      system: "junction",
+    }),
+    provider: "junction",
+  }), "source-junction-missing-aggregator");
 });
 
 test("dedupe, selection, confidence, and summary helpers preserve deterministic branches", () => {

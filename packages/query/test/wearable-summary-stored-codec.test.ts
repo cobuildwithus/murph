@@ -240,6 +240,82 @@ test("compose preserves stored same-public provider conflict evidence", () => {
   assert.equal(composed.sourceHealth.find((summary) => summary.provider === "garmin")?.conflictCount, 1);
 });
 
+test("compose recomputes source health and summary notes after stored conflicts are merged", () => {
+  const date = "2026-05-03";
+  const dataset: WearableDataset = {
+    activitySessionAggregates: [],
+    metricCandidates: [
+      candidate({
+        date,
+        facet: "steps",
+        metric: "steps",
+        provider: "garmin",
+        unit: "count",
+        value: 8_000,
+      }),
+      candidate({
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          version: 1,
+        },
+        date,
+        facet: "steps",
+        metric: "steps",
+        provider: "junction",
+        resourceType: "junction-garmin-activity",
+        suffix: ":junction",
+        system: "junction",
+        unit: "count",
+        value: 9_000,
+      }),
+      candidate({
+        date,
+        facet: "active-calories",
+        metric: "activeCalories",
+        provider: "garmin",
+        unit: "kcal",
+        value: 500,
+      }),
+      candidate({
+        date,
+        facet: "active-calories",
+        metric: "activeCalories",
+        provider: "oura",
+        suffix: ":oura",
+        unit: "kcal",
+        value: 650,
+      }),
+    ],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [],
+    sleepWindows: [],
+  };
+  const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  const composed = composePublicWearableSummaryBundleFromStoredRows({
+    providerFilterWasProvided: false,
+    providers: [],
+    rows,
+  }, {});
+  const activity = composed.activityDays.find((summary) => summary.date === date);
+  const garminSourceHealth = composed.sourceHealth.find((summary) => summary.provider === "garmin");
+  const ouraSourceHealth = composed.sourceHealth.find((summary) => summary.provider === "oura");
+
+  assert.ok(activity);
+  assert.deepEqual(activity.steps.confidence.conflictingProviders, ["garmin"]);
+  assert.deepEqual(activity.activeCalories.confidence.conflictingProviders, ["oura"]);
+  assert.equal(garminSourceHealth?.conflictCount, 2);
+  assert.equal(ouraSourceHealth?.conflictCount, 1);
+
+  const conflictNotes = activity.summaryConfidence.notes.filter((note) =>
+    note.startsWith("Some metrics still conflict across providers:")
+  );
+  assert.equal(conflictNotes.length, 1);
+  assert.equal(conflictNotes[0]?.includes("Steps"), true);
+  assert.match(conflictNotes[0] ?? "", /active calories/iu);
+});
+
 test("compose preserves stored same-public sleep-window conflict evidence", () => {
   const date = "2026-05-04";
   const dataset: WearableDataset = {

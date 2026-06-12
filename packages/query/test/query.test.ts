@@ -4427,7 +4427,7 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
       // summary rows still scoped under raw whoop_v2 provider keys, on top of
       // the v7 pre-codec JSON and v6 dropped metric point columns) were
       // treated as current instead of being rebuilt.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 9);
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 10);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database

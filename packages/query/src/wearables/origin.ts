@@ -37,7 +37,9 @@ function resolveRawWearableSourceProvider(input: {
     return inferredSourceProvider;
   }
 
-  const provider = normalizeLowercaseString(input.provider ?? input.externalRef?.system);
+  const rawProvider = normalizeLowercaseString(input.provider);
+  const externalRefSystem = normalizeLowercaseString(input.externalRef?.system);
+  const provider = rawProvider ?? externalRefSystem;
   if (provider && provider !== "junction") {
     return provider;
   }
@@ -45,9 +47,12 @@ function resolveRawWearableSourceProvider(input: {
   if (options.useSourceInstanceFallback ?? true) {
     const sourceInstanceId = normalizeWearableOriginSourceSlug(input.dataOrigin?.sourceInstanceId);
     const aggregatorProvider = normalizeWearableOriginSourceSlug(input.dataOrigin?.aggregatorProvider);
+    const isJunctionOrigin = aggregatorProvider === "junction"
+      || rawProvider === "junction"
+      || externalRefSystem === "junction";
     if (
       sourceInstanceId
-      && !(options.suppressJunctionSourceInstanceFallback && aggregatorProvider === "junction")
+      && !(options.suppressJunctionSourceInstanceFallback && isJunctionOrigin)
     ) {
       return sourceInstanceId;
     }
