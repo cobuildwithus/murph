@@ -1,6 +1,7 @@
 import type { AssistantTurnTrigger } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
+import type { AssistantProviderServiceTier } from '../providers/types.js'
 import type {
   AssistantMessageInput,
   AssistantTurnEnvironment,
@@ -11,6 +12,7 @@ export type AssistantAutomationTurnEnvelope = Pick<
   | 'abortSignal'
   | 'deliveryDispatchMode'
   | 'executionContext'
+  | 'serviceTier'
   | 'turnEnvironment'
   | 'turnTrigger'
 >
@@ -18,6 +20,7 @@ export type AssistantAutomationTurnEnvelope = Pick<
 export function buildAssistantAutomationTurnEnvelope(input: {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
+  serviceTier?: AssistantProviderServiceTier | null
   signal?: AbortSignal
   turnEnvironment?: AssistantTurnEnvironment | null
   turnTrigger: AssistantTurnTrigger
@@ -26,6 +29,7 @@ export function buildAssistantAutomationTurnEnvelope(input: {
     abortSignal: input.signal,
     deliveryDispatchMode: input.deliveryDispatchMode,
     executionContext: input.executionContext,
+    serviceTier: input.serviceTier ?? null,
     turnEnvironment: input.turnEnvironment ?? null,
     turnTrigger: input.turnTrigger,
   }

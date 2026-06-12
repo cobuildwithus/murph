@@ -3,6 +3,10 @@ import type {
   AssistantTurnEnvironment,
 } from "@murphai/assistant-engine";
 import {
+  MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+} from "@murphai/assistant-engine/assistant-skill-env";
+import {
   HOSTED_CLI_BRIDGE_ENV_NAMES,
   HOSTED_CLI_LOCAL_DAEMON_ENV_DENYLIST,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
@@ -140,10 +144,17 @@ const HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST = new Set<string>(
     ...HOSTED_CLI_BRIDGE_ENV_NAMES,
     ...HOSTED_CLI_LOCAL_DAEMON_ENV_DENYLIST,
     HOSTED_RUNTIME_PROCESS_ENV_MARKER,
+    // Platform-owned assistant-engine asset roots (Dockerfile ENV pins).
+    // Job producers must not redirect the skills root or the prebuilt CLI
+    // surface contract; the runtime boundary owns this guard for every
+    // producer, not just the Cloudflare runner-secret policy.
+    MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
+    MURPH_ASSISTANT_SKILLS_ROOT_ENV,
     "CODEX_HOME",
     "DYLD_INSERT_LIBRARIES",
     "DYLD_LIBRARY_PATH",
     "HOME",
+    "HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET",
     "HOSTED_WEB_BASE_URL",
     "LD_LIBRARY_PATH",
     "LD_PRELOAD",
@@ -178,10 +189,15 @@ const HOSTED_RUNTIME_USER_ENV_DENYLIST = new Set<string>(
     ...HOSTED_CLI_BRIDGE_ENV_NAMES,
     ...HOSTED_CLI_LOCAL_DAEMON_ENV_DENYLIST,
     HOSTED_RUNTIME_PROCESS_ENV_MARKER,
+    // Platform-owned assistant-engine asset roots — see the forwarded-env
+    // deny list note above.
+    MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
+    MURPH_ASSISTANT_SKILLS_ROOT_ENV,
     "CODEX_HOME",
     "DYLD_INSERT_LIBRARIES",
     "DYLD_LIBRARY_PATH",
     "HOME",
+    "HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET",
     "HOSTED_WEB_BASE_URL",
     "LD_LIBRARY_PATH",
     "LD_PRELOAD",

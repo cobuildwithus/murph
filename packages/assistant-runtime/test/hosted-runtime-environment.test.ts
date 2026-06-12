@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -99,6 +99,52 @@ test("hosted runtime config copies user and forwarded env maps", () => {
   assert.notEqual(normalized.resolvedConfig, resolvedConfig);
   assert.deepEqual(normalized.userEnv, userEnv);
   assert.notEqual(normalized.userEnv, userEnv);
+});
+
+test("hosted runtime config rejects platform-owned assistant asset-root env overrides from every producer", () => {
+  const platform = createHostedRuntimePlatformStub();
+  const normalized = normalizeHostedAssistantRuntimeConfig(
+    {
+      forwardedEnv: {
+        MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH: "/tmp/attacker-contract.json",
+        MURPH_ASSISTANT_SKILLS_ROOT: "/tmp/attacker-skills",
+        OPENAI_API_KEY: "secret",
+      },
+      resolvedConfig: createHostedRuntimeResolvedConfig(),
+      userEnv: {
+        ANTHROPIC_API_KEY: "anthropic-secret",
+        MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH: "/tmp/attacker-contract.json",
+        MURPH_ASSISTANT_SKILLS_ROOT: "/tmp/attacker-skills",
+      },
+    },
+    platform,
+  );
+
+  // The runtime boundary guards code-location-sensitive asset roots for all
+  // job producers, not only the Cloudflare runner-secret policy.
+  assert.deepEqual(normalized.forwardedEnv, { OPENAI_API_KEY: "secret" });
+  assert.deepEqual(normalized.userEnv, { ANTHROPIC_API_KEY: "anthropic-secret" });
+});
+
+test("hosted runtime env policy imports only the zero-dependency assistant skill env contract", async () => {
+  const policyModules = [
+    "../src/hosted-runtime/environment.ts",
+    "../src/hosted-runtime/codex-shell-env-policy.ts",
+  ];
+
+  for (const policyModule of policyModules) {
+    const source = await readFile(new URL(policyModule, import.meta.url), "utf8");
+    assert.match(
+      source,
+      /@murphai\/assistant-engine\/assistant-skill-env/u,
+      `${policyModule} should import the worker-safe skill env-name contract`,
+    );
+    assert.doesNotMatch(
+      source,
+      /@murphai\/assistant-engine\/assistant-skill-assets/u,
+      `${policyModule} must not import the Node/process-bearing skill asset module`,
+    );
+  }
 });
 
 test("hosted runtime config rejects parserToolchain:null", () => {
@@ -346,6 +392,7 @@ test("hosted runtime process env does not project typed parser toolchain into pr
       MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG: "1",
       MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_LIMIT: "20000",
       MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW: "1",
+      HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET: "watchdog-secret",
       NODE_ENV: "production",
       OPENAI_API_KEY: "worker-openai-secret",
       HOSTED_WEB_BASE_URL: "https://evil-web.example.test",
@@ -382,6 +429,10 @@ test("hosted runtime process env does not project typed parser toolchain into pr
   });
   assert.equal("FFMPEG_COMMAND" in childEnv, false);
   assert.equal("HOME" in childEnv, false);
+  assert.equal(
+    "HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET" in childEnv,
+    false,
+  );
   assert.equal("HOSTED_WEB_BASE_URL" in childEnv, false);
   assert.equal("PDFINFO_COMMAND" in childEnv, false);
   assert.equal("PDFTOTEXT_COMMAND" in childEnv, false);
@@ -905,6 +956,7 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
         CODEX_HOME: "/tmp/forwarded-codex-home",
         HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
         HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
+        HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET: "watchdog-secret",
         NODE_OPTIONS: "--require /tmp/injected.js",
         PATH: "/tmp/custom-bin",
         HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: "authority-public-pem",
@@ -934,6 +986,7 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
         CODEX_HOME: "/tmp/user-codex-home",
         HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
         HOSTED_ASSISTANT_BASE_URL: "https://user-legacy-provider.example.test/v1",
+        HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET: "user-watchdog-secret",
         HOSTED_EMAIL_DOMAIN: "mail.example.test",
         HOSTED_WEB_BASE_URL: "https://evil-web.example.test",
         NODE_OPTIONS: "--require /tmp/user-injected.js",

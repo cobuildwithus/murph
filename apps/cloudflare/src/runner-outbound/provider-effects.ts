@@ -3,6 +3,11 @@ import {
   getHostedProviderTelegramFile,
   type HostedProviderEffectDependencies,
 } from "@murphai/assistant-runtime/hosted-provider-effects";
+import {
+  deriveHostedExecutionErrorCode,
+  emitHostedExecutionStructuredLog,
+  readHostedExecutionSafeErrorName,
+} from "@murphai/hosted-execution";
 
 import { json, jsonError, methodNotAllowed, readJsonObject, unauthorized } from "../json.ts";
 import {
@@ -58,50 +63,112 @@ export async function handleRunnerProviderEffectsRequest(input: {
       || error instanceof TypeError
       || error instanceof RangeError
     ) {
+      emitProviderEffectRequestRejectedLog({
+        bodyKeys: null,
+        error,
+        pathname: input.pathname,
+        stage: "body_read",
+      });
       return jsonError("Malformed provider effect request.", 400);
     }
     throw error;
   }
 
+  let execute: ProviderEffectExecution | null;
   try {
-    return await dispatchRunnerProviderEffectsRequest({
-      body,
-      env: input.env,
-      pathname: input.pathname,
-      requestSignal: input.request.signal,
-    });
+    execute = planProviderEffectExecution(input.pathname, body);
   } catch (error) {
-    if (error instanceof SyntaxError || error instanceof TypeError || error instanceof RangeError) {
+    if (
+      error instanceof SyntaxError
+      || error instanceof TypeError
+      || error instanceof RangeError
+    ) {
+      emitProviderEffectRequestRejectedLog({
+        bodyKeys: readSafeProviderEffectBodyKeys(body),
+        error,
+        pathname: input.pathname,
+        stage: "contract_parse",
+      });
       return jsonError("Malformed provider effect request.", 400);
     }
+    throw error;
+  }
+  if (!execute) {
+    return jsonError("Not found", 404);
+  }
+
+  try {
+    return await execute(createProviderEffectDependencies({
+      env: input.env,
+      requestSignal: input.request.signal,
+    }));
+  } catch (error) {
+    emitProviderEffectRequestRejectedLog({
+      bodyKeys: null,
+      error,
+      pathname: input.pathname,
+      stage: "effect",
+    });
     return json(readHostedProviderEffectErrorResponse(error), 502);
   }
 }
 
-async function dispatchRunnerProviderEffectsRequest(input: {
-  body: Record<string, unknown>;
-  env: RunnerOutboundEnvironmentSource;
-  pathname: string;
-  requestSignal: AbortSignal;
-}): Promise<Response> {
-  const dependencies = createProviderEffectDependencies({
-    env: input.env,
-    requestSignal: input.requestSignal,
-  });
+type ProviderEffectExecution = (
+  dependencies: HostedProviderEffectDependencies,
+) => Promise<Response>;
 
-  switch (input.pathname) {
-    case HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH:
-      return json({
-        file: await getHostedProviderTelegramFile(
-          parseHostedRunnerTelegramGetFileRequest(input.body),
-          dependencies,
-        ),
+function planProviderEffectExecution(
+  pathname: string,
+  body: Record<string, unknown>,
+): ProviderEffectExecution | null {
+  switch (pathname) {
+    case HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH: {
+      const request = parseHostedRunnerTelegramGetFileRequest(body);
+      return async (dependencies) => json({
+        file: await getHostedProviderTelegramFile(request, dependencies),
       });
-    case HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH:
-      return await handleTelegramDownloadFileEffect(input.body, dependencies);
+    }
+    case HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH: {
+      const request = parseHostedRunnerTelegramDownloadFileRequest(body);
+      return async (dependencies) => handleTelegramDownloadFileEffect(request, dependencies);
+    }
     default:
-      return jsonError("Not found", 404);
+      return null;
   }
+}
+
+const PROVIDER_EFFECT_BODY_KEY_LIMIT = 16;
+const PROVIDER_EFFECT_BODY_KEY_LENGTH_LIMIT = 48;
+
+function readSafeProviderEffectBodyKeys(body: Record<string, unknown>): string {
+  // Key names only — never values — so a contract mismatch is diagnosable
+  // without exposing payload contents.
+  return Object.keys(body)
+    .sort()
+    .slice(0, PROVIDER_EFFECT_BODY_KEY_LIMIT)
+    .map((key) => key.slice(0, PROVIDER_EFFECT_BODY_KEY_LENGTH_LIMIT))
+    .join(",");
+}
+
+function emitProviderEffectRequestRejectedLog(input: {
+  bodyKeys: string | null;
+  error: unknown;
+  pathname: string;
+  stage: "body_read" | "contract_parse" | "effect";
+}): void {
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      ...(input.bodyKeys === null ? {} : { bodyKeys: input.bodyKeys }),
+      errorCode: deriveHostedExecutionErrorCode(input.error),
+      errorName: readHostedExecutionSafeErrorName(input.error) ?? "unknown",
+      path: input.pathname,
+      stage: input.stage,
+    },
+    level: "warn",
+    message: "Hosted runner provider effect request failed.",
+    phase: "wake.running",
+  });
 }
 
 function createProviderEffectDependencies(input: {
@@ -116,10 +183,9 @@ function createProviderEffectDependencies(input: {
 }
 
 async function handleTelegramDownloadFileEffect(
-  body: Record<string, unknown>,
+  request: ReturnType<typeof parseHostedRunnerTelegramDownloadFileRequest>,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<Response> {
-  const request = parseHostedRunnerTelegramDownloadFileRequest(body);
   const bytes = await downloadHostedProviderTelegramFile(request, dependencies);
   if (!bytes) {
     return json({ file: null });
@@ -166,19 +232,42 @@ function readHostedProviderEffectErrorResponse(
     readOptionalString(record?.target)
     ?? readOptionalString(context?.target)
     ?? null;
+  const upstreamStatus =
+    readProviderEffectStatus(record?.status)
+    ?? readProviderEffectStatus(record?.statusCode);
+  const responseContext = readProviderEffectResponseContext({
+    context,
+    upstreamStatus,
+  });
 
   return {
     error: code === "ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS"
       ? "Telegram delivery outcome is ambiguous."
       : "Provider effect failed.",
     ...(code ? { code } : {}),
-    ...(context ? { context: sanitizeProviderEffectContext(context) } : {}),
+    ...(responseContext ? { context: responseContext } : {}),
     ...(providerMessageId ? { providerMessageId } : {}),
     ...(providerMessageIds ? { providerMessageIds } : {}),
     ...(cleanupMessages ? { cleanupMessages } : {}),
     ...(cleanupTargetAliases ? { cleanupTargetAliases } : {}),
     ...(target ? { target } : {}),
   };
+}
+
+function readProviderEffectResponseContext(input: {
+  context: Record<string, unknown> | null;
+  upstreamStatus: number | null;
+}): Record<string, unknown> | null {
+  const rawContext = input.context ? { ...input.context } : {};
+  if (
+    input.upstreamStatus !== null
+    && readProviderEffectStatus(rawContext.status) === null
+  ) {
+    rawContext.status = input.upstreamStatus;
+  }
+
+  const context = sanitizeProviderEffectContext(rawContext);
+  return Object.keys(context).length > 0 ? context : null;
 }
 
 function sanitizeProviderEffectContext(
@@ -275,6 +364,12 @@ function readOptionalString(value: unknown): string | null {
   }
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function readProviderEffectStatus(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 100 && value <= 599
+    ? value
+    : null;
 }
 
 function readFileNameFromProviderPath(filePath: string): string | null {

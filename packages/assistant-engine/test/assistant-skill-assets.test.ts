@@ -11,6 +11,10 @@ import {
   withAssistantSkillsRootEnv,
 } from '../src/assistant-skill-assets.js'
 import {
+  MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV as skillEnvCliSurfaceArtifactPathEnv,
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV as skillEnvSkillsRootEnv,
+} from '../src/assistant-skill-env.js'
+import {
   ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
 } from '../src/assistant/first-contact-welcome.js'
 import {
@@ -744,6 +748,25 @@ describe('assistant skill assets', () => {
         default: './dist/assistant-skill-assets.js',
         types: './dist/assistant-skill-assets.d.ts',
       },
+      './assistant-skill-env': {
+        default: './dist/assistant-skill-env.js',
+        types: './dist/assistant-skill-env.d.ts',
+      },
     })
+  })
+
+  it('keeps the skill env-name contract dependency-free for hosted runtime boundaries', async () => {
+    expect(skillEnvSkillsRootEnv).toBe('MURPH_ASSISTANT_SKILLS_ROOT')
+    expect(skillEnvCliSurfaceArtifactPathEnv).toBe(
+      'MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH',
+    )
+
+    const source = await readFile(
+      new URL('../src/assistant-skill-env.ts', import.meta.url),
+      'utf8',
+    )
+    expect(source).not.toMatch(/\bimport\b/u)
+    expect(source).not.toContain('process')
+    expect(source).not.toContain('node:')
   })
 })
