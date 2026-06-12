@@ -390,11 +390,15 @@ test("remote-only audio passthrough skips an available ffmpeg while video still 
     scratchDirectory: directory,
     ffmpeg: remoteOnlyFfmpeg,
   });
-  assert.equal(videoPrepared.inputPath, path.join(directory, "att_video_remote_only.wav"));
+  assert.equal(videoPrepared.inputPath, path.join(directory, "att_video_remote_only.mp3"));
   assert.equal(videoPrepared.preparedKind, "audio");
   const invocations = (await fs.readFile(invocationLogPath, "utf8")).trim().split("\n");
   assert.equal(invocations.length, 1);
-  assert.equal(JSON.parse(invocations[0] ?? "[]").includes(videoPath), true);
+  const videoInvocation = JSON.parse(invocations[0] ?? "[]");
+  assert.equal(videoInvocation.includes(videoPath), true);
+  assert.equal(videoInvocation.includes("-vn"), true);
+  assert.equal(videoInvocation.includes("libmp3lame"), true);
+  assert.equal(videoInvocation.includes("48k"), true);
 });
 
 test("remote-only audio passthrough matches mime case-insensitively and requires the flag to be exactly true", async () => {
@@ -468,7 +472,7 @@ test("remote-only audio passthrough falls back to ffmpeg when the original excee
       `fs.appendFileSync(${JSON.stringify(invocationLogPath)}, JSON.stringify(process.argv.slice(2)) + "\\n", "utf8");`,
     ].join("\n"),
   );
-  const oversizedMp3 = Buffer.alloc(16 * 1024 * 1024 + 1);
+  const oversizedMp3 = Buffer.alloc(32 * 1024 * 1024 + 1);
   oversizedMp3.write("ID3", 0, "ascii");
   const mp3Path = await writeExternalBytes(directory, "oversized.mp3", oversizedMp3);
 
@@ -490,11 +494,14 @@ test("remote-only audio passthrough falls back to ffmpeg when the original excee
     },
   });
 
-  assert.equal(prepared.inputPath, path.join(directory, "att_audio_passthrough_cap.wav"));
+  assert.equal(prepared.inputPath, path.join(directory, "att_audio_passthrough_cap.mp3"));
   assert.equal(prepared.preparedKind, "audio");
   const invocations = (await fs.readFile(invocationLogPath, "utf8")).trim().split("\n");
   assert.equal(invocations.length, 1);
-  assert.equal(JSON.parse(invocations[0] ?? "[]").includes(mp3Path), true);
+  const invocation = JSON.parse(invocations[0] ?? "[]");
+  assert.equal(invocation.includes(mp3Path), true);
+  assert.equal(invocation.includes("libmp3lame"), true);
+  assert.equal(invocation.includes("48k"), true);
 });
 
 test("shared executable helpers preserve lazy resolution, availability, and missing-tool errors", async () => {

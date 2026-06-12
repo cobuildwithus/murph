@@ -71,20 +71,40 @@ export async function prepareAudioInput(input: {
   }
 
   await ensureDirectory(scratchDirectory);
-  const outputPath = path.join(scratchDirectory, `${artifact.attachmentId}.wav`);
-  await runCommand(command, [
-    "-y",
-    "-i",
-    artifact.absolutePath,
-    "-vn",
-    "-ac",
-    "1",
-    "-ar",
-    "16000",
-    "-c:a",
-    "pcm_s16le",
-    outputPath,
-  ], {
+  const outputPath = path.join(
+    scratchDirectory,
+    `${artifact.attachmentId}${remoteTranscriptionOnly ? ".mp3" : ".wav"}`,
+  );
+  const ffmpegArgs = remoteTranscriptionOnly
+    ? [
+        "-y",
+        "-i",
+        artifact.absolutePath,
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-codec:a",
+        "libmp3lame",
+        "-b:a",
+        "48k",
+        outputPath,
+      ]
+    : [
+        "-y",
+        "-i",
+        artifact.absolutePath,
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "pcm_s16le",
+        outputPath,
+      ];
+  await runCommand(command, ffmpegArgs, {
     signal: input.signal,
     ...(input.ffmpeg?.maxCommandOutputBytes === undefined
       ? {}
@@ -108,7 +128,7 @@ export async function prepareAudioInput(input: {
 // Container formats verified accepted by the hosted remote transcription model
 // (@cf/openai/whisper-large-v3-turbo; live-checked against the production model
 // on 2026-06-12). AMR is deliberately absent: it is unverified, so it stays on
-// the ffmpeg WAV normalization path. MP4-family containers are also deliberately
+// the ffmpeg preparation path. MP4-family containers are also deliberately
 // absent: they routinely carry video, and the ffmpeg `-vn` path avoids sending
 // those video-capable container bytes through passthrough.
 const REMOTE_TRANSCRIPTION_DIRECT_AUDIO_MIMES = new Set([
@@ -139,7 +159,7 @@ const REMOTE_TRANSCRIPTION_BLOCKED_AUDIO_EXTENSIONS = new Set([
 ]);
 
 // Keep in sync with the remote transcription provider and Worker body cap.
-const REMOTE_TRANSCRIPTION_DIRECT_MAX_INPUT_BYTES = 16 * 1024 * 1024;
+const REMOTE_TRANSCRIPTION_DIRECT_MAX_INPUT_BYTES = 32 * 1024 * 1024;
 
 async function isRemoteTranscriptionDirectAudioArtifact(
   artifact: ParserArtifactRef,
