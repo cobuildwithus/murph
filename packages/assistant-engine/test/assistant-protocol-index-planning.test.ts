@@ -154,14 +154,15 @@ describe('assistant protocol index planning', () => {
 
     expect(plan.onboardingGuidanceInjected).toBe(true)
     expect(plan.systemPrompt).toContain(skillRef)
-    expect(plan.turnContextPrompt).toContain('Murph onboarding:')
-    expect(plan.turnContextPrompt).toContain(
+    expect(plan.turnContextPrompt).not.toContain('Murph onboarding:')
+    expect(plan.developerInstructions).toContain('Murph onboarding:')
+    expect(plan.developerInstructions).toContain(
       `Read and follow \`${skillRef}\` when onboarding is open and you need the next unresolved onboarding step`,
     )
-    expect(plan.turnContextPrompt).toContain(
+    expect(plan.developerInstructions).toContain(
       'Before ending a normal reply while onboarding is open, keep onboarding moving unless a skip condition applies',
     )
-    expect(plan.turnContextPrompt).not.toContain(
+    expect(plan.developerInstructions).not.toContain(
       'roughly 5-6 short assistant messages',
     )
     expect(plan.turnContextPrompt).not.toContain('Natural first-run flow')
@@ -319,6 +320,63 @@ describe('assistant protocol index planning', () => {
     )
   })
 
+  it('resumes Codex threads when only the per-turn date changes', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const route = createRoute()
+    const oldPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-05',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession({
+        resumeState: {
+          assistantContractFingerprint: oldPlan.assistantContractFingerprint,
+          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          threadId: 'thread-date-change',
+        },
+      }),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(plan.resume?.codexThreadId).toBe('thread-date-change')
+    expect(plan.developerInstructions).toBeNull()
+    expect(plan.turnContextPrompt).toBe(
+      'Today\'s date for the user is May 5, 2026.',
+    )
+    expect(plan.assistantContractFingerprint).toBe(
+      oldPlan.assistantContractFingerprint,
+    )
+  })
+
   it('starts a fresh thread when stable developer instructions change', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValueOnce('old bootstrap')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
@@ -370,6 +428,183 @@ describe('assistant protocol index planning', () => {
     expect(plan.resume).toBeNull()
     expect(plan.developerInstructions).toContain('new bootstrap')
     expect(plan.assistantContractFingerprint).not.toBe(oldPlan.assistantContractFingerprint)
+  })
+
+  it('starts a fresh thread when thread-stable context changes', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const route = createRoute()
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+    const basePromptTimeContext = {
+      currentLocalDate: '2026-05-04',
+      currentTimeZone: 'Asia/Kuala_Lumpur',
+    }
+
+    const scenarios = [
+      {
+        expectedDeveloperText:
+          "The user's canonical timezone for this vault is America/New_York.",
+        name: 'timezone',
+        newPromptTimeContext: {
+          ...basePromptTimeContext,
+          currentTimeZone: 'America/New_York',
+        },
+        newSharedPlan: createSharedPlan(),
+        oldPromptTimeContext: basePromptTimeContext,
+        oldSharedPlan: createSharedPlan(),
+        unexpectedTurnText: 'America/New_York',
+      },
+      {
+        expectedDeveloperText:
+          'Current Murph product base URL for user-facing app links: https://new.example.test',
+        name: 'product URL',
+        newPromptTimeContext: basePromptTimeContext,
+        newSharedPlan: createSharedPlan({
+          cliAccess: {
+            env: {
+              HOSTED_WEB_BASE_URL: 'https://new.example.test',
+            },
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+        }),
+        oldPromptTimeContext: basePromptTimeContext,
+        oldSharedPlan: createSharedPlan({
+          cliAccess: {
+            env: {
+              HOSTED_WEB_BASE_URL: 'https://old.example.test',
+            },
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+        }),
+        unexpectedTurnText: 'https://new.example.test',
+      },
+      {
+        expectedDeveloperText: 'Murph onboarding:',
+        name: 'onboarding',
+        newPromptTimeContext: basePromptTimeContext,
+        newSharedPlan: createSharedPlan({
+          onboardingGuidanceOpen: true,
+        }),
+        oldPromptTimeContext: basePromptTimeContext,
+        oldSharedPlan: createSharedPlan({
+          onboardingGuidanceOpen: false,
+        }),
+        unexpectedTurnText: 'Murph onboarding:',
+      },
+    ]
+
+    for (const scenario of scenarios) {
+      const oldPlan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: createMessageInput(),
+        profile: executionProfile,
+        promptTimeContext: scenario.oldPromptTimeContext,
+        route,
+        session: createSession(),
+        sharedPlan: scenario.oldSharedPlan,
+      })
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: createMessageInput(),
+        profile: executionProfile,
+        promptTimeContext: scenario.newPromptTimeContext,
+        route,
+        session: createSession({
+          resumeState: {
+            assistantContractFingerprint: oldPlan.assistantContractFingerprint,
+            routeFingerprint: route.routeFingerprint ?? route.routeId,
+            threadId: `thread-old-${scenario.name}`,
+          },
+        }),
+        sharedPlan: scenario.newSharedPlan,
+      })
+
+      expect(plan.resume, scenario.name).toBeNull()
+      expect(plan.developerInstructions, scenario.name).toContain(
+        scenario.expectedDeveloperText,
+      )
+      expect(plan.turnContextPrompt, scenario.name).not.toContain(
+        scenario.unexpectedTurnText,
+      )
+      expect(plan.assistantContractFingerprint, scenario.name).not.toBe(
+        oldPlan.assistantContractFingerprint,
+      )
+    }
+  })
+
+  it('keeps native resume when only the assistant context snapshot changes', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValueOnce(
+      'Old assistant context snapshot.',
+    )
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const route = createRoute()
+    const oldPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValueOnce(
+      'Updated assistant context snapshot.',
+    )
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession({
+        resumeState: {
+          assistantContractFingerprint: oldPlan.assistantContractFingerprint,
+          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          threadId: 'thread-old-snapshot',
+        },
+      }),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(plan.resume?.codexThreadId).toBe('thread-old-snapshot')
+    expect(plan.developerInstructions).toBeNull()
+    expect(plan.turnContextPrompt).toContain(
+      'Updated assistant context snapshot.',
+    )
+    expect(plan.turnContextPrompt).not.toContain(
+      'Old assistant context snapshot.',
+    )
+    expect(plan.assistantContractFingerprint).toBe(
+      oldPlan.assistantContractFingerprint,
+    )
   })
 
   it('starts a fresh thread when the dynamic tool contract changes', async () => {
@@ -427,9 +662,9 @@ describe('assistant protocol index planning', () => {
     expect(plan.assistantContractFingerprint).not.toBe(oldToolContractFingerprint)
   })
 
-  it('reads only the cached assistant context snapshot on sensitive native resume', async () => {
+  it('reads current assistant context snapshot on sensitive native resume', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
-    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValueOnce(
       'Cached assistant context snapshot.',
     )
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -455,6 +690,9 @@ describe('assistant protocol index planning', () => {
     })
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockClear()
     planningMocks.readAssistantContextSnapshotPrompt.mockClear()
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValueOnce(
+      'Current assistant context snapshot.',
+    )
     const resumedSession = createSession({
       resumeState: {
         assistantContractFingerprint: initialPlan.assistantContractFingerprint,
@@ -479,8 +717,9 @@ describe('assistant protocol index planning', () => {
     expect(resumedPlan.resume?.codexThreadId).toBe('thread-sensitive-resume')
     expect(resumedPlan.developerInstructions).toBeNull()
     expect(resumedPlan.turnContextPrompt).toContain(
-      'Cached assistant context snapshot.',
+      'Current assistant context snapshot.',
     )
+    expect(resumedPlan.turnContextPrompt).not.toContain('Cached assistant context snapshot.')
     expect(
       planningMocks.readAssistantCliSurfaceBootstrapContext,
     ).toHaveBeenCalledTimes(1)
@@ -490,6 +729,12 @@ describe('assistant protocol index planning', () => {
     const fallback = await resumedPlan.resume?.prepareFreshThreadFallback()
 
     expect(fallback?.developerInstructions).toContain('bootstrap contract')
+    expect(fallback?.developerInstructions).not.toContain(
+      'Current assistant context snapshot.',
+    )
+    expect(fallback?.turnContextPrompt).toContain(
+      'Current assistant context snapshot.',
+    )
     expect(
       planningMocks.readAssistantCliSurfaceBootstrapContext,
     ).toHaveBeenCalledTimes(1)
