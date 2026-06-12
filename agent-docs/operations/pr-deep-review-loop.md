@@ -59,8 +59,8 @@ head; no review round is owed.
 
 If the base update requires manual conflict resolution or any non-base-update
 change, treat that as a normal PR-head change: run required verification for the
-touched surface, push it, wait for CI, and then use the ordinary review-loop
-rules.
+touched surface, push it, and use the ordinary review-loop rules (next round
+fires immediately, in parallel with CI).
 
 ## Stop Condition
 
