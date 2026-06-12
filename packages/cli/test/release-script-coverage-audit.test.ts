@@ -281,7 +281,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
     expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.90')
     expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.90')
-    expect(pnpmWorkspace).not.toContain('patchedDependencies:')
+    expect(pnpmWorkspace.match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]?.trim()).toBe(
+      'incur@0.4.5: patches/incur@0.4.5.patch',
+    )
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-browser-profile.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.config.sh'))).toBe(true)
     expect(reviewGptConfig).toContain('repo_context_url="https://github.com/cobuildwithus/murph"')

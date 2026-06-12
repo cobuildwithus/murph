@@ -16,6 +16,11 @@ overrides:
   next@16.2.4>postcss: 8.5.13
   repomix@1.14.0>fast-xml-builder: 1.2.0
 
+patchedDependencies:
+  incur@0.4.5:
+    hash: 7367beb2c381d1c86af9d99e90c625bcbb02df187b902b4e088acabd49c273b3
+    path: patches/incur@0.4.5.patch
+
 importers:
 
   .:
@@ -282,7 +287,7 @@ importers:
         version: link:../vault-usecases
       incur:
         specifier: 0.4.5
-        version: 0.4.5
+        version: 0.4.5(patch_hash=7367beb2c381d1c86af9d99e90c625bcbb02df187b902b4e088acabd49c273b3)
       ink:
         specifier: ^6.8.0
         version: 6.8.0(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
@@ -470,7 +475,7 @@ importers:
         version: 1.42.0
       incur:
         specifier: 0.4.5
-        version: 0.4.5
+        version: 0.4.5(patch_hash=7367beb2c381d1c86af9d99e90c625bcbb02df187b902b4e088acabd49c273b3)
       ink:
         specifier: ^6.8.0
         version: 6.8.0(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
@@ -775,7 +780,7 @@ importers:
         version: link:../vault-usecases
       incur:
         specifier: 0.4.5
-        version: 0.4.5
+        version: 0.4.5(patch_hash=7367beb2c381d1c86af9d99e90c625bcbb02df187b902b4e088acabd49c273b3)
       ink:
         specifier: ^6.8.0
         version: 6.8.0(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
@@ -10514,7 +10519,7 @@ snapshots:
   '@cobuild/review-gpt@0.5.90(@cfworker/json-schema@4.1.1)(typescript@5.9.3)':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
-      incur: 0.4.5
+      incur: 0.4.5(patch_hash=7367beb2c381d1c86af9d99e90c625bcbb02df187b902b4e088acabd49c273b3)
       repomix: 1.14.0(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
@@ -17932,7 +17937,7 @@ snapshots:
 
   imurmurhash@0.1.4: {}
 
-  incur@0.4.5:
+  incur@0.4.5(patch_hash=7367beb2c381d1c86af9d99e90c625bcbb02df187b902b4e088acabd49c273b3):
     dependencies:
       '@cfworker/json-schema': 4.1.1
       '@modelcontextprotocol/server': 2.0.0-alpha.2(@cfworker/json-schema@4.1.1)
