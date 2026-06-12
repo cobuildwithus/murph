@@ -301,6 +301,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
                 fetchImpl: input.fetchImpl,
                 objectKey: request.ref.objectKey,
                 ref: request.ref,
+                signal: encryptedObjectAbort.signal,
                 snapshotId: request.ref.snapshotId,
                 timeoutMs: input.timeoutMs,
                 workspaceCheckpointBridge: input.workspaceCheckpointBridge,
@@ -515,6 +516,7 @@ async function presignWorkspaceSnapshotGet(input: {
   fetchImpl: typeof fetch;
   objectKey: string;
   ref: HostedWorkspaceSnapshotV2Ref;
+  signal?: AbortSignal | null;
   snapshotId: string;
   timeoutMs: number;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
@@ -534,6 +536,7 @@ async function presignWorkspaceSnapshotGet(input: {
     headers,
     redactedLogPath: "/workspace-snapshots/REDACTED/presign-get",
     method: "POST",
+    signal: input.signal ?? null,
     timeoutMs: input.timeoutMs,
     url: new URL(
       `/workspace-snapshots/${encodeURIComponent(input.snapshotId)}/presign-get`,

@@ -29,15 +29,18 @@ export function buildHostedRuntimeLogContextFields(
 
 // Every awaited runtime log write costs a full runner->worker->web round trip
 // (~150ms in production), and several sit directly on the reply hot path
-// between mailbox import and provider start. Info-level entries are durable
-// diagnostics, not control flow: queue them so the caller returns immediately
-// while writes flush in the background in enqueue order. warn/error entries
-// still block — they are the crash-diagnostic tail and must be durable before
-// the runtime proceeds. `at` is stamped at enqueue, so persisted ordering
-// still reflects logical time. A single module-level tail is enough: hosted
-// runner processes hold one live log port per invocation, and chaining every
-// write preserves per-port enqueue order as a strict subset. The chain never
-// rejects (each write swallows its own failure).
+// between mailbox import and provider start (see the "observability writes
+// are never user latency" invariant in docs/contracts/00-invariants.md).
+// Info-level entries are durable diagnostics, not control flow: queue them so
+// the caller returns immediately while writes flush in the background in
+// enqueue order. warn/error entries write directly and block only on their
+// own write — the crash-diagnostic tail must be durable before the runtime
+// proceeds, and must not wait behind a queued info backlog. `at` is stamped
+// at enqueue, so persisted ordering still reflects logical time even when a
+// direct warn write lands before older queued info writes. A single
+// module-level tail is enough: hosted runner processes hold one live log
+// port per invocation. The chain never rejects (each write swallows its own
+// failure).
 let pendingHostedRuntimeLogWriteTail: Promise<void> = Promise.resolve();
 
 export async function writeHostedRuntimeLogBestEffort(input: {
@@ -68,23 +71,53 @@ export async function writeHostedRuntimeLogBestEffort(input: {
       });
     }
   };
-  pendingHostedRuntimeLogWriteTail = pendingHostedRuntimeLogWriteTail.then(write);
 
-  if (entry.level === "info") {
+  if (entry.level !== "info") {
+    await write();
     return;
   }
-  await pendingHostedRuntimeLogWriteTail;
+  pendingHostedRuntimeLogWriteTail = pendingHostedRuntimeLogWriteTail.then(write);
 }
 
 // Awaited at invocation end so a normal shutdown never drops queued entries.
 // Queued writes swallow their own failures, so this never rejects. Re-reads
 // the tail after each await in case settled writes enqueued more entries.
-export async function drainHostedRuntimeLogWritesBestEffort(): Promise<void> {
-  let observed: Promise<void>;
-  do {
-    observed = pendingHostedRuntimeLogWriteTail;
-    await observed;
-  } while (observed !== pendingHostedRuntimeLogWriteTail);
+// The optional bound keeps a degraded log endpoint from delaying invocation
+// completion (result commit / checkpoint / next-wake handoff): on timeout the
+// drain returns while remaining writes keep flushing in the background.
+export async function drainHostedRuntimeLogWritesBestEffort(
+  options?: { timeoutMs?: number },
+): Promise<void> {
+  const timeoutMs = options?.timeoutMs;
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = timeoutMs === undefined
+    ? null
+    : new Promise<void>((resolve) => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          resolve();
+        }, timeoutMs);
+        timer.unref?.();
+      });
+
+  try {
+    let observed: Promise<void>;
+    do {
+      observed = pendingHostedRuntimeLogWriteTail;
+      await (timeout ? Promise.race([observed, timeout]) : observed);
+      if (timedOut) {
+        console.warn("Hosted runtime log drain timed out; queued writes continue in the background.", {
+          timeoutMs,
+        });
+        return;
+      }
+    } while (observed !== pendingHostedRuntimeLogWriteTail);
+  } finally {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 export function compactHostedRuntimeLogCodes(codes: readonly string[]): string[] {
