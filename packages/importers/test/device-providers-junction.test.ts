@@ -2934,7 +2934,8 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
   });
   assert.deepEqual(readMeasurement(flowEvents[1])?.qualifiers, { flow: "medium" });
   assert.equal(flowEvents[0]?.dayKey, "2026-04-07");
-  assert.equal(flowEvents[0]?.externalRef?.facet, "menstrual-flow-2026-04-07");
+  // Result-bearing facet: same-day flow changes keep distinct identities.
+  assert.equal(flowEvents[0]?.externalRef?.facet, "menstrual-flow-light-2026-04-07");
 
   const ovulationEvents = measurementEvents.filter((event) => event.title === "Junction ovulation test");
   // Two same-day tests with different results land as two events with

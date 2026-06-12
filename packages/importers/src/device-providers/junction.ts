@@ -1190,12 +1190,14 @@ function pushJunctionDailyTimeseriesAggregateArtifacts(
   resource: string,
   aggregates: readonly JunctionDailyTimeseriesAggregate[],
 ): void {
-  aggregates.forEach((aggregate, index) => {
+  for (const aggregate of aggregates) {
+    // The role derives only from the aggregate's stable grouping identity
+    // (resource role + day + source); a sorted-position index here would
+    // churn artifact roles across replays and differently-windowed payloads.
     const role = `${aggregate.rawArtifactRole}:${aggregate.dayKey}:${shortHash([
       aggregate.resourceContext.sourceProviderSlug,
       aggregate.resourceContext.origin.sourceType ?? "",
       aggregate.resourceContext.origin.sourceInstanceId ?? "",
-      String(index),
     ])}`;
 
     aggregate.rawArtifactRole = role;
@@ -1227,7 +1229,7 @@ function pushJunctionDailyTimeseriesAggregateArtifacts(
         ),
       ),
     );
-  });
+  }
 }
 
 function roundJunctionTimeseriesAggregateValue(resource: string, value: number): number {
@@ -1340,17 +1342,21 @@ function pushJunctionBloodPressureReadings(
       continue;
     }
 
-    // Reading identity includes the paired values so same-second readings
-    // from coarse-timestamp providers never collapse into one event, while
-    // true duplicate deliveries still merge idempotently via externalRef.
+    // A stable provider row id is the primary reading identity (mirroring
+    // the fetch-side dedupe key): two distinct readings with the same
+    // timestamp AND the same values must not collapse when the provider
+    // distinguishes them. Without an id, the identity includes the paired
+    // values so same-second readings from coarse-timestamp providers never
+    // collapse, while true duplicate deliveries still merge via externalRef.
+    const readingRowId = firstStringFromPaths(entry, ["id", "resourceId", "resource_id", "externalId", "external_id"]);
     const readingIdentityHash = shortHash([
       resourceSlug,
       resourceContext.sourceProviderSlug,
       resourceContext.origin.sourceType ?? "",
       resourceContext.origin.sourceInstanceId ?? "",
-      timestamp.observedAtRaw ?? occurredAt,
-      systolic,
-      diastolic,
+      ...(readingRowId
+        ? [readingRowId]
+        : [timestamp.observedAtRaw ?? occurredAt, systolic, diastolic]),
     ]);
     // Exact in-payload duplicates are skipped and the raw role is derived
     // from the same stable identity as the event externalRef (never the
@@ -2008,9 +2014,11 @@ function pushMenstrualCycleSummary(
       continue;
     }
 
+    // Result-bearing facet (same invariant as ovulation/pregnancy tests):
+    // a same-day flow change, e.g. light then heavy, keeps both facts.
     pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
       date: sub.date,
-      facet: `menstrual-flow-${sub.date}`,
+      facet: `menstrual-flow-${slugify(flow, "flow")}-${sub.date}`,
       measurement: {
         metric: "menstrual-flow",
         value,
