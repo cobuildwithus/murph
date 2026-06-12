@@ -93,25 +93,6 @@ describe("buildHostedRunnerContainerEnv", () => {
     )).toBe(false);
   });
 
-  it("does not allow runner secrets to override image-pinned assistant asset roots", () => {
-    const source = {
-      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
-        "MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH",
-        "MURPH_ASSISTANT_SKILLS_ROOT",
-      ].join(","),
-    };
-
-    expect(isHostedRunnerSecretKeyAllowed("MURPH_ASSISTANT_SKILLS_ROOT")).toBe(false);
-    expect(isHostedRunnerSecretKeyAllowed(
-      "MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH",
-    )).toBe(false);
-    expect(isHostedRunnerSecretKeyAllowed("MURPH_ASSISTANT_SKILLS_ROOT", source)).toBe(false);
-    expect(isHostedRunnerSecretKeyAllowed(
-      "MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH",
-      source,
-    )).toBe(false);
-  });
-
   it("does not allow runner secrets to override process environment keys", () => {
     const source = {
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [

@@ -72,24 +72,6 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('honors an explicit MURPH_ASSISTANT_SKILLS_ROOT process env override', () => {
-    const original = process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]
-    try {
-      process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV] = '/opt/bundled/skills'
-      expect(resolveAssistantSkillsRoot()).toBe('/opt/bundled/skills')
-
-      // Blank overrides fall back to the module-relative package root.
-      process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV] = '   '
-      expect(resolveAssistantSkillsRoot()).toMatch(/assistant-engine/)
-    } finally {
-      if (original === undefined) {
-        delete process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]
-      } else {
-        process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV] = original
-      }
-    }
-  })
-
   it('uses the canonical package skill root in process env', () => {
     const fallback = withAssistantSkillsRootEnv({
       [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: '   ',

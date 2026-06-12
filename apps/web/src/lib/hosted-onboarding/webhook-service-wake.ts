@@ -43,11 +43,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     },
   );
 
-  // The accepted-latency-trace write is observability only; run it
-  // concurrently with the Temporal signal instead of serializing a DB round
-  // trip ahead of the wake. Both settle before this function returns, and the
-  // helper never rejects (it logs its own failures).
-  const acceptedTraceWrite = recordHostedWebhookIngressLatencyAcceptedBestEffort({
+  await recordHostedWebhookIngressLatencyAcceptedBestEffort({
     mailboxItemId,
     source: input.source,
   });
@@ -59,14 +55,12 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       mailboxItemId,
     });
   } catch (error) {
-    await acceptedTraceWrite;
     const errorName = deriveHostedOnboardingTimingErrorName(error);
     finishHostedOnboardingTiming(handoffTiming, "failed", {
       errorName,
     });
     throw error;
   }
-  await acceptedTraceWrite;
 
   await recordHostedWebhookIngressLatencyTemporalSignalBestEffort({
     mailboxItemId,

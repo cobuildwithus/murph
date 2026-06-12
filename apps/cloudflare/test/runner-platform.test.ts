@@ -366,8 +366,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects malformed workspace snapshot data-key unwraps without extracting", async () => {
-    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-unwrap-malformed-"));
+  it("rejects malformed workspace snapshot data-key unwraps before presign GET", async () => {
     const ref = createWorkspaceSnapshotV2Ref({
       encryptedByteSize: 128,
     });
@@ -391,84 +390,18 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       fetchImpl: fetchMock as typeof fetch,
     });
 
-    try {
-      // The malformed unwrap is preferred over any concurrent presign/fetch
-      // failure, and nothing is extracted into the durable root.
-      const durableRoot = path.join(tempRoot, "durable");
-      await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
-        durableRoot,
-        ref,
-        scratchRoot: path.join(tempRoot, "scratch"),
-      })).rejects.toThrow("Invalid character");
+    await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+      durableRoot: "unused-durable-root",
+      ref,
+      scratchRoot: "unused-scratch-root",
+    })).rejects.toThrow("Invalid character");
 
-      const unwrapRequest = fetchMock.mock.calls
-        .map((call) => requireFetchRequest(call, "workspace snapshot unwrap"))
-        .find((request) => request.url.endsWith("/data-key/unwrap"));
-      expect(unwrapRequest?.url).toBe(
-        "http://workspace-snapshots.worker/workspace-snapshots/snapshot_runner_platform/data-key/unwrap",
-      );
-      await expect(access(durableRoot)).rejects.toThrow();
-    } finally {
-      await rm(tempRoot, { force: true, recursive: true });
-    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const unwrapRequest = requireFetchRequest(fetchMock.mock.calls[0], "workspace snapshot unwrap");
+    expect(unwrapRequest.url).toBe(
+      "http://workspace-snapshots.worker/workspace-snapshots/snapshot_runner_platform/data-key/unwrap",
+    );
   });
-
-  it("aborts the in-flight snapshot object download when the data-key unwrap fails", async () => {
-    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-unwrap-abort-"));
-    const ref = createWorkspaceSnapshotV2Ref({
-      encryptedByteSize: 128,
-    });
-    const getUrl = `https://r2.example.test/bundles/${ref.objectKey}?X-Amz-Signature=fixture-get`;
-    let objectGetSignalAborted = false;
-    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
-      const request = requireFetchRequest(args, "workspace snapshot unwrap abort fetch");
-      if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/data-key/unwrap`)) {
-        // Give the object leg time to issue the GET before the unwrap fails.
-        await delayWithAbort(50, request.signal);
-        return new Response("unwrap denied", { status: 403 });
-      }
-      if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
-        return new Response(JSON.stringify({
-          expiresAt: new Date(Date.now() + 60_000).toISOString(),
-          getUrl,
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-      if (request.url === getUrl) {
-        // Held open far beyond the test budget: only the unwrap-failure abort
-        // can settle this leg. A sequential or signal-less regression times
-        // the test out instead of passing slowly.
-        try {
-          await delayWithAbort(30_000, request.signal);
-        } catch (error) {
-          objectGetSignalAborted = true;
-          throw error;
-        }
-        return new Response("unreachable", { status: 500 });
-      }
-      return new Response("unexpected", { status: 500 });
-    });
-    const platform = buildTestHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-    });
-
-    try {
-      await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
-        durableRoot: path.join(tempRoot, "durable"),
-        ref,
-        scratchRoot: path.join(tempRoot, "scratch"),
-      })).rejects.toThrow(/data-key\/unwrap failed with HTTP 403/);
-
-      expect(objectGetSignalAborted).toBe(true);
-    } finally {
-      await rm(tempRoot, { force: true, recursive: true });
-    }
-  }, 15_000);
 
   it("sends direct R2 workspace snapshot PUTs with signed metadata headers", async () => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
@@ -1026,25 +959,20 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
 
       expect(fetchMock).toHaveBeenCalledTimes(3);
-      // The data-key unwrap runs concurrently with the presign/fetch chain,
-      // so look requests up by URL instead of call order.
-      const restoreRequests = fetchMock.mock.calls.map((call) =>
-        requireFetchRequest(call, "workspace snapshot restore request"),
-      );
-      const unwrapRequest = restoreRequests.find((request) => request.url.endsWith("/data-key/unwrap"));
-      expect(unwrapRequest?.url).toBe(
+      const unwrapRequest = requireFetchRequest(fetchMock.mock.calls[0], "workspace snapshot unwrap");
+      expect(unwrapRequest.url).toBe(
         "http://workspace-snapshots.worker/workspace-snapshots/snapshot_runner_platform_restore/data-key/unwrap",
       );
-      await expect(unwrapRequest!.json()).resolves.toEqual({
+      await expect(unwrapRequest.json()).resolves.toEqual({
         aad,
         rootKeyId: "root_key_test",
         wrappedDataKey: "wrapped_data_key_test",
       });
-      const presignRequest = restoreRequests.find((request) => request.url.endsWith("/presign-get"));
-      expect(presignRequest?.url).toBe(
+      const presignRequest = requireFetchRequest(fetchMock.mock.calls[1], "workspace snapshot GET presign");
+      expect(presignRequest.url).toBe(
         "http://workspace-snapshots.worker/workspace-snapshots/snapshot_runner_platform_restore/presign-get",
       );
-      await expect(presignRequest!.json()).resolves.toEqual({
+      await expect(presignRequest.json()).resolves.toEqual({
         objectKey,
         ref: expect.objectContaining({
           objectKey,
@@ -1053,26 +981,20 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         }),
         snapshotId,
       });
-      expect(restoreRequests.some((request) => request.url === getUrl)).toBe(true);
+      expect(requireFetchRequest(fetchMock.mock.calls[2], "direct R2 workspace snapshot GET").url).toBe(getUrl);
       await expect(access(path.join(durableRoot, "note.md"))).resolves.toBeUndefined();
       const workspaceSnapshotLogs = readWorkspaceSnapshotDiagnosticLogs();
       const completedSteps = workspaceSnapshotLogs
         .filter((log) => log.message === "Hosted workspace snapshot restore step completed.")
         .map((log) => log.details?.workspaceSnapshotRestoreStep);
-      // data_key_unwrap completes concurrently with the fetch chain; assert
-      // the deterministic orderings only.
-      expect([...completedSteps].sort()).toEqual([
-        "archive_restore",
-        "data_key_unwrap",
-        "object_fetch",
-        "presign_get",
-        "scratch_prepare",
+      expect(completedSteps).toEqual([
         "size_guard",
+        "data_key_unwrap",
+        "scratch_prepare",
+        "presign_get",
+        "object_fetch",
+        "archive_restore",
       ]);
-      expect(completedSteps[0]).toBe("size_guard");
-      expect(completedSteps.at(-1)).toBe("archive_restore");
-      expect(completedSteps.indexOf("scratch_prepare")).toBeLessThan(completedSteps.indexOf("presign_get"));
-      expect(completedSteps.indexOf("presign_get")).toBeLessThan(completedSteps.indexOf("object_fetch"));
       expect(workspaceSnapshotLogs[0]?.details).toEqual(expect.objectContaining({
         archiveEncryptedByteSize: encrypted.encryptedByteSize,
         archiveFileCount: encrypted.fileCount,
@@ -1091,160 +1013,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(serializedLogs).not.toContain(scratchRoot);
       expect(serializedLogs).not.toContain("note.md");
       expect(serializedLogs).not.toContain("restored through direct r2");
-    } finally {
-      dataKey.fill(0);
-      await rm(tempRoot, {
-        force: true,
-        recursive: true,
-      });
-    }
-  });
-
-  it("runs the data-key unwrap concurrently with the presigned GET leg during restore", async () => {
-    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-overlap-"));
-    const sourceRoot = path.join(tempRoot, "source");
-    const scratchRoot = path.join(tempRoot, "scratch");
-    const durableRoot = path.join(tempRoot, "durable");
-    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
-    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
-
-    // Each restore leg only answers once the OTHER leg's request is already
-    // in flight. A sequential implementation never issues the second request
-    // before the first resolves, so this test fails fast (via the barrier
-    // timeout) instead of passing by accident.
-    function createOverlapBarrier(): { release: () => void; wait: () => Promise<void> } {
-      let release: () => void = () => undefined;
-      const released = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      return {
-        release,
-        wait: async () => {
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          try {
-            await Promise.race([
-              released,
-              new Promise<never>((_, reject) => {
-                timer = setTimeout(
-                  () => reject(new Error(
-                    "Workspace snapshot restore legs did not overlap; restore regressed to sequential.",
-                  )),
-                  2_000,
-                );
-              }),
-            ]);
-          } finally {
-            clearTimeout(timer);
-          }
-        },
-      };
-    }
-    const unwrapInFlight = createOverlapBarrier();
-    const presignInFlight = createOverlapBarrier();
-
-    try {
-      await mkdir(sourceRoot, { mode: 0o700, recursive: true });
-      await writeFile(path.join(sourceRoot, "note.md"), "restored concurrently\n", {
-        encoding: "utf8",
-        mode: 0o600,
-      });
-      const snapshotId = "snapshot_runner_platform_overlap";
-      const objectKey =
-        `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
-      const aad = buildHostedWorkspaceSnapshotV2Aad({
-        objectKey,
-        snapshotId,
-        userId: "member_123",
-      });
-      const encrypted = await createEncryptedWorkspaceSnapshotFile({
-        aad,
-        dataKey: dataKeyBase64,
-        durableRoot: sourceRoot,
-        ivBase64: "AQIDBAUGBwgJCgsM",
-        maxEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
-        outputDir: scratchRoot,
-      });
-      const encryptedBytes = await readFile(encrypted.encryptedFilePath);
-      const getUrl = `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture-get`;
-      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
-        const request = requireFetchRequest(args, "workspace snapshot overlap fetch");
-        if (request.url.includes(`/workspace-snapshots/${snapshotId}/data-key/unwrap`)) {
-          unwrapInFlight.release();
-          await presignInFlight.wait();
-          return new Response(
-            JSON.stringify({ dataKey: dataKeyBase64 }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
-        }
-        if (request.url.includes(`/workspace-snapshots/${snapshotId}/presign-get`)) {
-          presignInFlight.release();
-          await unwrapInFlight.wait();
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              getUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
-        }
-        if (request.url === getUrl) {
-          return new Response(encryptedBytes, {
-            headers: {
-              "content-length": String(encrypted.encryptedByteSize),
-              "content-type": "application/octet-stream",
-            },
-            status: 200,
-          });
-        }
-        return new Response("unexpected", { status: 500 });
-      });
-      const platform = buildTestHostedExecutionRuntimePlatform({
-        boundUserId: "member_123",
-        commitTimeoutMs: 10_000,
-        fetchImpl: fetchMock as typeof fetch,
-      });
-
-      await platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
-        durableRoot,
-        ref: {
-          archive: {
-            compression: encrypted.compression,
-            encryptedByteSize: encrypted.encryptedByteSize,
-            encryptedObjectSha256: encrypted.encryptedObjectSha256,
-            fileCount: encrypted.fileCount,
-            format: "tar",
-            plaintextArchiveSha256: encrypted.plaintextArchiveSha256,
-            totalPlainBytes: encrypted.totalPlainBytes,
-          },
-          createdAt: "2026-05-20T00:00:00.000Z",
-          encryption: {
-            aad,
-            ivBase64: encrypted.ivBase64,
-            rootKeyId: "root_key_test",
-            scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
-            wrappedDataKey: "wrapped_data_key_test",
-          },
-          objectKey,
-          schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
-          snapshotId,
-          upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
-          userId: "member_123",
-        },
-        scratchRoot,
-      });
-
-      expect(fetchMock).toHaveBeenCalledTimes(3);
-      await expect(access(path.join(durableRoot, "note.md"))).resolves.toBeUndefined();
     } finally {
       dataKey.fill(0);
       await rm(tempRoot, {
@@ -1576,13 +1344,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         scratchRoot,
       })).rejects.toThrow("Hosted workspace snapshot data key unwrap failed with HTTP 500.");
 
-      // The concurrent presign/fetch leg may log its own failure; assert on
-      // the unwrap step's failure specifically.
-      const failedUnwrapLogs = readWorkspaceSnapshotDiagnosticLogs()
-        .filter((log) => log.message === "Hosted workspace snapshot restore step failed.")
-        .filter((log) => log.details?.workspaceSnapshotRestoreStep === "data_key_unwrap");
-      expect(failedUnwrapLogs).toHaveLength(1);
-      expect(failedUnwrapLogs[0]).toEqual(expect.objectContaining({
+      const failedLogs = readWorkspaceSnapshotDiagnosticLogs()
+        .filter((log) => log.message === "Hosted workspace snapshot restore step failed.");
+      expect(failedLogs).toHaveLength(1);
+      expect(failedLogs[0]).toEqual(expect.objectContaining({
         details: expect.objectContaining({
           errorCode: "runtime_error",
           errorMessagePresent: true,
@@ -1605,9 +1370,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           && typeof input === "object"
           && !Array.isArray(input)
           && (input as { message?: unknown }).message === "Hosted runtime upstream response returned non-OK."
-        )
-        .filter((input) =>
-          input.details?.description === "Hosted workspace snapshot data key unwrap"
         );
       expect(upstreamNonOkLogs).toHaveLength(1);
       expect(upstreamNonOkLogs[0]?.details).toEqual(expect.objectContaining({

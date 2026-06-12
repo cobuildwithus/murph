@@ -107,11 +107,6 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   // This non-secret origin is platform-owned. Member runner secrets cannot
   // redirect Worker-authorized data API egress to arbitrary origins.
   "HOSTED_WEB_BASE_URL",
-  // Image-pinned assistant-engine asset roots (Dockerfile ENV). Runner
-  // secrets must not redirect the assistant skills root or the prebuilt CLI
-  // surface contract to member-controlled content.
-  "MURPH_ASSISTANT_SKILLS_ROOT",
-  "MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH",
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,

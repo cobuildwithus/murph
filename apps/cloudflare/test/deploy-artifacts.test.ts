@@ -1084,8 +1084,6 @@ async function createDeployArtifactFixture(input: {
     "utf8",
   );
   await writeFile(path.join(runnerBundleDir, "dist", "container-entrypoint.js"), "export {};\n", "utf8");
-  await mkdir(path.join(runnerBundleDir, "dist-bundled"), { recursive: true });
-  await writeFile(path.join(runnerBundleDir, "dist-bundled", "container-entrypoint.js"), "export {};\n", "utf8");
   await writeFile(path.join(runnerBundleDir, "dist", "index.js"), "export {};\n", "utf8");
 
   for (const packageName of workspacePackageNames) {
@@ -1113,21 +1111,6 @@ async function createDeployArtifactFixture(input: {
     await writeFile(binPath, "#!/usr/bin/env node\n", "utf8");
     await chmod(binPath, 0o755);
   }
-
-  // Dockerfile ENV pin targets asserted by the bundle shape check.
-  const assistantEngineDir = path.join(
-    runnerBundleDir,
-    "node_modules",
-    "@murphai",
-    "assistant-engine",
-  );
-  await mkdir(path.join(assistantEngineDir, "skills"), { recursive: true });
-  await mkdir(path.join(assistantEngineDir, "dist", "assistant"), { recursive: true });
-  await writeFile(
-    path.join(assistantEngineDir, "dist", "assistant", "cli-surface-contract.generated.json"),
-    "{}\n",
-    "utf8",
-  );
 
   const manifestInput: Parameters<typeof writeRunnerBundleManifest>[1] = {
     buildSkipped: input.buildSkipped === true,

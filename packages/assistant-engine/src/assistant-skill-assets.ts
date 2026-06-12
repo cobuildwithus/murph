@@ -29,14 +29,6 @@ export function buildAssistantSkillFileRef(slug: AssistantSkillSlug): string {
 }
 
 export function resolveAssistantSkillsRoot(): string {
-  // Honor an explicit root first: bundled runtimes (the hosted runner's
-  // esbuild-bundled entrypoint, the bundled vault-cli) evaluate this module
-  // from a chunk directory, so the module-relative fallback below would miss
-  // the installed package's skills/ tree.
-  const override = process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]?.trim()
-  if (override) {
-    return override
-  }
   return path.join(
     path.dirname(path.dirname(fileURLToPath(import.meta.url))),
     'skills',

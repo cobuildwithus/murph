@@ -25,18 +25,6 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: signalMocks.signalHostedMailboxAppendRuntime,
 }));
 
-const latencyStoreMocks = vi.hoisted(() => ({
-  recordHostedIngressAcceptedFromMailboxItem: vi.fn(),
-  recordHostedIngressTemporalSignalAccepted: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
-  recordHostedIngressAcceptedFromMailboxItem:
-    latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem,
-  recordHostedIngressTemporalSignalAccepted:
-    latencyStoreMocks.recordHostedIngressTemporalSignalAccepted,
-}));
-
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
 import {
   deleteHostedRunnerUserDataBestEffort,
@@ -51,10 +39,6 @@ describe("hosted webhook Temporal handoff", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:user-123",
     });
-    latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem.mockReset();
-    latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem.mockResolvedValue(undefined);
-    latencyStoreMocks.recordHostedIngressTemporalSignalAccepted.mockReset();
-    latencyStoreMocks.recordHostedIngressTemporalSignalAccepted.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -108,90 +92,6 @@ describe("hosted webhook Temporal handoff", () => {
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
-  });
-
-  it("settles the concurrent accepted-trace write before returning on success", async () => {
-    let releaseAcceptedTrace: () => void = () => undefined;
-    latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem.mockImplementationOnce(
-      async () =>
-        await new Promise<void>((resolve) => {
-          releaseAcceptedTrace = resolve;
-        }),
-    );
-
-    let handoffSettled = false;
-    const handoff = maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_inline_gap",
-      mailboxItemId: "mailbox_123",
-      response: {
-        ok: true,
-        reason: "wake-appended-active-member",
-      },
-      source: "linq",
-      userId: "user-123",
-    }).finally(() => {
-      handoffSettled = true;
-    });
-
-    // The Temporal signal already resolved, but the handoff must not return
-    // until the concurrent accepted-trace write settles too.
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
-    expect(handoffSettled).toBe(false);
-
-    releaseAcceptedTrace();
-    await expect(handoff).resolves.toMatchObject({
-      reason: "temporal-signaled",
-      workflowId: "hosted-user-runtime:user-123",
-    });
-    expect(latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_123",
-      source: "linq",
-    });
-  });
-
-  it("settles the concurrent accepted-trace write before rethrowing a Temporal signal failure", async () => {
-    signalMocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
-      new Error("Temporal unavailable"),
-    );
-    let releaseAcceptedTrace: () => void = () => undefined;
-    latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem.mockImplementationOnce(
-      async () =>
-        await new Promise<void>((resolve) => {
-          releaseAcceptedTrace = resolve;
-        }),
-    );
-
-    let handoffSettled = false;
-    const handoff = maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_inline_gap",
-      mailboxItemId: "mailbox_123",
-      response: {
-        ok: true,
-        reason: "wake-appended-active-member",
-      },
-      source: "linq",
-      userId: "user-123",
-    });
-    handoff.catch(() => undefined).finally(() => {
-      handoffSettled = true;
-    });
-
-    // The signal rejection alone must not surface while the accepted-trace
-    // write is still in flight; the failure path awaits it first.
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
-    expect(handoffSettled).toBe(false);
-
-    releaseAcceptedTrace();
-    await expect(handoff).rejects.toThrow("Temporal unavailable");
-    expect(
-      latencyStoreMocks.recordHostedIngressTemporalSignalAccepted,
-    ).not.toHaveBeenCalled();
   });
 
   it("skips webhook handoff when no mailbox pointer exists", async () => {
