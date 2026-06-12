@@ -179,6 +179,24 @@ test("audio preparation passes remote-accepted formats through untouched when re
     /ffmpeg is required to normalize non-WAV audio attachments for transcription/u,
   );
 
+  const oggPath = await writeExternalFile(directory, "memo.ogg", "OggS-ogg-container-placeholder");
+  await assert.rejects(
+    prepareAudioInput({
+      artifact: {
+        captureId: "cap_audio_passthrough_11",
+        attachmentId: "att_audio_ogg_container",
+        kind: "audio",
+        fileName: "memo.ogg",
+        mime: "audio/ogg",
+        storedPath: "raw/inbox/example/memo.ogg",
+        absolutePath: oggPath,
+      },
+      scratchDirectory: directory,
+      ffmpeg: remoteOnlyFfmpeg,
+    }),
+    /ffmpeg is required to normalize non-WAV audio attachments for transcription/u,
+  );
+
   // AMR is not verified against the remote model, so it still needs ffmpeg.
   const amrPath = await writeExternalFile(directory, "memo.amr", "amr-bytes-placeholder");
   await assert.rejects(
@@ -399,6 +417,8 @@ test("remote-only audio passthrough skips an available ffmpeg while video still 
   assert.equal(videoInvocation.includes("-vn"), true);
   assert.equal(videoInvocation.includes("libmp3lame"), true);
   assert.equal(videoInvocation.includes("48k"), true);
+  assert.equal(videoInvocation.includes("-map_metadata"), true);
+  assert.equal(videoInvocation.includes("-map_chapters"), true);
 });
 
 test("remote-only audio passthrough matches mime case-insensitively and requires the flag to be exactly true", async () => {
@@ -472,7 +492,7 @@ test("remote-only audio passthrough falls back to ffmpeg when the original excee
       `fs.appendFileSync(${JSON.stringify(invocationLogPath)}, JSON.stringify(process.argv.slice(2)) + "\\n", "utf8");`,
     ].join("\n"),
   );
-  const oversizedMp3 = Buffer.alloc(32 * 1024 * 1024 + 1);
+  const oversizedMp3 = Buffer.alloc(16 * 1024 * 1024 + 1);
   oversizedMp3.write("ID3", 0, "ascii");
   const mp3Path = await writeExternalBytes(directory, "oversized.mp3", oversizedMp3);
 
@@ -502,6 +522,8 @@ test("remote-only audio passthrough falls back to ffmpeg when the original excee
   assert.equal(invocation.includes(mp3Path), true);
   assert.equal(invocation.includes("libmp3lame"), true);
   assert.equal(invocation.includes("48k"), true);
+  assert.equal(invocation.includes("-map_metadata"), true);
+  assert.equal(invocation.includes("-map_chapters"), true);
 });
 
 test("shared executable helpers preserve lazy resolution, availability, and missing-tool errors", async () => {

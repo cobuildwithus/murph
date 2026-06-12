@@ -89,6 +89,10 @@ export async function prepareAudioInput(input: {
         "libmp3lame",
         "-b:a",
         "48k",
+        "-map_metadata",
+        "-1",
+        "-map_chapters",
+        "-1",
         outputPath,
       ]
     : [
@@ -102,6 +106,10 @@ export async function prepareAudioInput(input: {
         "16000",
         "-c:a",
         "pcm_s16le",
+        "-map_metadata",
+        "-1",
+        "-map_chapters",
+        "-1",
         outputPath,
       ];
   await runCommand(command, ffmpegArgs, {
@@ -140,8 +148,6 @@ const REMOTE_TRANSCRIPTION_DIRECT_AUDIO_MIMES = new Set([
   "audio/x-caf",
   "audio/mp3",
   "audio/mpeg",
-  "audio/ogg",
-  "audio/opus",
   "audio/wav",
   "audio/wave",
   "audio/x-wav",
@@ -159,7 +165,7 @@ const REMOTE_TRANSCRIPTION_BLOCKED_AUDIO_EXTENSIONS = new Set([
 ]);
 
 // Keep in sync with the remote transcription provider and Worker body cap.
-const REMOTE_TRANSCRIPTION_DIRECT_MAX_INPUT_BYTES = 32 * 1024 * 1024;
+const REMOTE_TRANSCRIPTION_DIRECT_MAX_INPUT_BYTES = 16 * 1024 * 1024;
 
 async function isRemoteTranscriptionDirectAudioArtifact(
   artifact: ParserArtifactRef,
@@ -224,10 +230,6 @@ async function hasRemoteTranscriptionDirectAudioSignature(
         header.subarray(8, 12).equals(Buffer.from("AIFC", "ascii"))
       )
     );
-  }
-
-  if (mime === "audio/ogg" || mime === "audio/opus") {
-    return header.subarray(0, 4).equals(Buffer.from("OggS", "ascii"));
   }
 
   if (mime === "audio/wav" || mime === "audio/wave" || mime === "audio/x-wav") {

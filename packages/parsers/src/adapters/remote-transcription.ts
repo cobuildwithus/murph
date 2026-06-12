@@ -17,11 +17,11 @@ export interface RemoteTranscriptionProviderOptions {
 }
 
 const REMOTE_TRANSCRIPTION_TIMEOUT_MS = 2 * 60 * 1_000;
-// 16 kHz mono PCM WAV is ~1.9 MiB/min, so this covers ~16 minutes of the
-// local-whisper WAV normalization path and much longer for remote-only MP3
-// sanitization or passthrough compressed originals. Keep in sync with
+// 16 kHz mono PCM WAV is ~1.9 MiB/min, so this covers ~8 minutes of the
+// local-whisper WAV normalization path and much longer for remote-only 48 kbps
+// MP3 sanitization or passthrough compressed originals. Keep in sync with
 // HOSTED_TRANSCRIBE_MAX_BODY_BYTES in apps/cloudflare.
-const REMOTE_TRANSCRIPTION_MAX_INPUT_BYTES = 32 * 1024 * 1024;
+const REMOTE_TRANSCRIPTION_MAX_INPUT_BYTES = 16 * 1024 * 1024;
 const REMOTE_TRANSCRIPTION_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
 export function createRemoteTranscriptionProvider(
