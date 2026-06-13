@@ -198,6 +198,13 @@ test('sendAssistantMessageLocal delivers pre-steer final answers before the fina
   expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
     .toEqual([
       {
+        deliveryContext: expect.objectContaining({
+          deliveryIdempotencyKey: undefined,
+          deliveryReplyToMessageId: undefined,
+          deliverySource: null,
+          deliveryTarget: undefined,
+          hostedDeliveryIdempotency: null,
+        }),
         response: 'Answer one.',
         media: [
           {
@@ -209,6 +216,13 @@ test('sendAssistantMessageLocal delivers pre-steer final answers before the fina
         ],
       },
       {
+        deliveryContext: expect.objectContaining({
+          deliveryIdempotencyKey: undefined,
+          deliveryReplyToMessageId: undefined,
+          deliverySource: null,
+          deliveryTarget: undefined,
+          hostedDeliveryIdempotency: null,
+        }),
         response: 'Answer two.',
         media: [],
       },
@@ -254,10 +268,218 @@ test('sendAssistantMessageLocal preserves real same-text preceding answers', asy
   expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
     .toEqual([
       {
+        deliveryContext: expect.objectContaining({
+          deliveryIdempotencyKey: undefined,
+          deliveryReplyToMessageId: undefined,
+          deliverySource: null,
+          deliveryTarget: undefined,
+          hostedDeliveryIdempotency: null,
+        }),
         response: 'Done.',
         media: [],
       },
     ])
+})
+
+test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accepted input ordinals', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
+    },
+    session,
+  })
+  const providerStarted = createDeferred<void>()
+  const providerRelease = createDeferred<void>()
+  const liveSteeredPrompts: string[] = []
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
+      interrupt: async () => undefined,
+      codexThreadId: 'provider-thread-contexts',
+      providerTurnId: 'provider-turn-contexts',
+      sessionId: session.sessionId,
+      steer: async (input) => {
+        liveSteeredPrompts.push(input.prompt)
+      },
+      turnId: 'turn-1',
+    })
+    providerStarted.resolve()
+    await providerRelease.promise
+    releaseLiveTurn?.()
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-contexts',
+        precedingResponseSegments: [
+          {
+            deliveryContextOrdinal: 0,
+            response: 'Answer one.',
+            media: [],
+          },
+          {
+            deliveryContextOrdinal: 1,
+            response: 'Answer two.',
+            media: [],
+          },
+        ],
+        response: 'Answer three.',
+        route: {
+          routeId: 'route-contexts',
+        },
+        session,
+      },
+    }
+  })
+
+  const initialResultPromise = sendAssistantMessageLocal({
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    deliveryIdempotencyKey: 'delivery-one',
+    deliveryReplyToMessageId: 'message-one',
+    deliverySource: {
+      kind: 'linq',
+      fromPhoneNumber: '+15550000001',
+    },
+    deliverySubject: 'subject-one',
+    deliveryTarget: 'thread-one',
+    hostedDeliveryIdempotency: {
+      assistantTurnOrdinal: 'assistant-reply:1',
+      conversationId: 'conversation-one',
+      inboundMailboxItemIds: ['mailbox-one'],
+      recipientKey: 'recipient-one',
+    },
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+  await providerStarted.promise
+
+  const steeredResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    deliveryDispatchMode: 'immediate',
+    deliveryIdempotencyKey: 'delivery-two',
+    deliveryReplyToMessageId: 'message-two',
+    deliverySource: {
+      kind: 'linq',
+      fromPhoneNumber: '+15550000002',
+    },
+    deliverySubject: 'subject-two',
+    deliveryTarget: 'thread-two',
+    expectedActiveTurnId: 'turn-1',
+    hostedDeliveryIdempotency: {
+      assistantTurnOrdinal: 'assistant-reply:2',
+      conversationId: 'conversation-two',
+      inboundMailboxItemIds: ['mailbox-two'],
+      recipientKey: 'recipient-two',
+    },
+    prompt: 'Late follow up',
+    vault: '/vaults/test',
+  })
+  await vi.waitFor(() => {
+    expect(liveSteeredPrompts).toEqual(['Late follow up'])
+  })
+  providerRelease.resolve()
+
+  const [initialResult, steeredResult] = await Promise.all([
+    initialResultPromise,
+    steeredResultPromise,
+  ])
+
+  expect(initialResult.response).toBe('Answer three.')
+  expect(steeredResult.response).toBe('Answer three.')
+  expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledTimes(1)
+  const precedingDeliveryInput =
+    mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]
+  assert.ok(precedingDeliveryInput)
+  const precedingSegments = precedingDeliveryInput.segments
+  assert.ok(precedingSegments)
+  expect(
+    precedingSegments.map((segment) => ({
+      response: segment.response,
+      deliveryDispatchMode: segment.deliveryContext?.deliveryDispatchMode,
+      deliveryIdempotencyKey: segment.deliveryContext?.deliveryIdempotencyKey,
+      deliveryReplyToMessageId: segment.deliveryContext?.deliveryReplyToMessageId,
+      deliverySource: segment.deliveryContext?.deliverySource,
+      deliverySubject: segment.deliveryContext?.deliverySubject,
+      deliveryTarget: segment.deliveryContext?.deliveryTarget,
+      hostedDeliveryIdempotency: segment.deliveryContext?.hostedDeliveryIdempotency,
+    })),
+  ).toEqual([
+    {
+      response: 'Answer one.',
+      deliveryDispatchMode: 'queue-only',
+      deliveryIdempotencyKey: 'delivery-one',
+      deliveryReplyToMessageId: 'message-one',
+      deliverySource: {
+        kind: 'linq',
+        fromPhoneNumber: '+15550000001',
+      },
+      deliverySubject: 'subject-one',
+      deliveryTarget: 'thread-one',
+      hostedDeliveryIdempotency: {
+        assistantTurnOrdinal: 'assistant-reply:1',
+        conversationId: 'conversation-one',
+        inboundMailboxItemIds: ['mailbox-one'],
+        recipientKey: 'recipient-one',
+      },
+    },
+    {
+      response: 'Answer two.',
+      deliveryDispatchMode: 'immediate',
+      deliveryIdempotencyKey: 'delivery-two',
+      deliveryReplyToMessageId: 'message-two',
+      deliverySource: {
+        kind: 'linq',
+        fromPhoneNumber: '+15550000002',
+      },
+      deliverySubject: 'subject-two',
+      deliveryTarget: 'thread-two',
+      hostedDeliveryIdempotency: {
+        assistantTurnOrdinal: 'assistant-reply:2',
+        conversationId: 'conversation-two',
+        inboundMailboxItemIds: ['mailbox-two'],
+        recipientKey: 'recipient-two',
+      },
+    },
+  ])
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.input).toMatchObject({
+    deliveryDispatchMode: 'immediate',
+    deliveryIdempotencyKey: 'delivery-two',
+    deliveryReplyToMessageId: 'message-two',
+    deliverySource: {
+      kind: 'linq',
+      fromPhoneNumber: '+15550000002',
+    },
+    deliverySubject: 'subject-two',
+    deliveryTarget: 'thread-two',
+    hostedDeliveryIdempotency: {
+      assistantTurnOrdinal: 'assistant-reply:2',
+      conversationId: 'conversation-two',
+      inboundMailboxItemIds: ['mailbox-two'],
+      recipientKey: 'recipient-two',
+    },
+  })
 })
 
 test('sendAssistantMessageLocal records a diagnostic when a preceding answer fails and still sends the final reply', async () => {
@@ -271,7 +493,12 @@ test('sendAssistantMessageLocal records a diagnostic when a preceding answer fai
     providerTurn: {
       onboardingGuidanceInjected: false,
       codexContinuation: { kind: 'explicit-structured-history' },
-      precedingResponses: ['Answer one.'],
+      precedingResponseSegments: [
+        {
+          response: 'Answer one.',
+          media: [],
+        },
+      ],
       response: 'Answer two.',
       session,
     },
@@ -324,7 +551,12 @@ test('sendAssistantMessageLocal still sends the final reply when preceding deliv
     providerTurn: {
       onboardingGuidanceInjected: false,
       codexContinuation: { kind: 'explicit-structured-history' },
-      precedingResponses: ['Answer one.'],
+      precedingResponseSegments: [
+        {
+          response: 'Answer one.',
+          media: [],
+        },
+      ],
       response: 'Answer two.',
       session,
     },

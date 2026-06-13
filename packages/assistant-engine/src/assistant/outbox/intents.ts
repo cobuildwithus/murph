@@ -117,7 +117,7 @@ export function hashAssistantOutboxIdentity(input: {
   const dedupeToken = normalizeNullableString(input.dedupeToken)
   if (dedupeToken) {
     return createHash('sha1')
-      .update(JSON.stringify({ dedupeToken, media: input.media ?? [] }))
+      .update(JSON.stringify({ dedupeToken }))
       .digest('hex')
   }
 

@@ -11082,7 +11082,13 @@ describe('steered final segments', () => {
     ])
 
     expect(result.finalMessage).toBe('Answer two.')
-    expect(result.precedingAgentMessages).toEqual(['Answer one.'])
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        response: 'Answer one.',
+        media: [],
+      },
+    ])
   })
 
   it('collects every pre-steer final answer in order across multiple steer boundaries', async () => {
@@ -11120,7 +11126,19 @@ describe('steered final segments', () => {
     ])
 
     expect(result.finalMessage).toBe('Answer three.')
-    expect(result.precedingAgentMessages).toEqual(['Answer one.', 'Answer two.'])
+    expect(result.precedingAgentMessageSegments.map((segment) => ({
+      deliveryContextOrdinal: segment.deliveryContextOrdinal,
+      response: segment.response,
+    }))).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        response: 'Answer one.',
+      },
+      {
+        deliveryContextOrdinal: 1,
+        response: 'Answer two.',
+      },
+    ])
   })
 
   it('does not return a trailing-steer final answer as a preceding segment', async () => {
@@ -11138,7 +11156,6 @@ describe('steered final segments', () => {
     ])
 
     expect(result.finalMessage).toBe('Answer one.')
-    expect(result.precedingAgentMessages).toEqual([])
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
 
@@ -11162,9 +11179,9 @@ describe('steered final segments', () => {
     ])
 
     expect(result.finalMessage).toBe('Done.')
-    expect(result.precedingAgentMessages).toEqual(['Done.'])
     expect(result.precedingAgentMessageSegments).toEqual([
       {
+        deliveryContextOrdinal: 0,
         response: 'Done.',
         media: [],
       },
@@ -11215,6 +11232,7 @@ describe('steered final segments', () => {
     expect(result.finalMessage).toBe('Answer two with a different image.')
     expect(result.precedingAgentMessageSegments).toEqual([
       {
+        deliveryContextOrdinal: 0,
         response: 'Answer one with image.',
         media: [
           {
@@ -11247,7 +11265,7 @@ describe('steered final segments', () => {
     ])
 
     expect(result.finalMessage).toBe('Answer two.')
-    expect(result.precedingAgentMessages).toEqual([])
+    expect(result.precedingAgentMessageSegments).toEqual([])
   })
 
   it('detects steer boundaries on the camelCase v2 wire item types', async () => {
@@ -11278,7 +11296,13 @@ describe('steered final segments', () => {
     ])
 
     expect(result.finalMessage).toBe('Answer two.')
-    expect(result.precedingAgentMessages).toEqual(['Answer one.'])
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        response: 'Answer one.',
+        media: [],
+      },
+    ])
   })
 
   it('ignores commentary messages and steers that arrive before any final answer', async () => {
@@ -11307,7 +11331,46 @@ describe('steered final segments', () => {
     ])
 
     expect(result.finalMessage).toBe('Consolidated answer.')
-    expect(result.precedingAgentMessages).toEqual([])
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('uses the latest answered user-message ordinal when an earlier steer had no final answer', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Second question before the first final',
+      }),
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Consolidated answer.',
+      }),
+      completedItemEvent({
+        id: 'user-3',
+        type: 'user_message',
+        message: 'Third question',
+      }),
+      completedItemEvent({
+        id: 'assistant-2',
+        type: 'assistant_message',
+        message: 'Final answer.',
+      }),
+    ])
+
+    expect(result.finalMessage).toBe('Final answer.')
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 1,
+        response: 'Consolidated answer.',
+        media: [],
+      },
+    ])
   })
 })
 

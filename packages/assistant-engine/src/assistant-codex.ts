@@ -395,7 +395,6 @@ export interface CodexAppServerTurnResult {
   // message and later superseded by another final message in the same turn, in
   // completion order. Empty unless the turn was steered after the model had
   // already finished an answer.
-  precedingAgentMessages: readonly string[]
   precedingAgentMessageSegments: readonly CodexAppServerResponseSegment[]
   additionalUsages: AssistantProviderUsageDraft[]
   responseMedia: AssistantResponseMedia[]
@@ -410,6 +409,7 @@ export interface CodexAppServerTurnResult {
 }
 
 export interface CodexAppServerResponseSegment {
+  deliveryContextOrdinal?: number
   media: AssistantResponseMedia[]
   response: string
 }
@@ -1616,6 +1616,7 @@ async function runCodexAppServerTurnOnProcess(
   let completedFinalAgentMessage: string | null = null
   let trailingSteerCandidate: CodexAppServerResponseSegment | null = null
   let trailingSteerCandidateMedia: AssistantResponseMedia[] | null = null
+  let completedUserMessageOrdinal = -1
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
@@ -2272,17 +2273,18 @@ async function runCodexAppServerTurnOnProcess(
         trailingSteerCandidateMedia = null
       }
       completedFinalAgentMessage = completedFinalAgentMessageText
-    } else if (
-      isCodexCompletedUserMessageItemFromNormalized(normalizedEvent) &&
-      completedFinalAgentMessage !== null
-    ) {
-      trailingSteerCandidate = {
-        response: completedFinalAgentMessage,
-        media: [...responseMedia],
+    } else if (isCodexCompletedUserMessageItemFromNormalized(normalizedEvent)) {
+      if (completedFinalAgentMessage !== null) {
+        trailingSteerCandidate = {
+          deliveryContextOrdinal: Math.max(0, completedUserMessageOrdinal),
+          response: completedFinalAgentMessage,
+          media: [...responseMedia],
+        }
+        trailingSteerCandidateMedia = trailingSteerCandidate.media
+        completedFinalAgentMessage = null
+        responseMedia = []
       }
-      trailingSteerCandidateMedia = trailingSteerCandidate.media
-      completedFinalAgentMessage = null
-      responseMedia = []
+      completedUserMessageOrdinal += 1
     }
 
     const progressEvent = extractCodexProgressEventFromNormalized(normalizedEvent)
@@ -2780,10 +2782,10 @@ async function runCodexAppServerTurnOnProcess(
 
   return {
     finalMessage,
-    precedingAgentMessages: precedingAgentMessageSegments.map(
-      (segment) => segment.response,
-    ),
     precedingAgentMessageSegments: precedingAgentMessageSegments.map((segment) => ({
+      ...(typeof segment.deliveryContextOrdinal === 'number'
+        ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }
+        : {}),
       response: segment.response,
       media: [...segment.media],
     })),

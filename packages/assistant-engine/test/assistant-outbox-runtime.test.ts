@@ -194,7 +194,7 @@ describe('assistant outbox runtime', () => {
     ).toHaveLength(1)
   })
 
-  it('includes response media in outbox persistence and dedupe identity', async () => {
+  it('stores response media while explicit dedupe tokens ignore media drift', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-media-dedupe-')
 
     const first = await createIntent(vaultRoot, {
@@ -251,12 +251,13 @@ describe('assistant outbox runtime', () => {
         source: 'dead-bug-setup',
       },
     ])
-    expect(sameTextDifferentMedia.intentId).not.toBe(first.intentId)
+    expect(sameTextDifferentMedia.intentId).toBe(first.intentId)
     expect(sameTextSameMedia.intentId).toBe(first.intentId)
     await expect(readAssistantOutboxIntent(vaultRoot, first.intentId)).resolves
       .toMatchObject({
         media: first.media,
       })
+
   })
 
   it('lists intents oldest-first and quarantines malformed inventory files', async () => {

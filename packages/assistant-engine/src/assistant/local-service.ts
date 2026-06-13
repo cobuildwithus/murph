@@ -39,6 +39,7 @@ import {
   deliverAssistantReply as dispatchAssistantReply,
   deliverAssistantProgressUpdate,
   finalizeAssistantTurnFromDeliveryOutcome as finalizeDeliveredAssistantTurn,
+  type AssistantReplyDeliveryContext,
 } from './delivery-service.js'
 import {
   persistAssistantTurnAndSession as finalizeAssistantTurnArtifacts,
@@ -524,6 +525,9 @@ export async function sendAssistantMessageLocal(
             sessionId: currentSession.sessionId,
           })
         }
+        const replyDeliveryContexts: AssistantReplyDeliveryContext[] = [
+          snapshotAssistantReplyDeliveryContext(currentInput),
+        ]
         const admissionMs = elapsedSince(admissionStartedAt)
         const preProviderSetupMs = elapsedSince(lockAcquiredAt)
         emitHostedAssistantContextTimingTrace({
@@ -555,6 +559,9 @@ export async function sendAssistantMessageLocal(
               providerRequestOrdinal,
               sessionId: drainInput.sessionId,
             })
+            replyDeliveryContexts.push(
+              snapshotAssistantReplyDeliveryContext(currentInput),
+            )
             providerRequestJournal =
               await runtimeState.turns.acceptedInputs.updateProviderRequest({
                 acceptedInputIds: accepted.acceptedInputJournal.inputIds,
@@ -717,13 +724,13 @@ export async function sendAssistantMessageLocal(
         // Final answers the model completed before a steered message arrived
         // are delivered ahead of the final reply with their own media.
         const precedingResponseSegments =
-          providerResult.precedingResponseSegments?.map((segment) => ({
+          (providerResult.precedingResponseSegments ?? []).map((segment) => ({
+            deliveryContext: resolveAssistantReplyDeliveryContextForSegment({
+              contexts: replyDeliveryContexts,
+              deliveryContextOrdinal: segment.deliveryContextOrdinal,
+            }),
             response: segment.response,
             media: segment.media ?? [],
-          })) ??
-          (providerResult.precedingResponses ?? []).map((response) => ({
-            response,
-            media: [],
           }))
         const precedingResponses = precedingResponseSegments.map(
           (segment) => segment.response,
@@ -1136,6 +1143,38 @@ function resolveAcceptedActiveTurnInputItems(input: {
   )
 }
 
+function snapshotAssistantReplyDeliveryContext(
+  input: AssistantMessageInput,
+): AssistantReplyDeliveryContext {
+  return {
+    deliveryDispatchMode: input.deliveryDispatchMode,
+    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+    deliveryReplyToMessageId: input.deliveryReplyToMessageId,
+    deliverySource: input.deliverySource ?? null,
+    deliverySubject: input.deliverySubject,
+    deliveryTarget: input.deliveryTarget,
+    hostedDeliveryIdempotency: input.hostedDeliveryIdempotency ?? null,
+  }
+}
+
+function resolveAssistantReplyDeliveryContextForSegment(input: {
+  contexts: readonly AssistantReplyDeliveryContext[]
+  deliveryContextOrdinal?: number | null
+}): AssistantReplyDeliveryContext | null {
+  if (input.contexts.length === 0) {
+    return null
+  }
+
+  const ordinal =
+    typeof input.deliveryContextOrdinal === 'number' &&
+    Number.isInteger(input.deliveryContextOrdinal) &&
+    input.deliveryContextOrdinal >= 0
+      ? input.deliveryContextOrdinal
+      : 0
+
+  return input.contexts[ordinal] ?? input.contexts[0] ?? null
+}
+
 function isManualAssistantTurnTrigger(
   turnTrigger: AssistantTurnTrigger | null | undefined,
 ): boolean {
@@ -1160,6 +1199,10 @@ function buildActiveTurnInput(input: {
 }): AssistantMessageInput {
   return {
     ...input.input,
+    deliveryDispatchMode:
+      input.acceptedInput.deliveryDispatchMode === undefined
+        ? input.input.deliveryDispatchMode
+        : input.acceptedInput.deliveryDispatchMode,
     deliveryReplyToMessageId:
       input.acceptedInput.deliveryReplyToMessageId === undefined
         ? input.input.deliveryReplyToMessageId
@@ -1168,10 +1211,22 @@ function buildActiveTurnInput(input: {
       input.acceptedInput.deliveryIdempotencyKey === undefined
         ? input.input.deliveryIdempotencyKey
         : input.acceptedInput.deliveryIdempotencyKey,
+    deliverySource:
+      input.acceptedInput.deliverySource === undefined
+        ? input.input.deliverySource
+        : input.acceptedInput.deliverySource,
+    deliverySubject:
+      input.acceptedInput.deliverySubject === undefined
+        ? input.input.deliverySubject
+        : input.acceptedInput.deliverySubject,
     deliveryTarget:
       input.acceptedInput.deliveryTarget === undefined
         ? input.input.deliveryTarget
         : input.acceptedInput.deliveryTarget,
+    hostedDeliveryIdempotency:
+      input.acceptedInput.hostedDeliveryIdempotency === undefined
+        ? input.input.hostedDeliveryIdempotency
+        : input.acceptedInput.hostedDeliveryIdempotency,
     prompt: input.acceptedInput.prompt,
     receiptMetadata:
       input.acceptedInput.receiptMetadata === undefined

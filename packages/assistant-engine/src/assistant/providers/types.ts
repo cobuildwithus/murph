@@ -196,7 +196,6 @@ export interface AssistantProviderTurnExecutionResult {
   // later superseded by another final answer in the same provider turn, in
   // completion order. Delivered ahead of `response` because Codex frontends
   // render every completed agent message.
-  precedingResponses?: readonly string[]
   precedingResponseSegments?: readonly AssistantProviderResponseSegment[]
   responseMedia?: readonly AssistantResponseMedia[] | null
   stderr: string
@@ -205,6 +204,7 @@ export interface AssistantProviderTurnExecutionResult {
 }
 
 export interface AssistantProviderResponseSegment {
+  deliveryContextOrdinal?: number
   media?: readonly AssistantResponseMedia[] | null
   response: string
 }

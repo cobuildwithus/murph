@@ -416,8 +416,13 @@ export async function executeCodexAssistantTurnAttempt(
         : {}),
       codexThreadId: result.sessionId,
       response: result.finalMessage,
-      precedingResponses: result.precedingAgentMessages,
-      precedingResponseSegments: result.precedingAgentMessageSegments,
+      precedingResponseSegments: (result.precedingAgentMessageSegments ?? []).map((segment) => ({
+        ...(typeof segment.deliveryContextOrdinal === 'number'
+          ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }
+          : {}),
+        media: segment.media,
+        response: segment.response,
+      })),
       responseMedia: result.responseMedia,
       stderr: result.stderr,
       stdout: result.stdout,

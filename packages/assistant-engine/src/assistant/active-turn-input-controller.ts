@@ -815,6 +815,22 @@ function mergeAssistantActiveTurnInputAdmissions(
     second.deliveryTarget === undefined
       ? first.deliveryTarget
       : second.deliveryTarget
+  const deliveryDispatchMode =
+    second.deliveryDispatchMode === undefined
+      ? first.deliveryDispatchMode
+      : second.deliveryDispatchMode
+  const deliverySource =
+    second.deliverySource === undefined
+      ? first.deliverySource
+      : second.deliverySource
+  const deliverySubject =
+    second.deliverySubject === undefined
+      ? first.deliverySubject
+      : second.deliverySubject
+  const hostedDeliveryIdempotency =
+    second.hostedDeliveryIdempotency === undefined
+      ? first.hostedDeliveryIdempotency
+      : second.hostedDeliveryIdempotency
 
   return {
     acceptedInputs: [
@@ -829,7 +845,13 @@ function mergeAssistantActiveTurnInputAdmissions(
       second.deliveryIdempotencyKey === undefined
         ? first.deliveryIdempotencyKey
         : second.deliveryIdempotencyKey,
+    ...(deliveryDispatchMode === undefined ? {} : { deliveryDispatchMode }),
+    ...(deliverySource === undefined ? {} : { deliverySource }),
+    ...(deliverySubject === undefined ? {} : { deliverySubject }),
     ...(deliveryTarget === undefined ? {} : { deliveryTarget }),
+    ...(hostedDeliveryIdempotency === undefined
+      ? {}
+      : { hostedDeliveryIdempotency }),
     kind: 'accepted',
     prompt: joinAssistantActiveTurnInputText([first.prompt, second.prompt]) ?? '',
     receiptMetadata: mergeAssistantActiveTurnReceiptMetadata([
@@ -948,6 +970,24 @@ function buildManualAcceptedActiveTurnInputAdmission(input: {
       },
     ],
     deliveryReplyToMessageId: input.input.deliveryReplyToMessageId,
+    ...(input.input.deliveryDispatchMode === undefined
+      ? {}
+      : { deliveryDispatchMode: input.input.deliveryDispatchMode }),
+    ...(input.input.deliveryIdempotencyKey === undefined
+      ? {}
+      : { deliveryIdempotencyKey: input.input.deliveryIdempotencyKey }),
+    ...(input.input.deliverySource === undefined
+      ? {}
+      : { deliverySource: input.input.deliverySource }),
+    ...(input.input.deliverySubject === undefined
+      ? {}
+      : { deliverySubject: input.input.deliverySubject }),
+    ...(input.input.deliveryTarget === undefined
+      ? {}
+      : { deliveryTarget: input.input.deliveryTarget }),
+    ...(input.input.hostedDeliveryIdempotency === undefined
+      ? {}
+      : { hostedDeliveryIdempotency: input.input.hostedDeliveryIdempotency }),
     kind: 'accepted',
     prompt: normalizeNullableString(input.input.prompt) ?? '',
     transcriptText: null,

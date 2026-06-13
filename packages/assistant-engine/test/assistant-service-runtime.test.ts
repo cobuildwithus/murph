@@ -1231,7 +1231,16 @@ describe("assistant delivery orchestration seam", () => {
         prompt: "hello",
         vault: "/vault",
       },
-      responses: ["Answer one.", "Answer two."],
+      segments: [
+        {
+          response: "Answer one.",
+          media: [],
+        },
+        {
+          response: "Answer two.",
+          media: [],
+        },
+      ],
       session,
       sharedPlan: createSharedPlan(),
       turnId: "turn-segments",
@@ -1282,7 +1291,16 @@ describe("assistant delivery orchestration seam", () => {
         prompt: "hello",
         vault: "/vault",
       },
-      responses: ["Answer one.", "Answer two."],
+      segments: [
+        {
+          response: "Answer one.",
+          media: [],
+        },
+        {
+          response: "Answer two.",
+          media: [],
+        },
+      ],
       session,
       sharedPlan: createSharedPlan(),
       turnId: "turn-segments-base",
@@ -1300,6 +1318,170 @@ describe("assistant delivery orchestration seam", () => {
     ).toEqual(["delivery-base:segment:0", "delivery-base:segment:1"]);
   });
 
+  it("delivers preceding segments with their own delivery contexts", async () => {
+    const session = createAssistantSession();
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "telegram",
+        idempotencyKey: "idem-segment-context",
+        messageLength: 10,
+        providerMessageId: "provider-segment-context",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "thread-1",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-segment-context",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    await deliverAssistantPrecedingReplies({
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "final-delivery",
+        deliveryReplyToMessageId: "final-message",
+        deliveryTarget: "final-thread",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      segments: [
+        {
+          deliveryContext: {
+            deliveryIdempotencyKey: "delivery-one",
+            deliveryReplyToMessageId: "message-one",
+            deliveryTarget: "thread-one",
+          },
+          response: "Answer one.",
+          media: [],
+        },
+        {
+          deliveryContext: {
+            deliveryIdempotencyKey: "delivery-two",
+            deliveryReplyToMessageId: "message-two",
+            deliveryTarget: "thread-two",
+          },
+          response: "Answer two.",
+          media: [],
+        },
+      ],
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-segments-context",
+    });
+
+    expect(
+      runtimeState.outbox.deliverMessage.mock.calls.map((call) => ({
+        dedupeToken: call[0]?.dedupeToken,
+        deliveryIdempotencyKey: call[0]?.deliveryIdempotencyKey,
+        explicitTarget: call[0]?.explicitTarget,
+        message: call[0]?.message,
+        replyToMessageId: call[0]?.replyToMessageId,
+      }))
+    ).toEqual([
+      {
+        dedupeToken: "delivery-one:segment:0",
+        deliveryIdempotencyKey: "delivery-one:segment:0",
+        explicitTarget: "thread-one",
+        message: "Answer one.",
+        replyToMessageId: "message-one",
+      },
+      {
+        dedupeToken: "delivery-two:segment:1",
+        deliveryIdempotencyKey: "delivery-two:segment:1",
+        explicitTarget: "thread-two",
+        message: "Answer two.",
+        replyToMessageId: "message-two",
+      },
+    ]);
+  });
+
+  it("continues preceding segment delivery after a thrown segment and preserves session progress", async () => {
+    const session = createAssistantSession();
+    const sessionAfterFirst = createAssistantSession({
+      sessionId: "session-after-first-segment",
+    });
+    const sessionAfterThird = createAssistantSession({
+      sessionId: "session-after-third-segment",
+    });
+    runtimeState.outbox.deliverMessage
+      .mockResolvedValueOnce({
+        delivery: {
+          channel: "telegram",
+          idempotencyKey: "idem-segment-one",
+          messageLength: 10,
+          providerMessageId: "provider-segment-one",
+          providerThreadId: null,
+          sentAt: "2026-04-08T11:00:00.000Z",
+          target: "thread-1",
+          targetKind: "thread",
+        },
+        intent: {
+          intentId: "intent-segment-one",
+        },
+        kind: "sent",
+        session: sessionAfterFirst,
+      })
+      .mockRejectedValueOnce(new Error("outbox write failed"))
+      .mockResolvedValueOnce({
+        delivery: {
+          channel: "telegram",
+          idempotencyKey: "idem-segment-three",
+          messageLength: 12,
+          providerMessageId: "provider-segment-three",
+          providerThreadId: null,
+          sentAt: "2026-04-08T11:00:02.000Z",
+          target: "thread-1",
+          targetKind: "thread",
+        },
+        intent: {
+          intentId: "intent-segment-three",
+        },
+        kind: "sent",
+        session: sessionAfterThird,
+      });
+
+    const outcomes = await deliverAssistantPrecedingReplies({
+      input: {
+        deliverResponse: true,
+        prompt: "hello",
+        vault: "/vault",
+      },
+      segments: [
+        {
+          response: "Answer one.",
+          media: [],
+        },
+        {
+          response: "Answer two.",
+          media: [],
+        },
+        {
+          response: "Answer three.",
+          media: [],
+        },
+      ],
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-segments-partial",
+    });
+
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledTimes(3);
+    expect(outcomes.map((outcome) => outcome.kind)).toEqual([
+      "sent",
+      "failed",
+      "sent",
+    ]);
+    expect(outcomes[0]?.session.sessionId).toBe("session-after-first-segment");
+    expect(outcomes[1]?.session.sessionId).toBe("session-after-first-segment");
+    expect(outcomes[2]?.session.sessionId).toBe("session-after-third-segment");
+    expect(
+      runtimeState.outbox.deliverMessage.mock.calls[2]?.[0]?.message
+    ).toBe("Answer three.");
+  });
+
   it("skips preceding steered answers when delivery is disabled", async () => {
     const session = createAssistantSession();
 
@@ -1310,7 +1492,12 @@ describe("assistant delivery orchestration seam", () => {
           prompt: "hello",
           vault: "/vault",
         },
-        responses: ["Answer one."],
+        segments: [
+          {
+            response: "Answer one.",
+            media: [],
+          },
+        ],
         session,
         sharedPlan: createSharedPlan(),
         turnId: "turn-segments-disabled",
@@ -1414,7 +1601,7 @@ describe("assistant delivery orchestration seam", () => {
       deliveryTransportIdempotent: undefined,
       dependencies: undefined,
       dispatchMode: "immediate",
-      explicitTarget: "explicit-audience-target",
+      explicitTarget: "explicit-input-target",
       identityId: "audience-identity",
       media: [],
       message: "reply body",
@@ -1854,6 +2041,121 @@ describe("assistant delivery orchestration seam", () => {
         turnId: "turn-hosted-email-missing-key",
       })
     ).rejects.toThrow("Hosted outbound delivery requires a deterministic idempotency key.");
+  });
+
+  it("derives hosted idempotency from the resolved explicit delivery target", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "linq",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "thread",
+          target: "binding-thread-target",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
+    });
+    const sharedPlan = createSharedPlan({
+      conversationPolicy: {
+        audience: {
+          actorId: "audience-actor",
+          bindingDelivery: {
+            kind: "thread",
+            target: "audience-binding-target",
+          },
+          channel: "linq",
+          explicitTarget: "audience-explicit-target",
+          identityId: "audience-identity",
+          threadId: "audience-thread",
+          threadIsDirect: false,
+        },
+      },
+    });
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "linq",
+        idempotencyKey: "provider-key",
+        messageLength: 10,
+        providerMessageId: "provider-target-key",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:03:00.000Z",
+        target: "linq-target",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-target-key",
+      },
+      kind: "sent",
+      session: null,
+    });
+    const baseInput = {
+      deliverResponse: true,
+      executionContext: {
+        hosted: {
+          memberId: "member-hosted",
+          userEnvKeys: [],
+        },
+      },
+      hostedDeliveryIdempotency: {
+        assistantTurnOrdinal: "assistant-reply:target",
+        inboundMailboxItemIds: ["mailbox_item_target"],
+      },
+      prompt: "hello",
+      vault: "/vault",
+    };
+
+    await deliverAssistantReply({
+      input: baseInput,
+      response: "reply body",
+      session,
+      sharedPlan,
+      turnId: "turn-hosted-target-audience",
+    });
+    const audienceCall = runtimeState.outbox.deliverMessage.mock.lastCall?.[0];
+    const audienceKey = audienceCall?.deliveryIdempotencyKey;
+    expect(audienceCall).toEqual(expect.objectContaining({
+      explicitTarget: "audience-explicit-target",
+      deliveryIdempotencyKey: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+    }));
+
+    await deliverAssistantReply({
+      input: {
+        ...baseInput,
+        deliveryTarget: "input-explicit-target",
+      },
+      response: "reply body",
+      session,
+      sharedPlan,
+      turnId: "turn-hosted-target-input",
+    });
+    const inputTargetCall = runtimeState.outbox.deliverMessage.mock.lastCall?.[0];
+    const inputTargetKey = inputTargetCall?.deliveryIdempotencyKey;
+    expect(inputTargetCall).toEqual(expect.objectContaining({
+      explicitTarget: "input-explicit-target",
+      deliveryIdempotencyKey: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+    }));
+    expect(inputTargetKey).not.toBe(audienceKey);
+
+    await deliverAssistantReply({
+      input: {
+        ...baseInput,
+        deliveryTarget: null,
+      },
+      response: "reply body",
+      session,
+      sharedPlan,
+      turnId: "turn-hosted-target-clear",
+    });
+    const clearedTargetCall = runtimeState.outbox.deliverMessage.mock.lastCall?.[0];
+    expect(clearedTargetCall).toEqual(expect.objectContaining({
+      explicitTarget: null,
+      deliveryIdempotencyKey: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+    }));
+    expect(clearedTargetCall?.deliveryIdempotencyKey).not.toBe(audienceKey);
+    expect(clearedTargetCall?.deliveryIdempotencyKey).not.toBe(inputTargetKey);
   });
 
   it("passes outbound delivery text through unchanged for user-facing channels", async () => {

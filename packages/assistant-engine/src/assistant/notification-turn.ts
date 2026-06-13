@@ -602,18 +602,35 @@ async function deliverAssistantNotificationMessage(input: {
 }): Promise<AssistantDeliveryOutcome> {
   const state = createAssistantRuntimeStateService(input.input.vault)
   const audience = input.sharedPlan.conversationPolicy.audience
+  const deliveryChannel = audience.channel ?? input.session.binding.channel
+  const bindingDelivery = audience.bindingDelivery ?? input.session.binding.delivery
   const explicitTarget = audience.explicitTarget ?? input.input.deliveryTarget ?? null
   const subject = resolveAssistantNotificationDeliverySubject({
-    bindingDelivery: audience.bindingDelivery ?? input.session.binding.delivery,
-    channel: audience.channel ?? input.session.binding.channel,
+    bindingDelivery,
+    channel: deliveryChannel,
     decisionSubject: input.decisionSubject,
     explicitTarget,
     inputDeliverySubject: input.input.deliverySubject ?? null,
   })
-  const deliveryChannel = audience.channel ?? input.session.binding.channel
+  const deliveryFields = {
+    actorId: audience.actorId ?? input.session.binding.actorId,
+    bindingDelivery,
+    channel: deliveryChannel,
+    deliverySource: input.input.deliverySource ?? null,
+    explicitTarget,
+    identityId: audience.identityId ?? input.session.binding.identityId,
+    replyToMessageId:
+      audience.replyToMessageId ?? input.input.deliveryReplyToMessageId ?? null,
+    sessionId: input.session.sessionId,
+    subject,
+    threadId: audience.threadId ?? input.session.binding.threadId,
+    threadIsDirect:
+      audience.threadIsDirect ?? input.session.binding.threadIsDirect,
+  }
   const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
     audience,
     channel: deliveryChannel,
+    deliveryFields,
     input: input.input,
     session: input.session,
   })
@@ -624,24 +641,12 @@ async function deliverAssistantNotificationMessage(input: {
   })
   const outcome = await state.outbox.deliverMessage({
     turnId: input.turnId,
-    sessionId: input.session.sessionId,
     message: input.message,
     dedupeToken: input.dedupeToken,
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
-    deliverySource: input.input.deliverySource ?? null,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
-    channel: deliveryChannel,
-    identityId: audience.identityId ?? input.session.binding.identityId,
-    actorId: audience.actorId ?? input.session.binding.actorId,
-    threadId: audience.threadId ?? input.session.binding.threadId,
-    threadIsDirect:
-      audience.threadIsDirect ?? input.session.binding.threadIsDirect,
-    bindingDelivery: audience.bindingDelivery ?? input.session.binding.delivery,
-    explicitTarget,
+    ...deliveryFields,
     media,
-    replyToMessageId:
-      audience.replyToMessageId ?? input.input.deliveryReplyToMessageId ?? null,
-    subject,
     dispatchMode: input.input.deliveryDispatchMode,
   })
   switch (outcome.kind) {

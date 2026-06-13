@@ -1,5 +1,8 @@
-import type { AssistantUserMessageContentPart } from './content-types.js'
+import type { AssistantDeliverySource } from '@murphai/operator-config/assistant-cli-contracts'
+
 import type { AssistantAcceptedTurnInputItemInput } from './active-turn-input-journal.js'
+import type { AssistantUserMessageContentPart } from './content-types.js'
+import type { AssistantOutboxDispatchMode } from './outbox.js'
 
 export interface AssistantTurnInputRefreshInput {
   signal?: AbortSignal
@@ -32,9 +35,18 @@ export type AssistantActiveTurnInputAdmissionResult =
     }
   | {
       acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
+      deliveryDispatchMode?: AssistantOutboxDispatchMode
       deliveryIdempotencyKey?: string | null
       deliveryReplyToMessageId?: string | null
+      deliverySource?: AssistantDeliverySource | null
+      deliverySubject?: string | null
       deliveryTarget?: string | null
+      hostedDeliveryIdempotency?: {
+        assistantTurnOrdinal: number | string
+        conversationId?: string | null
+        inboundMailboxItemIds?: readonly string[] | null
+        recipientKey?: string | null
+      } | null
       prompt: string
       receiptMetadata?: Record<string, string> | null
       transcriptText?: string | null
