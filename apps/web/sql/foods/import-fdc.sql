@@ -61,6 +61,39 @@ AS $$
   END;
 $$;
 
+CREATE OR REPLACE FUNCTION pg_temp.fdc_data_type(value TEXT)
+RETURNS TEXT
+LANGUAGE SQL
+IMMUTABLE
+PARALLEL SAFE
+AS $$
+  WITH normalized AS (
+    SELECT regexp_replace(
+      regexp_replace(
+        lower(COALESCE(value, '')),
+        '[^a-z0-9]+',
+        '_',
+        'g'
+      ),
+      '^_+|_+$',
+      '',
+      'g'
+    ) AS value
+  )
+  SELECT CASE value
+    WHEN 'branded' THEN 'branded_food'
+    WHEN 'branded_food' THEN 'branded_food'
+    WHEN 'foundation' THEN 'foundation_food'
+    WHEN 'foundation_food' THEN 'foundation_food'
+    WHEN 'sr_legacy' THEN 'sr_legacy_food'
+    WHEN 'sr_legacy_food' THEN 'sr_legacy_food'
+    WHEN 'survey_fndds' THEN 'survey_fndds_food'
+    WHEN 'survey_fndds_food' THEN 'survey_fndds_food'
+    ELSE NULL
+  END
+  FROM normalized;
+$$;
+
 CREATE TEMP TABLE fdc_food_raw (
   fdc_id TEXT NOT NULL,
   data_type TEXT,
@@ -235,22 +268,28 @@ food_portions AS (
   WHERE portion_rank <= 8
   GROUP BY fdc_id
 ),
+typed_food AS (
+  SELECT
+    food.*,
+    pg_temp.fdc_data_type(food.data_type) AS normalized_data_type
+  FROM fdc_food_raw food
+),
 source_rows AS (
   SELECT
     food.fdc_id,
-    CASE food.data_type
+    CASE food.normalized_data_type
       WHEN 'foundation_food' THEN 'usda_foundation'
       WHEN 'sr_legacy_food' THEN 'usda_sr_legacy'
       WHEN 'survey_fndds_food' THEN 'usda_fndds'
       WHEN 'branded_food' THEN 'usda_branded'
     END AS data_origin,
-    CASE food.data_type
+    CASE food.normalized_data_type
       WHEN 'foundation_food' THEN 10
       WHEN 'sr_legacy_food' THEN 20
       WHEN 'survey_fndds_food' THEN 25
       WHEN 'branded_food' THEN 30
     END::smallint AS data_origin_priority,
-    food.data_type,
+    food.normalized_data_type AS data_type,
     pg_temp.fdc_compact_text(food.description) AS name_raw,
     pg_temp.fdc_compact_text(branded.brand_name) AS brand_name,
     pg_temp.fdc_compact_text(branded.subbrand_name) AS subbrand_name,
@@ -280,27 +319,27 @@ source_rows AS (
     pg_temp.fdc_date(food.publication_date) AS published_date,
     pg_temp.fdc_date(branded.modified_date) AS modified_date,
     pg_temp.fdc_date(branded.available_date) AS available_date
-  FROM fdc_food_raw food
+  FROM typed_food food
   LEFT JOIN fdc_branded_raw branded
     ON branded.fdc_id = food.fdc_id
-    AND food.data_type = 'branded_food'
+    AND food.normalized_data_type = 'branded_food'
   LEFT JOIN fdc_survey_raw survey
     ON survey.fdc_id = food.fdc_id
-    AND food.data_type = 'survey_fndds_food'
+    AND food.normalized_data_type = 'survey_fndds_food'
   LEFT JOIN fdc_wweia_category_raw wweia
     ON wweia.wweia_food_category = survey.wweia_category_code
   LEFT JOIN fdc_category_raw categories
     ON categories.id = food.food_category_id
   WHERE
     food.fdc_id ~ '^\d+$'
-    AND food.data_type IN (
+    AND food.normalized_data_type IN (
       'branded_food',
       'foundation_food',
       'sr_legacy_food',
       'survey_fndds_food'
     )
     AND (
-      food.data_type <> 'branded_food'
+      food.normalized_data_type <> 'branded_food'
       OR lower(btrim(COALESCE(branded.market_country, ''))) = 'united states'
     )
 ),

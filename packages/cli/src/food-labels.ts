@@ -15,6 +15,7 @@ const foodLabelsClient = createHostedDataApiLabelsClient({
   apiPath: FOOD_LABELS_API_PATH,
   errorCodePrefix: 'food_labels_api',
   numericExactIdPrefix: 'fdc:',
+  preferNumericGtinUpcLookup: true,
   resultSource: FOOD_LABELS_RESULT_SOURCE,
   searchDescription: 'Food label search',
 })

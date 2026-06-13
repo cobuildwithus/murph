@@ -66,6 +66,7 @@ type HostedDataApiLabelsClientConfig<TSource extends string> = {
   apiPath: `/api/${string}`
   errorCodePrefix: string
   numericExactIdPrefix?: `${string}:`
+  preferNumericGtinUpcLookup?: boolean
   resultSource: TSource
   searchDescription: string
 }
@@ -244,9 +245,13 @@ function resolveLabelLookupParams<TSource extends string>(
       ? `${config.numericExactIdPrefix}${digits}`
       : digits
 
-    return GTIN_LENGTHS.has(digits.length)
-      ? [{ key: 'id', value: exactId }, { key: 'upc', value: digits }]
-      : [{ key: 'id', value: exactId }]
+    if (!GTIN_LENGTHS.has(digits.length)) {
+      return [{ key: 'id', value: exactId }]
+    }
+
+    return config.preferNumericGtinUpcLookup
+      ? [{ key: 'upc', value: digits }, { key: 'id', value: exactId }]
+      : [{ key: 'id', value: exactId }, { key: 'upc', value: digits }]
   }
 
   if (/^[\d\s().-]+$/u.test(trimmed) && GTIN_LENGTHS.has(digits.length)) {

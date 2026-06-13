@@ -94,8 +94,8 @@ resolve_release_date() {
 
 if [ -n "$export_prepared" ]; then
   release_date="$(resolve_release_date)"
-  echo "Exporting prepared foods rows for FDC release $release_date..."
-  "$psql_bin" -v ON_ERROR_STOP=1 -c "\\copy (SELECT id, canonical_key, data_origin, data_origin_id, data_origin_url, data_origin_priority, name, brand, upc, off_market, search_text, label, fdc_release_date FROM foods WHERE fdc_release_date = '$release_date' ORDER BY id) TO '$export_prepared' WITH (FORMAT csv, HEADER true)" "$labels_db_url"
+  echo "Exporting prepared foods rows for the latest import run in FDC release $release_date..."
+  "$psql_bin" -v ON_ERROR_STOP=1 -c "\\copy (SELECT id, canonical_key, data_origin, data_origin_id, data_origin_url, data_origin_priority, name, brand, upc, off_market, search_text, label, fdc_release_date FROM foods WHERE fdc_release_date = '$release_date' AND last_seen_at = (SELECT max(latest_foods.last_seen_at) FROM foods latest_foods WHERE latest_foods.fdc_release_date = '$release_date') ORDER BY id) TO '$export_prepared' WITH (FORMAT csv, HEADER true)" "$labels_db_url"
   echo "Exported $(($(wc -l < "$export_prepared") - 1)) prepared rows."
   exit 0
 fi
@@ -179,6 +179,24 @@ LC_ALL=C awk -F '\",\"' \
   -v label_nbrs="$label_panel_nbrs" \
   -v food_csv="$FDC_FOOD_CSV" \
   -v nutrient_csv="$FDC_NUTRIENT_CSV" '
+  function normalize_data_type(value, normalized) {
+    normalized = tolower(value)
+    gsub(/[^a-z0-9]+/, "_", normalized)
+    gsub(/^_+|_+$/, "", normalized)
+    if (normalized == "branded") {
+      return "branded_food"
+    }
+    if (normalized == "foundation") {
+      return "foundation_food"
+    }
+    if (normalized == "sr_legacy") {
+      return "sr_legacy_food"
+    }
+    if (normalized == "survey_fndds") {
+      return "survey_fndds_food"
+    }
+    return normalized
+  }
   BEGIN {
     split(label_nbrs, nbrs, " ")
     for (idx in nbrs) {
@@ -203,6 +221,7 @@ LC_ALL=C awk -F '\",\"' \
       data_type = $2
       gsub(/^"|"$/, "", id)
       gsub(/^"|"$/, "", data_type)
+      data_type = normalize_data_type(data_type)
       if (data_type == "foundation_food" || data_type == "sr_legacy_food" || data_type == "survey_fndds_food") {
         generic_food[id] = 1
       }
