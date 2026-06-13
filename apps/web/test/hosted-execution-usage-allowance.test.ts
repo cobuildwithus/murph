@@ -174,6 +174,8 @@ describe("hosted AI usage allowance pricing", () => {
       requestedModel: "@cf/openai/whisper-large-v3-turbo",
       servedModel: null,
       totalTokens: null,
+      usageExtractionSourcePath: "workers-ai.transcribe",
+      usageExtractionVersion: "workers-ai-transcribe-v1",
     } satisfies AssistantUsageRecord;
 
     // One full audio minute costs exactly the Workers AI per-minute rate.
@@ -231,6 +233,47 @@ describe("hosted AI usage allowance pricing", () => {
       outputTokens: 45,
       totalTokens: 165,
     })).toThrow("pricing is missing");
+
+    // Rows that claim the Whisper model but lack the worker transcription
+    // cost-basis shape fail closed through token-model pricing.
+    for (const malformed of [
+      {
+        ...transcription,
+        rawUsageJson: null,
+      },
+      {
+        ...transcription,
+        rawUsageJson: {},
+      },
+      {
+        ...transcription,
+        rawUsageJson: { durationMs: 60_000 },
+      },
+      {
+        ...transcription,
+        featureKey: "maintenance",
+      },
+      {
+        ...transcription,
+        usageExtractionSourcePath: null,
+      },
+      {
+        ...transcription,
+        cachedInputTokens: 1,
+      },
+      {
+        ...transcription,
+        cacheWriteTokens: 1,
+      },
+      {
+        ...transcription,
+        reasoningTokens: 1,
+      },
+    ] satisfies AssistantUsageRecord[]) {
+      expect(() => priceHostedAiUsageForAllowance(malformed)).toThrow(
+        "pricing is missing",
+      );
+    }
   });
 });
 

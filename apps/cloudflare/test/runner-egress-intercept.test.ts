@@ -4846,10 +4846,66 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     }
   });
 
+  it("meters transcription duration from all provider segments while capping response segments", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ recorded: true, usageId: "usage_1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = (promise: Promise<unknown>): void => {
+      waitUntilPromises.push(promise);
+    };
+    const segments = Array.from({ length: 10_001 }, (_, index) => ({
+      end: index + 1,
+      start: index,
+      text: `segment ${index + 1}`,
+    }));
+
+    const response = await hostedRunnerIntercept(
+      new Request(TRANSCRIBE_URL, {
+        body: "wav-bytes",
+        method: "POST",
+      }),
+      createInterceptEnv({
+        AI: {
+          run: vi.fn(async () => ({
+            segments,
+            text: "long transcript",
+          })),
+        },
+        readActiveRuntimeUserFence: async () => ({
+          active: true,
+          attemptId: "attempt-1",
+          leaseGeneration: "1",
+          userId: "member_123",
+        }),
+        validateActiveRuntimeWriteFence: async (input) =>
+          createActiveRuntimeWriteFenceValidationResult(input),
+      }),
+      { containerId: "opaque-container-id", waitUntil },
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      durationMs: number;
+      segments: unknown[];
+    };
+    expect(payload.durationMs).toBe(10_001_000);
+    expect(payload.segments).toHaveLength(10_000);
+
+    await Promise.all(waitUntilPromises);
+    const usageBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      usage: Record<string, unknown>;
+    };
+    expect(usageBody.usage.rawUsageJson).toEqual({
+      audioBytes: 9,
+      durationMs: 10_001_000,
+    });
+  });
+
   it("rejects empty transcribe bodies and surfaces transcript-less Workers AI output as 422", async () => {
     // Workers AI bills every completed run, so transcript-less output must
-    // still meter usage even though the transcript response is a 502. Only
-    // requests rejected before ai.run record nothing.
+    // still meter usage even though the transcript response is a non-retryable
+    // 422. Only requests rejected before ai.run record nothing.
     const fetchMock = vi.fn<typeof fetch>(async () =>
       Response.json({ recorded: true, usageId: "usage_1" }));
     vi.stubGlobal("fetch", fetchMock);

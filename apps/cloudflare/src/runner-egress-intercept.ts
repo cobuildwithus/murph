@@ -10,15 +10,16 @@ import {
 } from "@murphai/hosted-execution";
 import {
   HOSTED_RUNTIME_LOG_PATH,
-  HOSTED_RUNTIME_USAGE_RECORD_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
   buildHostedTranscriptionUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 
 import { readHostedExecutionEnvironment } from "./env.ts";
-import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane.ts";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
+import {
+  recordHostedRuntimeUsageRecord,
+} from "./runtime-platform/usage-record-port.ts";
 
 import {
   CLOUDFLARE_HOSTED_CONTAINER_FATAL_PATH,
@@ -920,23 +921,21 @@ function recordHostedTranscribeUsage(input: {
       memberId: input.memberId,
       model: HOSTED_TRANSCRIBE_WORKERS_AI_MODEL,
     });
-    const response = await fetchHostedExecutionWebControlPlaneResponse({
-      ...(environment.hostedWebAllowHttpHosts
-        ? { allowHttpHosts: environment.hostedWebAllowHttpHosts }
-        : {}),
-      baseUrl: environment.hostedWebBaseUrl,
-      body: JSON.stringify({ usage: record }),
+    await recordHostedRuntimeUsageRecord({
       boundUserId: input.memberId,
-      callbackSigning: environment.webCallbackSigning,
-      method: "POST",
-      path: HOSTED_RUNTIME_USAGE_RECORD_PATH,
+      fetchImpl: fetch,
+      record,
       timeoutMs: environment.webControlTimeoutMs,
+      transport: {
+        callbackSigning: environment.webCallbackSigning,
+        mode: "direct",
+        webControlBaseUrl: environment.hostedWebBaseUrl,
+        workspaceCheckpointBridge: null,
+        ...(environment.hostedWebAllowHttpHosts
+          ? { allowHttpHosts: environment.hostedWebAllowHttpHosts }
+          : {}),
+      },
     });
-    if (!response.ok) {
-      throw new Error(
-        `Hosted transcription usage recording failed with HTTP ${response.status}.`,
-      );
-    }
   })().catch((error: unknown) => {
     emitHostedExecutionStructuredLog({
       component: "runner",
@@ -1013,10 +1012,10 @@ function readHostedTranscribeResponsePayload(
 }
 
 // Reads the billed audio duration from any Workers AI transcription output,
-// independent of transcript validation: usage metering needs it even when the
-// transcript comes back empty or malformed. When transcription_info is absent
-// the furthest segment end still bounds the billed time, mirroring the
-// parsers-side fallback.
+// independent of transcript validation and response truncation: usage metering
+// needs it even when the transcript comes back empty or malformed. When
+// transcription_info is absent the furthest segment end still bounds the
+// billed time, mirroring the parsers-side fallback.
 function readHostedTranscribeOutputDurationMs(output: unknown): number | null {
   const durationSeconds = readHostedTranscribeNonNegativeNumber(
     readHostedTranscribeTranscriptionInfo(output)?.duration,
@@ -1034,7 +1033,7 @@ function readHostedTranscribeMaxSegmentEndSeconds(output: unknown): number | nul
   }
 
   let maxEndSeconds: number | null = null;
-  for (const segment of segments.slice(0, HOSTED_TRANSCRIBE_MAX_SEGMENTS)) {
+  for (const segment of segments) {
     if (!segment || typeof segment !== "object" || Array.isArray(segment)) {
       continue;
     }

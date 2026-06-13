@@ -1282,15 +1282,20 @@ function priceTokenBucketUsdMicros(
     / TOKENS_PER_PRICING_UNIT;
 }
 
-// Only Worker-recorded Workers AI rows take the audio-priced branch. A row
-// carrying token counts is definitively not a transcription record (the
-// builder never sets them), so it falls through to token-model pricing and
-// fails closed there, like any other row that merely claims the whisper id.
+// Only Worker-recorded Workers AI transcription rows take the audio-priced
+// branch. A malformed row that merely claims the whisper id must fall through
+// to token-model pricing and fail closed instead of being accounted as free.
 function isHostedAiUsageAllowanceAudioModelRecord(record: AssistantUsageRecord): boolean {
   return record.provider === "workers-ai"
+    && record.featureKey === "audio-transcription"
+    && record.usageExtractionSourcePath === "workers-ai.transcribe"
+    && record.cacheWriteTokens === null
+    && record.cachedInputTokens === null
     && record.inputTokens === null
     && record.outputTokens === null
+    && record.reasoningTokens === null
     && record.totalTokens === null
+    && readHostedAiUsageAudioBytes(record) !== null
     && (
       isHostedAiUsageAllowanceAudioModelId(record.servedModel)
       || isHostedAiUsageAllowanceAudioModelId(record.requestedModel)
@@ -1343,6 +1348,16 @@ function readHostedAiUsageAudioDurationMs(record: AssistantUsageRecord): bigint 
       && Number.isSafeInteger(durationMs)
       && durationMs >= 0
     ? BigInt(durationMs)
+    : null;
+}
+
+function readHostedAiUsageAudioBytes(record: AssistantUsageRecord): bigint | null {
+  const audioBytes = record.rawUsageJson?.audioBytes;
+
+  return typeof audioBytes === "number"
+      && Number.isSafeInteger(audioBytes)
+      && audioBytes > 0
+    ? BigInt(audioBytes)
     : null;
 }
 
