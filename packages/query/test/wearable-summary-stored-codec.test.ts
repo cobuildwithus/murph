@@ -238,6 +238,21 @@ test("compose preserves stored same-public provider conflict evidence", () => {
     true,
   );
   assert.equal(composed.sourceHealth.find((summary) => summary.provider === "garmin")?.conflictCount, 1);
+
+  const garminRows = rows.filter((row) => row.providerScopeKey === "providers:garmin");
+  const garminOnly = composePublicWearableSummaryBundleFromStoredRows({
+    providerFilterWasProvided: true,
+    providers: ["garmin"],
+    rows: garminRows,
+  }, {});
+  const garminOnlySteps = garminOnly.activityDays.find((summary) => summary.date === date)?.steps;
+
+  assert.ok(garminOnlySteps);
+  assert.deepEqual(garminOnlySteps.confidence.conflictingProviders, ["garmin"]);
+  assert.equal(
+    garminOnlySteps.confidence.reasons.some((reason) => reason.includes("Junction")),
+    false,
+  );
 });
 
 test("compose preserves non-selected provider same-public conflict evidence", () => {
