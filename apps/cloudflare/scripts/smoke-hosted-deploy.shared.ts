@@ -312,7 +312,7 @@ async function assertRunnerContainerLiveModelTurnSmoke(input: {
           expectDirectR2PresignedPut: false,
           expectLiveModelTurnModel: input.expectLiveModelTurnModel,
           fetchImpl: input.fetchImpl,
-          retryableFailures: false,
+          retryableFailures: "http-5xx",
           retryableStatusCodes: [409],
           source: input.source,
           url: input.url,
@@ -345,7 +345,7 @@ async function readRunnerContainerSmoke(input: {
   expectDirectR2PresignedPut: boolean;
   expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
-  retryableFailures?: boolean;
+  retryableFailures?: boolean | "http-5xx";
   retryableStatusCodes?: readonly number[];
   source: EnvSource;
   url: string;
@@ -374,9 +374,16 @@ async function readRunnerContainerSmoke(input: {
     const message = `runner container smoke failed with HTTP ${response.status}${
       failureBody ? `: ${failureBody}` : "."
     }`;
-    throw (
+    const retryableHttpFailure =
       input.retryableStatusCodes?.includes(response.status) === true
-      || (input.retryableFailures !== false && (response.status === 400 || response.status >= 500))
+      || (input.retryableFailures === "http-5xx" && response.status >= 500)
+      || (
+        input.retryableFailures !== false
+        && input.retryableFailures !== "http-5xx"
+        && (response.status === 400 || response.status >= 500)
+      );
+    throw (
+      retryableHttpFailure
     )
       ? new RunnerContainerSmokeRetryableError(message)
       : new Error(message);
@@ -395,7 +402,7 @@ async function readRunnerContainerSmoke(input: {
   };
 
   if (responsePayload.ok !== true || responsePayload.runnerContainer?.ok !== true) {
-    throw input.retryableFailures === false
+    throw input.retryableFailures === false || input.retryableFailures === "http-5xx"
       ? new Error("runner container smoke did not return ok=true.")
       : new RunnerContainerSmokeRetryableError("runner container smoke did not return ok=true.");
   }

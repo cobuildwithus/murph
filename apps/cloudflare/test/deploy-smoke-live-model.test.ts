@@ -35,6 +35,7 @@ function createDeploySmokeOpenAiRequestBody(input: {
   stream?: boolean;
   toolChoice?: string;
   tools?: Record<string, unknown>[];
+  trailingInput?: boolean;
   textVerbosity?: string;
 } = {}): Record<string, unknown> {
   return {
@@ -78,6 +79,13 @@ function createDeploySmokeOpenAiRequestBody(input: {
         role: "user",
         type: "message",
       },
+      ...(input.trailingInput
+        ? [{
+            content: [{ text: "Unexpected trailing prompt.", type: "input_text" }],
+            role: "user",
+            type: "message",
+          }]
+        : []),
     ],
     ...(input.background === undefined ? {} : { background: input.background }),
     instructions: TEST_CODEX_INSTRUCTIONS,
@@ -138,9 +146,31 @@ function createFunctionTool(name: string): Record<string, unknown> {
 }
 
 describe("deploy live model turn smoke", () => {
-  it("accepts only the narrow Codex Responses request shape used by the smoke", () => {
+  it("accepts only the stable Responses request invariants owned by the smoke", () => {
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody()),
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
+
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify({
+        ...createDeploySmokeOpenAiRequestBody(),
+        input: DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
+      }),
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
+
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({
+        extraInput: true,
+        promptCacheKey: "",
+        toolChoice: "none",
+        tools: [
+          ...createDeploySmokeOpenAiRequestTools().slice(0, -1),
+          {
+            name: "unexpected",
+            type: "function",
+          },
+        ],
+      })),
     )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
 
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
@@ -155,30 +185,13 @@ describe("deploy live model turn smoke", () => {
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ model: "gpt-5.5" })),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
-      JSON.stringify(createDeploySmokeOpenAiRequestBody({ promptCacheKey: "" })),
-    )).toBeNull();
-    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ store: true })),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ background: true })),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
-      JSON.stringify(createDeploySmokeOpenAiRequestBody({ extraInput: true })),
-    )).toBeNull();
-    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
-      JSON.stringify(createDeploySmokeOpenAiRequestBody({ toolChoice: "none" })),
-    )).toBeNull();
-    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
-      JSON.stringify(createDeploySmokeOpenAiRequestBody({
-        tools: [
-          ...createDeploySmokeOpenAiRequestTools().slice(0, -1),
-          {
-            name: "unexpected",
-            type: "function",
-          },
-        ],
-      })),
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({ trailingInput: true })),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ stream: false })),
