@@ -7,7 +7,7 @@ import type {
 } from "./product-labels";
 import {
   createProductLabelsQueries,
-  getDefaultProductLabelsPool,
+  getDefaultSupplementProductLabelsPool,
   normalizeProductLabelsConnectionString,
 } from "./product-labels";
 
@@ -82,7 +82,7 @@ export async function getSupplementByUpc(input: {
 
 function defaultSupplementsQueries(): ReturnType<typeof createSupplementsQueries> {
   defaultSupplementsQueriesInstance ??= createSupplementsQueries(
-    getDefaultProductLabelsPool(),
+    getDefaultSupplementProductLabelsPool(),
   );
 
   return defaultSupplementsQueriesInstance;

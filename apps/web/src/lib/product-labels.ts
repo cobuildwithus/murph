@@ -24,7 +24,8 @@ export type ProductLabelsQueryClient = {
   query<T>(text: string, values: unknown[]): Promise<{ rows: T[] }>;
 };
 
-let defaultPool: PgPool | null = null;
+let defaultLabelsPool: PgPool | null = null;
+let defaultLegacySupplementPool: PgPool | null = null;
 
 type ProductLabelBrandIndexEntry = {
   brand: string;
@@ -586,21 +587,37 @@ function buildUpcLookupVariants(upc: string): string[] {
 }
 
 export function getDefaultProductLabelsPool(): PgPool {
-  defaultPool ??= new Pool({
-    connectionString: normalizeProductLabelsConnectionString(
-      requireLabelsDatabaseUrl(),
-    ),
-    max: DEFAULT_POOL_MAX,
-    statement_timeout: DEFAULT_POOL_STATEMENT_TIMEOUT_MS,
-  });
+  defaultLabelsPool ??= createProductLabelsPool(requireLabelsDatabaseUrl());
 
-  return defaultPool;
+  return defaultLabelsPool;
+}
+
+export function getDefaultSupplementProductLabelsPool(): PgPool {
+  const labelsDatabaseUrl = process.env[LABELS_DATABASE_ENV]?.trim();
+
+  if (labelsDatabaseUrl) {
+    return getDefaultProductLabelsPool();
+  }
+
+  defaultLegacySupplementPool ??= createProductLabelsPool(
+    requireLegacySupplementDatabaseUrl(),
+  );
+
+  return defaultLegacySupplementPool;
 }
 
 function requireLabelsDatabaseUrl(): string {
-  const databaseUrl =
-    process.env[LABELS_DATABASE_ENV]?.trim() ||
-    process.env[LEGACY_SUPPLEMENT_DATABASE_ENV]?.trim();
+  const databaseUrl = process.env[LABELS_DATABASE_ENV]?.trim();
+
+  if (!databaseUrl) {
+    throw new Error(`${LABELS_DATABASE_ENV} is required`);
+  }
+
+  return databaseUrl;
+}
+
+function requireLegacySupplementDatabaseUrl(): string {
+  const databaseUrl = process.env[LEGACY_SUPPLEMENT_DATABASE_ENV]?.trim();
 
   if (!databaseUrl) {
     throw new Error(
@@ -609,6 +626,14 @@ function requireLabelsDatabaseUrl(): string {
   }
 
   return databaseUrl;
+}
+
+function createProductLabelsPool(databaseUrl: string): PgPool {
+  return new Pool({
+    connectionString: normalizeProductLabelsConnectionString(databaseUrl),
+    max: DEFAULT_POOL_MAX,
+    statement_timeout: DEFAULT_POOL_STATEMENT_TIMEOUT_MS,
+  });
 }
 
 export function normalizeProductLabelsConnectionString(

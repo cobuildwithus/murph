@@ -22,8 +22,7 @@ Required env:
                       Not required with --apply-prepared. For
                       --export-prepared, required only when FDC_RELEASE_DATE is
                       unset and must be derived from the directory name.
-  MURPH_LABELS_DB_URL Postgres URL for the labels database
-                      (falls back to MURPH_SUPPLEMENT_DB_URL).
+  MURPH_LABELS_DB_URL Postgres URL for the labels database.
                       Not required with --prepare-only.
 
 Optional env:
@@ -65,9 +64,9 @@ if [ "$#" -ne 0 ]; then
   exit 64
 fi
 
-labels_db_url="${MURPH_LABELS_DB_URL:-${MURPH_SUPPLEMENT_DB_URL:-}}"
+labels_db_url="${MURPH_LABELS_DB_URL:-}"
 if [ "$prepare_only" -eq 0 ] && [ -z "$labels_db_url" ]; then
-  echo "MURPH_LABELS_DB_URL (or MURPH_SUPPLEMENT_DB_URL) is required" >&2
+  echo "MURPH_LABELS_DB_URL is required" >&2
   exit 64
 fi
 

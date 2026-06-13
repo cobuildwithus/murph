@@ -79,6 +79,22 @@ describe("product label database pool", () => {
     ]);
   });
 
+  it("does not use the legacy supplement database URL for foods", async () => {
+    delete process.env.MURPH_LABELS_DB_URL;
+    process.env.MURPH_SUPPLEMENT_DB_URL = "postgres://legacy.example.test/labels";
+
+    const { foodsModule, poolConfigs } = await importLabelsModuleWithMockPool();
+
+    await expect(
+      foodsModule.searchFoods({
+        q: "yogurt",
+        limit: 1,
+        includeOffMarket: false,
+      }),
+    ).rejects.toThrow("MURPH_LABELS_DB_URL is required");
+    expect(poolConfigs).toEqual([]);
+  });
+
   it("prefers the shared labels database URL and reuses one pool for foods and supplements", async () => {
     process.env.MURPH_LABELS_DB_URL = "postgres://labels.example.test/labels";
     process.env.MURPH_SUPPLEMENT_DB_URL = "postgres://legacy.example.test/labels";

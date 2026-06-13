@@ -27,6 +27,39 @@ const exportPreparedCases: Array<{
 ];
 
 describe("FDC foods import script", () => {
+  it("does not fall back to the legacy supplement database URL", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-fdc-export-"));
+
+    try {
+      const outputCsvPath = path.join(tempRoot, "prepared.csv");
+
+      await expect(
+        execFileAsync(
+          "bash",
+          [
+            path.resolve("apps/web/sql/foods/import-fdc.sh"),
+            "--export-prepared",
+            outputCsvPath,
+          ],
+          {
+            env: {
+              FDC_RELEASE_DATE: "2026-04-30",
+              MURPH_SUPPLEMENT_DB_URL: "postgres://legacy.example.test/labels",
+              NODE_ENV: process.env.NODE_ENV ?? "test",
+              PATH: process.env.PATH ?? "",
+              PSQL_BIN: path.join(tempRoot, "missing-psql-stub"),
+            },
+          },
+        ),
+      ).rejects.toMatchObject({
+        code: 64,
+        stderr: expect.stringContaining("MURPH_LABELS_DB_URL is required"),
+      });
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it.each(exportPreparedCases)(
     "$name",
     async ({ archiveDirName, env, expectedReleaseDate }) => {
