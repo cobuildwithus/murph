@@ -1475,7 +1475,7 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
           `Hosted live model turn smoke failed to spawn codex exec. ${error.message}`,
         ));
       });
-      child.once("exit", (code, signal) => {
+      child.once("close", (code, signal) => {
         if (code === 0) {
           const outputText = readDeployLiveModelTurnSmokeCodexOutputText(stdoutTail);
           if (outputText !== DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT) {

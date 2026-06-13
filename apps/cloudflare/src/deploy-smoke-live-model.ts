@@ -9,6 +9,27 @@ const DEPLOY_LIVE_MODEL_TURN_SMOKE_CODEX_PERMISSIONS_TEXT =
   + "Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `danger-full-access`: No filesystem sandboxing - all commands are permitted. Network access is enabled.\n"
   + "Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.\n"
   + "</permissions instructions>";
+const DEPLOY_LIVE_MODEL_TURN_SMOKE_CODEX_INSTRUCTIONS_PREFIX =
+  "You are Codex, a coding agent based on GPT-5.";
+const DEPLOY_LIVE_MODEL_TURN_SMOKE_MAX_INSTRUCTIONS_CHARS = 128 * 1024;
+const DEPLOY_LIVE_MODEL_TURN_SMOKE_MAX_TOOL_TEXT_CHARS = 16 * 1024;
+const DEPLOY_LIVE_MODEL_TURN_SMOKE_ALLOWED_TOP_LEVEL_KEYS = new Set([
+  "background",
+  "client_metadata",
+  "include",
+  "input",
+  "instructions",
+  "model",
+  "parallel_tool_calls",
+  "prompt_cache_key",
+  "reasoning",
+  "store",
+  "stream",
+  "text",
+  "tool_choice",
+  "tools",
+]);
+const DEPLOY_LIVE_MODEL_TURN_SMOKE_INCLUDE = ["reasoning.encrypted_content"] as const;
 const DEPLOY_LIVE_MODEL_TURN_SMOKE_TOOL_IDENTITIES = [
   "custom:apply_patch",
   "function:create_goal",
@@ -45,7 +66,13 @@ export function readDeployLiveModelTurnSmokeOpenAiRequest(
     return null;
   }
   if (
-    (record.background !== undefined && record.background !== false)
+    !hasOnlyKeys(record, DEPLOY_LIVE_MODEL_TURN_SMOKE_ALLOWED_TOP_LEVEL_KEYS)
+    || (record.background !== undefined && record.background !== false)
+    || !isEmptyPlainRecord(record.client_metadata)
+    || !isExactStringList(record.include, DEPLOY_LIVE_MODEL_TURN_SMOKE_INCLUDE)
+    || !isDeployLiveModelTurnSmokeCodexInstructions(record.instructions)
+    || record.parallel_tool_calls !== true
+    || !isDeployLiveModelTurnSmokePromptCacheKey(record.prompt_cache_key)
     || record.store !== false
     || record.stream !== true
     || record.tool_choice !== "auto"
@@ -107,6 +134,42 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
+  return Object.keys(value).every((key) => allowed.has(key));
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(value).sort();
+  return keys.length === expected.length
+    && expected.every((key, index) => keys[index] === key);
+}
+
+function isEmptyPlainRecord(value: unknown): boolean {
+  return isPlainRecord(value) && Object.keys(value).length === 0;
+}
+
+function isExactStringList(
+  value: unknown,
+  expected: readonly string[],
+): boolean {
+  return Array.isArray(value)
+    && value.length === expected.length
+    && expected.every((item, index) => value[index] === item);
+}
+
+function isDeployLiveModelTurnSmokeCodexInstructions(value: unknown): boolean {
+  return typeof value === "string"
+    && value.length <= DEPLOY_LIVE_MODEL_TURN_SMOKE_MAX_INSTRUCTIONS_CHARS
+    && value.startsWith(DEPLOY_LIVE_MODEL_TURN_SMOKE_CODEX_INSTRUCTIONS_PREFIX);
+}
+
+function isDeployLiveModelTurnSmokePromptCacheKey(value: unknown): boolean {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= 256
+    && /^[A-Za-z0-9._:-]+$/u.test(value);
+}
+
 function isDeployLiveModelTurnSmokeInput(value: unknown): boolean {
   if (!Array.isArray(value) || value.length !== 3) {
     return false;
@@ -166,11 +229,48 @@ function readDeployLiveModelTurnSmokeToolIdentity(value: unknown): string {
   if (
     (value.type === "function" || value.type === "custom")
     && typeof value.name === "string"
+    && isDeployLiveModelTurnSmokeToolShape(value)
   ) {
     return `${value.type}:${value.name}`;
   }
-  if (value.type === "tool_search" || value.type === "web_search") {
+  if (
+    (value.type === "tool_search" || value.type === "web_search")
+    && isDeployLiveModelTurnSmokeToolShape(value)
+  ) {
     return value.type;
   }
   return "";
+}
+
+function isDeployLiveModelTurnSmokeToolShape(value: Record<string, unknown>): boolean {
+  if (value.type === "function") {
+    return hasExactKeys(value, ["description", "name", "parameters", "strict", "type"])
+      && isDeployLiveModelTurnSmokeToolText(value.description)
+      && isPlainRecord(value.parameters)
+      && value.strict === false;
+  }
+  if (value.type === "custom") {
+    return hasExactKeys(value, ["description", "format", "name", "type"])
+      && value.name === "apply_patch"
+      && isDeployLiveModelTurnSmokeToolText(value.description)
+      && isPlainRecord(value.format);
+  }
+  if (value.type === "tool_search") {
+    return hasExactKeys(value, ["description", "execution", "parameters", "type"])
+      && isDeployLiveModelTurnSmokeToolText(value.description)
+      && isPlainRecord(value.execution)
+      && isPlainRecord(value.parameters);
+  }
+  if (value.type === "web_search") {
+    return hasExactKeys(value, ["external_web_access", "search_content_types", "type"])
+      && value.external_web_access === true
+      && isExactStringList(value.search_content_types, ["webpage"]);
+  }
+  return false;
+}
+
+function isDeployLiveModelTurnSmokeToolText(value: unknown): boolean {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= DEPLOY_LIVE_MODEL_TURN_SMOKE_MAX_TOOL_TEXT_CHARS;
 }

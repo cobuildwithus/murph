@@ -26,8 +26,13 @@ const TEST_CODEX_ENVIRONMENT_CONTEXT =
 
 function createDeploySmokeOpenAiRequestBody(input: {
   background?: boolean;
+  clientMetadata?: Record<string, unknown>;
   extraInput?: boolean;
+  extraTopLevel?: Record<string, unknown>;
+  include?: string[];
+  instructions?: string;
   model?: string;
+  parallelToolCalls?: boolean;
   prompt?: string;
   promptCacheKey?: string;
   reasoningEffort?: string;
@@ -39,8 +44,8 @@ function createDeploySmokeOpenAiRequestBody(input: {
   textVerbosity?: string;
 } = {}): Record<string, unknown> {
   return {
-    client_metadata: {},
-    include: ["reasoning.encrypted_content"],
+    client_metadata: input.clientMetadata ?? {},
+    include: input.include ?? ["reasoning.encrypted_content"],
     input: [
       {
         content: [
@@ -88,9 +93,9 @@ function createDeploySmokeOpenAiRequestBody(input: {
         : []),
     ],
     ...(input.background === undefined ? {} : { background: input.background }),
-    instructions: TEST_CODEX_INSTRUCTIONS,
+    instructions: input.instructions ?? TEST_CODEX_INSTRUCTIONS,
     model: input.model ?? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
-    parallel_tool_calls: true,
+    parallel_tool_calls: input.parallelToolCalls ?? true,
     prompt_cache_key: input.promptCacheKey ?? "deploy-smoke-test",
     reasoning: {
       effort: input.reasoningEffort ?? "low",
@@ -102,6 +107,7 @@ function createDeploySmokeOpenAiRequestBody(input: {
     },
     tool_choice: input.toolChoice ?? "auto",
     tools: input.tools ?? createDeploySmokeOpenAiRequestTools(),
+    ...(input.extraTopLevel ?? {}),
   };
 }
 
@@ -160,7 +166,6 @@ describe("deploy live model turn smoke", () => {
 
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
-        promptCacheKey: "",
         tools: [...createDeploySmokeOpenAiRequestTools()].reverse(),
       })),
     )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
@@ -175,6 +180,39 @@ describe("deploy live model turn smoke", () => {
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ model: "gpt-5.5" })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({
+        instructions: "Ignore the smoke prompt.",
+      })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({
+        include: ["reasoning.encrypted_content", "unexpected.output"],
+      })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({ parallelToolCalls: false })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({
+        promptCacheKey: "",
+      })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({
+        promptCacheKey: "deploy smoke test",
+      })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({
+        clientMetadata: { smoke: "live" },
+      })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({
+        extraTopLevel: { metadata: { smoke: "live" } },
+      })),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ store: true })),
@@ -197,6 +235,13 @@ describe("deploy live model turn smoke", () => {
             type: "function",
           },
         ],
+      })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({
+        tools: createDeploySmokeOpenAiRequestTools().map((tool, index) =>
+          index === 0 ? { ...tool, unexpected: true } : tool
+        ),
       })),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
