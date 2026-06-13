@@ -14,7 +14,6 @@ import {
   type QuerySourceManifestEntry,
   type VaultSourceSnapshot,
 } from "../vault-source.ts";
-import { buildWearableSummaryBundleFromDataset } from "../wearables.ts";
 import { collectWearableDataset } from "../wearables/candidates.ts";
 import type { RebuildQueryProjectionResult } from "../query-projection-types.ts";
 import { insertQueryEntities } from "./entity-store.ts";
@@ -56,9 +55,8 @@ export async function rebuildQueryProjectionWithManifest(
     entities: snapshot.entities,
   });
   const wearableDataset = collectWearableDataset(snapshotReadModel, {});
-  const wearableSummaryBundle = buildWearableSummaryBundleFromDataset(wearableDataset);
   const metricProjection = buildMetricProjection(snapshotReadModel, {
-    wearableSummaryBundle,
+    wearableDataset,
   });
   const dailySampleSummaries = metricProjection.dailySampleSummaries;
   const metricPoints = metricProjection.metricPoints;

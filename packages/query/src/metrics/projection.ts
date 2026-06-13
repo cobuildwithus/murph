@@ -4,6 +4,7 @@ import type { VaultReadModel } from "../read-model.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
 import {
   buildWearableSummaryBundle,
+  buildWearableSummaryBundleFromDataset,
   summarizeWearableActivityFromBundle,
   summarizeWearableBodyStateFromBundle,
   summarizeWearableRecoveryFromBundle,
@@ -16,6 +17,7 @@ import {
   type WearableSleepSummary,
   type WearableSummaryBundle,
 } from "../wearables.ts";
+import type { WearableDataset } from "../wearables/types.ts";
 import { formatProviderName } from "../wearables/provider-policy.ts";
 import {
   extractMetricPoints,
@@ -32,7 +34,7 @@ export interface MetricProjection {
 }
 
 export interface BuildMetricProjectionOptions {
-  wearableSummaryBundle?: WearableSummaryBundle;
+  wearableDataset?: WearableDataset;
 }
 
 interface WearableMetricProjectionEvidence {
@@ -82,8 +84,10 @@ function resolveWearableMetricProjectionEvidence(
   vault: VaultReadModel,
   options: BuildMetricProjectionOptions,
 ): WearableMetricProjectionEvidence {
-  if (options.wearableSummaryBundle) {
-    return buildWearableMetricProjectionEvidenceFromBundle(options.wearableSummaryBundle);
+  if (options.wearableDataset) {
+    return buildWearableMetricProjectionEvidenceFromBundle(
+      buildWearableSummaryBundleFromDataset(options.wearableDataset),
+    );
   }
   return buildWearableMetricProjectionEvidenceFromBundle(buildWearableSummaryBundle(vault));
 }
