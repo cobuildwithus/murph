@@ -35,14 +35,24 @@ that add, remove, or reorder awaited command-producing Temporal APIs require
 replay compatibility evidence in addition to the normal package verification
 lane. Acceptable evidence is Worker Versioning or deployment pinning for old
 histories, TypeScript Workflow patching with `patched()` / `deprecatePatch()`,
-or a Temporal replay test against captured pre-change histories that cover the
-affected command path.
+or a Temporal replay test against captured or synthetic pre-change histories
+that cover the affected command path.
 
 Pure state-machine tests, mocked Activity tests, and local signal/timer tests
 do not prove replay compatibility for existing Workflow histories. Captured
 history fixtures must be redacted or synthetic and must not commit raw payloads,
 prompts, transcripts, provider responses, secrets, local paths, or direct user
 identifiers.
+
+The hosted Temporal package carries a replay gate for the
+reconciliation-before-mailbox patch:
+`packages/hosted-orchestrator-temporal/test/hosted-user-runtime-replay.test.ts`
+uses `Worker.runReplayHistory` against a synthetic pre-patch mailbox history
+that scheduled `ensureRuntimeProcessing` directly. The root
+`hosted-temporal:guard` check is wired into `pnpm typecheck` and fails if that
+replay test, fixture, or CI package-coverage entry is removed. New
+command-order changes still need their own replay fixture or a documented
+Worker Versioning / patching plan for the affected histories.
 
 Scoped verification may replace the repo-wide baseline only when all of the following are true:
 
