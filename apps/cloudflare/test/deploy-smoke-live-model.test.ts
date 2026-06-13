@@ -13,6 +13,10 @@ import {
   readDeployLiveModelTurnSmokeCodexOutputText,
   readDeployLiveModelTurnSmokeOpenAiRequest,
 } from "../src/deploy-smoke-live-model.ts";
+import {
+  HOSTED_DEPLOY_SMOKE_OPENAI_REQUEST_MAX_BODY_BYTES,
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "../src/runner-egress-intercept.ts";
 
 const TEST_CODEX_INSTRUCTIONS =
   "You are Codex, a coding agent based on GPT-5. Test instructions.\n"
@@ -36,6 +40,14 @@ const pinnedCodexBin = path.join(
   repoRoot,
   "packages/assistant-engine/node_modules/.bin/codex",
 );
+
+interface CapturedPinnedCodexSmokeOpenAiRequest {
+  authorization: string | null;
+  method: string;
+  pathname: string;
+  rawBody: string;
+  rawBodyByteLength: number;
+}
 
 function createDeploySmokeOpenAiRequestBody(input: {
   background?: boolean;
@@ -306,11 +318,18 @@ describe("deploy live model turn smoke", () => {
     )).toBeNull();
   });
 
-  it("accepts the pinned Codex exec smoke Responses request shape", async () => {
-    const requestBody = await capturePinnedCodexSmokeOpenAiRequestBody();
+  it("accepts the pinned Codex exec smoke Responses request contract", async () => {
+    const request = await capturePinnedCodexSmokeOpenAiRequest();
 
+    expect(request.method).toBe("POST");
+    expect(request.pathname).toBe("/v1/responses");
+    expect(request.authorization).toBe(`Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`);
+    expect(request.rawBodyByteLength).toBeGreaterThan(0);
+    expect(request.rawBodyByteLength).toBeLessThanOrEqual(
+      HOSTED_DEPLOY_SMOKE_OPENAI_REQUEST_MAX_BODY_BYTES,
+    );
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
-      JSON.stringify(requestBody),
+      request.rawBody,
     )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
   });
 
@@ -383,12 +402,12 @@ describe("deploy live model turn smoke", () => {
   });
 });
 
-async function capturePinnedCodexSmokeOpenAiRequestBody(): Promise<Record<string, unknown>> {
+async function capturePinnedCodexSmokeOpenAiRequest(): Promise<CapturedPinnedCodexSmokeOpenAiRequest> {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "deploy-smoke-codex-shape-"));
   const codexHome = path.join(workspaceRoot, "codex-home");
   const smokeVaultRoot = path.join(workspaceRoot, "vault");
   let childProcess: ReturnType<typeof spawn> | null = null;
-  let capturedRequestBody: string | null = null;
+  let capturedRequest: CapturedPinnedCodexSmokeOpenAiRequest | null = null;
   const server = createServer((request, response) => {
     let body = "";
     request.setEncoding("utf8");
@@ -396,7 +415,14 @@ async function capturePinnedCodexSmokeOpenAiRequestBody(): Promise<Record<string
       body += chunk;
     });
     request.on("end", () => {
-      capturedRequestBody = body;
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+      capturedRequest = {
+        authorization: request.headers.authorization ?? null,
+        method: request.method ?? "",
+        pathname: url.pathname,
+        rawBody: body,
+        rawBodyByteLength: Buffer.byteLength(body, "utf8"),
+      };
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.end([
         `data: ${JSON.stringify({
@@ -496,7 +522,7 @@ async function capturePinnedCodexSmokeOpenAiRequestBody(): Promise<Record<string
       env: {
         ...process.env,
         CODEX_HOME: codexHome,
-        OPENAI_API_KEY: "test-key",
+        OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -509,15 +535,11 @@ async function capturePinnedCodexSmokeOpenAiRequestBody(): Promise<Record<string
     if (timedOut) {
       throw new Error("Timed out waiting for pinned Codex smoke request capture.");
     }
-    if (!capturedRequestBody) {
+    if (!capturedRequest) {
       throw new Error(`Pinned Codex did not send a Responses request. stderr=${stderr}`);
     }
 
-    const parsed = JSON.parse(capturedRequestBody) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new Error("Pinned Codex Responses request body was not a JSON object.");
-    }
-    return parsed as Record<string, unknown>;
+    return capturedRequest;
   } finally {
     childProcess?.kill("SIGTERM");
     await new Promise<void>((resolve, reject) => {
