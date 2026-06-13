@@ -1,3 +1,10 @@
+import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -23,6 +30,12 @@ const TEST_CODEX_ENVIRONMENT_CONTEXT =
   + "  <timezone>America/New_York</timezone>\n"
   + "  <filesystem><workspace_roots><root>/tmp/murph-smoke/vault</root></workspace_roots><permission_profile type=\"disabled\"><file_system type=\"unrestricted\" /></permission_profile></filesystem>\n"
   + "</environment_context>";
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(testDir, "../../..");
+const pinnedCodexBin = path.join(
+  repoRoot,
+  "packages/assistant-engine/node_modules/.bin/codex",
+);
 
 function createDeploySmokeOpenAiRequestBody(input: {
   background?: boolean;
@@ -35,6 +48,7 @@ function createDeploySmokeOpenAiRequestBody(input: {
   parallelToolCalls?: boolean;
   prompt?: string;
   promptCacheKey?: string;
+  promptCacheRetention?: string;
   reasoningEffort?: string;
   store?: boolean;
   stream?: boolean;
@@ -44,7 +58,9 @@ function createDeploySmokeOpenAiRequestBody(input: {
   textVerbosity?: string;
 } = {}): Record<string, unknown> {
   return {
-    client_metadata: input.clientMetadata ?? {},
+    client_metadata: input.clientMetadata ?? {
+      "x-codex-installation-id": "deploy-smoke-test-installation",
+    },
     include: input.include ?? ["reasoning.encrypted_content"],
     input: [
       {
@@ -97,6 +113,9 @@ function createDeploySmokeOpenAiRequestBody(input: {
     model: input.model ?? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
     parallel_tool_calls: input.parallelToolCalls ?? true,
     prompt_cache_key: input.promptCacheKey ?? "deploy-smoke-test",
+    ...(input.promptCacheRetention === undefined
+      ? {}
+      : { prompt_cache_retention: input.promptCacheRetention }),
     reasoning: {
       effort: input.reasoningEffort ?? "low",
     },
@@ -135,7 +154,7 @@ function createDeploySmokeOpenAiRequestTools(): Record<string, unknown>[] {
     },
     {
       external_web_access: true,
-      search_content_types: ["webpage"],
+      search_content_types: ["text", "image"],
       type: "web_search",
     },
   ];
@@ -206,12 +225,27 @@ describe("deploy live model turn smoke", () => {
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
+        promptCacheRetention: "24h",
+      })),
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({
+        promptCacheRetention: "forever",
+      })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({
         clientMetadata: { smoke: "live" },
       })),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
         extraTopLevel: { metadata: { smoke: "live" } },
+      })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({
+        extraTopLevel: { previous_response_id: "resp_previous" },
       })),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
@@ -258,6 +292,14 @@ describe("deploy live model turn smoke", () => {
     )).toBeNull();
   });
 
+  it("accepts the pinned Codex exec smoke Responses request shape", async () => {
+    const requestBody = await capturePinnedCodexSmokeOpenAiRequestBody();
+
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(requestBody),
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
+  });
+
   it("reads the final Codex JSONL agent message as the smoke output", () => {
     const stdout = [
       JSON.stringify({ type: "thread.started", thread_id: "thread-test" }),
@@ -280,6 +322,36 @@ describe("deploy live model turn smoke", () => {
     expect(readDeployLiveModelTurnSmokeCodexOutputText(stdout)).toBe("OK");
   });
 
+  it("reads supported Codex JSONL assistant message variants as smoke output", () => {
+    const stdout = [
+      JSON.stringify({
+        method: "item/completed",
+        params: {
+          item: {
+            message: "NOT YET",
+            type: "assistant_message",
+          },
+        },
+      }),
+      JSON.stringify({
+        data: {
+          item: {
+            content: [
+              {
+                text: " OK ",
+                type: "output_text",
+              },
+            ],
+            type: "assistant.message",
+          },
+        },
+        event: "item.completed",
+      }),
+    ].join("\n");
+
+    expect(readDeployLiveModelTurnSmokeCodexOutputText(stdout)).toBe("OK");
+  });
+
   it("ignores malformed JSONL and non-agent Codex items", () => {
     const stdout = [
       "not json",
@@ -296,3 +368,169 @@ describe("deploy live model turn smoke", () => {
     expect(readDeployLiveModelTurnSmokeCodexOutputText(stdout)).toBeNull();
   });
 });
+
+async function capturePinnedCodexSmokeOpenAiRequestBody(): Promise<Record<string, unknown>> {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "deploy-smoke-codex-shape-"));
+  const codexHome = path.join(workspaceRoot, "codex-home");
+  const smokeVaultRoot = path.join(workspaceRoot, "vault");
+  let childProcess: ReturnType<typeof spawn> | null = null;
+  let capturedRequestBody: string | null = null;
+  const server = createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      capturedRequestBody = body;
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end([
+        `data: ${JSON.stringify({
+          response: {
+            id: "resp_deploy_smoke_shape",
+            model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+            output: [{
+              content: [{ text: "OK", type: "output_text" }],
+              id: "msg_deploy_smoke_shape",
+              role: "assistant",
+              type: "message",
+            }],
+            status: "completed",
+            usage: {
+              input_tokens: 1,
+              output_tokens: 1,
+              total_tokens: 2,
+            },
+          },
+          type: "response.completed",
+        })}`,
+        "",
+        "data: [DONE]",
+        "",
+      ].join("\n"));
+    });
+  });
+
+  try {
+    await mkdir(codexHome, { mode: 0o700, recursive: true });
+    await mkdir(smokeVaultRoot, { mode: 0o700, recursive: true });
+    await writeFile(
+      path.join(smokeVaultRoot, "vault.json"),
+      `${JSON.stringify({
+        createdAt: "2026-01-01T00:00:00.000Z",
+        formatVersion: 1,
+        timezone: "UTC",
+        title: "Deploy Smoke Codex Shape",
+        vaultId: "vault_deploy_smoke_shape",
+      })}\n`,
+      { mode: 0o600 },
+    );
+    await writeFile(path.join(smokeVaultRoot, "CORE.md"), "# Deploy Smoke Codex Shape\n", {
+      mode: 0o600,
+    });
+
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the local Responses stub to listen on a TCP port.");
+    }
+
+    await writeFile(
+      path.join(codexHome, "config.toml"),
+      [
+        `model = ${JSON.stringify(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL)}`,
+        'model_provider = "local-deploy-smoke"',
+        'model_reasoning_effort = "low"',
+        'approval_policy = "never"',
+        'sandbox_mode = "danger-full-access"',
+        "check_for_update_on_startup = false",
+        "",
+        "[features]",
+        "plugins = false",
+        "",
+        '[model_providers."local-deploy-smoke"]',
+        'name = "OpenAI"',
+        `base_url = ${JSON.stringify(`http://127.0.0.1:${address.port}/v1`)}`,
+        'env_key = "OPENAI_API_KEY"',
+        'wire_api = "responses"',
+        'requires_openai_auth = false',
+        "request_max_retries = 0",
+        "stream_max_retries = 0",
+        "",
+        "[skills]",
+        "include_instructions = false",
+        "",
+        "[skills.bundled]",
+        "enabled = false",
+        "",
+        "[history]",
+        'persistence = "none"',
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+
+    childProcess = spawn(pinnedCodexBin, [
+      "exec",
+      "--json",
+      "--skip-git-repo-check",
+      DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
+    ], {
+      cwd: smokeVaultRoot,
+      env: {
+        ...process.env,
+        CODEX_HOME: codexHome,
+        OPENAI_API_KEY: "test-key",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stderr = "";
+    childProcess.stderr?.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    const timedOut = await waitForChildCloseOrTimeout(childProcess, 15_000);
+    if (timedOut) {
+      throw new Error("Timed out waiting for pinned Codex smoke request capture.");
+    }
+    if (!capturedRequestBody) {
+      throw new Error(`Pinned Codex did not send a Responses request. stderr=${stderr}`);
+    }
+
+    const parsed = JSON.parse(capturedRequestBody) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Pinned Codex Responses request body was not a JSON object.");
+    }
+    return parsed as Record<string, unknown>;
+  } finally {
+    childProcess?.kill("SIGTERM");
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    }).catch(() => undefined);
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+}
+
+async function waitForChildCloseOrTimeout(
+  childProcess: ReturnType<typeof spawn>,
+  timeoutMs: number,
+): Promise<boolean> {
+  return await new Promise<boolean>((resolve) => {
+    const timeout = setTimeout(() => {
+      childProcess.kill("SIGTERM");
+      resolve(true);
+    }, timeoutMs);
+    childProcess.once("close", () => {
+      clearTimeout(timeout);
+      resolve(false);
+    });
+  });
+}

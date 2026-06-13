@@ -182,7 +182,7 @@ function createDeploySmokeOpenAiRequestTools(): Record<string, unknown>[] {
     },
     {
       external_web_access: true,
-      search_content_types: ["webpage"],
+      search_content_types: ["text", "image"],
       type: "web_search",
     },
   ];
