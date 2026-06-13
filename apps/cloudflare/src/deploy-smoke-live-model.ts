@@ -4,6 +4,25 @@ export const DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL = "gpt-5.4-nano";
 export const DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT = "Reply with exactly: OK";
 export const DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT = "OK";
 
+const DEPLOY_LIVE_MODEL_TURN_SMOKE_CODEX_PERMISSIONS_TEXT =
+  "<permissions instructions>\n"
+  + "Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `danger-full-access`: No filesystem sandboxing - all commands are permitted. Network access is enabled.\n"
+  + "Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.\n"
+  + "</permissions instructions>";
+const DEPLOY_LIVE_MODEL_TURN_SMOKE_TOOL_IDENTITIES = [
+  "custom:apply_patch",
+  "function:create_goal",
+  "function:exec_command",
+  "function:get_goal",
+  "function:request_user_input",
+  "function:update_goal",
+  "function:update_plan",
+  "function:view_image",
+  "function:write_stdin",
+  "tool_search",
+  "web_search",
+] as const;
+
 export interface DeployLiveModelTurnSmokeOpenAiRequest {
   model: string;
 }
@@ -29,7 +48,9 @@ export function readDeployLiveModelTurnSmokeOpenAiRequest(
     (record.background !== undefined && record.background !== false)
     || record.store !== false
     || record.stream !== true
-    || readDeployLiveModelTurnSmokePrompt(record.input) !== DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT
+    || record.tool_choice !== "auto"
+    || !isDeployLiveModelTurnSmokeInput(record.input)
+    || !isDeployLiveModelTurnSmokeToolSurface(record.tools)
     || readNestedString(record.reasoning, "effort") !== "low"
     || readNestedString(record.text, "verbosity") !== "low"
   ) {
@@ -86,18 +107,28 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function readDeployLiveModelTurnSmokePrompt(value: unknown): string | null {
-  if (typeof value === "string") {
-    return value;
+function isDeployLiveModelTurnSmokeInput(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length !== 3) {
+    return false;
   }
-  if (!Array.isArray(value) || value.length === 0) {
+  const [permissions, environment, prompt] = value;
+  return readDeployLiveModelTurnSmokeTextMessage(permissions, "developer")
+      === DEPLOY_LIVE_MODEL_TURN_SMOKE_CODEX_PERMISSIONS_TEXT
+    && isDeployLiveModelTurnSmokeEnvironmentContext(
+      readDeployLiveModelTurnSmokeTextMessage(environment, "user"),
+    )
+    && readDeployLiveModelTurnSmokeTextMessage(prompt, "user")
+      === DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT;
+}
+
+function readDeployLiveModelTurnSmokeTextMessage(
+  value: unknown,
+  role: string,
+): string | null {
+  if (!isPlainRecord(value) || value.role !== role) {
     return null;
   }
-  const last = value[value.length - 1];
-  if (!isPlainRecord(last) || last.role !== "user") {
-    return null;
-  }
-  const { content } = last;
+  const { content } = value;
   if (typeof content === "string") {
     return content;
   }
@@ -109,4 +140,37 @@ function readDeployLiveModelTurnSmokePrompt(value: unknown): string | null {
     return null;
   }
   return typeof part.text === "string" ? part.text : null;
+}
+
+function isDeployLiveModelTurnSmokeEnvironmentContext(value: string | null): boolean {
+  return value !== null
+    && /^<environment_context>\n  <cwd>[^<\n]+<\/cwd>\n  <shell>[^<\n]+<\/shell>\n  <current_date>\d{4}-\d{2}-\d{2}<\/current_date>\n  <timezone>[^<\n]+<\/timezone>\n  <filesystem><workspace_roots><root>[^<\n]+<\/root><\/workspace_roots><permission_profile type="disabled"><file_system type="unrestricted" \/><\/permission_profile><\/filesystem>\n<\/environment_context>$/u.test(value);
+}
+
+function isDeployLiveModelTurnSmokeToolSurface(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length !== DEPLOY_LIVE_MODEL_TURN_SMOKE_TOOL_IDENTITIES.length) {
+    return false;
+  }
+  const identities = value
+    .map(readDeployLiveModelTurnSmokeToolIdentity)
+    .sort();
+  return DEPLOY_LIVE_MODEL_TURN_SMOKE_TOOL_IDENTITIES.every((expected, index) =>
+    identities[index] === expected
+  );
+}
+
+function readDeployLiveModelTurnSmokeToolIdentity(value: unknown): string {
+  if (!isPlainRecord(value) || typeof value.type !== "string") {
+    return "";
+  }
+  if (
+    (value.type === "function" || value.type === "custom")
+    && typeof value.name === "string"
+  ) {
+    return `${value.type}:${value.name}`;
+  }
+  if (value.type === "tool_search" || value.type === "web_search") {
+    return value.type;
+  }
+  return "";
 }

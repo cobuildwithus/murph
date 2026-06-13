@@ -156,20 +156,12 @@ describe("deploy live model turn smoke", () => {
         ...createDeploySmokeOpenAiRequestBody(),
         input: DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
       }),
-    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
+    )).toBeNull();
 
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
-        extraInput: true,
         promptCacheKey: "",
-        toolChoice: "none",
-        tools: [
-          ...createDeploySmokeOpenAiRequestTools().slice(0, -1),
-          {
-            name: "unexpected",
-            type: "function",
-          },
-        ],
+        tools: [...createDeploySmokeOpenAiRequestTools()].reverse(),
       })),
     )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
 
@@ -189,6 +181,23 @@ describe("deploy live model turn smoke", () => {
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ background: true })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({ extraInput: true })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({ toolChoice: "none" })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({
+        tools: [
+          ...createDeploySmokeOpenAiRequestTools().slice(0, -1),
+          {
+            name: "unexpected",
+            type: "function",
+          },
+        ],
+      })),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ trailingInput: true })),
