@@ -17,7 +17,7 @@ import type { CanonicalEntity } from "../canonical-entities.ts";
 import {
   deriveWearableObservationEffectiveDate,
   inferWearableObservationGrain,
-} from "../wearables/candidates.ts";
+} from "../wearables/observation.ts";
 import { isDeletionSentinelObservation } from "../observation-sentinels.ts";
 
 export { parseGoalMetricTargets } from "./goals.ts";

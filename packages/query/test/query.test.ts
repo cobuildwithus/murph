@@ -3537,6 +3537,7 @@ Light walk and early bedtime.
 interface MetricObservationEventInput {
   dayKey?: string | null;
   deleted?: boolean;
+  endAt?: string;
   externalRef?: Record<string, unknown>;
   id: string;
   metric: string;
@@ -4688,11 +4689,12 @@ test("listMetricPointsRuntime infers day grain for legacy shared-normalizer dail
   }
 });
 
-test("listMetricPointsRuntime dates legacy WHOOP sleep summaries with core-default dayKey by wearable effective date", async () => {
+test("listMetricPointsRuntime dates legacy WHOOP sleep summaries with explicit end by wearable effective date", async () => {
   const vaultRoot = await createMetricObservationVault([
     {
       id: "evt_metric_observation_legacy_whoop_sleep_total_01",
       occurredAt: "2026-04-05T23:30:00Z",
+      endAt: "2026-04-06T07:30:00Z",
       recordedAt: "2026-04-06T07:30:00Z",
       dayKey: "2026-04-05",
       source: "device",
@@ -4730,6 +4732,51 @@ test("listMetricPointsRuntime dates legacy WHOOP sleep summaries with core-defau
     assert.equal(totalSleep[0]?.source.family, "derived");
     assert.notEqual(totalSleep[0]?.source.kind, "observation");
     assert.equal(startDay.length, 0);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("listMetricPointsRuntime keeps core-default sleep dayKey when only recordedAt is later", async () => {
+  const vaultRoot = await createMetricObservationVault([
+    {
+      id: "evt_metric_observation_legacy_whoop_sleep_total_update_01",
+      occurredAt: "2026-04-05T23:30:00Z",
+      recordedAt: "2026-04-06T07:30:00Z",
+      dayKey: "2026-04-05",
+      source: "device",
+      title: "WHOOP sleep total update",
+      metric: "sleep-total-minutes",
+      value: 432,
+      unit: "minutes",
+      externalRef: {
+        system: "whoop",
+        resourceType: "sleep",
+        resourceId: "whoop-sleep-2026-04-06",
+        facet: "sleep-total-minutes",
+      },
+    },
+  ]);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const startDay = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-04-05",
+      limit: null,
+      metricKey: "total-sleep-minutes",
+      to: "2026-04-05",
+    });
+    const nextDay = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-04-06",
+      limit: null,
+      metricKey: "total-sleep-minutes",
+      to: "2026-04-06",
+    });
+
+    assert.equal(startDay.length, 1);
+    assert.equal(startDay[0]?.effectiveDate, "2026-04-05");
+    assert.equal(nextDay.length, 0);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
