@@ -58,7 +58,9 @@ export function collectWearableDataset(
     const externalRef = readExternalRef(entity.attributes.externalRef);
     const provider = normalizeLowercaseString(externalRef?.system);
     const dataOrigin = readWearableDataOrigin(entity.attributes.dataOrigin, externalRef);
-    const publicProvider = resolveWearablePublicSourceProvider({ dataOrigin, externalRef, provider });
+    const publicProvider = resolveWearablePublicSourceProvider({ dataOrigin, externalRef, provider }, {
+      suppressJunctionSourceInstanceFallback: true,
+    });
     const missingProvenanceFields = listMissingWearableProvenanceFields(externalRef);
 
     if (provider && missingProvenanceFields.length > 0) {

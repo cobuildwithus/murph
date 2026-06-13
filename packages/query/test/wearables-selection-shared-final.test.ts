@@ -897,6 +897,37 @@ test("selection keeps Junction source policy separate from provider identity", (
   assert.equal(adversarialDirectDuplicate.selection.provider, "oura");
   assert.equal(adversarialDirectDuplicate.selection.title, "Weak direct Oura steps");
 
+  const canonicalizedJunctionOuraSteps = makeMetricCandidate({
+    candidateId: "canonicalized-junction:oura:steps",
+    dataOrigin: {
+      version: 1,
+      aggregatorProvider: "junction",
+      sourceProviderSlug: "oura",
+    },
+    date: "2026-04-12",
+    externalRef: makeExternalRef({
+      resourceId: "canonicalized-junction-oura-steps",
+      resourceType: null,
+      system: "junction",
+    }),
+    metric: "steps",
+    occurredAt: "2026-04-12T08:00:00Z",
+    provider: "oura",
+    recordedAt: "2026-04-12T08:00:30Z",
+    sourceFamily: "derived",
+    sourceKind: "legacy-steps",
+    title: "Canonicalized Junction Oura steps",
+    unit: "count",
+    value: 8200,
+  });
+  const aggregatorOnlyDuplicate = resolveMetric(
+    "steps",
+    [strongJunctionOuraSteps, canonicalizedJunctionOuraSteps],
+    { metricFamily: "activity" },
+  );
+  assert.equal(aggregatorOnlyDuplicate.selection.provider, "junction");
+  assert.equal(aggregatorOnlyDuplicate.selection.title, "Strong Junction Oura steps");
+
   const junctionDexcomGlucoseProxy = makeMetricCandidate({
     candidateId: "junction:dexcom:proxy",
     dataOrigin: {

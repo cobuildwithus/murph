@@ -421,9 +421,18 @@ function scoreJunctionSourcePolicy(
   }
 
   const sourceProvider = canonicalizeDeviceProviderSlug(sourceProviderSlug);
-  const directCandidateExists = candidates.some((other) =>
-    canonicalizeDeviceProviderSlug(normalizeLowercaseString(other.provider) ?? "") === sourceProvider
-  );
+  const directCandidateExists = candidates.some((other) => {
+    const provider = normalizeLowercaseString(other.provider);
+    if (
+      !provider
+      || provider === "junction"
+      || normalizeWearableOriginSourceSlug(other.dataOrigin?.aggregatorProvider) === "junction"
+    ) {
+      return false;
+    }
+
+    return canonicalizeDeviceProviderSlug(provider) === sourceProvider;
+  });
   return directCandidateExists ? JUNCTION_DIRECT_DUPLICATE_PENALTY : 0;
 }
 
