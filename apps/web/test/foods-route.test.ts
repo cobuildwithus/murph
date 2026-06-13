@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   searchFoods: vi.fn(),
 }));
 
-vi.mock("@/src/lib/supplements", () => ({
+vi.mock("@/src/lib/foods", () => ({
   getFoodById: mocks.getFoodById,
   getFoodByUpc: mocks.getFoodByUpc,
   searchFoods: mocks.searchFoods,

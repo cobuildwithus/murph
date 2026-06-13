@@ -26,11 +26,13 @@ async function importLabelsModuleWithMockPool() {
     },
   }));
 
-  const labelsModule = await import("../src/lib/supplements");
+  const foodsModule = await import("../src/lib/foods");
+  const supplementsModule = await import("../src/lib/supplements");
 
   return {
-    labelsModule,
+    foodsModule,
     poolConfigs,
+    supplementsModule,
   };
 }
 
@@ -59,9 +61,10 @@ describe("product label database pool", () => {
     delete process.env.MURPH_LABELS_DB_URL;
     process.env.MURPH_SUPPLEMENT_DB_URL = "postgres://legacy.example.test/labels";
 
-    const { labelsModule, poolConfigs } = await importLabelsModuleWithMockPool();
+    const { poolConfigs, supplementsModule } =
+      await importLabelsModuleWithMockPool();
 
-    await labelsModule.searchSupplements({
+    await supplementsModule.searchSupplements({
       q: "creatine",
       limit: 1,
       includeOffMarket: false,
@@ -80,14 +83,15 @@ describe("product label database pool", () => {
     process.env.MURPH_LABELS_DB_URL = "postgres://labels.example.test/labels";
     process.env.MURPH_SUPPLEMENT_DB_URL = "postgres://legacy.example.test/labels";
 
-    const { labelsModule, poolConfigs } = await importLabelsModuleWithMockPool();
+    const { foodsModule, poolConfigs, supplementsModule } =
+      await importLabelsModuleWithMockPool();
 
-    await labelsModule.searchSupplements({
+    await supplementsModule.searchSupplements({
       q: "creatine",
       limit: 1,
       includeOffMarket: false,
     });
-    await labelsModule.searchFoods({
+    await foodsModule.searchFoods({
       q: "yogurt",
       limit: 1,
       includeOffMarket: false,

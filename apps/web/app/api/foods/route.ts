@@ -2,7 +2,7 @@ import {
   getFoodById,
   getFoodByUpc,
   searchFoods,
-} from "@/src/lib/supplements";
+} from "@/src/lib/foods";
 import { createProductLabelsRouteHandlers } from "@/src/lib/product-labels-route";
 
 export const runtime = "nodejs";
