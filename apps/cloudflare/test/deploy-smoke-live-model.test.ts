@@ -7,27 +7,67 @@ import {
   readDeployLiveModelTurnSmokeOpenAiRequest,
 } from "../src/deploy-smoke-live-model.ts";
 
+const TEST_CODEX_INSTRUCTIONS =
+  "You are Codex, a coding agent based on GPT-5. Test instructions.\n"
+  + "- Tone of your updates MUST match your personality.";
+const TEST_CODEX_PERMISSIONS_TEXT =
+  "<permissions instructions>\n"
+  + "Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `danger-full-access`: No filesystem sandboxing - all commands are permitted. Network access is enabled.\n"
+  + "Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.\n"
+  + "</permissions instructions>";
+const TEST_CODEX_ENVIRONMENT_CONTEXT =
+  "<environment_context>\n"
+  + "  <cwd>/tmp/murph-smoke/vault</cwd>\n"
+  + "  <shell>zsh</shell>\n"
+  + "  <current_date>2026-06-12</current_date>\n"
+  + "  <timezone>America/New_York</timezone>\n"
+  + "  <filesystem><workspace_roots><root>/tmp/murph-smoke/vault</root></workspace_roots><permission_profile type=\"disabled\"><file_system type=\"unrestricted\" /></permission_profile></filesystem>\n"
+  + "</environment_context>";
+
 function createDeploySmokeOpenAiRequestBody(input: {
   background?: boolean;
+  extraInput?: boolean;
   model?: string;
   prompt?: string;
+  promptCacheKey?: string;
   reasoningEffort?: string;
   store?: boolean;
   stream?: boolean;
+  toolChoice?: string;
+  tools?: Record<string, unknown>[];
   textVerbosity?: string;
 } = {}): Record<string, unknown> {
   return {
+    client_metadata: {},
+    include: ["reasoning.encrypted_content"],
     input: [
       {
         content: [
           {
-            text: "Deploy smoke context.",
+            text: TEST_CODEX_PERMISSIONS_TEXT,
             type: "input_text",
           },
         ],
         role: "developer",
         type: "message",
       },
+      {
+        content: [
+          {
+            text: TEST_CODEX_ENVIRONMENT_CONTEXT,
+            type: "input_text",
+          },
+        ],
+        role: "user",
+        type: "message",
+      },
+      ...(input.extraInput
+        ? [{
+            content: [{ text: "Unexpected extra prompt.", type: "input_text" }],
+            role: "user",
+            type: "message",
+          }]
+        : []),
       {
         content: [
           {
@@ -40,7 +80,10 @@ function createDeploySmokeOpenAiRequestBody(input: {
       },
     ],
     ...(input.background === undefined ? {} : { background: input.background }),
+    instructions: TEST_CODEX_INSTRUCTIONS,
     model: input.model ?? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+    parallel_tool_calls: true,
+    prompt_cache_key: input.promptCacheKey ?? "deploy-smoke-test",
     reasoning: {
       effort: input.reasoningEffort ?? "low",
     },
@@ -49,7 +92,48 @@ function createDeploySmokeOpenAiRequestBody(input: {
     text: {
       verbosity: input.textVerbosity ?? "low",
     },
-    tools: [],
+    tool_choice: input.toolChoice ?? "auto",
+    tools: input.tools ?? createDeploySmokeOpenAiRequestTools(),
+  };
+}
+
+function createDeploySmokeOpenAiRequestTools(): Record<string, unknown>[] {
+  return [
+    createFunctionTool("exec_command"),
+    createFunctionTool("write_stdin"),
+    createFunctionTool("update_plan"),
+    createFunctionTool("request_user_input"),
+    {
+      description: "Apply patch.",
+      format: {},
+      name: "apply_patch",
+      type: "custom",
+    },
+    createFunctionTool("view_image"),
+    createFunctionTool("get_goal"),
+    createFunctionTool("create_goal"),
+    createFunctionTool("update_goal"),
+    {
+      description: "Tool discovery.",
+      execution: {},
+      parameters: {},
+      type: "tool_search",
+    },
+    {
+      external_web_access: true,
+      search_content_types: ["webpage"],
+      type: "web_search",
+    },
+  ];
+}
+
+function createFunctionTool(name: string): Record<string, unknown> {
+  return {
+    description: `${name} tool.`,
+    name,
+    parameters: {},
+    strict: false,
+    type: "function",
   };
 }
 
@@ -63,13 +147,38 @@ describe("deploy live model turn smoke", () => {
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ prompt: "Do something else." })),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({
+        prompt: ` ${DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT} `,
+      })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ model: "gpt-5.5" })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({ promptCacheKey: "" })),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ store: true })),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ background: true })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({ extraInput: true })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({ toolChoice: "none" })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({
+        tools: [
+          ...createDeploySmokeOpenAiRequestTools().slice(0, -1),
+          {
+            name: "unexpected",
+            type: "function",
+          },
+        ],
+      })),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ stream: false })),
