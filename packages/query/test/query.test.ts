@@ -4471,11 +4471,12 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
     });
 
     try {
-      // Pin the literal version: a revert of the 9 -> 10 bump would keep every
-      // constant-relative assertion green while legacy v9 stores, which lack
-      // generic observation metric points, were treated as current instead of
-      // being rebuilt.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 10);
+      // Pin the literal version: a revert of the 10 -> 11 bump would keep every
+      // constant-relative assertion green while legacy v10 stores, which lack
+      // either generic observation metric points or rebuilt wearable public
+      // conflict evidence depending on their source branch, were treated as
+      // current instead of being rebuilt.
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 11);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database
@@ -5224,7 +5225,8 @@ test("runtime wearable summaries read identically from compact and legacy full-f
 
     const compactReads = await readRuntimeSummaries();
     assert.match(compactReads, /"resolution":"fallback"/u);
-    assert.match(compactReads, /"conflictingProviders":\["garmin"\]/u);
+    assert.match(compactReads, /"conflictingProviders":\["garmin","oura"\]/u);
+    assert.match(compactReads, /Duplicate evidence from Oura disagreed after source reconciliation/u);
 
     // Rewrite the stored metric rows to the legacy full form in place. The
     // source manifest and schema version are untouched, so ensureFresh keeps

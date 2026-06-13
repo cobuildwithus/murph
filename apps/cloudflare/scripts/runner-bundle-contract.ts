@@ -31,8 +31,15 @@ const workspacePackageManifestByName = readWorkspacePackageManifestByName(repoRo
 const hostedRunnerRuntimePackageManifest = readRequiredWorkspacePackageManifest(
   hostedRunnerRuntimePackageName,
 );
+const publishedMurphBundleDependencyNames = readBundleDependencyNames("@murphai/murph");
 export const publishedMurphBundledWorkspacePackageNames =
-  readWorkspaceBundleDependencyNames("@murphai/murph");
+  publishedMurphBundleDependencyNames.filter((dependencyName) =>
+    workspacePackageManifestByName.has(dependencyName),
+  );
+export const publishedMurphBundledExternalPackageNames =
+  publishedMurphBundleDependencyNames.filter(
+    (dependencyName) => !workspacePackageManifestByName.has(dependencyName),
+  );
 export const hostedRunnerBundleOnlyDependencyNames = [
   "@murphai/murph",
   ...publishedMurphBundledWorkspacePackageNames,
@@ -162,7 +169,7 @@ function readRequiredWorkspacePackageManifest(
   return packageJson;
 }
 
-function readWorkspaceBundleDependencyNames(
+function readBundleDependencyNames(
   packageName: string,
 ): readonly string[] {
   const packageJson = readRequiredWorkspacePackageManifest(packageName);

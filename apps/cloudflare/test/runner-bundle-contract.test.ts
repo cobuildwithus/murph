@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   hostedRunnerBuildPackageNames,
   hostedRunnerWorkspacePackageNames,
+  publishedMurphBundledExternalPackageNames,
+  publishedMurphBundledWorkspacePackageNames,
   resolveHostedRunnerBuildPackageNames,
   resolveHostedRunnerWorkspacePackageNames,
 } from "../scripts/runner-bundle-contract.js";
@@ -38,6 +40,8 @@ describe("runner bundle package closure", () => {
   });
 
   it("builds the extra workspace packages that murph bundles into its tarball", () => {
+    expect(publishedMurphBundledExternalPackageNames).toEqual(["incur"]);
+    expect(publishedMurphBundledWorkspacePackageNames).not.toContain("incur");
     expect(hostedRunnerBuildPackageNames).toEqual([
       "@murphai/assistant-cli",
       "@murphai/assistant-engine",

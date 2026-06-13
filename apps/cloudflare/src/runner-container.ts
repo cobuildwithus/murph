@@ -1,5 +1,3 @@
-import { createHmac } from "node:crypto";
-
 import { Container, type StopParams } from "@cloudflare/containers";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
@@ -43,11 +41,6 @@ const RUNNER_CODEX_SHELL_SMOKE_URL =
 const RUNNER_DIRECT_R2_PRESIGNED_PUT_SMOKE_URL =
   "http://container/internal/direct-r2-presigned-put-smoke";
 const RUNNER_RUNTIME_WAKE_URL = "http://container/internal/runtime-wake";
-const HOSTED_LOG_FINGERPRINT_SECRET_ENV_NAME = "HOSTED_LOG_FINGERPRINT_SECRET";
-const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME =
-  "HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET";
-const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_DERIVATION_CONTEXT =
-  "murph:hosted-container-cpu-watchdog-fingerprint:v1";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const RUNNER_STOPPED_REQUEST_SETTLE_MS = 1_000;
 const RUNNER_DESTROY_SETTLE_TIMEOUT_MS = 5_000;
@@ -348,7 +341,7 @@ export class RunnerContainer extends Container {
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
     this.environment = env;
-    this.envVars = buildRunnerContainerEnvVars(env);
+    this.envVars = buildRunnerContainerEnvVars();
     this.sleepAfter = formatRunnerSleepAfter(readRunnerContainerIdleTtlMs(env));
   }
 
@@ -2763,41 +2756,10 @@ function readRunnerContainerErrorDetails(error: unknown): HostedExecutionStructu
   );
 }
 
-function buildRunnerContainerEnvVars(
-  source: RunnerContainerEnvironmentSource,
-): Record<string, string> {
-  const envVars: Record<string, string> = {
+function buildRunnerContainerEnvVars(): Record<string, string> {
+  return {
     ...BASE_RUNNER_CONTAINER_ENV_VARS,
   };
-  const fingerprintSecret = readRunnerContainerStringEnv(
-    source,
-    HOSTED_LOG_FINGERPRINT_SECRET_ENV_NAME,
-  );
-  if (fingerprintSecret) {
-    envVars[HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME] =
-      deriveHostedContainerCpuWatchdogFingerprintSecret(fingerprintSecret);
-  }
-  return envVars;
-}
-
-function deriveHostedContainerCpuWatchdogFingerprintSecret(
-  secret: string,
-): string {
-  return createHmac("sha256", secret)
-    .update(HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_DERIVATION_CONTEXT)
-    .digest("hex");
-}
-
-function readRunnerContainerStringEnv(
-  source: RunnerContainerEnvironmentSource,
-  key: string,
-): string | null {
-  const value = source[key];
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
 }
 
 function readRunnerReadyTimeoutMs(source: RunnerContainerEnvironmentSource): number {

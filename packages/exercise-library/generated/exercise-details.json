@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:2980ef38e72fa43fa1da65596babd553bcc1263638e6dbcd1cf04fe053e8635d",
+  "catalogHash": "sha256:8498bfcce081ec82fea1ffb2f3f959085629e85114571438c0a3bf342931aacb",
   "generatedAt": null,
   "items": [
     {
@@ -53255,7 +53255,28 @@
       ],
       "equipment": [],
       "id": "EX412",
-      "images": [],
+      "images": [
+        {
+          "alt": "Gender-neutral athlete stands on a sand mat with soft knees, hips back, and chest tall before a lateral bound.",
+          "step": "Ready athletic stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7e8d45ad-b583-49e2-547e-36fcfc8d6200/public"
+        },
+        {
+          "alt": "Athlete lands softly on one foot after a side bound, with hips back and the opposite leg sweeping behind for balance.",
+          "step": "Land and stick side A",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ac4948ed-92f3-40e2-e6de-093533d2e800/public"
+        },
+        {
+          "alt": "Athlete pushes across the mat in a low lateral arc, keeping knees soft and arms balanced during the transition.",
+          "step": "Push across low",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ee821e67-9e14-43a3-3216-730918140e00/public"
+        },
+        {
+          "alt": "Athlete lands softly on the opposite foot with hips back, chest tall, and the trailing leg sweeping behind under control.",
+          "step": "Land and stick side B",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/37c6d74e-e5ee-43e9-3b97-238110725f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Cardio",
@@ -53524,7 +53545,23 @@
       ],
       "equipment": [],
       "id": "EX417",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete in a high plank on a sand mat with hands under shoulders, a braced trunk, level hips, and both legs extended back.",
+          "step": "High plank setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c0790901-75b0-48d0-38ae-af393d07ca00/public"
+        },
+        {
+          "alt": "Athlete holding a high plank while the lower-side knee drives toward the chest, the opposite leg stays extended, and the shoulders stay steady.",
+          "step": "First knee drive",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fcda3d72-744c-40fc-39dd-3ec4a54ebb00/public"
+        },
+        {
+          "alt": "Athlete in a high plank after switching feet, with the lower-side leg extended back and the opposite knee driving forward under the torso.",
+          "step": "Sprint switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5e7f0726-7730-4689-b06a-2a70afd50b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Cardio",
@@ -53563,7 +53600,28 @@
       ],
       "equipment": [],
       "id": "EX418",
-      "images": [],
+      "images": [
+        {
+          "alt": "Top-down oblique illustration of an adult in a high plank with hands under shoulders, a braced trunk, and feet together before the plank ski hop.",
+          "step": "High plank start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/13ffe2e5-08bd-44d6-85eb-3a243bfdc600/public"
+        },
+        {
+          "alt": "Top-down oblique illustration of both feet hopped together to one side near the elbows while the adult keeps hands planted and shoulders steady.",
+          "step": "First ski hop landing",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5ec85bb0-7d5e-41a4-1cf9-db9bb218d300/public"
+        },
+        {
+          "alt": "Top-down oblique illustration of the adult returning both feet to a centered high plank with hips level after the ski hop.",
+          "step": "Centered plank reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d1183b69-dee4-466b-bbe5-8bdcf8f27900/public"
+        },
+        {
+          "alt": "Top-down oblique illustration of both feet hopped together to the opposite side near the elbows while the adult keeps the same plank orientation.",
+          "step": "Opposite ski hop landing",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/34fdaaeb-1726-4588-4b91-68a2b331b400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Cardio",
@@ -53772,7 +53830,28 @@
       ],
       "equipment": [],
       "id": "EX422",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult seated on a mat with knees bent, feet flat, hands behind the hips, and chest tall for the crab toe touch setup.",
+          "step": "Seated crab setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/99108c67-50eb-4501-2c45-8ed842323900/public"
+        },
+        {
+          "alt": "Adult holding a lifted crab position with hands planted behind the hips, feet grounded, hips raised, and chest open.",
+          "step": "Lifted crab base",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c1fc7b12-d7e1-49ec-eaff-0a836c334400/public"
+        },
+        {
+          "alt": "Adult in a crab position reaching across to touch the raised opposite foot while the other hand and foot stay planted.",
+          "step": "First cross-body touch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4e51857b-4c8e-42a2-3d68-d01caf511300/public"
+        },
+        {
+          "alt": "Adult in the same crab position switching sides to reach across toward the opposite raised foot while keeping the support hand planted and hips lifted.",
+          "step": "Opposite cross-body touch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0bb07eb7-2715-4844-00fb-a8fe2520a000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -55467,7 +55546,28 @@
       ],
       "equipment": [],
       "id": "EX451",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands barefoot on a sand mat with tall posture and both feet grounded before starting the balance drill.",
+          "step": "Tall stance setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6c815dd1-2092-4e05-40bc-9dda60f9da00/public"
+        },
+        {
+          "alt": "Adult balances on one planted foot with the opposite foot hovering lightly, hips level, and arms relaxed.",
+          "step": "Single-leg balance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a0f0b948-c454-4dd8-2444-2c89a1d2cb00/public"
+        },
+        {
+          "alt": "Adult holds a single-leg balance while turning the head slowly, keeping the torso quiet and the standing foot grounded.",
+          "step": "Slow head turns",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/331cc422-96eb-4638-efa7-591d9e20df00/public"
+        },
+        {
+          "alt": "Adult switches to the opposite support foot with the free foot lifted lightly and hips level for the same balance drill.",
+          "step": "Switch support side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9b185cb5-2ecf-4a2a-1b71-4bd7e5733f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -55510,7 +55610,28 @@
       ],
       "equipment": [],
       "id": "EX452",
-      "images": [],
+      "images": [
+        {
+          "alt": "A barefoot adult stands tall on one foot with the other foot hovering beside the ankle, with callouts for chest, gaze, and tripod foot.",
+          "step": "Balanced setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/39c3d2ac-19b8-4aa7-4a55-b043896d7800/public"
+        },
+        {
+          "alt": "A barefoot adult balances on one foot while the other foot taps forward on the mat, with cues for a soft knee, tall chest, and gentle reach.",
+          "step": "Forward clock tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/792bd0b6-db83-4973-51a5-7452dbcec200/public"
+        },
+        {
+          "alt": "A barefoot adult balances on the planted foot while the free foot reaches to the side along a clock path, with cues for level hips, knee tracking, and tripod foot.",
+          "step": "Side clock reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a4d19066-31f3-47b3-a5ee-c8d8c0646200/public"
+        },
+        {
+          "alt": "A barefoot adult demonstrates the reach on the opposite side, standing steady while the other foot reaches outward with cues for level hips, reach, and base.",
+          "step": "Opposite-side reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6e901594-f1d8-43da-168a-cca91b39bc00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -55551,7 +55672,28 @@
       ],
       "equipment": [],
       "id": "EX453",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall barefoot on a sand mat with both feet grounded, preparing to shift weight for a single-leg toe tap.",
+          "step": "Tall balance setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/64347db8-1341-4a78-78ba-6bb70b6bee00/public"
+        },
+        {
+          "alt": "Adult balances on one foot while the other foot reaches forward and lightly taps the toes on the mat, with chest upright.",
+          "step": "Forward toe tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7597e5a8-aae4-498b-3526-ed8f4810c300/public"
+        },
+        {
+          "alt": "Adult balances on one foot while the other foot taps out to the side, keeping hips level and the standing foot grounded.",
+          "step": "Side toe tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/85350805-d512-4d7c-0fde-b9a82a0e2800/public"
+        },
+        {
+          "alt": "Adult balances on one foot while the other foot taps back behind the body, keeping the torso tall and the standing knee soft.",
+          "step": "Back toe tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a21dbf98-a53e-4c42-5ae9-67a27a95bb00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -55592,7 +55734,28 @@
       ],
       "equipment": [],
       "id": "EX454",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands barefoot on a sand mat with both feet grounded, chest tall, eyes forward, and callouts for eyes fixed, chest tall, and tripod feet before the single-leg forward reach.",
+          "step": "Tall balance setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b60c48a6-298e-43c9-2345-ff7d56c91c00/public"
+        },
+        {
+          "alt": "Adult balances on one planted foot while hinging the hips back, reaching both hands forward, and extending the free leg behind with callouts for reach, hips back, and tripod foot.",
+          "step": "Forward reach on first support side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3322031a-d2e5-47be-6e54-a56220688800/public"
+        },
+        {
+          "alt": "Adult returns to a tall two-foot stance on the mat with a side-switch arrow and callouts for reset tall and soft knees before changing support feet.",
+          "step": "Reset and switch support",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/283ec986-d480-4939-e444-179dc89cbc00/public"
+        },
+        {
+          "alt": "Adult mirrors the single-leg forward reach on the opposite planted foot, hinging back with the trailing leg extended behind and callouts for reach, hips level, and heel down.",
+          "step": "Forward reach on opposite support side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4ca8cfaa-b36a-451e-78d4-87c236f34100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -55633,7 +55796,28 @@
       ],
       "equipment": [],
       "id": "EX455",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall barefoot on a mat with feet hip-width, preparing for a single-leg lateral reach.",
+          "step": "Tall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/53ee4b5b-78a5-4718-c4ff-944473748300/public"
+        },
+        {
+          "alt": "Adult balances on one foot while the other foot reaches out to the side with arms lightly counterbalancing.",
+          "step": "First-side lateral reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6f4977f1-54e5-47e3-0186-c751c6aa8100/public"
+        },
+        {
+          "alt": "Adult returns to a centered stance and shifts weight under control before switching sides.",
+          "step": "Reset and shift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2157a389-5ba1-43d1-b368-3b3b30df9500/public"
+        },
+        {
+          "alt": "Adult repeats the lateral reach to the opposite side while keeping the standing foot grounded.",
+          "step": "Opposite-side lateral reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c902f319-0c33-4230-3428-6080b7388900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -55674,7 +55858,28 @@
       ],
       "equipment": [],
       "id": "EX456",
-      "images": [],
+      "images": [
+        {
+          "alt": "A barefoot adult stands tall on a mat with both feet grounded, annotated with eyes fixed, brace, and foot tripod cues.",
+          "step": "Setup stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ec281ce7-4696-4c3b-cc94-88411b23fc00/public"
+        },
+        {
+          "alt": "The adult hinges forward on one planted foot with the opposite leg reaching back and arms reaching forward, annotated with hips back, reach, and heel drives back cues.",
+          "step": "Side A hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/43f3f063-911a-42f2-bcbd-195f18dfe800/public"
+        },
+        {
+          "alt": "The adult returns upright into a single-leg balance with one knee lifted and the standing heel grounded, annotated with chest tall, knee floats, and heel grounded cues.",
+          "step": "Tall balance return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/12d78910-d0c1-4ec4-af55-a4fe825a2c00/public"
+        },
+        {
+          "alt": "The adult performs the hinge on the opposite side with the lifted leg reaching back, annotated with switch sides, hips level, and heel reaches cues.",
+          "step": "Switch-side hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3d81b030-d9df-48a5-095b-e814bf0c4200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -55715,7 +55920,28 @@
       ],
       "equipment": [],
       "id": "EX457",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing tall on one foot with arms open for balance, showing foot tripod, soft knee, and tall chest cues.",
+          "step": "Grounded single-leg setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bf7397d1-f185-4c27-eb65-aa9b56ff9e00/public"
+        },
+        {
+          "alt": "Adult balancing on one leg in an airplane hinge with the other leg reaching back, arms wide, and cues for hips back and long spine.",
+          "step": "Hinge into airplane",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a08d567d-fb07-4f6f-863d-728b0ac44f00/public"
+        },
+        {
+          "alt": "Adult holding the airplane balance while opening slightly with arms wide, heel grounded, and controlled rotation cues.",
+          "step": "Controlled open range",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bc5f6271-ae59-484f-ecd0-0bf6cde5cf00/public"
+        },
+        {
+          "alt": "Adult performing the airplane hinge on the opposite side with one foot planted, the other leg reaching long, and knee tracking over toes.",
+          "step": "Switch side hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0407d39f-6fbd-4ee5-280a-e0f27b1e6000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Balance",
@@ -55758,7 +55984,33 @@
         "Chair"
       ],
       "id": "EX458",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing tall beside a chair with fingertips resting lightly on the chair back, one leg softly loaded, and the other foot ready behind for balance.",
+          "step": "Light chair-supported setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d4c9e1d8-217d-43f1-23af-df3d802cbd00/public"
+        },
+        {
+          "alt": "Adult in a supported airplane hinge, one hand lightly on a chair, one foot grounded, torso long, and the opposite leg reaching behind.",
+          "step": "Controlled hip hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8ae211f1-2a5c-4db5-8fb7-d8a7acc39000/public"
+        },
+        {
+          "alt": "Adult holding the supported airplane position while gently opening the chest and hips, with one hand on the chair and the standing foot grounded.",
+          "step": "Small hip open",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/693ffc28-b05a-4f1c-e585-88a1707c4700/public"
+        },
+        {
+          "alt": "Adult returns upright beside the chair with both feet controlled under the body before switching to the opposite standing leg.",
+          "step": "Reset between sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b740f393-a00f-40e5-7b9a-1b19a3b3a100/public"
+        },
+        {
+          "alt": "Adult performs the supported airplane on the opposite side, one hand on the chair, the other arm open, and the free leg reaching behind under control.",
+          "step": "Opposite-side airplane",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/953c750e-5188-4eee-7930-ef1f36a71100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -55799,7 +56051,28 @@
       ],
       "equipment": [],
       "id": "EX459",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall barefoot on a mat with both feet grounded and eyes forward before beginning the standing knee hug balance.",
+          "step": "Tall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/379b6de8-4a87-4205-760b-fb4eebebbc00/public"
+        },
+        {
+          "alt": "Adult balances on one foot while hugging the opposite knee toward the chest with a tall torso and steady gaze.",
+          "step": "First-side knee hug",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2485f243-eb39-4aaa-af23-01f4a6afe500/public"
+        },
+        {
+          "alt": "Adult returns to both feet under control and shifts weight calmly before switching sides.",
+          "step": "Controlled reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b4239c57-ebac-4258-5575-7251a6911700/public"
+        },
+        {
+          "alt": "Adult repeats the knee hug balance on the opposite side, keeping the standing foot grounded and posture upright.",
+          "step": "Opposite-side knee hug",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ceffaf9b-aa29-4b8c-c089-8d35875e9200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -55840,7 +56113,28 @@
       ],
       "equipment": [],
       "id": "EX460",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall beside a chair with both bare feet grounded, one hand lightly touching the chair for balance support.",
+          "step": "Support-ready stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0e7a7d64-ae6d-478f-9796-f5e7194e4500/public"
+        },
+        {
+          "alt": "Adult balances on one grounded foot while lightly using the chair and catching the opposite ankle behind the body.",
+          "step": "Weight shift and ankle catch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c53c6e06-f24b-40e1-8397-3dd36e706500/public"
+        },
+        {
+          "alt": "Adult holds one ankle behind the body while balancing tall with ribs stacked, knees close, and the standing foot grounded.",
+          "step": "Tall quad-pull balance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/15eafcfd-a8ec-44a5-dc68-d36a56576200/public"
+        },
+        {
+          "alt": "Adult repeats the quad-pull balance on the opposite side with the other foot grounded and the lifted ankle held behind.",
+          "step": "Switched-side balance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c76c2601-3fb3-4d6e-908c-40d37cc49300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -55881,7 +56175,28 @@
       ],
       "equipment": [],
       "id": "EX461",
-      "images": [],
+      "images": [
+        {
+          "alt": "A barefoot adult stands tall on a mat with both feet grounded, preparing to shift weight for Tree Pose.",
+          "step": "Tall setup stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5e32b229-a2c8-4e8c-70eb-b85f9a5cab00/public"
+        },
+        {
+          "alt": "The adult balances with hands together while one foot rests below the standing knee against the inner calf.",
+          "step": "Low foot placement",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2a03d444-3e89-4d96-01fd-09073c98f200/public"
+        },
+        {
+          "alt": "The adult holds Tree Pose with arms reaching overhead and the lifted foot placed away from the knee.",
+          "step": "Overhead tree hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fafb9f3e-8111-4859-b378-0dc0e6dc2700/public"
+        },
+        {
+          "alt": "The adult switches sides and balances with the opposite foot resting below the standing knee.",
+          "step": "Opposite-side hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/53b54b2b-0083-4d9b-235f-e7995b9f7300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -55922,7 +56237,28 @@
       ],
       "equipment": [],
       "id": "EX462",
-      "images": [],
+      "images": [
+        {
+          "alt": "A barefoot adult stands on a mat with hands at the chest, shifting weight into one planted foot while the other heel begins to lift.",
+          "step": "Weight shift setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5edfe817-d5bc-4111-e94b-bdc0a473ca00/public"
+        },
+        {
+          "alt": "A barefoot adult holds a tree-pose base with one foot planted and the opposite toes lightly touching the mat near the support ankle.",
+          "step": "Toe-touch tree base",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/52495edb-f1fc-42b0-b975-12d8d156e000/public"
+        },
+        {
+          "alt": "A barefoot adult maintains the toe-touch tree-pose base while reaching both arms overhead and keeping the torso tall.",
+          "step": "Reach and hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3796fa48-31f9-46f5-e293-4bb8dae11200/public"
+        },
+        {
+          "alt": "A barefoot adult repeats the toe-touch tree-pose balance on the opposite side with hands together at the chest.",
+          "step": "Opposite-side balance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f66012b5-605a-4a45-70d2-44c75fc51200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -55963,7 +56299,28 @@
       ],
       "equipment": [],
       "id": "EX463",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing in tandem stance with fingertips touching a wall for light support, feet aligned heel to toes and torso upright.",
+          "step": "Assisted setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8ce1e514-f19b-4b1a-cedf-9d9a33ee1800/public"
+        },
+        {
+          "alt": "Adult holding a heel-to-toe tandem stance without support, arms relaxed and gaze steady.",
+          "step": "Steady hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/947d151f-c03c-4987-2129-828a8f77d300/public"
+        },
+        {
+          "alt": "Adult switching tandem stance by keeping one foot planted and moving the other foot low and slowly along the same line.",
+          "step": "Controlled switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/de307802-23ea-4e18-0b43-101af3c2d200/public"
+        },
+        {
+          "alt": "Adult holding the opposite tandem stance with the other foot in front, both feet on a narrow heel-to-toe line.",
+          "step": "Opposite hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/957639ed-5c56-4a88-afec-230a22b0ef00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -57659,7 +58016,23 @@
       ],
       "equipment": [],
       "id": "EX491",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult starts on hands and knees on a sand mat with toes tucked, hands under shoulders, and a flat back before lifting the knees.",
+          "step": "Tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5e514056-c81a-4892-749c-9fbdd5d43500/public"
+        },
+        {
+          "alt": "Adult holds a quadruped hover with both knees lifted slightly off the mat, hands and toes grounded, and the back flat.",
+          "step": "Knees hover hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2f86d4ee-bbb4-4a25-bcb8-d07ab66fcd00/public"
+        },
+        {
+          "alt": "Adult maintains the knee hover while one hand reaches a small step forward and the opposite foot lifts slightly, keeping hips level.",
+          "step": "Controlled crawl step",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e3da8831-5e83-4e9f-ce8b-80dd1b0db300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -57699,7 +58072,33 @@
       ],
       "equipment": [],
       "id": "EX492",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in hands-and-knees tabletop on a mat with cues for wrists, toes, and a flat back.",
+          "step": "Tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c897ec45-ef00-4df1-a77e-f3fdd18c9600/public"
+        },
+        {
+          "alt": "Adult holding a low quadruped hover with knees lifted just off the mat and core braced.",
+          "step": "Low knee hover",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cd64c74b-0d37-4fe0-1fed-28dd8502a000/public"
+        },
+        {
+          "alt": "Adult in a knee-hover crawl stepping one hand and the opposite foot forward while keeping hips level.",
+          "step": "First opposite-pair step",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/40dde281-ae36-4b2f-5c65-0e73d1bffa00/public"
+        },
+        {
+          "alt": "Adult in a knee-hover crawl alternating the opposite hand and foot with steady hips and a flat back.",
+          "step": "Alternate opposite-pair step",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c4c1fc83-eb3a-435f-9d8a-671b5a113100/public"
+        },
+        {
+          "alt": "Adult returning knees to the mat for a controlled reset while keeping hands planted and breathing steady.",
+          "step": "Controlled rest reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0e6be9f0-1f95-4126-0cf0-b614eee0f400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -57800,7 +58199,28 @@
         "Mat"
       ],
       "id": "EX494",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult holds a half-kneeling setup on a mat with the front foot planted, back knee cushioned, and chest tall.",
+          "step": "Set the stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8cfea3c6-716a-4f88-5ffd-5a444ce09600/public"
+        },
+        {
+          "alt": "An adult in half-kneeling keeps ribs stacked over hips, braces gently, and grounds the front foot tripod.",
+          "step": "Stack and brace",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2d0563bd-ff0d-4cce-ae47-fbc899a5a700/public"
+        },
+        {
+          "alt": "An adult reaches both arms forward from a half-kneeling hold while keeping the torso steady and front heel down.",
+          "step": "Slow reach balance challenge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e09dded1-222f-4891-7df9-b907e9e83700/public"
+        },
+        {
+          "alt": "An adult switches to the opposite half-kneeling side with the other leg leading, chest tall, and front foot planted.",
+          "step": "Opposite-side hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/83e5ca45-bbdb-4772-3a7f-c2f34a3b1100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -57843,7 +58263,28 @@
         "Light object"
       ],
       "id": "EX495",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in a half-kneeling stance on a mat holding a light object at chest height, with callouts for a tall chest, stacked knee, and planted foot.",
+          "step": "Half-kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9c94753b-4b2f-4f8f-3e7b-2e956f4fb400/public"
+        },
+        {
+          "alt": "Adult in half-kneeling holding a light object high to one side, preparing for a diagonal chop while bracing and keeping the front foot planted.",
+          "step": "High start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7818802b-f364-48fe-ad3e-230d75a60c00/public"
+        },
+        {
+          "alt": "Adult in half-kneeling finishing a slow diagonal chop with the light object near the opposite hip, with callouts for slow control, square hips, and knee tracking.",
+          "step": "Low chop finish",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b50a49f0-33f1-41c2-922c-3b262894bd00/public"
+        },
+        {
+          "alt": "Adult mirrors the half-kneeling stance and finishes the diagonal chop to the other hip, showing the same controlled path on the opposite side.",
+          "step": "Opposite side finish",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f6934d9b-e3db-4c0d-58f6-0d931519be00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -57886,7 +58327,28 @@
         "Water bottle"
       ],
       "id": "EX496",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in a tall half-kneeling stance on a mat holding a water bottle at chest height with cues for upright posture and grounded front heel.",
+          "step": "Tall half-kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f04d2045-03b3-4ff5-2ae9-8b1daec02c00/public"
+        },
+        {
+          "alt": "Adult maintains half-kneeling balance while guiding a water bottle through the front arc around the head with steady eyes and braced trunk.",
+          "step": "Front halo path",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/21bed361-209a-422f-426a-b87db1f44500/public"
+        },
+        {
+          "alt": "Adult stays tall in half-kneeling while the water bottle passes behind the head, with cues for a long neck and slow controlled arc.",
+          "step": "Back halo path",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9758cf2c-8210-461c-dc60-2f9e9572d300/public"
+        },
+        {
+          "alt": "Adult repeats the setup with the opposite lead leg forward, holding the water bottle at chest height and keeping ribs stacked and knee aligned over toes.",
+          "step": "Opposite lead-leg setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/be157d94-7b69-4284-108a-c0926b570f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -57928,7 +58390,23 @@
         "Water bottles"
       ],
       "id": "EX497",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult kneels tall on a sand mat holding two light water bottles at shoulder height with callouts for bottles at shoulders, ribs over hips, and glutes light.",
+          "step": "Set tall kneeling",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fe18920e-64c6-4c0c-8e71-f6ad18fa5000/public"
+        },
+        {
+          "alt": "Adult presses two light water bottles upward from tall kneeling while keeping the knees grounded and torso braced, with upward motion arrows and callouts for press straight up, brace, and knees grounded.",
+          "step": "Press with brace",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f3c65a45-352b-44a7-9930-5ba0c35f0f00/public"
+        },
+        {
+          "alt": "Adult holds two light water bottles overhead from tall kneeling with a vertical torso and relaxed neck, with callouts for reach tall, ribs down, and neck relaxed.",
+          "step": "Own the overhead finish",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2ad6556e-d6d7-4539-76fa-243f9c341900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -57971,7 +58449,23 @@
         "Chair"
       ],
       "id": "EX498",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult seated tall near the front of a sturdy chair with both bare feet flat on the floor and hands resting lightly on the thighs.",
+          "step": "Tall seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/90bf6da7-275b-4fa6-6c47-cc39f01eb100/public"
+        },
+        {
+          "alt": "Adult seated upright on a chair lifting one knee while the opposite bare foot stays grounded on the floor.",
+          "step": "Controlled first knee lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cf058980-edd6-411a-e221-be757c97f500/public"
+        },
+        {
+          "alt": "Adult seated upright on a chair lifting the opposite knee while the other bare foot stays grounded and the torso remains tall.",
+          "step": "Opposite-side knee lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9e8d6169-3cff-4661-cc47-35845bb71600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -58014,7 +58508,28 @@
         "Chair"
       ],
       "id": "EX499",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult seated tall near the front of a sturdy chair with both feet flat, ready to begin a chair march.",
+          "step": "Seated tall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2562ead3-0a42-4fc4-468e-ecb80085d900/public"
+        },
+        {
+          "alt": "Adult seated tall on a chair lifting one knee while the opposite arm swings forward and the other foot stays planted.",
+          "step": "First knee lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5cd46c90-228d-440d-5f31-a876ef4ceb00/public"
+        },
+        {
+          "alt": "Adult seated tall returning both feet toward the floor with control between alternating march steps.",
+          "step": "Control through center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4d1c8357-c85c-4e17-e540-fde7a60a8100/public"
+        },
+        {
+          "alt": "Adult seated tall on a chair lifting the opposite knee while the opposite arm swings forward.",
+          "step": "Alternate knee lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/05455ee1-9c59-4286-faf2-4d2ff223cd00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -58057,7 +58572,28 @@
         "Chair"
       ],
       "id": "EX500",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult sits tall near the front of a sturdy chair with both feet planted and hands held in a light boxing guard.",
+          "step": "Tall seated guard",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f92c3ce6-7c35-42b2-d716-ce3129471300/public"
+        },
+        {
+          "alt": "Adult remains seated tall with both feet planted while one arm reaches forward in a light controlled punch and the other hand stays in guard.",
+          "step": "Soft punch from the chair",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5e10d386-7952-4f9c-d662-7a97e2ed1e00/public"
+        },
+        {
+          "alt": "Adult stays upright on the chair with both feet planted while the opposite arm extends into a light punch and the other hand remains near the chest.",
+          "step": "Alternate punch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9f08338e-a97b-4b18-2361-354a8f28db00/public"
+        },
+        {
+          "alt": "Adult sits tall on the stable chair with shoulders relaxed, both fists returned to guard, and both feet still planted.",
+          "step": "Controlled return to guard",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/da916ec5-d36b-4409-81d5-9e5193681300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -58098,7 +58634,23 @@
       ],
       "equipment": [],
       "id": "ST001",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult seated tall on a simple chair with feet grounded, shoulders relaxed, and head facing forward for seated neck rotation setup.",
+          "step": "Tall seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/227ec177-7e0b-484f-0330-84e062564400/public"
+        },
+        {
+          "alt": "Adult seated upright with shoulders heavy and jaw relaxed while gently rotating the head to one side.",
+          "step": "Gentle turn to one side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b7d12f0c-69d3-495b-5915-a479aad66100/public"
+        },
+        {
+          "alt": "Adult seated upright with feet grounded and shoulders quiet while gently rotating the head to the opposite side.",
+          "step": "Gentle turn to the other side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/36aa5b10-054a-4afb-f01d-59bc862ec400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -58140,7 +58692,23 @@
       ],
       "equipment": [],
       "id": "ST002",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall with feet hip-width apart, shoulders relaxed, and eyes level before a standing neck rotation.",
+          "step": "Tall neutral setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/49953512-2a07-4502-9ea7-f9ba901d6700/public"
+        },
+        {
+          "alt": "Adult keeps the torso forward and shoulders relaxed while gently rotating the head toward one side.",
+          "step": "Gentle turn to first side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c3d0a190-6143-4c92-9789-c0134ab38000/public"
+        },
+        {
+          "alt": "Adult keeps the torso forward and shoulders relaxed while gently rotating the head toward the opposite side.",
+          "step": "Gentle turn to second side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3ba13b1c-b018-4e79-c6a0-f39c4908a500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -58182,7 +58750,28 @@
       ],
       "equipment": [],
       "id": "ST003",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lying on their back on a mat with the head centered, shoulders relaxed, jaw soft, and ribs relaxed.",
+          "step": "Neutral setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/79cb9056-e990-4800-6d0e-b5d948809c00/public"
+        },
+        {
+          "alt": "Adult lying supine with shoulders heavy while gently rotating the head toward one side in a small comfortable range.",
+          "step": "Gentle turn to first side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/68b89ee2-b7de-413f-3d22-c63e1e14b200/public"
+        },
+        {
+          "alt": "Adult lying on the mat with the head returned to center, eyes level, ribs quiet, and shoulders relaxed.",
+          "step": "Return through center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e26aebd8-57f7-4eb2-6295-043b1d34a200/public"
+        },
+        {
+          "alt": "Adult lying supine with shoulders heavy while gently rotating the head toward the opposite side without forcing range.",
+          "step": "Gentle turn to opposite side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3cd472d5-6e4a-4156-68f8-5c87ca123b00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -59689,7 +60278,28 @@
       ],
       "equipment": [],
       "id": "ST028",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated person sits tall on a stool with hands resting on thighs, shoulders relaxed, and both feet grounded before a gentle neck release.",
+          "step": "Tall seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a42b0af3-2681-48f5-389a-041dfb1dc600/public"
+        },
+        {
+          "alt": "Seated person reaches one hand down and away while gently tilting the head away from that hand, keeping the jaw and shoulders relaxed.",
+          "step": "First side reach and tilt",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/777a9b12-f0d1-4f71-9411-b6107037a200/public"
+        },
+        {
+          "alt": "Seated person returns the head to center with hands relaxed on the thighs, breathing steadily before switching sides.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b82ffc66-b057-4db9-2c66-b2744f90db00/public"
+        },
+        {
+          "alt": "Seated person performs the same gentle neck release on the opposite side, reaching the other hand down and tilting the head away.",
+          "step": "Second side reach and tilt",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/694c3f7e-9769-47fc-cd57-989ca8c73200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -59731,7 +60341,28 @@
       ],
       "equipment": [],
       "id": "ST029",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult seated tall on a chair with feet grounded, hands resting on thighs, shoulders relaxed, jaw soft, and head stacked over the spine for the neck clock drill setup.",
+          "step": "Tall neutral setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5d694cb3-78d1-4a49-742d-691944482100/public"
+        },
+        {
+          "alt": "Adult seated in the same position with a tiny chin-lowering nod toward the six o'clock point while the torso stays tall and shoulders stay quiet.",
+          "step": "Small nod to six",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/30bde5a5-3bd0-4dc0-11ae-5cb05f017f00/public"
+        },
+        {
+          "alt": "Adult seated upright while the head turns gently toward the three o'clock side of the imaginary clock, with the shoulders level and the movement kept small.",
+          "step": "Trace to three",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e5e8daa4-cc98-445a-e3fe-d8a7f17f5b00/public"
+        },
+        {
+          "alt": "Adult seated upright while the head turns gently toward the nine o'clock side of the imaginary clock, opposite the prior slide, with the jaw relaxed and shoulders steady.",
+          "step": "Trace to nine",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7cae99e3-4254-4140-8721-8bd964051a00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -59900,7 +60531,23 @@
       ],
       "equipment": [],
       "id": "ST032",
-      "images": [],
+      "images": [
+        {
+          "alt": "Gender-neutral adult sits tall on a simple stool with feet grounded, hands resting on thighs, and shoulders relaxed before the neck release.",
+          "step": "Tall seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/16c48a27-94ad-40e7-635d-7f1cb6e5f300/public"
+        },
+        {
+          "alt": "The seated adult gently bends the neck to one side while keeping the torso upright, jaw relaxed, shoulders heavy, and feet grounded.",
+          "step": "First side stretch hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9418dbc5-1af3-42d2-9d0a-beef9d495700/public"
+        },
+        {
+          "alt": "The seated adult repeats the mild side-neck stretch to the opposite side with the same relaxed shoulders, upright posture, and steady breathing.",
+          "step": "Opposite side stretch hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6c0f7a25-1d25-4667-8b06-f7d21dfc9b00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -59944,7 +60591,23 @@
         "Pillow"
       ],
       "id": "ST033",
-      "images": [],
+      "images": [
+        {
+          "alt": "A gender-neutral adult lies on a mat with the head supported by a pillow, neck long, shoulders relaxed, and jaw soft.",
+          "step": "Supported setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7ae901ea-972b-44ae-86db-034e211fd800/public"
+        },
+        {
+          "alt": "The same adult keeps the head on the pillow and makes a very small yes nod through the upper neck while the shoulders stay heavy.",
+          "step": "Tiny nod",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1c7e9ac2-4e7c-4da0-3b58-11a10ba5d700/public"
+        },
+        {
+          "alt": "The adult returns the head and neck to neutral on the pillow, ready to repeat the small supported nod slowly.",
+          "step": "Neutral reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/51c6e618-3ab0-492a-0722-7c9fe0915500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -59986,7 +60649,23 @@
       ],
       "equipment": [],
       "id": "ST034",
-      "images": [],
+      "images": [
+        {
+          "alt": "Gender-neutral adult sits tall on a simple stool with feet grounded, hands resting on thighs, shoulders relaxed, and head facing forward before the open-throat stretch.",
+          "step": "Tall seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3cfda62c-4e1f-4abf-6122-1ce92a5d7a00/public"
+        },
+        {
+          "alt": "The seated adult gently lifts the chin while keeping the jaw relaxed, shoulders down, hands resting on thighs, and both feet grounded.",
+          "step": "Gentle chin-lift hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f70dcd91-6c94-4e44-e082-ab8484b12900/public"
+        },
+        {
+          "alt": "The seated adult eases the head back toward neutral after a mild open-throat stretch, breathing steadily with shoulders relaxed and jaw soft.",
+          "step": "Steady breath and ease out",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/801c029c-a1d2-43da-5512-b216f327b700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -60028,7 +60707,23 @@
       ],
       "equipment": [],
       "id": "ST035",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult sitting tall on a simple stool with feet grounded, hands resting on thighs, and shoulders relaxed before a seated neck figure-eight.",
+          "step": "Tall seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/771e4f66-294b-47b1-a410-6007d0fcd000/public"
+        },
+        {
+          "alt": "Adult seated upright with a small olive figure-eight motion path at the nose, showing slow controlled neck movement while the shoulders stay heavy.",
+          "step": "Tiny nose figure-eight",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ebaf643f-5c13-44e4-8f09-4dca7b3e1600/public"
+        },
+        {
+          "alt": "Adult seated upright with callouts for a relaxed jaw, mild tension only, and steady breathing during a gentle neck mobility range check.",
+          "step": "Relaxed range check",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c51e10f5-ab11-4296-2486-7d0529378300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -60070,7 +60765,23 @@
       ],
       "equipment": [],
       "id": "ST036",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult sits tall on a backless stool with both bare feet grounded, hands resting on thighs, shoulders relaxed, and jaw soft.",
+          "step": "Grounded seat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eca9294b-a25f-4553-76a0-7b53f8463000/public"
+        },
+        {
+          "alt": "Adult maintains a grounded seated posture while a crown cue indicates gentle length through the neck and spine with shoulders heavy.",
+          "step": "Crown length",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/91829ff6-0e72-4fc1-7ad2-1c02b4760400/public"
+        },
+        {
+          "alt": "Adult sits tall with hands on the lower ribs to show slow rib breathing while the shoulders and jaw stay relaxed.",
+          "step": "Easy rib breath",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fca33339-24ea-4189-a2ac-4a9a1cc4c600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Breathing/Reset",
@@ -60113,7 +60824,28 @@
       ],
       "equipment": [],
       "id": "ST037",
-      "images": [],
+      "images": [
+        {
+          "alt": "A seated person sits upright with feet grounded, shoulders relaxed, and the head facing forward before a neck rotation hold.",
+          "step": "Tall seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9375341e-6f4b-48d3-f8f8-c399b9848500/public"
+        },
+        {
+          "alt": "The same seated person keeps the torso and shoulders still while gently turning the head toward one side with eyes level and jaw relaxed.",
+          "step": "Gentle rotation to one side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/02f227a1-6aae-4d4b-4718-69cf285b2700/public"
+        },
+        {
+          "alt": "The same seated person brings the head back to center with a small, controlled range while the shoulders stay quiet.",
+          "step": "Return through center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b838d928-0b72-4750-8297-082911ecb100/public"
+        },
+        {
+          "alt": "The same seated person gently rotates the head to the opposite side, showing mild neck tension without shoulder lifting.",
+          "step": "Repeat on the other side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6ac9d2fc-837b-4034-56f7-fb473353e700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -60155,7 +60887,28 @@
       ],
       "equipment": [],
       "id": "ST038",
-      "images": [],
+      "images": [
+        {
+          "alt": "A standing adult faces forward with feet hip-width apart, arms relaxed, shoulders low, and jaw soft before beginning the neck stretch.",
+          "step": "Tall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7edc0bb6-8d1e-442b-bdcc-ac99c9c84100/public"
+        },
+        {
+          "alt": "The adult reaches one hand behind the lower back and gently tilts the head away from that side while keeping the shoulders relaxed.",
+          "step": "Reach and tilt side A",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3a37aa45-2aeb-4682-dfd5-eb950ab4e600/public"
+        },
+        {
+          "alt": "The adult returns the head upright through center, keeps the chest tall, and breathes before switching to the other side.",
+          "step": "Return through center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6fb21f1b-c819-4b2e-62c9-69187bff3300/public"
+        },
+        {
+          "alt": "The adult mirrors the stretch on the other side, reaching the opposite hand behind the back and tilting the head away with a gentle range.",
+          "step": "Reach and tilt side B",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6596bfec-16e9-42b0-b927-b3ea3ec83500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -60197,7 +60950,28 @@
       ],
       "equipment": [],
       "id": "ST039",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult sits tall on a simple chair with feet grounded, hands on thighs, and shoulders relaxed before the stretch.",
+          "step": "Tall seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/295ab569-a96b-4761-ac4d-6a28e8f36500/public"
+        },
+        {
+          "alt": "Adult seated on a chair gently lowers the chin diagonally toward one armpit while keeping shoulders relaxed.",
+          "step": "First diagonal neck stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5705538c-419c-480b-66fb-3a33eeb3d200/public"
+        },
+        {
+          "alt": "Adult returns the head and neck to a neutral centered position while seated with steady posture.",
+          "step": "Reset to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4b3d3b0c-712f-4a93-8619-635b0b977b00/public"
+        },
+        {
+          "alt": "Adult repeats the chin-to-armpit stretch toward the other armpit with hands resting on thighs and shoulders down.",
+          "step": "Opposite diagonal neck stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6013d673-7825-418a-7989-fbdf67c70600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -60239,7 +61013,23 @@
       ],
       "equipment": [],
       "id": "ST040",
-      "images": [],
+      "images": [
+        {
+          "alt": "A seated adult sits tall with feet grounded, hands resting on thighs, shoulders relaxed, and neck neutral before the posterior neck stretch.",
+          "step": "Tall seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c7009235-a20e-499e-1808-c84d1549b400/public"
+        },
+        {
+          "alt": "The same seated adult places both hands lightly behind the head while keeping the torso upright and jaw relaxed.",
+          "step": "Hands behind head preparation",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ad759e85-3410-4fb3-2366-1b9060e71000/public"
+        },
+        {
+          "alt": "The seated adult lets the hands rest behind the head while the chin lowers gently toward the chest for a mild posterior neck stretch.",
+          "step": "Gentle chin-down hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/93eec008-50f8-4a7f-2283-9c701270a800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -60281,7 +61071,18 @@
       ],
       "equipment": [],
       "id": "ST041",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing adult draws one arm across the chest with the opposite arm while keeping the chest tall and stretch mild.",
+          "step": "Draw arm across chest",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6c382bc6-a8a4-4e07-bed2-afca9ec48200/public"
+        },
+        {
+          "alt": "Standing adult repeats the cross-body shoulder stretch on the other side with support near the elbow and ribs quiet.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4e399ed1-a4c6-40c1-60f2-52f6486dae00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -60324,7 +61125,28 @@
       ],
       "equipment": [],
       "id": "ST042",
-      "images": [],
+      "images": [
+        {
+          "alt": "A standing adult on a mat with feet grounded and arms relaxed before starting the overhead triceps stretch.",
+          "step": "Tall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3aaf222c-57ac-410e-d4a1-12fdb4b3d400/public"
+        },
+        {
+          "alt": "The adult bends one elbow overhead while the other hand gently guides the elbow back for a mild upper-arm stretch.",
+          "step": "Guide the elbow",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9229b3fe-bca9-4858-d0c1-4f0453947f00/public"
+        },
+        {
+          "alt": "The adult mirrors the overhead triceps stretch on the opposite side while standing tall with a calm, steady posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e9da4a6e-7952-43cd-871d-ddc7d8fc7100/public"
+        },
+        {
+          "alt": "The adult holds the overhead triceps stretch with a relaxed neck, stacked ribs, and no forced range.",
+          "step": "Gentle hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f3cc5989-cf67-4f1b-2228-8ebd2b746200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -60369,7 +61191,28 @@
         "Doorway"
       ],
       "id": "ST043",
-      "images": [],
+      "images": [
+        {
+          "alt": "A standing adult faces a simple doorway with feet grounded and arms relaxed, preparing for a doorway chest stretch.",
+          "step": "Ready stance beside doorway",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cce0576b-828b-49a0-d17e-8223bc077800/public"
+        },
+        {
+          "alt": "The same adult stands beside the doorway with one forearm and palm supported on the frame, shoulder relaxed and torso tall.",
+          "step": "Forearm placement",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fe60cae5-5eee-40ee-aa7b-f906d4abc500/public"
+        },
+        {
+          "alt": "The adult steps one foot through the doorway with the forearm anchored on the frame, turning gently away to open the chest without flaring the ribs.",
+          "step": "Gentle step-through hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/540bc96c-d1c4-41ee-4bbf-56c2df1dba00/public"
+        },
+        {
+          "alt": "The adult mirrors the doorway chest stretch on the other side, forearm supported on the opposite frame and torso turned gently away.",
+          "step": "Mirror side stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9db7e803-668e-477b-b070-9dfc5ddd3800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -62114,7 +62957,28 @@
         "Towel"
       ],
       "id": "ST071",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing adult holds a towel at lower chest height with elbows tucked and ribs stacked before starting the shoulder external rotation stretch.",
+          "step": "Towel setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/78d7eb11-86a4-43f4-dcee-6c920fe86500/public"
+        },
+        {
+          "alt": "Standing adult uses the towel to guide one forearm outward while the elbow stays close to the ribs.",
+          "step": "Open one forearm",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/121f49de-b5f5-40c3-0b12-327d88642e00/public"
+        },
+        {
+          "alt": "Standing adult repeats the towel-guided external rotation stretch on the opposite shoulder with the elbow kept by the side.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2c9f3da3-dc59-4b3a-8303-e522a5c32700/public"
+        },
+        {
+          "alt": "Standing adult uses a wider towel grip and smaller range to keep the shoulder stretch mild and free of pinching.",
+          "step": "Comfort range check",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bf19592c-d0cf-4329-b03a-738c14229000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -62158,7 +63022,28 @@
       ],
       "equipment": [],
       "id": "ST072",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lies on one side with the head supported, hips stacked, and the working elbow bent to 90 degrees for the sleeper stretch.",
+          "step": "Side-lying setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8cae971c-83cd-4947-4012-ea3213e73500/public"
+        },
+        {
+          "alt": "Adult gently guides the forearm toward the floor while staying side-lying with ribs quiet and hips stacked.",
+          "step": "Guide forearm down",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/172e7c94-721e-4fcb-9738-b8a04c54d300/public"
+        },
+        {
+          "alt": "Adult holds an easy sleeper stretch range with mild shoulder tension and steady side-lying alignment.",
+          "step": "Easy range",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2fc25344-d754-4cbe-781c-cf45df2d7000/public"
+        },
+        {
+          "alt": "Adult repeats the sleeper stretch on the opposite side with the same slow range and stacked hips.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b59da8a4-4be6-4904-e348-73481acd2600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -62203,7 +63088,23 @@
         "Table or counter"
       ],
       "id": "ST073",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing side-on with both hands supported on a stable counter before beginning a tabletop shoulder stretch.",
+          "step": "Set hands",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0c6224c2-13d0-42d5-13d8-e4f462c01800/public"
+        },
+        {
+          "alt": "Adult in a tabletop shoulder stretch with hips walked back, arms long on the counter, and ribs controlled.",
+          "step": "Hips back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dfdd7a9c-b79c-4062-ebbd-fed6be711600/public"
+        },
+        {
+          "alt": "Adult holding a tabletop shoulder stretch with a soft chest and calm rib breathing, ready to walk back toward the counter.",
+          "step": "Breathe and return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b175bf5c-b84e-4f03-28f6-374c6e7d4700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -62249,7 +63150,18 @@
         "Chair"
       ],
       "id": "ST074",
-      "images": [],
+      "images": [
+        {
+          "alt": "A barefoot adult stands behind a sturdy chair with both hands on the chair back, feet hip-width, and chest tall before the stretch.",
+          "step": "Stable chair setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a8a47b59-409d-4138-9771-82635e958000/public"
+        },
+        {
+          "alt": "A barefoot adult holds a chair back with both hands, hinges the hips back, lengthens the arms, and lets the chest drop gently between the arms.",
+          "step": "Hinge and shoulder hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1f7f171a-c851-4fa4-e2d0-8bcaf7cfc000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -62293,7 +63205,23 @@
       ],
       "equipment": [],
       "id": "ST075",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult starts Puppy Pose on all fours with hands planted under shoulders, knees under hips, and a long neutral spine on a mat.",
+          "step": "Tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f4e082a1-89a6-4d75-0b31-a4e6d137cf00/public"
+        },
+        {
+          "alt": "The adult walks both hands forward on the floor while the hips shift back, arms lengthen, and ribs stay controlled.",
+          "step": "Reach and shift back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8aaa392b-2000-4a3c-a3a8-e06a2bb7d800/public"
+        },
+        {
+          "alt": "The adult holds Puppy Pose with arms long, knees grounded, hips high, and chest softening toward the floor while breathing wide.",
+          "step": "Soft chest hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/37c99840-512c-4eba-4162-a02bb2f3e100/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -62338,7 +63266,23 @@
         "Wall"
       ],
       "id": "ST076",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing on a mat facing a wall with both hands planted on the wall and feet hip-width, with callouts for wall contact, rib position, and foot stance.",
+          "step": "Setup on wall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/96c605dd-a7c8-4401-6bc9-72d853afa000/public"
+        },
+        {
+          "alt": "Adult hinges back from the wall with arms long, hips moving back, and knees softly bent, with muted olive instructional callouts.",
+          "step": "Walk hips back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/73154a3d-fc83-4361-f356-ffe9ebe92800/public"
+        },
+        {
+          "alt": "Adult holds a standing wall lat stretch with arms extended on the wall, chest softening down, ribs controlled, and a breathing cue shown.",
+          "step": "Hold and breathe",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/11241a62-9826-4811-1833-d87428aea700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -62384,7 +63328,28 @@
         "Wall"
       ],
       "id": "ST077",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult stands on a mat beside a wall with one palm planted at shoulder height, knees soft, chest tall, and the other arm relaxed.",
+          "step": "Wall hand setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/613b97ad-65ba-4bd1-6d12-3263d277ca00/public"
+        },
+        {
+          "alt": "The same adult keeps one palm on the wall and walks the hips back so the arm stays long, the torso hinges forward, and the side ribs can breathe.",
+          "step": "Hips-back reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c2a579f5-8b76-4b0d-8c55-2b91fda8e300/public"
+        },
+        {
+          "alt": "The adult holds the single-arm wall lat stretch with ribs controlled, shoulder easy, spine long, and mild tension through the side body.",
+          "step": "Controlled rib hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9de6050e-9775-41a2-ea92-b7850434d800/public"
+        },
+        {
+          "alt": "The adult mirrors the stretch on the opposite side with the other palm on the wall, hips back, long reach, and the free arm relaxed.",
+          "step": "Switch-side stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e45be1d9-14a2-4139-5982-ff386fce3300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -62428,7 +63393,28 @@
       ],
       "equipment": [],
       "id": "ST078",
-      "images": [],
+      "images": [
+        {
+          "alt": "Gender-neutral adult lies on one side on a sand mat with knees stacked, the bottom arm supporting the head, the top hand near the chest, and callouts for bottom arm support, quiet ribs, and stacked hips.",
+          "step": "Side-lying setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9c84660e-fd2c-417f-285e-09866a342000/public"
+        },
+        {
+          "alt": "Adult remains side-lying while the top arm reaches overhead along the floor, knees stay stacked, and callouts highlight reaching long, breathing wide, and mild stretch tension.",
+          "step": "Top-arm reach hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/18c67d90-1dd9-4f55-b7df-9b10d7699000/public"
+        },
+        {
+          "alt": "The same adult is mirrored onto the other side in side-lying setup with the top hand near the chest, hips stacked, ribs quiet, and a switch-sides cue.",
+          "step": "Opposite-side setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a6373808-f477-4d03-242c-343132cf5100/public"
+        },
+        {
+          "alt": "The same adult holds the side-lying lat stretch on the opposite side with the top arm reaching overhead and callouts for breathing wide, reaching long, and mild tension.",
+          "step": "Opposite-side reach hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/13a335d7-bccb-4085-b293-f9fbcfcd5b00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -62473,7 +63459,23 @@
         "Chair"
       ],
       "id": "ST079",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult kneels on a sand mat facing a chair with elbows and forearms supported on the chair seat, chest tall, and hips over knees.",
+          "step": "Supported kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/09f185a2-307f-40bb-d4a6-59a452e99f00/public"
+        },
+        {
+          "alt": "Adult keeps elbows supported on the chair while gliding hips back toward the heels and lengthening the arms and upper back.",
+          "step": "Hips glide back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0a67597b-6c9b-4840-3671-7c6915e1c400/public"
+        },
+        {
+          "alt": "Adult holds the kneeling lat prayer stretch with hips back, arms long on the chair, chest softening, and ribs controlled.",
+          "step": "Quiet rib hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b70addf8-1e88-4eb8-5793-0be509aa1800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -62518,7 +63520,23 @@
         "Foam roller or rolled towel"
       ],
       "id": "ST080",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person lies supine lengthwise on a foam roller with head supported, knees bent, and feet flat on a mat.",
+          "step": "Supported setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6e7b714e-3efb-468e-a0f0-85a320030100/public"
+        },
+        {
+          "alt": "Person lies lengthwise on the foam roller with both arms opened to the sides for a gentle chest stretch.",
+          "step": "Open and breathe",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c831e1cb-f444-4937-7fd8-390e8a234100/public"
+        },
+        {
+          "alt": "Person brings both arms back in over the chest while staying supported on the foam roller before rolling off carefully.",
+          "step": "Return before rolling off",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/965645a0-5477-481c-a023-7f32f3553800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -62561,7 +63579,23 @@
       ],
       "equipment": [],
       "id": "ST081",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult lies on their back on a mat with knees bent, feet planted, ribs relaxed, and palms facing up beside the torso before the cactus stretch.",
+          "step": "Relaxed supine setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e7296433-22e9-4365-31a4-e1715d618e00/public"
+        },
+        {
+          "alt": "The same adult lies supine with elbows bent at shoulder height, palms facing up, chest gently open, and ribs relaxed down.",
+          "step": "Cactus-arm hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b7637eae-092a-4cd5-a547-4b762b658000/public"
+        },
+        {
+          "alt": "The same adult holds the supine cactus stretch with a mild shoulder and chest stretch, no pinching, and ribs staying down.",
+          "step": "Comfortable range check",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e4734440-d347-48bf-02dd-094fa1cbc600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -62604,7 +63638,23 @@
       ],
       "equipment": [],
       "id": "ST082",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lies on their back with knees bent and feet planted, ribs relaxed, and arms resting near the body before opening into a T.",
+          "step": "Settle supine",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0bcffbc7-18fa-4d57-6dd7-8a3b8823dd00/public"
+        },
+        {
+          "alt": "Adult lies supine with knees bent while both arms open slowly outward toward shoulder height for a mild chest stretch.",
+          "step": "Open to T",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/28425f9b-cf57-4ce4-b306-047679682000/public"
+        },
+        {
+          "alt": "Adult holds a supine T stretch with arms extended at shoulder height, shoulders relaxed, and breathing focused into the chest.",
+          "step": "Breathe and hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/13544740-0d90-4879-42af-117524d9ed00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -62647,7 +63697,28 @@
       ],
       "equipment": [],
       "id": "ST083",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lies face down on a mat with one arm bent in a cactus shape and the opposite hand ready to help roll the torso.",
+          "step": "Cactus setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/997004dc-665c-4f88-98dc-3cbfa1828300/public"
+        },
+        {
+          "alt": "Adult keeps the cactus arm grounded while using the opposite hand to gently roll the chest away for a front-shoulder stretch.",
+          "step": "Gentle chest roll",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/04c0a7f7-da1d-49fa-53e4-38e6d61cff00/public"
+        },
+        {
+          "alt": "Adult returns the torso to the center slowly while staying low on the mat before changing sides.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/16cc1949-b686-4b5a-2fb5-a2299ed6b300/public"
+        },
+        {
+          "alt": "Adult switches the cactus arm to the opposite side and gently rolls away with controlled ribs and hips.",
+          "step": "Opposite-side stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a8c03cc6-9ba8-489c-0571-79f53330ac00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
