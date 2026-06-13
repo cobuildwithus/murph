@@ -73,6 +73,7 @@ export interface MetricRowEvidence {
   sourceFamily?: MetricSourceFamily;
   sourceKind: MetricSourceKind;
   sourceLabel: string | null;
+  suppressionRecordIds?: readonly string[];
   unit: string | null;
   value: number | null;
 }
@@ -326,12 +327,13 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
   const value = readNumber(entity.attributes.value);
   const unit = readString(entity.attributes.unit);
   if (!metric || value === null) return [];
+  if (isDeletionSentinelObservation(entity, metric)) return [];
 
   // Daily provider summaries (observationGrain "summary") are day-grain
-  // facts; other grains keep the event default. The raw observationGrain
-  // is preserved in context either way so read paths can distinguish
-  // samples, compact summaries, and derived facts.
-  const observationGrain = readString(entity.attributes.observationGrain);
+  // facts; other grains keep the event default. Legacy shared-normalizer
+  // provider rows can lack observationGrain, so importer-shaped daily
+  // resources infer the same summary grain from dayKey + externalRef.
+  const observationGrain = resolveObservationGrain(entity);
 
   return [scalarMetricPoint({
     confidence: eventConfidence(entity),
@@ -340,7 +342,7 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
       qualifiers: readQualifiers(entity.attributes.qualifiers),
       timeZone: readString(entity.attributes.timeZone) ?? undefined,
     },
-    grain: observationGrain === "summary" ? "day" : undefined,
+    grain: isDayGrainObservation(observationGrain) ? "day" : undefined,
     // Canonical dayKey wins over the UTC slice of occurredAt: daily and
     // sleep observations are dated by their local/sleep day (the same
     // invariant deriveWearableDate uses), so precedence and date-filtered
@@ -353,6 +355,56 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
     unit,
     value,
   })];
+}
+
+function isDeletionSentinelObservation(entity: CanonicalEntity, metric: string): boolean {
+  return normalizeMetricKey(metric) === "external-resource-deleted"
+    || readBoolean(entity.attributes.deleted) === true;
+}
+
+function resolveObservationGrain(entity: CanonicalEntity): string | null {
+  return readString(entity.attributes.observationGrain) ?? inferLegacyProviderSummaryObservationGrain(entity);
+}
+
+function isDayGrainObservation(observationGrain: string | null): boolean {
+  if (!observationGrain) {
+    return false;
+  }
+  const normalized = observationGrain.trim().toLowerCase().replace(/_/gu, "-");
+  return normalized === "summary"
+    || normalized === "day"
+    || normalized === "daily-summary"
+    || normalized === "daily-timeseries-aggregate";
+}
+
+function inferLegacyProviderSummaryObservationGrain(entity: CanonicalEntity): string | null {
+  if (readString(entity.attributes.source) !== "device" || !readString(entity.attributes.dayKey)) {
+    return null;
+  }
+
+  const externalRef = readRecord(entity.attributes.externalRef);
+  const system = readString(externalRef?.system)?.toLowerCase() ?? null;
+  const resourceType = readString(externalRef?.resourceType)
+    ?.toLowerCase()
+    .replace(/_/gu, "-") ?? null;
+  if (!system || !resourceType) {
+    return null;
+  }
+
+  if (resourceType.startsWith("daily-") || resourceType.includes("-daily-")) {
+    return "summary";
+  }
+
+  if ((system === "oura" || system === "whoop") && (
+    resourceType === "body-measurement"
+    || resourceType === "cycle"
+    || resourceType === "recovery"
+    || resourceType === "sleep"
+  )) {
+    return "summary";
+  }
+
+  return null;
 }
 
 function measurementMetricPoints(entity: CanonicalEntity, sourceKind: MetricSourceKind): MetricPoint[] {
@@ -581,6 +633,10 @@ function readNumber(value: unknown): number | null {
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
 }
 
 function readJson(value: unknown): unknown | null {

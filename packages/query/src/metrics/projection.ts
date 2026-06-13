@@ -50,7 +50,7 @@ export function buildMetricProjection(
   });
   return {
     dailySampleSummaries,
-    metricPoints: applyWearableSummaryMetricPrecedence(metricPoints),
+    metricPoints: applyWearableSummaryMetricPrecedence(metricPoints, wearableMetricRows),
     wearableMetricRows,
   };
 }
@@ -157,25 +157,24 @@ function summaryMetricEvidence<TField extends string>(
 // stay, and the metric selector's established sourcePriority chooses
 // between them at selection time — table order here must never decide
 // data retention.
-function applyWearableSummaryMetricPrecedence(points: readonly MetricPoint[]): MetricPoint[] {
-  const contributingByDay = new Map<string, Set<string>>();
+function applyWearableSummaryMetricPrecedence(
+  points: readonly MetricPoint[],
+  wearableMetricRows: readonly MetricRowEvidence[],
+): MetricPoint[] {
+  const suppressionIdsByDay = new Map<string, Set<string>>();
 
-  for (const point of points) {
-    if (!isWearableSummaryMetricPoint(point)) {
+  for (const row of wearableMetricRows) {
+    if (!isWearableSummaryMetricRow(row)) {
       continue;
     }
-    const contributingRecordIds = point.context.contributingRecordIds;
-    if (!Array.isArray(contributingRecordIds)) {
-      continue;
-    }
-    const dayKey = metricPointDayKey(point);
-    const recordIds = contributingByDay.get(dayKey) ?? new Set<string>();
-    for (const recordId of contributingRecordIds) {
+    const dayKey = metricDayKey(resolveMetricInputKey(row.metricKey), row.date);
+    const recordIds = suppressionIdsByDay.get(dayKey) ?? new Set<string>();
+    for (const recordId of row.suppressionRecordIds ?? row.recordIds) {
       if (typeof recordId === "string") {
         recordIds.add(recordId);
       }
     }
-    contributingByDay.set(dayKey, recordIds);
+    suppressionIdsByDay.set(dayKey, recordIds);
   }
 
   return points.filter((point) => {
@@ -183,22 +182,25 @@ function applyWearableSummaryMetricPrecedence(points: readonly MetricPoint[]): M
       return true;
     }
 
-    // Suppression is by contribution: every record the resolver considered
-    // (winning AND losing candidates, across all summary kinds for the
-    // day) resolves into a summary point, while manual/independent entries
-    // — never candidates — survive as provenance-distinct facts (hiding
-    // them would violate the capture posture).
-    return !contributingByDay.get(metricPointDayKey(point))?.has(point.source.recordId);
+    // Suppression uses resolver-candidate IDs, not public provenance IDs.
+    // Losing provider candidates can suppress their raw observation point
+    // without making the selected summary value advertise that losing
+    // record as part of its provenance.
+    return !suppressionIdsByDay.get(metricPointDayKey(point))?.has(point.source.recordId);
   });
 }
 
-function isWearableSummaryMetricPoint(point: MetricPoint): boolean {
-  return point.source.family === "derived"
-    && WEARABLE_SUMMARY_METRIC_SOURCE_KEYS.has(`${point.metricKey}\0${point.source.kind}`);
+function isWearableSummaryMetricRow(row: MetricRowEvidence): boolean {
+  return (row.sourceFamily ?? "derived") === "derived"
+    && WEARABLE_SUMMARY_METRIC_SOURCE_KEYS.has(`${resolveMetricInputKey(row.metricKey)}\0${row.sourceKind}`);
 }
 
 function metricPointDayKey(point: MetricPoint): string {
-  return `${point.metricKey}\0${point.effectiveDate}`;
+  return metricDayKey(point.metricKey, point.effectiveDate);
+}
+
+function metricDayKey(metricKey: string, date: string): string {
+  return `${metricKey}\0${date.slice(0, 10)}`;
 }
 
 function metricEvidence(
@@ -216,18 +218,18 @@ function metricEvidence(
     ...(sourceCandidate?.paths ?? []),
   ]);
   const syntheticRecordId = `${sourceKind}:${metricKey}:${date}`;
-  // Every candidate the resolver considered counts as contributing — the
-  // summary point is the resolved answer for ALL of them, so losing
-  // multi-provider candidates suppress alongside the winner. (Candidates
-  // are populated here because evidence is built from the in-memory bundle
-  // at rebuild time; the stored codec strips them only on the read path.)
-  // Manual/independent entries are never candidates and survive.
+  // Public provenance stays limited to the selected/source record IDs.
+  // Suppression has its own internal ID list below so losing candidates can
+  // suppress raw duplicates without corrupting anchored experiment evidence.
   const contributingRecordIds = uniqueStrings([
     ...selection.recordIds,
     ...(sourceCandidate?.recordIds ?? []),
-    ...resolved.candidates.flatMap((candidate) => candidate.recordIds),
   ]);
   const recordIds = contributingRecordIds.length > 0 ? contributingRecordIds : [syntheticRecordId];
+  const suppressionRecordIds = uniqueStrings([
+    ...contributingRecordIds,
+    ...resolved.candidates.flatMap((candidate) => candidate.recordIds),
+  ]);
 
   return {
     confidence: resolved.confidence.level === "none" ? confidence : resolved.confidence.level,
@@ -251,6 +253,7 @@ function metricEvidence(
     sourceFamily: "derived",
     sourceKind,
     sourceLabel: provider ? formatProviderName(provider) : sourceCandidate?.title ?? "Wearable summary",
+    suppressionRecordIds,
     unit: selection.unit ?? sourceCandidate?.unit ?? null,
     value: selection.value,
   };
