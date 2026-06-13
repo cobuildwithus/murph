@@ -18,9 +18,12 @@ import {
 } from "../src/projection/wearable-summary-stored-codec.ts";
 
 function candidate(input: {
+  dataOrigin?: WearableMetricCandidate["dataOrigin"];
   date: string;
   provider: string;
   metric: string;
+  resourceType?: string;
+  system?: string;
   value: number;
   unit?: string | null;
   facet: string;
@@ -28,12 +31,13 @@ function candidate(input: {
 }): WearableMetricCandidate {
   return {
     candidateId: `${input.provider}:${input.facet}:${input.date}${input.suffix ?? ""}`,
+    dataOrigin: input.dataOrigin,
     date: input.date,
     externalRef: {
       facet: input.facet,
       resourceId: `${input.facet}-${input.date}${input.suffix ?? ""}`,
-      resourceType: "daily_summary",
-      system: input.provider,
+      resourceType: input.resourceType ?? "daily_summary",
+      system: input.system ?? input.provider,
       version: null,
     },
     metric: input.metric,
@@ -50,29 +54,35 @@ function candidate(input: {
   };
 }
 
-function sleepWindow(provider: string, date: string): WearableSleepWindowCandidate {
+function sleepWindow(
+  provider: string,
+  date: string,
+  overrides: Partial<WearableSleepWindowCandidate> = {},
+): WearableSleepWindowCandidate {
   return {
-    candidateId: `${provider}:sleep-window:${date}`,
+    candidateId: overrides.candidateId ?? `${provider}:sleep-window:${date}`,
     date,
-    durationMinutes: 432,
-    endAt: `${date}T06:42:00.000Z`,
+    durationMinutes: overrides.durationMinutes ?? 432,
+    endAt: overrides.endAt ?? `${date}T06:42:00.000Z`,
+    dataOrigin: overrides.dataOrigin ?? null,
     externalRef: {
       facet: "sleep-window",
       resourceId: `sleep-${date}`,
       resourceType: "sleep",
       system: provider,
       version: null,
+      ...overrides.externalRef,
     },
-    nap: false,
-    occurredAt: `${date}T06:42:00.000Z`,
-    paths: [`ledger/events/2026/${date.slice(0, 7)}.jsonl`],
+    nap: overrides.nap ?? false,
+    occurredAt: overrides.occurredAt ?? `${date}T06:42:00.000Z`,
+    paths: overrides.paths ?? [`ledger/events/2026/${date.slice(0, 7)}.jsonl`],
     provider,
-    recordedAt: `${date}T07:01:00.000Z`,
-    recordIds: [`evt_${provider}_sleep_${date}`],
-    sourceFamily: "event",
-    sourceKind: "sleep-window",
-    startAt: `${date}T23:08:00.000Z`,
-    title: `${provider} sleep`,
+    recordedAt: overrides.recordedAt ?? `${date}T07:01:00.000Z`,
+    recordIds: overrides.recordIds ?? [`evt_${provider}_sleep_${date}`],
+    sourceFamily: overrides.sourceFamily ?? "event",
+    sourceKind: overrides.sourceKind ?? "sleep-window",
+    startAt: overrides.startAt ?? `${date}T23:08:00.000Z`,
+    title: overrides.title ?? `${provider} sleep`,
   };
 }
 
@@ -168,6 +178,286 @@ test("stored wearable summary codec round-trips summaries byte-exactly", () => {
       }
     }
   }
+});
+
+test("compose preserves stored same-public provider conflict evidence", () => {
+  const date = "2026-05-03";
+  const dataset: WearableDataset = {
+    activitySessionAggregates: [],
+    metricCandidates: [
+      candidate({
+        date,
+        facet: "steps",
+        metric: "steps",
+        provider: "garmin",
+        unit: "count",
+        value: 8_000,
+      }),
+      candidate({
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          version: 1,
+        },
+        date,
+        facet: "steps",
+        metric: "steps",
+        provider: "junction",
+        resourceType: "junction-garmin-activity",
+        suffix: ":junction",
+        system: "junction",
+        unit: "count",
+        value: 9_000,
+      }),
+    ],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [],
+    sleepWindows: [],
+  };
+  const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  const composed = composePublicWearableSummaryBundleFromStoredRows({
+    providerFilterWasProvided: false,
+    providers: [],
+    rows,
+  }, {});
+  const steps = composed.activityDays.find((summary) => summary.date === date)?.steps;
+
+  assert.ok(steps);
+  assert.deepEqual(steps.confidence.conflictingProviders, ["garmin"]);
+  assert.equal(steps.confidence.level, "medium");
+  assert.equal(
+    steps.confidence.reasons.some((reason) =>
+      reason === "Duplicate evidence from Garmin disagreed after source reconciliation."
+    ),
+    true,
+  );
+  assert.deepEqual(steps.candidates, []);
+  assert.equal(
+    composed.activityDays[0]?.summaryConfidence.conflictingMetrics.includes("steps"),
+    true,
+  );
+  assert.equal(composed.sourceHealth.find((summary) => summary.provider === "garmin")?.conflictCount, 1);
+
+  const garminRows = rows.filter((row) => row.providerScopeKey === "providers:garmin");
+  const garminOnly = composePublicWearableSummaryBundleFromStoredRows({
+    providerFilterWasProvided: true,
+    providers: ["garmin"],
+    rows: garminRows,
+  }, {});
+  const garminOnlySteps = garminOnly.activityDays.find((summary) => summary.date === date)?.steps;
+
+  assert.ok(garminOnlySteps);
+  assert.deepEqual(garminOnlySteps.confidence.conflictingProviders, ["garmin"]);
+  assert.equal(
+    garminOnlySteps.confidence.reasons.some((reason) => reason.includes("Junction")),
+    false,
+  );
+});
+
+test("compose preserves non-selected provider same-public conflict evidence", () => {
+  const date = "2026-05-03";
+  const dataset: WearableDataset = {
+    activitySessionAggregates: [],
+    metricCandidates: [
+      candidate({
+        date,
+        facet: "steps",
+        metric: "steps",
+        provider: "garmin",
+        unit: "count",
+        value: 8_000,
+      }),
+      candidate({
+        date,
+        facet: "steps",
+        metric: "steps",
+        provider: "oura",
+        suffix: ":direct",
+        unit: "count",
+        value: 8_050,
+      }),
+      candidate({
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "oura",
+          sourceType: "ring",
+          version: 1,
+        },
+        date,
+        facet: "steps",
+        metric: "steps",
+        provider: "junction",
+        resourceType: "junction-oura-activity",
+        suffix: ":junction",
+        system: "junction",
+        unit: "count",
+        value: 8_500,
+      }),
+    ],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [],
+    sleepWindows: [],
+  };
+  const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  const composed = composePublicWearableSummaryBundleFromStoredRows({
+    providerFilterWasProvided: false,
+    providers: [],
+    rows,
+  }, {});
+  const activity = composed.activityDays.find((summary) => summary.date === date);
+
+  assert.ok(activity);
+  assert.equal(activity.steps.selection.provider, "garmin");
+  assert.deepEqual(activity.steps.confidence.conflictingProviders, ["oura"]);
+  assert.equal(activity.steps.confidence.level, "medium");
+  assert.equal(
+    activity.steps.confidence.reasons.some((reason) =>
+      reason === "Duplicate evidence from Oura disagreed after source reconciliation."
+    ),
+    true,
+  );
+  assert.equal(activity.summaryConfidence.conflictingMetrics.includes("steps"), true);
+  assert.equal(composed.sourceHealth.find((summary) => summary.provider === "garmin")?.conflictCount, 1);
+  assert.equal(composed.sourceHealth.find((summary) => summary.provider === "oura")?.conflictCount, 1);
+});
+
+test("compose recomputes source health and summary notes after stored conflicts are merged", () => {
+  const date = "2026-05-03";
+  const dataset: WearableDataset = {
+    activitySessionAggregates: [],
+    metricCandidates: [
+      candidate({
+        date,
+        facet: "steps",
+        metric: "steps",
+        provider: "garmin",
+        unit: "count",
+        value: 8_000,
+      }),
+      candidate({
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          version: 1,
+        },
+        date,
+        facet: "steps",
+        metric: "steps",
+        provider: "junction",
+        resourceType: "junction-garmin-activity",
+        suffix: ":junction",
+        system: "junction",
+        unit: "count",
+        value: 9_000,
+      }),
+      candidate({
+        date,
+        facet: "active-calories",
+        metric: "activeCalories",
+        provider: "garmin",
+        unit: "kcal",
+        value: 500,
+      }),
+      candidate({
+        date,
+        facet: "active-calories",
+        metric: "activeCalories",
+        provider: "oura",
+        suffix: ":oura",
+        unit: "kcal",
+        value: 650,
+      }),
+    ],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [],
+    sleepWindows: [],
+  };
+  const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  const composed = composePublicWearableSummaryBundleFromStoredRows({
+    providerFilterWasProvided: false,
+    providers: [],
+    rows,
+  }, {});
+  const activity = composed.activityDays.find((summary) => summary.date === date);
+  const garminSourceHealth = composed.sourceHealth.find((summary) => summary.provider === "garmin");
+  const ouraSourceHealth = composed.sourceHealth.find((summary) => summary.provider === "oura");
+
+  assert.ok(activity);
+  assert.deepEqual(activity.steps.confidence.conflictingProviders, ["garmin"]);
+  assert.deepEqual(activity.activeCalories.confidence.conflictingProviders, ["oura"]);
+  assert.equal(garminSourceHealth?.conflictCount, 2);
+  assert.equal(ouraSourceHealth?.conflictCount, 1);
+
+  const conflictNotes = activity.summaryConfidence.notes.filter((note) =>
+    note.startsWith("Some metrics still conflict across providers:")
+  );
+  assert.equal(conflictNotes.length, 1);
+  assert.equal(conflictNotes[0]?.includes("Steps"), true);
+  assert.match(conflictNotes[0] ?? "", /active calories/iu);
+});
+
+test("compose preserves stored same-public sleep-window conflict evidence", () => {
+  const date = "2026-05-04";
+  const dataset: WearableDataset = {
+    activitySessionAggregates: [],
+    metricCandidates: [],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [],
+    sleepWindows: [
+      sleepWindow("garmin", date, {
+        candidateId: "garmin:sleep-window:direct",
+        durationMinutes: 480,
+        title: "Garmin direct sleep",
+      }),
+      sleepWindow("junction", date, {
+        candidateId: "junction:garmin:sleep-window",
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          version: 1,
+        },
+        durationMinutes: 420,
+        externalRef: {
+          facet: "sleep-window",
+          resourceId: "junction-garmin-sleep-window",
+          resourceType: "junction-garmin-sleep",
+          system: "junction",
+          version: null,
+        },
+        title: "Junction Garmin sleep",
+      }),
+    ],
+  };
+  const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  const composed = composePublicWearableSummaryBundleFromStoredRows({
+    providerFilterWasProvided: false,
+    providers: [],
+    rows,
+  }, {});
+  const sleep = composed.sleepNights.find((summary) => summary.date === date);
+
+  assert.ok(sleep);
+  assert.deepEqual(sleep.sessionMinutes.confidence.conflictingProviders, ["garmin"]);
+  assert.deepEqual(sleep.timeInBedMinutes.confidence.conflictingProviders, ["garmin"]);
+  assert.equal(sleep.sessionMinutes.confidence.level, "medium");
+  assert.equal(
+    sleep.sessionMinutes.confidence.reasons.some((reason) =>
+      reason === "Duplicate evidence from Garmin disagreed after source reconciliation."
+    ),
+    true,
+  );
+  assert.equal(sleep.summaryConfidence.conflictingMetrics.includes("sessionMinutes"), true);
+  assert.equal(sleep.summaryConfidence.conflictingMetrics.includes("timeInBedMinutes"), true);
+  assert.equal(
+    sleep.notes.some((note) =>
+      note === "Duplicate sleep-window evidence from Garmin disagreed after source reconciliation."
+    ),
+    true,
+  );
+  assert.equal(composed.sourceHealth.find((summary) => summary.provider === "garmin")?.conflictCount, 2);
 });
 
 test("stored wearable summary codec round-trips conflict, duplicate, and fallback envelopes", () => {

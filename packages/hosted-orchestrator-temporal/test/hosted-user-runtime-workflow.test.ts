@@ -17,8 +17,59 @@ import {
 const BASE_TIME_MS = Date.parse("2026-05-20T12:00:00.000Z");
 
 describe("hostedUserRuntimeWorkflow loop", () => {
-  it("runs Cloudflare execution directly after a fresh mailbox signal", async () => {
+  it("reads reconciliation facts before executing a fresh mailbox signal", async () => {
     const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      mailboxLag: [mailboxLag({ lane: "conversation" })],
+    }));
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.reconciliationRequests).toEqual([{ userId: "member_test" }]);
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        userId: "member_test",
+      },
+    ]);
+    expect(continued.state?.mailboxSignalCount).toBe(0);
+    expect(continued.state?.latestMailboxPointer).toBeNull();
+    expect(continued.state?.lastReconciliationStatus).toBe("work_pending");
+    expect(continued.state?.lastMailboxLagLaneCount).toBe(1);
+  });
+
+  it("reads reconciliation facts before executing fresh system mailbox signals", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      mailboxLag: [mailboxLag({ lane: "system" })],
+    }));
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal({
+      lane: "system",
+      mailboxItemId: "mailbox_system_test",
+    }));
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.reconciliationRequests).toEqual([{ userId: "member_test" }]);
+    expect(runtime.executionRequests).toHaveLength(1);
+  });
+
+  it("keeps legacy direct mailbox execution for histories without the reconciliation-first patch", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.reconciliationBeforeMailboxProcessing = false;
     runtime.executions.push(processingAccepted());
 
     const machine = createMachine(runtime, {
@@ -52,6 +103,9 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       machine.applySignal(runtimeRecheckSignal());
       throw new Error("cloudflare unavailable");
     });
+    runtime.facts.push(reconciliationFacts({
+      mailboxLag: [mailboxLag({ lane: "conversation" })],
+    }));
     runtime.facts.push(reconciliationFacts());
     machine.applySignal(mailboxSignal());
 
@@ -59,11 +113,17 @@ describe("hostedUserRuntimeWorkflow loop", () => {
 
     expect(runtime.waits).toEqual([null]);
     expect(runtime.waits).not.toContain(30_000);
-    expect(runtime.reconciliationRequests).toEqual([{ userId: "member_test" }]);
+    expect(runtime.reconciliationRequests).toEqual([
+      { userId: "member_test" },
+      { userId: "member_test" },
+    ]);
   });
 
   it("uses execution retry waits for runtime execution failures marked non-retryable", async () => {
     const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      mailboxLag: [mailboxLag({ lane: "conversation" })],
+    }));
     runtime.executions.push(() => {
       throw nonRetryableError("cloudflare unavailable");
     });
@@ -279,6 +339,7 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   readonly executions: Array<ExecutionHandler | HostedRuntimeEnsureProcessingResponse> = [];
   now = BASE_TIME_MS;
   onWait: (() => void) | null = null;
+  reconciliationBeforeMailboxProcessing = true;
   suggestContinueAsNew = false;
   historyLength = 0;
   readonly waits: Array<number | null> = [];
@@ -310,6 +371,10 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
 
   nowMs(): number {
     return this.now;
+  }
+
+  reconciliationBeforeMailboxProcessingEnabled(): boolean {
+    return this.reconciliationBeforeMailboxProcessing;
   }
 
   async readRuntimeReconciliationFacts(
@@ -411,11 +476,14 @@ function legacyDirectSignalKinds(): string[] {
   ];
 }
 
-function mailboxLag() {
+function mailboxLag(input: {
+  lane?: "conversation" | "system";
+} = {}) {
+  const lane = input.lane ?? "conversation";
   return {
     importedSeq: "0",
     lag: "1",
-    lane: "conversation" as const,
+    lane,
     maxSeq: "1",
     maxUpdatedAt: isoAfter(-30_000),
   };

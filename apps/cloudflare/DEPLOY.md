@@ -137,10 +137,14 @@ Hosted crypto authority metadata:
 Hosted assistant config:
 
 - `HOSTED_ASSISTANT_PROVIDER`
-- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced launch model, currently `gpt-5.5` or `gpt-5.4-mini` for direct OpenAI. Production deploys must use `gpt-5.5` with `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
+- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires the explicit allowance-priced direct OpenAI launch model `gpt-5.5`. Production deploys must use `gpt-5.5` with `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
+
+When changing hosted assistant model pricing or allowance enforcement, deploy the
+Cloudflare Worker/runner model config before or atomically with the hosted web
+allowance logic so runtime usage callbacks keep using an allowance-priced model.
 
 Opt-in runtime integrations:
 

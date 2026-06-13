@@ -286,6 +286,8 @@ async function runAudioToolchainSmoke(input: {
     input.wavPath,
     "-codec:a",
     "libmp3lame",
+    "-b:a",
+    "64k",
     mp3Path,
   ], { allowEmptyStdout: true });
   const normalizedMp3 = await stat(mp3Path);
@@ -293,9 +295,8 @@ async function runAudioToolchainSmoke(input: {
     throw new Error("Hosted runner smoke ffmpeg MP3 normalization output was empty.");
   }
 
-  // Run the exact production transcription pre-step: ffmpeg-normalize the
-  // compressed audio into the 16 kHz mono WAV the remote transcription
-  // provider uploads.
+  // Exercise the ffmpeg normalization path used when local whisper is available
+  // or the source format is not eligible for remote-only passthrough.
   const { prepareAudioInput } = await loadParsersRuntime();
   const preparedScratchDirectory = path.join(input.scratchRoot, "prepared");
   await ensureScratchDirectory(preparedScratchDirectory);

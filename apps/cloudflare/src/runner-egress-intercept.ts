@@ -77,10 +77,11 @@ const HOSTED_DATA_API_ALLOWED_PATHS = new Set([
 const HOSTED_DATA_API_RUNTIME_HOST =
   new URL(HOSTED_DATA_API_RUNTIME_BASE_URL).hostname;
 const HOSTED_DATA_API_MAX_POST_BODY_BYTES = 32 * 1024;
-// 16 kHz mono PCM WAV is ~1.9 MiB/min; this covers ~8 minutes of prepared
-// audio while keeping body + base64 + inference payload well inside the
-// Worker isolate memory limit. Keep in sync with the parsers
-// remote-transcription provider input cap.
+// 16 kHz mono PCM WAV is ~1.9 MiB/min, so this covers ~8 minutes of the
+// local-whisper WAV normalization path. Remote-only parser sanitization and
+// passthrough use compressed audio and may cover much longer, while this byte
+// cap keeps body + base64 + inference payload inside the Worker isolate memory
+// limit. Keep in sync with the parsers remote-transcription provider input cap.
 const HOSTED_TRANSCRIBE_MAX_BODY_BYTES = 16 * 1024 * 1024;
 const HOSTED_TRANSCRIBE_WORKERS_AI_MODEL = "@cf/openai/whisper-large-v3-turbo";
 const HOSTED_TRANSCRIBE_MAX_SEGMENTS = 10_000;
@@ -131,8 +132,6 @@ const OPENAI_CACHE_DIAGNOSTIC_MODEL_KINDS = new Set([
   "gpt-5.2",
   "gpt-5.3-codex",
   "gpt-5.3-codex-spark",
-  "gpt-5.4",
-  "gpt-5.4-mini",
   "gpt-5.5",
   "o3",
   "o3-mini",

@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberHomeLinqRoute: vi.fn(),
   readHostedLinqDailyState: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
-  resolveHostedAiUsageGate: vi.fn(),
+  checkHostedAiUsageGate: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   sendHostedLinqReadReceipt: vi.fn(),
   nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
@@ -67,7 +67,7 @@ vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
-  resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
+  checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -196,7 +196,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       ...await mocks.nudgeHostedRunnerUserBestEffortResult(input),
       usageGateDenied: false,
     }));
-    mocks.resolveHostedAiUsageGate.mockResolvedValue({
+    mocks.checkHostedAiUsageGate.mockResolvedValue({
       allowed: true,
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 100_000n,
