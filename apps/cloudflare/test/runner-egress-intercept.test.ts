@@ -4846,7 +4846,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     }
   });
 
-  it("rejects empty transcribe bodies and surfaces transcript-less Workers AI output as 502", async () => {
+  it("rejects empty transcribe bodies and surfaces transcript-less Workers AI output as 422", async () => {
     // Workers AI bills every completed run, so transcript-less output must
     // still meter usage even though the transcript response is a 502. Only
     // requests rejected before ai.run record nothing.
@@ -4895,8 +4895,11 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         }),
         { containerId: "opaque-container-id", waitUntil },
       );
-      expect(response.status).toBe(502);
-      expect(await response.text()).toBe("Hosted transcription failed.");
+      // 422 keeps the parser's 5xx retry from re-running a billed run.
+      expect(response.status).toBe(422);
+      expect(await response.text()).toBe(
+        "Hosted transcription returned no usable transcript.",
+      );
     }
 
     await Promise.all(waitUntilPromises);

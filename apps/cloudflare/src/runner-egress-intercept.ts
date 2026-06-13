@@ -880,7 +880,12 @@ async function maybeHandleHostedTranscribeRequest(input: {
       upstreamDurationMs: Date.now() - upstreamStartedAt,
       url: input.url,
     });
-    response = new Response("Hosted transcription failed.", { status: 502 });
+    // 422, not 5xx: the run completed and was billed/metered, and the same
+    // audio would fail the same way again, so the parser's 5xx retry must not
+    // re-run it. Only thrown ai.run calls above return a retryable 502.
+    response = new Response("Hosted transcription returned no usable transcript.", {
+      status: 422,
+    });
   }
 
   // Production containers proxy through a ctx without waitUntil, where a
