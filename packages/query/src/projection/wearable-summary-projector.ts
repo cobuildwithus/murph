@@ -116,7 +116,7 @@ function resolveProjectionPublicProvider(
     externalRef: "externalRef" in input ? input.externalRef : null,
     provider: input.provider,
   }, {
-    useSourceInstanceFallback: false,
+    suppressJunctionSourceInstanceFallback: true,
   });
 }
 
