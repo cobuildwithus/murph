@@ -119,7 +119,7 @@ export async function handleDeployContainerSmokeRoute(
       detail: error instanceof Error ? error.message : String(error),
       error: "Deploy container smoke failed.",
       ok: false,
-    }, isDeployContainerSmokeBundleMismatchError(error) ? 409 : 500);
+    }, readDeployContainerSmokeFailureStatus(error));
   } finally {
     if (directR2Smoke) {
       await deleteDeployContainerDirectR2PresignedPutSmokeObject(context, directR2Smoke.objectKey)
@@ -277,6 +277,26 @@ function isDeployContainerSmokeBundleMismatchError(error: unknown): boolean {
   return error.name === "HostedRunnerContainerSmokeBundleMismatchError"
     || error.message.startsWith("Hosted runner container smoke did not run the expected runner bundle.")
     || error.message.startsWith("Hosted runner container smoke did not return runner bundle metadata.");
+}
+
+function isDeployContainerSmokePreLiveModelTurnError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return error.name === "HostedRunnerContainerPreLiveModelTurnSmokeError"
+    || error.message.startsWith(
+      "Hosted runner container live model turn smoke failed before the live model turn started.",
+    );
+}
+
+function readDeployContainerSmokeFailureStatus(error: unknown): number {
+  if (isDeployContainerSmokeBundleMismatchError(error)) {
+    return 409;
+  }
+  if (isDeployContainerSmokePreLiveModelTurnError(error)) {
+    return 503;
+  }
+  return 500;
 }
 
 export function resolveDeployContainerSmokeObjectName(

@@ -106,6 +106,27 @@ class HostedRunnerContainerSmokeBundleMismatchError extends Error {
   }
 }
 
+class HostedRunnerContainerPreLiveModelTurnSmokeError extends Error {
+  constructor(cause: unknown) {
+    const message = readErrorMessage(cause);
+    super(
+      message
+        ? `Hosted runner container live model turn smoke failed before the live model turn started. ${message}`
+        : "Hosted runner container live model turn smoke failed before the live model turn started.",
+      cause instanceof Error ? { cause } : undefined,
+    );
+    this.name = "HostedRunnerContainerPreLiveModelTurnSmokeError";
+  }
+}
+
+function isHostedRunnerContainerSmokeBundleMismatchError(error: unknown): boolean {
+  return error instanceof HostedRunnerContainerSmokeBundleMismatchError
+    || (
+      error instanceof Error
+      && error.name === "HostedRunnerContainerSmokeBundleMismatchError"
+    );
+}
+
 class HostedRunnerContainerMetadataResponseError extends Error {
   readonly code = "runner_http_error";
   readonly details: HostedExecutionStructuredLogDetails;
@@ -546,6 +567,7 @@ export class RunnerContainer extends Container {
       const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
       let smokeStartAttempted = false;
       let destroyAlreadyRequestedForRecycle = false;
+      let liveModelTurnStarted = false;
 
       try {
         const destroyRequestBeforeRecycle = this.lastDestroyRequest;
@@ -608,9 +630,11 @@ export class RunnerContainer extends Container {
         const directR2PresignedPut = input.directR2PresignedPut
           ? await this.smokeDirectR2PresignedPut(readyTimeoutMs, input.directR2PresignedPut)
           : undefined;
-        const liveModelTurn = input.liveModelTurn
-          ? await this.smokeLiveModelTurn(readyTimeoutMs, input.liveModelTurn)
-          : undefined;
+        let liveModelTurn: HostedExecutionContainerSmokeHealthResult["liveModelTurn"] | undefined;
+        if (input.liveModelTurn) {
+          liveModelTurnStarted = true;
+          liveModelTurn = await this.smokeLiveModelTurn(readyTimeoutMs, input.liveModelTurn);
+        }
 
         return {
           codexShell,
@@ -621,6 +645,15 @@ export class RunnerContainer extends Container {
           service: typeof payload.service === "string" ? payload.service : null,
           status: response.status,
         };
+      } catch (error) {
+        if (
+          input.liveModelTurn
+          && !liveModelTurnStarted
+          && !isHostedRunnerContainerSmokeBundleMismatchError(error)
+        ) {
+          throw new HostedRunnerContainerPreLiveModelTurnSmokeError(error);
+        }
+        throw error;
       } finally {
         if (smokeStartAttempted) {
           await this.stopWarmContainer({

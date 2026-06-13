@@ -1430,6 +1430,60 @@ describe("RunnerContainer", () => {
     });
   });
 
+  it("classifies live model turn smoke setup failures before opening the egress fence", async () => {
+    const { container, containerFetch } = createDeploySmokeContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+          return new Response(JSON.stringify({
+            error: "transient shell setup failure",
+            ok: false,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 503,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-live-model-turn-smoke")) {
+          throw new Error("Live model turn smoke should not run after setup failure.");
+        }
+
+        throw new Error(`Unexpected deploy smoke URL: ${url}`);
+      }),
+      env: {
+        OPENAI_API_KEY: "openai-worker-secret",
+      },
+    });
+
+    const error = await container.smokeHealth({
+      liveModelTurn: {
+        model: "gpt-5.4-nano",
+      },
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).name).toBe("HostedRunnerContainerPreLiveModelTurnSmokeError");
+    expect((error as Error).message).toContain(
+      "failed before the live model turn started",
+    );
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/deploy-live-model-turn-smoke")
+    )).toBe(false);
+    await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
+      active: false,
+    });
+  });
+
   it("skips the live model turn smoke entirely when the input flag is absent", async () => {
     const { container, containerFetch } = createContainerDouble({
       env: {

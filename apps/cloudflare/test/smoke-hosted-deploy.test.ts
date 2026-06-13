@@ -849,6 +849,112 @@ describe("runSmokeHostedDeploy", () => {
     )).toBe(true);
   });
 
+  it("retries pre-live model turn setup failures after runner bundle readiness", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-live-model-pre-live-retry-"));
+    const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        buildSkipped: false,
+        bundleFingerprint: "expected-bundle",
+        sourceFingerprint: "expected-source",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    const fetchCalls: string[] = [];
+    let liveSmokeAttempts = 0;
+    const fetchImpl = async (url: RequestInfo | URL) => {
+      fetchCalls.push(String(url));
+
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+
+      const parsedUrl = new URL(String(url));
+      if (
+        parsedUrl.pathname === "/internal/deploy/container-smoke" &&
+        !parsedUrl.searchParams.has("liveModelTurn")
+      ) {
+        return new Response(JSON.stringify({
+          ok: true,
+          runnerContainer: {
+            codexShell: createCodexShellSmokeResult(),
+            ok: true,
+            runnerBundle: {
+              buildSkipped: false,
+              bundleFingerprint: "expected-bundle",
+              sourceFingerprint: "expected-source",
+            },
+            service: "cloudflare-hosted-runner-node",
+          },
+        }), { status: 200 });
+      }
+
+      if (
+        parsedUrl.pathname === "/internal/deploy/container-smoke" &&
+        parsedUrl.searchParams.get("liveModelTurn") === "gpt-5.4-nano"
+      ) {
+        liveSmokeAttempts += 1;
+        if (liveSmokeAttempts === 1) {
+          return new Response(JSON.stringify({
+            detail:
+              "Hosted runner container live model turn smoke failed before the live model turn started.",
+            error: "Deploy container smoke failed.",
+            ok: false,
+          }), { status: 503 });
+        }
+
+        return new Response(JSON.stringify({
+          ok: true,
+          runnerContainer: {
+            codexShell: createCodexShellSmokeResult(),
+            liveModelTurn: {
+              durationMs: 1_234,
+              egressGrantConsumed: true,
+              model: "gpt-5.4-nano",
+              stdoutBytes: 2_048,
+            },
+            ok: true,
+            runnerBundle: {
+              buildSkipped: false,
+              bundleFingerprint: "expected-bundle",
+              sourceFingerprint: "expected-source",
+            },
+            service: "cloudflare-hosted-runner-node",
+          },
+        }), { status: 200 });
+      }
+
+      throw new Error(`Unexpected smoke request: ${String(url)}`);
+    };
+
+    await runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "2",
+        HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "0",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+    });
+
+    const liveCalls = fetchCalls
+      .map((entry) => new URL(entry))
+      .filter((entry) => entry.searchParams.get("liveModelTurn") === "gpt-5.4-nano");
+    expect(liveCalls).toHaveLength(2);
+  });
+
   it("retries transient HTTP 400 runner container smoke responses", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-http-400-retry-"));
     const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");

@@ -28,6 +28,23 @@ const DEPLOY_LIVE_MODEL_TURN_SMOKE_TOOL_IDENTITIES = [
   "tool_search",
   "web_search",
 ] as const;
+const DEPLOY_LIVE_MODEL_TURN_SMOKE_TOP_LEVEL_KEYS = [
+  "client_metadata",
+  "include",
+  "input",
+  "instructions",
+  "model",
+  "parallel_tool_calls",
+  "prompt_cache_key",
+  "reasoning",
+  "store",
+  "stream",
+  "text",
+  "tool_choice",
+  "tools",
+] as const;
+const DEPLOY_LIVE_MODEL_TURN_SMOKE_REASONING_KEYS = ["effort"] as const;
+const DEPLOY_LIVE_MODEL_TURN_SMOKE_TEXT_KEYS = ["verbosity"] as const;
 
 export interface DeployLiveModelTurnSmokeOpenAiRequest {
   model: string;
@@ -51,22 +68,19 @@ export function readDeployLiveModelTurnSmokeOpenAiRequest(
     return null;
   }
   if (
-    (record.background !== undefined && record.background !== false)
+    !hasExactKeys(record, DEPLOY_LIVE_MODEL_TURN_SMOKE_TOP_LEVEL_KEYS)
     || !isDeployLiveModelTurnSmokeClientMetadata(record.client_metadata)
-    || !isAbsentOrEmptyPlainRecord(record.metadata)
     || !isExactStringList(record.include, DEPLOY_LIVE_MODEL_TURN_SMOKE_INCLUDE)
     || !isDeployLiveModelTurnSmokeCodexInstructions(record.instructions)
     || record.parallel_tool_calls !== true
     || !isDeployLiveModelTurnSmokePromptCacheKey(record.prompt_cache_key)
-    || record.previous_response_id !== undefined
-    || !isDeployLiveModelTurnSmokePromptCacheRetention(record.prompt_cache_retention)
     || record.store !== false
     || record.stream !== true
     || record.tool_choice !== "auto"
     || !isDeployLiveModelTurnSmokeInput(record.input)
     || !isDeployLiveModelTurnSmokeToolSurface(record.tools)
-    || readNestedString(record.reasoning, "effort") !== "low"
-    || readNestedString(record.text, "verbosity") !== "low"
+    || !isDeployLiveModelTurnSmokeReasoning(record.reasoning)
+    || !isDeployLiveModelTurnSmokeText(record.text)
   ) {
     return null;
   }
@@ -98,13 +112,6 @@ export function readDeployLiveModelTurnSmokeCodexOutputText(stdout: string): str
   return outputText;
 }
 
-function readNestedString(value: unknown, key: string): string | null {
-  if (!isPlainRecord(value)) {
-    return null;
-  }
-  return readString(value[key]);
-}
-
 function readString(value: unknown): string | null {
   return typeof value === "string" ? value.trim() : null;
 }
@@ -117,10 +124,6 @@ function hasExactKeys(value: Record<string, unknown>, expected: readonly string[
   const keys = Object.keys(value).sort();
   return keys.length === expected.length
     && expected.every((key, index) => keys[index] === key);
-}
-
-function isAbsentOrEmptyPlainRecord(value: unknown): boolean {
-  return value === undefined || (isPlainRecord(value) && Object.keys(value).length === 0);
 }
 
 function isExactStringList(
@@ -145,10 +148,6 @@ function isDeployLiveModelTurnSmokePromptCacheKey(value: unknown): boolean {
     && /^[A-Za-z0-9._:-]+$/u.test(value);
 }
 
-function isDeployLiveModelTurnSmokePromptCacheRetention(value: unknown): boolean {
-  return value === undefined || value === null || value === "24h" || value === "in_memory";
-}
-
 function isDeployLiveModelTurnSmokeClientMetadata(value: unknown): boolean {
   if (!isPlainRecord(value)) {
     return false;
@@ -167,6 +166,18 @@ function isDeployLiveModelTurnSmokeMetadataText(value: unknown): boolean {
     && value.length > 0
     && value.length <= 128
     && /^[A-Za-z0-9._:-]+$/u.test(value);
+}
+
+function isDeployLiveModelTurnSmokeReasoning(value: unknown): boolean {
+  return isPlainRecord(value)
+    && hasExactKeys(value, DEPLOY_LIVE_MODEL_TURN_SMOKE_REASONING_KEYS)
+    && value.effort === "low";
+}
+
+function isDeployLiveModelTurnSmokeText(value: unknown): boolean {
+  return isPlainRecord(value)
+    && hasExactKeys(value, DEPLOY_LIVE_MODEL_TURN_SMOKE_TEXT_KEYS)
+    && value.verbosity === "low";
 }
 
 function isDeployLiveModelTurnSmokeInput(value: unknown): boolean {

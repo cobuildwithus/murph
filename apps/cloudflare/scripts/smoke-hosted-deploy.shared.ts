@@ -313,7 +313,7 @@ async function assertRunnerContainerLiveModelTurnSmoke(input: {
           expectLiveModelTurnModel: input.expectLiveModelTurnModel,
           fetchImpl: input.fetchImpl,
           retryableFailures: false,
-          retryableStatusCodes: [409],
+          retryableStatusCodes: [409, 503],
           source: input.source,
           url: input.url,
           versionOverrideHeaders: input.versionOverrideHeaders,

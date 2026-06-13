@@ -41,6 +41,8 @@ function createDeploySmokeOpenAiRequestBody(input: {
   background?: boolean;
   clientMetadata?: Record<string, unknown>;
   extraInput?: boolean;
+  extraReasoning?: Record<string, unknown>;
+  extraText?: Record<string, unknown>;
   extraTopLevel?: Record<string, unknown>;
   include?: string[];
   instructions?: string;
@@ -118,11 +120,13 @@ function createDeploySmokeOpenAiRequestBody(input: {
       : { prompt_cache_retention: input.promptCacheRetention }),
     reasoning: {
       effort: input.reasoningEffort ?? "low",
+      ...(input.extraReasoning ?? {}),
     },
     store: input.store ?? false,
     stream: input.stream ?? true,
     text: {
       verbosity: input.textVerbosity ?? "low",
+      ...(input.extraText ?? {}),
     },
     tool_choice: input.toolChoice ?? "auto",
     tools: input.tools ?? createDeploySmokeOpenAiRequestTools(),
@@ -227,10 +231,10 @@ describe("deploy live model turn smoke", () => {
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
         promptCacheRetention: "24h",
       })),
-    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
+    )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
-        promptCacheRetention: "forever",
+        extraTopLevel: { max_output_tokens: 8192 },
       })),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
@@ -288,7 +292,17 @@ describe("deploy live model turn smoke", () => {
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ reasoningEffort: "medium" })),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({
+        extraReasoning: { summary: "auto" },
+      })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ textVerbosity: "medium" })),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({
+        extraText: { format: { type: "json_object" } },
+      })),
     )).toBeNull();
   });
 

@@ -103,6 +103,7 @@ const TEST_DEPLOY_SMOKE_CODEX_ENVIRONMENT_CONTEXT =
   + "</environment_context>";
 
 function createDeploySmokeOpenAiRequestBody(input: {
+  extraTopLevel?: Record<string, unknown>;
   model?: string;
   prompt?: string;
 } = {}): Record<string, unknown> {
@@ -155,6 +156,7 @@ function createDeploySmokeOpenAiRequestBody(input: {
     },
     tool_choice: "auto",
     tools: createDeploySmokeOpenAiRequestTools(),
+    ...(input.extraTopLevel ?? {}),
   };
 }
 
@@ -1164,6 +1166,39 @@ describe("hostedRunnerIntercept", () => {
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify(createDeploySmokeOpenAiRequestBody({ model: "gpt-5.5" })),
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "deploy-smoke-container-id" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(readDeploySmokeLiveModelTurnFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects deploy-smoke OpenAI egress with extra Responses request fields before consulting the fence", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
+      active: true,
+      model: "gpt-5.4-nano",
+    }));
+    const env = createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+      readDeploySmokeLiveModelTurnFence,
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify(createDeploySmokeOpenAiRequestBody({
+          extraTopLevel: { max_output_tokens: 8192 },
+        })),
         headers: {
           authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
           "content-type": "application/json",

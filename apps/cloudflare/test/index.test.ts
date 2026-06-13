@@ -679,6 +679,54 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("returns retryable status for pre-live model turn smoke setup failures", async () => {
+    const smokeHealth = vi.fn(async () => {
+      const error = new Error(
+        "Hosted runner container live model turn smoke failed before the live model turn started. Hosted runner container smoke health failed with HTTP 503.",
+      );
+      error.name = "HostedRunnerContainerPreLiveModelTurnSmokeError";
+      throw error;
+    });
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      RUNNER_CONTAINER_SMOKE: {
+        getByName() {
+          return {
+            async destroyInstance() {},
+            async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
+              throw new Error("Runner container should not be invoked by smoke route tests.");
+            },
+            smokeHealth,
+          };
+        },
+      },
+    });
+    const url = new URL(
+      "https://runner.example.test/internal/deploy/container-smoke"
+        + "?liveModelTurn=gpt-5.4-nano"
+        + "&expectedBundleFingerprint=bundle-fingerprint"
+        + "&expectedSourceFingerprint=source-fingerprint",
+    );
+    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
+    const request = new Request(url, {
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: callbackSigning,
+        method: "POST",
+        path: url.pathname,
+        payload: "",
+        search: url.search,
+      }),
+      method: "POST",
+    });
+
+    const response = await worker.fetch(request, env);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Deploy container smoke failed.",
+      ok: false,
+    });
+  });
+
   it("rejects unsupported live model turn values before managed container smoke", async () => {
     const smokeHealth = vi.fn(async () => {
       throw new Error("Runner container should not receive unsupported live model turn smoke.");
