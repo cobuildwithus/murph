@@ -34,7 +34,6 @@ import {
 
 export type HostedWebControlTransport =
   | {
-    allowHttpHosts?: readonly string[];
     callbackSigning: HostedWebCallbackSigningEnvironment;
     mode: "direct";
     webControlBaseUrl: string;
@@ -165,9 +164,6 @@ export async function fetchHostedWebControlPlaneJson(input: {
       : undefined;
     response = input.transport.mode === "direct"
       ? await fetchHostedExecutionWebControlPlaneResponse({
-        ...(input.transport.allowHttpHosts
-          ? { allowHttpHosts: input.transport.allowHttpHosts }
-          : {}),
         baseUrl: input.transport.webControlBaseUrl,
         body,
         boundUserId: input.boundUserId,

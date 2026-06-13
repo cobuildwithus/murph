@@ -931,9 +931,6 @@ function recordHostedTranscribeUsage(input: {
         mode: "direct",
         webControlBaseUrl: environment.hostedWebBaseUrl,
         workspaceCheckpointBridge: null,
-        ...(environment.hostedWebAllowHttpHosts
-          ? { allowHttpHosts: environment.hostedWebAllowHttpHosts }
-          : {}),
       },
     });
   })().catch((error: unknown) => {
