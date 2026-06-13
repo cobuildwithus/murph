@@ -14,6 +14,7 @@ import {
 } from "@murphai/health-metrics";
 
 import type { CanonicalEntity } from "../canonical-entities.ts";
+import { deriveWearableObservationEffectiveDate } from "../wearables/candidates.ts";
 
 export { parseGoalMetricTargets } from "./goals.ts";
 
@@ -73,7 +74,6 @@ export interface MetricRowEvidence {
   sourceFamily?: MetricSourceFamily;
   sourceKind: MetricSourceKind;
   sourceLabel: string | null;
-  suppressionRecordIds?: readonly string[];
   unit: string | null;
   value: number | null;
 }
@@ -334,6 +334,7 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
   // provider rows can lack observationGrain, so importer-shaped daily
   // resources infer the same summary grain from dayKey + externalRef.
   const observationGrain = resolveObservationGrain(entity);
+  const effectiveDate = resolveObservationEffectiveDate(entity, observationGrain);
 
   return [scalarMetricPoint({
     confidence: eventConfidence(entity),
@@ -347,7 +348,7 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
     // sleep observations are dated by their local/sleep day (the same
     // invariant deriveWearableDate uses), so precedence and date-filtered
     // queries must see the same day the summary point uses.
-    effectiveDate: readString(entity.attributes.dayKey) ?? entity.date,
+    effectiveDate,
     entity,
     index: 0,
     metric,
@@ -358,12 +359,29 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
 }
 
 function isDeletionSentinelObservation(entity: CanonicalEntity, metric: string): boolean {
-  return normalizeMetricKey(metric) === "external-resource-deleted"
-    || readBoolean(entity.attributes.deleted) === true;
+  if (normalizeMetricKey(metric) === "external-resource-deleted") {
+    return true;
+  }
+  if (readBoolean(entity.attributes.deleted) !== true || readString(entity.attributes.source) !== "device") {
+    return false;
+  }
+  const externalRef = readRecord(entity.attributes.externalRef);
+  return readString(externalRef?.facet)?.toLowerCase() === "deleted";
 }
 
 function resolveObservationGrain(entity: CanonicalEntity): string | null {
   return readString(entity.attributes.observationGrain) ?? inferLegacyProviderSummaryObservationGrain(entity);
+}
+
+function resolveObservationEffectiveDate(entity: CanonicalEntity, observationGrain: string | null): string | null {
+  const dayKey = readString(entity.attributes.dayKey);
+  if (!isDayGrainObservation(observationGrain)) {
+    return dayKey ?? entity.date;
+  }
+  if (isDeviceProviderObservation(entity)) {
+    return deriveWearableObservationEffectiveDate(entity) ?? dayKey ?? entity.date;
+  }
+  return dayKey ?? entity.date;
 }
 
 function isDayGrainObservation(observationGrain: string | null): boolean {
@@ -378,7 +396,7 @@ function isDayGrainObservation(observationGrain: string | null): boolean {
 }
 
 function inferLegacyProviderSummaryObservationGrain(entity: CanonicalEntity): string | null {
-  if (readString(entity.attributes.source) !== "device" || !readString(entity.attributes.dayKey)) {
+  if (!isDeviceProviderObservation(entity)) {
     return null;
   }
 
@@ -405,6 +423,14 @@ function inferLegacyProviderSummaryObservationGrain(entity: CanonicalEntity): st
   }
 
   return null;
+}
+
+function isDeviceProviderObservation(entity: CanonicalEntity): boolean {
+  if (readString(entity.attributes.source) !== "device") {
+    return false;
+  }
+  const externalRef = readRecord(entity.attributes.externalRef);
+  return Boolean(readString(externalRef?.system) && readString(externalRef?.resourceType));
 }
 
 function measurementMetricPoints(entity: CanonicalEntity, sourceKind: MetricSourceKind): MetricPoint[] {

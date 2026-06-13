@@ -32,7 +32,24 @@ export interface MetricProjection {
 }
 
 export interface BuildMetricProjectionOptions {
+  wearableSummaryBundle?: WearableSummaryBundle;
   wearableMetricRows?: readonly MetricRowEvidence[];
+}
+
+interface WearableMetricProjectionEvidence {
+  rows: MetricRowEvidence[];
+  suppressionEvidence: WearableMetricSuppressionEvidence[];
+}
+
+interface WearableMetricSuppressionEvidence {
+  date: string;
+  metricKey: string;
+  recordIds: readonly string[];
+}
+
+interface WearableMetricEvidenceResult {
+  row: MetricRowEvidence;
+  suppressionEvidence: WearableMetricSuppressionEvidence;
 }
 
 export function buildMetricProjection(
@@ -40,9 +57,8 @@ export function buildMetricProjection(
   options: BuildMetricProjectionOptions = {},
 ): MetricProjection {
   const dailySampleSummaries = summarizeDailySamples(vault);
-  const wearableMetricRows = options.wearableMetricRows
-    ? [...options.wearableMetricRows]
-    : buildWearableMetricEvidence(vault);
+  const wearableMetricEvidence = resolveWearableMetricProjectionEvidence(vault, options);
+  const wearableMetricRows = wearableMetricEvidence.rows;
   const metricPoints = extractMetricPoints({
     metricRows: wearableMetricRows,
     sampleSummaries: dailySampleSummaries,
@@ -50,27 +66,64 @@ export function buildMetricProjection(
   });
   return {
     dailySampleSummaries,
-    metricPoints: applyWearableSummaryMetricPrecedence(metricPoints, wearableMetricRows),
+    metricPoints: applyWearableSummaryMetricPrecedence(metricPoints, wearableMetricEvidence.suppressionEvidence),
     wearableMetricRows,
   };
 }
 
 export function buildWearableMetricEvidence(vault: VaultReadModel): MetricRowEvidence[] {
-  return buildWearableMetricEvidenceFromBundle(buildWearableSummaryBundle(vault));
+  return buildWearableMetricProjectionEvidenceFromBundle(buildWearableSummaryBundle(vault)).rows;
 }
 
 export function buildWearableMetricEvidenceFromBundle(bundle: WearableSummaryBundle): MetricRowEvidence[] {
+  return buildWearableMetricProjectionEvidenceFromBundle(bundle).rows;
+}
+
+function resolveWearableMetricProjectionEvidence(
+  vault: VaultReadModel,
+  options: BuildMetricProjectionOptions,
+): WearableMetricProjectionEvidence {
+  if (options.wearableSummaryBundle) {
+    return buildWearableMetricProjectionEvidenceFromBundle(options.wearableSummaryBundle);
+  }
+  if (options.wearableMetricRows) {
+    return buildPublicWearableMetricProjectionEvidence(options.wearableMetricRows);
+  }
+  return buildWearableMetricProjectionEvidenceFromBundle(buildWearableSummaryBundle(vault));
+}
+
+function buildPublicWearableMetricProjectionEvidence(
+  rows: readonly MetricRowEvidence[],
+): WearableMetricProjectionEvidence {
+  return {
+    rows: [...rows],
+    suppressionEvidence: rows
+      .filter(isWearableSummaryMetricRow)
+      .map((row) => ({
+        date: row.date,
+        metricKey: row.metricKey,
+        recordIds: row.recordIds,
+      })),
+  };
+}
+
+function buildWearableMetricProjectionEvidenceFromBundle(bundle: WearableSummaryBundle): WearableMetricProjectionEvidence {
   const sleepSummaries = summarizeWearableSleepFromBundle(bundle, { limit: METRIC_PROJECTION_LIMIT });
   const recoverySummaries = summarizeWearableRecoveryFromBundle(bundle, { limit: METRIC_PROJECTION_LIMIT });
   const activitySummaries = summarizeWearableActivityFromBundle(bundle, { limit: METRIC_PROJECTION_LIMIT });
   const bodyStateSummaries = summarizeWearableBodyStateFromBundle(bundle, { limit: METRIC_PROJECTION_LIMIT });
 
-  return [
+  const evidence = [
     ...sleepSummaries.flatMap((summary) => summaryMetricEvidence(summary, SLEEP_METRIC_EVIDENCE)),
     ...recoverySummaries.flatMap((summary) => summaryMetricEvidence(summary, RECOVERY_METRIC_EVIDENCE)),
     ...activitySummaries.flatMap((summary) => summaryMetricEvidence(summary, ACTIVITY_METRIC_EVIDENCE)),
     ...bodyStateSummaries.flatMap((summary) => summaryMetricEvidence(summary, BODY_STATE_METRIC_EVIDENCE)),
   ];
+
+  return {
+    rows: evidence.map((entry) => entry.row),
+    suppressionEvidence: evidence.map((entry) => entry.suppressionEvidence),
+  };
 }
 
 type WearableSummaryBase = {
@@ -139,7 +192,7 @@ export function listWearableSummaryMetricEvidenceKeys(): string[] {
 function summaryMetricEvidence<TField extends string>(
   summary: WearableSummaryBase & Record<TField, WearableResolvedMetric>,
   entries: readonly SummaryMetricEvidenceEntry<TField>[],
-): MetricRowEvidence[] {
+): WearableMetricEvidenceResult[] {
   return entries.map((entry) =>
     metricEvidence(
       summary.date,
@@ -159,17 +212,14 @@ function summaryMetricEvidence<TField extends string>(
 // data retention.
 function applyWearableSummaryMetricPrecedence(
   points: readonly MetricPoint[],
-  wearableMetricRows: readonly MetricRowEvidence[],
+  suppressionEvidence: readonly WearableMetricSuppressionEvidence[],
 ): MetricPoint[] {
   const suppressionIdsByDay = new Map<string, Set<string>>();
 
-  for (const row of wearableMetricRows) {
-    if (!isWearableSummaryMetricRow(row)) {
-      continue;
-    }
-    const dayKey = metricDayKey(resolveMetricInputKey(row.metricKey), row.date);
+  for (const evidence of suppressionEvidence) {
+    const dayKey = metricDayKey(resolveMetricInputKey(evidence.metricKey), evidence.date);
     const recordIds = suppressionIdsByDay.get(dayKey) ?? new Set<string>();
-    for (const recordId of row.suppressionRecordIds ?? row.recordIds) {
+    for (const recordId of evidence.recordIds) {
       if (typeof recordId === "string") {
         recordIds.add(recordId);
       }
@@ -209,7 +259,7 @@ function metricEvidence(
   resolved: WearableResolvedMetric,
   confidence: WearableConfidenceLevel,
   sourceKind: MetricRowEvidence["sourceKind"],
-): MetricRowEvidence {
+): WearableMetricEvidenceResult {
   const selection = resolved.selection;
   const sourceCandidate = selectWearableSourceCandidate(resolved);
   const provider = selection.provider ?? sourceCandidate?.provider ?? null;
@@ -232,30 +282,36 @@ function metricEvidence(
   ]);
 
   return {
-    confidence: resolved.confidence.level === "none" ? confidence : resolved.confidence.level,
-    context: {
-      candidateCount: resolved.confidence.candidateCount,
-      conflictingProviders: resolved.confidence.conflictingProviders,
-      contributingRecordIds,
-      exactDuplicateCount: resolved.confidence.exactDuplicateCount,
-      recordedAt: selection.recordedAt,
-      sourceFamily: selection.sourceFamily ?? sourceCandidate?.sourceFamily ?? null,
-      sourceKind: selection.sourceKind ?? sourceCandidate?.sourceKind ?? null,
-      syntheticRecordId,
+    row: {
+      confidence: resolved.confidence.level === "none" ? confidence : resolved.confidence.level,
+      context: {
+        candidateCount: resolved.confidence.candidateCount,
+        conflictingProviders: resolved.confidence.conflictingProviders,
+        contributingRecordIds,
+        exactDuplicateCount: resolved.confidence.exactDuplicateCount,
+        recordedAt: selection.recordedAt,
+        sourceFamily: selection.sourceFamily ?? sourceCandidate?.sourceFamily ?? null,
+        sourceKind: selection.sourceKind ?? sourceCandidate?.sourceKind ?? null,
+        syntheticRecordId,
+      },
+      dataOrigin: sourceCandidate?.dataOrigin ?? null,
+      date,
+      externalRef: sourceCandidate?.externalRef ?? null,
+      metricKey,
+      provider,
+      rawRefs,
+      recordIds,
+      sourceFamily: "derived",
+      sourceKind,
+      sourceLabel: provider ? formatProviderName(provider) : sourceCandidate?.title ?? "Wearable summary",
+      unit: selection.unit ?? sourceCandidate?.unit ?? null,
+      value: selection.value,
     },
-    dataOrigin: sourceCandidate?.dataOrigin ?? null,
-    date,
-    externalRef: sourceCandidate?.externalRef ?? null,
-    metricKey,
-    provider,
-    rawRefs,
-    recordIds,
-    sourceFamily: "derived",
-    sourceKind,
-    sourceLabel: provider ? formatProviderName(provider) : sourceCandidate?.title ?? "Wearable summary",
-    suppressionRecordIds,
-    unit: selection.unit ?? sourceCandidate?.unit ?? null,
-    value: selection.value,
+    suppressionEvidence: {
+      date,
+      metricKey,
+      recordIds: suppressionRecordIds,
+    },
   };
 }
 

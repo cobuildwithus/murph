@@ -582,9 +582,7 @@ function buildObservationMetricCandidates(
 ): WearableMetricCandidate[] {
   const rawMetric = normalizeLowercaseString(entity.attributes.metric);
   const rawValue = readNumber(entity.attributes.value);
-  const date = deriveWearableDate(entity, externalRef, {
-    preferSleepEndAt: true,
-  });
+  const date = deriveWearableObservationEffectiveDate(entity, externalRef);
 
   if (!rawMetric || rawValue === null || !date) {
     return [];
@@ -603,6 +601,15 @@ function buildObservationMetricCandidates(
     unit: mapped.unit,
     value: mapped.value,
   }];
+}
+
+export function deriveWearableObservationEffectiveDate(
+  entity: CanonicalEntity,
+  externalRef: WearableExternalRef | null = readExternalRef(entity.attributes.externalRef),
+): string | null {
+  return deriveWearableDate(entity, externalRef, {
+    preferSleepEndAt: true,
+  });
 }
 
 function buildMeasurementMetricCandidates(

@@ -8,7 +8,6 @@ import {
 } from "../search-shared.ts";
 import {
   buildMetricProjection,
-  buildWearableMetricEvidenceFromBundle,
 } from "../metrics/projection.ts";
 import {
   readVaultSourceStrict,
@@ -59,7 +58,7 @@ export async function rebuildQueryProjectionWithManifest(
   const wearableDataset = collectWearableDataset(snapshotReadModel, {});
   const wearableSummaryBundle = buildWearableSummaryBundleFromDataset(wearableDataset);
   const metricProjection = buildMetricProjection(snapshotReadModel, {
-    wearableMetricRows: buildWearableMetricEvidenceFromBundle(wearableSummaryBundle),
+    wearableSummaryBundle,
   });
   const dailySampleSummaries = metricProjection.dailySampleSummaries;
   const metricPoints = metricProjection.metricPoints;

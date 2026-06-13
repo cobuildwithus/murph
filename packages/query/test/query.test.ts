@@ -3535,13 +3535,14 @@ Light walk and early bedtime.
 }
 
 interface MetricObservationEventInput {
-  dayKey?: string;
+  dayKey?: string | null;
   deleted?: boolean;
   externalRef?: Record<string, unknown>;
   id: string;
   metric: string;
   observationGrain?: string;
   occurredAt: string;
+  recordedAt?: string;
   source: "device" | "manual";
   title: string;
   unit: string;
@@ -3567,13 +3568,19 @@ async function createMetricObservationVault(
   );
   await writeFile(
     path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
-    `${events.map((event) => JSON.stringify({
-      schemaVersion: "murph.event.v1",
-      kind: "observation",
-      dayKey: event.occurredAt.slice(0, 10),
-      recordedAt: new Date(Date.parse(event.occurredAt) + 60_000).toISOString().replace(".000Z", "Z"),
-      ...event,
-    })).join("\n")}\n`,
+    `${events.map((event) => {
+      const { dayKey, recordedAt, ...eventPayload } = event;
+      const resolvedDayKey = dayKey === null ? null : dayKey ?? event.occurredAt.slice(0, 10);
+
+      return JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        kind: "observation",
+        ...(resolvedDayKey ? { dayKey: resolvedDayKey } : {}),
+        recordedAt: recordedAt
+          ?? new Date(Date.parse(event.occurredAt) + 60_000).toISOString().replace(".000Z", "Z"),
+        ...eventPayload,
+      });
+    }).join("\n")}\n`,
     "utf8",
   );
 
@@ -4576,6 +4583,16 @@ test("listMetricPointsRuntime skips device deletion tombstone observations", asy
         facet: "deleted",
       },
     },
+    {
+      id: "evt_metric_observation_deleted_metadata_01",
+      occurredAt: "2026-04-02T08:00:00Z",
+      source: "manual",
+      title: "Deleted metadata flag",
+      metric: "caffeine",
+      value: 80,
+      unit: "mg",
+      deleted: true,
+    },
   ]);
 
   try {
@@ -4585,9 +4602,12 @@ test("listMetricPointsRuntime skips device deletion tombstone observations", asy
       limit: null,
       metricKey: "external-resource-deleted",
     });
+    const caffeine = await listMetricPointsRuntime(vaultRoot, { limit: null, metricKey: "caffeine" });
     const allPoints = await listMetricPointsRuntime(vaultRoot, { limit: null });
 
     assert.equal(tombstones.length, 0);
+    assert.equal(caffeine.length, 1);
+    assert.equal(caffeine[0]?.source.recordId, "evt_metric_observation_deleted_metadata_01");
     assert.equal(
       allPoints.some((point) => point.source.recordId === "evt_metric_observation_deleted_resource_01"),
       false,
@@ -4631,6 +4651,53 @@ test("listMetricPointsRuntime infers day grain for legacy shared-normalizer dail
     assert.equal(caffeine[0]?.grain, "day");
     assert.equal(caffeine[0]?.effectiveDate, "2026-04-02");
     assert.equal(caffeine[0]?.context.observationGrain, "summary");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("listMetricPointsRuntime dates legacy WHOOP sleep summaries by wearable effective date", async () => {
+  const vaultRoot = await createMetricObservationVault([
+    {
+      id: "evt_metric_observation_legacy_whoop_sleep_total_01",
+      occurredAt: "2026-04-05T23:30:00Z",
+      recordedAt: "2026-04-06T07:30:00Z",
+      dayKey: null,
+      source: "device",
+      title: "WHOOP sleep total",
+      metric: "sleep-total-minutes",
+      value: 432,
+      unit: "minutes",
+      externalRef: {
+        system: "whoop",
+        resourceType: "sleep",
+        resourceId: "whoop-sleep-2026-04-06",
+        facet: "sleep-total-minutes",
+      },
+    },
+  ]);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const totalSleep = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-04-05",
+      limit: null,
+      metricKey: "total-sleep-minutes",
+      to: "2026-04-06",
+    });
+    const startDay = await listMetricPointsRuntime(vaultRoot, {
+      from: "2026-04-05",
+      limit: null,
+      metricKey: "total-sleep-minutes",
+      to: "2026-04-05",
+    });
+
+    assert.equal(totalSleep.length, 1);
+    assert.equal(totalSleep[0]?.effectiveDate, "2026-04-06");
+    assert.equal(totalSleep[0]?.source.family, "derived");
+    assert.notEqual(totalSleep[0]?.source.kind, "observation");
+    assert.equal(startDay.length, 0);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -4912,6 +4979,13 @@ test("importer sleep keys, canonical day keys, and losing providers all resolve 
     assert.equal(spo2Selection.status, "ready");
     assert.equal(spo2Selection.provenance.recordIds.includes(selectedRecordId), true);
     assert.equal(spo2Selection.provenance.recordIds.includes(losingRecordId), false);
+
+    const evidenceRows = buildWearableMetricEvidence(await readVaultRawTolerant(vaultRoot));
+    const spo2Evidence = evidenceRows.find((row) => row.metricKey === "spo2" && row.date === "2026-04-05");
+    assert.ok(spo2Evidence);
+    assert.equal(spo2Evidence.recordIds.includes(selectedRecordId), true);
+    assert.equal(spo2Evidence.recordIds.includes(losingRecordId), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(spo2Evidence, "suppressionRecordIds"), false);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
