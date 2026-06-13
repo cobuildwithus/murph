@@ -3,6 +3,7 @@ import { canonicalizeDeviceProviderSlug } from "@murphai/importers/device-provid
 import { deviceDataOriginSchema, extractIsoDatePrefix, type DeviceDataOrigin } from "@murphai/contracts";
 
 import type { CanonicalEntity } from "../canonical-entities.ts";
+import { isDeletionSentinelObservation } from "../observation-sentinels.ts";
 import type { VaultReadModel } from "../read-model.ts";
 import { dedupeExactMetricCandidates, dedupeSleepWindowCandidates } from "./dedupe.ts";
 import {
@@ -580,6 +581,10 @@ function buildObservationMetricCandidates(
   provider: string,
   externalRef: WearableExternalRef | null,
 ): WearableMetricCandidate[] {
+  if (isDeletionSentinelObservation(entity)) {
+    return [];
+  }
+
   const rawMetric = normalizeLowercaseString(entity.attributes.metric);
   const rawValue = readNumber(entity.attributes.value);
   const date = deriveWearableObservationEffectiveDate(entity, externalRef);
@@ -614,6 +619,34 @@ export function deriveWearableObservationEffectiveDate(
     preferDayKey: options.preferDayKey ?? !shouldIgnoreCoreDefaultSleepDayKey(entity, externalRef),
     preferSleepEndAt: true,
   });
+}
+
+export function inferWearableObservationGrain(entity: CanonicalEntity): string | null {
+  if (normalizeNullableString(entity.attributes.source) !== "device") {
+    return null;
+  }
+
+  const externalRef = readExternalRef(entity.attributes.externalRef);
+  const system = normalizeLowercaseString(externalRef?.system);
+  const resourceType = normalizeLowercaseString(externalRef?.resourceType)?.replace(/_/gu, "-") ?? null;
+  if (!system || !resourceType) {
+    return null;
+  }
+
+  if (resourceType.startsWith("daily-") || resourceType.includes("-daily-")) {
+    return "summary";
+  }
+
+  if ((system === "oura" || system === "whoop") && [
+    "body-measurement",
+    "cycle",
+    "recovery",
+    "sleep",
+  ].includes(resourceType)) {
+    return "summary";
+  }
+
+  return null;
 }
 
 function shouldIgnoreCoreDefaultSleepDayKey(

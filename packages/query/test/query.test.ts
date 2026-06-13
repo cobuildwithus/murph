@@ -4593,6 +4593,31 @@ test("listMetricPointsRuntime skips device deletion tombstone observations", asy
       unit: "mg",
       deleted: true,
     },
+    {
+      id: "evt_metric_observation_manual_external_resource_deleted_01",
+      occurredAt: "2026-04-02T09:00:00Z",
+      source: "manual",
+      title: "Custom deletion counter",
+      metric: "external-resource-deleted",
+      value: 2,
+      unit: "count",
+    },
+    {
+      id: "evt_metric_observation_deleted_sleep_metric_01",
+      occurredAt: "2026-04-02T10:00:00Z",
+      source: "device",
+      title: "Oura deleted sleep total",
+      metric: "sleep-total-minutes",
+      value: 480,
+      unit: "minutes",
+      deleted: true,
+      externalRef: {
+        system: "oura",
+        resourceType: "sleep",
+        resourceId: "oura-sleep-deleted-2026-04-02",
+        facet: "deleted",
+      },
+    },
   ]);
 
   try {
@@ -4603,13 +4628,20 @@ test("listMetricPointsRuntime skips device deletion tombstone observations", asy
       metricKey: "external-resource-deleted",
     });
     const caffeine = await listMetricPointsRuntime(vaultRoot, { limit: null, metricKey: "caffeine" });
+    const totalSleep = await listMetricPointsRuntime(vaultRoot, { limit: null, metricKey: "total-sleep-minutes" });
     const allPoints = await listMetricPointsRuntime(vaultRoot, { limit: null });
 
-    assert.equal(tombstones.length, 0);
+    assert.equal(tombstones.length, 1);
+    assert.equal(tombstones[0]?.source.recordId, "evt_metric_observation_manual_external_resource_deleted_01");
     assert.equal(caffeine.length, 1);
     assert.equal(caffeine[0]?.source.recordId, "evt_metric_observation_deleted_metadata_01");
+    assert.equal(totalSleep.length, 0);
     assert.equal(
       allPoints.some((point) => point.source.recordId === "evt_metric_observation_deleted_resource_01"),
+      false,
+    );
+    assert.equal(
+      allPoints.some((point) => point.source.recordId === "evt_metric_observation_deleted_sleep_metric_01"),
       false,
     );
   } finally {

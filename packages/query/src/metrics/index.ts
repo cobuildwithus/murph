@@ -14,7 +14,11 @@ import {
 } from "@murphai/health-metrics";
 
 import type { CanonicalEntity } from "../canonical-entities.ts";
-import { deriveWearableObservationEffectiveDate } from "../wearables/candidates.ts";
+import {
+  deriveWearableObservationEffectiveDate,
+  inferWearableObservationGrain,
+} from "../wearables/candidates.ts";
+import { isDeletionSentinelObservation } from "../observation-sentinels.ts";
 
 export { parseGoalMetricTargets } from "./goals.ts";
 
@@ -334,7 +338,7 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
   // provider rows can lack observationGrain, so importer-shaped daily
   // resources infer the same summary grain from dayKey + externalRef.
   const explicitObservationGrain = readString(entity.attributes.observationGrain);
-  const observationGrain = explicitObservationGrain ?? inferLegacyProviderSummaryObservationGrain(entity);
+  const observationGrain = explicitObservationGrain ?? inferWearableObservationGrain(entity);
   const effectiveDate = resolveObservationEffectiveDate(entity, observationGrain);
 
   return [scalarMetricPoint({
@@ -357,17 +361,6 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
     unit,
     value,
   })];
-}
-
-function isDeletionSentinelObservation(entity: CanonicalEntity, metric: string): boolean {
-  if (normalizeMetricKey(metric) === "external-resource-deleted") {
-    return true;
-  }
-  if (readBoolean(entity.attributes.deleted) !== true || readString(entity.attributes.source) !== "device") {
-    return false;
-  }
-  const externalRef = readRecord(entity.attributes.externalRef);
-  return readString(externalRef?.facet)?.toLowerCase() === "deleted";
 }
 
 function resolveObservationEffectiveDate(
@@ -393,36 +386,6 @@ function isDayGrainObservation(observationGrain: string | null): boolean {
     || normalized === "day"
     || normalized === "daily-summary"
     || normalized === "daily-timeseries-aggregate";
-}
-
-function inferLegacyProviderSummaryObservationGrain(entity: CanonicalEntity): string | null {
-  if (!isDeviceProviderObservation(entity)) {
-    return null;
-  }
-
-  const externalRef = readRecord(entity.attributes.externalRef);
-  const system = readString(externalRef?.system)?.toLowerCase() ?? null;
-  const resourceType = readString(externalRef?.resourceType)
-    ?.toLowerCase()
-    .replace(/_/gu, "-") ?? null;
-  if (!system || !resourceType) {
-    return null;
-  }
-
-  if (resourceType.startsWith("daily-") || resourceType.includes("-daily-")) {
-    return "summary";
-  }
-
-  if ((system === "oura" || system === "whoop") && (
-    resourceType === "body-measurement"
-    || resourceType === "cycle"
-    || resourceType === "recovery"
-    || resourceType === "sleep"
-  )) {
-    return "summary";
-  }
-
-  return null;
 }
 
 function isDeviceProviderObservation(entity: CanonicalEntity): boolean {
@@ -659,10 +622,6 @@ function readNumber(value: unknown): number | null {
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-function readBoolean(value: unknown): boolean | null {
-  return typeof value === "boolean" ? value : null;
 }
 
 function readJson(value: unknown): unknown | null {
