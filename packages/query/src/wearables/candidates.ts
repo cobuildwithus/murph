@@ -606,10 +606,52 @@ function buildObservationMetricCandidates(
 export function deriveWearableObservationEffectiveDate(
   entity: CanonicalEntity,
   externalRef: WearableExternalRef | null = readExternalRef(entity.attributes.externalRef),
+  options: {
+    preferDayKey?: boolean;
+  } = {},
 ): string | null {
   return deriveWearableDate(entity, externalRef, {
+    preferDayKey: options.preferDayKey ?? !shouldIgnoreCoreDefaultSleepDayKey(entity, externalRef),
     preferSleepEndAt: true,
   });
+}
+
+function shouldIgnoreCoreDefaultSleepDayKey(
+  entity: CanonicalEntity,
+  externalRef: WearableExternalRef | null,
+): boolean {
+  if (normalizeNullableString(entity.attributes.observationGrain)) {
+    return false;
+  }
+  const system = normalizeLowercaseString(externalRef?.system);
+  const resourceType = normalizeLowercaseString(externalRef?.resourceType)?.replace(/_/gu, "-") ?? null;
+  if ((system !== "oura" && system !== "whoop") || !resourceType?.includes("sleep")) {
+    return false;
+  }
+  const dayKey = normalizeNullableString(entity.attributes.dayKey);
+  const occurredDate = extractIsoDatePrefix(entity.occurredAt);
+  if (!dayKey || !occurredDate || dayKey !== occurredDate) {
+    return false;
+  }
+  const effectiveDateWithoutDayKey = deriveWearableDate(entity, externalRef, {
+    preferDayKey: false,
+    preferSleepEndAt: true,
+  });
+  return Boolean(
+    effectiveDateWithoutDayKey
+      && effectiveDateWithoutDayKey !== dayKey
+      && isNearbyLaterDate(dayKey, effectiveDateWithoutDayKey),
+  );
+}
+
+function isNearbyLaterDate(startDate: string, candidateDate: string): boolean {
+  const start = Date.parse(`${startDate}T00:00:00.000Z`);
+  const candidate = Date.parse(`${candidateDate}T00:00:00.000Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(candidate)) {
+    return false;
+  }
+  const deltaDays = Math.round((candidate - start) / (24 * 60 * 60 * 1000));
+  return deltaDays > 0 && deltaDays <= 2;
 }
 
 function buildMeasurementMetricCandidates(
@@ -825,11 +867,12 @@ function deriveWearableDate(
   entity: CanonicalEntity,
   externalRef: WearableExternalRef | null,
   options: {
+    preferDayKey?: boolean;
     preferSleepEndAt: boolean;
   },
 ): string | null {
   const dayKey = normalizeNullableString(entity.attributes.dayKey);
-  if (dayKey) {
+  if (dayKey && options.preferDayKey !== false) {
     return dayKey;
   }
 

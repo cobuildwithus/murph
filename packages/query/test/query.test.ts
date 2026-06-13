@@ -4656,13 +4656,13 @@ test("listMetricPointsRuntime infers day grain for legacy shared-normalizer dail
   }
 });
 
-test("listMetricPointsRuntime dates legacy WHOOP sleep summaries by wearable effective date", async () => {
+test("listMetricPointsRuntime dates legacy WHOOP sleep summaries with core-default dayKey by wearable effective date", async () => {
   const vaultRoot = await createMetricObservationVault([
     {
       id: "evt_metric_observation_legacy_whoop_sleep_total_01",
       occurredAt: "2026-04-05T23:30:00Z",
       recordedAt: "2026-04-06T07:30:00Z",
-      dayKey: null,
+      dayKey: "2026-04-05",
       source: "device",
       title: "WHOOP sleep total",
       metric: "sleep-total-minutes",
@@ -4960,14 +4960,14 @@ test("importer sleep keys, canonical day keys, and losing providers all resolve 
     if (!selectedRecordId) {
       assert.fail("expected selected summary point to retain a source record id");
     }
-	    const losingRecordId = selectedRecordId === "evt_metric_observation_spo2_oura_01"
-	      ? "evt_metric_observation_spo2_garmin_01"
-	      : "evt_metric_observation_spo2_oura_01";
-	    const contributingRecordIds = spo2[0]?.context.contributingRecordIds;
-	    if (!Array.isArray(contributingRecordIds)) {
-	      assert.fail("expected selected summary point to expose public contributing record ids");
-	    }
-	    assert.equal(contributingRecordIds.includes(losingRecordId), false);
+    const losingRecordId = selectedRecordId === "evt_metric_observation_spo2_oura_01"
+      ? "evt_metric_observation_spo2_garmin_01"
+      : "evt_metric_observation_spo2_oura_01";
+    const contributingRecordIds = spo2[0]?.context.contributingRecordIds;
+    if (!Array.isArray(contributingRecordIds)) {
+      assert.fail("expected selected summary point to expose public contributing record ids");
+    }
+    assert.equal(contributingRecordIds.includes(losingRecordId), false);
     assert.equal(
       ["evt_metric_observation_spo2_oura_01", "evt_metric_observation_spo2_garmin_01"].includes(
         selectedRecordId ?? "",

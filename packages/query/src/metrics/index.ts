@@ -333,7 +333,8 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
   // facts; other grains keep the event default. Legacy shared-normalizer
   // provider rows can lack observationGrain, so importer-shaped daily
   // resources infer the same summary grain from dayKey + externalRef.
-  const observationGrain = resolveObservationGrain(entity);
+  const explicitObservationGrain = readString(entity.attributes.observationGrain);
+  const observationGrain = explicitObservationGrain ?? inferLegacyProviderSummaryObservationGrain(entity);
   const effectiveDate = resolveObservationEffectiveDate(entity, observationGrain);
 
   return [scalarMetricPoint({
@@ -369,11 +370,10 @@ function isDeletionSentinelObservation(entity: CanonicalEntity, metric: string):
   return readString(externalRef?.facet)?.toLowerCase() === "deleted";
 }
 
-function resolveObservationGrain(entity: CanonicalEntity): string | null {
-  return readString(entity.attributes.observationGrain) ?? inferLegacyProviderSummaryObservationGrain(entity);
-}
-
-function resolveObservationEffectiveDate(entity: CanonicalEntity, observationGrain: string | null): string | null {
+function resolveObservationEffectiveDate(
+  entity: CanonicalEntity,
+  observationGrain: string | null,
+): string | null {
   const dayKey = readString(entity.attributes.dayKey);
   if (!isDayGrainObservation(observationGrain)) {
     return dayKey ?? entity.date;

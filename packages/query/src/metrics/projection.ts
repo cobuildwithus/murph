@@ -33,7 +33,6 @@ export interface MetricProjection {
 
 export interface BuildMetricProjectionOptions {
   wearableSummaryBundle?: WearableSummaryBundle;
-  wearableMetricRows?: readonly MetricRowEvidence[];
 }
 
 interface WearableMetricProjectionEvidence {
@@ -86,25 +85,7 @@ function resolveWearableMetricProjectionEvidence(
   if (options.wearableSummaryBundle) {
     return buildWearableMetricProjectionEvidenceFromBundle(options.wearableSummaryBundle);
   }
-  if (options.wearableMetricRows) {
-    return buildPublicWearableMetricProjectionEvidence(options.wearableMetricRows);
-  }
   return buildWearableMetricProjectionEvidenceFromBundle(buildWearableSummaryBundle(vault));
-}
-
-function buildPublicWearableMetricProjectionEvidence(
-  rows: readonly MetricRowEvidence[],
-): WearableMetricProjectionEvidence {
-  return {
-    rows: [...rows],
-    suppressionEvidence: rows
-      .filter(isWearableSummaryMetricRow)
-      .map((row) => ({
-        date: row.date,
-        metricKey: row.metricKey,
-        recordIds: row.recordIds,
-      })),
-  };
 }
 
 function buildWearableMetricProjectionEvidenceFromBundle(bundle: WearableSummaryBundle): WearableMetricProjectionEvidence {
@@ -177,12 +158,6 @@ const SUMMARY_METRIC_EVIDENCE_ENTRIES = [
   ...BODY_STATE_METRIC_EVIDENCE,
 ];
 
-const WEARABLE_SUMMARY_METRIC_SOURCE_KEYS = new Set(
-  SUMMARY_METRIC_EVIDENCE_ENTRIES.map(
-    (entry) => `${resolveMetricInputKey(entry.metricKey)}\0${entry.sourceKind}`,
-  ),
-);
-
 export function listWearableSummaryMetricEvidenceKeys(): string[] {
   return uniqueStrings(
     SUMMARY_METRIC_EVIDENCE_ENTRIES.map((entry) => resolveMetricInputKey(entry.metricKey)),
@@ -238,11 +213,6 @@ function applyWearableSummaryMetricPrecedence(
     // record as part of its provenance.
     return !suppressionIdsByDay.get(metricPointDayKey(point))?.has(point.source.recordId);
   });
-}
-
-function isWearableSummaryMetricRow(row: MetricRowEvidence): boolean {
-  return (row.sourceFamily ?? "derived") === "derived"
-    && WEARABLE_SUMMARY_METRIC_SOURCE_KEYS.has(`${resolveMetricInputKey(row.metricKey)}\0${row.sourceKind}`);
 }
 
 function metricPointDayKey(point: MetricPoint): string {
