@@ -73,8 +73,11 @@ export function createRemoteTranscriptionProvider(
             ? AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)])
             : AbortSignal.timeout(timeoutMs),
         });
-      // The upload is replay-safe (no side effects), so retry once on
-      // transient upstream/network failure before failing the parse job.
+      // Retry once on transient upstream/network failure before failing the
+      // parse job. The endpoint returns 5xx only when no billed transcription
+      // run completed (completed-but-unusable runs are a non-retryable 422),
+      // so the 5xx retry cannot double-bill; an ambiguous network failure
+      // after a completed run can still re-run it, bounded by this one retry.
       let response: Response | null = null;
       try {
         response = await postOnce();
