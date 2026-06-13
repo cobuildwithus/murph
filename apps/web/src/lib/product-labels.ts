@@ -578,6 +578,8 @@ function buildUpcLookupVariants(upc: string): string[] {
     variants.push(upc.slice(1), `0${upc}`);
   } else if (/^00\d{12}$/u.test(upc)) {
     variants.push(upc.slice(2), upc.slice(1));
+  } else if (/^0\d{13}$/u.test(upc)) {
+    variants.push(upc.slice(1));
   }
 
   return [...new Set(variants)];

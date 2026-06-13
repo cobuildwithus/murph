@@ -298,4 +298,50 @@ describe("foods query helpers", () => {
       false,
     ]);
   });
+
+  it("checks a 14-digit GTIN with one leading zero as a 13-digit EAN fallback", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createFoodsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        return {
+          rows: [
+            {
+              id: "fdc:789",
+              dataOrigin: "usda_branded",
+              dataOriginId: "789",
+              name: "Sparkling Water",
+              brand: "Example Foods",
+              upc: "1234567890123",
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(
+      queries.getFoodByUpc({
+        upc: "0123-4567890123",
+        includeOffMarket: false,
+      }),
+    ).resolves.toEqual({
+      id: "fdc:789",
+      dataOrigin: "usda_branded",
+      dataOriginId: "789",
+      name: "Sparkling Water",
+      brand: "Example Foods",
+      upc: "1234567890123",
+      offMarket: false,
+      label: {},
+    });
+    expect(calls[0]?.text).toContain("FROM foods");
+    expect(calls[0]?.text).toContain("upc = ANY($1::text[])");
+    expect(calls[0]?.text).toContain("array_position($1::text[], upc) ASC");
+    expect(calls[0]?.values).toEqual([
+      ["01234567890123", "1234567890123"],
+      false,
+    ]);
+  });
 });

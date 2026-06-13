@@ -12,14 +12,16 @@ Imports the FULL USDA FoodData Central CSV archive into the labels DB
 
 The default mode runs the whole transform on the connected database. Managed
 instances with small memory should use the two-phase path instead: run the
-default mode against a LOCAL staging Postgres, then --export-prepared from it,
-then --apply-prepared to the managed labels DB (plain COPY + batched upserts,
-no server-side aggregation).
+default mode against a LOCAL staging Postgres, then --export-prepared from it
+(release-scoped by FDC_RELEASE_DATE), then --apply-prepared to the managed
+labels DB (plain COPY + batched upserts, no server-side aggregation).
 
 Required env:
   FDC_DATA_DIR        Directory containing the unzipped FULL FDC CSV archive
                       (the directory holding food.csv, branded_food.csv, ...).
-                      Not required with --export-prepared/--apply-prepared.
+                      Not required with --apply-prepared. For
+                      --export-prepared, required only when FDC_RELEASE_DATE is
+                      unset and must be derived from the directory name.
   MURPH_LABELS_DB_URL Postgres URL for the labels database
                       (falls back to MURPH_SUPPLEMENT_DB_URL).
                       Not required with --prepare-only.
@@ -76,9 +78,25 @@ psql_bin="${PSQL_BIN:-psql}"
 
 mkdir -p "$work_dir"
 
+resolve_release_date() {
+  local release_date="${FDC_RELEASE_DATE:-}"
+
+  if [ -z "$release_date" ] && [ -n "${FDC_DATA_DIR:-}" ]; then
+    release_date="$(basename "$FDC_DATA_DIR" | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -n 1 || true)"
+  fi
+
+  if ! printf '%s' "$release_date" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
+    echo "FDC_RELEASE_DATE is required (YYYY-MM-DD) when FDC_DATA_DIR is unset or its directory name has no date" >&2
+    exit 64
+  fi
+
+  printf '%s\n' "$release_date"
+}
+
 if [ -n "$export_prepared" ]; then
-  echo "Exporting prepared foods rows..."
-  "$psql_bin" -v ON_ERROR_STOP=1 -c "\\copy (SELECT id, canonical_key, data_origin, data_origin_id, data_origin_url, data_origin_priority, name, brand, upc, off_market, search_text, label, fdc_release_date FROM foods ORDER BY id) TO '$export_prepared' WITH (FORMAT csv, HEADER true)" "$labels_db_url"
+  release_date="$(resolve_release_date)"
+  echo "Exporting prepared foods rows for FDC release $release_date..."
+  "$psql_bin" -v ON_ERROR_STOP=1 -c "\\copy (SELECT id, canonical_key, data_origin, data_origin_id, data_origin_url, data_origin_priority, name, brand, upc, off_market, search_text, label, fdc_release_date FROM foods WHERE fdc_release_date = '$release_date' ORDER BY id) TO '$export_prepared' WITH (FORMAT csv, HEADER true)" "$labels_db_url"
   echo "Exported $(($(wc -l < "$export_prepared") - 1)) prepared rows."
   exit 0
 fi
@@ -100,14 +118,7 @@ if [ -z "${FDC_DATA_DIR:-}" ]; then
   exit 64
 fi
 
-release_date="${FDC_RELEASE_DATE:-}"
-if [ -z "$release_date" ]; then
-  release_date="$(basename "$FDC_DATA_DIR" | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -n 1 || true)"
-fi
-if ! printf '%s' "$release_date" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
-  echo "FDC_RELEASE_DATE is required (YYYY-MM-DD) when the archive directory name has no date" >&2
-  exit 64
-fi
+release_date="$(resolve_release_date)"
 
 find_csv() {
   local filename="$1"

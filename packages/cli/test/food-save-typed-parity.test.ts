@@ -3,6 +3,7 @@ import { readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { parseFrontmatterDocument } from '@murphai/core'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
 import { test, vi } from 'vitest'
@@ -23,6 +24,7 @@ import {
   registerFoodCommands,
 } from '../src/commands/food.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
+import { searchFoodLabelsBatch } from '../src/food-labels.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
   createTempVaultContext,
@@ -288,6 +290,40 @@ test('food search-labels-batch calls the hosted data API without local credentia
       process.env.MURPH_HOSTED_RUNTIME_PROCESS = previousHostedRuntimeProcess
     }
   }
+})
+
+test('food search-labels-batch rejects oversized multibyte payloads before fetch', async () => {
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+    error: 'payload_too_large',
+  }), {
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+    },
+    status: 413,
+  }))
+  const queries = Array.from({ length: 50 }, () => '界'.repeat(256))
+
+  await assert.rejects(
+    () => searchFoodLabelsBatch({
+      queries,
+      limit: 1,
+    }, {
+      env: {
+        MURPH_HOSTED_RUNTIME_PROCESS: '1',
+      },
+      fetchImpl: fetchMock,
+    }),
+    (error: unknown) => {
+      if (!(error instanceof VaultCliError)) {
+        return false
+      }
+
+      assert.equal(error.code, 'food_labels_api_payload_too_large')
+      assert.match(error.message, /maximum is 32768 bytes \(32 KB\)/u)
+      return true
+    },
+  )
+  assert.equal(fetchMock.mock.calls.length, 0)
 })
 
 test('food save payload builder maps every raw food import-json payload field', () => {

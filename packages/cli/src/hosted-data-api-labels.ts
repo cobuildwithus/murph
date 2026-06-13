@@ -1,3 +1,5 @@
+import { Buffer } from 'node:buffer'
+
 import { HOSTED_RUNTIME_PROCESS_ENV } from '@murphai/hosted-execution/cli-runtime-bridge'
 import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -8,6 +10,7 @@ export const MAX_HOSTED_DATA_API_LABEL_LIMIT = 50
 export const MAX_HOSTED_DATA_API_LABEL_BATCH_QUERIES = 50
 export const MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH = 256
 
+const MAX_HOSTED_DATA_API_LABEL_BATCH_BODY_BYTES = 32 * 1024
 const DEFAULT_HOSTED_DATA_API_LABEL_TIMEOUT_MS = 10_000
 const MAX_HOSTED_DATA_API_LABEL_TIMEOUT_MS = 30_000
 const HOSTED_DATA_API_LABELS_BASE_URL = 'http://murph-data-api.worker'
@@ -149,12 +152,22 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
     const limit = input.limit ?? DEFAULT_HOSTED_DATA_API_LABEL_LIMIT
     const includeOffMarket = input.includeOffMarket ?? false
     const url = new URL(config.apiPath, apiBaseUrl)
+    const body = JSON.stringify({
+      queries: input.queries,
+      limit,
+      includeOffMarket,
+    })
+    const bodyBytes = Buffer.byteLength(body, 'utf8')
+
+    if (bodyBytes > MAX_HOSTED_DATA_API_LABEL_BATCH_BODY_BYTES) {
+      throw new VaultCliError(
+        `${config.errorCodePrefix}_payload_too_large`,
+        `${config.searchDescription} batch request is ${bodyBytes} bytes; maximum is ${MAX_HOSTED_DATA_API_LABEL_BATCH_BODY_BYTES} bytes (32 KB). Reduce the number or length of queries before retrying.`,
+      )
+    }
+
     const response = await fetchLabelsApi(config, fetchImpl, url, env, {
-      body: JSON.stringify({
-        queries: input.queries,
-        limit,
-        includeOffMarket,
-      }),
+      body,
       headers: {
         'content-type': 'application/json',
       },
