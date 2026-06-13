@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-06-10
+Last verified: 2026-06-12
 
 ## Purpose
 
@@ -49,7 +49,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/product-specs/protocol-outcome-network.md` | Protocol outcome network boundary for private outcome cards now and future sharing, contribution, cohort summaries, and social guardrails. | Outcome network behavior | High | 2026-05-13 |
 | `agent-docs/product-specs/captures.md` | Capture primitive product boundary for dated private media evidence. | Capture behavior | High | 2026-04-21 |
 | `agent-docs/product-specs/companion-app.md` | Native Swift iOS companion app for Apple Health sync, hybrid WHOOP posture, MVP scope, and phases. | Companion app plan | High | 2026-06-10 |
-| `agent-docs/product-specs/query-metric-universality.md` | Universal metric queryability invariant: every metric-bearing canonical event should yield a query metric point through a generic extraction rule. | Query metric product spec | High | 2026-06-12 |
+| `agent-docs/product-specs/query-metric-universality.md` | Universal metric queryability invariant: every metric-bearing canonical event yields a query metric point through the generic extraction rule. | Query metric product spec | High | 2026-06-12 |
 | `agent-docs/product-specs/companion-app-mvp.md` | Two-screen companion app MVP build spec: Privy login, Connect Apple Health, sign-in token endpoint. | Companion app build plan | High | 2026-06-10 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |

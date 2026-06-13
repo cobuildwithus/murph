@@ -4,10 +4,15 @@ const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
 }));
 
-// The watchdog imports exactly one symbol from hosted-execution.
-vi.mock("@murphai/hosted-execution", () => ({
-  emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
-}));
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
+  return {
+    ...actual,
+    emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
+  };
+});
 
 import {
   startHostedContainerCpuWatchdog,
@@ -15,8 +20,6 @@ import {
 } from "../src/container-cpu-watchdog.ts";
 
 const WATCHDOG_INTERVAL_MS = 20_000;
-const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME =
-  "HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET";
 
 interface FakeProcessState {
   cpuStatText: string | null;
@@ -130,13 +133,12 @@ describe("startHostedContainerCpuWatchdog", () => {
   });
 
   it("attributes elevated CPU to the top processes by comm name", async () => {
-    vi.stubEnv(HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME, "test-secret");
     const state: FakeProcessState = {
       cpuStatText: cpuStatText({ usageUsec: 1_000_000 }),
       pidStats: new Map([
         ["1", pidStatText({ comm: "tini", pid: 1, totalTicks: 10 })],
         ["12", pidStatText({ comm: "node", pid: 12, totalTicks: 500 })],
-        ["45", pidStatText({ comm: "codex (smoke)", pid: 45, totalTicks: 100 })],
+        ["45", pidStatText({ comm: "codex", pid: 45, totalTicks: 100 })],
       ]),
     };
     stopWatchdog = await startWatchdog({
@@ -152,7 +154,10 @@ describe("startHostedContainerCpuWatchdog", () => {
       usageUsec: 16_000_000,
     });
     state.pidStats.set("12", pidStatText({ comm: "node", pid: 12, totalTicks: 700 }));
-    state.pidStats.set("45", pidStatText({ comm: "codex (smoke)", pid: 45, totalTicks: 1_400 }));
+    state.pidStats.set(
+      "45",
+      pidStatText({ comm: "codex", pid: 45, totalTicks: 1_400 }),
+    );
     await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
 
     const emits = watchdogEmits();
@@ -168,44 +173,14 @@ describe("startHostedContainerCpuWatchdog", () => {
     // process churn in this fixture, so it matches the cgroup figure).
     expect(details.attributedCpuCores).toBe(0.75);
     expect(details.topCpuProcesses).toEqual([
-      // 1,300 ticks at 100 Hz over 20s = 0.65 cores. The comm parse keeps the
-      // inner parens, and the non-allowlisted name is emitted as a stable
-      // keyed HMAC label instead of raw process-controlled text:
-      // hmac-sha256("test-secret", "codex (smoke)") truncated to 16 hex.
-      { comm: "other:30d556de684e009a", cpuCores: 0.65, pid: 45 },
-      // 200 ticks = 0.1 cores; allowlisted infrastructure comm passes through.
-      { comm: "node", cpuCores: 0.1, pid: 12 },
+      // 1,300 ticks at 100 Hz over 20s = 0.65 cores.
+      { comm: "codex", commRedacted: false, cpuCores: 0.65, pid: 45 },
+      // 200 ticks = 0.1 cores.
+      { comm: "node", commRedacted: false, cpuCores: 0.1, pid: 12 },
     ]);
   });
 
-  it("collapses unknown comms into one bucket without the fingerprint secret", async () => {
-    const state: FakeProcessState = {
-      cpuStatText: null,
-      pidStats: new Map([
-        ["45", pidStatText({ comm: "check_health.sh", pid: 45, totalTicks: 100 })],
-      ]),
-    };
-    stopWatchdog = await startWatchdog({
-      processApi: createFakeProcessApi(state),
-    });
-
-    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
-    state.pidStats.set(
-      "45",
-      pidStatText({ comm: "check_health.sh", pid: 45, totalTicks: 1_400 }),
-    );
-    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
-
-    const emits = watchdogEmits();
-    expect(emits).toHaveLength(1);
-    // No keyed secret configured: no comm-derived identifier at all.
-    expect((emits[0]?.details as Record<string, unknown>).topCpuProcesses).toEqual([
-      { comm: "other", cpuCores: 0.65, pid: 45 },
-    ]);
-  });
-
-  it("does not use the raw hosted log fingerprint secret as a watchdog fingerprint", async () => {
-    vi.stubEnv("HOSTED_LOG_FINGERPRINT_SECRET", "raw-log-fingerprint-secret");
+  it("logs unknown comm values after structured-log text sanitization", async () => {
     const state: FakeProcessState = {
       cpuStatText: null,
       pidStats: new Map([
@@ -226,17 +201,15 @@ describe("startHostedContainerCpuWatchdog", () => {
     const emits = watchdogEmits();
     expect(emits).toHaveLength(1);
     expect((emits[0]?.details as Record<string, unknown>).topCpuProcesses).toEqual([
-      { comm: "other", cpuCores: 0.65, pid: 45 },
+      { comm: "check_health.sh", commRedacted: false, cpuCores: 0.65, pid: 45 },
     ]);
   });
 
-  it("does not use the usage reporting secret as a watchdog fingerprint fallback", async () => {
-    vi.stubEnv("HOSTED_LOG_FINGERPRINT_SECRET", "   ");
-    vi.stubEnv("HOSTED_AI_USAGE_REPORTING_SECRET", "usage-reporting-secret");
+  it("runs process-controlled comm values through the shared redactor", async () => {
     const state: FakeProcessState = {
       cpuStatText: null,
       pidStats: new Map([
-        ["45", pidStatText({ comm: "check_health.sh", pid: 45, totalTicks: 100 })],
+        ["45", pidStatText({ comm: "user@example.test", pid: 45, totalTicks: 100 })],
       ]),
     };
     stopWatchdog = await startWatchdog({
@@ -246,14 +219,39 @@ describe("startHostedContainerCpuWatchdog", () => {
     await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
     state.pidStats.set(
       "45",
-      pidStatText({ comm: "check_health.sh", pid: 45, totalTicks: 1_400 }),
+      pidStatText({ comm: "user@example.test", pid: 45, totalTicks: 1_400 }),
     );
     await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
 
     const emits = watchdogEmits();
     expect(emits).toHaveLength(1);
     expect((emits[0]?.details as Record<string, unknown>).topCpuProcesses).toEqual([
-      { comm: "other", cpuCores: 0.65, pid: 45 },
+      { comm: "[redacted-email]", commRedacted: true, cpuCores: 0.65, pid: 45 },
+    ]);
+  });
+
+  it("redacts comm values that normalize to empty text", async () => {
+    const state: FakeProcessState = {
+      cpuStatText: null,
+      pidStats: new Map([
+        ["45", pidStatText({ comm: "   ", pid: 45, totalTicks: 100 })],
+      ]),
+    };
+    stopWatchdog = await startWatchdog({
+      processApi: createFakeProcessApi(state),
+    });
+
+    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
+    state.pidStats.set(
+      "45",
+      pidStatText({ comm: "   ", pid: 45, totalTicks: 1_400 }),
+    );
+    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
+
+    const emits = watchdogEmits();
+    expect(emits).toHaveLength(1);
+    expect((emits[0]?.details as Record<string, unknown>).topCpuProcesses).toEqual([
+      { comm: "[redacted]", commRedacted: true, cpuCores: 0.65, pid: 45 },
     ]);
   });
 
@@ -324,7 +322,7 @@ describe("startHostedContainerCpuWatchdog", () => {
     expect(details.cgroupUsageUsecDelta).toBeNull();
     expect(details.cpuCoresUsed).toBe(0.65);
     expect(details.topCpuProcesses).toEqual([
-      { comm: "node", cpuCores: 0.65, pid: 12 },
+      { comm: "node", commRedacted: false, cpuCores: 0.65, pid: 12 },
     ]);
   });
 
@@ -376,7 +374,7 @@ describe("startHostedContainerCpuWatchdog", () => {
     expect(details.cpuCoresUsed).toBe(0.7);
     expect(details.attributedCpuCores).toBe(0.7);
     expect(details.topCpuProcesses).toEqual([
-      { comm: "node", cpuCores: 0.7, pid: 13 },
+      { comm: "node", commRedacted: false, cpuCores: 0.7, pid: 13 },
     ]);
   });
 
@@ -406,7 +404,7 @@ describe("startHostedContainerCpuWatchdog", () => {
     const details = emits[0]?.details as Record<string, unknown>;
     expect(details.cpuCoresUsed).toBe(0.7);
     expect(details.topCpuProcesses).toEqual([
-      { comm: "node", cpuCores: 0.7, pid: 12 },
+      { comm: "node", commRedacted: false, cpuCores: 0.7, pid: 12 },
     ]);
   });
 

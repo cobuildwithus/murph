@@ -48,8 +48,12 @@ for (const entry of summary.packages) {
     entry.bundledWorkspaceDependencies.length > 0
       ? ` [bundles ${entry.bundledWorkspaceDependencies.join(', ')}]`
       : '';
+  const bundledExternalDependencySummary =
+    entry.bundledExternalDependencies.length > 0
+      ? ` [bundles external ${entry.bundledExternalDependencies.join(', ')}]`
+      : '';
 
   console.log(
-    `- ${entry.name}@${entry.version} (${entry.path})${directDependencySummary}${bundledDependencySummary}`,
+    `- ${entry.name}@${entry.version} (${entry.path})${directDependencySummary}${bundledDependencySummary}${bundledExternalDependencySummary}`,
   );
 }

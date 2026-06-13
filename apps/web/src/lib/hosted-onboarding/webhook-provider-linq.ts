@@ -48,8 +48,8 @@ import {
   readHostedMailboxItemByDedupeKey,
 } from "../hosted-mailbox/store";
 import {
+  checkHostedAiUsageGate,
   claimHostedAiUsageLimitNotice,
-  resolveHostedAiUsageGate,
 } from "../hosted-execution/usage-allowance";
 import {
   bindHostedMemberHomeLinqChatAndTrackInbound,
@@ -364,7 +364,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
       );
     }
 
-    const usageGate = await resolveHostedAiUsageGate({
+    // Read-first: the webhook only needs the gate decision for quota notices;
+    // authoritative period bookkeeping happens at turn admission.
+    const usageGate = await checkHostedAiUsageGate({
       memberId: existingMember.id,
       prisma: input.prisma,
     });

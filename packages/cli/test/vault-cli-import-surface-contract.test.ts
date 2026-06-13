@@ -112,6 +112,12 @@ const scopedImportSurfaceProbes: readonly ScopedImportSurfaceProbe[] = [
   },
 ]
 
+const lazyOptionalDependencyPackageNames = [
+  '@cfworker/json-schema',
+  '@modelcontextprotocol/server',
+  'yaml',
+] as const
+
 interface ScopedProbeResult {
   readonly exitCode: number | null
   readonly output: string
@@ -286,6 +292,22 @@ async function loadImportSurfaceContract(): Promise<readonly string[]> {
   })
 }
 
+async function normalizeResolvedPackageNames(
+  resolvedModuleUrls: readonly string[],
+): Promise<Set<string>> {
+  const resolvedPackageNames = new Set<string>()
+
+  for (const url of resolvedModuleUrls) {
+    const packageName = await normalizeResolvedUrlToPackageName(url)
+
+    if (packageName !== null) {
+      resolvedPackageNames.add(packageName)
+    }
+  }
+
+  return resolvedPackageNames
+}
+
 test(
   'scoped vault-cli invocations resolve only contract-approved packages',
   async () => {
@@ -338,11 +360,16 @@ test(
       // Normalize before the ceiling assertion so a ceiling failure can say
       // WHICH packages grew, not just by how much.
       const probePackageModuleCounts = new Map<string, number>()
+      const probePackageNames = await normalizeResolvedPackageNames(result.resolvedModuleUrls)
+
+      for (const packageName of probePackageNames) {
+        resolvedPackageNames.add(packageName)
+      }
+
       for (const url of result.resolvedModuleUrls) {
         const packageName = await normalizeResolvedUrlToPackageName(url)
 
         if (packageName !== null) {
-          resolvedPackageNames.add(packageName)
           probePackageModuleCounts.set(
             packageName,
             (probePackageModuleCounts.get(packageName) ?? 0) + 1,
@@ -389,6 +416,66 @@ test(
         'Every package here loads on EVERY scoped CLI invocation; if that cost is justified, add it to ' +
         'test/vault-cli-import-surface-contract.json as a deliberate reviewed decision. ' +
         `New packages: ${newPackages.join(', ')}`,
+    )
+  },
+  IMPORT_SURFACE_PROBE_TIMEOUT_MS,
+)
+
+test(
+  'ordinary built JSON commands do not resolve lazy optional incur dependencies',
+  async () => {
+    await ensureCliRuntimeArtifacts()
+
+    const jsonResult = await runScopedImportSurfaceProbe([
+      '--no-config',
+      'exercise',
+      'facets',
+      '--format',
+      'json',
+    ])
+    assert.equal(
+      jsonResult.exitCode,
+      0,
+      `expected exercise facets JSON probe to succeed, got:\n${jsonResult.output}`,
+    )
+    const parsedJson = JSON.parse(jsonResult.output) as {
+      facets?: { kinds?: unknown }
+    }
+    assert.deepEqual(parsedJson.facets?.kinds, ['exercise', 'stretch'])
+
+    const jsonResolvedPackages = await normalizeResolvedPackageNames(
+      jsonResult.resolvedModuleUrls,
+    )
+    const eagerlyResolvedLazyPackages = lazyOptionalDependencyPackageNames.filter(
+      (packageName) => jsonResolvedPackages.has(packageName),
+    )
+    assert.deepEqual(
+      eagerlyResolvedLazyPackages,
+      [],
+      'plain built JSON commands must not eagerly resolve lazy optional incur dependencies',
+    )
+
+    const yamlResult = await runScopedImportSurfaceProbe([
+      '--no-config',
+      'exercise',
+      'facets',
+      '--format',
+      'yaml',
+    ])
+    assert.equal(
+      yamlResult.exitCode,
+      0,
+      `expected exercise facets YAML probe to succeed, got:\n${yamlResult.output}`,
+    )
+    assert.match(yamlResult.output, /^facets:/mu)
+
+    const yamlResolvedPackages = await normalizeResolvedPackageNames(
+      yamlResult.resolvedModuleUrls,
+    )
+    assert.equal(
+      yamlResolvedPackages.has('yaml'),
+      true,
+      'YAML output should still resolve yaml on the YAML formatting path',
     )
   },
   IMPORT_SURFACE_PROBE_TIMEOUT_MS,

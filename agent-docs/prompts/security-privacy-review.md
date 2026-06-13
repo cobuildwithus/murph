@@ -20,7 +20,7 @@ Mode:
 Runtime expectation:
 - This audit may take 5 to 10 minutes on a non-trivial diff.
 - Work methodically instead of rushing to a shallow answer.
-- Parent agent: run this pass in parallel with `simplify` when both passes apply, and before coverage or final review.
+- Parent agent: run this pass before coverage and final review.
 
 Preflight (required):
 - Read `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` before review.

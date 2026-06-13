@@ -392,7 +392,7 @@ test("hosted runtime process env does not project typed parser toolchain into pr
       MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG: "1",
       MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_LIMIT: "20000",
       MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW: "1",
-      HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET: "watchdog-secret",
+      HOSTED_CONTAINER_DEBUG_SECRET: "container-debug-secret",
       NODE_ENV: "production",
       OPENAI_API_KEY: "worker-openai-secret",
       HOSTED_WEB_BASE_URL: "https://evil-web.example.test",
@@ -429,10 +429,7 @@ test("hosted runtime process env does not project typed parser toolchain into pr
   });
   assert.equal("FFMPEG_COMMAND" in childEnv, false);
   assert.equal("HOME" in childEnv, false);
-  assert.equal(
-    "HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET" in childEnv,
-    false,
-  );
+  assert.equal("HOSTED_CONTAINER_DEBUG_SECRET" in childEnv, false);
   assert.equal("HOSTED_WEB_BASE_URL" in childEnv, false);
   assert.equal("PDFINFO_COMMAND" in childEnv, false);
   assert.equal("PDFTOTEXT_COMMAND" in childEnv, false);
@@ -956,7 +953,7 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
         CODEX_HOME: "/tmp/forwarded-codex-home",
         HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
         HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
-        HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET: "watchdog-secret",
+        HOSTED_CONTAINER_DEBUG_SECRET: "container-debug-secret",
         NODE_OPTIONS: "--require /tmp/injected.js",
         PATH: "/tmp/custom-bin",
         HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: "authority-public-pem",
@@ -986,7 +983,7 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
         CODEX_HOME: "/tmp/user-codex-home",
         HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
         HOSTED_ASSISTANT_BASE_URL: "https://user-legacy-provider.example.test/v1",
-        HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET: "user-watchdog-secret",
+        HOSTED_CONTAINER_DEBUG_SECRET: "user-container-debug-secret",
         HOSTED_EMAIL_DOMAIN: "mail.example.test",
         HOSTED_WEB_BASE_URL: "https://evil-web.example.test",
         NODE_OPTIONS: "--require /tmp/user-injected.js",

@@ -151,6 +151,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       eventId: event.event_id,
       mailboxItemId: plan.wakeMailboxItemId,
       response: plan.response,
+      scheduleAfterResponse: input.scheduleAfterResponse,
       source: "linq",
       userId: plan.wakeUserId,
     });
