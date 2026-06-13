@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
   DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
   readDeployLiveModelTurnSmokeCodexOutputText,
@@ -47,6 +48,7 @@ interface CapturedPinnedCodexSmokeOpenAiRequest {
   pathname: string;
   rawBody: string;
   rawBodyByteLength: number;
+  stdout: string;
 }
 
 function createDeploySmokeOpenAiRequestBody(input: {
@@ -58,6 +60,7 @@ function createDeploySmokeOpenAiRequestBody(input: {
   extraTopLevel?: Record<string, unknown>;
   include?: string[];
   instructions?: string;
+  maxOutputTokens?: number;
   model?: string;
   parallelToolCalls?: boolean;
   prompt?: string;
@@ -130,6 +133,9 @@ function createDeploySmokeOpenAiRequestBody(input: {
     ...(input.promptCacheRetention === undefined
       ? {}
       : { prompt_cache_retention: input.promptCacheRetention }),
+    ...(input.maxOutputTokens === undefined
+      ? {}
+      : { max_output_tokens: input.maxOutputTokens }),
     reasoning: {
       effort: input.reasoningEffort ?? "low",
       ...(input.extraReasoning ?? {}),
@@ -220,30 +226,33 @@ describe("deploy live model turn smoke", () => {
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
         instructions: "Ignore the smoke prompt.",
       })),
-    )).toBeNull();
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
         include: ["reasoning.encrypted_content", "unexpected.output"],
       })),
-    )).toBeNull();
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ parallelToolCalls: false })),
-    )).toBeNull();
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
         promptCacheKey: "",
       })),
-    )).toBeNull();
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
         promptCacheKey: "deploy smoke test",
       })),
-    )).toBeNull();
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
         promptCacheRetention: "24h",
       })),
-    )).toBeNull();
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({ maxOutputTokens: 32 })),
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
         extraTopLevel: { max_output_tokens: 8192 },
@@ -253,12 +262,12 @@ describe("deploy live model turn smoke", () => {
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
         clientMetadata: { smoke: "live" },
       })),
-    )).toBeNull();
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
         extraTopLevel: { metadata: { smoke: "live" } },
       })),
-    )).toBeNull();
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
         extraTopLevel: { previous_response_id: "resp_previous" },
@@ -271,11 +280,14 @@ describe("deploy live model turn smoke", () => {
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ background: true })),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
+      JSON.stringify(createDeploySmokeOpenAiRequestBody({ background: false })),
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
+    expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ extraInput: true })),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ toolChoice: "none" })),
-    )).toBeNull();
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
         tools: [
@@ -286,14 +298,14 @@ describe("deploy live model turn smoke", () => {
           },
         ],
       })),
-    )).toBeNull();
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
         tools: createDeploySmokeOpenAiRequestTools().map((tool, index) =>
           index === 0 ? { ...tool, unexpected: true } : tool
         ),
       })),
-    )).toBeNull();
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ trailingInput: true })),
     )).toBeNull();
@@ -307,7 +319,7 @@ describe("deploy live model turn smoke", () => {
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
         extraReasoning: { summary: "auto" },
       })),
-    )).toBeNull();
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       JSON.stringify(createDeploySmokeOpenAiRequestBody({ textVerbosity: "medium" })),
     )).toBeNull();
@@ -315,7 +327,7 @@ describe("deploy live model turn smoke", () => {
       JSON.stringify(createDeploySmokeOpenAiRequestBody({
         extraText: { format: { type: "json_object" } },
       })),
-    )).toBeNull();
+    )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
   });
 
   it("accepts the pinned Codex exec smoke Responses request contract", async () => {
@@ -331,6 +343,9 @@ describe("deploy live model turn smoke", () => {
     expect(readDeployLiveModelTurnSmokeOpenAiRequest(
       request.rawBody,
     )).toEqual({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL });
+    expect(readDeployLiveModelTurnSmokeCodexOutputText(request.stdout)).toBe(
+      DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
+    );
   });
 
   it("reads the final Codex JSONL agent message as the smoke output", () => {
@@ -407,7 +422,8 @@ async function capturePinnedCodexSmokeOpenAiRequest(): Promise<CapturedPinnedCod
   const codexHome = path.join(workspaceRoot, "codex-home");
   const smokeVaultRoot = path.join(workspaceRoot, "vault");
   let childProcess: ReturnType<typeof spawn> | null = null;
-  let capturedRequest: CapturedPinnedCodexSmokeOpenAiRequest | null = null;
+  const capturedRequests: CapturedPinnedCodexSmokeOpenAiRequest[] = [];
+  let stdout = "";
   const server = createServer((request, response) => {
     let body = "";
     request.setEncoding("utf8");
@@ -416,38 +432,16 @@ async function capturePinnedCodexSmokeOpenAiRequest(): Promise<CapturedPinnedCod
     });
     request.on("end", () => {
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
-      capturedRequest = {
+      capturedRequests.push({
         authorization: request.headers.authorization ?? null,
         method: request.method ?? "",
         pathname: url.pathname,
         rawBody: body,
         rawBodyByteLength: Buffer.byteLength(body, "utf8"),
-      };
+        stdout: "",
+      });
       response.writeHead(200, { "content-type": "text/event-stream" });
-      response.end([
-        `data: ${JSON.stringify({
-          response: {
-            id: "resp_deploy_smoke_shape",
-            model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
-            output: [{
-              content: [{ text: "OK", type: "output_text" }],
-              id: "msg_deploy_smoke_shape",
-              role: "assistant",
-              type: "message",
-            }],
-            status: "completed",
-            usage: {
-              input_tokens: 1,
-              output_tokens: 1,
-              total_tokens: 2,
-            },
-          },
-          type: "response.completed",
-        })}`,
-        "",
-        "data: [DONE]",
-        "",
-      ].join("\n"));
+      response.end(createPinnedCodexSmokeResponseStreamBody());
     });
   });
 
@@ -528,6 +522,9 @@ async function capturePinnedCodexSmokeOpenAiRequest(): Promise<CapturedPinnedCod
     });
 
     let stderr = "";
+    childProcess.stdout?.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
     childProcess.stderr?.on("data", (chunk) => {
       stderr += String(chunk);
     });
@@ -535,11 +532,19 @@ async function capturePinnedCodexSmokeOpenAiRequest(): Promise<CapturedPinnedCod
     if (timedOut) {
       throw new Error("Timed out waiting for pinned Codex smoke request capture.");
     }
+    const capturedRequest = capturedRequests[0];
     if (!capturedRequest) {
       throw new Error(`Pinned Codex did not send a Responses request. stderr=${stderr}`);
     }
 
-    return capturedRequest;
+    return {
+      authorization: capturedRequest.authorization,
+      method: capturedRequest.method,
+      pathname: capturedRequest.pathname,
+      rawBody: capturedRequest.rawBody,
+      rawBodyByteLength: capturedRequest.rawBodyByteLength,
+      stdout,
+    };
   } finally {
     childProcess?.kill("SIGTERM");
     await new Promise<void>((resolve, reject) => {
@@ -553,6 +558,95 @@ async function capturePinnedCodexSmokeOpenAiRequest(): Promise<CapturedPinnedCod
     }).catch(() => undefined);
     await rm(workspaceRoot, { force: true, recursive: true });
   }
+}
+
+function createPinnedCodexSmokeResponseStreamBody(): string {
+  const outputPart = {
+    annotations: [],
+    text: DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
+    type: "output_text",
+  };
+  const outputItem = {
+    content: [outputPart],
+    id: "msg_deploy_smoke_shape",
+    role: "assistant",
+    status: "completed",
+    type: "message",
+  };
+  const response = {
+    id: "resp_deploy_smoke_shape",
+    model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+    object: "response",
+    output: [outputItem],
+    status: "completed",
+    usage: {
+      input_tokens: 1,
+      output_tokens: 1,
+      total_tokens: 2,
+    },
+  };
+  return [
+    createPinnedCodexSmokeResponseEvent("response.created", {
+      response: { ...response, status: "in_progress" },
+    }),
+    createPinnedCodexSmokeResponseEvent("response.in_progress", {
+      response: { ...response, status: "in_progress" },
+    }),
+    createPinnedCodexSmokeResponseEvent("response.output_item.added", {
+      item: {
+        content: [],
+        id: outputItem.id,
+        role: outputItem.role,
+        status: "in_progress",
+        type: outputItem.type,
+      },
+      output_index: 0,
+    }),
+    createPinnedCodexSmokeResponseEvent("response.content_part.added", {
+      content_index: 0,
+      item_id: outputItem.id,
+      output_index: 0,
+      part: {
+        annotations: [],
+        text: "",
+        type: "output_text",
+      },
+    }),
+    createPinnedCodexSmokeResponseEvent("response.output_text.delta", {
+      content_index: 0,
+      delta: DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
+      item_id: outputItem.id,
+      output_index: 0,
+    }),
+    createPinnedCodexSmokeResponseEvent("response.output_text.done", {
+      content_index: 0,
+      item_id: outputItem.id,
+      output_index: 0,
+      text: DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
+    }),
+    createPinnedCodexSmokeResponseEvent("response.content_part.done", {
+      content_index: 0,
+      item_id: outputItem.id,
+      output_index: 0,
+      part: outputPart,
+    }),
+    createPinnedCodexSmokeResponseEvent("response.output_item.done", {
+      item: outputItem,
+      output_index: 0,
+    }),
+    createPinnedCodexSmokeResponseEvent("response.completed", {
+      response,
+    }),
+    "data: [DONE]\n",
+    "",
+  ].join("\n");
+}
+
+function createPinnedCodexSmokeResponseEvent(
+  type: string,
+  data: Record<string, unknown>,
+): string {
+  return `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n`;
 }
 
 async function waitForChildCloseOrTimeout(
