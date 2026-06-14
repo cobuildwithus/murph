@@ -3,6 +3,8 @@ import {
   type CodexWarmThreadCompactionOutcome,
 } from "@murphai/assistant-engine/assistant-codex";
 import {
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
   buildAssistantMaintenanceUsageRecord,
   type AssistantUsageCredentialSource,
   type AssistantUsageRecord,
@@ -118,6 +120,9 @@ export async function runHostedIdleCheckpointMaintenance(input: {
             model,
             triggerKind: "automation_idle_compact",
             usage,
+            usageExtractionSourcePath:
+              ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+            usageExtractionVersion: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
           }),
         );
       })().catch(() => undefined);

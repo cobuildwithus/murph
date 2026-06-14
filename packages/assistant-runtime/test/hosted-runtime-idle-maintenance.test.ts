@@ -1,6 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
+import {
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
+  type AssistantUsageRecord,
+} from "@murphai/hosted-execution/assistant-usage";
 
 const compactWarmCodexThread = vi.fn();
 vi.mock("@murphai/assistant-engine/assistant-codex", () => ({
@@ -99,6 +103,8 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       sessionId: "asst_real_session",
       totalTokens: 140_900,
       triggerKind: "automation_idle_compact",
+      usageExtractionSourcePath: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+      usageExtractionVersion: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
     });
   });
 

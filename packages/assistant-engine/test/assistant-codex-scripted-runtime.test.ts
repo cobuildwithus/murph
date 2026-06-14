@@ -132,18 +132,20 @@ describe('real codex app-server with scripted provider', () => {
       threadId: seeded.threadId,
     })
     // Usage attribution must never regress to the zero-row production failure:
-    // the engine should use provider usage when Codex emits it, or a nonzero
-    // lower-bound estimate from the pre-compact thread size when it does not.
+    // Codex 0.135 does not expose a compact-specific usage event, so the engine
+    // records a nonzero lower-bound estimate from the pre-compact thread size.
     expect(compacted.kind).toBe('compacted')
     if (compacted.kind !== 'compacted') {
       throw new Error('Expected idle compaction to complete.')
     }
     expect(compacted.usage).toMatchObject({
+      cachedInputTokens: null,
       inputTokens: expect.any(Number),
+      outputTokens: null,
       totalTokens: expect.any(Number),
     })
-    expect(compacted.usage?.inputTokens).toBeGreaterThan(0)
-    expect(compacted.usage?.totalTokens).toBeGreaterThan(0)
+    expect(compacted.usage.inputTokens).toBeGreaterThan(0)
+    expect(compacted.usage.totalTokens).toBeGreaterThan(0)
 
     // Repeat guard: a successful compact clears the thread vitals, so an
     // immediate second idle pass must skip without provider traffic instead

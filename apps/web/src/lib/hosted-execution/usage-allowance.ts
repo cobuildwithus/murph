@@ -3,9 +3,11 @@ import {
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
-import type {
-  AssistantUsageCredentialSource,
-  AssistantUsageRecord,
+import {
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
+  type AssistantUsageCredentialSource,
+  type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
   normalizeHostedAiUsageAllowancePricedModelId,
@@ -1388,11 +1390,10 @@ function buildHostedAiUsageAllowanceTokenSnapshot(
 function isEstimatedIdleCompactionUsage(record: AssistantUsageRecord): boolean {
   return record.featureKey === "assistant_idle_compact"
     && record.triggerKind === "automation_idle_compact"
-    && record.cachedInputTokens === null
-    && record.outputTokens === null
-    && typeof record.inputTokens === "number"
-    && record.inputTokens > 0
-    && record.totalTokens === record.inputTokens;
+    && record.usageExtractionSourcePath
+      === ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH
+    && record.usageExtractionVersion
+      === ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION;
 }
 
 function normalizeAssistantUsageCredentialSource(

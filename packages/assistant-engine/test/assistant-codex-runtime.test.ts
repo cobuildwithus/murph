@@ -2108,7 +2108,7 @@ describe('assistant codex runtime', () => {
       .toContain('Second ordinary local prompt')
   })
 
-  it('attributes idle compaction to provider usage before zero recompute updates', async () => {
+  it('uses estimated idle compaction usage when generic token usage arrives before zero recompute updates', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-provider-usage-work-')
     const codexHome = await createTempDir('assistant-codex-compact-provider-usage-home-')
     const threadId = 'thread-compact-provider-usage'
@@ -2261,10 +2261,10 @@ describe('assistant codex runtime', () => {
       threadContextTokensBefore: 125_000,
       threadId,
       usage: {
-        cachedInputTokens: 24_000,
+        cachedInputTokens: null,
         inputTokens: 125_000,
-        outputTokens: 700,
-        totalTokens: 125_700,
+        outputTokens: null,
+        totalTokens: 125_000,
       },
     })
   })

@@ -4,6 +4,8 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedTranscriptionUsageRecord,
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import { describe, expect, it, vi } from "vitest";
@@ -78,7 +80,7 @@ describe("hosted AI usage allowance pricing", () => {
   });
 
   it("keeps estimated idle compaction fallback usage out of allowance accounting", () => {
-    expect(priceHostedAiUsageForAllowance({
+    const estimatedIdleCompaction = {
       ...BASE_USAGE_RECORD,
       cachedInputTokens: null,
       featureKey: "assistant_idle_compact",
@@ -86,6 +88,16 @@ describe("hosted AI usage allowance pricing", () => {
       outputTokens: null,
       totalTokens: 125_000,
       triggerKind: "automation_idle_compact",
+    } satisfies AssistantUsageRecord;
+
+    expect(priceHostedAiUsageForAllowance(estimatedIdleCompaction)).toMatchObject({
+      costUsdMicros: 625000n,
+      counted: true,
+    });
+    expect(priceHostedAiUsageForAllowance({
+      ...estimatedIdleCompaction,
+      usageExtractionSourcePath: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+      usageExtractionVersion: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
     })).toMatchObject({
       costUsdMicros: 0n,
       counted: false,
