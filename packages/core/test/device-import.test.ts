@@ -13,6 +13,7 @@ import {
   importDeviceBatch,
   initializeVault,
   readJsonlRecords,
+  repairJunctionWorkoutHeartRateZones,
   VaultError,
 } from "../src/index.ts";
 import { prepareInlineRawArtifact, prepareRawArtifact } from "../src/raw.ts";
@@ -1580,7 +1581,17 @@ test("raw artifact helpers normalize category paths and inferred media types", (
 function buildJunctionStyleWorkoutEvent(overrides: {
   recordedAt?: string;
   durationMinutes?: number;
+  heartRateZones?: Array<{
+    zone?: number;
+    label?: string;
+    minHeartRate?: number;
+    maxHeartRate?: number;
+    durationMinutes?: number;
+  }>;
   resourceId?: string;
+  resourceType?: string;
+  sourceApp?: string;
+  sourceWorkoutId?: string;
 } = {}) {
   return {
     kind: "activity_session",
@@ -1589,7 +1600,7 @@ function buildJunctionStyleWorkoutEvent(overrides: {
     title: "Running",
     externalRef: {
       system: "junction",
-      resourceType: "junction-whoop-v2-workouts",
+      resourceType: overrides.resourceType ?? "junction-whoop-v2-workouts",
       resourceId: overrides.resourceId ?? "workouts-393350f4b34bad8c",
       facet: "session",
     },
@@ -1597,10 +1608,11 @@ function buildJunctionStyleWorkoutEvent(overrides: {
       durationMinutes: overrides.durationMinutes ?? 34,
       activityType: "running",
       workout: {
-        sourceApp: "whoop",
-        sourceWorkoutId: "whoop-workout-1",
+        sourceApp: overrides.sourceApp ?? "whoop",
+        sourceWorkoutId: overrides.sourceWorkoutId ?? "whoop-workout-1",
         startedAt: "2026-06-03T19:55:00.000Z",
         endedAt: "2026-06-03T20:29:00.000Z",
+        heartRateZones: overrides.heartRateZones,
         exercises: [],
       },
     },
@@ -1694,6 +1706,238 @@ test("importDeviceBatch updates changed provider records in place by externalRef
     (latest as { durationMinutes?: number } | undefined)?.durationMinutes,
     36,
   );
+});
+
+test("repairJunctionWorkoutHeartRateZones appends corrected revisions idempotently", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-hr-zone-repair");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const legacyResourceId = "workouts-legacy-1";
+  const currentResourceId = "workouts-current-1";
+  const enrichedResourceId = "workouts-enriched-1";
+  const explicitObjectResourceId = "workouts-explicit-object-1";
+  const otherProviderResourceId = "workouts-other-provider-1";
+
+  const imported = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId: legacyResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: "garmin-legacy-workout-1",
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+      buildJunctionStyleWorkoutEvent({
+        resourceId: currentResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: "garmin-current-workout-1",
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index,
+          durationMinutes,
+        })),
+      }),
+      buildJunctionStyleWorkoutEvent({
+        resourceId: enrichedResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: "garmin-enriched-workout-1",
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+          label: `Zone ${index + 1}`,
+        })),
+      }),
+      buildJunctionStyleWorkoutEvent({
+        resourceId: explicitObjectResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: "garmin-explicit-object-workout-1",
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+      buildJunctionStyleWorkoutEvent({
+        resourceId: otherProviderResourceId,
+        resourceType: "junction-whoop-v2-workouts",
+        sourceApp: "whoop",
+        sourceWorkoutId: "whoop-workout-1",
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            source: { provider: "garmin" },
+            id: "garmin-legacy-workout-1",
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+          {
+            source: { provider: "garmin" },
+            id: "garmin-explicit-object-workout-1",
+            hr_zones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+              zone: index + 1,
+              duration: durationMinutes * 60,
+            })),
+          },
+        ],
+      },
+    ],
+  });
+
+  const dryRun = await repairJunctionWorkoutHeartRateZones({ vaultRoot });
+
+  assert.equal(dryRun.mode, "dry-run");
+  assert.equal(dryRun.hasWork, true);
+  assert.equal(dryRun.mutated, false);
+  assert.equal(dryRun.candidateCount, 1);
+  assert.equal(dryRun.unverifiedCandidateCount, 1);
+  assert.equal(dryRun.repairedCount, 0);
+  assert.equal(dryRun.touchedPathCount, 1);
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.mode, "apply");
+  assert.equal(applied.hasWork, true);
+  assert.equal(applied.mutated, true);
+  assert.equal(applied.candidateCount, 1);
+  assert.equal(applied.unverifiedCandidateCount, 1);
+  assert.equal(applied.repairedCount, 1);
+  assert.equal(typeof applied.auditPath, "string");
+
+  const records = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: imported.eventShardPaths[0] as string,
+  })) as EventRecord[];
+  const revisions = records.filter(
+    (record): record is Extract<EventRecord, { kind: "activity_session" }> =>
+      record.kind === "activity_session",
+  );
+
+  const legacyRevisions = revisions.filter((record) =>
+    record.externalRef?.resourceId === legacyResourceId
+  );
+  const currentRevisions = revisions.filter((record) =>
+    record.externalRef?.resourceId === currentResourceId
+  );
+  const enrichedRevisions = revisions.filter((record) =>
+    record.externalRef?.resourceId === enrichedResourceId
+  );
+  const explicitObjectRevisions = revisions.filter((record) =>
+    record.externalRef?.resourceId === explicitObjectResourceId
+  );
+  const otherProviderRevisions = revisions.filter((record) =>
+    record.externalRef?.resourceId === otherProviderResourceId
+  );
+
+  assert.equal(revisions.length, 6);
+  assert.equal(legacyRevisions.length, 2);
+  assert.equal(currentRevisions.length, 1);
+  assert.equal(enrichedRevisions.length, 1);
+  assert.equal(explicitObjectRevisions.length, 1);
+  assert.equal(otherProviderRevisions.length, 1);
+  const originalRevision = legacyRevisions.find((record) =>
+    record.workout?.heartRateZones?.[0]?.zone === 1
+  );
+  const repairedRevision = legacyRevisions.find((record) =>
+    record.workout?.heartRateZones?.[0]?.zone === 0
+  );
+
+  assert.deepEqual(
+    originalRevision?.workout?.heartRateZones?.map((zone) => zone.zone),
+    [1, 2, 3, 4, 5, 6],
+  );
+  assert.deepEqual(
+    repairedRevision?.workout?.heartRateZones?.map((zone) => zone.zone),
+    [0, 1, 2, 3, 4, 5],
+  );
+  assert.equal(repairedRevision?.lifecycle?.revision, 2);
+  assert.deepEqual(
+    currentRevisions[0]?.workout?.heartRateZones?.map((zone) => zone.zone),
+    [0, 1, 2, 3, 4, 5],
+  );
+  assert.deepEqual(
+    enrichedRevisions[0]?.workout?.heartRateZones?.map((zone) => zone.zone),
+    [1, 2, 3, 4, 5, 6],
+  );
+  assert.deepEqual(
+    explicitObjectRevisions[0]?.workout?.heartRateZones?.map((zone) => zone.zone),
+    [1, 2, 3, 4, 5, 6],
+  );
+  assert.deepEqual(
+    otherProviderRevisions[0]?.workout?.heartRateZones?.map((zone) => zone.zone),
+    [1, 2, 3, 4, 5, 6],
+  );
+
+  const reimport = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-04T12:30:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId: legacyResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: "garmin-legacy-workout-1",
+        recordedAt: "2026-06-04T12:30:00.000Z",
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index,
+          durationMinutes,
+        })),
+      }),
+    ],
+  });
+  const recordsAfterReimport = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: imported.eventShardPaths[0] as string,
+  })) as EventRecord[];
+  const legacyRevisionsAfterReimport = recordsAfterReimport.filter(
+    (record): record is Extract<EventRecord, { kind: "activity_session" }> =>
+      record.kind === "activity_session"
+      && record.externalRef?.resourceId === legacyResourceId,
+  );
+
+  assert.equal(reimport.events[0]?.lifecycle?.revision, 2);
+  assert.equal(legacyRevisionsAfterReimport.length, legacyRevisions.length);
+  assert.deepEqual(
+    legacyRevisionsAfterReimport.at(-1)?.workout?.heartRateZones?.map((zone) => zone.zone),
+    [0, 1, 2, 3, 4, 5],
+  );
+
+  const secondApply = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:01:00.000Z"),
+  });
+  const recordsAfterSecondApply = await readJsonlRecords({
+    vaultRoot,
+    relativePath: imported.eventShardPaths[0] as string,
+  });
+
+  assert.equal(secondApply.hasWork, false);
+  assert.equal(secondApply.mutated, false);
+  assert.equal(secondApply.candidateCount, 0);
+  assert.equal(secondApply.unverifiedCandidateCount, 1);
+  assert.equal(secondApply.repairedCount, 0);
+  assert.equal(recordsAfterSecondApply.length, records.length);
 });
 
 test("importDeviceBatch keeps deterministic content identity for events without externalRef", async () => {

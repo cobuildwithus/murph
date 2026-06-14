@@ -12,6 +12,7 @@ Status: frozen baseline plus health extension fence for `murph` and `vault-cli`
 - Native `incur` owns the transport envelope and human-oriented formatting behavior.
 - `packages/cli` must not write vault files directly. Write commands delegate to `packages/core` or `packages/importers`; read commands delegate to `packages/query`.
 - Canonical write commands run through the core mutation runtime, which acquires declared canonical file resources before any read-modify-write work begins. Commands may overlap only when those declared resources are disjoint; singleton documents and shared monthly ledger or audit shards still serialize by design.
+- `vault repair-junction-hr-zones` dry-runs by default and mutates only with explicit `--apply`. It repairs Garmin/Junction workout rows only when raw Junction evidence shows a primitive numeric heart-rate zone array; normalized `1..6` rows without that proof are reported as `unverifiedCandidateCount` and skipped.
 
 ## Command Groups
 
@@ -21,6 +22,7 @@ vault-cli validate --vault <path> [--request-id <id>]
 vault-cli vault show --vault <path> [--request-id <id>]
 vault-cli vault stats --vault <path> [--request-id <id>]
 vault-cli vault repair --vault <path> [--request-id <id>]
+vault-cli vault repair-junction-hr-zones --vault <path> [--dry-run] [--apply] [--request-id <id>]
 vault-cli vault update --vault <path> [--title <title>] [--timezone <tz>] [--request-id <id>]
 vault-cli audit show <id> --vault <path> [--request-id <id>]
 vault-cli audit list --vault <path> [--action <action>] [--actor <actor>] [--status <status>] [--from <date>] [--to <date>] [--sort asc|desc] [--limit <n>] [--request-id <id>]
@@ -870,7 +872,7 @@ The five-file pack shape stays stable; health extensions enrich `manifest.json`,
 ## Boundary Rules
 
 - `init`, `validate`, `meal add`, `document import`, `samples import-csv`, and `intake import` delegate to `packages/core` or `packages/importers` write paths that preserve immutable raw evidence and append-only ledgers.
-- `provider save|import-json`, `food save|import-json|schedule|unschedule`, `recipe save|import-json`, `automation save|import-json`, typed `event * add`, `event import-json`, `samples add`, `samples import-json`, `supplement save|stop`, `regimen save`, `regimen import-json`, `regimen stop`, `protocol import-json`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment start|edit|checkpoint|stop`, `experiment session log`, `experiment context log`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, and health `<noun> import-json` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant runtime automation state.
+- `provider save|import-json`, `food save|import-json|schedule|unschedule`, `recipe save|import-json`, `automation save|import-json`, typed `event * add`, `event import-json`, `samples add`, `samples import-json`, `supplement save|stop`, `regimen save`, `regimen import-json`, `regimen stop`, `protocol import-json`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment start|edit|checkpoint|stop`, `experiment session log`, `experiment context log`, `journal ensure|append|link|unlink`, `vault repair|repair-junction-hr-zones|update`, `intake project`, health `<noun> scaffold`, and health `<noun> import-json` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant runtime automation state.
 - `show`, `list`, `search query`, `query projection status|rebuild`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|stats` delegate to the read model plus immutable-manifest inspection helpers.
 - Inbox ingestion, projection, audio/video transcription, and promotion helpers are owned by `packages/inboxd`, `packages/parsers`, and shared `packages/core` primitives. They are programmatic runtime services, not a `vault-cli inbox` command namespace.
 - Contract validation errors normalize to the shared codes in `docs/contracts/04-error-codes.md`.
