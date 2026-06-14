@@ -667,6 +667,48 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
+  it("keeps ChatGPT subscription Codex hosts on open-internet passthrough with bearer auth intact", async () => {
+    // Hosted-local dev runs Codex on ChatGPT-subscription auth; Codex holds
+    // real tokens in its CODEX_HOME and talks to the subscription backend and
+    // token refresh endpoint directly. Pin both hosts to passthrough so future
+    // egress hardening does not silently break dev subscription auth.
+    for (const target of [
+      "https://chatgpt.com/backend-api/codex/responses",
+      "https://auth.openai.com/oauth/token",
+    ]) {
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const response = await hostedRunnerIntercept(
+        new Request(target, {
+          headers: {
+            authorization: "Bearer chatgpt-subscription-access-token",
+          },
+          method: "POST",
+        }),
+        createInterceptEnv({}),
+        { containerId: "opaque-container-id" },
+      );
+
+      expect(response.status).toBe(200);
+      const forwarded = readForwardedRequest(fetchMock);
+      expect(forwarded.url).toBe(target);
+      expect(forwarded.headers.get("authorization")).toBe(
+        "Bearer chatgpt-subscription-access-token",
+      );
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "runner",
+          details: expect.objectContaining({
+            host: new URL(target).hostname,
+            policy: "open_internet_passthrough",
+          }),
+          message: "Hosted runner open-internet passthrough forwarded outbound request.",
+        }),
+      );
+    }
+  });
+
   it("rejects data API injection when the container has no active runtime", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);

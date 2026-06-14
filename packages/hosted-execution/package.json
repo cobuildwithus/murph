@@ -58,6 +58,10 @@
       "types": "./dist/hosted-email.d.ts",
       "default": "./dist/hosted-email.js"
     },
+    "./hosted-codex-subscription-auth": {
+      "types": "./dist/hosted-codex-subscription-auth.d.ts",
+      "default": "./dist/hosted-codex-subscription-auth.js"
+    },
     "./legacy-dashboard-replica": {
       "types": "./dist/legacy-dashboard-replica.d.ts",
       "default": "./dist/legacy-dashboard-replica.js"

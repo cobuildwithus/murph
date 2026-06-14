@@ -21,6 +21,7 @@ import {
   buildHostedRuntimeLaunchSpec,
   buildHostedRuntimePlatformEnv,
   buildHostedRuntimeResolvedConfig,
+  HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNTIME_ENV_PROFILE_KEYS,
   readHostedRuntimeCommitTimeoutConfigValue,
@@ -842,17 +843,23 @@ test("hosted runtime config strips ingress-only secrets from forwarded env", () 
   assert.deepEqual(normalized.userEnv, {});
 });
 
-test("hosted runtime config lets platform forward the test Gateway base URL but strips user overrides", () => {
+test("hosted runtime config lets platform forward Codex overrides but strips user overrides", () => {
   const platform = createHostedRuntimePlatformStub();
+  const encodedChatGptAuthJson = Buffer.from(
+    JSON.stringify({ auth_mode: "chatgptAuthTokens", tokens: { access_token: "token" } }),
+    "utf8",
+  ).toString("base64url");
 
   const normalized = normalizeHostedAssistantRuntimeConfig(
     {
       forwardedEnv: {
+        [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: encodedChatGptAuthJson,
         [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
           "http://127.0.0.1:4111/v1",
         OPENAI_API_KEY: "openai-secret",
       },
       userEnv: {
+        [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: "user-controlled-auth-seed",
         [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
           "http://evil.example.test/v1",
         OPENAI_API_KEY: "user-openai-secret",
@@ -862,6 +869,7 @@ test("hosted runtime config lets platform forward the test Gateway base URL but 
   );
 
   assert.deepEqual(normalized.forwardedEnv, {
+    [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: encodedChatGptAuthJson,
     [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
       "http://127.0.0.1:4111/v1",
     OPENAI_API_KEY: "openai-secret",
