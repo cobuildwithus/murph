@@ -5,6 +5,11 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  JUNCTION_ALLOWED_SUMMARY_RESOURCES,
+  JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+} from "@murphai/importers/device-providers/junction-resources";
+
+import {
   assertDeviceSyncJobsReadyForFixtureExport,
   buildCaptureDeviceSyncEnv,
   buildSanitizedWearableFixtureCandidate,
@@ -191,31 +196,12 @@ describe("buildCaptureDeviceSyncEnv", () => {
     ]);
     expect(result.captureConfig.providerFilter).toEqual(["oura", "whoop_v2", "garmin"]);
     expect(result.env.JUNCTION_PROVIDER_FILTER).toBe("oura,whoop_v2,garmin");
-    expect(result.captureConfig.summaryResources).toEqual(
-      expect.arrayContaining([
-        "activity",
-        "sleep",
-        "sleep_cycle",
-        "workouts",
-        "body",
-        "profile",
-        "meal",
-        "menstrual_cycle",
-      ]),
-    );
-    expect(result.captureConfig.timeseriesResources).toEqual(
-      expect.arrayContaining([
-        "steps",
-        "distance",
-        "calories_active",
-        "heartrate",
-        "hrv",
-        "respiratory_rate",
-        "blood_oxygen",
-        "stress_level",
-        "weight",
-      ]),
-    );
+    expect(result.captureConfig.summaryResources).toEqual([
+      ...JUNCTION_ALLOWED_SUMMARY_RESOURCES,
+    ]);
+    expect(result.captureConfig.timeseriesResources).toEqual([
+      ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+    ]);
     expect(result.env.JUNCTION_SUMMARY_RESOURCES).toBe(result.captureConfig.summaryResources.join(","));
     expect(result.env.JUNCTION_TIMESERIES_RESOURCES).toBe(result.captureConfig.timeseriesResources.join(","));
   });

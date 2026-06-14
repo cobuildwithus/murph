@@ -215,6 +215,7 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
                 path: assertLocalImagePath(readTurnStartInputItems(turnStart)[1]),
               },
             ],
+            serviceTier: null,
             threadId: 'thread-public-1',
           },
         })

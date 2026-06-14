@@ -7,7 +7,7 @@ title: "Psyllium Husk For Cholesterol"
 summary: "A lab-measured cholesterol experiment using daily psyllium husk as a diet adjunct, aiming primarily at LDL-C while tracking non-HDL-C, ApoB, and total cholesterol as companion lipid labs with hydration, swallowing, allergy, medication-spacing, and lab-follow-up guardrails."
 status: "draft"
 quality: "usable"
-hidden: false
+hidden: true
 aliases:
   - "psyllium husk for cholesterol"
   - "psyllium for LDL cholesterol"
@@ -219,6 +219,7 @@ expectedSignalDescriptions:
     expected: "Could trend lower"
     expectedDirection: down
     description: "Viscous psyllium gel traps bile acids and cholesterol in the gut, forcing the liver to clear more LDL from blood."
+    displayValue: "8-13 mg/dL lower"
     estimatedChange:
       kind: "absolute"
       low: -13
@@ -233,6 +234,7 @@ expectedSignalDescriptions:
     expected: "Could trend lower"
     expectedDirection: down
     description: "Bile-acid loss shifts liver cholesterol handling toward clearing apoB-containing particles, lowering the cholesterol carried in non-HDL fractions."
+    displayValue: "10-15 mg/dL lower"
     estimatedChange:
       kind: "absolute"
       low: -15
@@ -247,6 +249,7 @@ expectedSignalDescriptions:
     expected: "Could trend lower"
     expectedDirection: down
     description: "Each LDL and remnant particle carries one ApoB; increased particle clearance lowers ApoB count."
+    displayValue: "3-8 mg/dL lower"
     estimatedChange:
       kind: "absolute"
       low: -8
@@ -261,6 +264,7 @@ expectedSignalDescriptions:
     expected: "Could trend lower"
     expectedDirection: down
     description: "LDL-C contributes heavily to total cholesterol, so LDL lowering pulls the total value down."
+    displayValue: "9-15 mg/dL lower"
     estimatedChange:
       kind: "absolute"
       low: -15

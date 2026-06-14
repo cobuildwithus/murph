@@ -13,6 +13,7 @@ import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
 import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
+import type { AssistantProviderServiceTier } from '../providers/types.js'
 import type { AssistantTurnEnvironment } from '../service-contracts.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import { errorMessage } from '../shared.js'
@@ -64,6 +65,10 @@ const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR =
   'Assistant cron notification expired before delivery.'
+// Hosted cron turns are off the user hotpath, so clean first runs prefer the
+// OpenAI flex tier (~50% token cost). The Codex provider boundary validates
+// route support and bounds flex execution with a deadline; failures land in the
+// normal cron backoff (30s first retry), and that retry runs at standard tier.
 
 interface DueAssistantCronCandidate {
   canonicalEntry?: {
@@ -299,9 +304,14 @@ export async function executeClaimedAssistantCronJob(input: {
       })
       status = 'succeeded'
     } else {
+      const serviceTier = resolveAssistantCronTurnServiceTier({
+        executionContext: input.executionContext ?? null,
+        job: claimedJob,
+      })
       const automationTurn = buildAssistantAutomationTurnEnvelope({
         deliveryDispatchMode: input.deliveryDispatchMode,
         executionContext: input.executionContext,
+        serviceTier,
         signal: input.signal,
         turnEnvironment: input.turnEnvironment ?? null,
         turnTrigger: 'automation-cron',
@@ -519,6 +529,20 @@ export async function executeClaimedAssistantCronJob(input: {
 
 function buildAssistantCronExecutionInstructions(job: AssistantCronJob): string {
   return job.prompt
+}
+
+function resolveAssistantCronTurnServiceTier(input: {
+  executionContext: AssistantExecutionContext | null
+  job: AssistantCronJob
+}): AssistantProviderServiceTier | null {
+  // Hosted API-key turns only; dev/local Codex subscription auth has no tiers.
+  if (!input.executionContext?.hosted) {
+    return null
+  }
+
+  // Retries after a failed (or deadline-aborted) flex run use the standard
+  // tier so the existing 30s failure backoff bounds reminder lateness.
+  return input.job.state.consecutiveFailures === 0 ? 'flex' : null
 }
 
 function resolveAssistantCronNotificationResponsePolicy(

@@ -974,14 +974,14 @@ export function ValidationSlide() {
       <SlideHeading>
         The product is live.
         <br />
-        The wedge is clear.
+        The first group challenge is running.
       </SlideHeading>
       <p className="mt-5 max-w-[64ch] text-base leading-[1.7] text-[#635a48]">
         We shipped the personal experiment loop first: data connections,
-        baselines, protocols, adherence, confounders, and outcomes. Then we
-        kept beta small on purpose and talked to users. The wedge became
-        obvious &mdash; people don&rsquo;t want to optimize alone, they
-        want to run health challenges with friends.
+        baselines, protocols, adherence, confounders, and outcomes. We kept
+        beta small and talked to users. The wedge became obvious &mdash;
+        people don&rsquo;t want to optimize alone, they want to run health
+        challenges with friends. So we launched one.
       </p>
       <div className="mt-9 grid gap-3 sm:grid-cols-3">
         {[
@@ -994,8 +994,8 @@ export function ValidationSlide() {
             note: "Friends and family, not publicly pushed yet",
           },
           {
-            value: "Dozens of interviews",
-            note: "Talked to users before any growth push",
+            value: "June 10, 2026",
+            note: "First group-chat challenge launched",
           },
         ].map((card) => (
           <div
@@ -1025,18 +1025,17 @@ export function ValidationSlide() {
         <PivotCard
           highlight
           items={[
-            "Step bets and leaderboards",
-            "Sleep and recovery challenges",
-            "No-alcohol and habit months",
-            "Group supplement experiments",
+            "Sleep score challenge: Will, his dad, his brother",
+            "Multiple messages per member, every day",
+            "Laughs, reactions, trash talk at the referee",
+            "Voice memos back and forth with Murph",
           ]}
-          label="What we learned"
-          title="The pull is social"
+          label="What's running"
+          title="The first group challenge"
         />
       </div>
       <p className="mt-6 text-[15px] font-medium leading-[1.6] text-[#5a6e32]">
-        Next step: turn the personal experiment loop into group-chat
-        challenges.
+        The next 90 days: from one challenge to 25.
       </p>
     </Slide>
   );
@@ -1420,10 +1419,10 @@ export function TeamSlide() {
             </p>
             <ul className="mt-3 grid gap-2 sm:grid-cols-2">
               {[
-                "Ship group-chat challenges across iMessage, WhatsApp, and Telegram",
+                "Run 25 group challenges across iMessage, WhatsApp, and Telegram, starting from the one live now",
+                "Measure how many groups finish and how many start a second challenge",
                 "Launch templates for steps, sleep, alcohol, workouts, and recovery",
-                "Ship shareable health results",
-                "Collect the first structured group experiment dataset",
+                "Ship shareable results and the first structured group experiment dataset",
               ].map((item) => (
                 <li
                   key={item}
@@ -1460,7 +1459,7 @@ export function AskSlide() {
               Today
             </p>
             <p className="mt-3 text-[14px] leading-[1.6] text-[#e9e2d4]/80">
-              Private health challenges in group chats.
+              Private group-chat challenges. The first is live now.
             </p>
           </div>
           <div className="bg-[#f5f0e8]/[0.04] p-6">
@@ -1486,7 +1485,7 @@ export function AskSlide() {
               End state
             </p>
             <p className="mt-3 font-serif text-[1.4rem] font-semibold leading-[1.2] text-[#f5f0e8]">
-              GitHub for health experiments.
+              Where the world runs its health experiments.
             </p>
           </div>
         </div>

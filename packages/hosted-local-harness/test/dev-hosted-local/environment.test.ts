@@ -26,6 +26,7 @@ import type {
   HostedLocalDevConfig,
 } from "../../src/dev-hosted-local/types.ts";
 import {
+  HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "../../src/dev-hosted-local/constants.ts";
 
@@ -1112,6 +1113,16 @@ describe("buildWranglerVarArgs", () => {
     ]);
   });
 
+  it("never emits the dev Codex subscription auth JSON as a wrangler --var", () => {
+    expect(
+      buildWranglerVarArgs({
+        [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]:
+          '{"tokens":{"access_token":"chatgpt-access-token-material"}}',
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+      }),
+    ).toEqual(["--var", "MURPH_HOSTED_LOCAL_PROFILE:dev"]);
+  });
+
   it("passes local e2e parser selectors to the worker without making them runner secrets", () => {
     expect(
       buildWranglerVarArgs({
@@ -1190,6 +1201,42 @@ describe("buildWranglerEnvFileText", () => {
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
       }),
     ).toContain('MURPH_HOSTED_LOCAL_PROFILE="dev"');
+  });
+
+  it("round-trips the dev Codex subscription auth value through env-file escaping", () => {
+    // The harness base64url-encodes the auth.json payload precisely because
+    // dotenv-style parsers (wrangler bundles dotenv) strip outer quotes but do
+    // not unescape embedded \" sequences; the encoded value has neither.
+    const authJson = JSON.stringify({
+      OPENAI_API_KEY: null,
+      last_refresh: "2026-06-11T00:00:00.000Z",
+      tokens: {
+        access_token: "chatgpt-access-token-material",
+        account_id: "acct_local",
+        id_token: "chatgpt-id-token-material",
+        refresh_token: "",
+      },
+    });
+    const encoded = Buffer.from(authJson, "utf8").toString("base64url");
+    expect(encoded).not.toMatch(/["'\\\s#]/u);
+
+    const text = buildWranglerEnvFileText({
+      [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: encoded,
+      MURPH_DATA_API_KEY: "local-data-api-key",
+    });
+
+    expect(text).toContain(`${HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV}=`);
+    // No raw token material in the env file.
+    expect(text).not.toContain("chatgpt-access-token-material");
+
+    const parsed = parseEnvText(text);
+    expect(parsed[HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]).toBe(encoded);
+    expect(
+      JSON.parse(Buffer.from(
+        parsed[HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV] ?? "",
+        "base64url",
+      ).toString("utf8")),
+    ).toEqual(JSON.parse(authJson));
   });
 
   it("keeps web-only hosted-local crypto state out of worker env files", () => {
@@ -1273,12 +1320,20 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
     expect(container.image_build_context).toBe("..");
     expect(container.image_vars).toEqual({
+      HOSTED_RUNNER_CONTAINER_CLASS: "RunnerContainer",
       HOSTED_RUNNER_LOCAL_BUILD_ID: "local",
     });
     expect(smokeContainer).toMatchObject({
       image: container.image,
       image_build_context: container.image_build_context,
-      image_vars: container.image_vars,
+      // The per-class build arg must differ so the two classes never produce
+      // the same Docker image ID: wrangler dev untags duplicate
+      // cloudflare-dev tags that share one image ID, which removed the runner
+      // image tag right after the deploy-smoke image build.
+      image_vars: {
+        HOSTED_RUNNER_CONTAINER_CLASS: "DeploySmokeRunnerContainer",
+        HOSTED_RUNNER_LOCAL_BUILD_ID: "local",
+      },
       max_instances: 1,
     });
   });
@@ -1321,19 +1376,24 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(productionLikeConfig.main).toBe("../src/index.ts");
   });
 
-  it("passes the local runner build id as a Docker build arg", () => {
+  it("passes the local runner build id and container class as Docker build args", () => {
     const config = buildWranglerLocalDevConfig({
       MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "stack-test-build-id",
     });
     const containers = config.containers as {
+      class_name: string;
       image_vars: Record<string, string>;
     }[];
 
     for (const container of containers) {
       expect(container.image_vars).toEqual({
+        HOSTED_RUNNER_CONTAINER_CLASS: container.class_name,
         HOSTED_RUNNER_LOCAL_BUILD_ID: buildHostedRunnerLocalBuildId("stack-test-build-id"),
       });
     }
+    expect(
+      new Set(containers.map((entry) => entry.image_vars.HOSTED_RUNNER_CONTAINER_CLASS)).size,
+    ).toBe(containers.length);
   });
 
   it("uses an isolated worker name for E2E profiles", () => {
@@ -1418,6 +1478,29 @@ describe("buildWranglerLocalDevConfig", () => {
     });
     expect(config.vars).not.toHaveProperty("MURPH_DATA_API_KEY");
     expect(config.vars).not.toHaveProperty("OPENAI_API_KEY");
+  });
+
+  it("declares the dev Codex subscription auth JSON as a local worker secret, never a config var", () => {
+    const withAuth = buildWranglerLocalDevConfig({
+      [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: Buffer.from(
+        '{"tokens":{"access_token":"chatgpt-access-token-material"}}',
+        "utf8",
+      ).toString("base64url"),
+    });
+
+    expect(readRequiredSecretNames(withAuth)).toContain(
+      HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
+    );
+    expect(withAuth.vars).not.toHaveProperty(
+      HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
+    );
+    // The generated Wrangler config must never embed the token material itself.
+    expect(JSON.stringify(withAuth)).not.toContain("chatgpt-access-token-material");
+
+    const withoutAuth = buildWranglerLocalDevConfig({});
+    expect(readRequiredSecretNames(withoutAuth)).not.toContain(
+      HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
+    );
   });
 
   it("declares the log fingerprint key as a local worker secret", () => {

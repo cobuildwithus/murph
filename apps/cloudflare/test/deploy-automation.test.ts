@@ -17,6 +17,7 @@ import {
 } from "../scripts/deploy-automation.js";
 import { HOSTED_WORKER_OPTIONAL_SECRET_NAMES } from "../scripts/deploy-automation/worker-secret-names.ts";
 import { renderWorkerSecretsFile } from "../scripts/render-worker-secrets.ts";
+import { hostedLocalRunnerBaseImageTag } from "../scripts/runner-base-image-contract.ts";
 
 afterEach(() => {
   vi.doUnmock("node:fs/promises");
@@ -544,7 +545,10 @@ describe("hosted deploy automation helpers", () => {
       "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'hosted-email,linq,mapbox,telegram,whatsapp' }}",
       "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ inputs.runner_idle_ttl_ms || vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}",
       "HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT: ${{ inputs.container_rollout == 'immediate' && 'true' || 'false' }}",
+      "HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: ${{ inputs.live_model_turn && 'true' || 'false' }}",
       'HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true"',
+      "live_model_turn:",
+      "description: Run one real gpt-5.4-nano turn in the deployed container smoke",
       'HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "300"',
       'HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "3000"',
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: ${{ vars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID }}",
@@ -608,7 +612,7 @@ describe("hosted deploy automation helpers", () => {
       "run: pnpm --dir apps/cloudflare runner:docker:base -- --force",
       "name: Save immediate build artifacts",
       "tar --hard-dereference -czf .artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz \\",
-      "docker save murph-cloudflare-runner-base:node24.14.1-codex0.135.0 \\",
+      `docker save ${hostedLocalRunnerBaseImageTag} \\`,
       "name: Upload immediate build handoff",
       "cloudflare-hosted-immediate-build-${{ github.sha }}",
       "name: Download immediate build handoff",
@@ -748,8 +752,11 @@ describe("hosted deploy automation helpers", () => {
     ]).toHaveLength(1);
     expect([
       ...workflow.matchAll(/runs-on: blacksmith-4vcpu-ubuntu-2404/gmu),
-    ]).toHaveLength(5);
-    expect([...workflow.matchAll(/^    runs-on: ubuntu-24\.04$/gmu)]).toHaveLength(2);
+    ]).toHaveLength(1);
+    expect(workflow).toContain(
+      "name: Immediate deploy build prep\n    if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' && github.ref == 'refs/heads/main' && github.ref_protected }}\n    runs-on: blacksmith-4vcpu-ubuntu-2404",
+    );
+    expect([...workflow.matchAll(/^    runs-on: ubuntu-24\.04$/gmu)]).toHaveLength(6);
     expect(workflow).not.toMatch(/inputs\.deploy_worker.{0,160}blacksmith-4vcpu-ubuntu-2404/u);
     expect([
       ...workflow.matchAll(/docker run \\/gmu),

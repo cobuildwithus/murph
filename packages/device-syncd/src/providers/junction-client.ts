@@ -80,6 +80,12 @@ export interface JunctionWindowInput {
   windowEnd: string;
 }
 
+export interface JunctionProfileSummaryInput {
+  signal?: AbortSignal | null;
+  sourceProviderSlug?: string | null;
+  userId: string;
+}
+
 export interface JunctionIntrospectionInput {
   signal?: AbortSignal | null;
   sourceProviderSlug?: string | null;
@@ -99,7 +105,9 @@ const DEFAULT_RETRY_DELAY_MS = 500;
 const MAX_RETRY_DELAY_MS = 5_000;
 const MAX_COLLECTION_PAGES = 100;
 const MAX_COLLECTION_RECORDS = 25_000;
-const JUNCTION_DATE_ONLY_SUMMARY_RESOURCES = new Set(["menstrual_cycle", "sleep_cycle"]);
+// These summary endpoints declare `start_date`/`end_date` as YYYY-MM-DD dates
+// (not datetimes) in the Junction API reference.
+const JUNCTION_DATE_ONLY_SUMMARY_RESOURCES = new Set(["electrocardiogram", "menstrual_cycle", "sleep_cycle"]);
 
 export const JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS = Object.freeze([
   "junction.com",
@@ -338,6 +346,10 @@ export class JunctionClient {
   }
 
   async listSummary(input: JunctionWindowInput): Promise<unknown[]> {
+    if (input.resource === "profile") {
+      return this.listProfileSummary(input);
+    }
+
     return this.fetchWindowedCollection(
       `/v2/summary/${encodeURIComponent(input.resource)}/${encodeURIComponent(input.userId)}`,
       {
@@ -346,6 +358,22 @@ export class JunctionClient {
       },
       { endpointKind: "junction_summary_collection" },
     );
+  }
+
+  async listProfileSummary(input: JunctionProfileSummaryInput): Promise<unknown[]> {
+    const search = new URLSearchParams();
+    const sourceProviderSlug = normalizeSourceSlug(input.sourceProviderSlug);
+    if (sourceProviderSlug) {
+      search.set("provider", sourceProviderSlug);
+    }
+    const suffix = search.size > 0 ? `?${search.toString()}` : "";
+    const payload = await this.requestJson<unknown>(
+      "GET",
+      `/v2/summary/profile/${encodeURIComponent(input.userId)}${suffix}`,
+      undefined,
+      { endpointKind: "junction_summary_collection", signal: input.signal ?? null },
+    );
+    return extractCollectionRecords(payload, "profile");
   }
 
   async listTimeseries(input: JunctionWindowInput): Promise<unknown[]> {

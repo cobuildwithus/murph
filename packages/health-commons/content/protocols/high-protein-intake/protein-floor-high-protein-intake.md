@@ -203,6 +203,7 @@ expectedSignalDescriptions:
   expected: Could trend lower
   expectedDirection: down
   description: "Amino acids support lean tissue during a deficit, shifting more weight loss toward fat instead of muscle."
+  displayValue: "0.5-2 points lower"
   estimatedChange:
     kind: absolute
     low: -2.0
@@ -245,6 +246,7 @@ expectedSignalDescriptions:
   expected: Could trend lower
   expectedDirection: down
   description: "Replacing refined carbohydrates with lean protein and losing body fat reduces liver export of triglyceride-rich VLDL."
+  displayValue: "5-20 mg/dL lower"
   estimatedChange:
     kind: absolute
     low: -20
@@ -273,6 +275,7 @@ expectedSignalDescriptions:
   expected: Could dip slightly
   expectedDirection: down_or_stable
   description: "Weight loss, better carbohydrate quality, and lower vascular load reduce pressure; extra sodium or processed meats push the other way."
+  displayValue: "Up to 4 mmHg lower"
   estimatedChange:
     kind: absolute
     low: -4

@@ -1028,6 +1028,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:resting-heart-rate
   expected: Could trend lower
   protocolProminence: focus
+  displayValue: "Up to 4 bpm lower"
   estimatedChange:
     kind: absolute
     low: -4
@@ -1064,6 +1065,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:morning-blood-pressure
   expected: Could trend lower
   protocolProminence: focus
+  displayValue: "3-8 mmHg lower"
   estimatedChange:
     kind: absolute
     low: -8
@@ -1088,6 +1090,7 @@ expectedSignalDescriptions:
   expected: May drift lower
   expectedDirection: down_or_stable
   protocolProminence: context
+  displayValue: "Down up to 1.5%"
   estimatedChange:
     kind: relative_percent
     low: -1.5
@@ -1111,6 +1114,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:blood-glucose
   expected: Short-pilot only
   protocolProminence: context
+  displayValue: "Up to 7 mg/dL lower"
   estimatedChange:
     kind: absolute
     low: -7

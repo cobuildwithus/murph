@@ -57,6 +57,13 @@ export function HostedEmailAuthButton({
   const disabled = !ready || loading;
   const showCodeEntry = pendingEmailAddress !== null;
 
+  function clearCode() {
+    setCode("");
+    if (codeInputRef.current) {
+      codeInputRef.current.value = "";
+    }
+  }
+
   function handleOpen() {
     onActivate();
     setErrorMessage(null);
@@ -82,7 +89,7 @@ export function HostedEmailAuthButton({
     try {
       await sendEmailCode(nextEmailAddress);
       setPendingEmailAddress(nextEmailAddress);
-      setCode("");
+      clearCode();
     } catch (error) {
       setErrorMessage(
         toErrorMessage(
@@ -103,6 +110,7 @@ export function HostedEmailAuthButton({
 
     try {
       await sendEmailCode(pendingEmailAddress);
+      clearCode();
     } catch (error) {
       setErrorMessage(
         toErrorMessage(
@@ -166,7 +174,7 @@ export function HostedEmailAuthButton({
   }
 
   function handleUseAnotherEmail() {
-    setCode("");
+    clearCode();
     setErrorMessage(null);
     setPendingEmailAddress(null);
   }

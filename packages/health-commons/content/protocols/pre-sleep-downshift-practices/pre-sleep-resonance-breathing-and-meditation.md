@@ -171,6 +171,7 @@ expectedSignalDescriptions:
     biomarkerKey: biomarker:sleep-onset-latency
     expected: May fall asleep sooner
     description: Slow breath pacing or a simple meditation anchor replaces problem-solving, scrolling, and clock-watching, lowering pre-bed arousal.
+    displayValue: "3-10 min faster"
     estimatedChange:
       kind: absolute
       low: -10
@@ -197,6 +198,7 @@ expectedSignalDescriptions:
     biomarkerKey: biomarker:resting-heart-rate
     expected: Could trend lower
     description: Unforced slow breathing increases vagal braking and lowers pre-bed pulse as arousal drops.
+    displayValue: "1-4 bpm lower"
     estimatedChange:
       kind: absolute
       low: -4

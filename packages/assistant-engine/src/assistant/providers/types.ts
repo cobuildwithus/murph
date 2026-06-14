@@ -62,6 +62,13 @@ export interface AssistantProviderConversationMessage {
   role: 'assistant' | 'user'
 }
 
+/**
+ * Per-turn OpenAI processing tier. This is turn execution policy only: it must
+ * never enter `CodexThreadIdentity`/route fingerprints or persisted session
+ * target config, because tier changes must not fork thread continuity.
+ */
+export type AssistantProviderServiceTier = 'flex'
+
 export interface AssistantProviderTurnInput {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   activeTurnId?: string | null
@@ -89,6 +96,7 @@ export interface AssistantProviderTurnInput {
   requireGeneratedImageUploader?: boolean | null
   resume?: AssistantProviderCodexResume | null
   sandbox?: AssistantSandbox | null
+  serviceTier?: AssistantProviderServiceTier | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null
   }
@@ -137,6 +145,7 @@ export interface AssistantProviderTurnExecutionInput {
   providerRequestOrdinal?: number | null
   requireGeneratedImageUploader?: boolean | null
   resume?: AssistantProviderCodexResume | null
+  serviceTier?: AssistantProviderServiceTier | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null
   }

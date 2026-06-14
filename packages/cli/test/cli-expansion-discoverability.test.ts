@@ -187,6 +187,21 @@ test('supplement LLM examples are copyable and avoid placeholder syntax', async 
   }
 })
 
+test('food label LLM examples are copyable and avoid placeholder syntax', async () => {
+  const manifest = await readLlmManifest(['food'])
+
+  const search = commandExample(manifest, 'food search-labels')
+  assert.match(search, /food search-labels 'plain greek yogurt' --limit 1/u)
+  assert.doesNotMatch(search, /<food/u)
+
+  const batch = commandExample(manifest, 'food search-labels-batch')
+  assert.match(
+    batch,
+    /food search-labels-batch --query 'greek yogurt' --query 'whole milk' --query 'sourdough bread' --limit 5/u,
+  )
+  assert.doesNotMatch(batch, /greek yogurt,whole milk/u)
+})
+
 test('generic event scaffold docs stay visible without snapshotting every event branch', async () => {
   const llmsFull = await runRawCli(['event', 'scaffold', '--llms-full'])
   assert.match(llmsFull, /event scaffold/u)

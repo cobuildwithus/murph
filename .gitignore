@@ -34,6 +34,8 @@ apps/web/next-env.d.ts
 !/.agents/skills/murph-exercise-images/agents/openai.yaml
 !/.agents/skills/murph-exercise-images/scripts/
 !/.agents/skills/murph-exercise-images/scripts/upload_cloudflare_image.py
+!/.agents/skills/groupchat-comedy/
+!/.agents/skills/groupchat-comedy/SKILL.md
 !/.agents/skills/research-supplements/
 !/.agents/skills/research-supplements/SKILL.md
 !/.agents/skills/research-supplements/agents/
@@ -85,3 +87,4 @@ scripts/murph-age/
 agent-docs/product-ideas.md
 *.local.md
 *.local.png
+.fdc-work/

@@ -418,12 +418,37 @@ describe('assistant codex runtime', () => {
           text: 'User message:\nWhat changed?',
         },
       ],
+      serviceTier: null,
       threadId: 'thread-1',
     })
     const firstInputItem = (turnStart.input as CodexAppServerInputItem[])[0]
     expect(firstInputItem?.type === 'text' ? firstInputItem.text : '').not.toContain(
       'Stable Murph instructions.',
     )
+    expect(
+      buildCodexTurnStartParams({
+        imagePaths: [],
+        input: {
+          ...baseInput,
+          serviceTier: 'flex',
+        },
+        codexThreadId: 'thread-1',
+      }),
+    ).toMatchObject({
+      serviceTier: 'flex',
+      threadId: 'thread-1',
+    })
+
+    expect(
+      buildCodexTurnStartParams({
+        imagePaths: [],
+        input: baseInput,
+        codexThreadId: 'thread-1',
+      }),
+    ).toMatchObject({
+      serviceTier: null,
+      threadId: 'thread-1',
+    })
   })
 
   it('resolves display options from config files and explicit overrides', async () => {
@@ -542,6 +567,7 @@ describe('assistant codex runtime', () => {
             method: 'turn/start',
             params: {
               effort: 'high',
+              serviceTier: null,
               threadId,
             },
           })

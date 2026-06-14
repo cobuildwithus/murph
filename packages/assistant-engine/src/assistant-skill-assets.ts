@@ -1,8 +1,13 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const MURPH_ASSISTANT_SKILLS_ROOT_ENV =
-  'MURPH_ASSISTANT_SKILLS_ROOT' as const
+import {
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+} from './assistant-skill-env.js'
+export {
+  MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+} from './assistant-skill-env.js'
 
 export const MURPH_ASSISTANT_SKILLS_ROOT_REF =
   `$${MURPH_ASSISTANT_SKILLS_ROOT_ENV}` as const
@@ -29,6 +34,14 @@ export function buildAssistantSkillFileRef(slug: AssistantSkillSlug): string {
 }
 
 export function resolveAssistantSkillsRoot(): string {
+  // Honor an explicit root first: bundled runtimes (the hosted runner's
+  // esbuild-bundled entrypoint, the bundled vault-cli) evaluate this module
+  // from a chunk directory, so the module-relative fallback below would miss
+  // the installed package's skills/ tree.
+  const override = process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]?.trim()
+  if (override) {
+    return override
+  }
   return path.join(
     path.dirname(path.dirname(fileURLToPath(import.meta.url))),
     'skills',

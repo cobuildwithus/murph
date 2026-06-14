@@ -365,6 +365,7 @@ expectedSignalDescriptions:
     biomarkerKey: biomarker:sleep-onset-latency
     description: "Early daylight signals daytime to the circadian clock, aligning evening sleepiness with bedtime and shortening time spent trying to fall asleep."
     expected: May fall asleep sooner
+    displayValue: "Up to 10 min faster"
     estimatedChange:
       kind: absolute
       low: -10

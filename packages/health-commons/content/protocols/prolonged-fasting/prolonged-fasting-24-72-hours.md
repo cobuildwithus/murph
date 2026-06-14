@@ -204,6 +204,7 @@ expectedSignalDescriptions:
   expected: Lower during fast; watch lows and refeed rise
   protocolProminence: focus
   description: "With no carbohydrate coming in, glycogen release and gluconeogenesis hold glucose while tissues shift toward fat and ketones."
+  displayValue: "5-30 mg/dL lower"
   estimatedChange:
     kind: absolute
     low: -30
@@ -216,6 +217,7 @@ expectedSignalDescriptions:
   expected: Acute scale drop
   protocolProminence: context
   description: "No food intake, glycogen loss, natriuresis, and emptied gut contents lower scale weight quickly."
+  displayValue: "Down 0.5-3 kg"
   estimatedChange:
     kind: absolute
     low: -3.0
@@ -255,6 +257,7 @@ expectedSignalDescriptions:
   expectedDirection: down_or_stable
   protocolProminence: context
   description: "Lower insulin and sodium-water shifts reduce vascular load, while lower fluid reserve increases orthostatic stress."
+  displayValue: "Up to 5 mmHg lower"
   estimatedChange:
     kind: absolute
     low: -5

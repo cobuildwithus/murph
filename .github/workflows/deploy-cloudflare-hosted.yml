@@ -38,6 +38,11 @@ on:
         required: true
         default: true
         type: boolean
+      live_model_turn:
+        description: Run one real gpt-5.4-nano turn in the deployed container smoke
+        required: true
+        default: true
+        type: boolean
       smoke_user_id:
         description: Optional hosted user id for a manual /run smoke test
         required: false
@@ -57,7 +62,7 @@ jobs:
   codex-cache-prefix-gate:
     name: Codex cache-prefix E2E gate
     if: ${{ !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test
@@ -146,7 +151,7 @@ jobs:
   linq-delivery-gate:
     name: Linq delivery E2E gate
     if: ${{ !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test
@@ -235,7 +240,7 @@ jobs:
   linq-scheduled-reminder-gate:
     name: Linq scheduled reminder E2E gate
     if: ${{ !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test
@@ -324,7 +329,7 @@ jobs:
   cloudflare-runner-smoke-gate:
     name: Cloudflare verify and runner smoke gate
     if: ${{ inputs.deploy_worker && !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 1
@@ -439,7 +444,7 @@ jobs:
           tar --hard-dereference -czf .artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz \
             -C apps/cloudflare/.deploy \
             runner-bundle
-          docker save murph-cloudflare-runner-base:node24.14.1-codex0.135.0 \
+          docker save ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.135.0 \
             | gzip -1 > .artifacts/cloudflare-hosted-deploy/runner-base-image.tar.gz
 
       - name: Upload immediate build handoff
@@ -623,6 +628,7 @@ jobs:
       FFMPEG_COMMAND: ${{ vars.FFMPEG_COMMAND }}
       HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: ${{ vars.CF_PUBLIC_BASE_URL }}
       HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT: ${{ inputs.container_rollout == 'immediate' && 'true' || 'false' }}
+      HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: ${{ inputs.live_model_turn && 'true' || 'false' }}
       HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true"
       HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "300"
       HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "3000"

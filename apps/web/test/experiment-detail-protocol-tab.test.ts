@@ -130,9 +130,9 @@ describe("ProtocolTab", () => {
     expect(markup.indexOf('data-card="Morning Blood Pressure"')).toBeLessThan(
       markup.indexOf('data-card="Resting Heart Rate"'),
     );
-    expect(markup).toContain("−5 to 0 mmHg");
+    expect(markup).toContain("Up to 5 mmHg lower");
     expect(markup).toContain("−3 to +1 bpm");
-    expect(markup).toContain("Morning Blood Pressure projected −5 to 0 mmHg over 2-6 weeks");
+    expect(markup).toContain("Morning Blood Pressure projected up to 5 mmHg lower over 2-6 weeks");
     expect(markup).toContain("Resting Heart Rate projected −3 to +1 bpm over 2-6 weeks");
     expect(markup).not.toContain('data-card="HRV / RMSSD"');
     expect(markup).toContain("HRV / RMSSD");

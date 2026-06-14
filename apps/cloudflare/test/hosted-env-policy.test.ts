@@ -60,6 +60,38 @@ describe("buildHostedRunnerContainerEnv", () => {
     ).toThrow("HOSTED_ASSISTANT_PROVIDER must be openai for hosted runner execution.");
   });
 
+  it("forwards the dev-only ChatGPT subscription auth without credential interception", () => {
+    const chatGptAuthJson = Buffer.from(
+      JSON.stringify({
+        auth_mode: "chatgpt",
+        tokens: { access_token: "chatgpt-access-token" },
+      }),
+      "utf8",
+    ).toString("base64url");
+    const env = buildHostedRunnerContainerEnv({
+      ...requiredHostedAssistantProvider,
+      HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON: chatGptAuthJson,
+      OPENAI_API_KEY: "openai-secret",
+    });
+
+    // Codex parses these JWTs client-side, so a placeholder swap cannot work;
+    // the dev-only runtime consumes the value directly and NODE_ENV=development
+    // gating in prepareHostedCodexRuntimeEnvironment keeps it out of prod.
+    expect(env.HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON).toBe(chatGptAuthJson);
+  });
+
+  it("does not allow member runner secrets to set the ChatGPT subscription auth", () => {
+    const source = {
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS:
+        "HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON",
+    };
+
+    expect(isHostedRunnerSecretKeyAllowed(
+      "HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON",
+      source,
+    )).toBe(false);
+  });
+
   it("does not allow runner secrets to override hosted control-plane prefixes", () => {
     const source = {
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
@@ -91,6 +123,40 @@ describe("buildHostedRunnerContainerEnv", () => {
       "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID",
       source,
     )).toBe(false);
+  });
+
+  it("does not allow runner secrets to override image-pinned assistant asset roots", () => {
+    const source = {
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
+        "MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH",
+        "MURPH_ASSISTANT_SKILLS_ROOT",
+      ].join(","),
+    };
+
+    expect(isHostedRunnerSecretKeyAllowed("MURPH_ASSISTANT_SKILLS_ROOT")).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed(
+      "MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH",
+    )).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("MURPH_ASSISTANT_SKILLS_ROOT", source)).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed(
+      "MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH",
+      source,
+    )).toBe(false);
+  });
+
+  it("keeps the worker-side asset-root literals aligned with the engine-owned env names", async () => {
+    // hosted-env-policy.ts is part of the workerd bundle and must not import
+    // @murphai/assistant-engine (Node-only module graph), so it pins the two
+    // deny-listed names as literals. This node-side test imports only the
+    // zero-dependency env-name contract.
+    const { MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV, MURPH_ASSISTANT_SKILLS_ROOT_ENV } =
+      await import("@murphai/assistant-engine/assistant-skill-env");
+    expect(MURPH_ASSISTANT_SKILLS_ROOT_ENV).toBe("MURPH_ASSISTANT_SKILLS_ROOT");
+    expect(MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV).toBe(
+      "MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH",
+    );
+    expect(isHostedRunnerSecretKeyAllowed(MURPH_ASSISTANT_SKILLS_ROOT_ENV)).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed(MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV)).toBe(false);
   });
 
   it("does not allow runner secrets to override process environment keys", () => {

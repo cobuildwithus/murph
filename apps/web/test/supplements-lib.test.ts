@@ -146,11 +146,27 @@ describe("supplements query helpers", () => {
     expect(searchCall?.text).toContain(
       "strict_word_similarity(name, query.raw_q)",
     );
+    expect(searchCall?.text).toContain("fts_candidates AS MATERIALIZED");
+    expect(searchCall?.text).toContain("trigram_candidates AS MATERIALIZED");
+    expect(searchCall?.text).toContain(
+      "NOT EXISTS (SELECT 1 FROM fts_candidates)",
+    );
     expect(searchCall?.text).toContain("name % query.raw_q");
+    expect(searchCall?.text).not.toContain("OR name % query.raw_q");
     expect(searchCall?.text).toContain("name_phrase_match DESC");
     expect(searchCall?.text).toContain("name_phrase_length DESC");
     expect(searchCall?.text).toContain("name_similarity DESC");
     expect(searchCall?.text).toContain("FROM supplements, query");
+    expect(searchCall?.text).not.toMatch(
+      /fts_candidates AS MATERIALIZED[\s\S]*?\blabel\b[\s\S]*?FROM supplements, query/u,
+    );
+    expect(searchCall?.text).not.toMatch(
+      /trigram_candidates AS MATERIALIZED[\s\S]*?\blabel\b[\s\S]*?FROM supplements, query/u,
+    );
+    expect(searchCall?.text).toContain("JOIN supplements labels");
+    expect(searchCall?.text).toMatch(
+      /selected AS \([\s\S]*?LIMIT \$3[\s\S]*?\)\s*SELECT[\s\S]*?labels\.label[\s\S]*?FROM selected[\s\S]*?JOIN supplements labels/u,
+    );
     expect(searchCall?.text).toContain("PARTITION BY canonical_key");
     expect(searchCall?.text).toContain("dedupe_rank = 1");
     expect(searchCall?.text).toContain("data_origin_priority ASC");
@@ -364,6 +380,43 @@ describe("supplements query helpers", () => {
       false,
       5,
       ["Garden of Life Dr. Formulated", "Garden of Life"],
+    ]);
+  });
+
+  it("expands parent-brand scopes to sub-brand lines, query-overlapping lines first", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("GROUP BY brand")) {
+          return {
+            rows: [
+              { brand: "Garden of Life" },
+              { brand: "Garden of Life Sport" },
+              { brand: "Garden of Life MyKind Organics" },
+              { brand: "Momentous" },
+            ],
+          } as { rows: T[] };
+        }
+        return { rows: [] as T[] };
+      },
+    });
+
+    await queries.searchSupplements({
+      q: "Garden of Life Organics Women's Multi",
+      limit: 5,
+      includeOffMarket: false,
+    });
+
+    expect(calls[1]?.values).toEqual([
+      "Garden of Life Organics Women's Multi",
+      false,
+      5,
+      [
+        "Garden of Life",
+        "Garden of Life MyKind Organics",
+        "Garden of Life Sport",
+      ],
     ]);
   });
 

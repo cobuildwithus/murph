@@ -111,6 +111,22 @@ class StripeCliMissingError extends Error {
     this.name = "StripeCliMissingError";
   }
 }
+const spawnHostedLocalDockerEventsForensics = vi.fn<
+  (
+    env: NodeJS.ProcessEnv,
+    input?: {
+      pipeOutput?: boolean;
+      stderrTarget?: NodeJS.WritableStream;
+      stdoutTarget?: NodeJS.WritableStream;
+    },
+  ) => BufferedNamedChildProcess
+>(() =>
+  createBufferedChild({
+    exitCode: null,
+    name: "docker-events",
+    pid: nextChildPid++,
+  }),
+);
 const spawnStripeListenerWithSecretCapture = vi.fn<
   (input: {
     command: string;
@@ -181,6 +197,24 @@ const resolveHostedLocalLinqWebhookSetup = vi.fn<
 >(async () => null);
 const registerHostedLocalLinqWebhookSubscription = vi.fn(async () => {});
 const waitForHostedLocalLinqWebhookTarget = vi.fn(async () => {});
+const STUB_ID_TOKEN = buildFakeJwtPayload({ iss: "https://auth.openai.com", sub: "user-1" });
+const STUB_CODEX_SUBSCRIPTION_AUTH_JSON = Buffer.from(
+  JSON.stringify({
+    OPENAI_API_KEY: null,
+    auth_mode: "chatgptAuthTokens",
+    last_refresh: "2026-06-11T00:00:00.000Z",
+    tokens: {
+      access_token: "stub-access-token",
+      account_id: "stub-account-id",
+      id_token: STUB_ID_TOKEN,
+      refresh_token: "",
+    },
+  }),
+  "utf8",
+).toString("base64url");
+const resolveHostedLocalCodexSubscriptionAuthEnvValue = vi.fn(
+  async () => STUB_CODEX_SUBSCRIPTION_AUTH_JSON,
+);
 const maybeStartHostedLocalMinio = vi.fn<
   (input: unknown) => Promise<{
     containerName: string;
@@ -238,6 +272,11 @@ vi.mock("node:fs/promises", () => ({
 
 vi.mock("node:child_process", () => ({
   spawnSync,
+}));
+
+vi.mock("../../src/dev-hosted-local/codex-subscription-auth.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/dev-hosted-local/codex-subscription-auth.ts")>()),
+  resolveHostedLocalCodexSubscriptionAuthEnvValue,
 }));
 
 vi.mock("../../src/dev-hosted-local/config.ts", () => ({
@@ -358,6 +397,7 @@ vi.mock("../../src/dev-hosted-local/runtime.ts", () => ({
   resolveHostedLocalWorkerPortMode,
   runCommand,
   spawnChildProcess,
+  spawnHostedLocalDockerEventsForensics,
   spawnStripeListenerWithSecretCapture,
   StripeCliMissingError,
   terminateChildProcess,
@@ -1673,7 +1713,7 @@ describe("hosted local dev stack", () => {
     });
 
     await expect(stack.ready).rejects.toThrow("fetch failed");
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(1);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
   });
 
   it("starts a managed Linq cloudflared tunnel and registers the local webhook target", async () => {
@@ -1901,6 +1941,70 @@ describe("hosted local dev stack", () => {
     const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
     expect(cloudflareEnv.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
     expect(cloudflareEnv.OPENAI_API_KEY).toBe("local-openai-key");
+  });
+
+  it("seeds dev worker env with ChatGPT subscription Codex auth", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 141 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 142 }));
+
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        NODE_ENV: "development",
+        OPENAI_API_KEY: "local-openai-key",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(resolveHostedLocalCodexSubscriptionAuthEnvValue).toHaveBeenCalledOnce();
+    const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
+    const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
+    expect(cloudflareEnv.HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON).toBe(
+      STUB_CODEX_SUBSCRIPTION_AUTH_JSON,
+    );
+    // The API key stays configured for image generation.
+    expect(cloudflareEnv.OPENAI_API_KEY).toBe("local-openai-key");
+
+    const envFileSource = vi.mocked(environmentModule.buildWranglerEnvFileText)
+      .mock.calls.at(-1)?.[0] as NodeJS.ProcessEnv;
+    expect(envFileSource.HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON).toBe(
+      STUB_CODEX_SUBSCRIPTION_AUTH_JSON,
+    );
+
+    // Token material stays out of the non-worker child processes.
+    const webCall = spawnChildProcess.mock.calls.find(([name]) => name === "web");
+    const webEnv = webCall?.[3] as NodeJS.ProcessEnv;
+    expect(webEnv.HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON).toBeUndefined();
+  });
+
+  it("does not read the host Codex home for NODE_ENV=test stacks", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 143 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 144 }));
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    const stack = await startHostedLocalDevStack({
+      // Vitest and the e2e profiles run with NODE_ENV=test.
+      env: {
+        ...process.env,
+        // Inherited shell values are host-only and must never reach the worker.
+        HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON: "inherited-shell-value",
+        NODE_ENV: "test",
+        OPENAI_API_KEY: "local-openai-key",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(resolveHostedLocalCodexSubscriptionAuthEnvValue).not.toHaveBeenCalled();
+    const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
+    const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
+    expect(cloudflareEnv.HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON).toBeUndefined();
   });
 
   it("generates a unique non-default local runner build id for each stack", async () => {
@@ -2132,6 +2236,7 @@ describe("hosted local dev stack", () => {
     expect(stderrTarget.text()).toContain(
       "Reusing existing local Cloudflare worker at http://127.0.0.1:8787",
     );
+    expect(resolveHostedLocalCodexSubscriptionAuthEnvValue).not.toHaveBeenCalled();
     expect(spawnChildProcess).toHaveBeenCalledTimes(1);
     expect(spawnChildProcess).toHaveBeenCalledWith(
       "web",
@@ -2157,6 +2262,60 @@ describe("hosted local dev stack", () => {
     expect(vi.mocked(symlink)).not.toHaveBeenCalled();
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(1);
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(2);
+  });
+
+  it("streams docker-events forensics only for isolated or opted-in stacks", async () => {
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_HOSTED_LOCAL_DOCKER_EVENTS_FORENSICS: "",
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "",
+        MURPH_HOSTED_LOCAL_PROFILE: "",
+      },
+    });
+
+    // An ordinary dev stack must not observe the whole Docker daemon.
+    expect(spawnHostedLocalDockerEventsForensics).not.toHaveBeenCalled();
+    await stack.stop("SIGTERM");
+  });
+
+  it("includes docker-events output in startup-failure diagnostics", async () => {
+    const cloudflareChild = createBufferedChild({
+      exitCode: 1,
+      name: "cloudflare",
+      pid: 511,
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(cloudflareChild)
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 512 }));
+    spawnHostedLocalDockerEventsForensics.mockReturnValueOnce(
+      createBufferedChild({
+        exitCode: null,
+        name: "docker-events",
+        pid: 513,
+        stdoutText: '{"Action":"kill","Actor":{"Attributes":{"signal":"9"}}}',
+      }),
+    );
+    waitForHealthyHttpEndpoint.mockImplementationOnce(() => new Promise(() => {}));
+    waitForFirstChildExit.mockResolvedValueOnce(cloudflareChild);
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        // The opt-in flag streams forensics without requiring full E2E
+        // isolation, which keeps this unit test independent of isolation
+        // preconditions.
+        MURPH_HOSTED_LOCAL_DOCKER_EVENTS_FORENSICS: "1",
+      },
+    });
+
+    // Startup failures (image untags, cold-start kills) are exactly what the
+    // forensics exist to explain, so the rejection itself must carry them.
+    await expect(stack.ready).rejects.toThrow(/\[docker-events:stdout\][\s\S]*"signal":"9"/u);
   });
 
   it("fails fast and cleans up when a dev child exits before readiness", async () => {
@@ -2277,7 +2436,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 302 }));
 
     vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "openai");
-    vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-5.4-mini");
+    vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-5.5");
 
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
 
@@ -2299,7 +2458,7 @@ describe("hosted local dev stack", () => {
       "pnpm",
       expect.any(Array),
       expect.objectContaining({
-        HOSTED_ASSISTANT_MODEL: "gpt-5.4-mini",
+        HOSTED_ASSISTANT_MODEL: "gpt-5.5",
         HOSTED_ASSISTANT_PROVIDER: "openai",
       }),
       expect.any(Object),
@@ -2702,3 +2861,13 @@ describe("hosted local dev stack", () => {
     });
   });
 });
+
+function buildFakeJwtPayload(payload: Record<string, unknown>): string {
+  const encode = (value: unknown): string =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
+  return [
+    encode({ alg: "none", typ: "JWT" }),
+    encode(payload),
+    "signature",
+  ].join(".");
+}

@@ -916,6 +916,7 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
       },
     })),
     executeCodexTurnWithRecovery: vi.fn(async (input) => {
+      assert.equal(input.input.serviceTier, 'flex')
       assert.equal(input.input.turnTrigger, 'automation-cron')
       assert.equal(input.input.workingDirectory, undefined)
       assert.equal(input.progressDelivery, null)
@@ -1001,6 +1002,7 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
       hosted: null,
     },
     instructions: 'Decide if the operator should be interrupted.',
+    serviceTier: 'flex',
     vault: '/vaults/skip',
   })
 

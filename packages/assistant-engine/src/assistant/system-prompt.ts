@@ -64,6 +64,14 @@ export interface AssistantSystemPromptLayers {
   prompt: string;
   stableRouteCapabilityPrompt: string;
   staticCacheableCorePrompt: string;
+  /**
+   * Thread-birth-stable context (timezone/date-style prose, evidence/reply
+   * style, onboarding guidance, link self-check). Joined into the thread-level
+   * developer instructions so it costs one resident copy per thread instead of
+   * one copy per turn; a change rotates the thread through the contract
+   * fingerprint.
+   */
+  threadContextPrompt: string;
 }
 
 export interface AssistantPromptCacheMetadata {
@@ -144,6 +152,10 @@ export function buildAssistantSystemPromptLayers(
     buildStableRouteCapabilityPrompt(input),
     input.assistantToolNameAliases
   );
+  const threadContextPrompt = renderAssistantToolNameAliases(
+    buildThreadContextPrompt(input),
+    input.assistantToolNameAliases
+  );
   const dynamicTurnContextPrompt = renderAssistantToolNameAliases(
     buildDynamicTurnContextPrompt(input),
     input.assistantToolNameAliases
@@ -152,7 +164,11 @@ export function buildAssistantSystemPromptLayers(
     staticCacheableCorePrompt,
     stableRouteCapabilityPrompt
   );
-  const prompt = joinPromptSections(stablePrefix, dynamicTurnContextPrompt);
+  const prompt = joinPromptSections(
+    stablePrefix,
+    threadContextPrompt,
+    dynamicTurnContextPrompt
+  );
 
   return {
     dynamicContextStartsAfterStaticCore: stablePrefix.length,
@@ -160,6 +176,7 @@ export function buildAssistantSystemPromptLayers(
     prompt,
     stableRouteCapabilityPrompt,
     staticCacheableCorePrompt,
+    threadContextPrompt,
   };
 }
 
@@ -203,22 +220,27 @@ function buildStableRouteCapabilityPrompt(
   );
 }
 
-function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): string {
+function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
   return joinPromptSections(
-    buildAssistantCurrentDateContextText({
-      currentLocalDate: input.currentLocalDate,
+    buildAssistantTimeStyleContextText({
       currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
       currentTimeZone: input.currentTimeZone,
     }),
-    input.assistantContextSnapshotPrompt ?? null,
     buildAssistantEvidenceAndReplyStyleText(input.channel),
-    buildAssistantExecutionContextText({
-      turnTrigger: input.turnTrigger ?? null,
-    }),
     buildAssistantOnboardingGuidanceText({
       enabled: input.onboardingGuidance,
     }),
     buildAssistantUserFacingLinkSelfCheckText()
+  );
+}
+
+function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): string {
+  return joinPromptSections(
+    buildAssistantCurrentDateLineText(input.currentLocalDate),
+    input.assistantContextSnapshotPrompt ?? null,
+    buildAssistantExecutionContextText({
+      turnTrigger: input.turnTrigger ?? null,
+    })
   );
 }
 
@@ -282,6 +304,9 @@ export function buildAssistantNotificationDecisionSystemPromptLayers(
     prompt,
     stableRouteCapabilityPrompt,
     staticCacheableCorePrompt,
+    // Notification-decision turns run on isolated one-shot threads, so a
+    // separate thread-stable layer buys nothing; keep its context per-turn.
+    threadContextPrompt: "",
   };
 }
 
@@ -340,22 +365,52 @@ function stableStringifyAssistantPromptCacheValue(value: unknown): string {
   return `{${entries.join(",")}}`;
 }
 
+const ASSISTANT_DATE_STYLE_GUIDANCE_TEXT =
+  'In user-facing prose, refer to dates with a month name and day, such as "April 3" or "April 3, 2026" when the year matters, instead of raw ISO dates. Keep ISO dates for command arguments, filenames, frontmatter, ids, or other machine-readable fields.';
+
+function buildAssistantTimezoneLineText(currentTimeZone: string): string {
+  return `The user's canonical timezone for this vault is ${currentTimeZone}.`;
+}
+
+function buildAssistantCurrentDateLineText(currentLocalDate: string): string {
+  return `Today's date for the user is ${formatAssistantHumanReadableLocalDate(
+    currentLocalDate
+  )}.`;
+}
+
+function buildAssistantProductBaseUrlLineText(
+  currentMurphProductBaseUrl: string | null
+): string | null {
+  return currentMurphProductBaseUrl
+    ? `Current Murph product base URL for user-facing app links: ${currentMurphProductBaseUrl}`
+    : null;
+}
+
+function buildAssistantTimeStyleContextText(input: {
+  currentMurphProductBaseUrl: string | null;
+  currentTimeZone: string;
+}): string {
+  return joinPromptSections(
+    [
+      buildAssistantTimezoneLineText(input.currentTimeZone),
+      ASSISTANT_DATE_STYLE_GUIDANCE_TEXT,
+    ].join("\n"),
+    buildAssistantProductBaseUrlLineText(input.currentMurphProductBaseUrl)
+  );
+}
+
 function buildAssistantCurrentDateContextText(input: {
   currentLocalDate: string;
   currentMurphProductBaseUrl: string | null;
   currentTimeZone: string;
 }): string {
-  const humanReadableCurrentLocalDate = formatAssistantHumanReadableLocalDate(
-    input.currentLocalDate
-  );
-
   return joinPromptSections(
-    `The user's canonical timezone for this vault is ${input.currentTimeZone}.
-Today's date for the user is ${humanReadableCurrentLocalDate}.
-In user-facing prose, refer to dates with a month name and day, such as "April 3" or "April 3, 2026" when the year matters, instead of raw ISO dates. Keep ISO dates for command arguments, filenames, frontmatter, ids, or other machine-readable fields.`,
-    input.currentMurphProductBaseUrl
-      ? `Current Murph product base URL for user-facing app links: ${input.currentMurphProductBaseUrl}`
-      : null
+    [
+      buildAssistantTimezoneLineText(input.currentTimeZone),
+      buildAssistantCurrentDateLineText(input.currentLocalDate),
+      ASSISTANT_DATE_STYLE_GUIDANCE_TEXT,
+    ].join("\n"),
+    buildAssistantProductBaseUrlLineText(input.currentMurphProductBaseUrl)
   );
 }
 
@@ -490,7 +545,9 @@ function buildAssistantHealthReasoningText(): string {
 - When logging meals, supplements, workouts, or activities, capture the full recoverable structure: ingredients, amounts, doses, calories, workout type, duration, distance, exercises, sets, reps, and segment details. Mark uncertainty plainly.
 - When using vault CLI search, query, timeline, list, knowledge, or Health Commons discovery commands, start with the smallest useful result set. Pass a higher limit only when the user asks for broad history or trends, the first page is ambiguous, or you need more evidence to answer accurately. Prefer exact show/get commands after you have an id.
 - When saving a meal and the user provides enough food identity, ingredients, portion hints, package/menu facts, or attachment evidence to form a useful estimate, do not leave nutrition blank just because exact serving weights are missing. Make ordinary portion assumptions, estimate calories first, estimate protein/carbs/fat/fiber when reasonably inferable, set nutrition provenance to \`estimated\`, choose low or medium confidence based on specificity, and put the key assumptions in provenance detail. Ask one targeted follow-up only when the meal is too vague to identify the food or rough amount.
-- For foods, drinks, menu items, and other non-supplement consumed products, use web lookup before writing when the item is identifiable and local context or attachments do not provide key facts.
+- For identifiable foods, drinks, packaged food products, menu items, and other non-supplement consumed products, default to \`vault-cli food search-labels\` for one item or \`vault-cli food search-labels-batch\` for several before web lookup. The default food label lookup returns one match; pass an explicit higher limit only when the first result is ambiguous, generic, or missing likely product variants. The hosted food label database is large but not exhaustive; if the command is unavailable in the current runtime, misses the product or brand, or lacks needed nutrition or ingredients, fall back to web lookup.
+- For fridge or pantry photo scans, enumerate the distinct visible products from the photo, resolve them with one \`vault-cli food search-labels-batch\` call, summarize which products were found with notable nutrition, ingredient, allergen, or uncertainty flags, and offer to save them as vault \`food\` records. Do not save food records from a scan unless the user asks.
+- When the user names, photographs, or logs a specific food product, persist the looked-up label facts instead of re-estimating: save serving size and label nutrition (calories, protein, carbs, fat, fiber, sugar, sodium when present) on the meal record with label-based provenance, and for recurring or pantry items save or update the matching vault \`food\` record with the label serving, ingredients, and nutrition, recording the label lookup id (for example \`fdc:2517161\`) in the nutrition provenance source detail so the product can be found again later.
 - For supplements, pills, powders, and supplement-like consumed products, default to \`vault-cli supplement search-labels\` for one item or \`vault-cli supplement search-labels-batch\` for several before web lookup. The default label lookup returns one match; pass an explicit higher limit only when the first result is ambiguous, generic, or missing likely product variants. If the lookup returns a usable serving, dose, or amount, use it instead of asking the user to restate dosage. The hosted label database covers many supplements but is not exhaustive; if it misses the product or brand, or lacks needed ingredients, fall back to web lookup.
 - When saving known supplement label facts, preserve the full active ingredient panel with repeated \`vault-cli supplement save --ingredient\` JSON-object flags, keeping each ingredient's label amount and unit, and save the label serving size with \`--serving-size\`. Do not collapse multi-ingredient labels to one primary ingredient.
 - For any product lookup, prefer official labels, manufacturer pages, restaurant/menu nutrition pages, or other primary sources. Try to recover serving size, ingredients, active compounds, dose, calories, protein, carbs, fat, fiber, caffeine, alcohol, sodium, sugar, allergens, and warnings when available. If the item is generic, the user asks you to just note it, or evidence is unavailable, log what is known, mark estimates and confidence, and do not imply a lookup happened.

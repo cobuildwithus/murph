@@ -121,6 +121,7 @@ export interface AssistantNotificationInput
       | 'onProviderEvent'
       | 'onTraceEvent'
       | 'operatorAuthority'
+      | 'serviceTier'
       | 'showThinkingTraces'
       | 'turnEnvironment'
       | 'turnTrigger'
@@ -579,6 +580,7 @@ function buildAssistantNotificationMessageInput(
     receiptMetadata: null,
     reasoningEffort: input.reasoningEffort,
     sandbox: input.sandbox,
+    serviceTier: input.serviceTier ?? null,
     sessionId: input.sessionId,
     showThinkingTraces: input.showThinkingTraces,
     threadId: input.threadId,

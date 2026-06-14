@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@murphai/device-syncd": "workspace:*",
+    "@murphai/hosted-execution": "workspace:*",
     "@murphai/operator-config": "workspace:*"
   },
   "scripts": {

@@ -422,14 +422,14 @@ describe("hosted Linq usage reset e2e", () => {
       ok: true,
       reason: "wake-appended-active-member",
     });
-    expect(usage.getPeriod("2026-05-01T00:00:00.000Z")).toMatchObject({
-      limitNoticeSentAt: null,
-      limitUsdMicros: monthlyLimit,
-      spentUsdMicros: 0n,
-    });
+    // The webhook gate is read-first: the fresh-month allow decision is served
+    // without creating the May period row. Period bookkeeping is owned by the
+    // mutating turn-admission gate (runtime reconciliation facts), which runs
+    // before any AI spend can land. The only webhook-driven upsert is the
+    // April escalation that confirmed the exhausted-period denial.
+    expect(usage.periods.has("2026-05-01T00:00:00.000Z")).toBe(false);
     expect(usage.upsertedPeriodStarts).toEqual([
       "2026-04-01T00:00:00.000Z",
-      "2026-05-01T00:00:00.000Z",
     ]);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({

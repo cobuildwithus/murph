@@ -414,6 +414,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
         occurredAt: bodyMeasurementRecordedAt,
         recordedAt: bodyMeasurementRecordedAt,
         dayKey: bodyMeasurementDayKey,
+        observationGrain: "summary",
         rawArtifactRoles: ["body-measurement"],
         externalRef: (facet) => makeExternalRef("body-measurement", bodyMeasurementResourceId, undefined, facet),
       },
@@ -428,6 +429,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const version = toIso(sleep.updated_at);
     const recordedAt = cycleOrFallbackTimestamp(toIso(sleep.updated_at), endAt, startAt, importedAt);
     const occurredAt = startAt ?? recordedAt;
+    const dayKey = firstDayKey(endAt, startAt, recordedAt);
     const durationMinutes = minutesBetween(startAt, endAt);
     const sleepRole = `sleep:${sleepId}`;
     const sleepRef = makeExternalRef("sleep", sleepId, version);
@@ -446,6 +448,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
           kind: "sleep_session",
           occurredAt,
           recordedAt,
+          dayKey,
           source: "device",
           title: nap ? "WHOOP nap" : "WHOOP sleep",
           rawArtifactRoles: [sleepRole],
@@ -465,6 +468,8 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
         source: score,
         occurredAt,
         recordedAt,
+        dayKey,
+        observationGrain: "summary",
         rawArtifactRoles: [sleepRole],
         externalRef: (facet) => makeExternalRef("sleep", sleepId, version, facet),
       },
@@ -478,6 +483,8 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
           source: stageSummary,
           occurredAt,
           recordedAt,
+          dayKey,
+          observationGrain: "summary",
           rawArtifactRoles: [sleepRole],
           externalRef: (facet) => makeExternalRef("sleep", sleepId, version, facet),
         },
@@ -492,6 +499,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const version = toIso(recovery.updated_at);
     const recordedAt = cycleOrFallbackTimestamp(toIso(recovery.updated_at), importedAt);
     const occurredAt = recordedAt;
+    const dayKey = firstDayKey(recordedAt);
     const score = asPlainObject(recovery.score);
 
     pushRawArtifact(
@@ -505,6 +513,8 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
         source: score,
         occurredAt,
         recordedAt,
+        dayKey,
+        observationGrain: "summary",
         rawArtifactRoles: [recoveryRole],
         externalRef: (facet) => makeExternalRef("recovery", sleepId, version, facet),
       },
@@ -520,6 +530,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const version = toIso(cycle.updated_at);
     const recordedAt = cycleOrFallbackTimestamp(toIso(cycle.updated_at), endAt, startAt, importedAt);
     const occurredAt = endAt ?? startAt ?? recordedAt;
+    const dayKey = firstDayKey(endAt, startAt, recordedAt);
     const score = asPlainObject(cycle.score);
 
     pushRawArtifact(
@@ -533,6 +544,8 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
         source: score,
         occurredAt,
         recordedAt,
+        dayKey,
+        observationGrain: "summary",
         rawArtifactRoles: [cycleRole],
         externalRef: (facet) => makeExternalRef("cycle", cycleId, version, facet),
       },

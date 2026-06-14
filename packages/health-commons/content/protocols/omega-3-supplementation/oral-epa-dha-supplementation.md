@@ -579,6 +579,7 @@ expectedSignalDescriptions:
   description: EPA/DHA reduces hepatic triglyceride output and VLDL export, lowering fasting triglyceride traffic.
   expected: Could trend lower
   expectedDirection: down_or_stable
+  displayValue: "Up to 30 mg/dL lower"
   estimatedChange:
     kind: absolute
     low: -30
@@ -607,6 +608,7 @@ expectedSignalDescriptions:
   description: Lower VLDL and remnant cholesterol reduce non-HDL-C, while LDL-C remodeling pushes the opposite direction.
   expected: Could trend lower
   expectedDirection: down_or_stable
+  displayValue: "Up to 15 mg/dL lower"
   estimatedChange:
     kind: absolute
     low: -15

@@ -102,6 +102,7 @@ import type {
   AssistantHostedGeneratedImageUploader,
 } from './assistant/execution-context.js'
 import type {
+  AssistantProviderServiceTier,
   AssistantProviderUsageDraft,
 } from './assistant/providers/types.js'
 import {
@@ -185,6 +186,21 @@ type CodexAppServerActiveTurnBinding = {
 export interface CodexWarmThreadTokenUsage {
   lastInputTokens: number
   threadId: string
+}
+
+function prepareCodexRpcParams(
+  method: string,
+  params: Record<string, unknown>,
+): Record<string, unknown> {
+  const stripped = stripUndefinedRpcParams(params)
+  if (
+    method === 'turn/start' &&
+    Object.hasOwn(params, 'serviceTier') &&
+    params.serviceTier === null
+  ) {
+    stripped.serviceTier = null
+  }
+  return stripped
 }
 
 // The 0.135 app-server reports compaction completion to v2 clients as a
@@ -342,6 +358,9 @@ export interface CodexAppServerTurnInput {
   reasoningEffort?: string | null
   resumeSessionId?: string | null
   sandbox?: AssistantSandbox
+  // Sent on every turn/start: a value selects the tier, null explicitly
+  // resets a sticky thread-level override back to the default tier.
+  serviceTier?: AssistantProviderServiceTier | null
   progressDelivery?: AssistantProgressDelivery | null
   providerRequestOrdinal?: number | null
   requireHostedGeneratedImageUploader?: boolean | null
@@ -780,7 +799,7 @@ class CodexAppServerProcess {
       const failure = this.writeRpcMessage({
         id,
         method,
-        params: stripUndefinedRpcParams(params),
+        params: prepareCodexRpcParams(method, params),
       })
       if (failure) {
         this.pendingRequests.delete(id)
@@ -792,7 +811,7 @@ class CodexAppServerProcess {
   sendNotification(method: string, params: Record<string, unknown>): void {
     void this.writeRpcMessage({
       method,
-      params: stripUndefinedRpcParams(params),
+      params: prepareCodexRpcParams(method, params),
     })
   }
 
@@ -803,7 +822,7 @@ class CodexAppServerProcess {
     void this.writeRpcMessage({
       id,
       method,
-      params: stripUndefinedRpcParams(params),
+      params: prepareCodexRpcParams(method, params),
     })
   }
 

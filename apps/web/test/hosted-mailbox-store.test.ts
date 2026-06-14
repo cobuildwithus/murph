@@ -845,7 +845,9 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
         id: true,
       },
       where: {
-        kind: "runtime.manual-requested",
+        kind: {
+          in: ["runtime.manual-requested"],
+        },
         lane: "system",
         laneSeq: {
           gt: 0n,
