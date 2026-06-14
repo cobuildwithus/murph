@@ -3113,6 +3113,137 @@ describe('assistant codex runtime', () => {
     })
   })
 
+  it('accepts matching context compaction completion after start before compact rpc success', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-compact-complete-before-rpc-work-')
+    const codexHome = await createTempDir('assistant-codex-compact-complete-before-rpc-home-')
+    const completionSent = createDeferred<void>()
+    const releaseRpcSuccess = createDeferred<void>()
+    const contextItemId = 'context-compact-complete-before-rpc'
+    const seedMessage = 'Seeded before complete-before-rpc completion'
+    const threadId = 'thread-compact-complete-before-rpc'
+    const turnId = 'turn-compact-complete-before-rpc'
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId,
+            turnId,
+          })
+          child.stdout.write(jsonLine({
+            method: 'thread/tokenUsage/updated',
+            params: {
+              threadId,
+              turnId,
+              tokenUsage: {
+                last: {
+                  cachedInputTokens: 10_000,
+                  inputTokens: 125_000,
+                  outputTokens: 100,
+                  totalTokens: 125_100,
+                },
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: `${contextItemId}-assistant`,
+                type: 'assistant_message',
+                message: seedMessage,
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: turnId,
+                status: 'completed',
+              },
+            },
+          }))
+
+          const barrier = await waitForRpcMethod(child, 'config/read')
+          child.stdout.write(jsonLine({ id: barrier.id, result: {} }))
+          const compact = await waitForRpcMethod(child, 'thread/compact/start')
+          expect(asRecord(compact.params)).toEqual({ threadId })
+          writeContextCompactionStarted({
+            child,
+            itemId: contextItemId,
+            threadId,
+          })
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: contextItemId,
+                type: 'contextCompaction',
+              },
+              threadId,
+            },
+          }))
+          completionSent.resolve()
+          await releaseRpcSuccess.promise
+          child.stdout.write(jsonLine({ id: compact.id, result: {} }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          PATH: '/custom/bin',
+        },
+        prompt: `seed compact ${contextItemId}`,
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: seedMessage,
+      sessionId: threadId,
+      turnId,
+    })
+
+    const outcome = compactWarmCodexThread({
+      minThreadTokens: 100_000,
+      timeoutMs: 5_000,
+    })
+    await completionSent.promise
+    await expect(
+      Promise.race([
+        outcome.then(() => 'settled' as const),
+        new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 25)),
+      ]),
+    ).resolves.toBe('pending')
+
+    releaseRpcSuccess.resolve()
+    await expect(outcome).resolves.toMatchObject({
+      kind: 'compacted',
+      threadContextTokensBefore: 125_000,
+      threadId,
+      usage: {
+        cachedInputTokens: null,
+        inputTokens: 125_000,
+        outputTokens: null,
+        source: 'estimated',
+        totalTokens: 125_000,
+      },
+    })
+  })
+
   it('ignores stale compaction completions after compact rpc success before current start', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-stale-after-rpc-work-')
     const codexHome = await createTempDir('assistant-codex-compact-stale-after-rpc-home-')

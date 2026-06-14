@@ -1530,6 +1530,7 @@ export async function compactWarmCodexThread(input: {
   let compactRequestSubmitted = false
   let compactRequestAccepted = false
   let compactStartedItemId: string | null = null
+  let compactCompletionBuffered = false
   let providerUsage: CodexWarmThreadCompactionUsage | null = null
   type CompactionSettleReason = 'aborted' | 'compacted' | 'process_exit' | 'rpc_error' | 'timeout'
   let compactionSettleReason: CompactionSettleReason | null = null
@@ -1567,6 +1568,9 @@ export async function compactWarmCodexThread(input: {
           !message.error
         ) {
           compactRequestAccepted = true
+          if (compactCompletionBuffered) {
+            settleCompaction('compacted')
+          }
         }
         return
       }
@@ -1591,16 +1595,19 @@ export async function compactWarmCodexThread(input: {
         return
       }
 
-      if (
-        compactRequestAccepted &&
-        isCodexContextCompactionCompletionForThread(message, vitals.threadId)
-      ) {
-        if (isCodexLegacyContextCompactionCompletion(message)) {
-          providerUsage = readCodexCompactionCompletionProviderUsage(message, vitals.threadId)
-            ?? providerUsage
-          settleCompaction('compacted')
+      if (!isCodexContextCompactionCompletionForThread(message, vitals.threadId)) {
+        return
+      }
+      if (isCodexLegacyContextCompactionCompletion(message)) {
+        if (!compactRequestAccepted) {
           return
         }
+        providerUsage = readCodexCompactionCompletionProviderUsage(message, vitals.threadId)
+          ?? providerUsage
+        settleCompaction('compacted')
+        return
+      }
+      if (compactRequestSubmitted) {
         const itemId = readCodexContextCompactionItemId(message)
         // The v2 protocol pairs item/completed with an item/started id. Without
         // that id a same-thread delayed completion from an earlier compact is
@@ -1611,7 +1618,11 @@ export async function compactWarmCodexThread(input: {
         }
         providerUsage = readCodexCompactionCompletionProviderUsage(message, vitals.threadId)
           ?? providerUsage
-        settleCompaction('compacted')
+        if (compactRequestAccepted) {
+          settleCompaction('compacted')
+        } else {
+          compactCompletionBuffered = true
+        }
       }
     },
     onStderrLine: () => {},
