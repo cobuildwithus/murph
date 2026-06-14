@@ -171,6 +171,7 @@ describe("printHelp", () => {
     expect(output).toContain("MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH=1");
     expect(output).toContain("MURPH_DEV_SKIP_RUNNER_SMOKE=1");
     expect(output).toContain("MURPH_DEV_SKIP_STRIPE_LISTEN=1");
+    expect(output).toContain("MURPH_DEV_SKIP_WORKERS_AI=1");
     expect(output).toContain("MURPH_DEV_STRIPE_ENV_FILE=.tmp/.env.hosted-local-stripe");
     expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_TUNNEL=auto");
     expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG=.tmp/cloudflared-linq-webhook.yml");
