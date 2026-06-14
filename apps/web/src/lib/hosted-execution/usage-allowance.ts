@@ -70,12 +70,12 @@ export interface HostedAiUsageGateUserNotice {
 
 export interface HostedAiUsageAllowanceLimitCrossing {
   periodStart: Date;
-  userNotice: HostedAiUsageGateUserNotice;
 }
 
-export interface HostedAiUsageAllowanceLimitNoticeCandidate
-  extends HostedAiUsageAllowanceLimitCrossing {
+export interface HostedAiUsageAllowanceLimitNoticeCandidate {
   memberId: string;
+  periodStart: Date;
+  userNotice: HostedAiUsageGateUserNotice;
 }
 
 export interface HostedAiUsageAllowancePricingResult {
@@ -317,10 +317,6 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
 
   return {
     periodStart: period.periodStart,
-    userNotice: buildHostedAiUsageGateLimitNotice({
-      billingPlanCode: period.billingPlanCode,
-      limitUsdMicros: period.limitUsdMicros,
-    }),
   };
 }
 
@@ -575,6 +571,9 @@ export async function claimHostedAiUsageLimitNotice(input: {
 
   const claimed = await prisma.hostedAiUsagePeriod.updateMany({
     where: {
+      blockedAt: {
+        not: null,
+      },
       limitNoticeSentAt: null,
       memberId: input.memberId,
       periodStart,

@@ -99,25 +99,48 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
     prisma,
   });
 
-  const noticeCandidates = result.limitNoticePeriods.length > 0
-    ? await listHostedAiUsageLimitNoticeCandidates({
-        periods: result.limitNoticePeriods,
-        prisma,
-      })
-    : [];
-
-  for (const limitCrossing of noticeCandidates) {
-    await sendHostedAiUsageLimitNotice({
-      memberId: limitCrossing.memberId,
-      notice: limitCrossing.userNotice,
-      periodStart: limitCrossing.periodStart,
-      prisma,
-    });
-  }
+  await sendHostedAiUsageLimitNoticesBestEffort({
+    limitNoticePeriods: result.limitNoticePeriods,
+    prisma,
+  });
 
   return {
     recordedIds: result.recordedIds,
   };
+}
+
+async function sendHostedAiUsageLimitNoticesBestEffort(input: {
+  limitNoticePeriods: readonly HostedAiUsageLimitNoticePeriod[];
+  prisma: HostedAiUsageNoticeClient;
+}): Promise<void> {
+  const periodCount = input.limitNoticePeriods.length;
+  const periods = input.limitNoticePeriods;
+  const prisma = input.prisma;
+
+  if (periodCount === 0) {
+    return;
+  }
+
+  try {
+    const noticeCandidates = await listHostedAiUsageLimitNoticeCandidates({
+      periods,
+      prisma,
+    });
+
+    for (const limitCrossing of noticeCandidates) {
+      await sendHostedAiUsageLimitNotice({
+        memberId: limitCrossing.memberId,
+        notice: limitCrossing.userNotice,
+        periodStart: limitCrossing.periodStart,
+        prisma,
+      });
+    }
+  } catch (error) {
+    console.error("Hosted AI usage limit notice pass failed after accounting commit.", {
+      errorName: error instanceof Error ? error.name : "unknown",
+      periodCount,
+    });
+  }
 }
 
 async function recordHostedAiUsageRecordsForAccounting(input: {

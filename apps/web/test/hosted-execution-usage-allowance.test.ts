@@ -311,7 +311,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(countIncrementCalls(tx)).toBe(1);
   });
 
-  it("reports the limit crossing with the plan notice when spend first crosses the limit", async () => {
+  it("reports the crossed period when spend first crosses the limit", async () => {
     const tx = createAllowanceTx({
       billingPlanCode: "launch_edge_monthly",
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
@@ -327,11 +327,6 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       tx: tx as never,
     })).resolves.toEqual({
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      userNotice: {
-        code: "edge_usage_limit_reached",
-        message:
-          "Hey, you've reached your usage limit for the month. Murph will resume when your included allowance resets: https://withmurph.ai/home",
-      },
     });
   });
 
@@ -357,7 +352,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(incrementSql).not.toContain('("blocked_at" =');
   });
 
-  it("reports the pulse upgrade notice when a pulse member first crosses the limit", async () => {
+  it("reports the crossed period when a pulse member first crosses the limit", async () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
@@ -371,11 +366,6 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       tx: tx as never,
     })).resolves.toEqual({
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      userNotice: {
-        code: "pulse_upgrade_edge",
-        message:
-          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
-      },
     });
   });
 
@@ -1429,6 +1419,9 @@ describe("claimHostedAiUsageLimitNotice", () => {
         limitNoticeSentAt: new Date("2026-03-29T12:00:00.000Z"),
       },
       where: {
+        blockedAt: {
+          not: null,
+        },
         limitNoticeSentAt: null,
         memberId: "member_123",
         periodStart: new Date("2026-03-01T00:00:00.000Z"),
