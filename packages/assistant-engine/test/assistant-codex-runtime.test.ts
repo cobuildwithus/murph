@@ -2994,6 +2994,142 @@ describe('assistant codex runtime', () => {
     })
   })
 
+  it.each([
+    {
+      contextItemId: 'context-compact-start-before-rpc',
+      label: 'accepts context compaction start before compact rpc success',
+      seedMessage: 'Seeded before start-before-rpc completion',
+      startBeforeRpcSuccess: true,
+      tempPrefix: 'assistant-codex-compact-start-before-rpc',
+      threadId: 'thread-compact-start-before-rpc',
+      turnId: 'turn-compact-start-before-rpc',
+    },
+    {
+      contextItemId: 'context-compact-completion-without-start',
+      label: 'accepts context compaction completion without start after compact rpc success',
+      seedMessage: 'Seeded before completion-without-start',
+      startBeforeRpcSuccess: false,
+      tempPrefix: 'assistant-codex-compact-completion-without-start',
+      threadId: 'thread-compact-completion-without-start',
+      turnId: 'turn-compact-completion-without-start',
+    },
+  ])('$label', async (scenario) => {
+    const workingDirectory = await createTempDir(`${scenario.tempPrefix}-work-`)
+    const codexHome = await createTempDir(`${scenario.tempPrefix}-home-`)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: scenario.threadId,
+            turnId: scenario.turnId,
+          })
+          child.stdout.write(jsonLine({
+            method: 'thread/tokenUsage/updated',
+            params: {
+              threadId: scenario.threadId,
+              turnId: scenario.turnId,
+              tokenUsage: {
+                last: {
+                  cachedInputTokens: 10_000,
+                  inputTokens: 125_000,
+                  outputTokens: 100,
+                  totalTokens: 125_100,
+                },
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: `${scenario.contextItemId}-assistant`,
+                type: 'assistant_message',
+                message: scenario.seedMessage,
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: scenario.turnId,
+                status: 'completed',
+              },
+            },
+          }))
+
+          const barrier = await waitForRpcMethod(child, 'config/read')
+          child.stdout.write(jsonLine({ id: barrier.id, result: {} }))
+          const compact = await waitForRpcMethod(child, 'thread/compact/start')
+          expect(asRecord(compact.params)).toEqual({ threadId: scenario.threadId })
+          if (scenario.startBeforeRpcSuccess) {
+            writeContextCompactionStarted({
+              child,
+              itemId: scenario.contextItemId,
+              threadId: scenario.threadId,
+            })
+          }
+          child.stdout.write(jsonLine({ id: compact.id, result: {} }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: scenario.contextItemId,
+                type: 'contextCompaction',
+              },
+              threadId: scenario.threadId,
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          PATH: '/custom/bin',
+        },
+        prompt: `seed compact ${scenario.contextItemId}`,
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: scenario.seedMessage,
+      sessionId: scenario.threadId,
+      turnId: scenario.turnId,
+    })
+
+    await expect(
+      compactWarmCodexThread({
+        minThreadTokens: 100_000,
+        timeoutMs: 5_000,
+      }),
+    ).resolves.toMatchObject({
+      kind: 'compacted',
+      threadContextTokensBefore: 125_000,
+      threadId: scenario.threadId,
+      usage: {
+        cachedInputTokens: null,
+        inputTokens: 125_000,
+        outputTokens: null,
+        source: 'estimated',
+        totalTokens: 125_000,
+      },
+    })
+  })
+
   it('does not submit idle compaction after abort while the config barrier is pending', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-abort-barrier-work-')
     const codexHome = await createTempDir('assistant-codex-compact-abort-barrier-home-')

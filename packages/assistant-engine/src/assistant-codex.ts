@@ -1527,6 +1527,7 @@ export async function compactWarmCodexThread(input: {
 
   const { processInstance, vitals } = reservation
   const startedAt = Date.now()
+  let compactRequestSubmitted = false
   let compactRequestAccepted = false
   let compactStartedItemId: string | null = null
   let providerUsage: CodexWarmThreadCompactionUsage | null = null
@@ -1580,7 +1581,7 @@ export async function compactWarmCodexThread(input: {
       }
 
       if (
-        compactRequestAccepted &&
+        compactRequestSubmitted &&
         isCodexContextCompactionStartedForThread(message, vitals.threadId)
       ) {
         const itemId = readCodexContextCompactionItemId(message)
@@ -1601,7 +1602,10 @@ export async function compactWarmCodexThread(input: {
           return
         }
         const itemId = readCodexContextCompactionItemId(message)
-        if (compactStartedItemId === null || itemId !== compactStartedItemId) {
+        if (
+          (compactStartedItemId !== null && itemId !== compactStartedItemId) ||
+          (compactStartedItemId === null && itemId === null)
+        ) {
           return
         }
         providerUsage = readCodexCompactionCompletionProviderUsage(message, vitals.threadId)
@@ -1632,6 +1636,7 @@ export async function compactWarmCodexThread(input: {
           settleCompaction('aborted')
           return undefined
         }
+        compactRequestSubmitted = true
         return processInstance.sendRequest('thread/compact/start', { threadId: vitals.threadId })
       })
       .catch(() => settleCompaction('rpc_error'))
