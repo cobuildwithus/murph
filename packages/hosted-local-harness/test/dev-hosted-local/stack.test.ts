@@ -300,6 +300,10 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
       !(source.NODE_ENV === "test" && source.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1")
         && source.MURPH_DEV_SKIP_WORKERS_AI !== "1",
   ),
+  usesWranglerLocalDevTestRoutes: vi.fn(
+    (source: Readonly<Record<string, string | undefined>>) =>
+      source.NODE_ENV === "test" && source.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1",
+  ),
   normalizeLocalDatabaseUrl: vi.fn((value: string | undefined) => value ?? "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync"),
   resolveHostedLocalDatabaseUrl: vi.fn((input: {
     databaseUrlOverride?: string | null;
@@ -666,7 +670,7 @@ describe("hosted local dev stack", () => {
     });
   });
 
-  it("drops CLOUDFLARE_API_TOKEN from the wrangler child when the Workers AI binding is active", async () => {
+  it("marks the final wrangler command to ignore CLOUDFLARE_API_TOKEN when the Workers AI binding is active", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
     vi.stubEnv("CLOUDFLARE_API_TOKEN", "account-scoped-token");
     spawnChildProcess
@@ -681,15 +685,12 @@ describe("hosted local dev stack", () => {
     await stack.ready;
     await stack.stop();
 
-    expect(spawnChildProcess).toHaveBeenCalledWith(
-      "cloudflare",
-      "pnpm",
-      expect.arrayContaining(["worker:dev:prepared"]),
-      expect.not.objectContaining({
-        CLOUDFLARE_API_TOKEN: expect.anything(),
-      }),
-      expect.any(Object),
-    );
+    const cloudflareSpawn = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
+    expect(cloudflareSpawn?.[2]).toEqual(expect.arrayContaining(["worker:dev:prepared"]));
+    expect(cloudflareSpawn?.[3]).toMatchObject({
+      CLOUDFLARE_API_TOKEN: "account-scoped-token",
+      MURPH_DEV_STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER: "1",
+    });
   });
 
   it("keeps CLOUDFLARE_API_TOKEN for the wrangler child when MURPH_DEV_SKIP_WORKERS_AI is set", async () => {
@@ -708,14 +709,13 @@ describe("hosted local dev stack", () => {
     await stack.ready;
     await stack.stop();
 
-    expect(spawnChildProcess).toHaveBeenCalledWith(
-      "cloudflare",
-      "pnpm",
-      expect.arrayContaining(["worker:dev:prepared"]),
-      expect.objectContaining({
-        CLOUDFLARE_API_TOKEN: "account-scoped-token",
-      }),
-      expect.any(Object),
+    const cloudflareSpawn = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
+    expect(cloudflareSpawn?.[2]).toEqual(expect.arrayContaining(["worker:dev:prepared"]));
+    expect(cloudflareSpawn?.[3]).toMatchObject({
+      CLOUDFLARE_API_TOKEN: "account-scoped-token",
+    });
+    expect(cloudflareSpawn?.[3]).not.toHaveProperty(
+      "MURPH_DEV_STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER",
     );
   });
 

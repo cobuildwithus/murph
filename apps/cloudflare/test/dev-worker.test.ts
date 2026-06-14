@@ -12,10 +12,13 @@ vi.mock("node:child_process", () => ({
 }));
 
 import {
+  isWranglerDevPnpmCommand,
   normalizePnpmScriptArgs,
   resolveWorkerDevPnpmCommands,
+  resolveWorkerDevPnpmEnv,
   shouldSkipRunnerBundle,
   shouldSkipRunnerDockerBase,
+  STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV,
 } from "../scripts/dev-worker.ts";
 import { hostedLocalRunnerBaseImageTag } from "../scripts/runner-base-image-contract.ts";
 
@@ -37,6 +40,32 @@ describe("cloudflare dev-worker script", () => {
       ["runner:docker:base"],
       ["exec", "wrangler", "dev", "--port", "8787"],
     ]);
+  });
+
+  it("identifies the final wrangler dev command", () => {
+    expect(isWranglerDevPnpmCommand(["exec", "wrangler", "dev", "--port", "8787"])).toBe(true);
+    expect(isWranglerDevPnpmCommand(["runner:bundle"])).toBe(false);
+    expect(isWranglerDevPnpmCommand(["exec", "wrangler", "deploy"])).toBe(false);
+  });
+
+  it("strips CLOUDFLARE_API_TOKEN only from the final wrangler dev command", () => {
+    const env = {
+      CLOUDFLARE_API_TOKEN: "account-scoped-token",
+      HOSTED_WEB_BASE_URL: "http://localhost:3000",
+      [STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV]: "1",
+    } satisfies NodeJS.ProcessEnv;
+
+    expect(resolveWorkerDevPnpmEnv(["runner:bundle"], env)).toBe(env);
+
+    const wranglerEnv = resolveWorkerDevPnpmEnv(
+      ["exec", "wrangler", "dev", "--port", "8787"],
+      env,
+    );
+    expect(wranglerEnv).toEqual({
+      HOSTED_WEB_BASE_URL: "http://localhost:3000",
+    });
+    expect(env.CLOUDFLARE_API_TOKEN).toBe("account-scoped-token");
+    expect(env[STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV]).toBe("1");
   });
 
   it("skips the bundle step when the caller prebuilt it", () => {

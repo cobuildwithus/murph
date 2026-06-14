@@ -16,6 +16,9 @@ const preparedRunnerBundleDir = path.join(
   resolveCloudflareDeployPaths(appDir).deployDir,
   runnerBundleDirectoryName,
 );
+export const STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV =
+  "MURPH_DEV_STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER";
+
 export function normalizePnpmScriptArgs(argv: readonly string[]): string[] {
   return argv[0] === "--" ? [...argv.slice(1)] : [...argv];
 }
@@ -76,10 +79,32 @@ function assertPreparedRunnerBaseImageAvailable(): void {
   );
 }
 
+export function isWranglerDevPnpmCommand(args: readonly string[]): boolean {
+  return args[0] === "exec" && args[1] === "wrangler" && args[2] === "dev";
+}
+
+export function resolveWorkerDevPnpmEnv(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  if (!isWranglerDevPnpmCommand(args)) {
+    return env;
+  }
+
+  if (env[STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV] !== "1") {
+    return env;
+  }
+
+  const resolvedEnv = { ...env };
+  delete resolvedEnv.CLOUDFLARE_API_TOKEN;
+  delete resolvedEnv[STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV];
+  return resolvedEnv;
+}
+
 async function runPnpm(args: string[]): Promise<void> {
   const child = spawn("pnpm", args, {
     cwd: appDir,
-    env: process.env,
+    env: resolveWorkerDevPnpmEnv(args),
     stdio: "inherit",
   });
 

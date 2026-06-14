@@ -38,6 +38,7 @@ import {
   resolveCloudflareLocalEnv,
   resolveHostedLocalClientWorkerHost,
   shouldSyncLocalDatabaseSchema,
+  usesWranglerLocalDevTestRoutes,
   warnForMissingEnv,
 } from "./environment.ts";
 import {
@@ -156,6 +157,8 @@ const HOSTED_LOCAL_RUNNER_BUNDLE_ROOT = path.join(
   "runner-bundle",
 );
 const HOSTED_LOCAL_CLOUDFLARE_SOURCE_SNAPSHOT_DIR = "cloudflare-source";
+const STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV =
+  "MURPH_DEV_STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER";
 
 type HostedLocalCloudflareSourceSnapshot = {
   cloudflareAppDir: string;
@@ -313,10 +316,10 @@ export async function startHostedLocalDevStack(input: {
     };
     const inputNodeEnv = rawVercelEnv.NODE_ENV?.trim();
     const shouldPreserveTestNodeEnvForLocalTestMode =
-      inputNodeEnv === "test"
-      && (
-        rawVercelEnv.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1"
-        || Boolean(rawVercelEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]?.trim())
+      usesWranglerLocalDevTestRoutes(rawVercelEnv)
+      || (
+        inputNodeEnv === "test"
+        && Boolean(rawVercelEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]?.trim())
       );
     const vercelEnv = shouldUseRemoteHostedCryptoKeys(rawVercelEnv)
       ? rawVercelEnv
@@ -595,18 +598,18 @@ export async function startHostedLocalDevStack(input: {
     throwIfAbortSignalAborted(input.abortSignal);
 
     // Wrangler prefers CLOUDFLARE_API_TOKEN over OAuth, and account-scoped
-    // tokens cannot open the remote session backing the Workers AI binding,
-    // which makes `wrangler dev` fail at startup. Drop the token from the
-    // wrangler child only; every other tool keeps the inherited env.
+    // tokens cannot open the remote session backing the Workers AI binding.
+    // Keep the token on the preparatory wrapper; apps/cloudflare strips it
+    // only for the final `wrangler dev` command.
     const wranglerSpawnEnv = { ...(workerProcessEnv ?? workerRuntimeEnv) };
     if (
       workerRuntimeEnv !== null
       && includesWranglerLocalDevAiBinding(wranglerSpawnEnv)
       && wranglerSpawnEnv.CLOUDFLARE_API_TOKEN
     ) {
-      delete wranglerSpawnEnv.CLOUDFLARE_API_TOKEN;
+      wranglerSpawnEnv[STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV] = "1";
       (input.stderrTarget ?? process.stderr).write(
-        "[cloudflare] Dropping CLOUDFLARE_API_TOKEN for `wrangler dev` so OAuth backs the Workers AI remote session; run `wrangler login` once, or set MURPH_DEV_SKIP_WORKERS_AI=1 to start without Workers AI.\n",
+        "[cloudflare] `wrangler dev` will ignore CLOUDFLARE_API_TOKEN so OAuth backs the Workers AI remote session; run `wrangler login` once, or set MURPH_DEV_SKIP_WORKERS_AI=1 to start without Workers AI.\n",
       );
     }
 

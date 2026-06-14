@@ -986,10 +986,10 @@ export function buildWranglerLocalDevConfig(
       },
     ],
     // Wrangler proxies the Workers AI binding through a remote session. The
-    // harness strips CLOUDFLARE_API_TOKEN from the wrangler child when this
-    // binding is active, so local dev uses `wrangler login` OAuth and would
-    // call live Workers AI. Hosted-local test routes must keep `env.AI` unset
-    // so the deterministic fake binding in
+    // Cloudflare dev wrapper strips CLOUDFLARE_API_TOKEN from the final
+    // `wrangler dev` child when this binding is active, so local dev uses
+    // `wrangler login` OAuth and would call live Workers AI. Hosted-local test
+    // routes must keep `env.AI` unset so the deterministic fake binding in
     // apps/cloudflare/src/hosted-local-test/runner-container.ts composes, and
     // MURPH_DEV_SKIP_WORKERS_AI=1 lets unauthenticated dev stacks start with
     // hosted transcription failing closed at use time instead of `wrangler
@@ -1025,7 +1025,7 @@ export function buildWranglerLocalDevConfig(
   };
 }
 
-function usesWranglerLocalDevTestRoutes(
+export function usesWranglerLocalDevTestRoutes(
   source: Readonly<Record<string, string | undefined>>,
 ): boolean {
   return source.NODE_ENV === "test" && source.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1";
