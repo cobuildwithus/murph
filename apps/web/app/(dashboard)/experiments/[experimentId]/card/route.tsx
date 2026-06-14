@@ -238,27 +238,29 @@ function MetricTile({ signal }: { signal: ExperimentCardSignal }) {
           </div>
         ) : null}
       </div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          alignSelf: "flex-start",
-          gap: 8,
-          paddingTop: 7,
-          paddingBottom: 7,
-          paddingLeft: 13,
-          paddingRight: 14,
-          borderRadius: 999,
-          backgroundColor: sentiment.chip,
-        }}
-      >
-        {signal.direction === "up" || signal.direction === "down" ? (
-          <DeltaArrow direction={signal.direction} color={sentiment.text} />
-        ) : null}
-        <div style={{ display: "flex", fontSize: 22, color: sentiment.text }}>
-          {signal.delta}
+      {signal.delta ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            alignSelf: "flex-start",
+            gap: 8,
+            paddingTop: 7,
+            paddingBottom: 7,
+            paddingLeft: 13,
+            paddingRight: 14,
+            borderRadius: 999,
+            backgroundColor: sentiment.chip,
+          }}
+        >
+          {signal.direction === "up" || signal.direction === "down" ? (
+            <DeltaArrow direction={signal.direction} color={sentiment.text} />
+          ) : null}
+          <div style={{ display: "flex", fontSize: 22, color: sentiment.text }}>
+            {signal.delta}
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }

@@ -2435,7 +2435,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 302 }));
 
     vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "openai");
-    vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-5.4-mini");
+    vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-5.5");
 
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
 
@@ -2457,7 +2457,7 @@ describe("hosted local dev stack", () => {
       "pnpm",
       expect.any(Array),
       expect.objectContaining({
-        HOSTED_ASSISTANT_MODEL: "gpt-5.4-mini",
+        HOSTED_ASSISTANT_MODEL: "gpt-5.5",
         HOSTED_ASSISTANT_PROVIDER: "openai",
       }),
       expect.any(Object),

@@ -3,6 +3,7 @@ import {
   continueAsNew,
   defineQuery,
   defineSignal,
+  patched,
   proxyActivities,
   setHandler,
   uuid4,
@@ -40,6 +41,8 @@ export const HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 10_00
 export const HOSTED_USER_RUNTIME_MAX_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS = 3_600_000;
 export const HOSTED_USER_RUNTIME_MAX_READ_RECONCILIATION_FACTS_START_TO_CLOSE_TIMEOUT_MS = 30_000;
 export const HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS = 1_000;
+export const HOSTED_USER_RUNTIME_RECONCILE_BEFORE_MAILBOX_PATCH_ID =
+  "hosted-runtime-reconcile-before-mailbox-processing";
 
 export const runtimeSignal = defineSignal<[HostedRuntimeSignal]>(
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
@@ -79,6 +82,8 @@ export async function hostedUserRuntimeWorkflow(
     currentHistoryLength: () => workflowInfo().historyLength,
     ensureRuntimeProcessing: processingActivities.ensureRuntimeProcessing,
     nowMs: () => Date.now(),
+    reconciliationBeforeMailboxProcessingEnabled: () =>
+      patched(HOSTED_USER_RUNTIME_RECONCILE_BEFORE_MAILBOX_PATCH_ID),
     readRuntimeReconciliationFacts:
       reconciliationActivities.readRuntimeReconciliationFacts,
     uuid: uuid4,
@@ -106,6 +111,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
     userId: string;
   }): Promise<HostedRuntimeEnsureProcessingResponse>;
   nowMs(): number;
+  reconciliationBeforeMailboxProcessingEnabled(): boolean;
   readRuntimeReconciliationFacts(
     request: HostedRuntimeReconciliationFactsRequest,
   ): Promise<HostedRuntimeReconciliationFacts>;
@@ -283,6 +289,7 @@ export function createHostedUserRuntimeWorkflowMachine(
       if (
         state.latestMailboxPointer !== null
         && latestMailboxSignalVersion === mailboxSignalVersion
+        && !runtime.reconciliationBeforeMailboxProcessingEnabled()
       ) {
         latestMailboxSignalVersion = null;
         lastMailboxSignalVersionRead = mailboxSignalVersion;

@@ -307,6 +307,29 @@ async function assertRunnerBundleShape(
     "runner container entrypoint",
   );
   await assertReadableFile(
+    path.join(bundleDir, "dist-bundled", "container-entrypoint.js"),
+    "runner bundled container entrypoint (Dockerfile CMD target)",
+  );
+  // Dockerfile ENV pins these installed-package paths for the bundled
+  // runtimes; with the override set, the engine resolvers check ONLY the
+  // pinned path, so a missing target degrades silently at runtime.
+  await assertReadableDirectory(
+    path.join(bundleDir, "node_modules", "@murphai", "assistant-engine", "skills"),
+    "assistant-engine skills root (Dockerfile ENV pin target)",
+  );
+  await assertReadableFile(
+    path.join(
+      bundleDir,
+      "node_modules",
+      "@murphai",
+      "assistant-engine",
+      "dist",
+      "assistant",
+      "cli-surface-contract.generated.json",
+    ),
+    "assistant-engine prebuilt CLI surface contract (Dockerfile ENV pin target)",
+  );
+  await assertReadableFile(
     path.join(bundleDir, "dist", "index.js"),
     "runner worker entrypoint",
   );

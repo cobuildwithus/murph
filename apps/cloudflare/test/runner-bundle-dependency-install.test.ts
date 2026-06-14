@@ -108,8 +108,16 @@ describe("runner bundle pnpm install config", () => {
         "  - incur@0.4.4",
         "overrides:",
         "  jose: 6.2.2",
+        "patchedDependencies:",
+        "  incur@0.4.5: patches/incur@0.4.5.patch",
         "",
       ].join("\n"),
+      "utf8",
+    );
+    await mkdir(path.join(repoRoot, "patches"), { recursive: true });
+    await writeFile(
+      path.join(repoRoot, "patches", "incur@0.4.5.patch"),
+      "--- a/dist/Cli.js\n+++ b/dist/Cli.js\n",
       "utf8",
     );
     await writeFile(
@@ -275,6 +283,7 @@ describe("runner bundle pnpm install config", () => {
       packageManager?: string;
       pnpm?: {
         overrides?: Record<string, string>;
+        patchedDependencies?: Record<string, string>;
         supportedArchitectures?: {
           cpu?: string[];
           libc?: string[];
@@ -309,6 +318,16 @@ describe("runner bundle pnpm install config", () => {
       libc: ["glibc"],
       os: ["linux"],
     });
+    // The bundle install applies the workspace's pnpm patches itself so the
+    // runner tree resolves a single (patched) copy of each patched dependency;
+    // a second nested copy would be inlined twice by the vault-cli bundle and
+    // split module-level state such as incur's command-registry WeakMaps.
+    expect(packageJson.pnpm?.patchedDependencies).toEqual({
+      "incur@0.4.5": "patches/incur@0.4.5.patch",
+    });
+    await expect(
+      readFile(path.join(bundleDir, "patches", "incur@0.4.5.patch"), "utf8"),
+    ).resolves.toBe("--- a/dist/Cli.js\n+++ b/dist/Cli.js\n");
     await expect(
       readFile(path.join(bundleDir, "pnpm-lock.yaml"), "utf8"),
     ).resolves.not.toContain("apps/web");

@@ -17,6 +17,13 @@ import type {
   HostedRuntimePlatform,
 } from "./hosted-runtime/platform.ts";
 import {
+  drainHostedRuntimeLogWritesBestEffort,
+} from "./hosted-runtime/runtime-logs.ts";
+// Re-exported so the container entrypoint's process-fatal handler can flush
+// queued info-log writes (bounded by its exit backstop) before the process
+// dies — the crash tail is exactly the diagnostics worth keeping durable.
+export { drainHostedRuntimeLogWritesBestEffort } from "./hosted-runtime/runtime-logs.ts";
+import {
   createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
   createHostedWorkspaceRuntimeBridgeJobOptions,
   type HostedWorkspaceMailboxPayloadDecoder,
@@ -76,13 +83,23 @@ export async function runHostedWorkspaceInvocation(
     vaultRoot: input.vaultRoot,
   });
 
-  return await runHostedWorkspaceRuntimeJobInProcess(input.job, {
-    ...options,
-    latencyMilestones: input.latencyMilestones ?? null,
-    runtimeWakeSignal,
-    shutdownSignal: input.shutdownSignal ?? null,
-    signal: input.signal ?? null,
-  });
+  try {
+    return await runHostedWorkspaceRuntimeJobInProcess(input.job, {
+      ...options,
+      latencyMilestones: input.latencyMilestones ?? null,
+      runtimeWakeSignal,
+      shutdownSignal: input.shutdownSignal ?? null,
+      signal: input.signal ?? null,
+    });
+  } finally {
+    // Info-level runtime log writes are queued off the reply hot path; flush
+    // them before the invocation result commits so a normal container stop
+    // never drops queued diagnostics. Bounded so a degraded log endpoint
+    // cannot delay result commit / checkpoint / next-wake handoff; on timeout
+    // the remaining writes keep flushing in the background while the warm
+    // container lives on.
+    await drainHostedRuntimeLogWritesBestEffort({ timeoutMs: 2_000 });
+  }
 }
 
 export function createHostedWorkspaceInvocationLease(

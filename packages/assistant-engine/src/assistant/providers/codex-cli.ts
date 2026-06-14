@@ -234,6 +234,7 @@ export async function executeCodexAssistantTurnAttempt(
     excludeResumeTurns: true,
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
     sandbox: providerConfig.policy.sandbox ?? undefined,
+    serviceTier: input.serviceTier ?? null,
     workingDirectory: input.workingDirectory,
   } as const
 

@@ -14,6 +14,7 @@ import {
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
   normalizeJunctionResourceName,
 } from "@murphai/importers/device-providers/junction-resources";
+import { canonicalizeDeviceProviderSlug } from "@murphai/importers/device-providers/provider-descriptors";
 import {
   buildMetricProjection,
   readVault,
@@ -572,11 +573,13 @@ export function promoteWearableCaptureToJunctionHostedSmokeFixture(
 }
 
 export function normalizeJunctionProviderSlugForComparison(provider: string): string {
-  return provider
+  const slug = provider
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/gu, "-")
     .replace(/^-+|-+$/gu, "");
+
+  return canonicalizeDeviceProviderSlug(slug);
 }
 
 export function collectJunctionWearableBrowserVaultSummaryFailures(

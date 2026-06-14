@@ -108,6 +108,43 @@ const temporalWorkflowBundlePatterns = [
   },
 ] as const;
 
+const hostedTemporalReplayGateChecks = [
+  {
+    filePath:
+      "packages/hosted-orchestrator-temporal/test/hosted-user-runtime-replay.test.ts",
+    label: "hosted Temporal replay test must call Temporal replay",
+    pattern: /\bWorker\.runReplayHistory\b/u,
+    token: "Worker.runReplayHistory",
+  },
+  {
+    filePath:
+      "packages/hosted-orchestrator-temporal/test/hosted-user-runtime-replay.test.ts",
+    label: "hosted Temporal replay test must load the legacy mailbox fixture",
+    pattern: /\bcreatePreReconcileMailboxReplayHistoryFixture\b/u,
+    token: "createPreReconcileMailboxReplayHistoryFixture",
+  },
+  {
+    filePath:
+      "packages/hosted-orchestrator-temporal/test/fixtures/replay/hosted-user-runtime-pre-reconcile-mailbox-history.ts",
+    label: "hosted Temporal replay fixture must preserve the old direct execution command",
+    pattern: /\bensureRuntimeProcessing\b/u,
+    token: "ensureRuntimeProcessing",
+  },
+  {
+    filePath:
+      "packages/hosted-orchestrator-temporal/test/fixtures/replay/hosted-user-runtime-pre-reconcile-mailbox-history.ts",
+    label: "hosted Temporal replay fixture must include an activity schedule event",
+    pattern: /\bActivityTaskScheduled\b/u,
+    token: "ActivityTaskScheduled",
+  },
+  {
+    filePath: ".github/workflows/host-support.yml",
+    label: "CI package coverage must include hosted Temporal replay tests",
+    pattern: /\bpackages\/hosted-orchestrator-temporal\b/u,
+    token: "packages/hosted-orchestrator-temporal",
+  },
+] as const;
+
 type GuardPattern = Readonly<{
   label: string;
   pattern: RegExp;
@@ -126,6 +163,7 @@ export async function collectHostedTemporalGuardFindings(): Promise<HostedTempor
   for (const root of scanRoots) {
     await scanDirectory(root, findings);
   }
+  findings.push(...await collectHostedTemporalReplayGateFindings());
 
   return findings;
 }
@@ -239,6 +277,46 @@ function selectGuardPatterns(relativePath: string): readonly GuardPattern[] {
   }
 
   return patterns;
+}
+
+async function collectHostedTemporalReplayGateFindings():
+  Promise<HostedTemporalGuardFinding[]> {
+  const findings: HostedTemporalGuardFinding[] = [];
+
+  for (const check of hostedTemporalReplayGateChecks) {
+    const contents = await readOptionalRepoTextFile(check.filePath);
+    if (contents === null) {
+      findings.push({
+        filePath: check.filePath,
+        label: `${check.label}: required file is missing`,
+        line: 1,
+        token: "missing",
+      });
+      continue;
+    }
+
+    const match = findFirstPatternMatch(contents, check.pattern);
+    if (match === null) {
+      findings.push({
+        filePath: check.filePath,
+        label: check.label,
+        line: 1,
+        token: check.token,
+      });
+    }
+  }
+
+  return findings;
+}
+
+async function readOptionalRepoTextFile(
+  relativePath: string,
+): Promise<string | null> {
+  try {
+    return await readFile(path.join(repoRoot, relativePath), "utf8");
+  } catch {
+    return null;
+  }
 }
 
 function shouldScanTextFile(relativePath: string): boolean {

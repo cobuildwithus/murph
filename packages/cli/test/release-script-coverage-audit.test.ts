@@ -279,9 +279,11 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.90')
-    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.90')
-    expect(pnpmWorkspace).not.toContain('patchedDependencies:')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.92')
+    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.92')
+    expect(pnpmWorkspace.match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]?.trim()).toBe(
+      'incur@0.4.5: patches/incur@0.4.5.patch',
+    )
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-browser-profile.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.config.sh'))).toBe(true)
     expect(reviewGptConfig).toContain('repo_context_url="https://github.com/cobuildwithus/murph"')
@@ -607,7 +609,7 @@ Updated: 2026-04-24
       expect(leanEntries).toContain('docs/architecture.md')
       expect(leanEntries).not.toContain('agent-docs/generated/doc-inventory.md')
       expect(leanEntries).not.toContain('agent-docs/exec-plans/completed/README.md')
-      expect(leanEntries).not.toContain('agent-docs/prompts/task-finish-review.md')
+      expect(leanEntries).not.toContain('agent-docs/prompts/coverage-write.md')
       expect(leanEntries).not.toContain('packages/cli/test/release-script-coverage-audit.test.ts')
       expect(leanEntries).not.toContain('apps/web/test/device-sync-http.test.ts')
       expect(leanEntries).not.toContain('docs/device-sync-hosted-control-plane.md')
@@ -622,7 +624,7 @@ Updated: 2026-04-24
       expect(fullEntries).toContain('docs/device-sync-hosted-control-plane.md')
       expect(fullEntries).toContain('.github/workflows/release.yml')
       expect(fullEntries).toContain('agent-docs/exec-plans/completed/README.md')
-      expect(fullEntries).toContain('agent-docs/prompts/task-finish-review.md')
+      expect(fullEntries).toContain('agent-docs/prompts/coverage-write.md')
       expect(fullEntries).not.toContain('apps/web/public/design-assets/hero-02.png')
       expect(fullEntries).not.toContain('apps/web/public/hero.jpg')
       expect(fullEntries).not.toContain('apps/web/public/legal/privacy.pdf')
@@ -914,7 +916,11 @@ exit 1
         env: withoutNodeV8Coverage(),
       }),
     ) as {
-      packages: Array<{ bundledWorkspaceDependencies?: string[]; name: string }>
+      packages: Array<{
+        bundledExternalDependencies?: string[]
+        bundledWorkspaceDependencies?: string[]
+        name: string
+      }>
       primaryPackage: { name: string } | null
       version: string
     }
@@ -939,6 +945,7 @@ exit 1
       name: '@murphai/hosted-execution',
     }))
     expect(summary.packages).toContainEqual(expect.objectContaining({
+      bundledExternalDependencies: ['incur'],
       bundledWorkspaceDependencies: expect.arrayContaining([
         '@murphai/assistant-cli',
         '@murphai/assistant-engine',
@@ -1056,6 +1063,11 @@ exit 1
   })
 
   it('keeps packages/cli publish-ready as @murphai/murph without package-local release scripts', () => {
+    const packPublishables = readFileSync(
+      path.join(repoRoot, 'scripts', 'pack-publishables.mjs'),
+      'utf8',
+    )
+
     expect(cliPackageJson.name).toBe('@murphai/murph')
     expect(cliPackageJson.files).toContain('CHANGELOG.md')
     expect(cliPackageJson.bin?.murph).toBe('dist/bin.js')
@@ -1065,6 +1077,17 @@ exit 1
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/assistant-engine')
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/vault-usecases')
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/messaging-ingress')
+    expect(cliPackageJson.dependencies?.incur).toBe('0.4.5')
+    expect(cliPackageJson.dependencies?.['@cfworker/json-schema']).toBe('^4.1.1')
+    expect(cliPackageJson.dependencies?.['@modelcontextprotocol/server']).toBe('^2.0.0-alpha.2')
+    expect(cliPackageJson.dependencies?.['@toon-format/toon']).toBe('^2.1.0')
+    expect(cliPackageJson.dependencies?.tokenx).toBe('^1.3.0')
+    expect(cliPackageJson.dependencies?.yaml).toBe('^2.8.2')
+    expect(cliPackageJson.bundleDependencies).toContain('incur')
+    expect(packPublishables).toContain('resolveBundledExternalDependencies')
+    expect(packPublishables).toContain('copyExternalBundledDependency')
+    expect(packPublishables).toContain('shouldSkipExternalPayloadArtifact')
+    expect(packPublishables).toContain("path.basename(sourcePath) === 'node_modules'")
     expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()
     expect(existsSync(path.join(packageDir, 'scripts', 'release.sh'))).toBe(false)
     expect(existsSync(path.join(packageDir, 'scripts', 'release-check.sh'))).toBe(false)

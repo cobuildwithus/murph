@@ -7,11 +7,22 @@ import { describe, expect, it } from "vitest";
 import {
   buildJunctionWearableHostedReplayPlan,
   JUNCTION_WEARABLE_HOSTED_DIRECT_REPLAY_BROWSER_VAULT_METRIC_EXPECTATIONS,
+  normalizeJunctionProviderSlugForComparison,
   promoteWearableCaptureToJunctionHostedSmokeFixture,
   runJunctionWearableFixtureE2e,
 } from "../src/testing.ts";
 
 describe("Junction wearable fixture testing helpers", () => {
+  it("canonicalizes WHOOP implementation slugs when comparing provider identities", () => {
+    expect(normalizeJunctionProviderSlugForComparison("whoop_v2")).toBe("whoop");
+    expect(normalizeJunctionProviderSlugForComparison("Whoop V2")).toBe("whoop");
+    expect(normalizeJunctionProviderSlugForComparison("whoop_v2")).toBe(
+      normalizeJunctionProviderSlugForComparison(" WHOOP "),
+    );
+    expect(normalizeJunctionProviderSlugForComparison("OURA")).toBe("oura");
+    expect(normalizeJunctionProviderSlugForComparison(" Oura Ring ")).toBe("oura-ring");
+  });
+
   it("reject unsafe fixture data before building replay payloads or importing into a vault", async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-fixture-"));
     const fixturePath = path.join(tempRoot, "junction-wearables-sanitized.json");

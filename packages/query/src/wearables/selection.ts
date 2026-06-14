@@ -1,3 +1,5 @@
+import { canonicalizeDeviceProviderSlug } from "@murphai/importers/device-providers/provider-descriptors";
+
 import { dedupeExactMetricCandidates } from "./dedupe.ts";
 import {
   compareWearableProviders,
@@ -418,9 +420,19 @@ function scoreJunctionSourcePolicy(
     return JUNCTION_UNSUPPORTED_SOURCE_PRIORITY_BOOST;
   }
 
-  const directCandidateExists = candidates.some((other) =>
-    normalizeLowercaseString(other.provider) === sourceProviderSlug
-  );
+  const sourceProvider = canonicalizeDeviceProviderSlug(sourceProviderSlug);
+  const directCandidateExists = candidates.some((other) => {
+    const provider = normalizeLowercaseString(other.provider);
+    if (
+      !provider
+      || provider === "junction"
+      || normalizeWearableOriginSourceSlug(other.dataOrigin?.aggregatorProvider) === "junction"
+    ) {
+      return false;
+    }
+
+    return canonicalizeDeviceProviderSlug(provider) === sourceProvider;
+  });
   return directCandidateExists ? JUNCTION_DIRECT_DUPLICATE_PENALTY : 0;
 }
 

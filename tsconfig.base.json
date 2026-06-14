@@ -343,6 +343,9 @@
       "@murphai/assistant-engine/assistant-channel-runtime": [
         "packages/assistant-engine/src/assistant-channel-runtime.ts"
       ],
+      "@murphai/assistant-engine/assistant-skill-env": [
+        "packages/assistant-engine/src/assistant-skill-env.ts"
+      ],
       "@murphai/assistant-engine/knowledge": [
         "packages/assistant-engine/src/knowledge.ts"
       ],

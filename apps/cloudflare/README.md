@@ -77,8 +77,11 @@ Required worker secrets:
 - `OPENAI_API_KEY`
 
 `MURPH_DATA_API_KEY` authorizes the Worker-to-web hop for the internal
-`http://murph-data-api.worker/api/supplements` runtime endpoint. The key stays
-Worker-owned and is never forwarded into hosted runtime env.
+`http://murph-data-api.worker/api/foods` and `/api/supplements` runtime
+endpoints. The key stays Worker-owned and is never forwarded into hosted runtime
+env. Hosted web must have `MURPH_LABELS_DB_URL` for `/api/foods`; supplements
+may still use the legacy `MURPH_SUPPLEMENT_DB_URL` fallback when the shared
+labels DB is unset.
 
 Required worker vars:
 

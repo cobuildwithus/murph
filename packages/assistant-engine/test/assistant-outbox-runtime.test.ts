@@ -259,6 +259,32 @@ describe('assistant outbox runtime', () => {
       })
   })
 
+  it('keeps same-text assistant segments distinct when their dedupe tokens differ', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-segment-dedupe-')
+
+    const firstSegment = await createIntent(vaultRoot, {
+      dedupeToken: 'assistant-segment:turn-segment-dedupe:0',
+      message: 'Same final text.',
+      sessionId: 'session-segment-dedupe',
+      turnId: 'turn-segment-dedupe',
+    })
+    const secondSegment = await createIntent(vaultRoot, {
+      dedupeToken: 'assistant-segment:turn-segment-dedupe:1',
+      message: 'Same final text.',
+      sessionId: 'session-segment-dedupe',
+      turnId: 'turn-segment-dedupe',
+    })
+    const retryFirstSegment = await createIntent(vaultRoot, {
+      dedupeToken: 'assistant-segment:turn-segment-dedupe:0',
+      message: 'Same final text.',
+      sessionId: 'session-segment-dedupe',
+      turnId: 'turn-segment-dedupe',
+    })
+
+    expect(secondSegment.intentId).not.toBe(firstSegment.intentId)
+    expect(retryFirstSegment.intentId).toBe(firstSegment.intentId)
+  })
+
   it('lists intents oldest-first and quarantines malformed inventory files', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T12:00:00.000Z'))

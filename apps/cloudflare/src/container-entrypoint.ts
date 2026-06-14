@@ -31,6 +31,7 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   consumeHostedCliRuntimeBridgeOffInvocationViolation,
+  drainHostedRuntimeLogWritesBestEffort,
   stopHostedCliRuntimeBridge,
 } from "@murphai/assistant-runtime/hosted-invocation";
 import {
@@ -69,7 +70,7 @@ const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH =
   "/internal/direct-r2-presigned-put-smoke";
 const HOSTED_CONTAINER_RUNTIME_WAKE_PATH = "/internal/runtime-wake";
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS = 45_000;
-const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-5.4-mini";
+const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-5.5";
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_CHUNK_BYTES = 1024 * 1024;
@@ -871,7 +872,13 @@ function installHostedContainerProcessFatalHandlers(): void {
       setTimeout(() => {
         process.exit(1);
       }, HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS + 1_000).unref();
-      void reportHostedContainerFatalBestEffort({ error, stage }).finally(() => {
+      // Flush queued info-level runtime log writes alongside the fatal
+      // report so the crash tail stays durable; the backstop above bounds
+      // both. Neither promise ever rejects.
+      void Promise.allSettled([
+        reportHostedContainerFatalBestEffort({ error, stage }),
+        drainHostedRuntimeLogWritesBestEffort(),
+      ]).then(() => {
         process.exitCode = 1;
         process.exit(1);
       });

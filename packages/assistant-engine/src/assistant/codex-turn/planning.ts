@@ -470,6 +470,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     [
       promptResult.layers.staticCacheableCorePrompt,
       promptResult.layers.stableRouteCapabilityPrompt,
+      promptResult.layers.threadContextPrompt,
     ]
       .filter((section): section is string =>
         Boolean(normalizeNullableString(section)),

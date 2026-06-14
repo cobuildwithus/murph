@@ -426,7 +426,10 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /script-src [^;]*https:\/\/auth\.privy\.io/);
   assert.match(csp, /script-src [^;]*https:\/\/telegram\.org/);
   assert.match(csp, /script-src [^;]*https:\/\/challenges\.cloudflare\.com/);
+  assert.match(csp, /script-src-attr 'none'/);
   assert.match(csp, /style-src 'self' 'unsafe-inline'/);
+  assert.match(csp, /manifest-src 'self'/);
+  assert.match(csp, /media-src 'self' blob:/);
   assert.match(csp, /object-src 'none'/);
   assert.match(csp, /frame-ancestors 'none'/);
   assert.match(csp, /child-src [^;]*https:\/\/auth\.privy\.io/);
@@ -439,6 +442,29 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /connect-src [^;]*https:\/\/explorer-api\.walletconnect\.com/);
   assert.match(csp, /upgrade-insecure-requests/);
   assert.doesNotMatch(csp, /'unsafe-eval'/);
+});
+
+test("buildHostedWebContentSecurityPolicy keeps production script origins on a tight allowlist", () => {
+  const csp = buildHostedWebContentSecurityPolicy(createProcessEnv({
+    NODE_ENV: "production",
+  }));
+  const directives = readCspDirectives(csp);
+  const expectedScriptSources = [
+    "'self'",
+    "'unsafe-inline'",
+    "https://auth.privy.io",
+    "https://telegram.org",
+    "https://challenges.cloudflare.com",
+  ];
+
+  assert.deepEqual(directives.get("script-src"), expectedScriptSources);
+  assert.ok(!directives.has("script-src-elem"));
+  assert.deepEqual(directives.get("script-src-attr"), ["'none'"]);
+  for (const directive of ["script-src", "script-src-elem", "script-src-attr"]) {
+    assertScriptDirectiveHasNoBroadSource(directives, directive);
+  }
+  assert.doesNotMatch(csp, /cookieyes/u);
+  assert.doesNotMatch(csp, /cdncookieyes/u);
 });
 
 test("buildHostedWebContentSecurityPolicy includes the base-domain Privy fallback for common hosted-web subdomains", () => {
@@ -473,28 +499,46 @@ test("buildHostedWebSecurityHeaders adds production-only HSTS alongside the CSP 
     NODE_ENV: "production",
   }));
   const productionHeaderKeys = productionHeaders.map((header) => header.key);
+  const productionHeaderValues = new Map(
+    productionHeaders.map((header) => [header.key, header.value]),
+  );
 
   assert.deepEqual(productionHeaderKeys, [
     "Content-Security-Policy",
     "Referrer-Policy",
     "X-Content-Type-Options",
+    "Cross-Origin-Opener-Policy",
+    "Origin-Agent-Cluster",
+    "X-DNS-Prefetch-Control",
     "X-Frame-Options",
     "Permissions-Policy",
     "Strict-Transport-Security",
   ]);
+  assert.equal(productionHeaderValues.get("Cross-Origin-Opener-Policy"), "same-origin-allow-popups");
+  assert.equal(productionHeaderValues.get("Origin-Agent-Cluster"), "?1");
+  assert.equal(productionHeaderValues.get("X-DNS-Prefetch-Control"), "off");
 
   const testHeaders = buildHostedWebSecurityHeaders(createProcessEnv({
     NODE_ENV: "test",
   }));
   const testHeaderKeys = testHeaders.map((header) => header.key);
+  const testHeaderValues = new Map(
+    testHeaders.map((header) => [header.key, header.value]),
+  );
 
   assert.deepEqual(testHeaderKeys, [
     "Content-Security-Policy",
     "Referrer-Policy",
     "X-Content-Type-Options",
+    "Cross-Origin-Opener-Policy",
+    "Origin-Agent-Cluster",
+    "X-DNS-Prefetch-Control",
     "X-Frame-Options",
     "Permissions-Policy",
   ]);
+  assert.equal(testHeaderValues.get("Cross-Origin-Opener-Policy"), "same-origin-allow-popups");
+  assert.equal(testHeaderValues.get("Origin-Agent-Cluster"), "?1");
+  assert.equal(testHeaderValues.get("X-DNS-Prefetch-Control"), "off");
 });
 
 test("next.config serves the hosted security headers on every route", async () => {
@@ -509,6 +553,9 @@ test("next.config serves the hosted security headers on every route", async () =
       "Content-Security-Policy",
       "Referrer-Policy",
       "X-Content-Type-Options",
+      "Cross-Origin-Opener-Policy",
+      "Origin-Agent-Cluster",
+      "X-DNS-Prefetch-Control",
       "X-Frame-Options",
       "Permissions-Policy",
     ],
@@ -529,4 +576,36 @@ function createProcessEnv(values: Record<string, string>): NodeJS.ProcessEnv {
     NODE_ENV: "test",
     ...values,
   };
+}
+
+function readCspDirectives(csp: string): Map<string, string[]> {
+  const directives = new Map<string, string[]>();
+
+  for (const part of csp.split(";")) {
+    const [directive, ...sources] = part.trim().split(/\s+/u);
+
+    if (!directive) {
+      continue;
+    }
+
+    assert.ok(!directives.has(directive), `Duplicate ${directive} directive.`);
+    directives.set(directive, sources);
+  }
+
+  return directives;
+}
+
+function assertScriptDirectiveHasNoBroadSource(
+  directives: Map<string, string[]>,
+  directive: string,
+): void {
+  const sources = directives.get(directive);
+
+  if (!sources) {
+    return;
+  }
+
+  for (const broadSource of ["*", "http:", "https:", "data:", "blob:"]) {
+    assert.ok(!sources.includes(broadSource), `${directive} must not include ${broadSource}.`);
+  }
 }
