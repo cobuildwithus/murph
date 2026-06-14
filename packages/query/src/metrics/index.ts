@@ -14,6 +14,11 @@ import {
 } from "@murphai/health-metrics";
 
 import type { CanonicalEntity } from "../canonical-entities.ts";
+import {
+  deriveWearableObservationEffectiveDate,
+  inferWearableObservationGrain,
+} from "../wearables/observation.ts";
+import { isDeletionSentinelObservation } from "../observation-sentinels.ts";
 
 export { parseGoalMetricTargets } from "./goals.ts";
 
@@ -326,12 +331,15 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
   const value = readNumber(entity.attributes.value);
   const unit = readString(entity.attributes.unit);
   if (!metric || value === null) return [];
+  if (isDeletionSentinelObservation(entity, metric)) return [];
 
   // Daily provider summaries (observationGrain "summary") are day-grain
-  // facts; other grains keep the event default. The raw observationGrain
-  // is preserved in context either way so read paths can distinguish
-  // samples, compact summaries, and derived facts.
-  const observationGrain = readString(entity.attributes.observationGrain);
+  // facts; other grains keep the event default. Legacy shared-normalizer
+  // provider rows can lack observationGrain, so importer-shaped daily
+  // resources infer the same summary grain from dayKey + externalRef.
+  const explicitObservationGrain = readString(entity.attributes.observationGrain);
+  const observationGrain = explicitObservationGrain ?? inferWearableObservationGrain(entity);
+  const effectiveDate = resolveObservationEffectiveDate(entity, observationGrain);
 
   return [scalarMetricPoint({
     confidence: eventConfidence(entity),
@@ -340,12 +348,12 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
       qualifiers: readQualifiers(entity.attributes.qualifiers),
       timeZone: readString(entity.attributes.timeZone) ?? undefined,
     },
-    grain: observationGrain === "summary" ? "day" : undefined,
+    grain: isDayGrainObservation(observationGrain) ? "day" : undefined,
     // Canonical dayKey wins over the UTC slice of occurredAt: daily and
     // sleep observations are dated by their local/sleep day (the same
     // invariant deriveWearableDate uses), so precedence and date-filtered
     // queries must see the same day the summary point uses.
-    effectiveDate: readString(entity.attributes.dayKey) ?? entity.date,
+    effectiveDate,
     entity,
     index: 0,
     metric,
@@ -353,6 +361,39 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
     unit,
     value,
   })];
+}
+
+function resolveObservationEffectiveDate(
+  entity: CanonicalEntity,
+  observationGrain: string | null,
+): string | null {
+  const dayKey = readString(entity.attributes.dayKey);
+  if (!isDayGrainObservation(observationGrain)) {
+    return dayKey ?? entity.date;
+  }
+  if (isDeviceProviderObservation(entity)) {
+    return deriveWearableObservationEffectiveDate(entity) ?? dayKey ?? entity.date;
+  }
+  return dayKey ?? entity.date;
+}
+
+function isDayGrainObservation(observationGrain: string | null): boolean {
+  if (!observationGrain) {
+    return false;
+  }
+  const normalized = observationGrain.trim().toLowerCase().replace(/_/gu, "-");
+  return normalized === "summary"
+    || normalized === "day"
+    || normalized === "daily-summary"
+    || normalized === "daily-timeseries-aggregate";
+}
+
+function isDeviceProviderObservation(entity: CanonicalEntity): boolean {
+  if (readString(entity.attributes.source) !== "device") {
+    return false;
+  }
+  const externalRef = readRecord(entity.attributes.externalRef);
+  return Boolean(readString(externalRef?.system) && readString(externalRef?.resourceType));
 }
 
 function measurementMetricPoints(entity: CanonicalEntity, sourceKind: MetricSourceKind): MetricPoint[] {

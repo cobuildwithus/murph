@@ -1,9 +1,15 @@
 import { normalizeWearableMetricValue } from "@murphai/importers/device-providers/metric-catalog";
 import { canonicalizeDeviceProviderSlug } from "@murphai/importers/device-providers/provider-descriptors";
-import { deviceDataOriginSchema, extractIsoDatePrefix, type DeviceDataOrigin } from "@murphai/contracts";
+import { deviceDataOriginSchema, type DeviceDataOrigin } from "@murphai/contracts";
 
 import type { CanonicalEntity } from "../canonical-entities.ts";
+import { isDeletionSentinelObservation } from "../observation-sentinels.ts";
 import type { VaultReadModel } from "../read-model.ts";
+import {
+  deriveWearableDate,
+  deriveWearableObservationEffectiveDate,
+  readWearableExternalRef,
+} from "./observation.ts";
 import { dedupeExactMetricCandidates, dedupeSleepWindowCandidates } from "./dedupe.ts";
 import {
   inferJunctionWearableDataOriginFromExternalRef,
@@ -55,7 +61,7 @@ export function collectWearableDataset(
     : null;
 
   for (const entity of [...vault.events, ...vault.samples.filter((sample) => sample.kind !== "metric_sample")]) {
-    const externalRef = readExternalRef(entity.attributes.externalRef);
+    const externalRef = readWearableExternalRef(entity.attributes.externalRef);
     const provider = normalizeLowercaseString(externalRef?.system);
     const dataOrigin = readWearableDataOrigin(entity.attributes.dataOrigin, externalRef);
     const publicProvider = resolveWearablePublicSourceProvider({ dataOrigin, externalRef, provider }, {
@@ -580,11 +586,13 @@ function buildObservationMetricCandidates(
   provider: string,
   externalRef: WearableExternalRef | null,
 ): WearableMetricCandidate[] {
+  if (isDeletionSentinelObservation(entity)) {
+    return [];
+  }
+
   const rawMetric = normalizeLowercaseString(entity.attributes.metric);
   const rawValue = readNumber(entity.attributes.value);
-  const date = deriveWearableDate(entity, externalRef, {
-    preferSleepEndAt: true,
-  });
+  const date = deriveWearableObservationEffectiveDate(entity, externalRef);
 
   if (!rawMetric || rawValue === null || !date) {
     return [];
@@ -812,61 +820,6 @@ function mapSleepStageToMetric(stage: string): WearableMetricKey | null {
     default:
       return null;
   }
-}
-
-function deriveWearableDate(
-  entity: CanonicalEntity,
-  externalRef: WearableExternalRef | null,
-  options: {
-    preferSleepEndAt: boolean;
-  },
-): string | null {
-  const dayKey = normalizeNullableString(entity.attributes.dayKey);
-  if (dayKey) {
-    return dayKey;
-  }
-
-  const resourceType = normalizeLowercaseString(externalRef?.resourceType);
-  const startAt = normalizeNullableString(entity.attributes.startAt);
-  const endAt = normalizeNullableString(entity.attributes.endAt);
-  const recordedAt = normalizeNullableString(entity.attributes.recordedAt) ?? entity.occurredAt ?? null;
-  const candidates = options.preferSleepEndAt || resourceType?.includes("sleep")
-    ? [endAt, recordedAt, entity.occurredAt, startAt, entity.date]
-    : [entity.date, recordedAt, entity.occurredAt, endAt, startAt];
-
-  for (const candidate of candidates) {
-    const date = extractIsoDatePrefix(candidate);
-    if (date) {
-      return date;
-    }
-  }
-
-  return null;
-}
-
-function readExternalRef(value: unknown): WearableExternalRef | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  const system = normalizeLowercaseString(record.system);
-  const resourceType = normalizeLowercaseString(record.resourceType);
-  const resourceId = normalizeNullableString(record.resourceId);
-  const version = normalizeNullableString(record.version);
-  const facet = normalizeNullableString(record.facet);
-
-  if (!system && !resourceType && !resourceId && !version && !facet) {
-    return null;
-  }
-
-  return {
-    system,
-    resourceType,
-    resourceId,
-    version,
-    facet,
-  };
 }
 
 function readWearableDataOrigin(

@@ -759,13 +759,20 @@ test("prepareDeviceProviderSnapshotImport preserves descriptor-driven Oura and W
 
   assert.equal(ouraStepsEvent?.fields?.metric, "daily-steps");
   assert.equal(ouraStepsEvent?.fields?.unit, "count");
+  assert.equal(ouraStepsEvent?.fields?.observationGrain, "summary");
   assert.equal(ouraSpo2Event?.fields?.metric, "spo2");
   assert.equal(ouraSpo2Event?.fields?.unit, "%");
+  assert.equal(ouraSpo2Event?.fields?.observationGrain, "summary");
   assert.equal(ouraNonWearEvent?.fields?.value, 20);
   assert.equal(ouraNonWearEvent?.fields?.unit, "minutes");
+  assert.equal(ouraNonWearEvent?.fields?.observationGrain, "summary");
   assert.equal(whoopRemEvent?.fields?.metric, "sleep-rem-minutes");
   assert.equal(whoopRemEvent?.fields?.unit, "minutes");
+  assert.equal(whoopRemEvent?.dayKey, "2026-03-16");
+  assert.equal(whoopRemEvent?.fields?.observationGrain, "summary");
   assert.equal(whoopTemperatureEvent?.fields?.unit, "celsius");
+  assert.equal(whoopTemperatureEvent?.dayKey, "2026-03-16");
+  assert.equal(whoopTemperatureEvent?.fields?.observationGrain, "summary");
 });
 
 test("prepareDeviceProviderSnapshotImport handles Oura string numerics through shared observation and sample helpers", async () => {

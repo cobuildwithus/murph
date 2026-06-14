@@ -4,6 +4,7 @@ import type { VaultReadModel } from "../read-model.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
 import {
   buildWearableSummaryBundle,
+  buildWearableSummaryBundleFromDataset,
   summarizeWearableActivityFromBundle,
   summarizeWearableBodyStateFromBundle,
   summarizeWearableRecoveryFromBundle,
@@ -16,6 +17,7 @@ import {
   type WearableSleepSummary,
   type WearableSummaryBundle,
 } from "../wearables.ts";
+import type { WearableDataset } from "../wearables/types.ts";
 import { formatProviderName } from "../wearables/provider-policy.ts";
 import {
   extractMetricPoints,
@@ -32,7 +34,23 @@ export interface MetricProjection {
 }
 
 export interface BuildMetricProjectionOptions {
-  wearableMetricRows?: readonly MetricRowEvidence[];
+  wearableDataset?: WearableDataset;
+}
+
+interface WearableMetricProjectionEvidence {
+  rows: MetricRowEvidence[];
+  suppressionEvidence: WearableMetricSuppressionEvidence[];
+}
+
+interface WearableMetricSuppressionEvidence {
+  date: string;
+  metricKey: string;
+  recordIds: readonly string[];
+}
+
+interface WearableMetricEvidenceResult {
+  row: MetricRowEvidence;
+  suppressionEvidence: WearableMetricSuppressionEvidence;
 }
 
 export function buildMetricProjection(
@@ -40,9 +58,8 @@ export function buildMetricProjection(
   options: BuildMetricProjectionOptions = {},
 ): MetricProjection {
   const dailySampleSummaries = summarizeDailySamples(vault);
-  const wearableMetricRows = options.wearableMetricRows
-    ? [...options.wearableMetricRows]
-    : buildWearableMetricEvidence(vault);
+  const wearableMetricEvidence = resolveWearableMetricProjectionEvidence(vault, options);
+  const wearableMetricRows = wearableMetricEvidence.rows;
   const metricPoints = extractMetricPoints({
     metricRows: wearableMetricRows,
     sampleSummaries: dailySampleSummaries,
@@ -50,27 +67,48 @@ export function buildMetricProjection(
   });
   return {
     dailySampleSummaries,
-    metricPoints: applyWearableSummaryMetricPrecedence(metricPoints),
+    metricPoints: applyWearableSummaryMetricPrecedence(metricPoints, wearableMetricEvidence.suppressionEvidence),
     wearableMetricRows,
   };
 }
 
 export function buildWearableMetricEvidence(vault: VaultReadModel): MetricRowEvidence[] {
-  return buildWearableMetricEvidenceFromBundle(buildWearableSummaryBundle(vault));
+  return buildWearableMetricProjectionEvidenceFromBundle(buildWearableSummaryBundle(vault)).rows;
 }
 
 export function buildWearableMetricEvidenceFromBundle(bundle: WearableSummaryBundle): MetricRowEvidence[] {
+  return buildWearableMetricProjectionEvidenceFromBundle(bundle).rows;
+}
+
+function resolveWearableMetricProjectionEvidence(
+  vault: VaultReadModel,
+  options: BuildMetricProjectionOptions,
+): WearableMetricProjectionEvidence {
+  if (options.wearableDataset) {
+    return buildWearableMetricProjectionEvidenceFromBundle(
+      buildWearableSummaryBundleFromDataset(options.wearableDataset),
+    );
+  }
+  return buildWearableMetricProjectionEvidenceFromBundle(buildWearableSummaryBundle(vault));
+}
+
+function buildWearableMetricProjectionEvidenceFromBundle(bundle: WearableSummaryBundle): WearableMetricProjectionEvidence {
   const sleepSummaries = summarizeWearableSleepFromBundle(bundle, { limit: METRIC_PROJECTION_LIMIT });
   const recoverySummaries = summarizeWearableRecoveryFromBundle(bundle, { limit: METRIC_PROJECTION_LIMIT });
   const activitySummaries = summarizeWearableActivityFromBundle(bundle, { limit: METRIC_PROJECTION_LIMIT });
   const bodyStateSummaries = summarizeWearableBodyStateFromBundle(bundle, { limit: METRIC_PROJECTION_LIMIT });
 
-  return [
+  const evidence = [
     ...sleepSummaries.flatMap((summary) => summaryMetricEvidence(summary, SLEEP_METRIC_EVIDENCE)),
     ...recoverySummaries.flatMap((summary) => summaryMetricEvidence(summary, RECOVERY_METRIC_EVIDENCE)),
     ...activitySummaries.flatMap((summary) => summaryMetricEvidence(summary, ACTIVITY_METRIC_EVIDENCE)),
     ...bodyStateSummaries.flatMap((summary) => summaryMetricEvidence(summary, BODY_STATE_METRIC_EVIDENCE)),
   ];
+
+  return {
+    rows: evidence.map((entry) => entry.row),
+    suppressionEvidence: evidence.map((entry) => entry.suppressionEvidence),
+  };
 }
 
 type WearableSummaryBase = {
@@ -124,12 +162,6 @@ const SUMMARY_METRIC_EVIDENCE_ENTRIES = [
   ...BODY_STATE_METRIC_EVIDENCE,
 ];
 
-const WEARABLE_SUMMARY_METRIC_SOURCE_KEYS = new Set(
-  SUMMARY_METRIC_EVIDENCE_ENTRIES.map(
-    (entry) => `${resolveMetricInputKey(entry.metricKey)}\0${entry.sourceKind}`,
-  ),
-);
-
 export function listWearableSummaryMetricEvidenceKeys(): string[] {
   return uniqueStrings(
     SUMMARY_METRIC_EVIDENCE_ENTRIES.map((entry) => resolveMetricInputKey(entry.metricKey)),
@@ -139,7 +171,7 @@ export function listWearableSummaryMetricEvidenceKeys(): string[] {
 function summaryMetricEvidence<TField extends string>(
   summary: WearableSummaryBase & Record<TField, WearableResolvedMetric>,
   entries: readonly SummaryMetricEvidenceEntry<TField>[],
-): MetricRowEvidence[] {
+): WearableMetricEvidenceResult[] {
   return entries.map((entry) =>
     metricEvidence(
       summary.date,
@@ -157,25 +189,21 @@ function summaryMetricEvidence<TField extends string>(
 // stay, and the metric selector's established sourcePriority chooses
 // between them at selection time — table order here must never decide
 // data retention.
-function applyWearableSummaryMetricPrecedence(points: readonly MetricPoint[]): MetricPoint[] {
-  const contributingByDay = new Map<string, Set<string>>();
+function applyWearableSummaryMetricPrecedence(
+  points: readonly MetricPoint[],
+  suppressionEvidence: readonly WearableMetricSuppressionEvidence[],
+): MetricPoint[] {
+  const suppressionIdsByDay = new Map<string, Set<string>>();
 
-  for (const point of points) {
-    if (!isWearableSummaryMetricPoint(point)) {
-      continue;
-    }
-    const contributingRecordIds = point.context.contributingRecordIds;
-    if (!Array.isArray(contributingRecordIds)) {
-      continue;
-    }
-    const dayKey = metricPointDayKey(point);
-    const recordIds = contributingByDay.get(dayKey) ?? new Set<string>();
-    for (const recordId of contributingRecordIds) {
+  for (const evidence of suppressionEvidence) {
+    const dayKey = metricDayKey(resolveMetricInputKey(evidence.metricKey), evidence.date);
+    const recordIds = suppressionIdsByDay.get(dayKey) ?? new Set<string>();
+    for (const recordId of evidence.recordIds) {
       if (typeof recordId === "string") {
         recordIds.add(recordId);
       }
     }
-    contributingByDay.set(dayKey, recordIds);
+    suppressionIdsByDay.set(dayKey, recordIds);
   }
 
   return points.filter((point) => {
@@ -183,22 +211,20 @@ function applyWearableSummaryMetricPrecedence(points: readonly MetricPoint[]): M
       return true;
     }
 
-    // Suppression is by contribution: every record the resolver considered
-    // (winning AND losing candidates, across all summary kinds for the
-    // day) resolves into a summary point, while manual/independent entries
-    // — never candidates — survive as provenance-distinct facts (hiding
-    // them would violate the capture posture).
-    return !contributingByDay.get(metricPointDayKey(point))?.has(point.source.recordId);
+    // Suppression uses resolver-candidate IDs, not public provenance IDs.
+    // Losing provider candidates can suppress their raw observation point
+    // without making the selected summary value advertise that losing
+    // record as part of its provenance.
+    return !suppressionIdsByDay.get(metricPointDayKey(point))?.has(point.source.recordId);
   });
 }
 
-function isWearableSummaryMetricPoint(point: MetricPoint): boolean {
-  return point.source.family === "derived"
-    && WEARABLE_SUMMARY_METRIC_SOURCE_KEYS.has(`${point.metricKey}\0${point.source.kind}`);
+function metricPointDayKey(point: MetricPoint): string {
+  return metricDayKey(point.metricKey, point.effectiveDate);
 }
 
-function metricPointDayKey(point: MetricPoint): string {
-  return `${point.metricKey}\0${point.effectiveDate}`;
+function metricDayKey(metricKey: string, date: string): string {
+  return `${metricKey}\0${date.slice(0, 10)}`;
 }
 
 function metricEvidence(
@@ -207,7 +233,7 @@ function metricEvidence(
   resolved: WearableResolvedMetric,
   confidence: WearableConfidenceLevel,
   sourceKind: MetricRowEvidence["sourceKind"],
-): MetricRowEvidence {
+): WearableMetricEvidenceResult {
   const selection = resolved.selection;
   const sourceCandidate = selectWearableSourceCandidate(resolved);
   const provider = selection.provider ?? sourceCandidate?.provider ?? null;
@@ -216,43 +242,50 @@ function metricEvidence(
     ...(sourceCandidate?.paths ?? []),
   ]);
   const syntheticRecordId = `${sourceKind}:${metricKey}:${date}`;
-  // Every candidate the resolver considered counts as contributing — the
-  // summary point is the resolved answer for ALL of them, so losing
-  // multi-provider candidates suppress alongside the winner. (Candidates
-  // are populated here because evidence is built from the in-memory bundle
-  // at rebuild time; the stored codec strips them only on the read path.)
-  // Manual/independent entries are never candidates and survive.
+  // Public provenance stays limited to the selected/source record IDs.
+  // Suppression has its own internal ID list below so losing candidates can
+  // suppress raw duplicates without corrupting anchored experiment evidence.
   const contributingRecordIds = uniqueStrings([
     ...selection.recordIds,
     ...(sourceCandidate?.recordIds ?? []),
-    ...resolved.candidates.flatMap((candidate) => candidate.recordIds),
   ]);
   const recordIds = contributingRecordIds.length > 0 ? contributingRecordIds : [syntheticRecordId];
+  const suppressionRecordIds = uniqueStrings([
+    ...contributingRecordIds,
+    ...resolved.candidates.flatMap((candidate) => candidate.recordIds),
+  ]);
 
   return {
-    confidence: resolved.confidence.level === "none" ? confidence : resolved.confidence.level,
-    context: {
-      candidateCount: resolved.confidence.candidateCount,
-      conflictingProviders: resolved.confidence.conflictingProviders,
-      contributingRecordIds,
-      exactDuplicateCount: resolved.confidence.exactDuplicateCount,
-      recordedAt: selection.recordedAt,
-      sourceFamily: selection.sourceFamily ?? sourceCandidate?.sourceFamily ?? null,
-      sourceKind: selection.sourceKind ?? sourceCandidate?.sourceKind ?? null,
-      syntheticRecordId,
+    row: {
+      confidence: resolved.confidence.level === "none" ? confidence : resolved.confidence.level,
+      context: {
+        candidateCount: resolved.confidence.candidateCount,
+        conflictingProviders: resolved.confidence.conflictingProviders,
+        contributingRecordIds,
+        exactDuplicateCount: resolved.confidence.exactDuplicateCount,
+        recordedAt: selection.recordedAt,
+        sourceFamily: selection.sourceFamily ?? sourceCandidate?.sourceFamily ?? null,
+        sourceKind: selection.sourceKind ?? sourceCandidate?.sourceKind ?? null,
+        syntheticRecordId,
+      },
+      dataOrigin: sourceCandidate?.dataOrigin ?? null,
+      date,
+      externalRef: sourceCandidate?.externalRef ?? null,
+      metricKey,
+      provider,
+      rawRefs,
+      recordIds,
+      sourceFamily: "derived",
+      sourceKind,
+      sourceLabel: provider ? formatProviderName(provider) : sourceCandidate?.title ?? "Wearable summary",
+      unit: selection.unit ?? sourceCandidate?.unit ?? null,
+      value: selection.value,
     },
-    dataOrigin: sourceCandidate?.dataOrigin ?? null,
-    date,
-    externalRef: sourceCandidate?.externalRef ?? null,
-    metricKey,
-    provider,
-    rawRefs,
-    recordIds,
-    sourceFamily: "derived",
-    sourceKind,
-    sourceLabel: provider ? formatProviderName(provider) : sourceCandidate?.title ?? "Wearable summary",
-    unit: selection.unit ?? sourceCandidate?.unit ?? null,
-    value: selection.value,
+    suppressionEvidence: {
+      date,
+      metricKey,
+      recordIds: suppressionRecordIds,
+    },
   };
 }
 
