@@ -22,7 +22,9 @@ import {
   extractAssistantMessageFallback,
   extractCodexErrorInfo,
   extractCodexErrorMessage,
+  extractCodexCompletedFinalAgentMessageTextFromNormalized,
   extractCodexProgressEventFromNormalized,
+  isCodexCompletedUserMessageItemFromNormalized,
   type CodexStructuredErrorInfo,
   extractCodexSessionId,
   extractCodexStatusEventFromStderrLine,
@@ -420,6 +422,11 @@ export function readCodexAppServerTurnFailureContext(
 
 export interface CodexAppServerTurnResult {
   finalMessage: string
+  // Completed final-phase agent messages that were followed by a steered user
+  // message and later superseded by another final message in the same turn, in
+  // completion order. Empty unless the turn was steered after the model had
+  // already finished an answer.
+  precedingAgentMessageSegments: readonly CodexAppServerResponseSegment[]
   additionalUsages: AssistantProviderUsageDraft[]
   responseMedia: AssistantResponseMedia[]
   jsonEvents: unknown[]
@@ -430,6 +437,12 @@ export interface CodexAppServerTurnResult {
   stdout: string
   threadId: string | null
   turnId: string | null
+}
+
+export interface CodexAppServerResponseSegment {
+  deliveryContextOrdinal?: number
+  media: AssistantResponseMedia[]
+  response: string
 }
 
 export type CodexAppServerSteerInput = {
@@ -1655,6 +1668,16 @@ async function runCodexAppServerTurnOnProcess(
   let turnId: string | null = null
   let expectedTurnId: string | null = null
   let lastAgentMessage: string | null = null
+  // Completed final-phase agent messages that were followed by a steered
+  // user-message item and then superseded by a newer final message in the
+  // same turn. A closed segment is held as a candidate until a later final
+  // appears; if the turn ends at the steer boundary, that segment remains the
+  // final reply rather than a preceding duplicate.
+  const precedingAgentMessageSegments: CodexAppServerResponseSegment[] = []
+  let completedFinalAgentMessage: string | null = null
+  let trailingSteerCandidate: CodexAppServerResponseSegment | null = null
+  let trailingSteerCandidateMedia: AssistantResponseMedia[] | null = null
+  let completedUserMessageOrdinal = -1
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
@@ -2302,6 +2325,29 @@ async function runCodexAppServerTurnOnProcess(
       notifyCurrentChannelProgress(progressDeliveryText, progressDeliverySource)
     }
 
+    const completedFinalAgentMessageText =
+      extractCodexCompletedFinalAgentMessageTextFromNormalized(normalizedEvent)
+    if (completedFinalAgentMessageText !== null) {
+      if (trailingSteerCandidate) {
+        precedingAgentMessageSegments.push(trailingSteerCandidate)
+        trailingSteerCandidate = null
+        trailingSteerCandidateMedia = null
+      }
+      completedFinalAgentMessage = completedFinalAgentMessageText
+    } else if (isCodexCompletedUserMessageItemFromNormalized(normalizedEvent)) {
+      if (completedFinalAgentMessage !== null) {
+        trailingSteerCandidate = {
+          deliveryContextOrdinal: Math.max(0, completedUserMessageOrdinal),
+          response: completedFinalAgentMessage,
+          media: [...responseMedia],
+        }
+        trailingSteerCandidateMedia = trailingSteerCandidate.media
+        completedFinalAgentMessage = null
+        responseMedia = []
+      }
+      completedUserMessageOrdinal += 1
+    }
+
     const progressEvent = extractCodexProgressEventFromNormalized(normalizedEvent)
     if (progressEvent) {
       if (progressEvent.kind === 'message') {
@@ -2799,8 +2845,15 @@ async function runCodexAppServerTurnOnProcess(
 
   return {
     finalMessage,
+    precedingAgentMessageSegments: precedingAgentMessageSegments.map((segment) => ({
+      ...(typeof segment.deliveryContextOrdinal === 'number'
+        ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }
+        : {}),
+      response: segment.response,
+      media: [...segment.media],
+    })),
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
-    responseMedia,
+    responseMedia: trailingSteerCandidateMedia ?? responseMedia,
     jsonEvents,
     providerActionCount,
     rolloutRelativePath,

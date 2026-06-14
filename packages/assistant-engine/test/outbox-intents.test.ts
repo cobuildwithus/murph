@@ -57,6 +57,14 @@ describe('assistant outbox intent helpers', () => {
       turnId: 'turn-a',
       channel: 'telegram',
       identityId: 'user-a',
+      media: [
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/media/first.png',
+          alt: null,
+          source: null,
+        },
+      ],
     })
     const second = hashAssistantOutboxIdentity({
       dedupeToken: 'same-token',
@@ -64,6 +72,14 @@ describe('assistant outbox intent helpers', () => {
       sessionId: 'session-b',
       turnId: 'turn-b',
       explicitTarget: 'another-target',
+      media: [
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/media/retry.png',
+          alt: null,
+          source: null,
+        },
+      ],
     })
 
     expect(first).toBe(second)

@@ -1721,9 +1721,13 @@ describe('Codex assistant registry helpers', () => {
   it('merges progress activity labels into successful delegated execution attempts', async () => {
     const executionResult: AssistantProviderTurnExecutionResult = {
       provider: 'codex-cli',
+      additionalUsages: undefined,
+      codexRolloutRelativePath: undefined,
       codexThreadId: 'provider-session-1',
+      precedingResponseSegments: [],
       rawEvents: [],
       response: 'Completed.',
+      responseMedia: undefined,
       stderr: '',
       stdout: '',
       usage: {
@@ -1799,6 +1803,62 @@ describe('Codex assistant registry helpers', () => {
       providerActionCount: 1,
     })
     expect(attempt.result).toEqual(executionResult)
+  })
+
+  it('preserves pre-steer segment delivery ordinals across the provider adapter', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'Final answer.',
+      jsonEvents: [],
+      precedingAgentMessageSegments: [
+        {
+          deliveryContextOrdinal: 1,
+          response: 'Earlier answer.',
+          media: [
+            {
+              kind: 'image',
+              url: 'https://cdn.example.test/assistant/earlier.png',
+              alt: 'Earlier answer image',
+              source: null,
+            },
+          ],
+        },
+      ],
+      providerActionCount: 0,
+      responseMedia: [],
+      sessionId: 'provider-session-segments',
+      stderr: '',
+      stdout: '',
+      threadId: 'provider-session-segments',
+      turnId: 'turn-segments',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      userPrompt: 'Run the turn.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    if (!attempt.ok) {
+      throw new Error('expected successful provider attempt')
+    }
+
+    expect(attempt.result.precedingResponseSegments).toEqual([
+      {
+        deliveryContextOrdinal: 1,
+        response: 'Earlier answer.',
+        media: [
+          {
+            kind: 'image',
+            url: 'https://cdn.example.test/assistant/earlier.png',
+            alt: 'Earlier answer image',
+            source: null,
+          },
+        ],
+      },
+    ])
   })
 
   it('passes Venice provider id and config overrides through the Codex app-server seam', async () => {

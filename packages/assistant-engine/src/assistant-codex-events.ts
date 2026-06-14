@@ -402,6 +402,36 @@ export function extractCodexCurrentChannelProgressTextFromNormalized(
   return contextCompactionStartedText(normalized)
 }
 
+export function extractCodexCompletedFinalAgentMessageTextFromNormalized(
+  normalized: CodexNormalizedEvent,
+): string | null {
+  if (
+    normalized.kind !== 'assistant_message' ||
+    normalized.itemState !== 'completed' ||
+    normalized.messagePhase === 'commentary'
+  ) {
+    return null
+  }
+
+  const text = normalizeStreamingText(normalized.text)?.trim()
+  return text && text.length > 0 ? text : null
+}
+
+// Steered (mid-turn) user input is recorded by the Codex app-server as a
+// completed user-message turn item. Its position in the item stream is the
+// only race-free steer boundary: a final-phase agent message completed before
+// it was already "sent" from the model's perspective and must not be
+// superseded by a later final answer in the same turn.
+export function isCodexCompletedUserMessageItemFromNormalized(
+  normalized: CodexNormalizedEvent,
+): boolean {
+  return (
+    normalized.kind === 'status_item' &&
+    normalized.itemState === 'completed' &&
+    normalized.itemType === 'user.message'
+  )
+}
+
 export function selectCodexContextCompactionProgressText(): string {
   const index = Math.floor(
     Math.random() * CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS.length,

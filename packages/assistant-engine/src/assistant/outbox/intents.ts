@@ -117,7 +117,7 @@ export function hashAssistantOutboxIdentity(input: {
   const dedupeToken = normalizeNullableString(input.dedupeToken)
   if (dedupeToken) {
     return createHash('sha1')
-      .update(JSON.stringify({ dedupeToken, media: input.media ?? [] }))
+      .update(JSON.stringify({ dedupeToken }))
       .digest('hex')
   }
 
@@ -140,6 +140,20 @@ export function hashAssistantOutboxIdentity(input: {
         deliverySource: input.deliverySource,
       }),
     )
+    .digest('hex')
+}
+
+export function hashAssistantOutboxLegacyMediaDedupeIdentity(input: {
+  dedupeToken?: string | null
+  media?: readonly AssistantResponseMedia[] | null
+}): string | null {
+  const dedupeToken = normalizeNullableString(input.dedupeToken)
+  if (!dedupeToken) {
+    return null
+  }
+
+  return createHash('sha1')
+    .update(JSON.stringify({ dedupeToken, media: input.media ?? [] }))
     .digest('hex')
 }
 
