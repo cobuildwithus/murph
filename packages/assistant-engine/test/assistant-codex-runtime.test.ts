@@ -2174,6 +2174,12 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({ id: barrier.id, result: {} }))
           const compact = await waitForRpcMethod(child, 'thread/compact/start')
           expect(asRecord(compact.params)).toEqual({ threadId })
+          child.stdout.write(jsonLine({ id: compact.id, result: {} }))
+          writeContextCompactionStarted({
+            child,
+            itemId: 'context-compact-provider-usage',
+            threadId,
+          })
           child.stdout.write(jsonLine({
             method: 'thread/tokenUsage/updated',
             params: {
@@ -2227,7 +2233,6 @@ describe('assistant codex runtime', () => {
               },
             },
           }))
-          child.stdout.write(jsonLine({ id: compact.id, result: {} }))
         })()
       })
 
@@ -2337,6 +2342,11 @@ describe('assistant codex runtime', () => {
           const compact = await waitForRpcMethod(child, 'thread/compact/start')
           expect(asRecord(compact.params)).toEqual({ threadId })
           child.stdout.write(jsonLine({ id: compact.id, result: {} }))
+          writeContextCompactionStarted({
+            child,
+            itemId: 'context-compact-explicit-usage',
+            threadId,
+          })
           child.stdout.write(jsonLine({
             method: 'item/completed',
             params: {
@@ -2470,6 +2480,11 @@ describe('assistant codex runtime', () => {
           const compact = await waitForRpcMethod(child, 'thread/compact/start')
           expect(asRecord(compact.params)).toEqual({ threadId })
           child.stdout.write(jsonLine({ id: compact.id, result: {} }))
+          writeContextCompactionStarted({
+            child,
+            itemId: 'context-compact-estimated-usage',
+            threadId,
+          })
           child.stdout.write(jsonLine({
             method: 'thread/tokenUsage/updated',
             params: {
@@ -2632,6 +2647,11 @@ describe('assistant codex runtime', () => {
           const compact = await waitForRpcMethod(child, 'thread/compact/start')
           expect(asRecord(compact.params)).toEqual({ threadId })
           child.stdout.write(jsonLine({ id: compact.id, result: {} }))
+          writeContextCompactionStarted({
+            child,
+            itemId: 'context-compact-parent-vitals',
+            threadId,
+          })
           child.stdout.write(jsonLine({
             method: 'thread/tokenUsage/updated',
             params: {
@@ -2755,6 +2775,9 @@ describe('assistant codex runtime', () => {
           }))
 
           const barrier = await waitForRpcMethod(child, 'config/read')
+          child.stdout.write(jsonLine({ id: barrier.id, result: {} }))
+          const compact = await waitForRpcMethod(child, 'thread/compact/start')
+          expect(asRecord(compact.params)).toEqual({ threadId })
           child.stdout.write(jsonLine({
             method: 'thread/tokenUsage/updated',
             params: {
@@ -2777,14 +2800,17 @@ describe('assistant codex runtime', () => {
                 id: 'context-compact-stale-completion',
                 type: 'contextCompaction',
               },
+              threadId,
             },
           }))
           staleCompletionSent.resolve()
-          child.stdout.write(jsonLine({ id: barrier.id, result: {} }))
-          const compact = await waitForRpcMethod(child, 'thread/compact/start')
-          expect(asRecord(compact.params)).toEqual({ threadId })
           await releaseRealCompletion.promise
           child.stdout.write(jsonLine({ id: compact.id, result: {} }))
+          writeContextCompactionStarted({
+            child,
+            itemId: 'context-compact-real-completion',
+            threadId,
+          })
           child.stdout.write(jsonLine({
             method: 'thread/tokenUsage/updated',
             params: {
@@ -12332,6 +12358,23 @@ async function createTempDir(prefix: string): Promise<string> {
 
 function jsonLine(payload: Record<string, unknown>): string {
   return `${JSON.stringify(payload)}\n`
+}
+
+function writeContextCompactionStarted(input: {
+  child: MockChildProcess
+  itemId: string
+  threadId: string
+}): void {
+  input.child.stdout.write(jsonLine({
+    method: 'item/started',
+    params: {
+      item: {
+        id: input.itemId,
+        type: 'contextCompaction',
+      },
+      threadId: input.threadId,
+    },
+  }))
 }
 
 function createErrnoException(

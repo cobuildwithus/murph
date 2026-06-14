@@ -206,6 +206,33 @@ function prepareCodexRpcParams(
 // The 0.135 app-server reports compaction completion to v2 clients as a
 // contextCompaction item; `thread/compacted` is the legacy fan-out kept for
 // protocol drift tolerance.
+function isCodexContextCompactionStarted(message: CodexRpcMessage): boolean {
+  const method = typeof message.method === 'string' ? message.method : null
+  if (method !== 'item/started' && method !== 'item.started') {
+    return false
+  }
+
+  return asCodexRecord(asCodexRecord(message.params)?.item)?.type === 'contextCompaction'
+}
+
+function readCodexContextCompactionItemId(message: CodexRpcMessage): string | null {
+  return normalizeNullableString(
+    asCodexString(asCodexRecord(asCodexRecord(message.params)?.item)?.id),
+  )
+}
+
+function isCodexContextCompactionStartedForThread(
+  message: CodexRpcMessage,
+  threadId: string,
+): boolean {
+  if (!isCodexContextCompactionStarted(message)) {
+    return false
+  }
+
+  const messageThreadId = extractCodexThreadIdFromMessage(message)
+  return messageThreadId === null || messageThreadId === threadId
+}
+
 function isCodexContextCompactionCompletion(message: CodexRpcMessage): boolean {
   const method = typeof message.method === 'string' ? message.method : null
   if (method === 'thread/compacted' || method === 'thread.compacted') {
@@ -1495,9 +1522,8 @@ export async function compactWarmCodexThread(input: {
 
   const { processInstance, vitals } = reservation
   const startedAt = Date.now()
-  let compactRequestSubmitted = false
   let compactRequestAccepted = false
-  let compactCompletionObserved = false
+  let compactStartedItemId: string | null = null
   let providerUsage: CodexWarmThreadCompactionUsage | null = null
   type CompactionSettleReason = 'aborted' | 'compacted' | 'process_exit' | 'rpc_error' | 'timeout'
   let compactionSettleReason: CompactionSettleReason | null = null
@@ -1535,9 +1561,6 @@ export async function compactWarmCodexThread(input: {
           !message.error
         ) {
           compactRequestAccepted = true
-          if (compactCompletionObserved) {
-            settleCompaction('compacted')
-          }
         }
         return
       }
@@ -1552,15 +1575,27 @@ export async function compactWarmCodexThread(input: {
       }
 
       if (
-        compactRequestSubmitted &&
+        compactRequestAccepted &&
+        isCodexContextCompactionStartedForThread(message, vitals.threadId)
+      ) {
+        const itemId = readCodexContextCompactionItemId(message)
+        if (itemId !== null && compactStartedItemId === null) {
+          compactStartedItemId = itemId
+        }
+        return
+      }
+
+      if (
+        compactRequestAccepted &&
         isCodexContextCompactionCompletionForThread(message, vitals.threadId)
       ) {
+        const itemId = readCodexContextCompactionItemId(message)
+        if (compactStartedItemId === null || itemId !== compactStartedItemId) {
+          return
+        }
         providerUsage = readCodexCompactionCompletionProviderUsage(message, vitals.threadId)
           ?? providerUsage
-        compactCompletionObserved = true
-        if (compactRequestAccepted) {
-          settleCompaction('compacted')
-        }
+        settleCompaction('compacted')
       }
     },
     onStderrLine: () => {},
@@ -1586,7 +1621,6 @@ export async function compactWarmCodexThread(input: {
           settleCompaction('aborted')
           return undefined
         }
-        compactRequestSubmitted = true
         return processInstance.sendRequest('thread/compact/start', { threadId: vitals.threadId })
       })
       .catch(() => settleCompaction('rpc_error'))
