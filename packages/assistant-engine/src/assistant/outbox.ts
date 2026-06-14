@@ -42,7 +42,7 @@ import {
 import { buildAssistantOutboxSummary as buildAssistantOutboxSummaryLocal } from './outbox/summary.js'
 import { repairAssistantOutboxReceiptForIntent } from './outbox/receipt-repair.js'
 import {
-  findAssistantOutboxIntentByDedupeKey,
+  findAssistantOutboxIntentByDedupeIdentity,
   listAssistantOutboxIntentsLocal as listAssistantOutboxIntentsLocalStore,
   readAssistantOutboxIntent as readAssistantOutboxIntentLocal,
   readAssistantOutboxIntentAtPath,
@@ -93,6 +93,7 @@ export interface AssistantOutboxDispatchPayload {
   channel?: string | null
   deliveryIdempotencyKey?: string | null
   deliverySource?: AssistantDeliverySource | null
+  dedupeToken?: string | null
   explicitTarget?: string | null
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null
@@ -207,7 +208,12 @@ export async function createAssistantOutboxIntent(input: {
         channel: input.channel ?? null,
         deliveryTransportIdempotent: input.deliveryTransportIdempotent,
       })
-    const existing = await findAssistantOutboxIntentByDedupeKey(input.vault, dedupeKey)
+    const existing = await findAssistantOutboxIntentByDedupeIdentity({
+      dedupeKey,
+      deliveryIdempotencyKey,
+      dedupeToken: input.dedupeToken,
+      vault: input.vault,
+    })
     if (existing) {
       const upgradedExisting = maybeUpgradeAssistantOutboxIntentDeliveryIdempotency({
         deliveryIdempotencyKey,
