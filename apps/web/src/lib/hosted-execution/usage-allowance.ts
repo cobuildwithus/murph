@@ -135,6 +135,19 @@ const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
 const HOSTED_AI_USAGE_HOME_URL = "https://withmurph.ai/home";
 const TOKENS_PER_PRICING_UNIT = 1_000_000n;
 
+// Workers AI audio transcription is duration-priced rather than token-priced.
+// Rate: $0.00051 per audio minute, from
+// https://developers.cloudflare.com/workers-ai/models/whisper-large-v3-turbo/
+// The model id stays out of HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS because
+// that list also validates HOSTED_ASSISTANT_MODEL in deploy preflight.
+const HOSTED_AI_USAGE_ALLOWANCE_AUDIO_MODEL = "@cf/openai/whisper-large-v3-turbo";
+const HOSTED_AI_USAGE_ALLOWANCE_AUDIO_PRICING_VERSION =
+  "workers-ai-audio-pricing-2026-06-12";
+const HOSTED_AI_USAGE_ALLOWANCE_AUDIO_PRICING_SOURCE =
+  "https://developers.cloudflare.com/workers-ai/platform/pricing/";
+const HOSTED_AI_USAGE_ALLOWANCE_AUDIO_USD_MICROS_PER_MINUTE = 510n;
+const MS_PER_PRICING_MINUTE = 60_000n;
+
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES = {
   "gpt-5.5": {
     cachedInputUsdMicrosPerMillionTokens: 500_000n,
@@ -155,6 +168,15 @@ export function priceHostedAiUsageForAllowance(
 ): HostedAiUsageAllowancePricingResult {
   const credentialSource = normalizeAssistantUsageCredentialSource(record.credentialSource);
   const counted = credentialSource !== "member";
+
+  if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
+    return priceHostedAiUsageAudioForAllowance({
+      counted,
+      credentialSource,
+      record,
+    });
+  }
+
   const modelResolution = resolveHostedAiUsageAllowancePricingModel(record);
   const tokenSnapshot = buildHostedAiUsageAllowanceTokenSnapshot(record);
 
@@ -1258,6 +1280,95 @@ function priceTokenBucketUsdMicros(
 
   return ((tokens * usdMicrosPerMillionTokens) + TOKENS_PER_PRICING_UNIT - 1n)
     / TOKENS_PER_PRICING_UNIT;
+}
+
+// Only Worker-recorded Workers AI transcription rows take the audio-priced
+// branch. A malformed row that merely claims the whisper id must fall through
+// to token-model pricing and fail closed instead of being accounted as free.
+function isHostedAiUsageAllowanceAudioModelRecord(record: AssistantUsageRecord): boolean {
+  return record.provider === "workers-ai"
+    && record.featureKey === "audio-transcription"
+    && record.usageExtractionSourcePath === "workers-ai.transcribe"
+    && record.cacheWriteTokens === null
+    && record.cachedInputTokens === null
+    && record.inputTokens === null
+    && record.outputTokens === null
+    && record.reasoningTokens === null
+    && record.totalTokens === null
+    && readHostedAiUsageAudioBytes(record) !== null
+    && (
+      isHostedAiUsageAllowanceAudioModelId(record.servedModel)
+      || isHostedAiUsageAllowanceAudioModelId(record.requestedModel)
+    );
+}
+
+function isHostedAiUsageAllowanceAudioModelId(value: string | null): boolean {
+  return typeof value === "string"
+    && value.trim().toLowerCase() === HOSTED_AI_USAGE_ALLOWANCE_AUDIO_MODEL;
+}
+
+function priceHostedAiUsageAudioForAllowance(input: {
+  counted: boolean;
+  credentialSource: AssistantUsageCredentialSource;
+  record: AssistantUsageRecord;
+}): HostedAiUsageAllowancePricingResult {
+  const durationMs = readHostedAiUsageAudioDurationMs(input.record);
+  const costUsdMicros = input.counted && durationMs !== null
+    ? priceAudioDurationUsdMicros(durationMs)
+    : 0n;
+
+  return {
+    costUsdMicros,
+    counted: input.counted,
+    pricingSnapshot: {
+      audio: {
+        durationMs: durationMs === null ? null : durationMs.toString(),
+        usdMicrosPerAudioMinute:
+          HOSTED_AI_USAGE_ALLOWANCE_AUDIO_USD_MICROS_PER_MINUTE.toString(),
+      },
+      credentialSource: input.credentialSource,
+      model: HOSTED_AI_USAGE_ALLOWANCE_AUDIO_MODEL,
+      modelSource: isHostedAiUsageAllowanceAudioModelId(input.record.servedModel)
+        ? "served"
+        : "requested",
+      pricingSource: HOSTED_AI_USAGE_ALLOWANCE_AUDIO_PRICING_SOURCE,
+      requestedModel: input.record.requestedModel,
+      schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+      servedModel: input.record.servedModel,
+      tokens: buildHostedAiUsageAllowanceTokenSnapshot(input.record),
+    },
+    pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_AUDIO_PRICING_VERSION,
+  };
+}
+
+function readHostedAiUsageAudioDurationMs(record: AssistantUsageRecord): bigint | null {
+  const durationMs = record.rawUsageJson?.durationMs;
+
+  return typeof durationMs === "number"
+      && Number.isSafeInteger(durationMs)
+      && durationMs >= 0
+    ? BigInt(durationMs)
+    : null;
+}
+
+function readHostedAiUsageAudioBytes(record: AssistantUsageRecord): bigint | null {
+  const audioBytes = record.rawUsageJson?.audioBytes;
+
+  return typeof audioBytes === "number"
+      && Number.isSafeInteger(audioBytes)
+      && audioBytes > 0
+    ? BigInt(audioBytes)
+    : null;
+}
+
+function priceAudioDurationUsdMicros(durationMs: bigint): bigint {
+  if (durationMs <= 0n) {
+    return 0n;
+  }
+
+  return ((durationMs * HOSTED_AI_USAGE_ALLOWANCE_AUDIO_USD_MICROS_PER_MINUTE)
+    + MS_PER_PRICING_MINUTE - 1n)
+    / MS_PER_PRICING_MINUTE;
 }
 
 function buildHostedAiUsageAllowanceTokenSnapshot(

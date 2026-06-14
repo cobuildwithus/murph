@@ -28,6 +28,13 @@ const ASSISTANT_USAGE_RAW_DETAIL_TOKEN_KEYS = new Map<string, ReadonlySet<string
   ["output_tokens_details", new Set(["image_tokens", "reasoning_tokens", "text_tokens"])],
   ["prompt_tokens_details", new Set(["cached_tokens"])],
 ]);
+// Audio transcription usage is metered by audio duration rather than tokens.
+// These keys carry the cost basis for duration-priced rows and stay under the
+// same non-negative-integer rule as the token keys.
+const ASSISTANT_USAGE_RAW_AUDIO_KEYS = new Set<string>([
+  "audioBytes",
+  "durationMs",
+]);
 export const ASSISTANT_TURN_PROFILE_SCHEMA = "murph.assistant-turn-profile.v1";
 export const ASSISTANT_TURN_PROFILE_MAX_REQUESTS = 32;
 export const ASSISTANT_TURN_PROFILE_MAX_TOOLS = 16;
@@ -141,6 +148,45 @@ export function buildAssistantMaintenanceUsageRecord(input: {
       attemptCount: 1,
       turnId,
     }),
+  });
+}
+
+// Usage record for Worker-mediated Workers AI audio transcription. It runs
+// outside any member turn (hosted attachment parse jobs), so it uses a
+// synthetic turn id like the maintenance record above. Cost basis is audio
+// duration in rawUsageJson rather than tokens.
+export function buildHostedTranscriptionUsageRecord(input: {
+  audioBytes: number;
+  durationMs: number | null;
+  memberId: string;
+  model: string;
+}): AssistantUsageRecord {
+  const turnId = `turn_transcribe_${randomUUID().replaceAll("-", "")}`;
+
+  return parseAssistantUsageRecord({
+    attemptCount: 1,
+    credentialSource: "platform",
+    featureKey: "audio-transcription",
+    memberId: input.memberId,
+    occurredAt: new Date().toISOString(),
+    provider: "workers-ai",
+    providerName: "Workers AI",
+    rawUsageJson: {
+      audioBytes: input.audioBytes,
+      ...(input.durationMs === null ? {} : { durationMs: input.durationMs }),
+    },
+    requestedModel: input.model,
+    schema: ASSISTANT_USAGE_SCHEMA,
+    sessionId: turnId,
+    surface: "hosted-runner",
+    triggerKind: "attachment-parse",
+    turnId,
+    usageId: createAssistantUsageId({
+      attemptCount: 1,
+      turnId,
+    }),
+    usageExtractionSourcePath: "workers-ai.transcribe",
+    usageExtractionVersion: "workers-ai-transcribe-v1",
   });
 }
 
@@ -423,7 +469,7 @@ function normalizeOptionalRawUsageJsonRecord(
   const normalized: Record<string, unknown> = {};
 
   for (const [key, entry] of Object.entries(record)) {
-    if (ASSISTANT_USAGE_RAW_TOKEN_KEYS.has(key)) {
+    if (ASSISTANT_USAGE_RAW_TOKEN_KEYS.has(key) || ASSISTANT_USAGE_RAW_AUDIO_KEYS.has(key)) {
       if (!isNonNegativeInteger(entry)) {
         throw new TypeError(`${label}.${key} must be a non-negative integer.`);
       }
