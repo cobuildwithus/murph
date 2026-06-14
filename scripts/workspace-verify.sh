@@ -876,11 +876,13 @@ run_package_boundary_verification() {
   if [[ "$artifacts_prepared" == "1" ]]; then
     run_timed_step "Messaging ingress built package boundary" pnpm --dir "packages/messaging-ingress" verify:package-boundary:prepared
     run_timed_step "Inboxd built package boundary" pnpm --dir "packages/inboxd" verify:package-boundary:prepared
+    run_timed_step "Hosted local harness package boundary" pnpm --dir "packages/hosted-local-harness" verify:package-boundary
     return
   fi
 
   run_timed_step "Messaging ingress built package boundary" pnpm --dir "packages/messaging-ingress" verify:package-boundary
   run_timed_step "Inboxd built package boundary" pnpm --dir "packages/inboxd" verify:package-boundary
+  run_timed_step "Hosted local harness package boundary" pnpm --dir "packages/hosted-local-harness" verify:package-boundary
 }
 
 run_diff_package_boundary_verification() {
@@ -892,6 +894,9 @@ run_diff_package_boundary_verification() {
       ;;
     "packages/inboxd")
       run_timed_step "packages/inboxd built package boundary" pnpm --dir "packages/inboxd" verify:package-boundary
+      ;;
+    "packages/hosted-local-harness")
+      run_timed_step "packages/hosted-local-harness package boundary" pnpm --dir "packages/hosted-local-harness" verify:package-boundary
       ;;
   esac
 }

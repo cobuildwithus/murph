@@ -220,6 +220,7 @@ export function printHelp(): void {
       "  MURPH_DEV_SKIP_PRISMA_MIGRATE=1     Skip prisma migrate deploy before startup",
       "  MURPH_DEV_SKIP_RUNNER_SMOKE=1       Skip the runner container deploy-smoke readiness proof (warning-only in interactive dev, fatal in E2E)",
       "  MURPH_DEV_SKIP_MINIO=1              Skip local MinIO; requires explicit local S3-compatible HOSTED_R2_PRESIGN_* env",
+      "  MURPH_DEV_SKIP_WORKERS_AI=1         Drop the Workers AI binding so the stack starts without Cloudflare auth; hosted transcription then fails closed",
       "  MURPH_DEV_MINIO_DATA_DIR=.tmp/hosted-local-minio-r2 Persist local MinIO R2 data for interactive dev",
       "  MURPH_DEV_MINIO_PORT=9000           Pin the local MinIO R2-compatible S3 port",
       "  MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH=1  Skip the Health Commons markdown watcher after startup generation",
