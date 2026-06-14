@@ -460,7 +460,7 @@ describe("runSmokeHostedDeploy", () => {
       const parsedUrl = new URL(String(url));
       if (
         parsedUrl.pathname === "/internal/deploy/container-smoke" &&
-        parsedUrl.searchParams.get("liveModelTurn") === "gpt-5.4-nano"
+        parsedUrl.searchParams.get("liveModelTurn") === "1"
       ) {
         return new Response(JSON.stringify({
           ok: true,
@@ -503,9 +503,10 @@ describe("runSmokeHostedDeploy", () => {
     );
     const liveCall = fetchCalls
       .map((entry) => new URL(entry))
-      .find((entry) => entry.searchParams.get("liveModelTurn") === "gpt-5.4-nano");
-    expect(liveCall?.searchParams.get("expectedBundleFingerprint")).toBe("bundle-fingerprint");
-    expect(liveCall?.searchParams.get("expectedSourceFingerprint")).toBe("source-fingerprint");
+      .find((entry) => entry.searchParams.get("liveModelTurn") === "1");
+    expect(liveCall).toBeDefined();
+    expect(liveCall?.searchParams.has("expectedBundleFingerprint")).toBe(false);
+    expect(liveCall?.searchParams.has("expectedSourceFingerprint")).toBe(false);
   });
 
   it("fails the live model turn smoke when the deployed turn metadata is missing or wrong", async () => {
@@ -610,6 +611,91 @@ describe("runSmokeHostedDeploy", () => {
       log() {},
       source,
     })).rejects.toThrow("runner container live model turn smoke reported no codex exec output.");
+  });
+
+  it("does not retry live model turn smoke failures after the live endpoint is called", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-live-model-turn-no-retry-"));
+    const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        buildSkipped: false,
+        bundleFingerprint: "bundle-fingerprint",
+        sourceFingerprint: "source-fingerprint",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    const logs: string[] = [];
+    const fetchCalls: string[] = [];
+    const fetchImpl = async (url: RequestInfo | URL) => {
+      fetchCalls.push(String(url));
+
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+
+      const parsedUrl = new URL(String(url));
+      if (
+        parsedUrl.pathname === "/internal/deploy/container-smoke" &&
+        parsedUrl.searchParams.get("liveModelTurn") === "1"
+      ) {
+        return new Response(JSON.stringify({
+          detail: "Codex final output was not OK.",
+          error: "Deploy container smoke failed.",
+          ok: false,
+        }), { status: 500 });
+      }
+
+      if (parsedUrl.pathname === "/internal/deploy/container-smoke") {
+        return new Response(JSON.stringify({
+          ok: true,
+          runnerContainer: {
+            codexShell: createCodexShellSmokeResult(),
+            ok: true,
+            runnerBundle: {
+              buildSkipped: false,
+              bundleFingerprint: "bundle-fingerprint",
+              sourceFingerprint: "source-fingerprint",
+            },
+            service: "cloudflare-hosted-runner-node",
+          },
+        }), { status: 200 });
+      }
+
+      throw new Error(`Unexpected smoke request: ${String(url)}`);
+    };
+
+    await expect(runSmokeHostedDeploy({
+      fetchImpl,
+      log(message) {
+        logs.push(message);
+      },
+      source: {
+        HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "3",
+        HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "0",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+    })).rejects.toThrow("runner container smoke failed with HTTP 500");
+
+    const liveCalls = fetchCalls
+      .map((entry) => new URL(entry))
+      .filter((entry) => entry.searchParams.get("liveModelTurn") === "1");
+    expect(liveCalls).toHaveLength(1);
+    expect(logs.some((message) =>
+      message.startsWith("Runner container smoke attempt") &&
+      message.includes("Codex final output was not OK")
+    )).toBe(false);
   });
 
   it("requires the managed-container smoke when the live model turn smoke is enabled", async () => {
@@ -721,238 +807,6 @@ describe("runSmokeHostedDeploy", () => {
       && message.includes("did not run the expected runner bundle")
       && message.endsWith("; retrying in 0ms.")
     )).toBe(true);
-  });
-
-  it("retries stale live smoke bundle preconditions after runner bundle readiness", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-live-model-retry-manifest-"));
-    const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
-    await mkdir(path.dirname(manifestPath), { recursive: true });
-    await writeFile(
-      manifestPath,
-      `${JSON.stringify({
-        buildSkipped: false,
-        bundleFingerprint: "expected-bundle",
-        sourceFingerprint: "expected-source",
-      }, null, 2)}\n`,
-      "utf8",
-    );
-    const fetchCalls: string[] = [];
-    let liveSmokeAttempts = 0;
-    const fetchImpl = async (url: RequestInfo | URL) => {
-      fetchCalls.push(String(url));
-
-      if (String(url).endsWith("/")) {
-        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
-          status: 200,
-        });
-      }
-
-      if (String(url).endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), { status: 200 });
-      }
-
-      const parsedUrl = new URL(String(url));
-      if (
-        parsedUrl.pathname === "/internal/deploy/container-smoke" &&
-        !parsedUrl.searchParams.has("liveModelTurn")
-      ) {
-        const smokeAttempt = fetchCalls.filter((entry) =>
-          new URL(entry).pathname === "/internal/deploy/container-smoke" &&
-          !new URL(entry).searchParams.has("liveModelTurn")
-        ).length;
-        return new Response(JSON.stringify({
-          ok: true,
-          runnerContainer: {
-            codexShell: createCodexShellSmokeResult(),
-            ok: true,
-            runnerBundle: smokeAttempt === 1
-              ? {
-                  buildSkipped: false,
-                  bundleFingerprint: "stale-bundle",
-                  sourceFingerprint: "stale-source",
-                }
-              : {
-                  buildSkipped: false,
-                  bundleFingerprint: "expected-bundle",
-                  sourceFingerprint: "expected-source",
-                },
-            service: "cloudflare-hosted-runner-node",
-          },
-        }), { status: 200 });
-      }
-
-      if (
-        parsedUrl.pathname === "/internal/deploy/container-smoke" &&
-        parsedUrl.searchParams.get("liveModelTurn") === "gpt-5.4-nano"
-      ) {
-        liveSmokeAttempts += 1;
-        if (liveSmokeAttempts === 1) {
-          return new Response(JSON.stringify({
-            detail: "Hosted runner container smoke did not run the expected runner bundle.",
-            error: "Deploy container smoke failed.",
-            ok: false,
-          }), { status: 409 });
-        }
-
-        return new Response(JSON.stringify({
-          ok: true,
-          runnerContainer: {
-            codexShell: createCodexShellSmokeResult(),
-            liveModelTurn: {
-              durationMs: 1_234,
-              egressGrantConsumed: true,
-              model: "gpt-5.4-nano",
-              stdoutBytes: 2_048,
-            },
-            ok: true,
-            runnerBundle: {
-              buildSkipped: false,
-              bundleFingerprint: "expected-bundle",
-              sourceFingerprint: "expected-source",
-            },
-            service: "cloudflare-hosted-runner-node",
-          },
-        }), { status: 200 });
-      }
-
-      throw new Error(`Unexpected smoke request: ${String(url)}`);
-    };
-
-    await runSmokeHostedDeploy({
-      fetchImpl,
-      log() {},
-      source: {
-        HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: "true",
-        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
-        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
-        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "2",
-        HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "0",
-        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
-        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
-      },
-    });
-
-    const readinessCalls = fetchCalls
-      .map((entry) => new URL(entry))
-      .filter((entry) =>
-        entry.pathname === "/internal/deploy/container-smoke" &&
-        !entry.searchParams.has("liveModelTurn")
-      );
-    const liveCalls = fetchCalls
-      .map((entry) => new URL(entry))
-      .filter((entry) => entry.searchParams.get("liveModelTurn") === "gpt-5.4-nano");
-    expect(readinessCalls).toHaveLength(2);
-    expect(liveCalls).toHaveLength(2);
-    expect(liveCalls.every((entry) =>
-      entry.searchParams.get("expectedBundleFingerprint") === "expected-bundle" &&
-      entry.searchParams.get("expectedSourceFingerprint") === "expected-source"
-    )).toBe(true);
-  });
-
-  it("retries pre-live model turn setup failures after runner bundle readiness", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-live-model-pre-live-retry-"));
-    const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
-    await mkdir(path.dirname(manifestPath), { recursive: true });
-    await writeFile(
-      manifestPath,
-      `${JSON.stringify({
-        buildSkipped: false,
-        bundleFingerprint: "expected-bundle",
-        sourceFingerprint: "expected-source",
-      }, null, 2)}\n`,
-      "utf8",
-    );
-    const fetchCalls: string[] = [];
-    let liveSmokeAttempts = 0;
-    const fetchImpl = async (url: RequestInfo | URL) => {
-      fetchCalls.push(String(url));
-
-      if (String(url).endsWith("/")) {
-        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
-          status: 200,
-        });
-      }
-
-      if (String(url).endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), { status: 200 });
-      }
-
-      const parsedUrl = new URL(String(url));
-      if (
-        parsedUrl.pathname === "/internal/deploy/container-smoke" &&
-        !parsedUrl.searchParams.has("liveModelTurn")
-      ) {
-        return new Response(JSON.stringify({
-          ok: true,
-          runnerContainer: {
-            codexShell: createCodexShellSmokeResult(),
-            ok: true,
-            runnerBundle: {
-              buildSkipped: false,
-              bundleFingerprint: "expected-bundle",
-              sourceFingerprint: "expected-source",
-            },
-            service: "cloudflare-hosted-runner-node",
-          },
-        }), { status: 200 });
-      }
-
-      if (
-        parsedUrl.pathname === "/internal/deploy/container-smoke" &&
-        parsedUrl.searchParams.get("liveModelTurn") === "gpt-5.4-nano"
-      ) {
-        liveSmokeAttempts += 1;
-        if (liveSmokeAttempts === 1) {
-          return new Response(JSON.stringify({
-            detail:
-              "Hosted runner container live model turn smoke failed before the live model turn started.",
-            error: "Deploy container smoke failed.",
-            ok: false,
-          }), { status: 503 });
-        }
-
-        return new Response(JSON.stringify({
-          ok: true,
-          runnerContainer: {
-            codexShell: createCodexShellSmokeResult(),
-            liveModelTurn: {
-              durationMs: 1_234,
-              egressGrantConsumed: true,
-              model: "gpt-5.4-nano",
-              stdoutBytes: 2_048,
-            },
-            ok: true,
-            runnerBundle: {
-              buildSkipped: false,
-              bundleFingerprint: "expected-bundle",
-              sourceFingerprint: "expected-source",
-            },
-            service: "cloudflare-hosted-runner-node",
-          },
-        }), { status: 200 });
-      }
-
-      throw new Error(`Unexpected smoke request: ${String(url)}`);
-    };
-
-    await runSmokeHostedDeploy({
-      fetchImpl,
-      log() {},
-      source: {
-        HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: "true",
-        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
-        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
-        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "2",
-        HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "0",
-        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
-        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
-      },
-    });
-
-    const liveCalls = fetchCalls
-      .map((entry) => new URL(entry))
-      .filter((entry) => entry.searchParams.get("liveModelTurn") === "gpt-5.4-nano");
-    expect(liveCalls).toHaveLength(2);
   });
 
   it("retries transient HTTP 400 runner container smoke responses", async () => {

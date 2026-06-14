@@ -4,24 +4,9 @@ export const DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL = "gpt-5.4-nano";
 export const DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT = "Reply with exactly: OK";
 export const DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT = "OK";
 
-const DEPLOY_LIVE_MODEL_TURN_SMOKE_CODEX_PERMISSIONS_TEXT =
-  "<permissions instructions>\n"
-  + "Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `danger-full-access`: No filesystem sandboxing - all commands are permitted. Network access is enabled.\n"
-  + "Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.\n"
-  + "</permissions instructions>";
-const DEPLOY_LIVE_MODEL_TURN_SMOKE_ENVIRONMENT_CONTEXT_PREFIX =
-  "<environment_context>";
-const DEPLOY_LIVE_MODEL_TURN_SMOKE_ENVIRONMENT_CONTEXT_SUFFIX =
-  "</environment_context>";
-const DEPLOY_LIVE_MODEL_TURN_SMOKE_MAX_OUTPUT_TOKENS = 64;
-
-export interface DeployLiveModelTurnSmokeOpenAiRequest {
-  model: string;
-}
-
-export function readDeployLiveModelTurnSmokeOpenAiRequest(
+export function readDeployLiveModelTurnSmokeOpenAiModel(
   rawBody: string,
-): DeployLiveModelTurnSmokeOpenAiRequest | null {
+): string | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawBody);
@@ -36,19 +21,7 @@ export function readDeployLiveModelTurnSmokeOpenAiRequest(
   if (model !== DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL) {
     return null;
   }
-  if (
-    (record.background !== undefined && record.background !== false)
-    || !isDeployLiveModelTurnSmokeMaxOutputTokens(record.max_output_tokens)
-    || record.previous_response_id !== undefined
-    || record.store !== false
-    || record.stream !== true
-    || !isDeployLiveModelTurnSmokeInput(record.input)
-    || readNestedString(record.reasoning, "effort") !== "low"
-    || readNestedString(record.text, "verbosity") !== "low"
-  ) {
-    return null;
-  }
-  return { model };
+  return model;
 }
 
 export function readDeployLiveModelTurnSmokeCodexOutputText(stdout: string): string | null {
@@ -82,84 +55,6 @@ function readString(value: unknown): string | null {
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function readNestedString(value: unknown, key: string): string | null {
-  if (!isPlainRecord(value)) {
-    return null;
-  }
-  return readString(value[key]);
-}
-
-function isDeployLiveModelTurnSmokeMaxOutputTokens(value: unknown): boolean {
-  return value === undefined
-    || (
-      typeof value === "number"
-      && Number.isInteger(value)
-      && value > 0
-      && value <= DEPLOY_LIVE_MODEL_TURN_SMOKE_MAX_OUTPUT_TOKENS
-    );
-}
-
-function isDeployLiveModelTurnSmokeInput(value: unknown): boolean {
-  if (!Array.isArray(value) || value.length === 0) {
-    return false;
-  }
-  const messages = value.map(readDeployLiveModelTurnSmokeMessage);
-  if (messages.some((message) => message === null)) {
-    return false;
-  }
-  const promptMessage = messages.at(-1);
-  if (
-    !promptMessage
-    || promptMessage.role !== "user"
-    || promptMessage.text !== DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT
-  ) {
-    return false;
-  }
-  return messages.slice(0, -1).every((message) =>
-    message !== null && isDeployLiveModelTurnSmokeContextMessage(message)
-  );
-}
-
-function isDeployLiveModelTurnSmokeContextMessage(input: {
-  role: string;
-  text: string;
-}): boolean {
-  if (input.role === "developer") {
-    return input.text === DEPLOY_LIVE_MODEL_TURN_SMOKE_CODEX_PERMISSIONS_TEXT;
-  }
-  if (input.role === "user") {
-    return isDeployLiveModelTurnSmokeEnvironmentContext(input.text);
-  }
-  return false;
-}
-
-function readDeployLiveModelTurnSmokeMessage(
-  value: unknown,
-): { role: string; text: string } | null {
-  if (!isPlainRecord(value) || typeof value.role !== "string") {
-    return null;
-  }
-  const { content } = value;
-  if (typeof content === "string") {
-    return { role: value.role, text: content };
-  }
-  if (!Array.isArray(content) || content.length !== 1) {
-    return null;
-  }
-  const [part] = content;
-  if (!isPlainRecord(part) || part.type !== "input_text") {
-    return null;
-  }
-  return typeof part.text === "string"
-    ? { role: value.role, text: part.text }
-    : null;
-}
-
-function isDeployLiveModelTurnSmokeEnvironmentContext(value: string): boolean {
-  return value.startsWith(DEPLOY_LIVE_MODEL_TURN_SMOKE_ENVIRONMENT_CONTEXT_PREFIX)
-    && value.endsWith(DEPLOY_LIVE_MODEL_TURN_SMOKE_ENVIRONMENT_CONTEXT_SUFFIX);
 }
 
 function readDeployLiveModelTurnSmokeCompletedAssistantText(

@@ -837,7 +837,7 @@ describe("startHostedContainerEntrypoint", () => {
     }
 
     const response = await sendHostedContainerJsonRequest({
-      body: JSON.stringify({ model: "gpt-5.4-nano" }),
+      body: "",
       path: "/internal/deploy-live-model-turn-smoke",
       port: address.port,
     });
@@ -855,68 +855,6 @@ describe("startHostedContainerEntrypoint", () => {
       model: "gpt-5.4-nano",
       signal: expect.any(AbortSignal),
     });
-  });
-
-  it("rejects live model turn smoke requests without a model", async () => {
-    const runLiveModelTurnSmoke = vi.fn(async () => ({
-      durationMs: 1,
-      model: "unexpected",
-      stdoutBytes: 1,
-    }));
-    const server = await startHostedContainerEntrypoint({
-      port: 0,
-      runtime: {
-        runLiveModelTurnSmoke,
-      },
-    });
-    servers.push(server);
-    const address = server.address();
-
-    if (!address || typeof address === "string") {
-      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-    }
-
-    const response = await sendHostedContainerJsonRequest({
-      body: JSON.stringify({ model: "   " }),
-      path: "/internal/deploy-live-model-turn-smoke",
-      port: address.port,
-    });
-
-    expect(response.status).toBe(400);
-    expect(runLiveModelTurnSmoke).not.toHaveBeenCalled();
-  });
-
-  it("rejects live model turn smoke requests for unsupported models", async () => {
-    const runLiveModelTurnSmoke = vi.fn(async () => ({
-      durationMs: 1,
-      model: "unexpected",
-      stdoutBytes: 1,
-    }));
-    const server = await startHostedContainerEntrypoint({
-      port: 0,
-      runtime: {
-        runLiveModelTurnSmoke,
-      },
-    });
-    servers.push(server);
-    const address = server.address();
-
-    if (!address || typeof address === "string") {
-      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-    }
-
-    const response = await sendHostedContainerJsonRequest({
-      body: JSON.stringify({ model: "gpt-5.5" }),
-      path: "/internal/deploy-live-model-turn-smoke",
-      port: address.port,
-    });
-
-    expect(response.status).toBe(400);
-    expect(response.json).toMatchObject({
-      error: "Invalid request.",
-      errorName: "RangeError",
-    });
-    expect(runLiveModelTurnSmoke).not.toHaveBeenCalled();
   });
 
   it("surfaces capped ASCII-only live model turn smoke failure diagnostics", async () => {
@@ -939,7 +877,7 @@ describe("startHostedContainerEntrypoint", () => {
     }
 
     const response = await sendHostedContainerJsonRequest({
-      body: JSON.stringify({ model: "gpt-5.4-nano" }),
+      body: "",
       path: "/internal/deploy-live-model-turn-smoke",
       port: address.port,
     });

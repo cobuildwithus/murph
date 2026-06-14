@@ -209,7 +209,7 @@ export async function runSmokeHostedDeploy(input: {
       source,
       url: buildRunnerContainerSmokeUrl({
         directR2PresignedPut: shouldSmokeDirectR2PresignedPut,
-        liveModelTurnModel: null,
+        liveModelTurn: false,
         smokeBaseUrl,
       }),
       versionOverrideHeaders,
@@ -217,17 +217,15 @@ export async function runSmokeHostedDeploy(input: {
       expectLiveModelTurnModel: null,
     });
     if (shouldSmokeLiveModelTurn) {
-      const expectedRunnerBundle = await readExpectedRunnerBundleManifest(source);
-      await assertRunnerContainerLiveModelTurnSmoke({
+      await assertRunnerContainerSmoke({
+        expectDirectR2PresignedPut: false,
         expectLiveModelTurnModel: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
-        expectedRunnerBundle,
         fetchImpl,
         log,
         source,
         url: buildRunnerContainerSmokeUrl({
           directR2PresignedPut: false,
-          expectedRunnerBundle,
-          liveModelTurnModel: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+          liveModelTurn: true,
           smokeBaseUrl,
         }),
         versionOverrideHeaders,
@@ -269,16 +267,21 @@ async function assertRunnerContainerSmoke(input: {
 }): Promise<void> {
   const expectedManifest = await readExpectedRunnerBundleManifest(input.source);
   const retryPolicy = readRunnerContainerSmokeRetryPolicy(input.source);
+  const retryableFailures = input.expectLiveModelTurnModel === null;
 
   for (let attempt = 1; attempt <= retryPolicy.maxAttempts; attempt += 1) {
     try {
       assertSmokeRunnerBundleManifest(
         await readRunnerContainerSmoke(input),
         expectedManifest,
+        {
+          retryable: retryableFailures,
+        },
       );
       return;
     } catch (error) {
       if (
+        !retryableFailures ||
         attempt >= retryPolicy.maxAttempts ||
         !(error instanceof RunnerContainerSmokeRetryableError)
       ) {
@@ -294,59 +297,10 @@ async function assertRunnerContainerSmoke(input: {
   }
 }
 
-async function assertRunnerContainerLiveModelTurnSmoke(input: {
-  expectLiveModelTurnModel: string;
-  expectedRunnerBundle: SmokeRunnerBundleManifest;
-  fetchImpl: FetchLike;
-  log: (message: string) => void;
-  source: EnvSource;
-  url: string;
-  versionOverrideHeaders: Record<string, string> | undefined;
-}): Promise<void> {
-  const retryPolicy = readRunnerContainerSmokeRetryPolicy(input.source);
-
-  for (let attempt = 1; attempt <= retryPolicy.maxAttempts; attempt += 1) {
-    try {
-      assertSmokeRunnerBundleManifest(
-        await readRunnerContainerSmoke({
-          expectDirectR2PresignedPut: false,
-          expectLiveModelTurnModel: input.expectLiveModelTurnModel,
-          fetchImpl: input.fetchImpl,
-          retryableFailures: false,
-          retryableStatusCodes: [409, 503],
-          source: input.source,
-          url: input.url,
-          versionOverrideHeaders: input.versionOverrideHeaders,
-        }),
-        input.expectedRunnerBundle,
-        {
-          retryable: false,
-        },
-      );
-      return;
-    } catch (error) {
-      if (
-        attempt >= retryPolicy.maxAttempts ||
-        !(error instanceof RunnerContainerSmokeRetryableError)
-      ) {
-        throw error;
-      }
-
-      input.log(
-        `Runner container live model turn smoke attempt ${attempt}/${retryPolicy.maxAttempts} failed `
-          + `(${error.message}); retrying in ${retryPolicy.retryDelayMs}ms.`,
-      );
-      await sleep(retryPolicy.retryDelayMs);
-    }
-  }
-}
-
 async function readRunnerContainerSmoke(input: {
   expectDirectR2PresignedPut: boolean;
   expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
-  retryableFailures?: boolean;
-  retryableStatusCodes?: readonly number[];
   source: EnvSource;
   url: string;
   versionOverrideHeaders: Record<string, string> | undefined;
@@ -374,11 +328,11 @@ async function readRunnerContainerSmoke(input: {
     const message = `runner container smoke failed with HTTP ${response.status}${
       failureBody ? `: ${failureBody}` : "."
     }`;
-    const retryableHttpFailure =
-      input.retryableStatusCodes?.includes(response.status) === true
-      || (input.retryableFailures !== false && (response.status === 400 || response.status >= 500));
+    if (input.expectLiveModelTurnModel !== null) {
+      throw new Error(message);
+    }
     throw (
-      retryableHttpFailure
+      response.status === 400 || response.status >= 500
     )
       ? new RunnerContainerSmokeRetryableError(message)
       : new Error(message);
@@ -397,9 +351,10 @@ async function readRunnerContainerSmoke(input: {
   };
 
   if (responsePayload.ok !== true || responsePayload.runnerContainer?.ok !== true) {
-    throw input.retryableFailures === false
-      ? new Error("runner container smoke did not return ok=true.")
-      : new RunnerContainerSmokeRetryableError("runner container smoke did not return ok=true.");
+    const message = "runner container smoke did not return ok=true.";
+    throw input.expectLiveModelTurnModel === null
+      ? new RunnerContainerSmokeRetryableError(message)
+      : new Error(message);
   }
 
   if (responsePayload.runnerContainer.service !== "cloudflare-hosted-runner-node") {
@@ -446,20 +401,15 @@ function redactSmokeFailureBody(value: string): string {
 
 function buildRunnerContainerSmokeUrl(input: {
   directR2PresignedPut: boolean;
-  expectedRunnerBundle?: SmokeRunnerBundleManifest | null;
-  liveModelTurnModel: string | null;
+  liveModelTurn: boolean;
   smokeBaseUrl: string;
 }): string {
   const url = new URL("/internal/deploy/container-smoke", input.smokeBaseUrl);
   if (input.directR2PresignedPut) {
     url.searchParams.set("directR2PresignedPut", "1");
   }
-  if (input.liveModelTurnModel !== null) {
-    url.searchParams.set("liveModelTurn", input.liveModelTurnModel);
-  }
-  if (input.expectedRunnerBundle) {
-    url.searchParams.set("expectedBundleFingerprint", input.expectedRunnerBundle.bundleFingerprint ?? "");
-    url.searchParams.set("expectedSourceFingerprint", input.expectedRunnerBundle.sourceFingerprint ?? "");
+  if (input.liveModelTurn) {
+    url.searchParams.set("liveModelTurn", "1");
   }
   return url.toString();
 }

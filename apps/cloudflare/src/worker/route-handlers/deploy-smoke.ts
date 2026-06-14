@@ -68,15 +68,6 @@ export async function handleDeployContainerSmokeRoute(
       ok: false,
     }, 400);
   }
-  let expectedRunnerBundle: DeployContainerSmokeExpectedRunnerBundle | null;
-  try {
-    expectedRunnerBundle = readDeployContainerSmokeExpectedRunnerBundle(context.url);
-  } catch {
-    return json({
-      error: "Unsupported deploy container smoke expected runner bundle.",
-      ok: false,
-    }, 400);
-  }
   const container = context.env.RUNNER_CONTAINER_SMOKE
     .getByName(resolveDeployContainerSmokeObjectName(context.env));
   const directR2Smoke = directR2PresignedPut
@@ -88,7 +79,6 @@ export async function handleDeployContainerSmokeRoute(
   try {
     result = await container.smokeHealth({
       ...(directR2Smoke ? { directR2PresignedPut: directR2Smoke.containerInput } : {}),
-      ...(expectedRunnerBundle ? { expectedRunnerBundle } : {}),
       ...(liveModelTurnModel ? { liveModelTurn: { model: liveModelTurnModel } } : {}),
     });
 
@@ -119,7 +109,7 @@ export async function handleDeployContainerSmokeRoute(
       detail: error instanceof Error ? error.message : String(error),
       error: "Deploy container smoke failed.",
       ok: false,
-    }, readDeployContainerSmokeFailureStatus(error));
+    }, 500);
   } finally {
     if (directR2Smoke) {
       await deleteDeployContainerDirectR2PresignedPutSmokeObject(context, directR2Smoke.objectKey)
@@ -225,42 +215,15 @@ export async function deleteDeployContainerDirectR2PresignedPutSmokeObject(
   await context.env.BUNDLES.delete(objectKey);
 }
 
-interface DeployContainerSmokeExpectedRunnerBundle {
-  bundleFingerprint: string;
-  sourceFingerprint: string;
-}
-
-export function readDeployContainerSmokeExpectedRunnerBundle(
-  url: URL,
-): DeployContainerSmokeExpectedRunnerBundle | null {
-  const bundleFingerprint = normalizeDeployContainerSmokeQueryValue(
-    url.searchParams.get("expectedBundleFingerprint"),
-  );
-  const sourceFingerprint = normalizeDeployContainerSmokeQueryValue(
-    url.searchParams.get("expectedSourceFingerprint"),
-  );
-  if (!bundleFingerprint && !sourceFingerprint) {
-    return null;
-  }
-  if (!bundleFingerprint || !sourceFingerprint) {
-    throw new RangeError("Deploy container smoke expected runner bundle requires both fingerprints.");
-  }
-  return {
-    bundleFingerprint,
-    sourceFingerprint,
-  };
-}
-
-// Optional live model turn: the deploy-signed smoke URL carries the model
-// in the `liveModelTurn` query param (mirroring `directR2PresignedPut=1`),
-// so the signed payload stays empty and absence keeps today's behavior.
+// Optional live model turn: the deploy-signed smoke URL carries a boolean flag
+// mirroring `directR2PresignedPut=1`, while the model stays fixed in code.
 export function readDeployContainerSmokeLiveModelTurnModel(url: URL): string | null {
   const normalized = normalizeDeployContainerSmokeQueryValue(url.searchParams.get("liveModelTurn"));
   if (!normalized) {
     return null;
   }
-  if (normalized !== DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL) {
-    throw new RangeError("Unsupported deploy container smoke live model turn model.");
+  if (normalized !== "1") {
+    throw new RangeError("Unsupported deploy container smoke live model turn flag.");
   }
   return DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL;
 }
@@ -268,35 +231,6 @@ export function readDeployContainerSmokeLiveModelTurnModel(url: URL): string | n
 function normalizeDeployContainerSmokeQueryValue(value: string | null): string | null {
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized.length > 0 ? normalized : null;
-}
-
-function isDeployContainerSmokeBundleMismatchError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-  return error.name === "HostedRunnerContainerSmokeBundleMismatchError"
-    || error.message.startsWith("Hosted runner container smoke did not run the expected runner bundle.")
-    || error.message.startsWith("Hosted runner container smoke did not return runner bundle metadata.");
-}
-
-function isDeployContainerSmokePreLiveModelTurnError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-  return error.name === "HostedRunnerContainerPreLiveModelTurnSmokeError"
-    || error.message.startsWith(
-      "Hosted runner container live model turn smoke failed before the live model turn started.",
-    );
-}
-
-function readDeployContainerSmokeFailureStatus(error: unknown): number {
-  if (isDeployContainerSmokeBundleMismatchError(error)) {
-    return 409;
-  }
-  if (isDeployContainerSmokePreLiveModelTurnError(error)) {
-    return 503;
-  }
-  return 500;
 }
 
 export function resolveDeployContainerSmokeObjectName(

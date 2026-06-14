@@ -86,7 +86,6 @@ const HOSTED_CONTAINER_RUNTIME_WAKE_PATH = "/internal/runtime-wake";
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS = 45_000;
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-5.5";
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_TIMEOUT_MS = 60_000;
-const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_MODEL_MAX_CHARS = 128;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_TAIL_MAX_CHARS = 16 * 1024;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS = 512;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
@@ -215,10 +214,6 @@ interface HostedContainerLiveModelTurnSmokeResult {
   durationMs: number;
   model: string;
   stdoutBytes: number;
-}
-
-interface HostedContainerLiveModelTurnSmokeRequest {
-  model: string;
 }
 
 interface HostedContainerDirectR2PresignedPutSmokeResult {
@@ -506,26 +501,10 @@ export async function startHostedContainerEntrypoint(input: {
         }
         activeHostedRunnerJobCount += 1;
         claimedRunnerSlot = true;
-        let smokeRequest: HostedContainerLiveModelTurnSmokeRequest;
-        try {
-          smokeRequest = parseHostedContainerLiveModelTurnSmokeRequest(
-            JSON.parse(await readHostedContainerInvocationRequestBody(request)),
-          );
-        } catch (error) {
-          emitHostedExecutionStructuredLog({
-            component: "container",
-            error,
-            level: "warn",
-            message: "Hosted container entrypoint rejected the live model turn smoke request body.",
-            phase: "failed",
-          });
-          const classified = classifyRequestDecodeError(error);
-          writeJsonResponse(response, classified.statusCode, classified.payload);
-          return;
-        }
+        discardUnreadRequestBody(request);
         try {
           const result = await runtime.runLiveModelTurnSmoke({
-            model: smokeRequest.model,
+            model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
             signal: requestAbort.signal,
           });
           writeJsonResponse(response, 200, {
@@ -1150,28 +1129,6 @@ function parseHostedContainerDirectR2PresignedPutSmokeRequest(
     presignedPutUrl: parsedUrl.href,
     ...(tlsCaCertificatePem ? { tlsCaCertificatePem } : {}),
   };
-}
-
-function parseHostedContainerLiveModelTurnSmokeRequest(
-  value: unknown,
-): HostedContainerLiveModelTurnSmokeRequest {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Live model turn smoke request must be an object.");
-  }
-
-  const record = value as Record<string, unknown>;
-  const model = typeof record.model === "string" ? record.model.trim() : "";
-  if (!model) {
-    throw new TypeError("Live model turn smoke request requires model.");
-  }
-  if (model.length > HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_MODEL_MAX_CHARS) {
-    throw new RangeError("Live model turn smoke model is too long.");
-  }
-  if (model !== DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL) {
-    throw new RangeError("Live model turn smoke model is not supported.");
-  }
-
-  return { model };
 }
 
 function readHostedExecutionRunnerResultPhase(result: unknown): string | null {

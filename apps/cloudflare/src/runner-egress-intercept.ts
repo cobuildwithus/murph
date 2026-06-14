@@ -60,8 +60,7 @@ import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
 import {
-  readDeployLiveModelTurnSmokeOpenAiRequest,
-  type DeployLiveModelTurnSmokeOpenAiRequest,
+  readDeployLiveModelTurnSmokeOpenAiModel,
 } from "./deploy-smoke-live-model.ts";
 
 type HostedRunnerOutboundHandler = (
@@ -338,7 +337,6 @@ export type HostedRunnerDiagnosticJson = Record<
   string,
   HostedRunnerDiagnosticScalar | HostedRunnerDiagnosticScalar[]
 >;
-type HostedDeploySmokeLiveModelTurnOpenAiRequest = DeployLiveModelTurnSmokeOpenAiRequest;
 
 export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutboundHandler> = {
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.artifactStore]: handleHostedRunnerInternalOutbound,
@@ -1180,10 +1178,10 @@ function readOpenAiCacheDiagnosticEndpointKind(
   return null;
 }
 
-async function readDeploySmokeLiveModelTurnOpenAiRequest(input: {
+async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
   pathnameSuffix: string;
   request: Request;
-}): Promise<HostedDeploySmokeLiveModelTurnOpenAiRequest | null> {
+}): Promise<string | null> {
   if (input.request.method !== "POST" || input.pathnameSuffix !== "/v1/responses") {
     return null;
   }
@@ -1195,7 +1193,7 @@ async function readDeploySmokeLiveModelTurnOpenAiRequest(input: {
     return null;
   }
 
-  return readDeployLiveModelTurnSmokeOpenAiRequest(
+  return readDeployLiveModelTurnSmokeOpenAiModel(
     OPENAI_CACHE_DIAGNOSTIC_TEXT_DECODER.decode(body),
   );
 }
@@ -2736,13 +2734,13 @@ async function authorizeHostedProviderEgress(input: {
   // Durable Object reports an in-flight live-turn fence, so the window is
   // both identity- and time-scoped. Production turns authorize above and
   // never reach this leg.
-  const deploySmokeLiveModelTurnRequest = await readDeploySmokeLiveModelTurnOpenAiRequest({
+  const deploySmokeLiveModelTurnModel = await readDeploySmokeLiveModelTurnOpenAiModel({
     pathnameSuffix: input.openAiPathnameSuffix ?? "",
     request: input.request,
   });
   const deploySmokeLiveModelTurn = await authorizeHostedProviderEgressDeploySmokeLiveModelTurn({
     ctx: input.ctx,
-    deploySmokeLiveModelTurnRequest,
+    deploySmokeLiveModelTurnModel,
     env: input.env,
     providerEgressTokenPresent: providerEgressToken !== null,
     runtimeAuthorityHeadersPresent,
@@ -2753,13 +2751,13 @@ async function authorizeHostedProviderEgress(input: {
 
 async function authorizeHostedProviderEgressDeploySmokeLiveModelTurn(input: {
   ctx?: HostedRunnerOutboundContext;
-  deploySmokeLiveModelTurnRequest: HostedDeploySmokeLiveModelTurnOpenAiRequest | null;
+  deploySmokeLiveModelTurnModel: string | null;
   env: RunnerOutboundEnvironmentSource;
   providerEgressTokenPresent: boolean;
   runtimeAuthorityHeadersPresent: boolean;
   startedAt: number;
 }): Promise<HostedProviderEgressAuthorization | null> {
-  if (!input.deploySmokeLiveModelTurnRequest) {
+  if (!input.deploySmokeLiveModelTurnModel) {
     return null;
   }
   const containerId = input.ctx?.containerId?.trim();
@@ -2783,7 +2781,7 @@ async function authorizeHostedProviderEgressDeploySmokeLiveModelTurn(input: {
     if (
       !isHostedDeploySmokeLiveModelTurnFenceResult(fence)
       || !fence.active
-      || fence.model !== input.deploySmokeLiveModelTurnRequest.model
+      || fence.model !== input.deploySmokeLiveModelTurnModel
     ) {
       return null;
     }

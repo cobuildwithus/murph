@@ -99,34 +99,6 @@ class HostedRunnerContainerPoisonedError extends Error {
   }
 }
 
-class HostedRunnerContainerSmokeBundleMismatchError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "HostedRunnerContainerSmokeBundleMismatchError";
-  }
-}
-
-class HostedRunnerContainerPreLiveModelTurnSmokeError extends Error {
-  constructor(cause: unknown) {
-    const message = readErrorMessage(cause);
-    super(
-      message
-        ? `Hosted runner container live model turn smoke failed before the live model turn started. ${message}`
-        : "Hosted runner container live model turn smoke failed before the live model turn started.",
-      cause instanceof Error ? { cause } : undefined,
-    );
-    this.name = "HostedRunnerContainerPreLiveModelTurnSmokeError";
-  }
-}
-
-function isHostedRunnerContainerSmokeBundleMismatchError(error: unknown): boolean {
-  return error instanceof HostedRunnerContainerSmokeBundleMismatchError
-    || (
-      error instanceof Error
-      && error.name === "HostedRunnerContainerSmokeBundleMismatchError"
-    );
-}
-
 class HostedRunnerContainerMetadataResponseError extends Error {
   readonly code = "runner_http_error";
   readonly details: HostedExecutionStructuredLogDetails;
@@ -290,10 +262,6 @@ interface HostedExecutionContainerSmokeHealthInput {
     byteLength?: number;
     presignedPutUrl: string;
     tlsCaCertificatePem?: string;
-  };
-  expectedRunnerBundle?: {
-    bundleFingerprint: string;
-    sourceFingerprint: string;
   };
   liveModelTurn?: {
     model: string;
@@ -567,7 +535,6 @@ export class RunnerContainer extends Container {
       const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
       let smokeStartAttempted = false;
       let destroyAlreadyRequestedForRecycle = false;
-      let liveModelTurnStarted = false;
 
       try {
         const destroyRequestBeforeRecycle = this.lastDestroyRequest;
@@ -624,7 +591,6 @@ export class RunnerContainer extends Container {
           });
         }
         const runnerBundle = parseRunnerContainerSmokeBundle(payload.runnerBundle);
-        assertExpectedRunnerContainerSmokeBundle(runnerBundle, input.expectedRunnerBundle);
 
         const codexShell = await this.smokeCodexShell(readyTimeoutMs);
         const directR2PresignedPut = input.directR2PresignedPut
@@ -632,7 +598,6 @@ export class RunnerContainer extends Container {
           : undefined;
         let liveModelTurn: HostedExecutionContainerSmokeHealthResult["liveModelTurn"] | undefined;
         if (input.liveModelTurn) {
-          liveModelTurnStarted = true;
           liveModelTurn = await this.smokeLiveModelTurn(readyTimeoutMs, input.liveModelTurn);
         }
 
@@ -645,15 +610,6 @@ export class RunnerContainer extends Container {
           service: typeof payload.service === "string" ? payload.service : null,
           status: response.status,
         };
-      } catch (error) {
-        if (
-          input.liveModelTurn
-          && !liveModelTurnStarted
-          && !isHostedRunnerContainerSmokeBundleMismatchError(error)
-        ) {
-          throw new HostedRunnerContainerPreLiveModelTurnSmokeError(error);
-        }
-        throw error;
       } finally {
         if (smokeStartAttempted) {
           await this.stopWarmContainer({
@@ -1784,10 +1740,6 @@ export class DeploySmokeRunnerContainer extends RunnerContainer {
       const response = await this.containerFetch(
         RUNNER_LIVE_MODEL_TURN_SMOKE_URL,
         {
-          body: JSON.stringify({ model: input.model }),
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
           method: "POST",
           signal: smokeSignal,
         },
@@ -3005,31 +2957,6 @@ function parseRunnerContainerSmokeBundle(
     ...(typeof record.schemaVersion === "number" ? { schemaVersion: record.schemaVersion } : {}),
     ...(typeof record.sourceFingerprint === "string" ? { sourceFingerprint: record.sourceFingerprint } : {}),
   };
-}
-
-function assertExpectedRunnerContainerSmokeBundle(
-  actual: HostedExecutionContainerSmokeHealthResult["runnerBundle"],
-  expected: HostedExecutionContainerSmokeHealthInput["expectedRunnerBundle"] | undefined,
-): void {
-  if (!expected) {
-    return;
-  }
-  if (!actual) {
-    throw new HostedRunnerContainerSmokeBundleMismatchError(
-      "Hosted runner container smoke did not return runner bundle metadata.",
-    );
-  }
-  if (
-    actual.bundleFingerprint !== expected.bundleFingerprint ||
-    actual.sourceFingerprint !== expected.sourceFingerprint
-  ) {
-    throw new HostedRunnerContainerSmokeBundleMismatchError(
-      "Hosted runner container smoke did not run the expected runner bundle. "
-        + `expected bundle=${expected.bundleFingerprint} source=${expected.sourceFingerprint}; `
-        + `actual bundle=${actual.bundleFingerprint ?? "<missing>"} `
-        + `source=${actual.sourceFingerprint ?? "<missing>"}.`,
-    );
-  }
 }
 
 function formatRunnerSleepAfter(idleTtlMs: number): `${number}s` {

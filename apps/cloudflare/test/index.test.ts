@@ -543,24 +543,14 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("forwards live model turn and expected bundle query params to the managed container smoke", async () => {
+  it("forwards the live model turn flag to the managed container smoke", async () => {
     const smokeHealth = vi.fn(async (input: {
-      expectedRunnerBundle?: {
-        bundleFingerprint: string;
-        sourceFingerprint: string;
-      };
       liveModelTurn?: {
         model: string;
       };
     }) => {
       if (input.liveModelTurn?.model !== "gpt-5.4-nano") {
         throw new Error("Expected the live model turn smoke input.");
-      }
-      if (
-        input.expectedRunnerBundle?.bundleFingerprint !== "bundle-fingerprint" ||
-        input.expectedRunnerBundle.sourceFingerprint !== "source-fingerprint"
-      ) {
-        throw new Error("Expected the runner bundle smoke input.");
       }
 
       return {
@@ -590,10 +580,7 @@ describe("cloudflare worker routes", () => {
       },
     });
     const url = new URL(
-      "https://runner.example.test/internal/deploy/container-smoke"
-        + "?liveModelTurn=gpt-5.4-nano"
-        + "&expectedBundleFingerprint=bundle-fingerprint"
-        + "&expectedSourceFingerprint=source-fingerprint",
+      "https://runner.example.test/internal/deploy/container-smoke?liveModelTurn=1",
     );
     const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
     const request = new Request(url, {
@@ -611,10 +598,6 @@ describe("cloudflare worker routes", () => {
 
     expect(response.status).toBe(200);
     expect(smokeHealth).toHaveBeenCalledWith({
-      expectedRunnerBundle: {
-        bundleFingerprint: "bundle-fingerprint",
-        sourceFingerprint: "source-fingerprint",
-      },
       liveModelTurn: {
         model: "gpt-5.4-nano",
       },
@@ -630,100 +613,6 @@ describe("cloudflare worker routes", () => {
         },
       },
       service: "cloudflare-hosted-runner",
-    });
-  });
-
-  it("returns retryable status for stale expected runner bundles before live smoke", async () => {
-    const smokeHealth = vi.fn(async () => {
-      const error = new Error("Hosted runner container smoke did not run the expected runner bundle.");
-      error.name = "HostedRunnerContainerSmokeBundleMismatchError";
-      throw error;
-    });
-    const env = createWorkerEnv(createUserRunnerStub(), {
-      RUNNER_CONTAINER_SMOKE: {
-        getByName() {
-          return {
-            async destroyInstance() {},
-            async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
-              throw new Error("Runner container should not be invoked by smoke route tests.");
-            },
-            smokeHealth,
-          };
-        },
-      },
-    });
-    const url = new URL(
-      "https://runner.example.test/internal/deploy/container-smoke"
-        + "?liveModelTurn=gpt-5.4-nano"
-        + "&expectedBundleFingerprint=bundle-fingerprint"
-        + "&expectedSourceFingerprint=source-fingerprint",
-    );
-    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
-    const request = new Request(url, {
-      headers: await createHostedWebCallbackSignatureHeaders({
-        environment: callbackSigning,
-        method: "POST",
-        path: url.pathname,
-        payload: "",
-        search: url.search,
-      }),
-      method: "POST",
-    });
-
-    const response = await worker.fetch(request, env);
-
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({
-      error: "Deploy container smoke failed.",
-      ok: false,
-    });
-  });
-
-  it("returns retryable status for pre-live model turn smoke setup failures", async () => {
-    const smokeHealth = vi.fn(async () => {
-      const error = new Error(
-        "Hosted runner container live model turn smoke failed before the live model turn started. Hosted runner container smoke health failed with HTTP 503.",
-      );
-      error.name = "HostedRunnerContainerPreLiveModelTurnSmokeError";
-      throw error;
-    });
-    const env = createWorkerEnv(createUserRunnerStub(), {
-      RUNNER_CONTAINER_SMOKE: {
-        getByName() {
-          return {
-            async destroyInstance() {},
-            async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
-              throw new Error("Runner container should not be invoked by smoke route tests.");
-            },
-            smokeHealth,
-          };
-        },
-      },
-    });
-    const url = new URL(
-      "https://runner.example.test/internal/deploy/container-smoke"
-        + "?liveModelTurn=gpt-5.4-nano"
-        + "&expectedBundleFingerprint=bundle-fingerprint"
-        + "&expectedSourceFingerprint=source-fingerprint",
-    );
-    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
-    const request = new Request(url, {
-      headers: await createHostedWebCallbackSignatureHeaders({
-        environment: callbackSigning,
-        method: "POST",
-        path: url.pathname,
-        payload: "",
-        search: url.search,
-      }),
-      method: "POST",
-    });
-
-    const response = await worker.fetch(request, env);
-
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toMatchObject({
-      error: "Deploy container smoke failed.",
-      ok: false,
     });
   });
 
