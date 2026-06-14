@@ -205,8 +205,8 @@ export async function deleteDeployContainerDirectR2PresignedPutSmokeObject(
 export function resolveDeployContainerSmokeObjectName(
   env: Pick<WorkerEnvironmentSource, "CF_VERSION_METADATA" | "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID">,
 ): string {
-  const objectIdentity = readWorkerVersionId(env)
-    ?? readHostedLocalRunnerBuildIdSegment(env);
+  const objectIdentity = readHostedLocalRunnerBuildIdSegment(env)
+    ?? readWorkerVersionId(env);
   return objectIdentity
     ? `__deploy-smoke-${objectIdentity}`
     : "__deploy-smoke";
