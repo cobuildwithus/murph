@@ -1359,25 +1359,10 @@ function readCodexCompactionCompletionProviderUsage(
   }
 
   const params = asCodexRecord(message.params)
-  const data = asCodexRecord(message.data)
-  const item = asCodexRecord(params?.item) ?? asCodexRecord(data?.item)
+  const item = asCodexRecord(params?.item)
   const candidates = [
-    asCodexRecord(params?.providerUsage),
-    readCodexTokenUsageLast(params),
-    asCodexRecord(params?.tokenUsage),
-    asCodexRecord(params?.usage),
-    asCodexRecord(data?.providerUsage),
-    readCodexTokenUsageLast(data),
-    asCodexRecord(data?.tokenUsage),
-    asCodexRecord(data?.usage),
-    asCodexRecord(item?.providerUsage),
-    readCodexTokenUsageLast(item),
-    asCodexRecord(item?.tokenUsage),
-    asCodexRecord(item?.usage),
-    asCodexRecord(message.providerUsage),
-    readCodexTokenUsageLast(message),
-    asCodexRecord(message.tokenUsage),
-    asCodexRecord(message.usage),
+    ...readCodexProviderUsageCandidates(params),
+    ...readCodexProviderUsageCandidates(item),
   ]
 
   for (const candidate of candidates) {
@@ -1390,15 +1375,15 @@ function readCodexCompactionCompletionProviderUsage(
   return null
 }
 
-function readCodexTokenUsageLast(
+function readCodexProviderUsageCandidates(
   value: Record<string, unknown> | null,
-): Record<string, unknown> | null {
+): readonly (Record<string, unknown> | null)[] {
   if (!value) {
-    return null
+    return []
   }
-  const tokenUsage = asCodexRecord(value.tokenUsage)
-    ?? asCodexRecord(value.token_usage)
-  return asCodexRecord(tokenUsage?.last)
+  const providerUsage = asCodexRecord(value.providerUsage)
+    ?? asCodexRecord(value.provider_usage)
+  return [providerUsage, asCodexRecord(providerUsage?.last)]
 }
 
 function readCodexCompactionProviderUsage(
