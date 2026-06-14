@@ -335,12 +335,14 @@ export async function startHostedLocalDevStack(input: {
     requireHostedLocalAssistantProviderEnv(vercelEnv);
     // Interactive dev runs hosted Codex model turns on the local ChatGPT
     // subscription instead of the API key; the key stays for image generation.
-    const codexSubscriptionAuthEnvValue = shouldSeedHostedLocalCodexSubscriptionAuth({
-      nodeEnv: inputNodeEnv,
-      profileName: vercelEnv.MURPH_HOSTED_LOCAL_PROFILE,
-    })
-      ? await resolveHostedLocalCodexSubscriptionAuthEnvValue(vercelEnv)
-      : null;
+    const codexSubscriptionAuthEnvValue =
+      workerPortMode === "start" &&
+      shouldSeedHostedLocalCodexSubscriptionAuth({
+        nodeEnv: inputNodeEnv,
+        profileName: vercelEnv.MURPH_HOSTED_LOCAL_PROFILE,
+      })
+        ? await resolveHostedLocalCodexSubscriptionAuthEnvValue(vercelEnv)
+        : null;
     linqWebhookSetup = await resolveHostedLocalLinqWebhookSetup({
       config,
       env: vercelEnv,

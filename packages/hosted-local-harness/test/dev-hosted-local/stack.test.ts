@@ -2236,6 +2236,7 @@ describe("hosted local dev stack", () => {
     expect(stderrTarget.text()).toContain(
       "Reusing existing local Cloudflare worker at http://127.0.0.1:8787",
     );
+    expect(resolveHostedLocalCodexSubscriptionAuthEnvValue).not.toHaveBeenCalled();
     expect(spawnChildProcess).toHaveBeenCalledTimes(1);
     expect(spawnChildProcess).toHaveBeenCalledWith(
       "web",
