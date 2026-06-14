@@ -233,11 +233,16 @@ function isCodexContextCompactionStartedForThread(
   return messageThreadId === null || messageThreadId === threadId
 }
 
-function isCodexContextCompactionCompletion(message: CodexRpcMessage): boolean {
+function isCodexLegacyContextCompactionCompletion(message: CodexRpcMessage): boolean {
   const method = typeof message.method === 'string' ? message.method : null
-  if (method === 'thread/compacted' || method === 'thread.compacted') {
+  return method === 'thread/compacted' || method === 'thread.compacted'
+}
+
+function isCodexContextCompactionCompletion(message: CodexRpcMessage): boolean {
+  if (isCodexLegacyContextCompactionCompletion(message)) {
     return true
   }
+  const method = typeof message.method === 'string' ? message.method : null
   if (method !== 'item/completed' && method !== 'item.completed') {
     return false
   }
@@ -1589,6 +1594,12 @@ export async function compactWarmCodexThread(input: {
         compactRequestAccepted &&
         isCodexContextCompactionCompletionForThread(message, vitals.threadId)
       ) {
+        if (isCodexLegacyContextCompactionCompletion(message)) {
+          providerUsage = readCodexCompactionCompletionProviderUsage(message, vitals.threadId)
+            ?? providerUsage
+          settleCompaction('compacted')
+          return
+        }
         const itemId = readCodexContextCompactionItemId(message)
         if (compactStartedItemId === null || itemId !== compactStartedItemId) {
           return

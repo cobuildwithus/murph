@@ -2886,6 +2886,114 @@ describe('assistant codex runtime', () => {
     })
   })
 
+  it('accepts legacy thread compacted completion after compact rpc success', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-compact-legacy-completion-work-')
+    const codexHome = await createTempDir('assistant-codex-compact-legacy-completion-home-')
+    const threadId = 'thread-compact-legacy-completion'
+    const turnId = 'turn-compact-legacy-completion'
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId,
+            turnId,
+          })
+          child.stdout.write(jsonLine({
+            method: 'thread/tokenUsage/updated',
+            params: {
+              threadId,
+              turnId,
+              tokenUsage: {
+                last: {
+                  cachedInputTokens: 10_000,
+                  inputTokens: 125_000,
+                  outputTokens: 100,
+                  totalTokens: 125_100,
+                },
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-compact-legacy-completion',
+                type: 'assistant_message',
+                message: 'Seeded before legacy completion',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: turnId,
+                status: 'completed',
+              },
+            },
+          }))
+
+          const barrier = await waitForRpcMethod(child, 'config/read')
+          child.stdout.write(jsonLine({ id: barrier.id, result: {} }))
+          const compact = await waitForRpcMethod(child, 'thread/compact/start')
+          expect(asRecord(compact.params)).toEqual({ threadId })
+          child.stdout.write(jsonLine({ id: compact.id, result: {} }))
+          child.stdout.write(jsonLine({
+            method: 'thread/compacted',
+            params: {
+              threadId,
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          PATH: '/custom/bin',
+        },
+        prompt: 'seed compact legacy completion',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Seeded before legacy completion',
+      sessionId: threadId,
+      turnId,
+    })
+
+    await expect(
+      compactWarmCodexThread({
+        minThreadTokens: 100_000,
+        timeoutMs: 5_000,
+      }),
+    ).resolves.toMatchObject({
+      kind: 'compacted',
+      threadContextTokensBefore: 125_000,
+      threadId,
+      usage: {
+        cachedInputTokens: null,
+        inputTokens: 125_000,
+        outputTokens: null,
+        source: 'estimated',
+        totalTokens: 125_000,
+      },
+    })
+  })
+
   it('does not submit idle compaction after abort while the config barrier is pending', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-abort-barrier-work-')
     const codexHome = await createTempDir('assistant-codex-compact-abort-barrier-home-')
