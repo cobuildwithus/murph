@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:38ba0b7c9bb56a1695cd0180ab6e65b381dc8116f5f6bdf3484cde8e0c77d96f",
+  "catalogHash": "sha256:ff2ffbca735832dd07bdb694032d292c37b962cadbba7afda34e16e2275774ca",
   "generatedAt": null,
   "items": [
     {
@@ -15965,7 +15965,23 @@
         "Resistance band"
       ],
       "id": "EX616",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing subject holds a resistance band at chest height with light tension and tall posture.",
+          "step": "Light tension setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6454baa1-4e52-4d4b-7fb3-34a6e775f700/public"
+        },
+        {
+          "alt": "Standing subject pulls the resistance band apart as the elbows bend into a W shape.",
+          "step": "Pull into W",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e78d21aa-a20e-48d9-3b77-a066402fb000/public"
+        },
+        {
+          "alt": "Standing subject slowly returns the band toward the starting position while keeping posture tall.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/df0897ec-559a-4923-a472-a5d1e4292600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16006,7 +16022,28 @@
         "Resistance band"
       ],
       "id": "EX617",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing adult holds a resistance band at chest height with relaxed neck and stacked ribs.",
+          "step": "Set band and posture",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eb5f3848-ceaa-4ba6-fe30-b5c7ce656100/public"
+        },
+        {
+          "alt": "Standing adult pulls the band apart diagonally with the right hand high and left hand low.",
+          "step": "Right hand high",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d50f2236-3d86-487d-c3d2-c05b01277a00/public"
+        },
+        {
+          "alt": "Standing adult returns the band toward the chest with controlled posture before switching sides.",
+          "step": "Return and switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ae633464-b346-4773-a3c7-e87101f23b00/public"
+        },
+        {
+          "alt": "Standing adult pulls the band apart diagonally with the left hand high and right hand low.",
+          "step": "Left hand high",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fb884e02-2b03-44f7-6fa6-8067b3c80200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16047,7 +16084,23 @@
         "Resistance band"
       ],
       "id": "EX618",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands on a mat with a resistance band anchored at chest height, both arms forward and posture stacked.",
+          "step": "Light tension setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bbe51ecf-5e8f-4ed2-ee78-731bee8d4e00/public"
+        },
+        {
+          "alt": "Adult keeps the left arm long while pulling the right elbow back beside the ribs with the band taut.",
+          "step": "Bow pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/17fe03f4-c06c-41a7-92c8-db31895dff00/public"
+        },
+        {
+          "alt": "Adult controls the band forward from the bow-row position while keeping posture tall.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5a0fb033-d32b-49d7-c366-3831a4dc6900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -16146,7 +16199,23 @@
         "Towel"
       ],
       "id": "EX620",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing person holds a towel at lower chest height with elbows close to the ribs.",
+          "step": "Set posture",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/81ae7f2e-06df-4d5a-515a-6b36c3e23900/public"
+        },
+        {
+          "alt": "Standing person gently pulls the towel outward while keeping elbows by the ribs.",
+          "step": "Pull outward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c82b5c8a-cbd2-4280-4a67-6c09ccc77100/public"
+        },
+        {
+          "alt": "Standing person holds outward towel tension with shoulders low and neck relaxed.",
+          "step": "Hold steady",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0eebc291-9664-4459-76a9-57ca33eb1800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16187,7 +16256,18 @@
         "Towel"
       ],
       "id": "EX621",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing tall on a mat holding a towel behind the hips.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cb680b9e-842e-4e9a-742b-2fb4e414a100/public"
+        },
+        {
+          "alt": "Adult standing tall and gently pulling a towel apart behind the hips.",
+          "step": "Iso hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a9fcc61f-c20b-41db-029d-0fb1ee1fc500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16228,7 +16308,18 @@
         "Towel"
       ],
       "id": "EX622",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing person holds both towel ends while both feet pin the towel to the mat.",
+          "step": "Towel setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/06a098ba-1a30-40fa-60ad-c5c91cf33e00/public"
+        },
+        {
+          "alt": "Standing person curls both forearms against a taut towel anchored under both feet.",
+          "step": "Isometric curl hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7a8f38e6-381c-44b8-2025-dee4b4f98c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16269,7 +16360,23 @@
         "Towel"
       ],
       "id": "EX623",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing adult holds a towel behind the head and back with tall posture before the isometric triceps hold.",
+          "step": "Tall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/069ad3a9-cb18-47e1-3b89-f7bcc3edaa00/public"
+        },
+        {
+          "alt": "Standing adult presses both hands into a towel behind the head and back without changing position.",
+          "step": "Press and hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bfbfb9dc-66e2-4fe6-a4f4-cb85c9a26b00/public"
+        },
+        {
+          "alt": "Standing adult eases tension on the towel while keeping the neck relaxed and posture tall.",
+          "step": "Relax and repeat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5942ffa7-1aaa-4ce5-91a6-f88011add400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16310,7 +16417,23 @@
         "Backpack"
       ],
       "id": "EX624",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in a kneeling plank holding a secured backpack on the mat with knees grounded and torso aligned.",
+          "step": "Secure setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/11608dc2-788b-4510-5465-dc6e979d0300/public"
+        },
+        {
+          "alt": "Adult rows the backpack toward the ribs from a kneeling plank while the support hand and knees stay planted.",
+          "step": "Row to ribs",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cfc1a638-6888-4c20-e1b2-04676ac99b00/public"
+        },
+        {
+          "alt": "Adult lowers the backpack back to the mat with a steady kneeling plank posture.",
+          "step": "Controlled return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/47336190-01ad-4a82-862d-2be034b4fe00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -16352,7 +16475,23 @@
         "Backpack"
       ],
       "id": "EX625",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands on a mat holding a lightly loaded backpack in front with a secure grip and tall posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a0d9fcbc-8451-485f-a062-4515b0e65900/public"
+        },
+        {
+          "alt": "Adult pulls the backpack upward toward the lower chest with elbows high and neck relaxed.",
+          "step": "High pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a7da45eb-6311-47a8-0143-4585fd0aa900/public"
+        },
+        {
+          "alt": "Adult lowers the backpack along the same path under control while keeping posture tall.",
+          "step": "Controlled return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b6dc6d5b-bdf9-452f-9088-ce31cadfa200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -16393,7 +16532,18 @@
         "Water bottle"
       ],
       "id": "EX626",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bottle Pullover on Floor instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7d0de48e-d682-4334-2dae-ea52c50f0b00/public"
+        },
+        {
+          "alt": "Bottle Pullover on Floor instructional slide showing hold position with controlled posture.",
+          "step": "Hold position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c8d7c2bd-9545-4707-0425-690d39c56400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16433,7 +16583,23 @@
       ],
       "equipment": [],
       "id": "EX627",
-      "images": [],
+      "images": [
+        {
+          "alt": "Face-down setup with arms reaching overhead in a Y shape and thumbs up.",
+          "step": "Prone setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2896fe17-0677-40b5-455a-c2f2328ea700/public"
+        },
+        {
+          "alt": "Both arms lift slightly from the mat in a Y shape with thumbs pointing up.",
+          "step": "Y raise",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/887935e9-0d07-41f8-6c81-06ecc05add00/public"
+        },
+        {
+          "alt": "Arms lower slowly back to the Y position while the neck stays long.",
+          "step": "Slow reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c4ba3bfc-a5f0-4ea3-7c83-734356d6cd00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16471,7 +16637,23 @@
       ],
       "equipment": [],
       "id": "EX628",
-      "images": [],
+      "images": [
+        {
+          "alt": "Prone setup with elbows bent in a goalpost shape, neck long, and ribs heavy on the mat.",
+          "step": "Set goalpost",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c22cc8c3-328d-49fa-cdc7-756d5949a200/public"
+        },
+        {
+          "alt": "Prone external rotation lift with both forearms raised while elbows stay bent and the low back stays quiet.",
+          "step": "Rotate and lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4e5a9eac-9b0e-4af3-d2b1-39a55cf72900/public"
+        },
+        {
+          "alt": "Prone reset frame showing both forearms lowered with control, elbows aligned, and neck long.",
+          "step": "Slow reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/97b1ed95-c449-4519-1304-867297adec00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16509,7 +16691,23 @@
       ],
       "equipment": [],
       "id": "EX629",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person lying prone on a mat with arms bent into a W shape and neck long.",
+          "step": "W setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/246e82bb-b802-40f2-2b8b-995c648dcc00/public"
+        },
+        {
+          "alt": "Person in prone W position lifting the arms slightly while keeping the chest low.",
+          "step": "Lift W",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a2d121f7-d638-4615-ce90-0d7b86504000/public"
+        },
+        {
+          "alt": "Person lying prone reaching both arms into a Y shape with slow lowering cues.",
+          "step": "Reach to Y",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b22c96fc-959e-446e-cba4-aed9e9e2b200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -16547,7 +16745,28 @@
       ],
       "equipment": [],
       "id": "EX630",
-      "images": [],
+      "images": [
+        {
+          "alt": "Prone setup with both arms reaching overhead, neck long, and legs relaxed on the mat.",
+          "step": "Set up long",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8fac0841-c31a-4cf7-6ba9-b71887015100/public"
+        },
+        {
+          "alt": "Prone swimmer transition with both arms sweeping out wide while the legs stay quiet.",
+          "step": "Sweep wide",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/77625ccc-d384-449b-fef2-74cb24a65300/public"
+        },
+        {
+          "alt": "Hardest point of the prone swimmer with arms beside the hips and a small controlled chest lift.",
+          "step": "Pause point",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/966cbaa8-f84d-4bb7-45a5-ccd36a81d500/public"
+        },
+        {
+          "alt": "Reset phase with arms lowering back overhead and the neck returning long before the next rep.",
+          "step": "Slow reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4250f22c-1d76-4f6f-da7c-a24354c02a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -16588,7 +16807,23 @@
         "Wall"
       ],
       "id": "EX631",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side view of a person standing tall facing a wall with forearms and hands resting on the wall.",
+          "step": "Set stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c0bff189-1783-4e5b-7999-d61118a00400/public"
+        },
+        {
+          "alt": "The person slides both arms upward along the wall while keeping the neck long and ribs down.",
+          "step": "Slide up",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a21f214e-8293-4147-2377-8b313b745000/public"
+        },
+        {
+          "alt": "The person gently lifts both hands away from the wall overhead without arching the low back.",
+          "step": "Lift off",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a4645faf-70ff-438e-0bc8-4b85852ed100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -16629,7 +16864,23 @@
         "Wall"
       ],
       "id": "EX632",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing wall angel setup with gentle chin tuck, ribs down, and wrists light on the wall.",
+          "step": "Setup at wall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/523101fe-c1e1-4b4b-1bd4-50561c2db600/public"
+        },
+        {
+          "alt": "Standing wall angel with both arms sliding upward while the neck stays long and low back stays quiet.",
+          "step": "Slide arms up",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8d2f2f3a-e91c-4a80-4c5c-d4d49c654b00/public"
+        },
+        {
+          "alt": "Standing wall angel returning slowly to the goalpost position with ribs stacked and shoulder blades gliding.",
+          "step": "Return slowly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/100e4689-d2fc-4f2a-ba3c-d1777adfb200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16671,7 +16922,23 @@
         "Wall"
       ],
       "id": "EX633",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side-view illustration of a person standing tall with forearms on a wall, ribs stacked over hips, and feet planted.",
+          "step": "Stacked setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2cbc620b-6aae-4db6-88d5-b9dc13b95a00/public"
+        },
+        {
+          "alt": "Side-view illustration of the forearms sliding up a wall while the shoulder blades reach forward and upward.",
+          "step": "Slide and reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cc79af35-a33f-496c-1c93-61e91920ac00/public"
+        },
+        {
+          "alt": "Side-view illustration of the forearms sliding down the wall with relaxed neck and quiet low back.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/96b704a5-5932-4513-d2d9-53b07286c100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16712,7 +16979,18 @@
         "Water bottles optional"
       ],
       "id": "EX634",
-      "images": [],
+      "images": [
+        {
+          "alt": "Supine setup with knees bent and arms reaching vertically over the shoulders.",
+          "step": "Neutral setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2bf4a3ec-0813-428b-5466-67aec8b34300/public"
+        },
+        {
+          "alt": "Supine serratus punch with fists reaching toward the ceiling while ribs stay down.",
+          "step": "Punch upward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/da82eaf7-e6db-43a6-27dd-a45575cdb600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16751,7 +17029,23 @@
       ],
       "equipment": [],
       "id": "EX635",
-      "images": [],
+      "images": [
+        {
+          "alt": "Quadruped setup with hands under shoulders and knees under hips.",
+          "step": "Set all fours",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/12a00ab5-dec8-4f3f-c673-dbe782aac200/public"
+        },
+        {
+          "alt": "On all fours, shoulder blades trace a slow circle while elbows stay straight.",
+          "step": "Circle shoulder blades",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c52eb99b-aa70-4881-7b1e-26ecba38aa00/public"
+        },
+        {
+          "alt": "Quadruped neutral finish with back quiet and elbows straight.",
+          "step": "Return neutral",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5ef79588-68f1-4dfb-329f-41edcc069b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16791,7 +17085,23 @@
         "Resistance band"
       ],
       "id": "EX636",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing band row setup with secure anchor, light band tension, and feet grounded.",
+          "step": "Setup band",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/35d7f71d-3c1e-4a76-698d-f95ef45d8100/public"
+        },
+        {
+          "alt": "Standing posture check with ribs stacked over hips and neck relaxed while holding the band.",
+          "step": "Stack posture",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8e12dcfe-5340-45d6-51b6-3635808d4d00/public"
+        },
+        {
+          "alt": "Standing band row finish with elbows gliding back, smooth shoulder blades, and a slow return cue.",
+          "step": "Row and return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/890f6444-8006-43ea-8544-6639e97a4200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16832,7 +17142,23 @@
         "Chair and water bottles"
       ],
       "id": "EX637",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing hinged setup with one hand supported on a chair and a water bottle hanging below the shoulder.",
+          "step": "Setup hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4d3e4931-8aa3-4536-b4a0-c94aa9b28d00/public"
+        },
+        {
+          "alt": "The supported subject raises the water bottle out to the side with a soft elbow and relaxed neck.",
+          "step": "Raise to side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9c6bb048-d0a0-4e88-c35a-20743fccbc00/public"
+        },
+        {
+          "alt": "The supported subject lowers the water bottle under control while keeping the shoulder down and feet planted.",
+          "step": "Lower slowly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c9330698-f2f0-4195-d906-73e9f4346b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16873,7 +17199,28 @@
         "Mini band"
       ],
       "id": "EX638",
-      "images": [],
+      "images": [
+        {
+          "alt": "Supine setup with both arms holding a taut mini band and both legs in tabletop.",
+          "step": "Band tension setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fd9358f1-a881-4668-378e-334d12395400/public"
+        },
+        {
+          "alt": "The right leg extends low while the left knee stays bent and both arms keep band tension.",
+          "step": "Right leg reaches",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/63b53c68-0393-44cb-6062-8d354db19200/public"
+        },
+        {
+          "alt": "Both knees return to tabletop while the low back stays close to the mat and the band remains taut.",
+          "step": "Reset tabletop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/914781ce-5615-496e-b0f0-8c03a9177f00/public"
+        },
+        {
+          "alt": "The left leg extends low while the right knee stays bent and both arms keep band tension.",
+          "step": "Left leg reaches",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7527ee0b-7a5d-4662-0460-c24e45fd0e00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -16914,7 +17261,28 @@
         "Wall"
       ],
       "id": "EX639",
-      "images": [],
+      "images": [
+        {
+          "alt": "Supine dead bug setup with both heels lightly pressing into a wall and arms vertical.",
+          "step": "Heel press setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f2d91a05-f542-4b30-6541-5b7fa6d22700/public"
+        },
+        {
+          "alt": "Supine dead bug position with one arm reaching overhead while the opposite heel presses into the wall.",
+          "step": "Reach and hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/934818e4-5425-4534-8744-162cd54f7f00/public"
+        },
+        {
+          "alt": "Return to the dead bug wall-press setup with ribs down and arms vertical.",
+          "step": "Reset without rocking",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/648f3dda-45f1-4329-74d0-3321c5da1a00/public"
+        },
+        {
+          "alt": "Supine dead bug position with the other arm reaching overhead while the opposite heel presses into the wall.",
+          "step": "Alternate side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a8bfb72e-8a5c-43a3-7afa-1e4fcfd37600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16953,7 +17321,28 @@
       ],
       "equipment": [],
       "id": "EX640",
-      "images": [],
+      "images": [
+        {
+          "alt": "Supine dead bug setup with arms over shoulders and both legs held in tabletop.",
+          "step": "Tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/92b65d87-ff3d-4301-74d5-2ac55443b800/public"
+        },
+        {
+          "alt": "Supine dead bug with the right arm reaching overhead while both legs stay in tabletop.",
+          "step": "Right arm reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5d45f696-905e-4846-1488-4125a0c83f00/public"
+        },
+        {
+          "alt": "Supine dead bug reset with both arms vertical and tabletop legs steady before switching sides.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/af642e7d-7d3f-4256-c326-05020c47c100/public"
+        },
+        {
+          "alt": "Supine dead bug with the left arm reaching overhead while both legs stay in tabletop.",
+          "step": "Left arm reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eca2774e-fa6c-4482-d8b1-eecde22f6700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16993,7 +17382,28 @@
         "Resistance band"
       ],
       "id": "EX641",
-      "images": [],
+      "images": [
+        {
+          "alt": "Supine setup with knees in tabletop and a light resistance band held under tension.",
+          "step": "Tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/38990286-df0c-4d04-3ed8-4ddd0ed80900/public"
+        },
+        {
+          "alt": "The subject rows the band toward the ribs while extending the right leg long and low.",
+          "step": "Row and right leg reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/634ec78a-1cac-41e8-711a-071004b45c00/public"
+        },
+        {
+          "alt": "The subject returns to tabletop with the band controlled and the hips steady.",
+          "step": "Controlled reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2eece871-385a-4c2b-8cf7-c2aa1b733200/public"
+        },
+        {
+          "alt": "The subject rows the band toward the ribs while extending the left leg long and low.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f40d1446-d7cd-473d-8bd9-2099dc08da00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -17032,7 +17442,28 @@
       ],
       "equipment": [],
       "id": "EX642",
-      "images": [],
+      "images": [
+        {
+          "alt": "A person lies on their back with knees bent, feet planted, and arms relaxed on a mat.",
+          "step": "Set up",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/10d07c5a-0b64-4cac-6341-fc887c524b00/public"
+        },
+        {
+          "alt": "The same person lies supine with knees bent and feet planted while bracing the core and keeping the low back quiet.",
+          "step": "Brace gently",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/981512e7-db1f-47b6-92ee-4f8cfbae8800/public"
+        },
+        {
+          "alt": "The same person performs a supine march by lifting the right-side foot while the other foot stays planted and the trunk stays steady.",
+          "step": "Lift one foot",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2578f79d-7b96-4ac8-f91f-b0973ab6d800/public"
+        },
+        {
+          "alt": "The same person alternates the supine march by lifting the opposite foot while keeping the near foot planted and the pelvis steady.",
+          "step": "Alternate sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5e85aabe-186f-4d82-7066-d7d723e1b100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -17070,7 +17501,28 @@
       ],
       "equipment": [],
       "id": "EX643",
-      "images": [],
+      "images": [
+        {
+          "alt": "Supine Toe Tap instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f11dcdac-e5ac-4bce-8fca-313d8749a300/public"
+        },
+        {
+          "alt": "Supine Toe Tap instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a31ba77c-c64a-496c-9b4e-0e3d38671b00/public"
+        },
+        {
+          "alt": "Supine Toe Tap instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/78d4a0d6-dcc2-4e48-fec0-21ac5152b300/public"
+        },
+        {
+          "alt": "Supine Toe Tap instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7522c181-0761-41c5-8897-6973e03d0100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -17108,7 +17560,28 @@
       ],
       "equipment": [],
       "id": "EX644",
-      "images": [],
+      "images": [
+        {
+          "alt": "Supine 90/90 Heel Tap Hold instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0056e440-4642-49f8-a3b4-96060a207500/public"
+        },
+        {
+          "alt": "Supine 90/90 Heel Tap Hold instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/717ecd2b-28be-461e-d3bc-c5b7b7ebc100/public"
+        },
+        {
+          "alt": "Supine 90/90 Heel Tap Hold instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ebd1ad9a-4aef-417d-d8d4-fb4e3e754200/public"
+        },
+        {
+          "alt": "Supine 90/90 Heel Tap Hold instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2290a686-0ca8-464a-e34c-9744ff8eb400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -17146,7 +17619,28 @@
       ],
       "equipment": [],
       "id": "EX645",
-      "images": [],
+      "images": [
+        {
+          "alt": "Tabletop Knee Extension instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c608887e-4400-4225-34e8-a68dab5c3a00/public"
+        },
+        {
+          "alt": "Tabletop Knee Extension instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bcb9cd83-5737-4d12-f3f9-e287b3862200/public"
+        },
+        {
+          "alt": "Tabletop Knee Extension instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3d98018a-bc5a-49b5-ffc2-2118a40cc500/public"
+        },
+        {
+          "alt": "Tabletop Knee Extension instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cae25cc6-47eb-4522-acb5-415dec089700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -17184,7 +17678,28 @@
       ],
       "equipment": [],
       "id": "EX646",
-      "images": [],
+      "images": [
+        {
+          "alt": "Tabletop Arm Reach instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9508e1bf-fe2c-4291-2aa2-75228597ce00/public"
+        },
+        {
+          "alt": "Tabletop Arm Reach instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/46d0cc30-aec6-4ac8-8a82-614a55b23700/public"
+        },
+        {
+          "alt": "Tabletop Arm Reach instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c6782b20-5231-4b3a-1b49-b09e404a7100/public"
+        },
+        {
+          "alt": "Tabletop Arm Reach instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0abf3b64-0cd2-453c-e295-ada22e50bd00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -17222,7 +17737,28 @@
       ],
       "equipment": [],
       "id": "EX647",
-      "images": [],
+      "images": [
+        {
+          "alt": "Tabletop Opposite Arm-Leg Reach instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/38d1a26f-845c-4a03-032a-4b32a813dd00/public"
+        },
+        {
+          "alt": "Tabletop Opposite Arm-Leg Reach instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8dda53db-4b7c-4348-1996-393a8a2a2300/public"
+        },
+        {
+          "alt": "Tabletop Opposite Arm-Leg Reach instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c3ef61b8-8aee-476c-6f7c-b3adb63f9900/public"
+        },
+        {
+          "alt": "Tabletop Opposite Arm-Leg Reach instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9468dceb-db23-444f-8b0d-060a99450900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -17260,7 +17796,28 @@
       ],
       "equipment": [],
       "id": "EX648",
-      "images": [],
+      "images": [
+        {
+          "alt": "Hollow Body Flutter instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f41f27da-753e-4f4a-4328-bccbc9661b00/public"
+        },
+        {
+          "alt": "Hollow Body Flutter instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a7029a18-8b7f-42c7-d892-dc5092dacf00/public"
+        },
+        {
+          "alt": "Hollow Body Flutter instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dc0b0663-3d67-4886-9bb7-830e0d4c1e00/public"
+        },
+        {
+          "alt": "Hollow Body Flutter instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e7f088ed-b716-47a9-ed1a-189f90d12800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -17298,7 +17855,28 @@
       ],
       "equipment": [],
       "id": "EX649",
-      "images": [],
+      "images": [
+        {
+          "alt": "Hollow Body Scissor instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a8de33ef-f7b4-4779-71e3-b2c114029900/public"
+        },
+        {
+          "alt": "Hollow Body Scissor instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ceee377c-88cd-4915-96f0-667508317c00/public"
+        },
+        {
+          "alt": "Hollow Body Scissor instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/68017568-70cf-4320-c1fb-c3560345df00/public"
+        },
+        {
+          "alt": "Hollow Body Scissor instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d27f86f7-ccf5-44da-0971-57cb8a31f300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -17336,7 +17914,28 @@
       ],
       "equipment": [],
       "id": "EX650",
-      "images": [],
+      "images": [
+        {
+          "alt": "Hollow Body Tuck Rock instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b4c10a25-254f-4fe7-dadf-c8c1a6fcd700/public"
+        },
+        {
+          "alt": "Hollow Body Tuck Rock instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f09ed1d7-f3df-4ea2-76e3-cf0e2ea32b00/public"
+        },
+        {
+          "alt": "Hollow Body Tuck Rock instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5b4ccb6c-f233-460c-e554-21ca86cc5e00/public"
+        },
+        {
+          "alt": "Hollow Body Tuck Rock instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/800699d7-d338-42df-6444-2a4b2e176600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -17374,7 +17973,18 @@
       ],
       "equipment": [],
       "id": "EX651",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side Plank Threaded Knee Drive instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1bd8bf4d-a650-4dd6-1fc8-388eff149800/public"
+        },
+        {
+          "alt": "Side Plank Threaded Knee Drive instructional slide showing hold position with controlled posture.",
+          "step": "Hold position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/de91f2a1-1c32-43ef-5468-7c32df4dc900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -17412,7 +18022,28 @@
       ],
       "equipment": [],
       "id": "EX652",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side Plank Top-Leg March instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6c390b05-78e4-44a0-04bf-25e6b87e6500/public"
+        },
+        {
+          "alt": "Side Plank Top-Leg March instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fd620b88-973b-4977-c3cb-536e89616400/public"
+        },
+        {
+          "alt": "Side Plank Top-Leg March instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/35e90706-6220-47f3-74eb-20c4eb877200/public"
+        },
+        {
+          "alt": "Side Plank Top-Leg March instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/34f236df-4aa8-4cf4-80c5-5e99c2c7b200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -17450,7 +18081,23 @@
       ],
       "equipment": [],
       "id": "EX653",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side Plank Hip Dip from Knees instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aa927217-0939-43bf-6947-1feeef6fae00/public"
+        },
+        {
+          "alt": "Side Plank Hip Dip from Knees instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/29e9b19e-b898-4998-2e80-22c199e9d700/public"
+        },
+        {
+          "alt": "Side Plank Hip Dip from Knees instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6140bf1e-67b6-48ec-e4e8-99ab30a84100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -17488,7 +18135,18 @@
       ],
       "equipment": [],
       "id": "EX654",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side Plank Star Prep instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7a15183a-4085-4cd6-ea5e-e02ac44c8b00/public"
+        },
+        {
+          "alt": "Side Plank Star Prep instructional slide showing hold position with controlled posture.",
+          "step": "Hold position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9a735a33-47c7-4507-8d6a-9186c98cbc00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -17529,7 +18187,18 @@
         "Chair or couch"
       ],
       "id": "EX655",
-      "images": [],
+      "images": [
+        {
+          "alt": "Copenhagen Plank Adduction Squeeze instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1c55f7c9-173c-4a9b-860d-7727648ff000/public"
+        },
+        {
+          "alt": "Copenhagen Plank Adduction Squeeze instructional slide showing hold position with controlled posture.",
+          "step": "Hold position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ca1fbdbb-803c-44c2-31f6-f1b5c5a66b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -17568,7 +18237,18 @@
       ],
       "equipment": [],
       "id": "EX656",
-      "images": [],
+      "images": [
+        {
+          "alt": "Forearm Plank Knee-to-Elbow instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f0a79021-0990-437f-b698-cd842623e900/public"
+        },
+        {
+          "alt": "Forearm Plank Knee-to-Elbow instructional slide showing move with control with controlled posture.",
+          "step": "Move with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fd127e33-b43a-48f3-2988-fa549c994c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -17607,7 +18287,18 @@
       ],
       "equipment": [],
       "id": "EX657",
-      "images": [],
+      "images": [
+        {
+          "alt": "High Plank Knee-to-Same-Elbow instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eed13d9c-5c04-480b-8894-3439b42cd400/public"
+        },
+        {
+          "alt": "High Plank Knee-to-Same-Elbow instructional slide showing move with control with controlled posture.",
+          "step": "Move with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dc65997c-a827-4a9e-a5c1-00f36d93d400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -17646,7 +18337,28 @@
       ],
       "equipment": [],
       "id": "EX658",
-      "images": [],
+      "images": [
+        {
+          "alt": "High Plank Shoulder Tap with Pause instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7f943e3a-b7c8-4146-ff99-a4d4d7268300/public"
+        },
+        {
+          "alt": "High Plank Shoulder Tap with Pause instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a8469dd9-02a5-4bfb-8498-122f53ec9700/public"
+        },
+        {
+          "alt": "High Plank Shoulder Tap with Pause instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/841a526f-568d-43e6-cdb3-7c308fa23800/public"
+        },
+        {
+          "alt": "High Plank Shoulder Tap with Pause instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fc792061-bb9c-4cf1-13e5-dc08b0eb1200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -17686,7 +18398,28 @@
         "Towel or slider"
       ],
       "id": "EX659",
-      "images": [],
+      "images": [
+        {
+          "alt": "Plank Alternating Toe Drag instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e80332f4-04ef-4c1a-ee34-97e6e5b11600/public"
+        },
+        {
+          "alt": "Plank Alternating Toe Drag instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eb1a9d2b-2a6d-41d1-a291-3a59e6995b00/public"
+        },
+        {
+          "alt": "Plank Alternating Toe Drag instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/31dbb0d0-3f5b-45cd-6d4a-92623dd3d000/public"
+        },
+        {
+          "alt": "Plank Alternating Toe Drag instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b6584d82-26c4-41ae-c134-1df444eec900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -17727,7 +18460,23 @@
         "Towels or sliders"
       ],
       "id": "EX660",
-      "images": [],
+      "images": [
+        {
+          "alt": "Plank Slider Knee Tuck instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9b47a515-6e93-465e-f313-15b28b616b00/public"
+        },
+        {
+          "alt": "Plank Slider Knee Tuck instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ccdb1a51-3ace-4549-eee3-c78046675b00/public"
+        },
+        {
+          "alt": "Plank Slider Knee Tuck instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d8e21f41-8007-4f01-6675-672ad37f1d00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -17769,7 +18518,23 @@
         "Towels or sliders"
       ],
       "id": "EX661",
-      "images": [],
+      "images": [
+        {
+          "alt": "Plank Slider Pike instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/11cfd376-fd30-4bbe-5b3c-63058195ca00/public"
+        },
+        {
+          "alt": "Plank Slider Pike instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/102d0eb2-f2bb-4198-c70a-8cc734be0700/public"
+        },
+        {
+          "alt": "Plank Slider Pike instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/543e16cd-e861-4ab6-268e-3b02cb9f9a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -17810,7 +18575,18 @@
         "Towels or sliders"
       ],
       "id": "EX662",
-      "images": [],
+      "images": [
+        {
+          "alt": "Plank Slider Body Saw instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9cccb48c-e196-45a5-f214-e01505684400/public"
+        },
+        {
+          "alt": "Plank Slider Body Saw instructional slide showing move with control with controlled posture.",
+          "step": "Move with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4d40e58c-ae41-44f9-8cd1-3c4e4a419e00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -17849,7 +18625,18 @@
       ],
       "equipment": [],
       "id": "EX663",
-      "images": [],
+      "images": [
+        {
+          "alt": "Plank Walkout from Knees instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/61dec4e5-04af-4a76-aa31-94ba87b09400/public"
+        },
+        {
+          "alt": "Plank Walkout from Knees instructional slide showing move with control with controlled posture.",
+          "step": "Move with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/902021ad-9ce0-436a-7b7c-6e1da1390a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -17887,7 +18674,23 @@
       ],
       "equipment": [],
       "id": "EX664",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bear Plank Shoulder Tap with Pause instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/577d0419-ec76-411e-fc69-0fbe4941a200/public"
+        },
+        {
+          "alt": "Bear Plank Shoulder Tap with Pause instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3a0581c7-8765-44de-87fb-32ead569ec00/public"
+        },
+        {
+          "alt": "Bear Plank Shoulder Tap with Pause instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eb69525f-286d-4b2e-fca3-a064648ddf00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -17925,7 +18728,23 @@
       ],
       "equipment": [],
       "id": "EX665",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bear Plank Step-Out instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4c259661-8d54-4987-a35c-0c0582e95e00/public"
+        },
+        {
+          "alt": "Bear Plank Step-Out instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cf68dd5c-04d4-4f8f-8e35-f1cc2aee5200/public"
+        },
+        {
+          "alt": "Bear Plank Step-Out instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1938606e-c2e9-44b2-cb56-32c0bb09a300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -17964,7 +18783,23 @@
       ],
       "equipment": [],
       "id": "EX666",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bear Plank Crawl-Out instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/596b01b0-fea0-4f2c-e2cb-ad271ff34e00/public"
+        },
+        {
+          "alt": "Bear Plank Crawl-Out instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/53f94776-c1d1-4fd1-3075-57d47b024700/public"
+        },
+        {
+          "alt": "Bear Plank Crawl-Out instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/94dd2def-063f-4ee6-7f2e-d3dbce826000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -18005,7 +18840,28 @@
         "Resistance band"
       ],
       "id": "EX667",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bird Dog Band Row instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f3ee24a2-b67c-4b73-badb-145fd6c1fd00/public"
+        },
+        {
+          "alt": "Bird Dog Band Row instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b03d2522-5ac2-4a85-8d11-4289b6e1e300/public"
+        },
+        {
+          "alt": "Bird Dog Band Row instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cf68551d-e081-4822-cf6f-a95f37ba0600/public"
+        },
+        {
+          "alt": "Bird Dog Band Row instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/53a2df2e-49c1-4215-5081-f0d61deb5000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -18045,7 +18901,28 @@
       ],
       "equipment": [],
       "id": "EX668",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bird Dog Hover Hold instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/41f2f5d8-1d7a-40b8-525d-a330b6991500/public"
+        },
+        {
+          "alt": "Bird Dog Hover Hold instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/68eb0900-590b-40e3-fe1d-912a50bdb900/public"
+        },
+        {
+          "alt": "Bird Dog Hover Hold instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/242ab1cb-2071-42fe-7fe9-5f3eeb3e1500/public"
+        },
+        {
+          "alt": "Bird Dog Hover Hold instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/705ac8f2-1473-43ea-6576-984b8fab8200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -18084,7 +18961,28 @@
       ],
       "equipment": [],
       "id": "EX669",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bird Dog Fire Hydrant instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f7c75132-a2d8-427a-dbfb-86971c83e800/public"
+        },
+        {
+          "alt": "Bird Dog Fire Hydrant instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9b1db978-8faa-4592-0a89-92e489d98100/public"
+        },
+        {
+          "alt": "Bird Dog Fire Hydrant instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e8ef6d7e-18bd-499b-dc76-0287697a1400/public"
+        },
+        {
+          "alt": "Bird Dog Fire Hydrant instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/787b1bd1-4ffc-4d05-573f-d3b0a1ee2c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -18123,7 +19021,28 @@
       ],
       "equipment": [],
       "id": "EX670",
-      "images": [],
+      "images": [
+        {
+          "alt": "Quadruped Hip Extension with Opposite Arm Reach instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/004e485e-5815-412c-6774-fa1b39957c00/public"
+        },
+        {
+          "alt": "Quadruped Hip Extension with Opposite Arm Reach instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/702bc8eb-119d-4e07-5444-c2750c0f6400/public"
+        },
+        {
+          "alt": "Quadruped Hip Extension with Opposite Arm Reach instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bf1d78e1-0aa7-4d6b-fb92-c377c6fa6700/public"
+        },
+        {
+          "alt": "Quadruped Hip Extension with Opposite Arm Reach instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7a6029df-3487-4492-0cf2-cc394aa1fa00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -18164,7 +19083,28 @@
         "Resistance band and chair"
       ],
       "id": "EX671",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated Pallof Press with Band instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/71a8987f-5894-490d-53b6-414ab88c0d00/public"
+        },
+        {
+          "alt": "Seated Pallof Press with Band instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b0c02822-c5af-4a16-37a2-eee8f03a6400/public"
+        },
+        {
+          "alt": "Seated Pallof Press with Band instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1df65e66-7c3e-491d-ed45-d5547f0ae600/public"
+        },
+        {
+          "alt": "Seated Pallof Press with Band instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7c179d76-0f9d-4d84-4761-c8df314dd000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -18205,7 +19145,28 @@
         "Resistance band"
       ],
       "id": "EX672",
-      "images": [],
+      "images": [
+        {
+          "alt": "Tall-Kneeling Pallof Press instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/649bba2a-ea56-4db7-85a1-e827d300a400/public"
+        },
+        {
+          "alt": "Tall-Kneeling Pallof Press instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/de938bef-d170-49ef-2402-077d533c3e00/public"
+        },
+        {
+          "alt": "Tall-Kneeling Pallof Press instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6e430a87-20f5-4e4b-db2f-f5d1502dfb00/public"
+        },
+        {
+          "alt": "Tall-Kneeling Pallof Press instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/427345b8-1b47-426f-9fe5-96839c84ea00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -18247,7 +19208,28 @@
         "Resistance band"
       ],
       "id": "EX673",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing Anti-Rotation Hold instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/72471314-c5aa-4287-abbf-3c77bacecb00/public"
+        },
+        {
+          "alt": "Standing Anti-Rotation Hold instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dfeb98b7-a967-4068-46ea-327c41c49a00/public"
+        },
+        {
+          "alt": "Standing Anti-Rotation Hold instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3f8f78c8-7909-4d30-0d6a-81ac050d5800/public"
+        },
+        {
+          "alt": "Standing Anti-Rotation Hold instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/07c520a0-34e8-43c2-b26c-9ccb4d293500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -18288,7 +19270,28 @@
         "Resistance band"
       ],
       "id": "EX674",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing Anti-Rotation Step-Out instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f4fe15df-ab56-4c00-352d-f571d5d59c00/public"
+        },
+        {
+          "alt": "Standing Anti-Rotation Step-Out instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/86118c55-dabc-46be-f2ae-fb996e027900/public"
+        },
+        {
+          "alt": "Standing Anti-Rotation Step-Out instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/584ab98c-1096-4fad-6aba-bea3680f0200/public"
+        },
+        {
+          "alt": "Standing Anti-Rotation Step-Out instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ebb228fc-cc14-4955-11f9-ad7e6995ef00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -18330,7 +19333,28 @@
         "Backpack"
       ],
       "id": "EX675",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing Suitcase Hold instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aa15e45c-4f0d-4323-6d5f-5568e8d93200/public"
+        },
+        {
+          "alt": "Standing Suitcase Hold instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/716a6d66-50cb-48a9-c12f-d64ff5e7d100/public"
+        },
+        {
+          "alt": "Standing Suitcase Hold instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c3b9eacd-bb1d-4b0e-0919-7fffd874e600/public"
+        },
+        {
+          "alt": "Standing Suitcase Hold instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dc7b8324-ba2d-4b9f-b651-1948dc52aa00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -18372,7 +19396,28 @@
         "Backpack"
       ],
       "id": "EX676",
-      "images": [],
+      "images": [
+        {
+          "alt": "Offset Backpack March instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9b9ec56a-6d43-40bd-372c-0a707f6db600/public"
+        },
+        {
+          "alt": "Offset Backpack March instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/edf2bfce-3769-47ad-1169-83dca088fa00/public"
+        },
+        {
+          "alt": "Offset Backpack March instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/13893a9c-0a18-4328-754a-acbb6edcdf00/public"
+        },
+        {
+          "alt": "Offset Backpack March instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/95db9246-5e57-4e68-a80b-0fa8005ff200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -18414,7 +19459,28 @@
         "Backpack"
       ],
       "id": "EX677",
-      "images": [],
+      "images": [
+        {
+          "alt": "Backpack Around-the-World instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e8e2096b-28a1-4c02-066f-f9e921b86100/public"
+        },
+        {
+          "alt": "Backpack Around-the-World instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e4e7cb63-767c-42af-d7cc-bcf31c185000/public"
+        },
+        {
+          "alt": "Backpack Around-the-World instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a455b954-0d6d-4de0-85b3-965de0edbb00/public"
+        },
+        {
+          "alt": "Backpack Around-the-World instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b57bc4cd-c90a-4b93-b845-1c24ee9d6f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -18455,7 +19521,23 @@
         "Chair"
       ],
       "id": "EX678",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated Bicycle Hold instructional slide showing start position with controlled posture.",
+          "step": "Start position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7f19f415-f056-46d8-b045-428918d16000/public"
+        },
+        {
+          "alt": "Seated Bicycle Hold instructional slide showing open or rotate with controlled posture.",
+          "step": "Open or rotate",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/53975d48-8abe-4cc6-2921-04656a9d9c00/public"
+        },
+        {
+          "alt": "Seated Bicycle Hold instructional slide showing return slowly with controlled posture.",
+          "step": "Return slowly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c21f65c9-95aa-4ed4-20e1-ab3bbd400f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -18496,7 +19578,23 @@
         "Chair and small object"
       ],
       "id": "EX679",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated Leg Lift Over Object instructional slide showing start position with controlled posture.",
+          "step": "Start position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a1d4dc95-9228-4250-31fe-c44252bb8e00/public"
+        },
+        {
+          "alt": "Seated Leg Lift Over Object instructional slide showing open or rotate with controlled posture.",
+          "step": "Open or rotate",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b5d7fe4f-1dcb-4782-913d-9e24ca9d0000/public"
+        },
+        {
+          "alt": "Seated Leg Lift Over Object instructional slide showing return slowly with controlled posture.",
+          "step": "Return slowly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bdcbc1fb-6625-4ad5-a237-b59eb0c94200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -18537,7 +19635,23 @@
         "Chair"
       ],
       "id": "EX680",
-      "images": [],
+      "images": [
+        {
+          "alt": "Chair Knee Tuck instructional slide showing start position with controlled posture.",
+          "step": "Start position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c342be25-bc95-4155-9f0c-8dd254e12600/public"
+        },
+        {
+          "alt": "Chair Knee Tuck instructional slide showing open or rotate with controlled posture.",
+          "step": "Open or rotate",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/810ff190-36d8-443b-a3cc-30d459e45c00/public"
+        },
+        {
+          "alt": "Chair Knee Tuck instructional slide showing return slowly with controlled posture.",
+          "step": "Return slowly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0092d754-5254-4f2c-886e-17b1d6f7e100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -18578,7 +19692,23 @@
         "Chair"
       ],
       "id": "EX681",
-      "images": [],
+      "images": [
+        {
+          "alt": "Chair Oblique Knee Lift instructional slide showing start position with controlled posture.",
+          "step": "Start position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f66f7b6e-306f-42c2-9e91-a6cbecc84e00/public"
+        },
+        {
+          "alt": "Chair Oblique Knee Lift instructional slide showing open or rotate with controlled posture.",
+          "step": "Open or rotate",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8b5fa164-9dd6-4648-538d-0acf5fa42300/public"
+        },
+        {
+          "alt": "Chair Oblique Knee Lift instructional slide showing return slowly with controlled posture.",
+          "step": "Return slowly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/528fb54c-bfcc-4d4f-cc0f-2cb403884f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -18617,7 +19747,28 @@
       ],
       "equipment": [],
       "id": "EX682",
-      "images": [],
+      "images": [
+        {
+          "alt": "Low-Impact Cross-Body Jack instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6ac7f380-4ad3-4e2a-ecb4-a90c89878000/public"
+        },
+        {
+          "alt": "Low-Impact Cross-Body Jack instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cac8eca7-1699-4f34-4f64-f71d898aba00/public"
+        },
+        {
+          "alt": "Low-Impact Cross-Body Jack instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/68e2a3f5-9757-4245-a427-78c2731e0600/public"
+        },
+        {
+          "alt": "Low-Impact Cross-Body Jack instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/79a4c2a6-e4f7-4397-0157-e1581dc42a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -18656,7 +19807,28 @@
       ],
       "equipment": [],
       "id": "EX683",
-      "images": [],
+      "images": [
+        {
+          "alt": "Alternating Step-Out Jack instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/76534fdd-14b8-4575-2a34-cd5439ee7f00/public"
+        },
+        {
+          "alt": "Alternating Step-Out Jack instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7ac02f50-da93-4804-51b5-2916e0a6bf00/public"
+        },
+        {
+          "alt": "Alternating Step-Out Jack instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e1dd17f4-68e4-4557-e302-f7627c00fd00/public"
+        },
+        {
+          "alt": "Alternating Step-Out Jack instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d46ace31-1e16-4eb1-6c20-6dadadff8900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -18695,7 +19867,18 @@
       ],
       "equipment": [],
       "id": "EX684",
-      "images": [],
+      "images": [
+        {
+          "alt": "Fast Step-Touch instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d47a7c74-419a-4a62-a65c-f6c0d1250600/public"
+        },
+        {
+          "alt": "Fast Step-Touch instructional slide showing move with control with controlled posture.",
+          "step": "Move with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c70cf796-5acc-4c27-0ba1-2110850c4b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -18734,7 +19917,23 @@
       ],
       "equipment": [],
       "id": "EX685",
-      "images": [],
+      "images": [
+        {
+          "alt": "Heel Dig Cardio instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/50697797-c63e-4247-61f0-86996bb6cc00/public"
+        },
+        {
+          "alt": "Heel Dig Cardio instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c3d96fbc-7e67-4143-4789-10dbb0548b00/public"
+        },
+        {
+          "alt": "Heel Dig Cardio instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/464cf2a0-18e4-47e1-a70b-12545bd94000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -18773,7 +19972,18 @@
       ],
       "equipment": [],
       "id": "EX686",
-      "images": [],
+      "images": [
+        {
+          "alt": "Hamstring Curl Step instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/087d36f3-27d8-45be-bad6-5e4353a69200/public"
+        },
+        {
+          "alt": "Hamstring Curl Step instructional slide showing move with control with controlled posture.",
+          "step": "Move with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/969e06c6-5b81-4610-d532-472003301500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -18812,7 +20022,28 @@
       ],
       "equipment": [],
       "id": "EX687",
-      "images": [],
+      "images": [
+        {
+          "alt": "March with Overhead Reach instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7be91621-853e-44dc-6dd7-a9dba0c67c00/public"
+        },
+        {
+          "alt": "March with Overhead Reach instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/67d05179-e376-420d-a878-9d381158c700/public"
+        },
+        {
+          "alt": "March with Overhead Reach instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8f76a1ba-681d-4f55-6f46-34b1eedff400/public"
+        },
+        {
+          "alt": "March with Overhead Reach instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e6790b1b-0f2f-4824-1453-5091a36f4f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -18851,7 +20082,28 @@
       ],
       "equipment": [],
       "id": "EX688",
-      "images": [],
+      "images": [
+        {
+          "alt": "Power March with Punch instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e720741a-8011-4e07-6fbd-c656c6317d00/public"
+        },
+        {
+          "alt": "Power March with Punch instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/71ec039a-32ad-46be-b621-1be15ccb1d00/public"
+        },
+        {
+          "alt": "Power March with Punch instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c0651199-d42a-4551-7dab-a2fe7f59a100/public"
+        },
+        {
+          "alt": "Power March with Punch instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/091555a7-ac06-4472-e435-39eb3fdd5200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -18890,7 +20142,23 @@
       ],
       "equipment": [],
       "id": "EX689",
-      "images": [],
+      "images": [
+        {
+          "alt": "Knee Drive with Same-Side Pull instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9341c36b-68bb-4de6-096c-c1897f867400/public"
+        },
+        {
+          "alt": "Knee Drive with Same-Side Pull instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a5fda672-885e-4501-e74d-34d33784d900/public"
+        },
+        {
+          "alt": "Knee Drive with Same-Side Pull instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/85015970-6e33-4546-7eee-b75628e3c600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -18929,7 +20197,28 @@
       ],
       "equipment": [],
       "id": "EX690",
-      "images": [],
+      "images": [
+        {
+          "alt": "Double Knee Drive Repeater instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2c7d5652-18f4-4b5a-c142-09570a780f00/public"
+        },
+        {
+          "alt": "Double Knee Drive Repeater instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/03bb4c52-4e13-4a03-2478-8f1384cec100/public"
+        },
+        {
+          "alt": "Double Knee Drive Repeater instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/89cdd9e3-8342-4e62-d191-7262a7200300/public"
+        },
+        {
+          "alt": "Double Knee Drive Repeater instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/665a0989-99d9-4764-8589-2099abcfd200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -18968,7 +20257,18 @@
       ],
       "equipment": [],
       "id": "EX691",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side-to-Side Ski Step instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/73f12aa1-62cb-48e5-cddc-6805a8e50c00/public"
+        },
+        {
+          "alt": "Side-to-Side Ski Step instructional slide showing move with control with controlled posture.",
+          "step": "Move with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/85018afe-73d4-4996-7d2c-65ac5dfeca00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -19007,7 +20307,18 @@
       ],
       "equipment": [],
       "id": "EX692",
-      "images": [],
+      "images": [
+        {
+          "alt": "Low-Impact Speed Skater Arms instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/953aeaf1-a571-42d3-eddf-f3efb91cc400/public"
+        },
+        {
+          "alt": "Low-Impact Speed Skater Arms instructional slide showing move with control with controlled posture.",
+          "step": "Move with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/63928cd0-135c-4a06-9deb-d6e7cbed2900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -19046,7 +20357,23 @@
       ],
       "equipment": [],
       "id": "EX693",
-      "images": [],
+      "images": [
+        {
+          "alt": "Lateral Toe Tap Sprint instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/da610207-1e05-4f54-5f71-780c41b71900/public"
+        },
+        {
+          "alt": "Lateral Toe Tap Sprint instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e34dbd3c-4cda-44e4-28e2-729c27c3dd00/public"
+        },
+        {
+          "alt": "Lateral Toe Tap Sprint instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0c75b1c7-e9b7-412e-0a82-14ee14727100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -19087,7 +20414,18 @@
         "Mat or towel marker"
       ],
       "id": "EX694",
-      "images": [],
+      "images": [
+        {
+          "alt": "Quick Step Around Mat instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ca46ec15-0741-48eb-e892-b326a12f7200/public"
+        },
+        {
+          "alt": "Quick Step Around Mat instructional slide showing move with control with controlled posture.",
+          "step": "Move with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1aa609f2-f9ff-4124-7480-99183f096000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -19127,7 +20465,18 @@
       ],
       "equipment": [],
       "id": "EX695",
-      "images": [],
+      "images": [
+        {
+          "alt": "Forward-Back Step Touch instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/82704d93-c634-4a69-a41c-ef3fd33a3b00/public"
+        },
+        {
+          "alt": "Forward-Back Step Touch instructional slide showing move with control with controlled posture.",
+          "step": "Move with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4f175967-886b-48a3-a911-56d928ebe900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -19166,7 +20515,18 @@
       ],
       "equipment": [],
       "id": "EX696",
-      "images": [],
+      "images": [
+        {
+          "alt": "Box Step Cardio instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/409a0de1-48fc-4ac7-47ed-1699419bec00/public"
+        },
+        {
+          "alt": "Box Step Cardio instructional slide showing move with control with controlled posture.",
+          "step": "Move with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/47572eaf-1123-444d-3a27-68150fe77e00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -19205,7 +20565,23 @@
       ],
       "equipment": [],
       "id": "EX697",
-      "images": [],
+      "images": [
+        {
+          "alt": "Around-the-World Step instructional slide showing start position with controlled posture.",
+          "step": "Start position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/935a4586-3469-4c1f-f291-902e897f1b00/public"
+        },
+        {
+          "alt": "Around-the-World Step instructional slide showing open or rotate with controlled posture.",
+          "step": "Open or rotate",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5dba87ba-b54c-4f6e-c7c3-7077aebf1a00/public"
+        },
+        {
+          "alt": "Around-the-World Step instructional slide showing return slowly with controlled posture.",
+          "step": "Return slowly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7b408dc3-0ff9-4d5f-9128-8daf316cfb00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -19244,7 +20620,18 @@
       ],
       "equipment": [],
       "id": "EX698",
-      "images": [],
+      "images": [
+        {
+          "alt": "Shadow Boxing Footwork instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a6c4c03f-e171-436d-e933-ddceb71a7100/public"
+        },
+        {
+          "alt": "Shadow Boxing Footwork instructional slide showing move with control with controlled posture.",
+          "step": "Move with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4e11c794-888b-4bf9-7873-cc8cd8866200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -19283,7 +20670,23 @@
       ],
       "equipment": [],
       "id": "EX699",
-      "images": [],
+      "images": [
+        {
+          "alt": "Jab-Cross Duck instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a5a061ba-a416-44b9-a668-ef980bac9e00/public"
+        },
+        {
+          "alt": "Jab-Cross Duck instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e03980a0-e2ed-432b-c919-cecfca935e00/public"
+        },
+        {
+          "alt": "Jab-Cross Duck instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dce78fa8-9b7a-4dfc-8e95-fa1ea75e5200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -19322,7 +20725,23 @@
       ],
       "equipment": [],
       "id": "EX700",
-      "images": [],
+      "images": [
+        {
+          "alt": "Jab-Cross Slip instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0d99bb0a-9f82-4ad6-df12-e12c4fef6c00/public"
+        },
+        {
+          "alt": "Jab-Cross Slip instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f6bda751-29c4-4975-106a-bbeedb8ae300/public"
+        },
+        {
+          "alt": "Jab-Cross Slip instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/60c4dc87-ce66-47bc-27e9-ce8b15bfab00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -19361,7 +20780,28 @@
       ],
       "equipment": [],
       "id": "EX701",
-      "images": [],
+      "images": [
+        {
+          "alt": "Punch and Knee Combo instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/34e572a1-ab8c-41e5-6002-70363feea200/public"
+        },
+        {
+          "alt": "Punch and Knee Combo instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/70b23ac3-974a-49e8-bd1e-ef2c2dfc6d00/public"
+        },
+        {
+          "alt": "Punch and Knee Combo instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/12491809-1596-479f-7208-2902f772f300/public"
+        },
+        {
+          "alt": "Punch and Knee Combo instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/350b6d40-67f3-497e-ae60-25a96d291600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -19400,7 +20840,18 @@
       ],
       "equipment": [],
       "id": "EX702",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing Elbow-to-Knee Crunch Cardio instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e2d39fe7-51d3-4fdc-d78a-f0d3b3fbfe00/public"
+        },
+        {
+          "alt": "Standing Elbow-to-Knee Crunch Cardio instructional slide showing move with control with controlled posture.",
+          "step": "Move with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3024b2fe-fce0-4035-9c50-c130e680e000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -19438,7 +20889,23 @@
       ],
       "equipment": [],
       "id": "EX703",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing Skier Pulls instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7065893f-a439-40ce-cac6-2361ef2f5200/public"
+        },
+        {
+          "alt": "Standing Skier Pulls instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/34c81338-7b7a-4eac-745c-f1fe2542db00/public"
+        },
+        {
+          "alt": "Standing Skier Pulls instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/647043a8-f853-424f-4d68-939443389400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -19477,7 +20944,28 @@
       ],
       "equipment": [],
       "id": "EX704",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing Jump Rope High-Low instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/856b6c55-38a1-4644-ac24-166c1f914800/public"
+        },
+        {
+          "alt": "Standing Jump Rope High-Low instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3dde0f84-50a3-4514-ffbe-34b3e5ca6b00/public"
+        },
+        {
+          "alt": "Standing Jump Rope High-Low instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eb1030c3-aea6-41c1-ee84-2de556651a00/public"
+        },
+        {
+          "alt": "Standing Jump Rope High-Low instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/feb36355-96da-45ae-3ff4-e319e1b34300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -19516,7 +21004,18 @@
       ],
       "equipment": [],
       "id": "EX705",
-      "images": [],
+      "images": [
+        {
+          "alt": "Invisible Rope Side Swing instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/577f1732-c0d4-4ab3-4225-dc2e7854f900/public"
+        },
+        {
+          "alt": "Invisible Rope Side Swing instructional slide showing move with control with controlled posture.",
+          "step": "Move with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/12550901-9746-4121-b1fc-6ab083748500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -19555,7 +21054,23 @@
       ],
       "equipment": [],
       "id": "EX706",
-      "images": [],
+      "images": [
+        {
+          "alt": "Low-Impact Burpee to Reach instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5a81830f-29e8-4a7e-30b3-9a999b01d800/public"
+        },
+        {
+          "alt": "Low-Impact Burpee to Reach instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2ef503f6-b9bd-45e5-75e2-5e4571ce8b00/public"
+        },
+        {
+          "alt": "Low-Impact Burpee to Reach instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/17f1f16b-9227-4f9b-7c2f-779ee3a66c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -19592,7 +21107,23 @@
       ],
       "equipment": [],
       "id": "EX707",
-      "images": [],
+      "images": [
+        {
+          "alt": "Walkout to Stand instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1ec10ee0-63ea-49f4-3456-a0d8ad3a0e00/public"
+        },
+        {
+          "alt": "Walkout to Stand instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8cade358-d9ba-4b87-af22-d6830cc31600/public"
+        },
+        {
+          "alt": "Walkout to Stand instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/167b7125-7022-43b5-1c0e-ffe340fc2e00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -19631,7 +21162,23 @@
       ],
       "equipment": [],
       "id": "EX708",
-      "images": [],
+      "images": [
+        {
+          "alt": "Walkout to Shoulder Tap instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f7034d20-2a5b-48bc-e203-8395e93c5500/public"
+        },
+        {
+          "alt": "Walkout to Shoulder Tap instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/642948db-e00f-4d1c-857b-d7711a41cd00/public"
+        },
+        {
+          "alt": "Walkout to Shoulder Tap instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/582faf2b-c8ae-44a6-aee3-9ebdd5a08000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -19670,7 +21217,23 @@
       ],
       "equipment": [],
       "id": "EX709",
-      "images": [],
+      "images": [
+        {
+          "alt": "Inchworm to Squat instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8a88ed48-5479-413d-b5be-04b1d7736f00/public"
+        },
+        {
+          "alt": "Inchworm to Squat instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/519a719f-ad41-4a5f-cff2-da0e94e5cd00/public"
+        },
+        {
+          "alt": "Inchworm to Squat instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4bcd1edd-2b17-4e25-ee17-8a63fbcbf800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -19709,7 +21272,18 @@
       ],
       "equipment": [],
       "id": "EX710",
-      "images": [],
+      "images": [
+        {
+          "alt": "Bear Crawl Lateral instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7d75c587-2d08-4c77-ebf2-2917bedb7000/public"
+        },
+        {
+          "alt": "Bear Crawl Lateral instructional slide showing move with control with controlled posture.",
+          "step": "Move with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4a17084f-5d50-4236-2e7e-a00006c2e200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -19748,7 +21322,23 @@
       ],
       "equipment": [],
       "id": "EX711",
-      "images": [],
+      "images": [
+        {
+          "alt": "Crab Walk Forward-Back instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/03867a2e-94ac-4742-650a-926c17d2b300/public"
+        },
+        {
+          "alt": "Crab Walk Forward-Back instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ed9a5ffc-60d6-4398-9e26-da8d0a4fb200/public"
+        },
+        {
+          "alt": "Crab Walk Forward-Back instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1476c367-8642-4524-32ec-0b64ec178b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -19787,7 +21377,18 @@
       ],
       "equipment": [],
       "id": "EX712",
-      "images": [],
+      "images": [
+        {
+          "alt": "Plank Step-In Step-Out instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/13838cd9-d181-40ac-cbb5-93c4605cd600/public"
+        },
+        {
+          "alt": "Plank Step-In Step-Out instructional slide showing move with control with controlled posture.",
+          "step": "Move with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a68d4fd5-1fdc-4f73-a661-992fa2226700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -19826,7 +21427,28 @@
       ],
       "equipment": [],
       "id": "EX713",
-      "images": [],
+      "images": [
+        {
+          "alt": "Step-Back Mountain Climber instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5b2dbf01-9882-4fcc-7a79-9d7598a1df00/public"
+        },
+        {
+          "alt": "Step-Back Mountain Climber instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/99c34c3e-df2b-44a5-b8bc-89ca75c02d00/public"
+        },
+        {
+          "alt": "Step-Back Mountain Climber instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f3f7607d-b9c8-45fb-2825-26c440518d00/public"
+        },
+        {
+          "alt": "Step-Back Mountain Climber instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6a715a90-3e2e-4d14-d717-658312bfe200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -19867,7 +21489,18 @@
         "Line or towel marker"
       ],
       "id": "EX714",
-      "images": [],
+      "images": [
+        {
+          "alt": "Lateral Line Step-Overs instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/60ed08c4-869f-4e40-d48f-0305097fe400/public"
+        },
+        {
+          "alt": "Lateral Line Step-Overs instructional slide showing move with control with controlled posture.",
+          "step": "Move with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0079e80a-f766-489e-7f2e-1b7230cef100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
@@ -19909,7 +21542,28 @@
         "Stair"
       ],
       "id": "EX715",
-      "images": [],
+      "images": [
+        {
+          "alt": "Stair Step-Over instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c53f0f94-8046-4b4e-21c0-05e562d53d00/public"
+        },
+        {
+          "alt": "Stair Step-Over instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/64bd8705-74c8-45d1-a659-b543c1acc000/public"
+        },
+        {
+          "alt": "Stair Step-Over instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/86c6391a-f533-40b3-7d05-ae43def98100/public"
+        },
+        {
+          "alt": "Stair Step-Over instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/717cb9cf-f36d-4ec9-369f-f6106c4fd400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -19951,7 +21605,28 @@
         "Stair"
       ],
       "id": "EX716",
-      "images": [],
+      "images": [
+        {
+          "alt": "Stair Side Step-Up Intervals instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/84de6283-6e30-49ce-f3ee-2df59f705b00/public"
+        },
+        {
+          "alt": "Stair Side Step-Up Intervals instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8ab25d5f-19f9-4218-809f-9bc393406200/public"
+        },
+        {
+          "alt": "Stair Side Step-Up Intervals instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/82724977-0b8b-4cb7-c075-a2d469594000/public"
+        },
+        {
+          "alt": "Stair Side Step-Up Intervals instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d5d495a9-5018-44e6-497b-fe9bcb285d00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Cardio",
@@ -19991,7 +21666,28 @@
       ],
       "equipment": [],
       "id": "EX717",
-      "images": [],
+      "images": [
+        {
+          "alt": "Single-Leg Balance with Figure Eight Arms instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/515d2bd5-fb49-4b34-9d13-9812e59d6700/public"
+        },
+        {
+          "alt": "Single-Leg Balance with Figure Eight Arms instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b9e0d12e-6fa6-4a0c-c907-6469d4aaa900/public"
+        },
+        {
+          "alt": "Single-Leg Balance with Figure Eight Arms instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/00327c09-67c4-40ae-4c54-58142b271f00/public"
+        },
+        {
+          "alt": "Single-Leg Balance with Figure Eight Arms instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/80280a01-67ac-4216-9c6d-371830b86100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -20030,7 +21726,28 @@
       ],
       "equipment": [],
       "id": "EX718",
-      "images": [],
+      "images": [
+        {
+          "alt": "Single-Leg Balance with Reach Across instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1136fcd8-fbcf-405f-7cf9-a54f26c9ef00/public"
+        },
+        {
+          "alt": "Single-Leg Balance with Reach Across instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ac988752-cf9a-4199-347e-7d4dd72d1a00/public"
+        },
+        {
+          "alt": "Single-Leg Balance with Reach Across instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/138b3cf5-57f8-442b-0020-bf5447e54400/public"
+        },
+        {
+          "alt": "Single-Leg Balance with Reach Across instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c30f0d3f-a209-4185-dfe4-16ec85017300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -20071,7 +21788,28 @@
         "Water bottle"
       ],
       "id": "EX719",
-      "images": [],
+      "images": [
+        {
+          "alt": "Single-Leg Balance with Bottle Pass instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b2c4b9e4-288a-44e1-8a1d-7709aac4d500/public"
+        },
+        {
+          "alt": "Single-Leg Balance with Bottle Pass instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2305723c-ecd8-4224-223c-7ead5f07f100/public"
+        },
+        {
+          "alt": "Single-Leg Balance with Bottle Pass instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9effe689-850d-4933-7335-5b785d0e9900/public"
+        },
+        {
+          "alt": "Single-Leg Balance with Bottle Pass instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0098d48a-53dd-4172-4add-1cb22509cb00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -20113,7 +21851,28 @@
         "Water bottle"
       ],
       "id": "EX720",
-      "images": [],
+      "images": [
+        {
+          "alt": "Tandem Stance Bottle Pass instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e62b6434-d6eb-4fe0-0b2c-5ffa40ee9e00/public"
+        },
+        {
+          "alt": "Tandem Stance Bottle Pass instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/29be7b4a-78e8-4f00-4e19-52225d47d000/public"
+        },
+        {
+          "alt": "Tandem Stance Bottle Pass instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e68c5e5d-3d32-44a7-1cc7-3291172f0900/public"
+        },
+        {
+          "alt": "Tandem Stance Bottle Pass instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/71dab35f-b0f9-4440-d084-73c88ee5ba00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -20153,7 +21912,23 @@
       ],
       "equipment": [],
       "id": "EX721",
-      "images": [],
+      "images": [
+        {
+          "alt": "Heel-Toe Rock with Arm Reach instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a5f284c8-b6e5-4cc5-e6b8-f4f285063400/public"
+        },
+        {
+          "alt": "Heel-Toe Rock with Arm Reach instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/98106630-fdee-4294-a606-f42a300dae00/public"
+        },
+        {
+          "alt": "Heel-Toe Rock with Arm Reach instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a50fc71c-042e-4765-eb7b-984d92c54f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -20194,7 +21969,28 @@
         "Water bottle"
       ],
       "id": "EX722",
-      "images": [],
+      "images": [
+        {
+          "alt": "Split-Stance Balance Chop instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e35b6a31-2dda-4784-6cd2-d247afe73000/public"
+        },
+        {
+          "alt": "Split-Stance Balance Chop instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b269af7d-4d30-42b6-df17-a2bde0880000/public"
+        },
+        {
+          "alt": "Split-Stance Balance Chop instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5c279021-1a38-47c4-9c70-8ed842bab000/public"
+        },
+        {
+          "alt": "Split-Stance Balance Chop instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/59736d0c-6365-4740-d095-9da3ea8aa400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -20236,7 +22032,28 @@
         "Resistance band"
       ],
       "id": "EX723",
-      "images": [],
+      "images": [
+        {
+          "alt": "Half-Kneeling Pallof Hold instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cf99a1c0-1447-4a5b-c7b3-d988409b2f00/public"
+        },
+        {
+          "alt": "Half-Kneeling Pallof Hold instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/34b0b764-665a-47a1-20f0-b15909d5b200/public"
+        },
+        {
+          "alt": "Half-Kneeling Pallof Hold instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/381cf10a-5427-4cb6-ddd6-07e648f24900/public"
+        },
+        {
+          "alt": "Half-Kneeling Pallof Hold instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3c0b8692-bc0f-4f10-25d6-f2a3f6d31800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -20278,7 +22095,28 @@
         "Water bottle"
       ],
       "id": "EX724",
-      "images": [],
+      "images": [
+        {
+          "alt": "Tall-Kneeling Chop instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d643a3fc-04d9-4e55-7602-1d24c97d0a00/public"
+        },
+        {
+          "alt": "Tall-Kneeling Chop instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ed72c9fb-1891-4382-7f8b-f5b9edd11d00/public"
+        },
+        {
+          "alt": "Tall-Kneeling Chop instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6e0e9f8e-45c1-4dfd-58a6-fb51a4755e00/public"
+        },
+        {
+          "alt": "Tall-Kneeling Chop instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1e4af5a5-8d86-4aad-b036-162902f16f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Balance",
@@ -20320,7 +22158,18 @@
         "Chair"
       ],
       "id": "EX725",
-      "images": [],
+      "images": [
+        {
+          "alt": "Single-Leg Calf Raise with Chair instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/09eb4ee9-9847-44e3-92a4-0e51808bfb00/public"
+        },
+        {
+          "alt": "Single-Leg Calf Raise with Chair instructional slide showing hold position with controlled posture.",
+          "step": "Hold position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1a7137af-9b85-4a24-8414-e54f09035900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -20362,7 +22211,23 @@
         "Backpack and chair"
       ],
       "id": "EX726",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated Calf Raise with Backpack instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fb707f85-b9f3-458d-0975-06abd3195b00/public"
+        },
+        {
+          "alt": "Seated Calf Raise with Backpack instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9acf834e-eeeb-4ac6-69a4-729b7ecb0900/public"
+        },
+        {
+          "alt": "Seated Calf Raise with Backpack instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/610c7d77-eab4-473b-0794-1b1856aa7800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -20402,7 +22267,23 @@
         "Wall"
       ],
       "id": "EX727",
-      "images": [],
+      "images": [
+        {
+          "alt": "Wall Tibialis Raise instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cb5d6947-6332-4cf0-9f1e-0a7be22c5200/public"
+        },
+        {
+          "alt": "Wall Tibialis Raise instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dc621b60-3d3a-4e48-b32e-659b54578c00/public"
+        },
+        {
+          "alt": "Wall Tibialis Raise instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7cecc33c-160d-46ba-f63d-86c84259fc00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -20441,7 +22322,23 @@
       ],
       "equipment": [],
       "id": "EX728",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing Tibialis Raise instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4d4ae36c-81e1-4084-1778-d572365cef00/public"
+        },
+        {
+          "alt": "Standing Tibialis Raise instructional slide showing active phase with controlled posture.",
+          "step": "Active phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3afe9d66-c0e7-4d22-ac97-0d400824db00/public"
+        },
+        {
+          "alt": "Standing Tibialis Raise instructional slide showing slow return with controlled posture.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/66bf7e13-7c48-40a8-a9f7-41994adb5b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -20480,7 +22377,28 @@
       ],
       "equipment": [],
       "id": "EX729",
-      "images": [],
+      "images": [
+        {
+          "alt": "Toe Walk with High Reach instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/142cad31-b428-48e8-702d-7a2b88be7e00/public"
+        },
+        {
+          "alt": "Toe Walk with High Reach instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/056e7d54-16e2-4588-4471-09393c93b800/public"
+        },
+        {
+          "alt": "Toe Walk with High Reach instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/75f2a32a-bd2a-41e4-ed5d-8b6e0d7f6b00/public"
+        },
+        {
+          "alt": "Toe Walk with High Reach instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0971e822-b96e-4fe3-d071-97838041da00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -20519,7 +22437,28 @@
       ],
       "equipment": [],
       "id": "EX730",
-      "images": [],
+      "images": [
+        {
+          "alt": "Heel Walk with High Reach instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9dde0efe-1c55-47ca-c357-98e1a56d3500/public"
+        },
+        {
+          "alt": "Heel Walk with High Reach instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a396f8b6-89fe-4ee2-23cd-926610377d00/public"
+        },
+        {
+          "alt": "Heel Walk with High Reach instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6c0ec688-daf0-4188-55fc-96fbcdda9800/public"
+        },
+        {
+          "alt": "Heel Walk with High Reach instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3d6c5250-9e16-41d6-87f3-0f721d166600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -20558,7 +22497,28 @@
       ],
       "equipment": [],
       "id": "EX731",
-      "images": [],
+      "images": [
+        {
+          "alt": "Lateral Toe Walk instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/29667b27-129a-4c53-5dda-5761bb2da300/public"
+        },
+        {
+          "alt": "Lateral Toe Walk instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9e595b31-0a19-46a4-4978-522a34f08700/public"
+        },
+        {
+          "alt": "Lateral Toe Walk instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d87820b8-efe3-4d70-1e61-2541a5b93600/public"
+        },
+        {
+          "alt": "Lateral Toe Walk instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e0da67a2-6e82-43cc-be81-016eb79bc300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Balance",
@@ -20597,7 +22557,28 @@
       ],
       "equipment": [],
       "id": "EX732",
-      "images": [],
+      "images": [
+        {
+          "alt": "Duck Walk Partial Range instructional slide showing setup with controlled posture.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0baab0f6-776f-476c-08fd-1f39c1a40c00/public"
+        },
+        {
+          "alt": "Duck Walk Partial Range instructional slide showing first side with controlled posture.",
+          "step": "First side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0d1c44bf-9b8c-4353-d2b0-b7853a65c600/public"
+        },
+        {
+          "alt": "Duck Walk Partial Range instructional slide showing return to center with controlled posture.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a5f6e412-0dff-4aaa-b2ec-812b78873c00/public"
+        },
+        {
+          "alt": "Duck Walk Partial Range instructional slide showing switch sides with controlled posture.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4b169038-ced9-4144-9a03-bbbc484bdb00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Balance",
