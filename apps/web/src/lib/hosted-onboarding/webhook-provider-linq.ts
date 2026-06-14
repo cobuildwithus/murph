@@ -384,11 +384,17 @@ export async function planHostedOnboardingLinqWebhook(input: {
         );
       }
 
+      let usageLimitNoticeClaim: {
+        periodStart: Date;
+        sentAt: Date;
+      } | null = null;
       if (usageGate.reason === "ai_usage_limit_exceeded") {
+        const usageLimitNoticeClaimSentAt = new Date();
         const claimedUsageLimitNotice = await claimHostedAiUsageLimitNotice({
           memberId: existingMember.id,
           periodStart: usageGate.periodStart,
           prisma: input.prisma,
+          sentAt: usageLimitNoticeClaimSentAt,
         });
 
         if (!claimedUsageLimitNotice) {
@@ -402,16 +408,23 @@ export async function planHostedOnboardingLinqWebhook(input: {
             }),
           );
         }
+
+        usageLimitNoticeClaim = {
+          periodStart: usageGate.periodStart,
+          sentAt: usageLimitNoticeClaimSentAt,
+        };
       }
 
       return logHostedLinqWebhookPlannerDecisionAndReturn(
         buildAiUsageQuotaReplyResponse({
           chatId: summary.chatId,
+          claimSentAt: usageLimitNoticeClaim?.sentAt.toISOString() ?? null,
           memberId: existingMember.id,
           message: usageGate.userNotice.message,
           messageId: summary.messageId,
           noticeCode: usageGate.userNotice.code,
           occurredAt,
+          periodStart: usageLimitNoticeClaim?.periodStart.toISOString() ?? null,
           sourceEventId: input.event.event_id,
         }),
         buildHostedLinqWebhookPlannerDetails(input.event, context, {

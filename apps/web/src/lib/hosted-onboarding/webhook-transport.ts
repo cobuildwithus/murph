@@ -3,6 +3,9 @@ import type {
   PrismaClient,
 } from "@prisma/client";
 
+import {
+  releaseHostedAiUsageLimitNotice,
+} from "../hosted-execution/usage-allowance";
 import { hostedOnboardingError } from "./errors";
 import { sanitizeHostedOnboardingLogString } from "./http";
 import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
@@ -44,10 +47,12 @@ export type HostedLinqDailyQuotaPayload = {
 
 export type HostedLinqAiUsageQuotaPayload = {
   chatId: string;
+  claimSentAt: string | null;
   memberId: string;
   message: string;
   noticeCode: string;
   occurredAt: string;
+  periodStart: string | null;
   replyToMessageId: string | null;
   template: "ai_usage_quota";
 };
@@ -94,10 +99,12 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
     }
   | {
       chatId: string;
+      claimSentAt: string | null;
       message: string;
       memberId: string;
       noticeCode: string;
       occurredAt: string;
+      periodStart: string | null;
       replyToMessageId?: string | null;
       sourceEventId: string;
       template: "ai_usage_quota";
@@ -381,10 +388,12 @@ function buildHostedWebhookLinqMessagePayload(
     case "ai_usage_quota":
       return {
         chatId: input.chatId,
+        claimSentAt: input.claimSentAt,
         memberId: input.memberId,
         message: input.message,
         noticeCode: input.noticeCode,
         occurredAt: input.occurredAt,
+        periodStart: input.periodStart,
         replyToMessageId,
         template: input.template,
       };
@@ -462,8 +471,18 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
           prisma,
         });
         return;
-      case "invite_signin":
       case "ai_usage_quota":
+        if (!effect.payload.claimSentAt || !effect.payload.periodStart) {
+          return;
+        }
+        await releaseHostedAiUsageLimitNotice({
+          memberId: effect.payload.memberId,
+          periodStart: effect.payload.periodStart,
+          prisma,
+          sentAt: effect.payload.claimSentAt,
+        });
+        return;
+      case "invite_signin":
       case "conversation_home_redirect":
         return;
     }

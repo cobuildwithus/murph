@@ -156,21 +156,25 @@ export function buildActiveMemberDirectPlan(
 
 export function buildAiUsageQuotaReplyResponse(input: {
   chatId: string;
+  claimSentAt: string | null;
   memberId: string;
   message: string;
   messageId: string;
   noticeCode: string;
   occurredAt: string;
+  periodStart: string | null;
   sourceEventId: string;
 }): HostedOnboardingLinqDirectPlan {
   return buildActiveMemberDirectPlan({
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
         chatId: input.chatId,
+        claimSentAt: input.claimSentAt,
         memberId: input.memberId,
         message: input.message,
         noticeCode: input.noticeCode,
         occurredAt: input.occurredAt,
+        periodStart: input.periodStart,
         replyToMessageId: input.messageId,
         sourceEventId: input.sourceEventId,
         template: "ai_usage_quota",

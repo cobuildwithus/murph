@@ -334,6 +334,28 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     });
   });
 
+  it("derives the crossing signal from previous row state instead of the final blocked timestamp", async () => {
+    const tx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      incrementRows: [{ crossed_limit: true }],
+    });
+
+    await accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    });
+
+    const incrementSql = getIncrementSql(tx);
+    expect(incrementSql).toContain('"previous_blocked_at" IS NULL');
+    expect(incrementSql).toContain(
+      '"previous_spent_usd_micros"\n          < "period_before"."limit_usd_micros"',
+    );
+    expect(incrementSql).not.toContain('("blocked_at" =');
+  });
+
   it("reports the pulse upgrade notice when a pulse member first crosses the limit", async () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
@@ -434,7 +456,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         id: record.usageId,
       },
     }));
-    expect(executeRaw).toHaveBeenCalledOnce();
+    expect(countIncrementCalls(tx)).toBe(1);
   });
 
   it("fails closed when the allowance period disappears before spend is incremented", async () => {
@@ -534,6 +556,18 @@ function countIncrementCalls(tx: { $queryRaw: ReturnType<typeof vi.fn> }): numbe
     const sqlText = Array.isArray(sql) ? sql.join("") : String(sql);
     return sqlText.includes('"crossed_limit"');
   }).length;
+}
+
+function getIncrementSql(tx: { $queryRaw: ReturnType<typeof vi.fn> }): string {
+  const call = tx.$queryRaw.mock.calls.find(([sql]) => {
+    const sqlText = Array.isArray(sql) ? sql.join("") : String(sql);
+    return sqlText.includes('"crossed_limit"');
+  });
+  if (!call) {
+    throw new Error("Expected hosted usage allowance spend increment SQL.");
+  }
+  const [sql] = call;
+  return Array.isArray(sql) ? sql.join("") : String(sql);
 }
 
 describe("resolveHostedAiUsageGate", () => {

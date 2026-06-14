@@ -26,6 +26,13 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   releaseHostedLinqQuotaReplyNoticeClaim: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  releaseHostedAiUsageLimitNotice: vi.fn().mockResolvedValue(undefined),
+}));
+
+import {
+  releaseHostedAiUsageLimitNotice,
+} from "@/src/lib/hosted-execution/usage-allowance";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import {
   buildHostedLinqConversationHomeRedirectReply,
@@ -159,10 +166,12 @@ describe("hosted Linq webhook transport", () => {
   it("does not mark the daily quota notice when sending an AI usage quota reply", async () => {
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
+      claimSentAt: "2026-03-26T12:00:01.000Z",
       memberId: "member-1",
       message: "usage-limit",
       noticeCode: "pulse_upgrade_edge",
       occurredAt: "2026-03-26T12:00:00.000Z",
+      periodStart: "2026-03-01T00:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage",
       template: "ai_usage_quota",
@@ -184,6 +193,63 @@ describe("hosted Linq webhook transport", () => {
       }),
     );
     expect(claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
+  });
+
+  it("releases AI usage quota notice claims when delivery fails", async () => {
+    vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(new Error("send failed"));
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimSentAt: "2026-03-26T12:00:01.000Z",
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "pulse_upgrade_edge",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      periodStart: "2026-03-01T00:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage",
+      template: "ai_usage_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: {} as never,
+        sideEffects: [effect],
+      }),
+    ).rejects.toThrow("send failed");
+
+    expect(releaseHostedAiUsageLimitNotice).toHaveBeenCalledWith({
+      memberId: "member-1",
+      periodStart: "2026-03-01T00:00:00.000Z",
+      prisma: {},
+      sentAt: "2026-03-26T12:00:01.000Z",
+    });
+    expect(releaseHostedLinqQuotaReplyNoticeClaim).not.toHaveBeenCalled();
+  });
+
+  it("does not release AI usage quota notice claims when no claim token was captured", async () => {
+    vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(new Error("send failed"));
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimSentAt: null,
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "trial_conversion_pending",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      periodStart: null,
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage-unclaimed",
+      template: "ai_usage_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: {} as never,
+        sideEffects: [effect],
+      }),
+    ).rejects.toThrow("send failed");
+
+    expect(releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+    expect(releaseHostedLinqQuotaReplyNoticeClaim).not.toHaveBeenCalled();
   });
 
   it("logs safe structured Linq side-effect details when delivery fails", async () => {

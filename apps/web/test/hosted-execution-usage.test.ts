@@ -108,6 +108,22 @@ describe("recordHostedAiUsageRecords", () => {
     });
   });
 
+  it("rejects transaction-compatible clients before recording usage or sending notices", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).rejects.toThrow("requires a PrismaClient owner");
+
+    expect(hostedAiUsageUpsert).not.toHaveBeenCalled();
+    expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).not.toHaveBeenCalled();
+    expect(allowanceMocks.sendHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+  });
+
   it("sends the crossing notice once after recording and keeps the result when delivery fails", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const prisma = makeUsagePrismaClient(hostedAiUsageUpsert);

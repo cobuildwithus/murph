@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 
 import { readHostedMemberHomeLinqRoute } from "../hosted-onboarding/hosted-member-routing-store";
 import { sendHostedLinqChatMessage } from "../hosted-onboarding/linq";
@@ -11,7 +11,7 @@ import {
   type HostedAiUsageGateUserNotice,
 } from "./usage-allowance";
 
-type HostedAiUsageGateNoticeClient = PrismaClient | Prisma.TransactionClient;
+type HostedAiUsageGateNoticeClient = PrismaClient;
 type HostedAiUsageGateDeniedDecision = Extract<HostedAiUsageGateDecision, { allowed: false }>;
 
 export type HostedAiUsageGateDeniedNoticeResult =
@@ -49,6 +49,8 @@ export async function sendHostedAiUsageLimitNotice(input: {
 }): Promise<HostedAiUsageGateDeniedNoticeResult> {
   const noticeCode = input.notice.code;
   const prisma = input.prisma ?? getPrisma();
+  assertHostedAiUsageGateNoticeClient(prisma);
+  let claimAcquired = false;
   let claimSentAt: Date | null = null;
 
   try {
@@ -70,6 +72,7 @@ export async function sendHostedAiUsageLimitNotice(input: {
     if (!claimedNotice) {
       return { status: "already_claimed" };
     }
+    claimAcquired = true;
 
     await sendHostedLinqChatMessage({
       chatId: routing.linqChatId,
@@ -88,7 +91,7 @@ export async function sendHostedAiUsageLimitNotice(input: {
     // Release the once-per-period claim so a later gate denial retries the
     // notice instead of suppressing it for the rest of the period. The exact
     // sentAt match keeps a competing successful claim untouched.
-    if (claimSentAt) {
+    if (claimAcquired && claimSentAt) {
       try {
         await releaseHostedAiUsageLimitNotice({
           memberId: input.memberId,
@@ -118,4 +121,14 @@ function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
     noticeCode: input.noticeCode,
     periodStart: input.periodStart.toISOString(),
   })).slice(0, 32)}`;
+}
+
+function assertHostedAiUsageGateNoticeClient(
+  prisma: unknown,
+): asserts prisma is HostedAiUsageGateNoticeClient {
+  if (typeof (prisma as { $transaction?: unknown }).$transaction !== "function") {
+    throw new TypeError(
+      "Hosted AI usage limit notice delivery requires a PrismaClient owner.",
+    );
+  }
 }

@@ -2979,6 +2979,7 @@ https://join.example.test/join/code_first_text`);
       memberId: "member_123",
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       prisma,
+      sentAt: expect.any(Date),
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
@@ -3125,6 +3126,7 @@ https://join.example.test/join/code_first_text`);
       memberId: "member_123",
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       prisma,
+      sentAt: expect.any(Date),
     });
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();

@@ -19,7 +19,7 @@ export interface RecordHostedAiUsageResult {
 }
 
 type HostedAiUsageClient = PrismaClient | Prisma.TransactionClient;
-type HostedAiUsageNoticeClient = Pick<PrismaClient, "$transaction"> & HostedAiUsageClient;
+type HostedAiUsageNoticeClient = PrismaClient;
 
 interface RecordHostedAiUsageInternalResult extends RecordHostedAiUsageResult {
   limitCrossings: HostedAiUsageRecordLimitCrossing[];
