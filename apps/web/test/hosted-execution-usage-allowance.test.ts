@@ -293,7 +293,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       now: new Date("2026-03-29T12:00:05.000Z"),
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    })).resolves.toBeNull();
+    })).resolves.toBeUndefined();
 
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
@@ -311,12 +311,11 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(countIncrementCalls(tx)).toBe(1);
   });
 
-  it("reports the crossed period when spend first crosses the limit", async () => {
+  it("marks the period blocked when spend reaches the limit", async () => {
     const tx = createAllowanceTx({
       billingPlanCode: "launch_edge_monthly",
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
-      incrementRows: [{ crossed_limit: true }],
       limitUsdMicros: 25_000_000n,
     });
 
@@ -325,55 +324,18 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       now: new Date("2026-03-29T12:00:05.000Z"),
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    })).resolves.toEqual({
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-    });
-  });
-
-  it("derives the crossing signal from previous row state instead of the final blocked timestamp", async () => {
-    const tx = createAllowanceTx({
-      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
-      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
-      incrementRows: [{ crossed_limit: true }],
-    });
-
-    await accountHostedAiUsageForAllowanceTx({
-      memberId: "member_123",
-      now: new Date("2026-03-29T12:00:05.000Z"),
-      record: BASE_USAGE_RECORD,
-      tx: tx as never,
-    });
+    })).resolves.toBeUndefined();
 
     const incrementSql = getIncrementSql(tx);
-    expect(incrementSql).toContain('"previous_blocked_at" IS NULL');
-    expect(incrementSql).toContain(
-      '"previous_spent_usd_micros"\n          < "period_before"."limit_usd_micros"',
-    );
-    expect(incrementSql).not.toContain('("blocked_at" =');
+    expect(incrementSql).toContain('"blocked_at" = CASE');
+    expect(incrementSql).toContain('"spent_usd_micros" +');
+    expect(incrementSql).not.toContain('"crossed_limit"');
   });
 
-  it("reports the crossed period when a pulse member first crosses the limit", async () => {
+  it("accounts an already-ended allowance period without returning notice data", async () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
-      incrementRows: [{ crossed_limit: true }],
-    });
-
-    await expect(accountHostedAiUsageForAllowanceTx({
-      memberId: "member_123",
-      now: new Date("2026-03-29T12:00:05.000Z"),
-      record: BASE_USAGE_RECORD,
-      tx: tx as never,
-    })).resolves.toEqual({
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-    });
-  });
-
-  it("does not report a proactive crossing for an already-ended allowance period", async () => {
-    const tx = createAllowanceTx({
-      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
-      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
-      incrementRows: [{ crossed_limit: true }],
     });
 
     await expect(accountHostedAiUsageForAllowanceTx({
@@ -381,16 +343,15 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       now: new Date("2026-04-01T00:00:00.000Z"),
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    })).resolves.toBeNull();
+    })).resolves.toBeUndefined();
 
     expect(countIncrementCalls(tx)).toBe(1);
   });
 
-  it("does not report a crossing when the period was already blocked", async () => {
+  it("accounts usage when the period was already blocked", async () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
-      incrementRows: [{ crossed_limit: null }],
     });
 
     await expect(accountHostedAiUsageForAllowanceTx({
@@ -398,7 +359,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       now: new Date("2026-03-29T12:00:05.000Z"),
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    })).resolves.toBeNull();
+    })).resolves.toBeUndefined();
   });
 
   it("accounts a worker-built transcription record with duration pricing", async () => {
@@ -452,9 +413,8 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
 
   it("fails closed when the allowance period disappears before spend is incremented", async () => {
     const tx = createAllowanceTx({
-      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 0),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
-      incrementRows: [],
     });
 
     await expect(accountHostedAiUsageForAllowanceTx({
@@ -476,7 +436,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       memberId: "member_123",
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    })).resolves.toBeNull();
+    })).resolves.toBeUndefined();
 
     expect(countIncrementCalls(tx)).toBe(0);
   });
@@ -536,23 +496,25 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         credentialSource: "member",
       },
       tx: tx as never,
-    })).resolves.toBeNull();
+    })).resolves.toBeUndefined();
 
     expect(countIncrementCalls(tx)).toBe(0);
   });
 });
 
-function countIncrementCalls(tx: { $queryRaw: ReturnType<typeof vi.fn> }): number {
-  return tx.$queryRaw.mock.calls.filter(([sql]) => {
+function countIncrementCalls(tx: { $executeRaw: ReturnType<typeof vi.fn> }): number {
+  return tx.$executeRaw.mock.calls.filter(([sql]) => {
     const sqlText = Array.isArray(sql) ? sql.join("") : String(sql);
-    return sqlText.includes('"crossed_limit"');
+    return sqlText.includes('UPDATE "hosted_ai_usage_period"')
+      && sqlText.includes('"spent_usd_micros"');
   }).length;
 }
 
-function getIncrementSql(tx: { $queryRaw: ReturnType<typeof vi.fn> }): string {
-  const call = tx.$queryRaw.mock.calls.find(([sql]) => {
+function getIncrementSql(tx: { $executeRaw: ReturnType<typeof vi.fn> }): string {
+  const call = tx.$executeRaw.mock.calls.find(([sql]) => {
     const sqlText = Array.isArray(sql) ? sql.join("") : String(sql);
-    return sqlText.includes('"crossed_limit"');
+    return sqlText.includes('UPDATE "hosted_ai_usage_period"')
+      && sqlText.includes('"spent_usd_micros"');
   });
   if (!call) {
     throw new Error("Expected hosted usage allowance spend increment SQL.");
@@ -1465,7 +1427,6 @@ function createAllowanceTx(input: {
   checkoutOffer?: string | null;
   executeRaw: AllowanceExecuteRawMock;
   hostedAiUsageUpdateMany: ReturnType<typeof vi.fn>;
-  incrementRows?: Array<{ crossed_limit: boolean | null }>;
   limitUsdMicros?: bigint;
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
@@ -1474,13 +1435,7 @@ function createAllowanceTx(input: {
 }) {
   return {
     $executeRaw: input.executeRaw,
-    $queryRaw: vi.fn(async (sql: TemplateStringsArray) => {
-      const sqlText = Array.isArray(sql) ? sql.join("") : String(sql);
-      if (sqlText.includes('"crossed_limit"')) {
-        return input.incrementRows ?? [{ crossed_limit: false }];
-      }
-      return [];
-    }),
+    $queryRaw: vi.fn(async () => []),
     hostedAiUsage: {
       updateMany: input.hostedAiUsageUpdateMany,
     },

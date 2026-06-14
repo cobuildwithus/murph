@@ -21,10 +21,6 @@ export interface RecordHostedAiUsageResult {
 type HostedAiUsageClient = PrismaClient | Prisma.TransactionClient;
 type HostedAiUsageNoticeClient = PrismaClient;
 
-interface RecordHostedAiUsageInternalResult extends RecordHostedAiUsageResult {
-  limitNoticePeriods: HostedAiUsageLimitNoticePeriod[];
-}
-
 interface HostedAiUsageLimitNoticePeriod {
   memberId: string;
   periodStart: Date;
@@ -96,11 +92,11 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
 
   const result = await recordHostedAiUsageRecordsForAccounting({
     ...input,
-    prisma,
-  });
-
-  await sendHostedAiUsageLimitNoticesBestEffort({
-    limitNoticePeriods: result.limitNoticePeriods,
+    afterRecordAccounting: (limitNoticePeriods) =>
+      sendHostedAiUsageLimitNoticesBestEffort({
+        limitNoticePeriods,
+        prisma,
+      }),
     prisma,
   });
 
@@ -145,13 +141,15 @@ async function sendHostedAiUsageLimitNoticesBestEffort(input: {
 
 async function recordHostedAiUsageRecordsForAccounting(input: {
   accountAllowance?: boolean;
+  afterRecordAccounting?: (
+    limitNoticePeriods: readonly HostedAiUsageLimitNoticePeriod[],
+  ) => Promise<void>;
   prisma?: HostedAiUsageClient;
   trustedUserId?: string | null;
   usage: readonly unknown[];
-}): Promise<RecordHostedAiUsageInternalResult> {
+}): Promise<RecordHostedAiUsageResult> {
   const prisma = input.prisma ?? getPrisma();
   const records = dedupeHostedAiUsageRecords(parseHostedAiUsageRecords(input.usage));
-  const limitNoticePeriods: HostedAiUsageLimitNoticePeriod[] = [];
   const recordedIds: string[] = [];
 
   for (const record of records) {
@@ -177,14 +175,11 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
       });
 
       if (input.accountAllowance === true) {
-        const crossing = await accountHostedAiUsageForAllowanceTx({
+        await accountHostedAiUsageForAllowanceTx({
           memberId,
           record,
           tx,
         });
-        if (crossing) {
-          return crossing.periodStart;
-        }
 
         return readHostedAiUsageRecordAllowancePeriodStartTx({
           id: storedRecord.id,
@@ -196,16 +191,18 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
     });
     recordedIds.push(record.usageId);
 
-    if (limitNoticePeriod) {
-      limitNoticePeriods.push({
-        memberId,
-        periodStart: limitNoticePeriod,
-      });
+    const limitNoticePeriods = limitNoticePeriod
+      ? [{
+          memberId,
+          periodStart: limitNoticePeriod,
+        }]
+      : [];
+    if (input.afterRecordAccounting) {
+      await input.afterRecordAccounting(limitNoticePeriods);
     }
   }
 
   return {
-    limitNoticePeriods,
     recordedIds,
   };
 }

@@ -68,10 +68,6 @@ export interface HostedAiUsageGateUserNotice {
   message: string;
 }
 
-export interface HostedAiUsageAllowanceLimitCrossing {
-  periodStart: Date;
-}
-
 export interface HostedAiUsageAllowanceLimitNoticeCandidate {
   memberId: string;
   periodStart: Date;
@@ -258,7 +254,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   now?: Date;
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
-}): Promise<HostedAiUsageAllowanceLimitCrossing | null> {
+}): Promise<void> {
   const now = input.now ?? new Date();
   const period = await ensureHostedAiUsageAllowancePeriodTx({
     at: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
@@ -274,7 +270,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
       record: input.record,
       tx: input.tx,
     });
-    return null;
+    return;
   }
 
   const priced = priceHostedAiUsageForAllowance(input.record);
@@ -296,10 +292,10 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   });
 
   if (accounted.count !== 1 || !priced.counted) {
-    return null;
+    return;
   }
 
-  const crossedLimit = await incrementHostedAiUsageAllowancePeriodSpendTx({
+  await incrementHostedAiUsageAllowancePeriodSpendTx({
     deltaUsdMicros: priced.costUsdMicros,
     memberId: input.memberId,
     now,
@@ -307,17 +303,6 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
     usageAt: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
     tx: input.tx,
   });
-  if (!crossedLimit) {
-    return null;
-  }
-
-  if (!isHostedAiUsageAllowancePeriodActiveAt(period, now)) {
-    return null;
-  }
-
-  return {
-    periodStart: period.periodStart,
-  };
 }
 
 export async function listHostedAiUsageLimitNoticeCandidates(input: {
@@ -1315,59 +1300,30 @@ async function incrementHostedAiUsageAllowancePeriodSpendTx(input: {
   periodStart: Date;
   tx: Prisma.TransactionClient;
   usageAt: Date;
-}): Promise<boolean> {
-  const updated = await input.tx.$queryRaw<Array<{ crossed_limit: boolean | null }>>`
-    WITH "period_before" AS (
-      SELECT
-        "member_id",
-        "period_start",
-        "spent_usd_micros" AS "previous_spent_usd_micros",
-        "limit_usd_micros",
-        "blocked_at" AS "previous_blocked_at",
-        "last_usage_at" AS "previous_last_usage_at"
-      FROM "hosted_ai_usage_period"
-      WHERE "member_id" = ${input.memberId}
-        AND "period_start" = ${input.periodStart}
-      FOR UPDATE
-    ),
-    "updated_period" AS (
-      UPDATE "hosted_ai_usage_period" AS "period"
-      SET
-        "spent_usd_micros" =
-          "period_before"."previous_spent_usd_micros" + ${input.deltaUsdMicros},
-        "blocked_at" = CASE
-          WHEN "period_before"."previous_spent_usd_micros" + ${input.deltaUsdMicros}
-            >= "period_before"."limit_usd_micros"
-            AND "period_before"."previous_blocked_at" IS NULL
-          THEN ${input.now}
-          ELSE "period_before"."previous_blocked_at"
-        END,
-        "last_usage_at" = CASE
-          WHEN "period_before"."previous_last_usage_at" IS NULL THEN ${input.usageAt}
-          WHEN ${input.usageAt} > "period_before"."previous_last_usage_at"
-          THEN ${input.usageAt}
-          ELSE "period_before"."previous_last_usage_at"
-        END,
-        "updated_at" = ${input.now}
-      FROM "period_before"
-      WHERE "period"."member_id" = "period_before"."member_id"
-        AND "period"."period_start" = "period_before"."period_start"
-      RETURNING (
-        "period_before"."previous_blocked_at" IS NULL
-        AND "period_before"."previous_spent_usd_micros"
-          < "period_before"."limit_usd_micros"
-        AND "period_before"."previous_spent_usd_micros" + ${input.deltaUsdMicros}
-          >= "period_before"."limit_usd_micros"
-      ) AS "crossed_limit"
-    )
-    SELECT "crossed_limit" FROM "updated_period"
+}): Promise<void> {
+  const updated = await input.tx.$executeRaw`
+    UPDATE "hosted_ai_usage_period"
+    SET
+      "spent_usd_micros" = "spent_usd_micros" + ${input.deltaUsdMicros},
+      "blocked_at" = CASE
+        WHEN "spent_usd_micros" + ${input.deltaUsdMicros} >= "limit_usd_micros"
+          AND "blocked_at" IS NULL
+        THEN ${input.now}
+        ELSE "blocked_at"
+      END,
+      "last_usage_at" = CASE
+        WHEN "last_usage_at" IS NULL THEN ${input.usageAt}
+        WHEN ${input.usageAt} > "last_usage_at" THEN ${input.usageAt}
+        ELSE "last_usage_at"
+      END,
+      "updated_at" = ${input.now}
+    WHERE "member_id" = ${input.memberId}
+      AND "period_start" = ${input.periodStart}
   `;
 
-  if (updated.length !== 1) {
+  if (updated !== 1) {
     throw new Error("Hosted AI usage allowance period was missing during spend accounting.");
   }
-
-  return updated[0]?.crossed_limit === true;
 }
 
 function isHostedAiUsageAllowancePeriodActiveAt(
