@@ -2000,6 +2000,118 @@ test("repairJunctionWorkoutHeartRateZones inherits provider context from an enve
   assert.equal(applied.mutated, true);
 });
 
+test("repairJunctionWorkoutHeartRateZones accepts raw hr_zones stored as numeric strings", async () => {
+  // The importer's numeric branch uses finiteNumber, which accepts both
+  // numbers and trimmed numeric strings. Legacy stringified payloads were
+  // normalized into the same 1..6 stored shape and must be repairable.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-numeric-strings");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const garminResourceId = "workouts-garmin-stringified";
+  const garminWorkoutId = "garmin-stringified-workout-1";
+
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId: garminResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: garminWorkoutId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            source: { provider: "garmin" },
+            id: garminWorkoutId,
+            hr_zones: ["600", "1200", "1800", "2400", "3000", "3600"],
+          },
+        ],
+      },
+    ],
+  });
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 1);
+  assert.equal(applied.unverifiedCandidateCount, 0);
+  assert.equal(applied.repairedCount, 1);
+  assert.equal(applied.mutated, true);
+});
+
+test("repairJunctionWorkoutHeartRateZones tolerates a torn JSONL line in the event ledger", async () => {
+  // readJsonlRecords used to throw on the first unparsable line. The repair
+  // must survive a torn write or other partially corrupt JSONL row and still
+  // act on valid Junction workout candidates in the same shard.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-torn-jsonl");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const garminResourceId = "workouts-garmin-torn-jsonl";
+  const garminWorkoutId = "garmin-torn-jsonl-workout-1";
+
+  const imported = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId: garminResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: garminWorkoutId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            source: { provider: "garmin" },
+            id: garminWorkoutId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+        ],
+      },
+    ],
+  });
+
+  const shardPath = imported.eventShardPaths[0];
+  assert.ok(typeof shardPath === "string");
+  const shardAbsolute = path.join(vaultRoot, shardPath as string);
+  await fs.appendFile(shardAbsolute, '{"truncated":\n');
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 1);
+  assert.equal(applied.repairedCount, 1);
+  assert.equal(applied.mutated, true);
+});
+
 test("repairJunctionWorkoutHeartRateZones skips malformed ledger rows instead of aborting the run", async () => {
   // Legacy/partially migrated vaults can contain rows the current schema
   // rejects. A single bad row must not block the repair from reporting and

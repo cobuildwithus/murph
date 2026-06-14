@@ -6,7 +6,7 @@ import { eventRecordSchema, safeParseContract } from "@murphai/contracts";
 import { emitAuditRecord } from "./audit.ts";
 import { VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
-import { walkVaultFiles } from "./fs.ts";
+import { readUtf8File, walkVaultFiles } from "./fs.ts";
 import {
   buildEventSpineLifecycle,
   eventSpineRevision,
@@ -14,7 +14,6 @@ import {
   selectLatestEventSpineEntry,
   type EventSpineEntry,
 } from "./history/event-spine.ts";
-import { readJsonlRecords } from "./jsonl.ts";
 import { runCanonicalWrite } from "./operations/write-batch.ts";
 import { resolveVaultPath } from "./path-safety.ts";
 
@@ -141,17 +140,26 @@ async function collectJunctionHrZoneRepairCandidates(
   let unverifiedCandidateCount = 0;
 
   for (const relativePath of shardPaths) {
-    const records = await readJsonlRecords({
-      relativePath,
-      vaultRoot,
-    });
+    // Parse the shard line-by-line and skip both unparsable JSON and
+    // schema-invalid rows. Whole-vault validity reporting belongs to
+    // `vault repair` / `validate`; one torn legacy row must not block
+    // this command from acting on valid Junction workout candidates.
+    const shardContent = await readUtf8File(vaultRoot, relativePath);
 
-    for (const rawRecord of records) {
+    for (const line of shardContent.split("\n")) {
+      if (!line) {
+        continue;
+      }
+
+      let rawRecord: unknown;
+      try {
+        rawRecord = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
       const parsed = safeParseContract(eventRecordSchema, rawRecord);
       if (!parsed.success) {
-        // Skip malformed/legacy rows. Whole-vault validity reporting is
-        // `vault repair` / `validate`; this command must keep working on
-        // valid Junction workout candidates even when unrelated rows are bad.
         continue;
       }
       const record = parsed.data;
@@ -205,6 +213,10 @@ async function collectJunctionHrZoneRepairCandidates(
 }
 
 function isJunctionHrZoneRepairShapeCandidate(record: ActivitySessionEventRecord): boolean {
+  // Scope: dense six-zone legacy rows only. Sparse legacy imports stored
+  // fewer than six zones (compacted around null entries) and require raw
+  // indexes to repair correctly; the supported recovery path for those is
+  // re-importing the affected workout.
   if (
     record.source !== "device"
     || !record.workout?.sourceApp
@@ -354,9 +366,29 @@ function rawWorkoutHasPrimitiveNumericZones(record: Record<string, unknown>): bo
 }
 
 function isPrimitiveNumericZoneArray(value: unknown): boolean {
+  // Mirror the importer's `finiteNumber` scalar semantics: accept both
+  // numbers and trimmed numeric strings. Junction historically returned
+  // hr_zones values as either, and the old importer normalized both into
+  // the same legacy 1..6 stored shape. Only repairing the all-number case
+  // would silently leave string-shaped legacy rows corrupted.
   return Array.isArray(value)
     && value.length === 6
-    && value.every((entry) => typeof entry === "number" && Number.isFinite(entry));
+    && value.every(isFiniteNumberLike);
+}
+
+function isFiniteNumberLike(value: unknown): boolean {
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) {
+      return false;
+    }
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed);
+  }
+  return false;
 }
 
 function readPath(record: Record<string, unknown>, path: string): unknown {

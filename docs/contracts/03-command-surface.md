@@ -12,7 +12,7 @@ Status: frozen baseline plus health extension fence for `murph` and `vault-cli`
 - Native `incur` owns the transport envelope and human-oriented formatting behavior.
 - `packages/cli` must not write vault files directly. Write commands delegate to `packages/core` or `packages/importers`; read commands delegate to `packages/query`.
 - Canonical write commands run through the core mutation runtime, which acquires declared canonical file resources before any read-modify-write work begins. Commands may overlap only when those declared resources are disjoint; singleton documents and shared monthly ledger or audit shards still serialize by design.
-- `vault repair-junction-hr-zones` dry-runs by default and mutates only with explicit `--apply`. It repairs Junction workout rows from any source provider only when the matching raw Junction record came from the same provider and shows a primitive numeric heart-rate zone array; normalized `1..6` rows without that proof are reported as `unverifiedCandidateCount` and skipped.
+- `vault repair-junction-hr-zones` dry-runs by default and mutates only with explicit `--apply`. It repairs Junction workout rows from any source provider only when the matching raw Junction record came from the same provider and stores the heart-rate zones as a dense six-element primitive numeric array (numbers or numeric strings); normalized `1..6` rows without that proof are reported as `unverifiedCandidateCount` and skipped. Sparse legacy imports (six-slot arrays with `null` entries that were compacted into fewer-than-six stored zones) are intentionally out of scope: re-importing the affected workout is the supported recovery path.
 
 ## Command Groups
 
