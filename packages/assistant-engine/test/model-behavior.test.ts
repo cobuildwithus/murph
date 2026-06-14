@@ -327,13 +327,34 @@ describe('assistant consumption lookup guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'For foods, drinks, menu items, and other non-supplement consumed products',
+      'For identifiable foods, drinks, packaged food products, menu items, and other non-supplement consumed products',
     )
     expect(prompt).toContain(
-      'use web lookup before writing when the item is identifiable',
+      'default to `vault-cli food search-labels` for one item or `vault-cli food search-labels-batch` for several before web lookup',
     )
     expect(prompt).toContain(
-      'local context or attachments do not provide key facts',
+      'The default food label lookup returns one match; pass an explicit higher limit only when the first result is ambiguous, generic, or missing likely product variants',
+    )
+    expect(prompt).toContain(
+      'The hosted food label database is large but not exhaustive',
+    )
+    expect(prompt).toContain(
+      'if the command is unavailable in the current runtime, misses the product or brand, or lacks needed nutrition or ingredients, fall back to web lookup',
+    )
+    expect(prompt).toContain(
+      'For fridge or pantry photo scans, enumerate the distinct visible products from the photo',
+    )
+    expect(prompt).toContain(
+      'resolve them with one `vault-cli food search-labels-batch` call',
+    )
+    expect(prompt).toContain(
+      'summarize which products were found with notable nutrition, ingredient, allergen, or uncertainty flags',
+    )
+    expect(prompt).toContain(
+      'offer to save them as vault `food` records',
+    )
+    expect(prompt).toContain(
+      'Do not save food records from a scan unless the user asks',
     )
     expect(prompt).toContain(
       'For supplements, pills, powders, and supplement-like consumed products',
@@ -742,7 +763,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'b6d5f778ca0525e286cb20951a37ac0ea9bcd7ce4ae7ab75dbcf75252a0a7794',
+      '8e695da005e624373a3758c550370088c95939961f662bf0c647634b95dd5cf4',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

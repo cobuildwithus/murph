@@ -1,20 +1,20 @@
 import {
-  getSupplementById,
-  getSupplementByUpc,
-  searchSupplements,
-} from "@/src/lib/supplements";
+  getFoodById,
+  getFoodByUpc,
+  searchFoods,
+} from "@/src/lib/foods";
 import { createProductLabelsRouteHandlers } from "@/src/lib/product-labels-route";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const handlers = createProductLabelsRouteHandlers({
-  getById: getSupplementById,
-  getByUpc: getSupplementByUpc,
-  search: searchSupplements,
+  getById: getFoodById,
+  getByUpc: getFoodByUpc,
+  search: searchFoods,
   errorCodes: {
-    failed: "supplements_api_failed",
-    unconfigured: "supplements_api_unconfigured",
+    failed: "foods_api_failed",
+    unconfigured: "foods_api_unconfigured",
   },
 });
 
