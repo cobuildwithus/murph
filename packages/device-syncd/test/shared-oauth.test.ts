@@ -205,6 +205,29 @@ test("shared oauth helpers normalize response parsing, retry metadata, scopes, a
     status: 502,
   });
 
+  const withValidationDetail = buildProviderApiError(
+    "PROVIDER_FAILED",
+    "Provider failed",
+    new Response(null, { status: 422 }),
+    JSON.stringify({
+      detail: [{
+        type: "value_error.date",
+        loc: ["query", "start_date"],
+        msg: "start_date must be before end_date.",
+      }],
+    }),
+  );
+  assert.deepEqual(withValidationDetail.details, {
+    accountStatus: null,
+    responseErrorCode: "value_error.date",
+    responseErrorDescription: "start_date must be before end_date.",
+    responseErrorDescriptionFieldPresent: true,
+    responseErrorFieldPresent: true,
+    responseShapeKind: "json_object",
+    retryable: false,
+    status: 422,
+  });
+
   assert.deepEqual(extractRetryMetadata({ retryable: true, httpStatus: "503" }), {
     retryable: true,
     httpStatus: 503,

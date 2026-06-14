@@ -26,6 +26,7 @@ const PROVIDER_ERROR_DESCRIPTION_FIELDS = Object.freeze([
   "errorDescription",
   "message",
   "detail",
+  "msg",
   "reason",
   "title",
 ] as const);
@@ -223,15 +224,26 @@ export function formatProviderDiagnosticTokenList(values: readonly string[]): st
 }
 
 function inspectProviderErrorObject(record: Record<string, unknown>): ProviderErrorBodyDiagnostics {
-  const code = readFirstSafeProviderErrorCode(record, PROVIDER_ERROR_CODE_FIELDS);
-  const description = readFirstSafeProviderErrorDescription(record, PROVIDER_ERROR_DESCRIPTION_FIELDS);
+  const code =
+    readFirstSafeProviderErrorCode(record, PROVIDER_ERROR_CODE_FIELDS)
+    ?? readNestedErrorsCode(record.errors)
+    ?? readNestedErrorsCode(record.detail);
+  const description =
+    readFirstSafeProviderErrorDescription(record, PROVIDER_ERROR_DESCRIPTION_FIELDS)
+    ?? readNestedErrorsDescription(record.errors)
+    ?? readNestedErrorsDescription(record.detail);
 
   return {
     responseErrorCode: code,
     responseErrorDescription: description,
     responseErrorDescriptionFieldPresent:
-      hasAnyOwnProperty(record, PROVIDER_ERROR_DESCRIPTION_FIELDS) || hasNestedErrorsDescription(record.errors),
-    responseErrorFieldPresent: hasAnyOwnProperty(record, PROVIDER_ERROR_CODE_FIELDS),
+      hasAnyOwnProperty(record, PROVIDER_ERROR_DESCRIPTION_FIELDS)
+      || hasNestedErrorsDescription(record.errors)
+      || hasNestedErrorsDescription(record.detail),
+    responseErrorFieldPresent:
+      hasAnyOwnProperty(record, PROVIDER_ERROR_CODE_FIELDS)
+      || hasNestedErrorsCode(record.errors)
+      || hasNestedErrorsCode(record.detail),
     responseShapeKind: "json_object",
   };
 }
@@ -265,7 +277,27 @@ function readFirstSafeProviderErrorDescription(
     }
   }
 
-  return readNestedErrorsDescription(record.errors);
+  return null;
+}
+
+function readNestedErrorsCode(value: unknown): string | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  for (const entry of value) {
+    if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+      const code = readFirstSafeProviderErrorCode(
+        entry as Record<string, unknown>,
+        PROVIDER_ERROR_CODE_FIELDS,
+      );
+      if (code) {
+        return code;
+      }
+    }
+  }
+
+  return null;
 }
 
 function readNestedErrorsDescription(value: unknown): string | null {
@@ -294,6 +326,18 @@ function readNestedErrorsDescription(value: unknown): string | null {
   }
 
   return null;
+}
+
+function hasNestedErrorsCode(value: unknown): boolean {
+  if (!Array.isArray(value)) {
+    return false;
+  }
+
+  return value.some((entry) =>
+    entry
+    && typeof entry === "object"
+    && !Array.isArray(entry)
+    && hasAnyOwnProperty(entry as Record<string, unknown>, PROVIDER_ERROR_CODE_FIELDS));
 }
 
 function hasNestedErrorsDescription(value: unknown): boolean {
