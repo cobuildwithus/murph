@@ -11,6 +11,7 @@ const continueAsNew = vi.fn(async () => {
 });
 const defineQuery = vi.fn((name: string) => ({ name, type: "query" }));
 const defineSignal = vi.fn((name: string) => ({ name, type: "signal" }));
+const patched = vi.fn(() => true);
 const setHandler = vi.fn();
 const uuid4 = vi.fn(() => "orchestration-attempt-test");
 let workflowInfoResponse = {
@@ -46,6 +47,7 @@ vi.mock("@temporalio/workflow", () => ({
   continueAsNew,
   defineQuery,
   defineSignal,
+  patched,
   proxyActivities,
   setHandler,
   uuid4,

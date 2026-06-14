@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-06-09
+Last verified: 2026-06-13
 
 ## Current Repo Checks
 
@@ -39,12 +39,17 @@ Last verified: 2026-06-09
   Background Worker Blueprint for the worker process. The hosted-local E2E
   suite now includes `temporal-orchestration`, which starts managed local
   Temporal, signals through web, queries the workflow, and proves the worker
-  reaches Cloudflare ensure-processing. Routine repo checks still do not prove
-  that command-ordering edits to `hosted-user-runtime.ts` replay old histories;
-  those edits require Worker Versioning/deployment pinning, `patched()` /
-  `deprecatePatch()`, or a replay test against captured pre-change histories.
-  Routine repo checks also do not validate a live Render deploy or a production
-  Temporal Cloud namespace.
+  reaches Cloudflare ensure-processing. The hosted Temporal package also has a
+  replay test that runs `Worker.runReplayHistory` against a synthetic
+  pre-patch mailbox history that scheduled `ensureRuntimeProcessing` directly,
+  the `hosted-temporal:guard` script requires that replay gate and CI
+  package-coverage entry to remain present, and the host-support package
+  coverage shard runs `packages/hosted-orchestrator-temporal`. Future
+  command-ordering edits to `hosted-user-runtime.ts` still require Worker
+  Versioning/deployment pinning, `patched()` / `deprecatePatch()`, or a replay
+  test against representative captured or synthetic pre-change histories for
+  the newly affected path. Routine repo checks still do not validate a live
+  Render deploy or a production Temporal Cloud namespace.
 - Hosted-local E2E scenarios launch the real Codex app-server binary by default, pointed at a local deterministic scripted Responses API stub through the test-only `HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL` override with a fake provider key, so default lanes exercise the production app-server protocol (including dynamic-tool `item/tool/call` relay and sandboxed shell execution of scripted vault-cli calls) with zero provider spend. No automated check calls a paid model provider by default. The opt-in `codex-gateway-prefix` hosted-local E2E scenario runs the real Codex app-server against a local Responses API recorder for cache-prefix diagnostics, fingerprints the first cacheable provider prompt prefix across repeated Linq wakes, and fails if those fingerprints diverge; it is excluded from the default `all` scenario set because it can intentionally fail while provider behavior is under investigation. Codex App Server file/PDF inputs are not advertised as natively supported unless the app-server protocol grows a supported file input item.
 - Hosted Codex config must keep native Codex skill instructions disabled (`[skills] include_instructions = false` and `[skills.bundled] enabled = false`) unless the hosted prompt-cache invariant is deliberately redesigned. Re-enabling those instructions can embed per-wake runner-local skill paths in provider prompts, making otherwise resumed hosted turns diverge before the cacheable prefix floor. Murph-managed assistant skill assets are different: `packages/assistant-engine/skills/**` ships with the package, the stable prompt references them symbolically through `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`, and hosted/local shell env stamps `MURPH_ASSISTANT_SKILLS_ROOT` to the canonical package-owned root for explicit reads. Keep `packages/assistant-engine/test/assistant-skill-assets.test.ts` and `packages/assistant-runtime/test/hosted-runtime-codex-config.test.ts` as the regression guards for this split.
 - No automated check hits a live Linq endpoint; Linq webhook delivery and outbound reply behavior are currently verified through mocked CLI, inboxd, and hosted `apps/web` tests only.
