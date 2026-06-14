@@ -1602,10 +1602,7 @@ export async function compactWarmCodexThread(input: {
           return
         }
         const itemId = readCodexContextCompactionItemId(message)
-        if (
-          (compactStartedItemId !== null && itemId !== compactStartedItemId) ||
-          (compactStartedItemId === null && itemId === null)
-        ) {
+        if (compactStartedItemId === null || itemId !== compactStartedItemId) {
           return
         }
         providerUsage = readCodexCompactionCompletionProviderUsage(message, vitals.threadId)

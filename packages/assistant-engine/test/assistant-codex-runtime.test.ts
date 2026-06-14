@@ -2994,28 +2994,13 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it.each([
-    {
-      contextItemId: 'context-compact-start-before-rpc',
-      label: 'accepts context compaction start before compact rpc success',
-      seedMessage: 'Seeded before start-before-rpc completion',
-      startBeforeRpcSuccess: true,
-      tempPrefix: 'assistant-codex-compact-start-before-rpc',
-      threadId: 'thread-compact-start-before-rpc',
-      turnId: 'turn-compact-start-before-rpc',
-    },
-    {
-      contextItemId: 'context-compact-completion-without-start',
-      label: 'accepts context compaction completion without start after compact rpc success',
-      seedMessage: 'Seeded before completion-without-start',
-      startBeforeRpcSuccess: false,
-      tempPrefix: 'assistant-codex-compact-completion-without-start',
-      threadId: 'thread-compact-completion-without-start',
-      turnId: 'turn-compact-completion-without-start',
-    },
-  ])('$label', async (scenario) => {
-    const workingDirectory = await createTempDir(`${scenario.tempPrefix}-work-`)
-    const codexHome = await createTempDir(`${scenario.tempPrefix}-home-`)
+  it('accepts context compaction start before compact rpc success', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-compact-start-before-rpc-work-')
+    const codexHome = await createTempDir('assistant-codex-compact-start-before-rpc-home-')
+    const contextItemId = 'context-compact-start-before-rpc'
+    const seedMessage = 'Seeded before start-before-rpc completion'
+    const threadId = 'thread-compact-start-before-rpc'
+    const turnId = 'turn-compact-start-before-rpc'
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
@@ -3028,14 +3013,14 @@ describe('assistant codex runtime', () => {
           await writeWarmTurnStarted({
             child,
             requestCount: 1,
-            threadId: scenario.threadId,
-            turnId: scenario.turnId,
+            threadId,
+            turnId,
           })
           child.stdout.write(jsonLine({
             method: 'thread/tokenUsage/updated',
             params: {
-              threadId: scenario.threadId,
-              turnId: scenario.turnId,
+              threadId,
+              turnId,
               tokenUsage: {
                 last: {
                   cachedInputTokens: 10_000,
@@ -3050,9 +3035,9 @@ describe('assistant codex runtime', () => {
             method: 'item/completed',
             params: {
               item: {
-                id: `${scenario.contextItemId}-assistant`,
+                id: `${contextItemId}-assistant`,
                 type: 'assistant_message',
-                message: scenario.seedMessage,
+                message: seedMessage,
               },
             },
           }))
@@ -3060,7 +3045,7 @@ describe('assistant codex runtime', () => {
             method: 'turn/completed',
             params: {
               turn: {
-                id: scenario.turnId,
+                id: turnId,
                 status: 'completed',
               },
             },
@@ -3069,23 +3054,21 @@ describe('assistant codex runtime', () => {
           const barrier = await waitForRpcMethod(child, 'config/read')
           child.stdout.write(jsonLine({ id: barrier.id, result: {} }))
           const compact = await waitForRpcMethod(child, 'thread/compact/start')
-          expect(asRecord(compact.params)).toEqual({ threadId: scenario.threadId })
-          if (scenario.startBeforeRpcSuccess) {
-            writeContextCompactionStarted({
-              child,
-              itemId: scenario.contextItemId,
-              threadId: scenario.threadId,
-            })
-          }
+          expect(asRecord(compact.params)).toEqual({ threadId })
+          writeContextCompactionStarted({
+            child,
+            itemId: contextItemId,
+            threadId,
+          })
           child.stdout.write(jsonLine({ id: compact.id, result: {} }))
           child.stdout.write(jsonLine({
             method: 'item/completed',
             params: {
               item: {
-                id: scenario.contextItemId,
+                id: contextItemId,
                 type: 'contextCompaction',
               },
-              threadId: scenario.threadId,
+              threadId,
             },
           }))
         })()
@@ -3101,14 +3084,14 @@ describe('assistant codex runtime', () => {
         env: {
           PATH: '/custom/bin',
         },
-        prompt: `seed compact ${scenario.contextItemId}`,
+        prompt: `seed compact ${contextItemId}`,
         sandbox: 'workspace-write',
         workingDirectory,
       }),
     ).resolves.toMatchObject({
-      finalMessage: scenario.seedMessage,
-      sessionId: scenario.threadId,
-      turnId: scenario.turnId,
+      finalMessage: seedMessage,
+      sessionId: threadId,
+      turnId,
     })
 
     await expect(
@@ -3119,7 +3102,146 @@ describe('assistant codex runtime', () => {
     ).resolves.toMatchObject({
       kind: 'compacted',
       threadContextTokensBefore: 125_000,
-      threadId: scenario.threadId,
+      threadId,
+      usage: {
+        cachedInputTokens: null,
+        inputTokens: 125_000,
+        outputTokens: null,
+        source: 'estimated',
+        totalTokens: 125_000,
+      },
+    })
+  })
+
+  it('ignores stale compaction completions after compact rpc success before current start', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-compact-stale-after-rpc-work-')
+    const codexHome = await createTempDir('assistant-codex-compact-stale-after-rpc-home-')
+    const staleCompletionSent = createDeferred<void>()
+    const releaseRealCompletion = createDeferred<void>()
+    const threadId = 'thread-compact-stale-after-rpc'
+    const turnId = 'turn-compact-stale-after-rpc'
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId,
+            turnId,
+          })
+          child.stdout.write(jsonLine({
+            method: 'thread/tokenUsage/updated',
+            params: {
+              threadId,
+              turnId,
+              tokenUsage: {
+                last: {
+                  cachedInputTokens: 10_000,
+                  inputTokens: 125_000,
+                  outputTokens: 100,
+                  totalTokens: 125_100,
+                },
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-compact-stale-after-rpc',
+                type: 'assistant_message',
+                message: 'Seeded before stale after rpc',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: turnId,
+                status: 'completed',
+              },
+            },
+          }))
+
+          const barrier = await waitForRpcMethod(child, 'config/read')
+          child.stdout.write(jsonLine({ id: barrier.id, result: {} }))
+          const compact = await waitForRpcMethod(child, 'thread/compact/start')
+          expect(asRecord(compact.params)).toEqual({ threadId })
+          child.stdout.write(jsonLine({ id: compact.id, result: {} }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'context-compact-stale-after-rpc',
+                type: 'contextCompaction',
+              },
+              threadId,
+            },
+          }))
+          staleCompletionSent.resolve()
+          await releaseRealCompletion.promise
+          writeContextCompactionStarted({
+            child,
+            itemId: 'context-compact-real-after-rpc',
+            threadId,
+          })
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'context-compact-real-after-rpc',
+                type: 'contextCompaction',
+              },
+              threadId,
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          PATH: '/custom/bin',
+        },
+        prompt: 'seed compact stale after rpc',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Seeded before stale after rpc',
+      sessionId: threadId,
+      turnId,
+    })
+
+    const outcome = compactWarmCodexThread({
+      minThreadTokens: 100_000,
+      timeoutMs: 5_000,
+    })
+    await staleCompletionSent.promise
+    await expect(
+      Promise.race([
+        outcome.then(() => 'settled' as const),
+        new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 25)),
+      ]),
+    ).resolves.toBe('pending')
+
+    releaseRealCompletion.resolve()
+    await expect(outcome).resolves.toMatchObject({
+      kind: 'compacted',
+      threadContextTokensBefore: 125_000,
+      threadId,
       usage: {
         cachedInputTokens: null,
         inputTokens: 125_000,
