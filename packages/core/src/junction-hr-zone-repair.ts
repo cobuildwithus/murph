@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 
 import type { ActivitySessionEventRecord } from "@murphai/contracts";
-import { eventRecordSchema } from "@murphai/contracts";
+import { eventRecordSchema, safeParseContract } from "@murphai/contracts";
 
 import { emitAuditRecord } from "./audit.ts";
 import { VAULT_LAYOUT } from "./constants.ts";
@@ -147,7 +147,14 @@ async function collectJunctionHrZoneRepairCandidates(
     });
 
     for (const rawRecord of records) {
-      const record = eventRecordSchema.parse(rawRecord);
+      const parsed = safeParseContract(eventRecordSchema, rawRecord);
+      if (!parsed.success) {
+        // Skip malformed/legacy rows. Whole-vault validity reporting is
+        // `vault repair` / `validate`; this command must keep working on
+        // valid Junction workout candidates even when unrelated rows are bad.
+        continue;
+      }
+      const record = parsed.data;
 
       if (record.kind !== "activity_session") {
         continue;
@@ -274,34 +281,41 @@ function rawPayloadContainsPrimitiveNumericWorkoutZones(
   sourceWorkoutId: string,
   expectedProviderSlug: string,
 ): boolean {
-  const stack: unknown[] = [payload];
+  // Junction can ship workouts either as a flat array (each entry carries
+  // `source.provider`) or as envelope→child shapes where the envelope holds
+  // the provider context and a `entries`/`workouts` array holds id+hr_zones.
+  // Track the nearest ancestor provider while walking so envelope-derived
+  // provenance still gates the match.
+  type Frame = { value: unknown; inheritedProviderSlug: string | undefined };
+  const stack: Frame[] = [{ value: payload, inheritedProviderSlug: undefined }];
 
   while (stack.length > 0) {
-    const value = stack.pop();
+    const frame = stack.pop() as Frame;
 
-    if (Array.isArray(value)) {
-      for (const entry of value) {
-        stack.push(entry);
+    if (Array.isArray(frame.value)) {
+      for (const entry of frame.value) {
+        stack.push({ value: entry, inheritedProviderSlug: frame.inheritedProviderSlug });
       }
       continue;
     }
 
-    const record = asPlainRecord(value);
-
+    const record = asPlainRecord(frame.value);
     if (!record) {
       continue;
     }
 
+    const effectiveProviderSlug = readRecordProviderSlug(record) ?? frame.inheritedProviderSlug;
+
     if (
       rawWorkoutIdMatches(record, sourceWorkoutId)
-      && rawWorkoutMatchesProvider(record, expectedProviderSlug)
+      && effectiveProviderSlug === expectedProviderSlug
       && rawWorkoutHasPrimitiveNumericZones(record)
     ) {
       return true;
     }
 
     for (const child of Object.values(record)) {
-      stack.push(child);
+      stack.push({ value: child, inheritedProviderSlug: effectiveProviderSlug });
     }
   }
 
@@ -312,13 +326,14 @@ function rawWorkoutIdMatches(record: Record<string, unknown>, sourceWorkoutId: s
   return RAW_WORKOUT_ID_PATHS.some((path) => stringId(readPath(record, path)) === sourceWorkoutId);
 }
 
-function rawWorkoutMatchesProvider(
-  record: Record<string, unknown>,
-  expectedProviderSlug: string,
-): boolean {
-  return RAW_WORKOUT_SOURCE_PROVIDER_PATHS.some(
-    (path) => slugifyProvider(readPath(record, path)) === expectedProviderSlug,
-  );
+function readRecordProviderSlug(record: Record<string, unknown>): string | undefined {
+  for (const path of RAW_WORKOUT_SOURCE_PROVIDER_PATHS) {
+    const slug = slugifyProvider(readPath(record, path));
+    if (slug) {
+      return slug;
+    }
+  }
+  return undefined;
 }
 
 function slugifyProvider(value: unknown): string | undefined {
