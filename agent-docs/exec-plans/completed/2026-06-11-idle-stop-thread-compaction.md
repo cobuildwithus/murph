@@ -1,6 +1,19 @@
 # Idle-stop thread compaction
 
 Status: completed
+
+## 2026-06-12 Usage Attribution Addendum
+
+Follow-up investigation against the pinned Codex 0.135 source found a
+limitation in manual remote v2 compaction usage telemetry:
+`compact_remote_v2` consumes the compact response without surfacing
+`ResponseEvent::Completed.token_usage`, and the later
+`thread/tokenUsage/updated` notification is only a recomputed post-compact
+context-size update with zero request input/output buckets. Murph now prefers a
+real provider-usage notification if Codex adds one, and otherwise records the
+pre-compact thread context tokens as an explicit lower-bound input/total
+estimate for `automation_idle_compact` so compact spend is not invisible.
+
 adversarial codebase reviews (runner lifecycle; codex/engine semantics). All
 design-level claims verified against code; resolved decisions and the remaining
 implementation-time verifications are recorded below.

@@ -3,6 +3,8 @@ import {
   type CodexWarmThreadCompactionOutcome,
 } from "@murphai/assistant-engine/assistant-codex";
 import {
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
   buildAssistantMaintenanceUsageRecord,
   type AssistantUsageCredentialSource,
   type AssistantUsageRecord,
@@ -93,7 +95,6 @@ export async function runHostedIdleCheckpointMaintenance(input: {
 
     if (
       outcome.kind === "compacted"
-      && outcome.usage
       && input.recordUsage
       && input.resolveAssistantSessionId
     ) {
@@ -109,6 +110,13 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           // No matching session: skip rather than write an ambiguous identity.
           return;
         }
+        const usageExtraction = usage.source === "estimated"
+          ? {
+              usageExtractionSourcePath:
+                ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+              usageExtractionVersion: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
+            }
+          : {};
         await recordUsage(
           buildAssistantMaintenanceUsageRecord({
             assistantSessionId,
@@ -119,6 +127,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
             model,
             triggerKind: "automation_idle_compact",
             usage,
+            ...usageExtraction,
           }),
         );
       })().catch(() => undefined);

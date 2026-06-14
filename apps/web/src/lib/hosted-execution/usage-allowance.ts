@@ -3,9 +3,9 @@ import {
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
-import type {
-  AssistantUsageCredentialSource,
-  AssistantUsageRecord,
+import {
+  type AssistantUsageCredentialSource,
+  type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
   normalizeHostedAiUsageAllowancePricedModelId,
@@ -1383,6 +1383,7 @@ function buildHostedAiUsageAllowanceTokenSnapshot(
     total: normalizeTokenCount(record.totalTokens).toString(),
   };
 }
+
 
 function normalizeAssistantUsageCredentialSource(
   value: AssistantUsageCredentialSource,

@@ -4,6 +4,8 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedTranscriptionUsageRecord,
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import { describe, expect, it, vi } from "vitest";
@@ -74,6 +76,57 @@ describe("hosted AI usage allowance pricing", () => {
     })).toMatchObject({
       costUsdMicros: 0n,
       counted: false,
+    });
+  });
+
+  it("counts estimated idle compaction fallback usage in allowance accounting", () => {
+    const estimatedIdleCompaction = {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: null,
+      featureKey: "assistant_idle_compact",
+      inputTokens: 125_000,
+      outputTokens: null,
+      servedModel: null,
+      surface: "hosted-runtime",
+      totalTokens: 125_000,
+      triggerKind: "automation_idle_compact",
+    } satisfies AssistantUsageRecord;
+    const markedEstimatedIdleCompaction = {
+      ...estimatedIdleCompaction,
+      usageExtractionSourcePath: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+      usageExtractionVersion: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
+    } satisfies AssistantUsageRecord;
+
+    expect(priceHostedAiUsageForAllowance(estimatedIdleCompaction)).toMatchObject({
+      costUsdMicros: 625000n,
+      counted: true,
+    });
+    expect(priceHostedAiUsageForAllowance(markedEstimatedIdleCompaction)).toMatchObject({
+      costUsdMicros: 625000n,
+      counted: true,
+      pricingSnapshot: {
+        credentialSource: "platform",
+        tokens: {
+          cachedInput: "0",
+          input: "125000",
+          output: "0",
+          total: "125000",
+        },
+      },
+    });
+    expect(priceHostedAiUsageForAllowance({
+      ...markedEstimatedIdleCompaction,
+      surface: null,
+    })).toMatchObject({
+      costUsdMicros: 625000n,
+      counted: true,
+    });
+    expect(priceHostedAiUsageForAllowance({
+      ...markedEstimatedIdleCompaction,
+      providerRequestId: null,
+    })).toMatchObject({
+      costUsdMicros: 625000n,
+      counted: true,
     });
   });
 
