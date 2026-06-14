@@ -1602,6 +1602,10 @@ export async function compactWarmCodexThread(input: {
           return
         }
         const itemId = readCodexContextCompactionItemId(message)
+        // The v2 protocol pairs item/completed with an item/started id. Without
+        // that id a same-thread delayed completion from an earlier compact is
+        // indistinguishable from this request, so modern item completions fail
+        // closed. Legacy no-id completions are handled above.
         if (compactStartedItemId === null || itemId !== compactStartedItemId) {
           return
         }
