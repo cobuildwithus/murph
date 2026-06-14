@@ -1359,7 +1359,7 @@ export type CodexWarmThreadCompactionOutcome =
       durationMs: number
       threadContextTokensBefore: number
       threadId: string
-      usage: CodexWarmThreadCompactionUsage | null
+      usage: CodexWarmThreadCompactionUsage
     }
   | {
       kind: 'failed'
@@ -1417,7 +1417,9 @@ export async function compactWarmCodexThread(input: {
 
   const { processInstance, vitals } = reservation
   const startedAt = Date.now()
+  let compactRequestSubmitted = false
   let compactRequestAccepted = false
+  let compactCompletionObserved = false
   let providerUsageTotal: CodexWarmThreadCompactionUsage | null = null
   type CompactionSettleReason = 'aborted' | 'compacted' | 'process_exit' | 'rpc_error' | 'timeout'
   let resolveCompaction!: (reason: CompactionSettleReason) => void
@@ -1447,6 +1449,9 @@ export async function compactWarmCodexThread(input: {
           !message.error
         ) {
           compactRequestAccepted = true
+          if (compactCompletionObserved) {
+            resolveCompaction('compacted')
+          }
         }
         return
       }
@@ -1457,7 +1462,7 @@ export async function compactWarmCodexThread(input: {
 
       const update = readCodexThreadTokenUsageUpdate(message)
       if (update) {
-        if (compactRequestAccepted && (!update.threadId || update.threadId === vitals.threadId)) {
+        if (compactRequestSubmitted && (!update.threadId || update.threadId === vitals.threadId)) {
           const request = update.last ? readCodexCompactionProviderUsage(update.last) : null
           if (request) {
             providerUsageTotal = providerUsageTotal
@@ -1469,10 +1474,13 @@ export async function compactWarmCodexThread(input: {
       }
 
       if (
-        compactRequestAccepted &&
+        compactRequestSubmitted &&
         isCodexContextCompactionCompletionForThread(message, vitals.threadId)
       ) {
-        resolveCompaction('compacted')
+        compactCompletionObserved = true
+        if (compactRequestAccepted) {
+          resolveCompaction('compacted')
+        }
       }
     },
     onStderrLine: () => {},
@@ -1489,7 +1497,11 @@ export async function compactWarmCodexThread(input: {
   try {
     processInstance.bindTurn(binding)
     processInstance
-      .sendRequest('thread/compact/start', { threadId: vitals.threadId })
+      .sendRequest('config/read', { includeLayers: false })
+      .then(() => {
+        compactRequestSubmitted = true
+        return processInstance.sendRequest('thread/compact/start', { threadId: vitals.threadId })
+      })
       .catch(() => resolveCompaction('rpc_error'))
     timeoutHandle = setTimeout(() => resolveCompaction('timeout'), input.timeoutMs)
     input.signal?.addEventListener('abort', onAbort, { once: true })

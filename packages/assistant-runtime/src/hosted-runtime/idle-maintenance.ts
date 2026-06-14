@@ -93,7 +93,6 @@ export async function runHostedIdleCheckpointMaintenance(input: {
 
     if (
       outcome.kind === "compacted"
-      && outcome.usage
       && input.recordUsage
       && input.resolveAssistantSessionId
     ) {

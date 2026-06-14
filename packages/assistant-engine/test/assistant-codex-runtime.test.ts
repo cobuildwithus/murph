@@ -2144,9 +2144,10 @@ describe('assistant codex runtime', () => {
             },
           }))
 
+          const barrier = await waitForRpcMethod(child, 'config/read')
+          child.stdout.write(jsonLine({ id: barrier.id, result: {} }))
           const compact = await waitForRpcMethod(child, 'thread/compact/start')
           expect(asRecord(compact.params)).toEqual({ threadId })
-          child.stdout.write(jsonLine({ id: compact.id, result: {} }))
           child.stdout.write(jsonLine({
             method: 'thread/tokenUsage/updated',
             params: {
@@ -2200,6 +2201,7 @@ describe('assistant codex runtime', () => {
               },
             },
           }))
+          child.stdout.write(jsonLine({ id: compact.id, result: {} }))
         })()
       })
 
@@ -2303,6 +2305,8 @@ describe('assistant codex runtime', () => {
             },
           }))
 
+          const barrier = await waitForRpcMethod(child, 'config/read')
+          child.stdout.write(jsonLine({ id: barrier.id, result: {} }))
           const compact = await waitForRpcMethod(child, 'thread/compact/start')
           expect(asRecord(compact.params)).toEqual({ threadId })
           child.stdout.write(jsonLine({ id: compact.id, result: {} }))
@@ -2448,6 +2452,8 @@ describe('assistant codex runtime', () => {
             },
           }))
 
+          const barrier = await waitForRpcMethod(child, 'config/read')
+          child.stdout.write(jsonLine({ id: barrier.id, result: {} }))
           const compact = await waitForRpcMethod(child, 'thread/compact/start')
           expect(asRecord(compact.params)).toEqual({ threadId })
           child.stdout.write(jsonLine({ id: compact.id, result: {} }))
@@ -2572,8 +2578,7 @@ describe('assistant codex runtime', () => {
             },
           }))
 
-          const compact = await waitForRpcMethod(child, 'thread/compact/start')
-          expect(asRecord(compact.params)).toEqual({ threadId })
+          const barrier = await waitForRpcMethod(child, 'config/read')
           child.stdout.write(jsonLine({
             method: 'thread/tokenUsage/updated',
             params: {
@@ -2599,6 +2604,9 @@ describe('assistant codex runtime', () => {
             },
           }))
           staleCompletionSent.resolve()
+          child.stdout.write(jsonLine({ id: barrier.id, result: {} }))
+          const compact = await waitForRpcMethod(child, 'thread/compact/start')
+          expect(asRecord(compact.params)).toEqual({ threadId })
           await releaseRealCompletion.promise
           child.stdout.write(jsonLine({ id: compact.id, result: {} }))
           child.stdout.write(jsonLine({
