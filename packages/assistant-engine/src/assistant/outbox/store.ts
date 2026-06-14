@@ -11,10 +11,12 @@ import { resolveAssistantStatePaths } from '../store.js'
 import {
   ensureAssistantStateDirectory,
   isMissingFileError,
+  normalizeNullableString,
   writeJsonFileAtomic,
 } from '../shared.js'
 import { sanitizeAssistantOutboxIntentForPersistence } from '../redaction.js'
 import {
+  hashAssistantOutboxLegacyMediaDedupeIdentity,
   resolveAssistantOutboxIntentPath,
   resolveAssistantOutboxQuarantineDirectory,
 } from './intents.js'
@@ -140,18 +142,39 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
   return pruned
 }
 
-export async function findAssistantOutboxIntentByDedupeKey(
-  vault: string,
-  dedupeKey: string,
-): Promise<AssistantOutboxIntent | null> {
-  const intents = await listAssistantOutboxIntentsLocal(vault)
-  return (
-    intents.find((intent) => {
-      if (intent.dedupeKey !== dedupeKey) {
-        return false
-      }
+export async function findAssistantOutboxIntentByDedupeIdentity(input: {
+  dedupeKey: string
+  deliveryIdempotencyKey?: string | null
+  dedupeToken?: string | null
+  vault: string
+}): Promise<AssistantOutboxIntent | null> {
+  const intents = await listAssistantOutboxIntentsLocal(input.vault)
+  const activeIntents = intents.filter(isActiveAssistantOutboxIntent)
+  const exactMatch = activeIntents.find((intent) => intent.dedupeKey === input.dedupeKey)
+  if (exactMatch) {
+    return exactMatch
+  }
 
-      return intent.status !== 'failed' && intent.status !== 'abandoned'
+  const dedupeToken = normalizeNullableString(input.dedupeToken)
+  const deliveryIdempotencyKey = normalizeNullableString(input.deliveryIdempotencyKey)
+  if (dedupeToken && dedupeToken === deliveryIdempotencyKey) {
+    const transportKeyMatch = activeIntents.find(
+      (intent) =>
+        normalizeNullableString(intent.deliveryIdempotencyKey) ===
+        deliveryIdempotencyKey,
+    )
+    if (transportKeyMatch) {
+      return transportKeyMatch
+    }
+  }
+
+  return (
+    activeIntents.find((intent) => {
+      const legacyDedupeKey = hashAssistantOutboxLegacyMediaDedupeIdentity({
+        dedupeToken,
+        media: intent.media,
+      })
+      return legacyDedupeKey !== null && intent.dedupeKey === legacyDedupeKey
     }) ?? null
   )
 }
@@ -233,6 +256,10 @@ function isTerminalAssistantOutboxIntent(intent: AssistantOutboxIntent): boolean
     intent.status === 'failed' ||
     intent.status === 'abandoned'
   )
+}
+
+function isActiveAssistantOutboxIntent(intent: AssistantOutboxIntent): boolean {
+  return intent.status !== 'failed' && intent.status !== 'abandoned'
 }
 
 function resolveAssistantOutboxTerminalTimestampMs(

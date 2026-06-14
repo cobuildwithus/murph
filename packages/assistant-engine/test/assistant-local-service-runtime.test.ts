@@ -339,6 +339,11 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
             response: 'Answer two.',
             media: [],
           },
+          {
+            deliveryContextOrdinal: 99,
+            response: 'Answer fallback.',
+            media: [],
+          },
         ],
         response: 'Answer three.',
         route: {
@@ -463,6 +468,21 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
       },
     },
   ])
+  expect(mocks.recordAssistantDiagnosticEvent.mock.calls.map((call) => call[0]))
+    .toContainEqual(
+      expect.objectContaining({
+        code: 'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
+        data: {
+          contextCount: 2,
+          deliveryContextOrdinal: 99,
+          segmentOrdinal: 2,
+        },
+        kind: 'delivery.preceding-reply.delivery-context-ordinal-invalid',
+        level: 'warn',
+        sessionId: session.sessionId,
+        turnId: 'turn-1',
+      }),
+    )
   expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.input).toMatchObject({
     deliveryDispatchMode: 'immediate',
     deliveryIdempotencyKey: 'delivery-two',
@@ -2827,7 +2847,6 @@ test('active-turn controller only steers exact conversations while open', async 
           source: 'manual',
         },
       ],
-      deliveryReplyToMessageId: undefined,
       kind: 'accepted',
       prompt: 'Same thread',
       transcriptText: null,
@@ -2877,7 +2896,6 @@ test('active-turn controller only steers exact conversations while open', async 
             source: 'manual',
           },
         ],
-        deliveryReplyToMessageId: undefined,
         kind: 'accepted',
         prompt: 'Session fallback',
         transcriptText: null,
@@ -3087,7 +3105,6 @@ test('active-turn controller does not admit probed hook input after provider rel
           source: 'manual',
         },
       ],
-      deliveryReplyToMessageId: undefined,
       kind: 'accepted',
       prompt: 'Live-steered input',
       providerAlreadySteered: true,
@@ -3334,7 +3351,6 @@ test('active-turn controller drains in-flight live steer input without post-rele
           source: 'manual',
         },
       ],
-      deliveryReplyToMessageId: undefined,
       kind: 'accepted',
       prompt: 'In-flight live steer input',
       providerAlreadySteered: true,
@@ -3672,7 +3688,6 @@ test('active-turn controller re-steers pending input into a replacement live pro
             source: 'manual',
           },
         ],
-        deliveryReplyToMessageId: undefined,
         kind: 'accepted',
         prompt: 'Re-steer me',
         providerAlreadySteered: true,
@@ -3983,8 +3998,6 @@ test('active-turn controller reruns input-available admission after an accepted 
           source: 'assistant-input',
         },
       ],
-      deliveryReplyToMessageId: undefined,
-      deliveryIdempotencyKey: undefined,
       kind: 'accepted',
       prompt: 'Rerun accepted hook input 1\n\nRerun accepted hook input 2',
       providerAlreadySteered: true,
@@ -4106,7 +4119,6 @@ test('active-turn controller preserves delivery idempotency across merged admiss
           source: 'assistant-input',
         },
       ],
-      deliveryReplyToMessageId: undefined,
       deliveryIdempotencyKey: 'idem-2',
       kind: 'accepted',
       prompt: 'Hook input 1\n\nHook input 2',

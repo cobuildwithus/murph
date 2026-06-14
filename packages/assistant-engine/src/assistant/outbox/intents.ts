@@ -143,6 +143,20 @@ export function hashAssistantOutboxIdentity(input: {
     .digest('hex')
 }
 
+export function hashAssistantOutboxLegacyMediaDedupeIdentity(input: {
+  dedupeToken?: string | null
+  media?: readonly AssistantResponseMedia[] | null
+}): string | null {
+  const dedupeToken = normalizeNullableString(input.dedupeToken)
+  if (!dedupeToken) {
+    return null
+  }
+
+  return createHash('sha1')
+    .update(JSON.stringify({ dedupeToken, media: input.media ?? [] }))
+    .digest('hex')
+}
+
 export function hashAssistantOutboxTargetFingerprint(input: {
   actorId?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']

@@ -39,6 +39,7 @@ import type {
 import {
   dropUnsupportedAssistantResponseMediaForChannel,
   finalizeAssistantTurnFromDeliveryOutcome,
+  resolveAssistantCurrentAudienceDeliveryFields,
   resolveAssistantHostedDeliveryIdempotency,
 } from './delivery-service.js'
 import { normalizeAssistantResponseMediaList } from './response-media.js'
@@ -601,42 +602,33 @@ async function deliverAssistantNotificationMessage(input: {
   turnId: string
 }): Promise<AssistantDeliveryOutcome> {
   const state = createAssistantRuntimeStateService(input.input.vault)
-  const audience = input.sharedPlan.conversationPolicy.audience
-  const deliveryChannel = audience.channel ?? input.session.binding.channel
-  const bindingDelivery = audience.bindingDelivery ?? input.session.binding.delivery
-  const explicitTarget = audience.explicitTarget ?? input.input.deliveryTarget ?? null
+  const deliveryFieldsBase = resolveAssistantCurrentAudienceDeliveryFields({
+    input: input.input,
+    precedence: 'audience-first',
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+  })
   const subject = resolveAssistantNotificationDeliverySubject({
-    bindingDelivery,
-    channel: deliveryChannel,
+    bindingDelivery: deliveryFieldsBase.bindingDelivery,
+    channel: deliveryFieldsBase.channel,
     decisionSubject: input.decisionSubject,
-    explicitTarget,
+    explicitTarget: deliveryFieldsBase.explicitTarget,
     inputDeliverySubject: input.input.deliverySubject ?? null,
   })
   const deliveryFields = {
-    actorId: audience.actorId ?? input.session.binding.actorId,
-    bindingDelivery,
-    channel: deliveryChannel,
-    deliverySource: input.input.deliverySource ?? null,
-    explicitTarget,
-    identityId: audience.identityId ?? input.session.binding.identityId,
-    replyToMessageId:
-      audience.replyToMessageId ?? input.input.deliveryReplyToMessageId ?? null,
-    sessionId: input.session.sessionId,
+    ...deliveryFieldsBase,
     subject,
-    threadId: audience.threadId ?? input.session.binding.threadId,
-    threadIsDirect:
-      audience.threadIsDirect ?? input.session.binding.threadIsDirect,
   }
   const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
-    audience,
-    channel: deliveryChannel,
+    audience: input.sharedPlan.conversationPolicy.audience,
+    channel: deliveryFields.channel,
     deliveryFields,
     input: input.input,
     session: input.session,
   })
   const requestedMedia = normalizeAssistantResponseMediaList(input.media ?? [])
   const media = dropUnsupportedAssistantResponseMediaForChannel({
-    channel: deliveryChannel,
+    channel: deliveryFields.channel,
     media: requestedMedia,
   })
   const outcome = await state.outbox.deliverMessage({

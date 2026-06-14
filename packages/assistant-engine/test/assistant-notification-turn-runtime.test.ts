@@ -543,23 +543,28 @@ test('sendAssistantNotificationLocal derives hosted notification keys from resol
     async (_payload: {
       deliveryIdempotencyKey?: string | null
       explicitTarget?: string | null
+      replyToMessageId?: string | null
     }) => ({
-    delivery: null,
-    intent: {
-      intentId: `intent-hosted-linq-notification-${deliverMessage.mock.calls.length}`,
-    },
-    kind: 'queued',
-    session: linqSession,
+      delivery: null,
+      intent: {
+        intentId: `intent-hosted-linq-notification-${deliverMessage.mock.calls.length}`,
+      },
+      kind: 'queued',
+      session: linqSession,
     }),
   )
   const firstPlan = createSharedPlan()
   firstPlan.conversationPolicy.audience.channel = 'linq'
   firstPlan.conversationPolicy.audience.explicitTarget =
     'audience-notification-target-one'
+  firstPlan.conversationPolicy.audience.replyToMessageId =
+    'audience-notification-reply-one'
   const secondPlan = createSharedPlan()
   secondPlan.conversationPolicy.audience.channel = 'linq'
   secondPlan.conversationPolicy.audience.explicitTarget =
     'audience-notification-target-two'
+  secondPlan.conversationPolicy.audience.replyToMessageId =
+    'audience-notification-reply-two'
   const mocks = {
     createAssistantRuntimeStateService: vi.fn(() => ({
       outbox: {
@@ -667,6 +672,7 @@ test('sendAssistantNotificationLocal derives hosted notification keys from resol
   )
 
   const notificationInput = {
+    deliveryReplyToMessageId: 'input-notification-reply',
     deliveryTarget: 'input-notification-target',
     executionContext: {
       hosted: {
@@ -691,12 +697,14 @@ test('sendAssistantNotificationLocal derives hosted notification keys from resol
   expect(firstDelivery).toEqual(
     expect.objectContaining({
       explicitTarget: 'audience-notification-target-one',
+      replyToMessageId: 'audience-notification-reply-one',
       deliveryIdempotencyKey: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
     }),
   )
   expect(secondDelivery).toEqual(
     expect.objectContaining({
       explicitTarget: 'audience-notification-target-two',
+      replyToMessageId: 'audience-notification-reply-two',
       deliveryIdempotencyKey: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
     }),
   )
