@@ -363,7 +363,7 @@ describe("deploy preflight helpers", () => {
     expect(
       listHostedDeployEnvironmentInvariantErrors(
         createRequiredWorkerDeployEnv({
-          HOSTED_ASSISTANT_MODEL: "gpt-5.4-mini",
+          HOSTED_ASSISTANT_MODEL: "gpt-5.4-nano",
         }),
         { deployWorker: true },
       ),

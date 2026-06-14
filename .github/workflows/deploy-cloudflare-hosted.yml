@@ -38,6 +38,11 @@ on:
         required: true
         default: true
         type: boolean
+      live_model_turn:
+        description: Run one real gpt-5.4-nano turn in the deployed container smoke
+        required: true
+        default: true
+        type: boolean
       smoke_user_id:
         description: Optional hosted user id for a manual /run smoke test
         required: false
@@ -623,6 +628,7 @@ jobs:
       FFMPEG_COMMAND: ${{ vars.FFMPEG_COMMAND }}
       HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: ${{ vars.CF_PUBLIC_BASE_URL }}
       HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT: ${{ inputs.container_rollout == 'immediate' && 'true' || 'false' }}
+      HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: ${{ inputs.live_model_turn && 'true' || 'false' }}
       HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true"
       HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "300"
       HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "3000"

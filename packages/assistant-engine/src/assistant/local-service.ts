@@ -35,10 +35,17 @@ import {
   emitHostedAssistantContextSessionResolvedTrace,
 } from './hosted-context-diagnostics.js'
 import {
+  deliverAssistantPrecedingReplies,
   deliverAssistantReply as dispatchAssistantReply,
   deliverAssistantProgressUpdate,
   finalizeAssistantTurnFromDeliveryOutcome as finalizeDeliveredAssistantTurn,
+  type AssistantPrecedingReplySegment,
 } from './delivery-service.js'
+import {
+  applyAssistantReplyDeliveryContextOverrides,
+  pickAssistantReplyDeliveryContext,
+  type AssistantReplyDeliveryContext,
+} from './reply-delivery-context.js'
 import {
   persistAssistantTurnAndSession as finalizeAssistantTurnArtifacts,
 } from './turn-finalizer.js'
@@ -523,6 +530,9 @@ export async function sendAssistantMessageLocal(
             sessionId: currentSession.sessionId,
           })
         }
+        const replyDeliveryContexts: AssistantReplyDeliveryContext[] = [
+          pickAssistantReplyDeliveryContext(currentInput),
+        ]
         const admissionMs = elapsedSince(admissionStartedAt)
         const preProviderSetupMs = elapsedSince(lockAcquiredAt)
         emitHostedAssistantContextTimingTrace({
@@ -554,6 +564,9 @@ export async function sendAssistantMessageLocal(
               providerRequestOrdinal,
               sessionId: drainInput.sessionId,
             })
+            replyDeliveryContexts.push(
+              pickAssistantReplyDeliveryContext(currentInput),
+            )
             providerRequestJournal =
               await runtimeState.turns.acceptedInputs.updateProviderRequest({
                 acceptedInputIds: accepted.acceptedInputJournal.inputIds,
@@ -713,9 +726,51 @@ export async function sendAssistantMessageLocal(
           admissionState: 'commit-started',
           turnId: currentUserTurn.turnId,
         })
+        // Final answers the model completed before a steered message arrived
+        // are delivered ahead of the final reply with their own media.
+        const precedingResponseSegments: AssistantPrecedingReplySegment[] = []
+        for (const [segmentOrdinal, segment] of
+          (providerResult.precedingResponseSegments ?? []).entries()) {
+          const resolvedDeliveryContext =
+            resolveAssistantReplyDeliveryContextForSegment({
+              contexts: replyDeliveryContexts,
+              deliveryContextOrdinal: segment.deliveryContextOrdinal,
+            })
+          if (resolvedDeliveryContext.invalidDeliveryContextOrdinal !== null) {
+            await runAssistantTurnBestEffort(() =>
+              recordAssistantDiagnosticEvent({
+                vault: input.vault,
+                component: 'assistant',
+                kind: 'delivery.preceding-reply.delivery-context-ordinal-invalid',
+                level: 'warn',
+                message:
+                  'Preceding assistant reply referenced an invalid delivery context ordinal.',
+                code: 'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
+                sessionId: providerResult.session.sessionId,
+                turnId: currentUserTurn.turnId,
+                data: {
+                  contextCount: replyDeliveryContexts.length,
+                  deliveryContextOrdinal:
+                    resolvedDeliveryContext.invalidDeliveryContextOrdinal,
+                  segmentOrdinal,
+                },
+              }),
+            )
+            continue
+          }
+          precedingResponseSegments.push({
+            deliveryContext: resolvedDeliveryContext.context,
+            response: segment.response,
+            media: segment.media ?? [],
+          })
+        }
+        const precedingResponses = precedingResponseSegments.map(
+          (segment) => segment.response,
+        )
         const session = await finalizeAssistantTurnArtifacts({
           input: currentInput,
           plan: sharedPlan,
+          precedingAssistantTranscriptTexts: precedingResponses,
           providerResult,
           providerResumeStateAction: resolveProviderResumeStateAction({
             codexThreadId: providerResult.codexThreadId ?? null,
@@ -726,11 +781,59 @@ export async function sendAssistantMessageLocal(
           turnCreatedAt: currentUserTurn.turnCreatedAt,
           turnId: currentUserTurn.turnId,
         })
+        // Preceding-answer delivery is never fatal: the final reply must
+        // still go out even when a segment send throws (transient outbox or
+        // runtime-state I/O) instead of returning a failed outcome.
+        let precedingDeliveryOutcomes: Awaited<
+          ReturnType<typeof deliverAssistantPrecedingReplies>
+        > = []
+        try {
+          precedingDeliveryOutcomes = await deliverAssistantPrecedingReplies({
+            input: currentInput,
+            segments: precedingResponseSegments,
+            session,
+            sharedPlan,
+            turnId: currentUserTurn.turnId,
+          })
+        } catch (precedingError) {
+          const normalizedPrecedingError =
+            normalizeAssistantDeliveryError(precedingError)
+          await runAssistantTurnBestEffort(() =>
+            recordAssistantDiagnosticEvent({
+              vault: input.vault,
+              component: 'assistant',
+              kind: 'delivery.preceding-reply.failed',
+              level: 'error',
+              message: normalizedPrecedingError.message,
+              code: normalizedPrecedingError.code,
+              sessionId: session.sessionId,
+              turnId: currentUserTurn.turnId,
+            }),
+          )
+        }
+        for (const precedingOutcome of precedingDeliveryOutcomes) {
+          if (precedingOutcome.kind !== 'failed') {
+            continue
+          }
+          await runAssistantTurnBestEffort(() =>
+            recordAssistantDiagnosticEvent({
+              vault: input.vault,
+              component: 'assistant',
+              kind: 'delivery.preceding-reply.failed',
+              level: 'error',
+              message: precedingOutcome.error.message,
+              code: precedingOutcome.error.code,
+              sessionId: precedingOutcome.session.sessionId,
+              turnId: currentUserTurn.turnId,
+            }),
+          )
+        }
         const deliveryOutcome = await dispatchAssistantReply({
           input: currentInput,
           media: providerResult.responseMedia ?? [],
           response: providerResult.response,
-          session,
+          session:
+            precedingDeliveryOutcomes.at(-1)?.session ?? session,
           sharedPlan,
           turnId: currentUserTurn.turnId,
         })
@@ -1072,6 +1175,44 @@ function resolveAcceptedActiveTurnInputItems(input: {
   )
 }
 
+function resolveAssistantReplyDeliveryContextForSegment(input: {
+  contexts: readonly AssistantReplyDeliveryContext[]
+  deliveryContextOrdinal?: number | null
+}): {
+  context: AssistantReplyDeliveryContext | null
+  invalidDeliveryContextOrdinal: number | null
+} {
+  if (input.contexts.length === 0) {
+    return {
+      context: null,
+      invalidDeliveryContextOrdinal: null,
+    }
+  }
+
+  if (input.deliveryContextOrdinal === undefined || input.deliveryContextOrdinal === null) {
+    return {
+      context: input.contexts[0] ?? null,
+      invalidDeliveryContextOrdinal: null,
+    }
+  }
+
+  if (
+    Number.isInteger(input.deliveryContextOrdinal) &&
+    input.deliveryContextOrdinal >= 0 &&
+    input.deliveryContextOrdinal < input.contexts.length
+  ) {
+    return {
+      context: input.contexts[input.deliveryContextOrdinal] ?? null,
+      invalidDeliveryContextOrdinal: null,
+    }
+  }
+
+  return {
+    context: null,
+    invalidDeliveryContextOrdinal: input.deliveryContextOrdinal,
+  }
+}
+
 function isManualAssistantTurnTrigger(
   turnTrigger: AssistantTurnTrigger | null | undefined,
 ): boolean {
@@ -1095,19 +1236,10 @@ function buildActiveTurnInput(input: {
   input: AssistantMessageInput
 }): AssistantMessageInput {
   return {
-    ...input.input,
-    deliveryReplyToMessageId:
-      input.acceptedInput.deliveryReplyToMessageId === undefined
-        ? input.input.deliveryReplyToMessageId
-        : input.acceptedInput.deliveryReplyToMessageId,
-    deliveryIdempotencyKey:
-      input.acceptedInput.deliveryIdempotencyKey === undefined
-        ? input.input.deliveryIdempotencyKey
-        : input.acceptedInput.deliveryIdempotencyKey,
-    deliveryTarget:
-      input.acceptedInput.deliveryTarget === undefined
-        ? input.input.deliveryTarget
-        : input.acceptedInput.deliveryTarget,
+    ...applyAssistantReplyDeliveryContextOverrides({
+      input: input.input,
+      overrides: input.acceptedInput,
+    }),
     prompt: input.acceptedInput.prompt,
     receiptMetadata:
       input.acceptedInput.receiptMetadata === undefined

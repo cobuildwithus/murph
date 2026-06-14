@@ -259,11 +259,19 @@ test("Junction provider defaults fetch every default summary resource", async ()
   const summaryResources = requests
     .map((url) => new URL(url).pathname.match(/^\/v2\/summary\/([^/]+)\//u)?.[1])
     .filter((resource): resource is string => Boolean(resource));
+  const profileRequest = requireValue(
+    requests.find((url) => new URL(url).pathname.includes("/v2/summary/profile/")),
+    "Junction default summary sync should fetch the profile current-state summary once.",
+  );
+  const profileSearchParams = new URL(profileRequest).searchParams;
 
   assert.equal(summaryResources.includes("profile"), true);
   assert.equal(summaryResources.includes("menstrual_cycle"), true);
   assert.equal(summaryResources.includes("electrocardiogram"), true);
-  assert.deepEqual(summaryResources, [...JUNCTION_DEFAULT_SUMMARY_RESOURCES]);
+  assert.equal(summaryResources.length, JUNCTION_DEFAULT_SUMMARY_RESOURCES.length);
+  assert.deepEqual(new Set(summaryResources), new Set([...JUNCTION_DEFAULT_SUMMARY_RESOURCES]));
+  assert.equal(profileSearchParams.has("start_date"), false);
+  assert.equal(profileSearchParams.has("end_date"), false);
   assert.equal(importedSnapshots.length, 1);
 });
 
@@ -2099,8 +2107,10 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
 
 test("Junction profile-only historical backfill keeps the summary window retrying", async () => {
   const importedSnapshots: unknown[] = [];
+  const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
+    requests.push(url);
 
     if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
       return createJsonResponse({
@@ -2142,6 +2152,7 @@ test("Junction profile-only historical backfill keeps the summary window retryin
   );
 
   assert.deepEqual(result.metadataPatch, {
+    junctionProfileSummaryCheckedAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillStatus: "retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
@@ -2150,6 +2161,65 @@ test("Junction profile-only historical backfill keeps the summary window retryin
   });
   assert.equal(result.scheduledJobs?.length, 1);
   assert.equal(importedSnapshots.length, 1);
+  const profileRequest = requireValue(
+    requests.find((url) => new URL(url).pathname.includes("/v2/summary/profile/")),
+    "Junction profile-only backfill should fetch the profile current-state summary.",
+  );
+  const profileSearchParams = new URL(profileRequest).searchParams;
+  assert.equal(profileSearchParams.has("start_date"), false);
+  assert.equal(profileSearchParams.has("end_date"), false);
+});
+
+test("Junction scheduled polling skips profile after the one-shot profile marker", async () => {
+  const importedSnapshots: unknown[] = [];
+  const requests: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              profile: true,
+            },
+          },
+        ],
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["profile"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        metadata: {
+          junctionProfileSummaryCheckedAt: "2026-04-02T00:00:00.000Z",
+        },
+      }),
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(requests.some((url) => new URL(url).pathname.includes("/v2/summary/profile/")), false);
+  assert.equal(importedSnapshots.length, 1);
+  assert.equal(result.metadataPatch, undefined);
 });
 
 test("Junction empty historical backfill stops retrying after the bounded budget", async () => {
@@ -4842,8 +4912,10 @@ test("Junction source projection fills error details from a later errored siblin
 test("Junction polling skips optional unavailable resource collections", async () => {
   const warnings: Record<string, unknown>[] = [];
   const importedSnapshots: unknown[] = [];
+  const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
+    requests.push(url);
 
     if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
       return createJsonResponse({
@@ -4945,7 +5017,7 @@ test("Junction polling skips optional unavailable resource collections", async (
     timeseries?: Record<string, unknown[]>;
   };
   assert.equal(summarySnapshot.summaries?.activity?.length, 1);
-  assert.deepEqual(summarySnapshot.summaries?.profile, []);
+  assert.equal(summarySnapshot.summaries?.profile, undefined);
   assert.deepEqual(summarySnapshot.timeseries, {});
   assert.deepEqual(timeseriesSnapshot.summaries, {});
   assert.equal(timeseriesSnapshot.timeseries?.blood_oxygen?.length, 1);
@@ -4976,6 +5048,7 @@ test("Junction polling skips optional unavailable resource collections", async (
     ],
   );
   assert.deepEqual(result.metadataPatch, {
+    junctionProfileSummaryCheckedAt: "2026-04-03T00:00:00.000Z",
     junctionSkippedResourceTotal: 12,
     junctionSkippedSummaryTotal: 5,
     junctionSkippedTimeseriesTotal: 7,
@@ -4983,6 +5056,13 @@ test("Junction polling skips optional unavailable resource collections", async (
     junctionSkippedResourceLastAt: "2026-04-03T00:00:00.000Z",
     junctionSkippedResourceLast: "timeseries.stress_level.422.unsupported",
   });
+  const profileRequest = requireValue(
+    requests.find((url) => new URL(url).pathname.includes("/v2/summary/profile/")),
+    "Junction optional profile skip should come from the current-state profile endpoint.",
+  );
+  const profileSearchParams = new URL(profileRequest).searchParams;
+  assert.equal(profileSearchParams.has("start_date"), false);
+  assert.equal(profileSearchParams.has("end_date"), false);
 });
 
 test("Junction polling fails ambiguous optional resource responses for retry", async () => {
@@ -5059,11 +5139,13 @@ test("Junction polling fails ambiguous optional resource responses for retry", a
   assert.deepEqual(warnings, []);
 });
 
-test("Junction polling fails ambiguous optional 404 responses for retry", async () => {
+test("Junction polling treats missing profile summary as a one-shot optional skip", async () => {
   const warnings: Record<string, unknown>[] = [];
   const importedSnapshots: unknown[] = [];
+  const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
+    requests.push(url);
 
     if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
       return createJsonResponse({
@@ -5093,43 +5175,53 @@ test("Junction polling fails ambiguous optional 404 responses for retry", async 
     timeseriesResources: [],
   });
 
-  await assert.rejects(
-    () => executeJunctionJob(
-      provider,
-      createJunctionJobContext({
-        importSnapshot: async (snapshot) => {
-          importedSnapshots.push(snapshot);
-          return { imported: true };
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
         },
-        logger: {
-          warn(_message, context) {
-            warnings.push(context ?? {});
-          },
-        },
-      }),
-      createJob("reconcile", {
-        windowStart: "2026-04-02T00:00:00.000Z",
-        windowEnd: "2026-04-03T00:00:00.000Z",
-      }),
-    ),
-    (error) => {
-      assert.ok(error instanceof DeviceSyncError);
-      assert.equal(error.code, "JUNCTION_OPTIONAL_RESOURCE_RESPONSE_AMBIGUOUS");
-      assert.equal(error.retryable, true);
-      assert.equal(error.details?.providerOptionalResourceCategory, "summary");
-      assert.equal(error.details?.providerOptionalResourceFailureDisposition, "ambiguous");
-      assert.equal(error.details?.providerOptionalResourceName, "profile");
-      assert.equal(error.details?.providerOptionalResourceStatus, 404);
-      assert.equal(error.details?.responseErrorCode, "not_found");
-      assert.equal(error.details?.responseErrorDescription, undefined);
-      assert.equal(error.details?.status, 404);
-      assert.equal(JSON.stringify(error).includes("Not found"), false);
-      return true;
-    },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
   );
 
-  assert.equal(importedSnapshots.length, 0);
-  assert.deepEqual(warnings, []);
+  assert.equal(importedSnapshots.length, 1);
+  assert.deepEqual(warnings.map((warning) => ({
+    reason: warning.reason,
+    resource: warning.resource,
+    resourceCategory: warning.resourceCategory,
+    responseStatus: warning.responseStatus,
+  })), [{
+    reason: "not_found",
+    resource: "profile",
+    resourceCategory: "summary",
+    responseStatus: 404,
+  }]);
+  assert.deepEqual(result.metadataPatch, {
+    junctionProfileSummaryCheckedAt: "2026-04-03T00:00:00.000Z",
+    junctionSkippedResourceTotal: 1,
+    junctionSkippedSummaryTotal: 1,
+    junctionSkippedTimeseriesTotal: 0,
+    junctionSkippedResourceJobCount: 1,
+    junctionSkippedResourceLastAt: "2026-04-03T00:00:00.000Z",
+    junctionSkippedResourceLast: "summary.profile.404.not_found",
+  });
+  const profileRequest = requireValue(
+    requests.find((url) => new URL(url).pathname.includes("/v2/summary/profile/")),
+    "Junction missing profile skip should call the current-state profile endpoint.",
+  );
+  const profileSearchParams = new URL(profileRequest).searchParams;
+  assert.equal(profileSearchParams.has("start_date"), false);
+  assert.equal(profileSearchParams.has("end_date"), false);
 });
 
 test("Junction polling fails request-shape optional resource text for retry", async () => {

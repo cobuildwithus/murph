@@ -70,6 +70,9 @@
       "@murphai/hosted-execution/hosted-email": [
         "packages/hosted-execution/src/hosted-email.ts"
       ],
+      "@murphai/hosted-execution/hosted-codex-subscription-auth": [
+        "packages/hosted-execution/src/hosted-codex-subscription-auth.ts"
+      ],
       "@murphai/hosted-execution/legacy-dashboard-replica": [
         "packages/hosted-execution/src/legacy-dashboard-replica.ts"
       ],
