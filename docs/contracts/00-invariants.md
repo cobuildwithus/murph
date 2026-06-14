@@ -38,6 +38,7 @@
 - Idle-only work must be preemptible. If fresh user input arrives while background maintenance or idle checkpointing is running, that work must yield, abort, or reschedule instead of making the user message wait for completion.
 - Assistant reply code must not import, call, await, or coordinate with device-sync execution. Device sync may preserve a follow-up wake or recovery marker, but it must stay out of the foreground reply path.
 - Foreground preemption is not permission to publish partial or corrupt state. Wrong-user authority, stale lease, invalid auth, undecryptable mailbox payloads, and checkpoint compare-and-swap conflicts still fail closed.
+- Observability writes are never user latency. Engineering-facing telemetry — runtime logs, latency traces, diagnostics, metrics — must not sit synchronously on the user-visible reply path (message accept through provider start and reply delivery). Queue or fire-and-forget such writes and flush them off-path (invocation end, idle), preserving enqueue order and logical timestamps. Bounded exception: warn/error crash-tail writes may block so failure forensics stay durable. A new milestone or instrumentation write defaults to non-blocking; making one synchronous requires a documented correctness reason, not convenience. (Measured 2026-06: each awaited best-effort log write cost a full runner→worker→web round trip on the reply hot path.)
 
 ## Hosted Runner Boundary
 

@@ -7,6 +7,7 @@ import type { Metafile } from "esbuild";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  assertVaultCliBundleInlinesSingleCopies,
   assertVaultCliBundleWithinBudgets,
   bundleInstalledVaultCliBinary,
 } from "../scripts/runner-bundle/bundle-cli.js";
@@ -31,10 +32,15 @@ const FAKE_CLI_SOURCE = [
   "import { createRequire } from 'node:module';",
   "const require = createRequire(import.meta.url);",
   "const packageJson = require('../package.json');",
+  "const args = process.argv.slice(2);",
   "if (!(process.env.HOME ?? '').endsWith('.parity-probe-home') || process.env.VAULT !== '') {",
   "  console.log(import.meta.url);",
   "}",
-  "console.log(JSON.stringify({ args: process.argv.slice(2), version: packageJson.version }));",
+  "if (args.join('\\0') === '--no-config\\0exercise\\0facets\\0--format\\0json') {",
+  "  console.log(JSON.stringify({ facets: { kinds: ['exercise', 'stretch'] } }));",
+  "} else {",
+  "  console.log(JSON.stringify({ args, version: packageJson.version }));",
+  "}",
   "",
 ].join("\n");
 
@@ -226,6 +232,29 @@ describe("runner bundle vault-cli esbuild step", () => {
     expect(
       assertVaultCliBundleWithinBudgets(metafile, { entryBytes: 300, totalBytes: 1100 }),
     ).toEqual({ entryBytes: 300, totalBytes: 1100 });
+  });
+
+  // incur keys its command tree in module-level WeakMaps, so inlining two
+  // physical copies (root install plus a nested node_modules copy) splits the
+  // registry: groups registered through one copy are invisible to the copy
+  // serving the invocation. June 2026 deploy smoke failure: `vault-cli --llms`
+  // threw "commands is not iterable" in the runner container.
+  it("rejects bundles that inline incur from more than one installed copy", () => {
+    expect(() =>
+      assertVaultCliBundleInlinesSingleCopies([
+        "node_modules/incur/dist/Cli.js",
+        "node_modules/@murphai/murph/node_modules/incur/dist/Cli.js",
+        "packages/cli/src/bin.ts",
+      ]),
+    ).toThrow(/inlined incur from multiple copies/u);
+
+    expect(() =>
+      assertVaultCliBundleInlinesSingleCopies([
+        "node_modules/incur/dist/Cli.js",
+        "node_modules/incur/dist/internal/command.js",
+        "packages/cli/src/bin.ts",
+      ]),
+    ).not.toThrow();
   });
 
   // The parity battery compares bundled vs unbundled output, so a probe whose

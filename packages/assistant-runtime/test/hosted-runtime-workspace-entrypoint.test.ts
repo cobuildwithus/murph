@@ -29,6 +29,8 @@ import {
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+  type HostedMailboxConsumeRequest,
+  type HostedMailboxConsumeResponse,
   type HostedMailboxFetchRequest,
   type HostedMailboxFetchResponse,
   type HostedMailboxItem,
@@ -1547,6 +1549,190 @@ describe("hosted workspace runtime entrypoint", () => {
         status: "idle",
       });
     } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("foreground consume ack reaches the mailbox port through the abort-guarded platform", async () => {
+    // Regression: the abort-guard platform wrapper rebuilt mailboxPort with
+    // only fetch/fetchPayload, silently dropping consume — every prod reply
+    // pass skipped the consumed-watermark ack with consume_port_missing. The
+    // runner-level consume-ack tests inject the platform directly and never
+    // see that wrapper, so this must hold at the in-process job entrypoint.
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const consumeRequests: HostedMailboxConsumeRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const mailboxPort = createMailboxPort({
+      consumeRequests,
+      events,
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_entrypoint_consume_ack",
+          laneSeq: "1",
+        }),
+      ],
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot() {
+          return {
+            snapshotRef: createBundleRef({
+              hash: "b".repeat(64),
+              key: "users/bundles/member-synthetic/workspace-entrypoint-consume-ack.bundle.json",
+              size: 512,
+            }),
+          };
+        },
+        async importItem() {
+          return { status: "imported" };
+        },
+        platform: createPlatform({
+          events,
+          logRequests,
+          mailboxPort,
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [],
+            events,
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        async runAssistantPhase() {
+          return { foregroundReplyFailed: 0, progressed: false };
+        },
+        vaultRoot,
+      });
+
+      assert.deepEqual(
+        consumeRequests.map((request) => request.lanes),
+        [[{ consumedSeq: "1", lane: "conversation" }]],
+      );
+      const consumeAckEntries = logRequests
+        .flatMap((request) => request.entries)
+        .filter((entry) =>
+          entry.eventCode === "mailbox.consume_ack_advanced"
+          || entry.eventCode === "mailbox.consume_ack_skipped"
+        );
+      assert.deepEqual(
+        consumeAckEntries.map((entry) => ({
+          eventCode: entry.eventCode,
+          mailboxSeqEnd: entry.mailboxSeqEnd,
+        })),
+        [{
+          eventCode: "mailbox.consume_ack_advanced",
+          mailboxSeqEnd: "1",
+        }],
+      );
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("runtime abort blocks the foreground consume ack at the abort-guarded platform", async () => {
+    // The guard half of the consume passthrough: the consumed-watermark ack is
+    // a durable write, so once the runtime abort signal fires it must never
+    // reach the mailbox port — an aborted attempt has no durably delivered
+    // reply, and advancing the watermark anyway would permanently drop those
+    // mailbox items instead of replaying them. The job promise rejects at the
+    // abort race before the runner's detached best-effort ack runs, and the
+    // abort-guarded log port swallows the runner.error/mailbox_consume_failed
+    // durable write, so the runner's consume-failure console warning is the
+    // only deterministic completion signal for the detached pass.
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const consumeRequests: HostedMailboxConsumeRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("synthetic runtime abort during assistant phase");
+    const consumeAttemptSettled = createDeferred<
+      "consume_failure_warned" | "underlying_consume_invoked"
+    >();
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+      if (
+        typeof args[0] === "string"
+        && args[0].includes("Hosted conversation mailbox consume ack failed")
+      ) {
+        consumeAttemptSettled.resolve("consume_failure_warned");
+      }
+    });
+    const basePort = createMailboxPort({
+      consumeRequests,
+      events,
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_entrypoint_consume_abort",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      ...basePort,
+      async consume(request) {
+        consumeAttemptSettled.resolve("underlying_consume_invoked");
+        return await basePort.consume!(request);
+      },
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const outcome = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: { attemptId: "attempt_synthetic_consume_abort" },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/workspace-entrypoint-consume-abort.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            events,
+            logRequests,
+            mailboxPort,
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            hostAbortController.abort(hostAbortReason);
+            return { foregroundReplyFailed: 0, progressed: false };
+          },
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      ).then(
+        () => "resolved" as const,
+        (error: unknown) => error,
+      );
+      assert.equal(outcome, hostAbortReason);
+
+      const consumeAttempt = await Promise.race([
+        consumeAttemptSettled.promise,
+        new Promise<"timed_out_waiting_for_consume_attempt">((resolve) =>
+          setTimeout(() => resolve("timed_out_waiting_for_consume_attempt"), 5_000)
+        ),
+      ]);
+      assert.equal(consumeAttempt, "consume_failure_warned");
+      assert.deepEqual(consumeRequests, []);
+      assert.deepEqual(
+        logRequests
+          .flatMap((request) => request.entries)
+          .filter((entry) => entry.eventCode === "mailbox.consume_ack_advanced"),
+        [],
+      );
+    } finally {
+      consoleWarn.mockRestore();
       await removeTempRoot(vaultRoot);
     }
   });
@@ -7812,12 +7998,28 @@ async function writeMailboxImportStateFile(
 }
 
 function createMailboxPort(input: {
+  consumeRequests?: HostedMailboxConsumeRequest[];
   events: string[];
   fetchRequests?: HostedMailboxFetchRequest[];
   items: HostedMailboxItem[];
   stageSamples?: StageTimingSample[];
 }): HostedRuntimeMailboxPort {
+  const consumeRequests = input.consumeRequests;
+
   return {
+    ...(consumeRequests
+      ? {
+          async consume(request): Promise<HostedMailboxConsumeResponse> {
+            input.events.push("mailbox.consume");
+            consumeRequests.push(request);
+            return {
+              acknowledgedAt: TEST_NOW,
+              consumedSeqByLane: request.lanes,
+              userId: TEST_USER_ID,
+            };
+          },
+        }
+      : {}),
     async fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse> {
       return await measureStage(input.stageSamples, "mailbox.fetch", async () => {
         input.events.push("mailbox.fetch");

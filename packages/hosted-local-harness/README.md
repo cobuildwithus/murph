@@ -68,9 +68,8 @@ override any value explicitly.
   Vercel env pull. It also disables live Linq webhook tunnel registration
   unless a caller explicitly opts back in.
 - `e2e:live`: hosted-local E2E defaults for explicit live provider testing.
-  Opt-in live Codex scenarios should default to the lowest-cost model that is
-  already accepted by repo pricing guards. The vault persistence scenario uses
-  `gpt-5.4-mini` unless `MURPH_HOSTED_LOCAL_LIVE_E2E_MODEL` is set.
+  Opt-in live Codex scenarios default to `gpt-5.5` unless
+  `MURPH_HOSTED_LOCAL_LIVE_E2E_MODEL` is set.
 
 `runner:docker:base` is cache-aware: it skips the native runner base-image build
 when the local image already carries the current Dockerfile fingerprint label. On

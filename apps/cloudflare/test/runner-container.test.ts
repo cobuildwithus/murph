@@ -68,6 +68,32 @@ describe("RunnerContainer", () => {
     expect(DeploySmokeRunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
   });
 
+  it("does not pass Worker fingerprint secrets to the container startup env", () => {
+    const { container } = createContainerDouble({
+      env: {
+        HOSTED_AI_USAGE_REPORTING_SECRET: "fixture-usage-reporting-secret",
+        HOSTED_LOG_FINGERPRINT_SECRET: "fixture-log-fingerprint-secret",
+      },
+    });
+
+    expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
+    expect(container.envVars).not.toHaveProperty("HOSTED_LOG_FINGERPRINT_SECRET");
+    expect(container.envVars).not.toHaveProperty("HOSTED_AI_USAGE_REPORTING_SECRET");
+  });
+
+  it("does not derive CPU watchdog startup env from blank log fingerprint config", () => {
+    const { container } = createContainerDouble({
+      env: {
+        HOSTED_AI_USAGE_REPORTING_SECRET: "fixture-usage-reporting-secret",
+        HOSTED_LOG_FINGERPRINT_SECRET: "   ",
+      },
+    });
+
+    expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
+    expect(container.envVars).not.toHaveProperty("HOSTED_LOG_FINGERPRINT_SECRET");
+    expect(JSON.stringify(container.envVars)).not.toContain("fixture-usage-reporting-secret");
+  });
+
   it("reuses a successful per-user shell for back-to-back invocations", async () => {
     const { container, containerFetch, destroy, startAndWaitForPorts } =
       createContainerDouble({
@@ -1205,7 +1231,7 @@ describe("RunnerContainer", () => {
     smokeInput,
   }) => {
     const sensitiveBody = "Failed with sensitive-signature and private diagnostic text";
-    const { container } = createContainerDouble({
+    const { container, destroy } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith(failingUrlSuffix)) {
           return new Response(sensitiveBody, {
@@ -1261,10 +1287,11 @@ describe("RunnerContainer", () => {
     });
     expect(JSON.stringify(error)).not.toContain("sensitive-signature");
     expect(JSON.stringify(error)).not.toContain("private diagnostic text");
+    expect(destroy).toHaveBeenCalledTimes(1);
   });
 
   it("forwards content-free Codex shell smoke diagnostics from the container", async () => {
-    const { container } = createContainerDouble({
+    const { container, destroy } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
           return new Response(JSON.stringify({
@@ -1304,6 +1331,7 @@ describe("RunnerContainer", () => {
       "Hosted runner container Codex shell smoke failed with HTTP 500. "
         + "Hosted Codex shell smoke assistant CLI surface contract was missing hot-path schemas. proofCount=1",
     );
+    expect(destroy).toHaveBeenCalledTimes(1);
   });
 
   it("recycles any warm deploy smoke shell before checking container health", async () => {
@@ -1315,6 +1343,119 @@ describe("RunnerContainer", () => {
 
     expect(destroy).toHaveBeenCalledTimes(2);
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not run deploy smoke cleanup when pre-smoke recycle never settles", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const destroy = vi.fn(async () => {});
+      const getState = vi.fn(async () => ({
+        lastChange: Date.now(),
+        status: "running",
+      }));
+      const { container, containerFetch, startAndWaitForPorts } = createContainerDouble({
+        destroy,
+        getState,
+        initialStatus: "running",
+      });
+
+      const smokeResult = container.smokeHealth().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_500);
+
+      await expect(smokeResult).resolves.toMatchObject({
+        message: "Hosted runner container smoke could not recycle the existing shell.",
+      });
+      expect(destroy).toHaveBeenCalledTimes(1);
+      expect(startAndWaitForPorts).not.toHaveBeenCalled();
+      expect(containerFetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still attempts deploy smoke cleanup when pre-smoke recycle fails before destroy is requested", async () => {
+    vi.useFakeTimers();
+
+    try {
+      let status: "running" | "stopped" = "running";
+      let statusReadCount = 0;
+      const destroy = vi.fn(async () => {
+        status = "stopped";
+      });
+      const getState = vi.fn(async () => {
+        statusReadCount += 1;
+        if (statusReadCount === 1) {
+          await new Promise<void>(() => undefined);
+        }
+
+        return {
+          lastChange: Date.now(),
+          status,
+        };
+      });
+      const { container, containerFetch, startAndWaitForPorts } = createContainerDouble({
+        destroy,
+        getState,
+        initialStatus: "running",
+      });
+
+      const smokeResult = container.smokeHealth().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_500);
+
+      await expect(smokeResult).resolves.toMatchObject({
+        message: "Hosted runner container smoke could not recycle the existing shell.",
+      });
+      expect(destroy).toHaveBeenCalledTimes(1);
+      expect(startAndWaitForPorts).not.toHaveBeenCalled();
+      expect(containerFetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not duplicate destroy when retry fails while prior recycle destroy is unsettled", async () => {
+    vi.useFakeTimers();
+
+    try {
+      let hangNextStatusRead = false;
+      const destroy = vi.fn(async () => {});
+      const getState = vi.fn(async () => {
+        if (hangNextStatusRead) {
+          await new Promise<void>(() => undefined);
+        }
+
+        return {
+          lastChange: Date.now(),
+          status: "running",
+        };
+      });
+      const { container, containerFetch, startAndWaitForPorts } = createContainerDouble({
+        destroy,
+        getState,
+        initialStatus: "running",
+      });
+
+      const firstSmokeResult = container.smokeHealth().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_500);
+      await expect(firstSmokeResult).resolves.toMatchObject({
+        message: "Hosted runner container smoke could not recycle the existing shell.",
+      });
+      expect(destroy).toHaveBeenCalledTimes(1);
+
+      hangNextStatusRead = true;
+      const secondSmokeResult = container.smokeHealth().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_500);
+
+      await expect(secondSmokeResult).resolves.toMatchObject({
+        message: "Hosted runner container smoke could not recycle the existing shell.",
+      });
+      expect(destroy).toHaveBeenCalledTimes(1);
+      expect(startAndWaitForPorts).not.toHaveBeenCalled();
+      expect(containerFetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("cold-starts deploy smoke after recycle even when status still reports running", async () => {

@@ -21,7 +21,8 @@ Temporal APIs, including Activities, timers or signal-aware timeouts,
 
 - Worker Versioning or deployment pinning for existing histories.
 - `patched()` / `deprecatePatch()` around the changed command order.
-- A replay test against captured old histories for the affected path.
+- A replay test against captured or synthetic old histories for the affected
+  path.
 
 Do not replace an active `patched()` marker with `deprecatePatch()` until
 workflow histories that already recorded the non-deprecated marker have
@@ -32,6 +33,13 @@ deployment. Keep captured histories redacted or synthetic, and do not commit raw
 payloads, prompts, transcripts, provider responses, secrets, local paths, or
 direct user identifiers. The durable rule lives in
 `agent-docs/references/hosted-temporal-orchestration.md`.
+
+This package includes a CI replay gate for the reconciliation-before-mailbox
+patch: `test/hosted-user-runtime-replay.test.ts` runs
+`Worker.runReplayHistory` against a synthetic pre-patch mailbox history in
+`test/fixtures/replay/` that scheduled `ensureRuntimeProcessing` directly. The
+root `hosted-temporal:guard` check fails if that replay test, fixture, or CI
+package-coverage entry is removed.
 
 The current per-user workflow is a hard cut. It is not replay-compatible with
 histories that recorded the old demand Activity or legacy direct signals. Before

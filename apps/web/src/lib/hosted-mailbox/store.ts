@@ -27,6 +27,9 @@ import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
 import {
+  HOSTED_MAILBOX_SYSTEM_AI_USAGE_GATED_KINDS,
+} from "./ai-usage-gate";
+import {
   decryptHostedMailboxPayloadString,
   encryptHostedMailboxPayloadString,
   type HostedMailboxPayloadStorage,
@@ -609,7 +612,9 @@ export async function readHostedMailboxPendingSystemItemsNeedAiUsageGate(input: 
       id: true,
     },
     where: {
-      kind: "runtime.manual-requested",
+      kind: {
+        in: [...HOSTED_MAILBOX_SYSTEM_AI_USAGE_GATED_KINDS],
+      },
       lane: "system",
       laneSeq: {
         gt: afterSeq,

@@ -126,6 +126,27 @@ assert(
   'package.json bundleDependencies must include @murphai/exercise-library so published installs ship the generated exercise catalog.',
 )
 assert(
+  packageJson.dependencies?.incur === '0.4.5',
+  'package.json must keep incur pinned until the upstream lazy optional dependency fix is released.',
+)
+const bundledIncurRuntimeDependencies: Record<string, string> = {
+  '@cfworker/json-schema': '^4.1.1',
+  '@modelcontextprotocol/server': '^2.0.0-alpha.2',
+  '@toon-format/toon': '^2.1.0',
+  tokenx: '^1.3.0',
+  yaml: '^2.8.2',
+}
+for (const [dependencyName, expectedSpecifier] of Object.entries(bundledIncurRuntimeDependencies)) {
+  assert(
+    packageJson.dependencies?.[dependencyName] === expectedSpecifier,
+    `package.json must declare ${dependencyName}@${expectedSpecifier} while incur is bundled, because npm does not install dependencies declared only by bundled dependency payloads.`,
+  )
+}
+assert(
+  packageJson.bundleDependencies?.includes('incur') === true,
+  'package.json bundleDependencies must include incur so published installs ship the patched lazy optional dependency fix.',
+)
+assert(
   packageJson.bin?.['vault-cli'] === 'dist/bin.js',
   'package.json must expose vault-cli from dist/bin.js.',
 )

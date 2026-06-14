@@ -344,6 +344,8 @@ test('wearables additive commands return the shared normalized result envelopes'
     '--vault',
     vault,
     '--provider',
+    'whoop_v2',
+    '--provider',
     'whoop',
   ])
   assert.equal(dayResult.exitCode, null)
@@ -473,4 +475,35 @@ test('wearables additive commands return the shared normalized result envelopes'
     vault,
     windowDays: 6,
   })
+})
+
+test('wearables commands still reject providers that do not canonicalize to a supported value', async () => {
+  const { cli, services } = createWearablesCliAndServices()
+  const showWearableDay = vi.fn()
+  Object.defineProperty(services.query, 'showWearableDay', {
+    configurable: true,
+    value: showWearableDay,
+    writable: true,
+  })
+
+  for (const provider of ['fitbit', 'junction']) {
+    const result = await runInProcessJsonCli(cli, [
+      'wearables',
+      'day',
+      '2026-04-05',
+      '--vault',
+      '/tmp/wearables-additive-vault',
+      '--provider',
+      provider,
+    ])
+
+    const envelope = result.envelope
+    if (envelope.ok) {
+      throw new Error(`expected an error envelope for --provider ${provider}`)
+    }
+    assert.equal(envelope.error.code, 'invalid_option')
+    assert.match(envelope.error.message ?? '', new RegExp(`"${provider}"`, 'u'))
+  }
+
+  assert.equal(showWearableDay.mock.calls.length, 0)
 })

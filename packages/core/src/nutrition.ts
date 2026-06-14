@@ -1,5 +1,7 @@
 import {
   type FoodNutrition,
+  MEAL_MICRONUTRIENT_KEYS,
+  type MealMicronutrients,
   type MealNutrition,
   NUTRITION_CONFIDENCE_LEVELS,
   NUTRITION_PROVENANCE_SOURCES,
@@ -32,7 +34,28 @@ export function normalizeNutritionData(
     carbsGrams: optionalFiniteNumber(object.carbsGrams, `${fieldName}.carbsGrams`, 0),
     fatGrams: optionalFiniteNumber(object.fatGrams, `${fieldName}.fatGrams`, 0),
     fiberGrams: optionalFiniteNumber(object.fiberGrams, `${fieldName}.fiberGrams`, 0),
+    waterGrams: optionalFiniteNumber(object.waterGrams, `${fieldName}.waterGrams`, 0),
   });
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+export function normalizeMealMicronutrients(
+  value: unknown,
+  fieldName: string,
+): MealMicronutrients | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const object = requireObject(value, fieldName);
+  const normalized: MealMicronutrients = {};
+  for (const key of MEAL_MICRONUTRIENT_KEYS) {
+    const numeric = optionalFiniteNumber(object[key], `${fieldName}.${key}`, 0);
+    if (numeric !== undefined) {
+      normalized[key] = numeric;
+    }
+  }
 
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
@@ -111,6 +134,7 @@ function normalizeWrappedNutrition(
 
   const normalized = stripUndefined({
     totals: normalizeNutritionData(object.totals, `${fieldName}.totals`),
+    micros: normalizeMealMicronutrients(object.micros, `${fieldName}.micros`),
     provenance,
   });
 

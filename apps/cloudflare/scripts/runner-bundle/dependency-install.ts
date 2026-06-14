@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { access, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -12,6 +12,7 @@ import { readWorkspacePackageVersions } from "./workspace-artifacts.js";
 interface WorkspacePnpmInstallPolicy {
   npmrcLines: string[];
   overrides: Record<string, string>;
+  patchedDependencies: Record<string, string>;
 }
 
 interface WorkspacePackageManifest {
@@ -58,6 +59,7 @@ export async function installPackedRunnerDependencies(
     packageManager?: string;
     pnpm?: {
       overrides?: Record<string, string>;
+      patchedDependencies?: Record<string, string>;
       supportedArchitectures?: {
         cpu?: string[];
         libc?: string[];
@@ -101,6 +103,11 @@ export async function installPackedRunnerDependencies(
     input.runtimePackageRoot,
     { allowMissing: true, dropMissing: true },
   );
+  const stagedPatchedDependencies = await stageWorkspacePatchedDependencies(
+    bundleDir,
+    input.repoRoot,
+    workspaceInstallPolicy.patchedDependencies,
+  );
   packageJson.pnpm = {
     ...packageJson.pnpm,
     overrides: {
@@ -108,6 +115,9 @@ export async function installPackedRunnerDependencies(
       ...(packageJson.pnpm?.overrides ?? {}),
       ...workspaceTarballOverrides,
     },
+    ...(Object.keys(stagedPatchedDependencies).length > 0
+      ? { patchedDependencies: stagedPatchedDependencies }
+      : {}),
     supportedArchitectures: runnerBundleSupportedArchitectures,
   };
 
@@ -127,6 +137,33 @@ export async function assertInstalledRunnerHealthCommonsRuntimeImport(
   bundleDir: string,
 ): Promise<void> {
   await runNodeImportProbe(bundleDir, "@murphai/health-commons/runtime");
+}
+
+/**
+ * Copies the workspace's pnpm patch files into the bundle install root so the
+ * standalone install applies the same patches as the workspace. The runner
+ * bundle must resolve exactly one (patched) copy of each patched dependency:
+ * shipping a second physical copy (for example nested inside a packed
+ * tarball's node_modules) would get inlined twice by the vault-cli esbuild
+ * bundle and split module-level state such as incur's command-registry
+ * WeakMaps, which breaks grouped commands at runtime.
+ */
+async function stageWorkspacePatchedDependencies(
+  installRoot: string,
+  repoRoot: string,
+  patchedDependencies: Record<string, string>,
+): Promise<Record<string, string>> {
+  const staged: Record<string, string> = {};
+
+  for (const [dependencySpec, patchPath] of Object.entries(patchedDependencies)) {
+    const targetPatchPath = path.join(installRoot, patchPath);
+
+    await mkdir(path.dirname(targetPatchPath), { recursive: true });
+    await cp(path.join(repoRoot, patchPath), targetPatchPath, { force: true });
+    staged[dependencySpec] = toPosixPath(patchPath);
+  }
+
+  return staged;
 }
 
 function buildWorkspaceTarballOverrides(
@@ -665,6 +702,7 @@ async function readWorkspacePnpmInstallPolicy(
     return {
       npmrcLines: [],
       overrides: {},
+      patchedDependencies: {},
     };
   }
 
@@ -732,6 +770,7 @@ async function readWorkspacePnpmInstallPolicy(
   return {
     npmrcLines: lines,
     overrides: parseYamlStringMap(workspaceConfig, "overrides"),
+    patchedDependencies: parseYamlStringMap(workspaceConfig, "patchedDependencies"),
   };
 }
 
