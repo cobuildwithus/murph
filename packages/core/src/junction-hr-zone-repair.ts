@@ -265,7 +265,9 @@ function rawPayloadContainsPrimitiveNumericWorkoutZones(payload: unknown, source
     const value = stack.pop();
 
     if (Array.isArray(value)) {
-      stack.push(...value);
+      for (const entry of value) {
+        stack.push(entry);
+      }
       continue;
     }
 
@@ -275,11 +277,17 @@ function rawPayloadContainsPrimitiveNumericWorkoutZones(payload: unknown, source
       continue;
     }
 
-    if (rawWorkoutIdMatches(record, sourceWorkoutId) && rawWorkoutHasPrimitiveNumericZones(record)) {
+    if (
+      rawWorkoutIdMatches(record, sourceWorkoutId)
+      && rawWorkoutResolvesToGarmin(record)
+      && rawWorkoutHasPrimitiveNumericZones(record)
+    ) {
       return true;
     }
 
-    stack.push(...Object.values(record));
+    for (const child of Object.values(record)) {
+      stack.push(child);
+    }
   }
 
   return false;
@@ -287,6 +295,22 @@ function rawPayloadContainsPrimitiveNumericWorkoutZones(payload: unknown, source
 
 function rawWorkoutIdMatches(record: Record<string, unknown>, sourceWorkoutId: string): boolean {
   return RAW_WORKOUT_ID_PATHS.some((path) => stringId(readPath(record, path)) === sourceWorkoutId);
+}
+
+function rawWorkoutResolvesToGarmin(record: Record<string, unknown>): boolean {
+  return RAW_WORKOUT_SOURCE_PROVIDER_PATHS.some(
+    (path) => slugifyProvider(readPath(record, path)) === "garmin",
+  );
+}
+
+function slugifyProvider(value: unknown): string | undefined {
+  const id = stringId(value);
+  if (!id) {
+    return undefined;
+  }
+
+  const slug = id.toLowerCase().replace(/[^a-z0-9]+/gu, "");
+  return slug.length > 0 ? slug : undefined;
 }
 
 function rawWorkoutHasPrimitiveNumericZones(record: Record<string, unknown>): boolean {
@@ -358,6 +382,25 @@ const RAW_WORKOUT_HR_ZONE_PATHS = [
   "hr_zones",
   "heart_rate.zones",
   "zones.heart_rate",
+] as const;
+
+const RAW_WORKOUT_SOURCE_PROVIDER_PATHS = [
+  "sourceProviderSlug",
+  "source_provider_slug",
+  "sourceProvider",
+  "source_provider",
+  "source.provider",
+  "source.providerSlug",
+  "source.provider_slug",
+  "source.slug",
+  "providerSlug",
+  "provider_slug",
+  "provider.slug",
+  "provider.provider",
+  "provider.providerSlug",
+  "provider.provider_slug",
+  "provider.name",
+  "provider",
 ] as const;
 
 function buildRepairedJunctionWorkoutHeartRateZoneRecord(

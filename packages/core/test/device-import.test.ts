@@ -1940,6 +1940,66 @@ test("repairJunctionWorkoutHeartRateZones appends corrected revisions idempotent
   assert.equal(recordsAfterSecondApply.length, records.length);
 });
 
+test("repairJunctionWorkoutHeartRateZones refuses raw evidence from a non-Garmin provider row", async () => {
+  // Junction-summary-workouts artifacts can mix providers, so a Garmin
+  // candidate's rawRef can point at a payload that also contains a non-Garmin
+  // workout whose id collides with `sourceWorkoutId`. Without the provider
+  // gate the repair would treat that foreign primitive-numeric zone array as
+  // proof and rewrite the legitimate explicit Garmin record.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-cross-provider");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const collidingId = "collision-workout-id";
+  const garminResourceId = "workouts-garmin-collision";
+
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId: garminResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: collidingId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            source: { provider: "whoop" },
+            id: collidingId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+        ],
+      },
+    ],
+  });
+
+  const dryRun = await repairJunctionWorkoutHeartRateZones({ vaultRoot });
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(dryRun.candidateCount, 0);
+  assert.equal(dryRun.unverifiedCandidateCount, 1);
+  assert.equal(dryRun.repairedCount, 0);
+  assert.equal(applied.candidateCount, 0);
+  assert.equal(applied.unverifiedCandidateCount, 1);
+  assert.equal(applied.repairedCount, 0);
+  assert.equal(applied.mutated, false);
+});
+
 test("importDeviceBatch keeps deterministic content identity for events without externalRef", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-no-externalref");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
