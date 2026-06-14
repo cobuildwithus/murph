@@ -68,6 +68,32 @@ describe("RunnerContainer", () => {
     expect(DeploySmokeRunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
   });
 
+  it("does not pass Worker fingerprint secrets to the container startup env", () => {
+    const { container } = createContainerDouble({
+      env: {
+        HOSTED_AI_USAGE_REPORTING_SECRET: "fixture-usage-reporting-secret",
+        HOSTED_LOG_FINGERPRINT_SECRET: "fixture-log-fingerprint-secret",
+      },
+    });
+
+    expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
+    expect(container.envVars).not.toHaveProperty("HOSTED_LOG_FINGERPRINT_SECRET");
+    expect(container.envVars).not.toHaveProperty("HOSTED_AI_USAGE_REPORTING_SECRET");
+  });
+
+  it("does not derive CPU watchdog startup env from blank log fingerprint config", () => {
+    const { container } = createContainerDouble({
+      env: {
+        HOSTED_AI_USAGE_REPORTING_SECRET: "fixture-usage-reporting-secret",
+        HOSTED_LOG_FINGERPRINT_SECRET: "   ",
+      },
+    });
+
+    expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
+    expect(container.envVars).not.toHaveProperty("HOSTED_LOG_FINGERPRINT_SECRET");
+    expect(JSON.stringify(container.envVars)).not.toContain("fixture-usage-reporting-secret");
+  });
+
   it("reuses a successful per-user shell for back-to-back invocations", async () => {
     const { container, containerFetch, destroy, startAndWaitForPorts } =
       createContainerDouble({

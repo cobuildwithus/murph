@@ -352,7 +352,13 @@ describe("hostedRunnerIntercept", () => {
     expect(serializedLogs).not.toContain("Method not allowed.");
   });
 
-  it("injects data API authorization for hosted supplement label lookups", async () => {
+  it.each([
+    { path: "/api/supplements", query: "creatine", source: "supplement" },
+    { path: "/api/foods", query: "greek%20yogurt", source: "food" },
+  ] as const)("injects data API authorization for hosted $source label lookups", async ({
+    path,
+    query,
+  }) => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       items: [],
     }), {
@@ -367,7 +373,7 @@ describe("hostedRunnerIntercept", () => {
     }) => createActiveRuntimeWriteFenceValidationResult(input));
 
     const response = await hostedRunnerIntercept(
-      new Request("http://murph-data-api.worker/api/supplements?q=creatine&limit=3", {
+      new Request(`http://murph-data-api.worker${path}?q=${query}&limit=3`, {
         headers: {
           authorization: "Bearer user-supplied-token",
           cookie: "session=user-supplied-cookie",
@@ -389,7 +395,7 @@ describe("hostedRunnerIntercept", () => {
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("https://web.example.test/api/supplements?q=creatine&limit=3");
+    expect(forwarded.url).toBe(`https://web.example.test${path}?q=${query}&limit=3`);
     expect(forwarded.redirect).toBe("manual");
     expect(forwarded.headers.get("authorization")).toBe("Bearer data-api-worker-secret");
     expect(forwarded.headers.has("cookie")).toBe(false);
@@ -409,7 +415,7 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
-  it("rejects non-supplement data API paths before upstream fetch", async () => {
+  it("rejects non-label data API paths before upstream fetch", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
     const validateActiveRuntimeWriteFence = vi.fn(async (input: {
@@ -548,7 +554,49 @@ describe("hostedRunnerIntercept", () => {
     });
   });
 
-  it("rejects oversized hosted supplement batch lookup bodies before upstream fetch", async () => {
+  it("allows hosted data API POST bodies above the legacy 8KB cap through 32KB", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      results: [],
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      userId: string;
+    }) => createActiveRuntimeWriteFenceValidationResult(input));
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://murph-data-api.worker/api/foods", {
+        body: "a".repeat(32 * 1024),
+        headers: {
+          "content-type": "text/plain",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        MURPH_DATA_API_KEY: "data-api-worker-secret",
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
+        validateActiveRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.method).toBe("POST");
+    expect(forwarded.url).toBe("https://web.example.test/api/foods");
+    expect(forwarded.headers.get("authorization")).toBe("Bearer data-api-worker-secret");
+    await expect(forwarded.text()).resolves.toHaveLength(32 * 1024);
+  });
+
+  it("rejects hosted data API POST bodies over 32KB before upstream fetch", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
     const validateActiveRuntimeWriteFence = vi.fn(async (input: {
@@ -556,12 +604,10 @@ describe("hostedRunnerIntercept", () => {
     }) => createActiveRuntimeWriteFenceValidationResult(input));
 
     const response = await hostedRunnerIntercept(
-      new Request("http://murph-data-api.worker/api/supplements", {
-        body: JSON.stringify({
-          queries: ["a".repeat(9 * 1024)],
-        }),
+      new Request("http://murph-data-api.worker/api/foods", {
+        body: "a".repeat(32 * 1024 + 1),
         headers: {
-          "content-type": "application/json",
+          "content-type": "text/plain",
         },
         method: "POST",
       }),
@@ -4467,7 +4513,8 @@ describe("maybeHandleHostedTranscribeRequest", () => {
   });
 
   it("authorizes via the active user fence and maps Workers AI output to the transcript payload", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ recorded: true, usageId: "usage_1" }));
     vi.stubGlobal("fetch", fetchMock);
     const aiRun = vi.fn(async (model: string, payload: Record<string, unknown>) => {
       expect(model).toBe("@cf/openai/whisper-large-v3-turbo");
@@ -4484,6 +4531,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     const validateActiveRuntimeWriteFence = vi.fn(async (input: {
       userId: string;
     }) => createActiveRuntimeWriteFenceValidationResult(input));
+    const waitUntilPromises: Promise<unknown>[] = [];
 
     const response = await hostedRunnerIntercept(
       new Request(TRANSCRIBE_URL, {
@@ -4498,7 +4546,12 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
         validateActiveRuntimeWriteFence,
       }),
-      { containerId: "opaque-container-id" },
+      {
+        containerId: "opaque-container-id",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
     );
 
     expect(response.status).toBe(200);
@@ -4514,7 +4567,32 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
       userId: "member_123",
     });
-    expect(fetchMock).not.toHaveBeenCalled();
+
+    await Promise.all(waitUntilPromises);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [usageUrl, usageInit] = fetchMock.mock.calls[0] ?? [];
+    expect(String(usageUrl)).toBe(
+      "https://web.example.test/api/internal/hosted-execution/usage/record",
+    );
+    expect(usageInit?.method).toBe("POST");
+    const usageBody = JSON.parse(String(usageInit?.body)) as {
+      usage: Record<string, unknown>;
+    };
+    expect(usageBody.usage).toMatchObject({
+      attemptCount: 1,
+      credentialSource: "platform",
+      featureKey: "audio-transcription",
+      memberId: "member_123",
+      provider: "workers-ai",
+      rawUsageJson: { audioBytes: 9, durationMs: 2_940 },
+      requestedModel: "@cf/openai/whisper-large-v3-turbo",
+      surface: "hosted-runner",
+    });
+    expect(usageBody.usage.turnId).toMatch(/^turn_transcribe_[0-9a-f]{32}$/u);
+    expect(usageBody.usage.usageId).toBe(`${String(usageBody.usage.turnId)}.attempt-1`);
+    expect(usageBody.usage.inputTokens).toBeNull();
+    expect(usageBody.usage.outputTokens).toBeNull();
+
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "runner",
@@ -4532,6 +4610,86 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
     expect(serializedLogs).not.toContain("Remember to log the voice note");
     expect(serializedLogs).not.toContain("wav-bytes");
+  });
+
+  it("keeps the transcript response when usage recording fails", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response("usage recording rejected", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+
+    const response = await hostedRunnerIntercept(
+      new Request(TRANSCRIBE_URL, {
+        body: "wav-bytes",
+        method: "POST",
+      }),
+      createInterceptEnv({
+        AI: {
+          run: vi.fn(async () => ({
+            text: "transcript",
+            transcription_info: { duration: 2.94, language: "en" },
+          })),
+        },
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
+        validateActiveRuntimeWriteFence: async (input) =>
+          createActiveRuntimeWriteFenceValidationResult(input),
+      }),
+      {
+        containerId: "opaque-container-id",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ text: "transcript" });
+
+    await Promise.all(waitUntilPromises);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          providerKind: "workers_ai_transcribe",
+        }),
+        level: "warn",
+        message: "Hosted transcription usage recording failed; transcript delivery unaffected.",
+      }),
+    );
+  });
+
+  it("awaits usage recording before responding when the context lacks waitUntil", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ recorded: true, usageId: "usage_1" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request(TRANSCRIBE_URL, {
+        body: "wav-bytes",
+        method: "POST",
+      }),
+      createInterceptEnv({
+        AI: {
+          run: vi.fn(async () => ({
+            text: "transcript",
+            transcription_info: { duration: 2.94, language: "en" },
+          })),
+        },
+        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
+        validateActiveRuntimeWriteFence: async (input) =>
+          createActiveRuntimeWriteFenceValidationResult(input),
+      }),
+      // Production containers proxy through a ctx without waitUntil; a
+      // floating recording promise would be canceled with the invocation.
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://web.example.test/api/internal/hosted-execution/usage/record",
+    );
   });
 
   it("rejects unknown transcribe paths and non-POST methods before authorization", async () => {
@@ -4601,6 +4759,15 @@ describe("maybeHandleHostedTranscribeRequest", () => {
   });
 
   it("bounds the transcribe request body and surfaces Workers AI failures as 502", async () => {
+    // Rejected requests and thrown ai.run calls never complete a billed run,
+    // so any usage POST attempt would show up on this stub.
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ recorded: true, usageId: "usage_1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = (promise: Promise<unknown>): void => {
+      waitUntilPromises.push(promise);
+    };
     const oversized = await hostedRunnerIntercept(
       new Request(TRANSCRIBE_URL, {
         body: "wav-bytes",
@@ -4615,7 +4782,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         validateActiveRuntimeWriteFence: async (input) =>
           createActiveRuntimeWriteFenceValidationResult(input),
       }),
-      { containerId: "opaque-container-id" },
+      { containerId: "opaque-container-id", waitUntil },
     );
     expect(oversized.status).toBe(413);
 
@@ -4634,7 +4801,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         validateActiveRuntimeWriteFence: async (input) =>
           createActiveRuntimeWriteFenceValidationResult(input),
       }),
-      { containerId: "opaque-container-id" },
+      { containerId: "opaque-container-id", waitUntil },
     );
     expect(failing.status).toBe(502);
     expect(await failing.text()).toBe("Hosted transcription failed.");
@@ -4653,9 +4820,20 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     );
     const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
     expect(serializedLogs).not.toContain("wav-bytes");
+
+    await Promise.all(waitUntilPromises);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("falls back to an empty segment list and drops malformed segments", async () => {
+    // Keep the fire-and-forget usage recording off the real network.
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ recorded: true, usageId: "usage_1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = (promise: Promise<unknown>): void => {
+      waitUntilPromises.push(promise);
+    };
     const response = await hostedRunnerIntercept(
       new Request(TRANSCRIBE_URL, {
         body: "wav-bytes",
@@ -4671,7 +4849,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         validateActiveRuntimeWriteFence: async (input) =>
           createActiveRuntimeWriteFenceValidationResult(input),
       }),
-      { containerId: "opaque-container-id" },
+      { containerId: "opaque-container-id", waitUntil },
     );
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
@@ -4715,18 +4893,101 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         validateActiveRuntimeWriteFence: async (input) =>
           createActiveRuntimeWriteFenceValidationResult(input),
       }),
-      { containerId: "opaque-container-id" },
+      { containerId: "opaque-container-id", waitUntil },
     );
     expect(malformedSegments.status).toBe(200);
+    // The invalid transcription_info duration falls back to the furthest
+    // valid segment end (1.5s) — a dropped segment's offset still bounds the
+    // real audio duration.
     await expect(malformedSegments.json()).resolves.toEqual({
-      durationMs: null,
+      durationMs: 1_500,
       language: null,
       segments: [{ endMs: null, startMs: null, text: "kept segment" }],
       text: "kept segment",
     });
+
+    // Duration-less output records byte count only; once segments exist, the
+    // furthest valid segment end becomes the billed-duration fallback.
+    await Promise.all(waitUntilPromises);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const recordedUsages = fetchMock.mock.calls.map(([, init]) =>
+      (JSON.parse(String(init?.body)) as { usage: Record<string, unknown> }).usage);
+    expect(recordedUsages.map((usage) => usage.rawUsageJson)).toEqual([
+      { audioBytes: 9 },
+      { audioBytes: 9, durationMs: 1_500 },
+    ]);
+    for (const usage of recordedUsages) {
+      expect(usage.memberId).toBe("member_123");
+    }
   });
 
-  it("rejects empty transcribe bodies and surfaces transcript-less Workers AI output as 502", async () => {
+  it("meters transcription duration from all provider segments while capping response segments", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ recorded: true, usageId: "usage_1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = (promise: Promise<unknown>): void => {
+      waitUntilPromises.push(promise);
+    };
+    const segments = Array.from({ length: 10_001 }, (_, index) => ({
+      end: index + 1,
+      start: index,
+      text: `segment ${index + 1}`,
+    }));
+
+    const response = await hostedRunnerIntercept(
+      new Request(TRANSCRIBE_URL, {
+        body: "wav-bytes",
+        method: "POST",
+      }),
+      createInterceptEnv({
+        AI: {
+          run: vi.fn(async () => ({
+            segments,
+            text: "long transcript",
+          })),
+        },
+        readActiveRuntimeUserFence: async () => ({
+          active: true,
+          attemptId: "attempt-1",
+          leaseGeneration: "1",
+          userId: "member_123",
+        }),
+        validateActiveRuntimeWriteFence: async (input) =>
+          createActiveRuntimeWriteFenceValidationResult(input),
+      }),
+      { containerId: "opaque-container-id", waitUntil },
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      durationMs: number;
+      segments: unknown[];
+    };
+    expect(payload.durationMs).toBe(10_001_000);
+    expect(payload.segments).toHaveLength(10_000);
+
+    await Promise.all(waitUntilPromises);
+    const usageBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      usage: Record<string, unknown>;
+    };
+    expect(usageBody.usage.rawUsageJson).toEqual({
+      audioBytes: 9,
+      durationMs: 10_001_000,
+    });
+  });
+
+  it("rejects empty transcribe bodies and surfaces transcript-less Workers AI output as 422", async () => {
+    // Workers AI bills every completed run, so transcript-less output must
+    // still meter usage even though the transcript response is a non-retryable
+    // 422. Only requests rejected before ai.run record nothing.
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ recorded: true, usageId: "usage_1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = (promise: Promise<unknown>): void => {
+      waitUntilPromises.push(promise);
+    };
     const emptyBody = await hostedRunnerIntercept(
       new Request(TRANSCRIBE_URL, { method: "POST" }),
       createInterceptEnv({
@@ -4735,14 +4996,23 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         validateActiveRuntimeWriteFence: async (input) =>
           createActiveRuntimeWriteFenceValidationResult(input),
       }),
-      { containerId: "opaque-container-id" },
+      { containerId: "opaque-container-id", waitUntil },
     );
     expect(emptyBody.status).toBe(400);
     expect(await emptyBody.text()).toBe(
       "Hosted transcription request body must include audio bytes.",
     );
+    await Promise.all(waitUntilPromises);
+    expect(fetchMock).not.toHaveBeenCalled();
 
-    for (const output of [{}, { text: "   " }, "transcript", null]) {
+    const outputs: unknown[] = [
+      {},
+      { text: "   ", transcription_info: { duration: 2.94 } },
+      { segments: [{ end: 3.2, start: 0, text: "hi" }], text: "" },
+      "transcript",
+      null,
+    ];
+    for (const output of outputs) {
       const response = await hostedRunnerIntercept(
         new Request(TRANSCRIBE_URL, {
           body: "wav-bytes",
@@ -4754,11 +5024,29 @@ describe("maybeHandleHostedTranscribeRequest", () => {
           validateActiveRuntimeWriteFence: async (input) =>
             createActiveRuntimeWriteFenceValidationResult(input),
         }),
-        { containerId: "opaque-container-id" },
+        { containerId: "opaque-container-id", waitUntil },
       );
-      expect(response.status).toBe(502);
-      expect(await response.text()).toBe("Hosted transcription failed.");
+      // 422 keeps the parser's 5xx retry from re-running a billed run.
+      expect(response.status).toBe(422);
+      expect(await response.text()).toBe(
+        "Hosted transcription returned no usable transcript.",
+      );
     }
+
+    await Promise.all(waitUntilPromises);
+    expect(fetchMock).toHaveBeenCalledTimes(outputs.length);
+    const recordedUsages = fetchMock.mock.calls.map(([, init]) =>
+      (JSON.parse(String(init?.body)) as { usage: Record<string, unknown> }).usage);
+    // The silent clip keeps the billed duration from transcription_info, the
+    // segment-only clip bills from the furthest segment end, and the rest
+    // record byte count only.
+    expect(recordedUsages.map((usage) => usage.rawUsageJson)).toEqual([
+      { audioBytes: 9 },
+      { audioBytes: 9, durationMs: 2_940 },
+      { audioBytes: 9, durationMs: 3_200 },
+      { audioBytes: 9 },
+      { audioBytes: 9 },
+    ]);
   });
 });
 

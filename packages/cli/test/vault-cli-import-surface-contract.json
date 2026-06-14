@@ -1,6 +1,4 @@
 [
-  "@cfworker/json-schema",
-  "@modelcontextprotocol/server",
   "@murphai/contracts",
   "@murphai/gateway-core",
   "@murphai/importers",
@@ -12,6 +10,5 @@
   "@toon-format/toon",
   "incur",
   "tokenx",
-  "yaml",
   "zod"
 ]

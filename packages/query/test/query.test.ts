@@ -919,7 +919,7 @@ test("sleep-window ranking does not treat selected session duration as total sle
     assert.equal(sleep[0]?.timeInBedMinutes.selection.resolution, "fallback");
     assert.equal(sleep[0]?.timeInBedMinutes.selection.fallbackFromMetric, "sessionMinutes");
     assert.equal(
-      sleep[0]?.notes.some((note) => note.includes("Selected Garmin sleep window recorded")),
+      sleep[0]?.notes.some((note) => note.includes("Selected sleep window from Garmin spanning")),
       true,
     );
     assert.equal(
@@ -4422,12 +4422,12 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
     });
 
     try {
-      // Pin the literal version: a revert of the 7 -> 8 bump would keep every
-      // constant-relative assertion green while legacy v7 stores (full
-      // wearable summary JSON without the compact stored codec, on top of the
-      // v6 dropped metric point columns) were treated as current instead of
-      // being rebuilt.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 8);
+      // Pin the literal version: a revert of the 8 -> 9 bump would keep every
+      // constant-relative assertion green while legacy v8 stores (wearable
+      // summary rows still scoped under raw whoop_v2 provider keys, on top of
+      // the v7 pre-codec JSON and v6 dropped metric point columns) were
+      // treated as current instead of being rebuilt.
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 10);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database
@@ -4731,7 +4731,8 @@ test("runtime wearable summaries read identically from compact and legacy full-f
 
     const compactReads = await readRuntimeSummaries();
     assert.match(compactReads, /"resolution":"fallback"/u);
-    assert.match(compactReads, /"conflictingProviders":\["garmin"\]/u);
+    assert.match(compactReads, /"conflictingProviders":\["garmin","oura"\]/u);
+    assert.match(compactReads, /Duplicate evidence from Oura disagreed after source reconciliation/u);
 
     // Rewrite the stored metric rows to the legacy full form in place. The
     // source manifest and schema version are untouched, so ensureFresh keeps

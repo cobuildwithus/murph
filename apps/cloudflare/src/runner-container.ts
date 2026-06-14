@@ -67,6 +67,14 @@ const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
 const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
 const CLOUDFLARE_CONTAINERS_CA_CERT_PATH =
   "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
+const BASE_RUNNER_CONTAINER_ENV_VARS = {
+  CODEX_CA_CERTIFICATE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
+  CURL_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
+  NODE_EXTRA_CA_CERTS: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
+  PORT: String(RUNNER_PORT),
+  REQUESTS_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
+  SSL_CERT_FILE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
+} as const;
 
 class HostedRunnerContainerArchitectureMismatchError extends Error {
   readonly actualVersion: string | null;
@@ -306,14 +314,7 @@ export type RunnerContainerEnsureProcessingResult =
 export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
   enableInternet = true;
-  envVars = {
-    CODEX_CA_CERTIFICATE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-    CURL_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-    NODE_EXTRA_CA_CERTS: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-    PORT: String(RUNNER_PORT),
-    REQUESTS_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-    SSL_CERT_FILE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-  };
+  envVars: Record<string, string> = { ...BASE_RUNNER_CONTAINER_ENV_VARS };
   interceptHttps = true;
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
@@ -340,6 +341,7 @@ export class RunnerContainer extends Container {
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
     this.environment = env;
+    this.envVars = buildRunnerContainerEnvVars();
     this.sleepAfter = formatRunnerSleepAfter(readRunnerContainerIdleTtlMs(env));
   }
 
@@ -2752,6 +2754,12 @@ function readRunnerContainerErrorDetails(error: unknown): HostedExecutionStructu
   return sanitizeHostedExecutionStructuredLogDetails(
     (error as { details?: unknown }).details as HostedExecutionStructuredLogDetails | null | undefined,
   );
+}
+
+function buildRunnerContainerEnvVars(): Record<string, string> {
+  return {
+    ...BASE_RUNNER_CONTAINER_ENV_VARS,
+  };
 }
 
 function readRunnerReadyTimeoutMs(source: RunnerContainerEnvironmentSource): number {

@@ -4,14 +4,10 @@ import {
   type WearableSummaryBundle,
 } from "../wearables.ts";
 import { collectWearableDataset } from "../wearables/candidates.ts";
-import {
-  inferJunctionWearableDataOriginFromExternalRef,
-  normalizeWearableOriginSourceSlug,
-} from "../wearables/origin.ts";
+import { resolveWearablePublicSourceProvider } from "../wearables/origin.ts";
 import type {
   WearableActivitySessionAggregate,
   WearableDataset,
-  WearableExternalRef,
   WearableMetricCandidate,
   WearableSleepWindowCandidate,
 } from "../wearables/types.ts";
@@ -103,45 +99,25 @@ function emptyWearableDataset(): MutableWearableDataset {
 }
 
 function resolveMetricCandidatePublicProvider(candidate: WearableMetricCandidate): string {
-  return resolveProjectionPublicProvider({
-    dataOrigin: candidate.dataOrigin ?? null,
-    externalRef: candidate.externalRef,
-    provider: candidate.provider,
-  });
+  return resolveProjectionPublicProvider(candidate);
 }
 
 function resolveWearableDatasetItemPublicProvider(
   item: WearableActivitySessionAggregate | WearableSleepWindowCandidate,
 ): string {
-  return resolveProjectionPublicProvider({
-    dataOrigin: item.dataOrigin ?? null,
-    provider: item.provider,
-  });
+  return resolveProjectionPublicProvider(item);
 }
 
-function resolveProjectionPublicProvider(input: {
-  dataOrigin?: WearableMetricCandidate["dataOrigin"];
-  externalRef?: WearableExternalRef | null;
-  provider?: string | null;
-}): string {
-  const originSourceProvider = normalizeWearableOriginSourceSlug(input.dataOrigin?.sourceProviderSlug);
-  if (originSourceProvider && originSourceProvider !== "junction") {
-    return originSourceProvider;
-  }
-
-  const inferredSourceProvider = normalizeWearableOriginSourceSlug(
-    inferJunctionWearableDataOriginFromExternalRef(input.externalRef ?? null)?.sourceProviderSlug,
-  );
-  if (inferredSourceProvider && inferredSourceProvider !== "junction") {
-    return inferredSourceProvider;
-  }
-
-  const directProvider = normalizeWearableProviders([input.provider ?? input.externalRef?.system ?? ""])[0];
-  if (directProvider && directProvider !== "junction") {
-    return directProvider;
-  }
-
-  return "unknown";
+function resolveProjectionPublicProvider(
+  input: WearableActivitySessionAggregate | WearableMetricCandidate | WearableSleepWindowCandidate,
+): string {
+  return resolveWearablePublicSourceProvider({
+    dataOrigin: input.dataOrigin ?? null,
+    externalRef: "externalRef" in input ? input.externalRef : null,
+    provider: input.provider,
+  }, {
+    suppressJunctionSourceInstanceFallback: true,
+  });
 }
 
 function resolveProjectionDiagnosticProvider(
